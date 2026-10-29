@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_telemetry (BT-4025): the stdlib Telemetry facade's
 runtime half (execute/3, span/3 with NLR handling, attach/3, attachMany/3,
 detach/1, handle_event/4) and the runtime helpers moved from beamtalk_actor
-(emit/3, maybe_span/3).
+(emit/3, dispatch_span/5), plus the BT-4113 dispatch-event opt-in flag.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -40,10 +40,15 @@ telemetry_test_() ->
         fun detach_is_idempotent/0,
         fun detach_rejects_bad_and_reserved_ids/0,
         fun handler_does_not_reenter_itself/0,
-        fun maybe_span_nlr_emits_stop/0,
+        fun dispatch_span_nlr_emits_stop/0,
         fun raising_handler_is_detached/0,
         fun emit_returns_ok/0,
-        fun maybe_span_runs_fun_and_emits_span/0
+        fun dispatch_span_emits_span_with_outcome_when_enabled/0,
+        fun dispatch_span_emits_nothing_by_default/0,
+        fun dispatch_span_reraises_unchanged_when_disabled/0,
+        fun dispatch_events_follow_erlang_api/0,
+        fun dispatch_events_follow_app_env/0,
+        fun dispatch_events_follow_beamtalk_dispatch_handlers/0
     ]}.
 
 setup() ->
@@ -296,31 +301,126 @@ raising_handler_is_detached() ->
 emit_returns_ok() ->
     ?assertEqual(ok, beamtalk_telemetry:emit([bt4025, emit], #{}, #{})).
 
-maybe_span_runs_fun_and_emits_span() ->
-    Id = forward([[bt4025, ms, stop]]),
-    ?assertEqual(
-        result,
-        beamtalk_telemetry:maybe_span([bt4025, ms], #{a => 1}, fun() -> {result, #{a => 2}} end)
-    ),
-    {[bt4025, ms, stop], _, StopMd} = recv(),
-    ?assertMatch(#{a := 2, telemetry_span_context := _}, StopMd),
-    telemetry:detach(Id).
+-define(DISPATCH_EVENTS, [
+    [beamtalk, actor, dispatch, start],
+    [beamtalk, actor, dispatch, stop],
+    [beamtalk, actor, dispatch, exception]
+]).
 
-maybe_span_nlr_emits_stop() ->
-    %% Actor dispatch spans share run_span/3: an NLR crossing one is a stop.
-    Id = forward([[bt4025, msnlr, stop], [bt4025, msnlr, exception]]),
-    Nlr = {'$bt_nlr', make_ref(), 1, #{}},
+%% Run Fun with dispatch events forced on through the Erlang API.
+with_dispatch_events(Fun) ->
+    ok = beamtalk_telemetry:enable_dispatch_events(),
+    try
+        Fun()
+    after
+        ok = beamtalk_telemetry:disable_dispatch_events()
+    end.
+
+dispatch_span_emits_span_with_outcome_when_enabled() ->
+    with_dispatch_events(fun() ->
+        Id = forward(?DISPATCH_EVENTS),
+        Pid = self(),
+        ?assertEqual(
+            result,
+            beamtalk_telemetry:dispatch_span(Pid, 'Counter', count, sync, fun() -> {result, ok} end)
+        ),
+        {[beamtalk, actor, dispatch, start], _, StartMd} = recv(),
+        ?assertMatch(
+            #{pid := Pid, class := 'Counter', selector := count, mode := sync}, StartMd
+        ),
+        {[beamtalk, actor, dispatch, stop], #{duration := D}, StopMd} = recv(),
+        ?assert(D >= 0),
+        ?assertMatch(
+            #{pid := Pid, class := 'Counter', outcome := ok, telemetry_span_context := _},
+            StopMd
+        ),
+        ?assertEqual(ok, no_more()),
+        telemetry:detach(Id)
+    end).
+
+dispatch_span_nlr_emits_stop() ->
+    %% A `^` crossing an actor send is a normal exit: a stop, not an exception.
+    with_dispatch_events(fun() ->
+        Id = forward(?DISPATCH_EVENTS),
+        Nlr = {'$bt_nlr', make_ref(), 1, #{}},
+        ?assertEqual(
+            {thrown, Nlr},
+            try
+                beamtalk_telemetry:dispatch_span(self(), 'C', s, sync, fun() -> throw(Nlr) end)
+            catch
+                throw:T -> {thrown, T}
+            end
+        ),
+        ?assertMatch({[beamtalk, actor, dispatch, start], _, _}, recv()),
+        ?assertMatch({[beamtalk, actor, dispatch, stop], _, _}, recv()),
+        ?assertEqual(ok, no_more()),
+        telemetry:detach(Id)
+    end).
+
+dispatch_span_emits_nothing_by_default() ->
+    %% BT-4113: dispatch events are opt-in; with no source enabled a send
+    %% builds no metadata and emits nothing.
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    Id = forward(?DISPATCH_EVENTS),
     ?assertEqual(
-        {thrown, Nlr},
-        try
-            beamtalk_telemetry:maybe_span([bt4025, msnlr], #{}, fun() -> throw(Nlr) end)
-        catch
-            throw:T -> {thrown, T}
-        end
+        value, beamtalk_telemetry:dispatch_span(self(), 'C', s, cast, fun() -> {value, cast} end)
     ),
-    ?assertMatch({[bt4025, msnlr, stop], _, _}, recv()),
     ?assertEqual(ok, no_more()),
     telemetry:detach(Id).
+
+dispatch_span_reraises_unchanged_when_disabled() ->
+    Raise = fun() -> erlang:raise(exit, {noproc, here}, [{m, f, 0, []}]) end,
+    ?assertEqual(
+        {exit, {noproc, here}, [{m, f, 0, []}]},
+        try
+            beamtalk_telemetry:dispatch_span(self(), 'C', s, sync, Raise)
+        catch
+            C:R:S -> {C, R, S}
+        end
+    ).
+
+dispatch_events_follow_erlang_api() ->
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    ok = beamtalk_telemetry:enable_dispatch_events(),
+    ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+    %% A refresh keeps an explicit enable.
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
+    ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+    ok = beamtalk_telemetry:disable_dispatch_events(),
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()).
+
+dispatch_events_follow_app_env() ->
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    application:set_env(beamtalk_runtime, dispatch_telemetry, true),
+    try
+        ok = beamtalk_telemetry:refresh_dispatch_events(),
+        ?assert(beamtalk_telemetry:dispatch_events_enabled())
+    after
+        application:unset_env(beamtalk_runtime, dispatch_telemetry)
+    end,
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()).
+
+dispatch_events_follow_beamtalk_dispatch_handlers() ->
+    Block = fun(_, _, _) -> ok end,
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    %% A handler on some other event leaves them off.
+    #{isOk := true} = beamtalk_telemetry:attach(bt4113_other, [bt4113, other], Block),
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    %% One on a dispatch event (attach:to:do:) turns them on; a second
+    %% (attach:toAll:do:) keeps them on until the last one detaches.
+    #{isOk := true} = beamtalk_telemetry:attach(
+        bt4113_stop, [beamtalk, actor, dispatch, stop], Block
+    ),
+    ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+    #{isOk := true} = beamtalk_telemetry:attachMany(
+        bt4113_many, [[bt4113, x], [beamtalk, actor, dispatch, exception]], Block
+    ),
+    nil = beamtalk_telemetry:detach(bt4113_stop),
+    ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+    nil = beamtalk_telemetry:detach(bt4113_many),
+    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+    nil = beamtalk_telemetry:detach(bt4113_other).
 
 detach_rejects_bad_and_reserved_ids() ->
     ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:detach(42) end)),

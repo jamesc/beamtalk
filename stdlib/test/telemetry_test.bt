@@ -222,14 +222,14 @@ TestCase subclass: TelemetryTest
 
   testDetachRuntimeHandlerIsRefused =>
     self should: [
-      Telemetry detach: #beamtalk_trace_store_dispatch_stop
+      Telemetry detach: #beamtalk_trace_store_lifecycle_stop
     ] raise: #reserved_name
 
   testAttachRuntimeHandlerIdIsRefused =>
     self
       should: [
         Telemetry
-          attach: #beamtalk_trace_store_dispatch_stop
+          attach: #beamtalk_trace_store_lifecycle_stop
           to: #(#bt4025, #r)
           do: [:e :m :md | nil]
       ]

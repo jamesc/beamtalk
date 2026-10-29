@@ -1,7 +1,7 @@
 # ADR 0069: Actor Observability and Tracing
 
 ## Status
-Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below.
+Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below. Amended 2026-10-28 (BT-4113): the `[beamtalk, actor, dispatch, *]` telemetry events are opt-in, and the aggregates are recorded directly — see "Amendment (2026-10-28): dispatch events are opt-in (BT-4113)" below.
 
 ## Amendment (2026-10-21): application events (BT-4025)
 
@@ -28,7 +28,7 @@ A new stdlib class, `Telemetry` (`stdlib/src/telemetry.bt`), is a sealed, statel
 - **`span:` is NLR-aware.** `telemetry:span/3` catches every `throw`, so a Beamtalk `^` out of the block (thrown as the `'$bt_nlr'` tuple, ADR 0041) would be reported as an `exception`. The runtime's span implementation recognises the NLR with the shared `?IS_NLR` check, emits `stop` and lets the NLR continue. Under ADR 0134 a raise inside a span in a cast or `handleInfo:` still crashes the actor, with the `exception` event emitted first.
 - **Beamtalk handlers.** The block is stored in the handler config and called through the exported `beamtalk_telemetry:handle_event/4`; `telemetry` warns about (and slows down) local funs used as handlers. The handler runs synchronously in the emitting process, and `telemetry` detaches a handler that raises (and logs it). Class-variable access from the block follows ADR 0130: away from home, reads see a snapshot and a write raises `class_state_unreachable`; at home, the block runs under `beamtalk_class_vars:protect/1`, so a raise discards its writes (`telemetry`'s own catch would otherwise keep them). A handler is not re-entered by an emit it causes itself, so a handler on actor dispatch events that sends to an actor cannot recurse without bound. Handler ids are Symbols or Strings, and `attach:`/`detach:` refuse the runtime's own handler ids with `reserved_name`.
 - **`native:` delegation, not a compiler primitive (BT-4055).** The class is `native: beamtalk_telemetry` and each method is `=> self delegate` (ADR 0101), so it lowers to `beamtalk_erlang_proxy:native_call/4` into a new runtime module, `beamtalk_telemetry` (`execute/3`, `span/3`, `attach/3`, `detach/1`; `attach:toAll:do:` forwards to an internal `attachMany:to:do:`, because its first keyword would collide with `attach:to:do:`'s). A compiled static `Telemetry execute: ...` send is a direct call into the class module (sealed, stateless, `class sealed`), with no exports lookup (BT-4021). `beamtalk_telemetry` opts out of the proxy's ok/error → `Result` coercion, so a span block's value comes back unchanged. The first version (BT-4025) used `@primitive` bodies and a per-class compiler table; that added to the primitive surface ADR 0034/0037 keep minimal and duplicated the Erlang names and arities in Rust, so it was replaced, and a codegen test now keeps service facades out of the primitive table. Measured overhead is in `docs/development/benchmarks.md` (BT-4055).
-- **One implementation.** `beamtalk_actor:maybe_span/3` and the emit half of `maybe_execute_telemetry/3` moved into `beamtalk_telemetry` (`maybe_span/3`, `emit/3`), and actor dispatch spans share the facade's span implementation. `beamtalk_actor:maybe_execute_telemetry/3` keeps only the actor-lifecycle announcement (ADR 0093) on top. `beamtalk_trace_store` detaches its handlers through `beamtalk_telemetry:detach/1`.
+- **One implementation.** `beamtalk_actor:maybe_span/3` and the emit half of `maybe_execute_telemetry/3` moved into `beamtalk_telemetry` (`maybe_span/3` — `dispatch_span/5` since BT-4113 — and `emit/3`), and actor dispatch spans share the facade's span implementation. `beamtalk_actor:maybe_execute_telemetry/3` keeps only the actor-lifecycle announcement (ADR 0093) on top. `beamtalk_trace_store` detaches its handlers through `beamtalk_telemetry:detach/1`.
 - **`Tracing` stays separate.** `Tracing` is actor-dispatch observability (capture, stats, health); `Telemetry` is the application event bus. Each class comment points to the other, and `Tracing` gains no `events` view.
 - **Exporters stay Erlang-side.** StatsD, Prometheus and OpenTelemetry bridges are still attached in Erlang. Attaching from Beamtalk exists mainly for tests and in-image consumers.
 
@@ -73,6 +73,35 @@ The empty-values convention is kept deliberately: `traces` already answers `[]` 
 - Memory is flat under churn: 1M short-lived actors leave every aggregate table and the atomics array exactly at baseline (pinned by test).
 - No `monitored_by` side effect, ever; the `monitored_by` guidance added for BT-4066 (jamesc/beamtalk#4506) is revised out of `Tracing`'s docs.
 - Consumers that matched `"retired:<Class>"` keys or `pid => "retired"` entries must match `"class:<Class>"` keys instead (MCP tool descriptions updated; no MCP/LSP structural change — stats pass through opaquely).
+
+## Amendment (2026-10-28): dispatch events are opt-in (BT-4113)
+
+This amendment changes a contract: the `[beamtalk, actor, dispatch, start | stop | exception]` telemetry events (see "Telemetry Events" below) are no longer emitted for every actor send. The always-on `{Class, Selector}` aggregates (BT-4103 amendment), the `Tracing` method surface and results, trace capture, the `Telemetry` facade's own events and the `[beamtalk, actor, lifecycle, *]` events are unchanged.
+
+### Why
+
+The vs-elixir microbenchmarks (rows 7a–7c) measured an actor send at +174 reductions and +256 words over `GenServer.call`, and +184 / +230 over `GenServer.cast`. Most of it was work that ran on every send whether anyone listened or not: two `telemetry:execute/3` calls (a ref, a wall-clock read, handler-table lookups, event-name `++` and metadata maps), with the always-on aggregates fed *through* the trace store's `[beamtalk, actor, dispatch, stop]` handler, so the events could never be skipped. On top of that, every send scanned the whole instance registry to find the actor's class (O(live actors)), always built and restored an empty propagated context (including logger metadata calls on the receiver), pre-checked liveness before `gen_server:call`, and every receiving callback scanned its state for `__local__` temporaries.
+
+### Decision
+
+- **Dispatch events are emitted only while `beamtalk_telemetry:dispatch_events_enabled()` is true**, a single `persistent_term` read. It is true when any of these holds:
+  - tracing is enabled (`Tracing enable`): trace capture needs the causal span ids this path sets;
+  - a handler attached through the Beamtalk `Telemetry attach:to:do:` / `attach:toAll:do:` API listens to an event under `[beamtalk, actor, dispatch]` (read from `telemetry`'s own handler table on every Beamtalk attach and detach, so the flag clears when the last such handler detaches);
+  - the app env `{beamtalk_runtime, dispatch_telemetry}` is `true` (read at startup and on every refresh), for Erlang/Elixir code that calls `telemetry:attach/4` directly, which Beamtalk cannot observe;
+  - `beamtalk_telemetry:enable_dispatch_events/0` was called (undone by `disable_dispatch_events/0`, which leaves the other sources alone).
+- **Aggregates are recorded directly** by the dispatch span (`beamtalk_telemetry:dispatch_span/5` → `beamtalk_trace_store:record_dispatch/6`, or `record_dispatch_stop/2` / `record_dispatch_exception/2` while events are on), exactly once per send: a raise counts as an error, a `^` non-local return as a normal exit. The trace store no longer attaches dispatch handlers; it keeps its lifecycle handlers.
+- With events off, the span takes two monotonic clock reads around the send and records the aggregate. No metadata map, ref or wall-clock read is built.
+- **The class rides along with the send.** `beamtalk_message_dispatch` already holds it from the `#beamtalk_object{}` record and passes it to `beamtalk_actor:sync_send_known/4,5` / `cast_send_known/4`, which replaced the per-send process-dictionary stash for remote pids (ADR 0126 §7.3). `lookup_class/1`, kept for callers that have only a pid, reads a pid-keyed index next to the instance registry: O(1).
+- **Context propagates only when there is context.** The sender includes `otel`, `trace_ctx` and `causal` only when non-empty (`call_stack` stays on every sync send for cycle detection); the receiver clears what it kept from a previous message only when it has something to clear. The wire shape is unchanged, and an older sender's `trace_ctx => #{}` still clears.
+- **No liveness pre-check before `gen_server:call`** (or `gen_server:cast`): the call's own `noproc`/`normal`/`shutdown` exits already map to `actor_dead`, without the snapshot race.
+- **Generated callbacks skip the `__local__` strip scan** when the committed state has exactly the declared size (internal keys plus every declared field), falling back to the scan on any other size. Classes with a `late` slot always scan.
+
+### Consequences
+
+- A sync send costs about 140 reductions and 145 words (was 226 / 318), and a cast about 110 / 80 (was 203 / 242); see `benchmarks/vs-elixir/results/` for the measured before/after and what remains.
+- Code that attached to dispatch events with `telemetry:attach/4` (e.g. an exporter) must turn them on: set `{beamtalk_runtime, dispatch_telemetry, true}` or call `beamtalk_telemetry:enable_dispatch_events/0`. Beamtalk `Telemetry attach:` handlers need nothing.
+- A handler that `telemetry` detaches on its own (because it raised) keeps the flag on until the next refresh. That only costs the events.
+- Flipping the flag writes a `persistent_term`, which triggers a global GC scan. Flips happen only on attach, detach, enable and disable, which are rare control-plane operations.
 
 ## Context
 
@@ -178,6 +207,8 @@ telemetry_poller (periodic VM stats for systemHealth)
 - Deferred: design aggregates so they *could* be wrapped in a `telemetry_metrics` reporter later
 
 ### Telemetry Events
+
+*(Amended by BT-4113: the dispatch events below are emitted only while dispatch events are enabled — tracing on, a Beamtalk `Telemetry attach:` handler on one of them, the `dispatch_telemetry` app env, or `beamtalk_telemetry:enable_dispatch_events/0`. See the 2026-10-28 amendment above.)*
 
 Beamtalk emits telemetry events from the actor send wrappers in `beamtalk_actor.erl`:
 

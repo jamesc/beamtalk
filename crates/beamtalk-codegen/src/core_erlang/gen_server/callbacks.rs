@@ -13,7 +13,7 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
-use beamtalk_core::ast::{ClassDefinition, Module, SlotKind};
+use beamtalk_core::ast::{ClassDefinition, Expression, Module, SlotKind};
 
 /// ADR 0078: Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
@@ -43,6 +43,74 @@ pub(in crate::core_erlang) struct InheritedTypedField {
     pub field_name: String,
     /// Human-readable type annotation (used verbatim in diagnostics).
     pub type_name: String,
+}
+
+/// An internal (non-field) key every compiled actor's state map carries.
+#[derive(Debug, Clone, Copy)]
+enum InternalStateKey {
+    /// `'__class_mod__'`: the instance's compiled class module.
+    ClassMod,
+    /// `'__shape_version__'`: ADR 0123's hot-reload shape version.
+    ShapeVersion,
+}
+
+impl InternalStateKey {
+    fn name(self) -> &'static str {
+        match self {
+            Self::ClassMod => "__class_mod__",
+            Self::ShapeVersion => "__shape_version__",
+        }
+    }
+}
+
+/// The internal keys of an actor's state map, in the order `init/1` writes
+/// them. The single source for both the initial state map
+/// (`internal_state_prefix_doc`) and the committed-state size guard
+/// (`committed_state_size`, BT-4113).
+const INTERNAL_STATE_KEYS: [InternalStateKey; 2] =
+    [InternalStateKey::ClassMod, InternalStateKey::ShapeVersion];
+
+/// BT-4113: `let <dest> = <src with __local__ temporaries stripped> in`.
+///
+/// With a known committed-state size (`committed_state_size`), a new state
+/// of exactly that size holds no `__local__` key, so it is kept as is and
+/// only a size mismatch (a temporary present, or fields changed by hot
+/// reload) pays for `beamtalk_actor:strip_local_temps/1`'s scan of every
+/// key. Without one, it always strips.
+fn clean_state_binding(
+    dest: &'static str,
+    src: &'static str,
+    state_size: Option<usize>,
+) -> Document<'static> {
+    let strip = docvec![
+        "call 'beamtalk_actor':'strip_local_temps'(",
+        leaf::var(src),
+        ")"
+    ];
+    let value = match state_size {
+        None => strip,
+        Some(size) => docvec![
+            "case call 'erlang':'map_size'(",
+            leaf::var(src),
+            ") of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<",
+                    leaf::int_lit(i64::try_from(size).unwrap_or(i64::MAX)),
+                    "> when 'true' -> ",
+                    leaf::var(src),
+                    line(),
+                    "<_> when 'true' -> ",
+                    strip,
+                ]
+            ),
+            line(),
+            "end",
+        ],
+    };
+    docvec!["let ", leaf::var(dest), " = ", value, " in"]
 }
 
 impl CoreErlangGenerator {
@@ -383,14 +451,63 @@ impl CoreErlangGenerator {
     /// shape version key; `shape_version` is this leaf class's own
     /// effective `shapeVersion:` (ADR 0123 §1, default `1`) — never the
     /// superclass's, since shape versions are per concrete class.
+    ///
+    /// The entries come from [`INTERNAL_STATE_KEYS`], the same table
+    /// [`Self::committed_state_size`] counts, so the size guard can never
+    /// disagree with the map `init/1` builds.
     fn internal_state_prefix_doc(module_name: &str, shape_version: u32) -> Document<'static> {
-        docvec![
-            "'__class_mod__' => ",
-            leaf::atom(module_name.to_owned()),
-            line(),
-            ", '__shape_version__' => ",
-            leaf::int_lit(i64::from(shape_version)),
-        ]
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for (i, key) in INTERNAL_STATE_KEYS.iter().enumerate() {
+            if i > 0 {
+                parts.push(line());
+                parts.push(Document::Str(", "));
+            }
+            parts.push(leaf::atom(key.name()));
+            parts.push(Document::Str(" => "));
+            parts.push(match key {
+                InternalStateKey::ClassMod => leaf::atom(module_name.to_owned()),
+                InternalStateKey::ShapeVersion => leaf::int_lit(i64::from(shape_version)),
+            });
+        }
+        Document::Vec(parts)
+    }
+
+    /// BT-4113: the exact number of keys a committed state map of this actor
+    /// holds when it carries no codegen-internal `__local__` temporaries —
+    /// [`INTERNAL_STATE_KEYS`] plus every declared field of the class and its
+    /// ancestors. The generated callbacks compare `map_size/1` of the new
+    /// state against it and skip the `strip_local_temps/1` key scan on a
+    /// match (see [`clean_state_binding`]).
+    ///
+    /// A match must prove the map holds no extra key, so this answers `None`
+    /// (always strip) unless every counted field is certain to be present:
+    /// no class identity or hierarchy, a script module seeding extra keys
+    /// from top-level assignments, or a `late` slot anywhere in the chain
+    /// (a defaultless one is absent until first assigned). An ancestor
+    /// missing from the hierarchy makes `all_state` undercount, which only
+    /// means the guard never matches. Keys are never removed from actor
+    /// state during dispatch, so the size cannot match with a field missing
+    /// and a temporary present.
+    fn committed_state_size(&self, module: &Module) -> Option<usize> {
+        if module
+            .expressions
+            .iter()
+            .any(|stmt| matches!(stmt.expression, Expression::Assignment { .. }))
+        {
+            return None;
+        }
+        let class = self.current_class(module)?;
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let class_name = class.name.name.as_str();
+        hierarchy.get_class(class_name)?;
+        let fields = hierarchy.all_state(class_name);
+        if fields
+            .iter()
+            .any(|f| hierarchy.state_field_kind(class_name, f) == SlotKind::Late)
+        {
+            return None;
+        }
+        Some(INTERNAL_STATE_KEYS.len() + fields.len())
     }
 
     /// ADR 0079: Generate the `$beamtalk_actor` process-dictionary
@@ -588,6 +705,7 @@ impl CoreErlangGenerator {
         &self,
         current_class: Option<&ClassDefinition>,
         module: &Module,
+        state_size: Option<usize>,
         // Reserved for future log-metadata enrichment that names the leaf
         // spawning class in addition to the field's owning class.
         _leaf_class_name: &ecow::EcoString,
@@ -609,7 +727,7 @@ impl CoreErlangGenerator {
             // local must not persist the temporary into the actor's first state.
             return docvec![
                 line(),
-                "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
+                clean_state_binding("InitCleanState", "InitNewState", state_size),
                 line(),
                 "{'noreply', InitCleanState}",
             ];
@@ -720,7 +838,7 @@ impl CoreErlangGenerator {
             line(),
             // clean the committed state once before the field checks; the
             // checks read user fields (never `__local__`) so they are unaffected.
-            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
+            clean_state_binding("InitCleanState", "InitNewState", state_size),
             line(),
             "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
             line(),
@@ -1064,8 +1182,13 @@ impl CoreErlangGenerator {
         let current_class = self.current_class(module);
         let leaf_class_name =
             current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
-        let success_body =
-            self.generate_post_initialize_check(current_class, module, &leaf_class_name);
+        let state_size = self.committed_state_size(module);
+        let success_body = self.generate_post_initialize_check(
+            current_class,
+            module,
+            state_size,
+            &leaf_class_name,
+        );
 
         // ADR 0078: Walk the user-defined initialize chain (parent-first).
         // Each entry is the (class_name, compiled_module_name) for a class that
@@ -1329,7 +1452,7 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             "let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in",
-                            Self::cast_dispatch_case(&module_name),
+                            Self::cast_dispatch_case(&module_name, state_size),
                         ]
                     ),
                     line(),
@@ -1396,12 +1519,15 @@ impl CoreErlangGenerator {
     /// `perform:` — came from another process and is answered with
     /// `invalid_continuation` instead of being dispatched inside the actor,
     /// where the runtime's `self()` check could not tell.
-    fn mailbox_call_guard(module_name: &ecow::EcoString) -> Document<'static> {
+    fn mailbox_call_guard(
+        module_name: &ecow::EcoString,
+        state_size: Option<usize>,
+    ) -> Document<'static> {
         Self::mailbox_guard(
             "Selector",
             "Args",
             "ContErr",
-            Self::handle_call_dispatch_case(module_name),
+            Self::handle_call_dispatch_case(module_name, state_size),
             docvec!["{'reply', {'error', ContErr}, State}"],
         )
     }
@@ -1409,12 +1535,15 @@ impl CoreErlangGenerator {
     /// BT-3968: `handle_cast/2`'s fire-and-forget dispatch behind the same
     /// guard as [`Self::mailbox_call_guard`]; a rejected cast (logged by the
     /// runtime check) is dropped.
-    fn mailbox_cast_guard(module_name: &ecow::EcoString) -> Document<'static> {
+    fn mailbox_cast_guard(
+        module_name: &ecow::EcoString,
+        state_size: Option<usize>,
+    ) -> Document<'static> {
         Self::mailbox_guard(
             "CastSelector",
             "CastArgs",
             "_ContErr",
-            Self::cast_dispatch_case(module_name),
+            Self::cast_dispatch_case(module_name, state_size),
             docvec!["{'noreply', State}"],
         )
     }
@@ -1498,7 +1627,10 @@ impl CoreErlangGenerator {
     /// a `continueWith:` step, which reuses it). A successful dispatch commits
     /// its new state and discards the result; a raising one crashes the actor
     /// through the shared no-reply error arms (ADR 0134, BT-3958).
-    fn cast_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
+    fn cast_dispatch_case(
+        module_name: &ecow::EcoString,
+        state_size: Option<usize>,
+    ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
@@ -1525,7 +1657,7 @@ impl CoreErlangGenerator {
                             // strip codegen-internal `__local__` threading
                             // temporaries before persist + notify (see handle_call).
                             line(),
-                            "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in",
+                            clean_state_binding("CleanCastNewState", "CastNewState", state_size),
                             // same per-object change push as handle_call, for
                             // a state write committed via a fire-and-forget cast.
                             line(),
@@ -1570,8 +1702,12 @@ impl CoreErlangGenerator {
     /// through to the ordinary catch-all below exactly like an
     /// un-wire-tagged one already does today.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_handle_cast(&mut self) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_handle_cast(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
+        let state_size = self.committed_state_size(module);
         let doc = docvec![
             "'handle_cast'/2 = fun (Msg, State) ->",
             nest(
@@ -1627,13 +1763,13 @@ impl CoreErlangGenerator {
                                     docvec![
                                         line(),
                                         "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
-                                        Self::mailbox_cast_guard(&module_name),
+                                        Self::mailbox_cast_guard(&module_name, state_size),
                                     ]
                                 ),
                                 // Fire-and-forget cast without context (backward compat)
                                 line(),
                                 "<{'cast', CastSelector, CastArgs}> when 'true' ->",
-                                nest(INDENT, Self::mailbox_cast_guard(&module_name)),
+                                nest(INDENT, Self::mailbox_cast_guard(&module_name, state_size)),
                                 line(),
                                 "<_> when 'true' -> {'noreply', State}",
                             ]
@@ -1670,9 +1806,13 @@ impl CoreErlangGenerator {
     /// is returned with `State` untouched, without ever reaching
     /// `safe_dispatch/3`.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
-    pub(in crate::core_erlang) fn generate_handle_call(&mut self) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_handle_call(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
         let module_name = self.module_name.clone();
-        let dispatch_case = Self::mailbox_call_guard(&module_name);
+        let dispatch_case =
+            Self::mailbox_call_guard(&module_name, self.committed_state_size(module));
         let doc = docvec![
             "'handle_call'/3 = fun (Msg, From, State) ->",
             nest(
@@ -1845,7 +1985,10 @@ impl CoreErlangGenerator {
     /// `encode_reply_for/3` unchanged — it never branches on the result,
     /// it builds the reply's own outer shape itself at each call site, so
     /// it was never at risk of this ambiguity.)
-    fn handle_call_dispatch_case(module_name: &ecow::EcoString) -> Document<'static> {
+    fn handle_call_dispatch_case(
+        module_name: &ecow::EcoString,
+        state_size: Option<usize>,
+    ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
@@ -1882,7 +2025,7 @@ impl CoreErlangGenerator {
                             // threaded through a control-flow desugar never leaks into
                             // the committed actor state or a watch notification.
                             line(),
-                            "let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
+                            clean_state_binding("CleanNewState", "NewState", state_size),
                             // notify the per-object change substrate so a
                             // watched compiled actor's committed state write pushes
                             // {object_changed, …} to the live Inspector — the runtime
@@ -2019,7 +2162,8 @@ impl CoreErlangGenerator {
             let has_hook = self.current_class(module).is_some_and(|c| {
                 self.class_or_ancestor_defines_linked_exit_hook(module, &c.name.name)
             });
-            let dispatch_body = self.info_dispatch_doc("handleInfo:", "[Msg]");
+            let state_size = self.committed_state_size(module);
+            let dispatch_body = self.info_dispatch_doc("handleInfo:", "[Msg]", state_size);
             let hook_arm = has_hook.then(|| {
                 docvec![
                     line(),
@@ -2028,7 +2172,11 @@ impl CoreErlangGenerator {
                         INDENT,
                         docvec![
                             line(),
-                            self.info_dispatch_doc("onLinkedExit:reason:", "[HookPid, HookReason]")
+                            self.info_dispatch_doc(
+                                "onLinkedExit:reason:",
+                                "[HookPid, HookReason]",
+                                state_size
+                            )
                         ]
                     ),
                 ]
@@ -2067,7 +2215,12 @@ impl CoreErlangGenerator {
     /// The `safe_dispatch` + state-commit + error-arms block shared by the
     /// `handleInfo:` dispatch and (BT-4052) the `onLinkedExit:reason:` hook
     /// dispatch in `handle_info/2`. `args` is a Core Erlang list literal.
-    fn info_dispatch_doc(&self, selector: &str, args: &'static str) -> Document<'static> {
+    fn info_dispatch_doc(
+        &self,
+        selector: &str,
+        args: &'static str,
+        state_size: Option<usize>,
+    ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
             Self::pdict_stash_preamble(),
@@ -2097,7 +2250,7 @@ impl CoreErlangGenerator {
                             // outer local through a control-flow desugar must not
                             // persist `__local__` temps into the committed state.
                             line(),
-                            "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
+                            clean_state_binding("CleanInfoNewState", "NewState", state_size),
                             line(),
                             "{'noreply', CleanInfoNewState}",
                         ]

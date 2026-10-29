@@ -70,9 +70,9 @@ remote_safe_sends_test_() ->
                     announcements_deliver_to_remote_subscriber(PeerNode)
                 end},
                 {
-                    "stash_known_class/2 is lookup_class/1's fallback for a remote pid, "
-                    "scoped to the stashed pid and cleared by clear_known_class/0",
-                    fun() -> stash_known_class_is_scoped_lookup_class_fallback(PeerNode) end
+                    "a send that carries the class (sync_send_known/4) reports it for a "
+                    "remote pid, which lookup_class/1 cannot resolve",
+                    fun() -> known_class_send_reports_class_for_remote_pid(PeerNode) end
                 }
             ]
         end}}.
@@ -164,45 +164,47 @@ remote_subscriber_loop(Collector) ->
     end.
 
 %%====================================================================
-%% beamtalk_actor:stash_known_class/2 + lookup_class/1 (ADR 0126 §7.3)
+%% beamtalk_actor:sync_send_known/4 for a remote pid (ADR 0126 §7.3, BT-4113)
 %%====================================================================
 
 -doc """
-Direct coverage of the class-hint mechanism `beamtalk_message_dispatch`
-relies on (ADR 0126 §7.3): a genuinely remote pid is the only way to
-observe `lookup_class/1`'s registry-miss fallback (a local pid always
-resolves via the instance registry, stashed or not), so this needs the
-real peer, not a mock.
+A remote pid's class is not in the local-only instance registry, so
+`lookup_class/1` answers `unknown`; `beamtalk_message_dispatch` passes the
+`#beamtalk_object{}` record's class with the send instead (BT-4113, which
+replaced the per-send process-dictionary stash). The dispatch event
+metadata shows which class the send reported.
 """.
-stash_known_class_is_scoped_lookup_class_fallback(PeerNode) ->
-    {ok, RemotePid} = rpc:call(PeerNode, test_counter, start, [0]),
+known_class_send_reports_class_for_remote_pid(PeerNode) ->
+    {ok, RemotePid} = rpc:call(PeerNode, test_counter, start, [7]),
+    Self = self(),
+    HandlerId = {?MODULE, known_class, make_ref()},
+    ok = telemetry:attach(
+        HandlerId,
+        [beamtalk, actor, dispatch, stop],
+        fun(_E, _M, Meta, #{dest := Dest}) -> Dest ! {dispatch_stop, Meta} end,
+        #{dest => Self}
+    ),
+    ok = beamtalk_telemetry:enable_dispatch_events(),
     try
-        %% No hint stashed yet: the local-only instance registry has
-        %% nothing for a remote pid, so this is the pre-fix behavior this
-        %% ADR fixes for callers that DO have the class.
         ?assertEqual(unknown, beamtalk_actor:lookup_class(RemotePid)),
-
-        ok = beamtalk_actor:stash_known_class(RemotePid, 'Counter'),
-        ?assertEqual('Counter', beamtalk_actor:lookup_class(RemotePid)),
-
-        %% Scoped by pid: a hint for a *different* pid is never returned
-        %% for this one — guards against a stale hint leaking across sends.
-        {ok, OtherRemotePid} = rpc:call(PeerNode, test_counter, start, [0]),
-        try
-            ?assertEqual(unknown, beamtalk_actor:lookup_class(OtherRemotePid))
-        after
-            rpc:call(PeerNode, gen_server, stop, [OtherRemotePid])
+        ?assertEqual(7, beamtalk_actor:sync_send_known(RemotePid, 'Counter', getValue, [])),
+        receive
+            {dispatch_stop, #{pid := RemotePid} = Meta} ->
+                ?assertEqual('Counter', maps:get(class, Meta))
+        after 2000 ->
+            ?assert(false)
         end,
-
-        ok = beamtalk_actor:clear_known_class(),
-        ?assertEqual(unknown, beamtalk_actor:lookup_class(RemotePid)),
-
-        %% No-op for a local pid: stashing must never override (or risk
-        %% masking) the instance registry, which is already authoritative.
-        ok = beamtalk_actor:stash_known_class(self(), 'SomeClass'),
-        ?assertEqual(unknown, beamtalk_actor:lookup_class(self()))
+        %% Without the class, the send reports `unknown`.
+        ?assertEqual(7, beamtalk_actor:sync_send(RemotePid, getValue, [])),
+        receive
+            {dispatch_stop, #{pid := RemotePid} = Meta2} ->
+                ?assertEqual(unknown, maps:get(class, Meta2))
+        after 2000 ->
+            ?assert(false)
+        end
     after
-        beamtalk_actor:clear_known_class(),
+        ok = beamtalk_telemetry:disable_dispatch_events(),
+        telemetry:detach(HandlerId),
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
 

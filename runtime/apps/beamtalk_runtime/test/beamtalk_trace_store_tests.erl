@@ -608,15 +608,15 @@ bottlenecks_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Telemetry handler - dispatch stop
+%% Test: Direct dispatch recording - stop (BT-4113: no longer a telemetry handler)
 %%====================================================================
 
-telemetry_dispatch_stop_handler_test_() ->
+record_dispatch_stop_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
                 TestPid = self(),
-                Measurements = #{duration => 5000},
+                Duration = 5000,
                 Metadata = #{
                     pid => TestPid,
                     class => 'Counter',
@@ -625,13 +625,8 @@ telemetry_dispatch_stop_handler_test_() ->
                     outcome => ok
                 },
 
-                %% Call handler directly
-                beamtalk_trace_store:handle_dispatch_stop(
-                    [beamtalk, actor, dispatch, stop],
-                    Measurements,
-                    Metadata,
-                    #{}
-                ),
+                %% Record directly, as dispatch_span/5 does
+                beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
 
                 %% Verify the always-on class aggregate was recorded
                 #{
@@ -646,15 +641,15 @@ telemetry_dispatch_stop_handler_test_() ->
     end}.
 
 %%====================================================================
-%% Test: Telemetry handler - dispatch exception
+%% Test: Direct dispatch recording - exception
 %%====================================================================
 
-telemetry_dispatch_exception_handler_test_() ->
+record_dispatch_exception_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
                 TestPid = self(),
-                Measurements = #{duration => 3000},
+                Duration = 3000,
                 Metadata = #{
                     pid => TestPid,
                     class => 'Counter',
@@ -664,13 +659,8 @@ telemetry_dispatch_exception_handler_test_() ->
                     reason => badarg
                 },
 
-                %% Call handler directly
-                beamtalk_trace_store:handle_dispatch_exception(
-                    [beamtalk, actor, dispatch, exception],
-                    Measurements,
-                    Metadata,
-                    #{}
-                ),
+                %% Record directly, as dispatch_span/5 does
+                beamtalk_trace_store:record_dispatch_exception(Metadata, Duration),
 
                 %% Verify error was recorded in the always-on class entry
                 #{
@@ -1982,11 +1972,11 @@ tracing_disabled_skips_events_test_() ->
                     %% No traces should have been recorded
                     ?assertEqual([], beamtalk_trace_store:get_traces())
                 end)},
-            {"dispatch handler does not record trace events when disabled",
+            {"dispatch recording does not record trace events when disabled",
                 ?_test(begin
                     beamtalk_trace_store:disable(),
                     TestPid = self(),
-                    Measurements = #{duration => 5000},
+                    Duration = 5000,
                     Metadata = #{
                         pid => TestPid,
                         class => 'Counter',
@@ -1994,12 +1984,7 @@ tracing_disabled_skips_events_test_() ->
                         mode => sync,
                         outcome => ok
                     },
-                    beamtalk_trace_store:handle_dispatch_stop(
-                        [beamtalk, actor, dispatch, stop],
-                        Measurements,
-                        Metadata,
-                        #{}
-                    ),
+                    beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
                     %% Class aggregates should still be recorded, but no
                     %% per-actor entry and no trace events
                     ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),

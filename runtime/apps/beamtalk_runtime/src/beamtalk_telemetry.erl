@@ -20,11 +20,41 @@ Two audiences share it:
   arguments and raise structured `#beamtalk_error{}`s. The module opts out of
   the proxy's ok/error → `Result` coercion (`beamtalk_ffi_raw_results/0`):
   `span/3` answers the block's own value, which must come back unchanged.
-- **The runtime itself.** `maybe_span/3` instruments actor dispatch and
+- **The runtime itself.** `dispatch_span/5` instruments actor dispatch and
   `emit/3` emits the actor lifecycle and distribution events. Both moved
-  here from `beamtalk_actor` (`maybe_span/3`, and the emit half of
+  here from `beamtalk_actor` (the old `maybe_span/3`, and the emit half of
   `maybe_execute_telemetry/3`) so the span logic (start/stop/exception, NLR
   handling) and the guarded emit exist exactly once.
+
+## Dispatch events are opt-in (BT-4113)
+
+`[beamtalk, actor, dispatch, start | stop | exception]` are emitted only
+while `dispatch_events_enabled/0` is true. Every actor send pays for them
+otherwise (a ref, a wall-clock read, two handler-table lookups and the
+metadata maps), whether or not anyone listens. The flag is true when any of
+these holds:
+
+- tracing is enabled (`Tracing enable`, `beamtalk_trace_store:enable/0`);
+- a Beamtalk handler attached through `attach/3` / `attachMany/3` listens
+  to an event under `[beamtalk, actor, dispatch]` (read back from
+  `telemetry`'s own handler table, so it clears when the last one detaches);
+- the app env `{beamtalk_runtime, dispatch_telemetry}` is `true` (read at
+  startup and on every refresh), for Erlang/Elixir code that calls
+  `telemetry:attach/4` directly, which Beamtalk cannot observe;
+- `enable_dispatch_events/0` was called (undone by
+  `disable_dispatch_events/0`, which leaves the other sources alone).
+
+The always-on `{Class, Selector}` aggregates (BT-4103) do not depend on the
+flag: `dispatch_span/5` records them directly in `beamtalk_trace_store`,
+events or not.
+
+The flag is a single `persistent_term` read on the send path. Writing a
+`persistent_term` triggers a global GC scan, which is fine here because the
+flag flips only on attach/detach/enable/disable: rare, control-plane
+operations. Refreshes are serialized with a `global:trans/3` lock local to
+the node, so two concurrent flips cannot leave a stale value behind. A
+handler `telemetry` detaches on its own (because it raised) keeps the flag
+on until the next refresh, which only costs the events.
 
 Every entry point degrades gracefully when the `telemetry` application is not
 loaded (a partial test harness): emitting becomes a no-op and spans just run
@@ -50,6 +80,8 @@ raises (and logs it).
 
 -include("beamtalk.hrl").
 
+-type span_exit() :: {stop | exception, map(), integer()}.
+
 -export([
     %% stdlib Telemetry facade (`native:` / `self delegate` targets)
     execute/3,
@@ -62,9 +94,20 @@ raises (and logs it).
     %% telemetry handler callback for Beamtalk blocks
     handle_event/4,
     %% runtime instrumentation (moved from beamtalk_actor, BT-4025)
-    maybe_span/3,
-    emit/3
+    dispatch_span/5,
+    emit/3,
+    %% dispatch-event opt-in (BT-4113)
+    dispatch_events_enabled/0,
+    enable_dispatch_events/0,
+    disable_dispatch_events/0,
+    refresh_dispatch_events/0
 ]).
+
+%% persistent_term keys (BT-4113). PT_DISPATCH_EVENTS is the flag the send
+%% path reads; PT_DISPATCH_FORCED is the enable_dispatch_events/0 source.
+-define(PT_DISPATCH_EVENTS, beamtalk_dispatch_events).
+-define(PT_DISPATCH_FORCED, beamtalk_dispatch_events_forced).
+-define(DISPATCH_PREFIX, [beamtalk, actor, dispatch]).
 
 %%====================================================================
 %% stdlib facade
@@ -149,7 +192,11 @@ detach(HandlerId) ->
     Sel = 'detach:',
     check_handler_id(HandlerId, Sel),
     check_not_reserved(HandlerId, Sel),
-    detach_handler(HandlerId).
+    nil = detach_handler(HandlerId),
+    %% BT-4113: the last Beamtalk dispatch handler gone switches the
+    %% dispatch events back off (unless another source keeps them on).
+    ok = refresh_dispatch_events(),
+    nil.
 
 -doc """
 Opt out of `beamtalk_erlang_proxy`'s ok/error → `Result` coercion (ADR 0076)
@@ -213,32 +260,76 @@ handle_event(EventName, Measurements, Metadata, #{block := Block, id := Id}) ->
 %%====================================================================
 
 -doc """
-Wrap actor dispatch in a telemetry span (ADR 0069 Phase 2a).
+Wrap one actor send (ADR 0069 Phase 2a): a send to `Pid` (an actor of
+`Class`) of `Selector`, in `Mode` (`sync`, `async` or `cast`). `Fun` performs
+the send and answers `{Result, Outcome}`, `Outcome` being `ok`, `error` or
+`cast`; the span answers `Result`.
 
-`Fun` answers `{Result, StopMetadata}`. When trace capture is enabled this
-also generates a span id and sets the trace id (a root span when none exists)
-in the process dictionary for causal linking. Moved from `beamtalk_actor`
-(BT-4025); the span itself is `run_span/3`, shared with `span/3`.
+Always records the `{Class, Selector}` aggregate directly in
+`beamtalk_trace_store`, exactly once per send: a raise counts as an error
+and is re-raised with its original class, reason and stacktrace; a `^`
+non-local return counts as a normal exit.
+
+With dispatch events off (the default, see the module doc) that is all it
+does: two monotonic clock reads around `Fun` and the aggregate, with no
+metadata map built at all. With them on it also emits
+`[beamtalk, actor, dispatch, start | stop | exception]` (metadata `pid`,
+`class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
+is enabled, sets the causal span id (and the trace id, for a root span) in
+the process dictionary and records a trace event.
 """.
--spec maybe_span(list(), map(), fun(() -> {term(), map()})) -> term().
-maybe_span(EventPrefix, Metadata, Fun) ->
-    %% Generate causal trace IDs when tracing is enabled.
-    %% Only incurs atomics cost (~10ns) when trace capture is active.
-    case beamtalk_trace_store:is_enabled() of
-        true ->
-            SpanId = beamtalk_trace_store:next_span_id(),
-            %% If no trace_id exists, this is a root span
-            case get('$beamtalk_trace_id') of
-                undefined ->
-                    put('$beamtalk_trace_id', SpanId),
-                    put('$beamtalk_span_id', SpanId);
-                _ExistingTraceId ->
-                    put('$beamtalk_span_id', SpanId)
-            end;
+-spec dispatch_span(pid(), atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})) ->
+    term().
+dispatch_span(Pid, Class, Selector, Mode, Fun) ->
+    case dispatch_events_enabled() andalso erlang:function_exported(telemetry, execute, 3) of
         false ->
-            ok
-    end,
-    run_span(EventPrefix, Metadata, Fun).
+            run_recorded(Pid, Class, Selector, Mode, Fun);
+        true ->
+            run_dispatch_events(
+                #{pid => Pid, class => Class, selector => Selector, mode => Mode}, Fun
+            )
+    end.
+
+-doc """
+Whether actor dispatch telemetry events are emitted (BT-4113): one
+`persistent_term` read. See the module doc for what turns it on.
+""".
+-spec dispatch_events_enabled() -> boolean().
+dispatch_events_enabled() ->
+    persistent_term:get(?PT_DISPATCH_EVENTS, false).
+
+-doc """
+Turn dispatch telemetry events on, for Erlang/Elixir code that attaches to
+them with `telemetry:attach/4` directly. Stays on until
+`disable_dispatch_events/0`.
+""".
+-spec enable_dispatch_events() -> ok.
+enable_dispatch_events() ->
+    with_dispatch_lock(fun() ->
+        persistent_term:put(?PT_DISPATCH_FORCED, true),
+        do_refresh_dispatch_events()
+    end).
+
+-doc """
+Undo `enable_dispatch_events/0`. The events stay on while another source
+(tracing, a Beamtalk dispatch handler, the app env) still asks for them.
+""".
+-spec disable_dispatch_events() -> ok.
+disable_dispatch_events() ->
+    with_dispatch_lock(fun() ->
+        _ = persistent_term:erase(?PT_DISPATCH_FORCED),
+        do_refresh_dispatch_events()
+    end).
+
+-doc """
+Recompute the dispatch-events flag from its sources (module doc). Called
+after anything that can change one: trace store start and `enable/0` /
+`disable/0`, and Beamtalk handler attach/detach. Writes the
+`persistent_term` only when the value changes.
+""".
+-spec refresh_dispatch_events() -> ok.
+refresh_dispatch_events() ->
+    with_dispatch_lock(fun do_refresh_dispatch_events/0).
 
 -doc """
 Emit a `telemetry:execute/3` event if telemetry is loaded, else do nothing.
@@ -268,13 +359,21 @@ non-local return treated as a normal exit. `Fun` answers `{Result, StopMeta}`.
 run_span(EventPrefix, StartMeta, Fun) ->
     case erlang:function_exported(telemetry, execute, 3) of
         true ->
-            run_traced_span(EventPrefix, StartMeta, Fun);
+            run_traced_span(EventPrefix, StartMeta, Fun, fun(_Exit) -> ok end);
         false ->
             {Result, _StopMeta} = Fun(),
             Result
     end.
 
-run_traced_span(EventPrefix, StartMeta0, Fun) ->
+-doc """
+`run_span/3` with an exit hook: `OnExit` is called once, after the stop or
+exception event, with `{stop, StopMeta, Duration}` or
+`{exception, ExceptionMeta, Duration}` (native time units).
+`dispatch_span/5` records its aggregate and trace event there.
+""".
+-spec run_traced_span(list(), map(), fun(() -> {term(), map()}), fun((span_exit()) -> ok)) ->
+    term().
+run_traced_span(EventPrefix, StartMeta0, Fun, OnExit) ->
     StartTime = erlang:monotonic_time(),
     StartMeta = with_span_context(StartMeta0, erlang:make_ref()),
     Ctx = maps:get(telemetry_span_context, StartMeta),
@@ -287,30 +386,129 @@ run_traced_span(EventPrefix, StartMeta0, Fun) ->
     %% re-raises the original class/reason/stacktrace (an NLR included)
     try Fun() of
         {Result, StopMeta} ->
-            emit_stop(EventPrefix, StartTime, with_span_context(StopMeta, Ctx)),
+            emit_stop(EventPrefix, StartTime, with_span_context(StopMeta, Ctx), OnExit),
             Result
     catch
         throw:Nlr:Stack when ?IS_NLR(Nlr) ->
             %% A `^` out of the block is a normal exit, not an exception.
-            emit_stop(EventPrefix, StartTime, StartMeta),
+            emit_stop(EventPrefix, StartTime, StartMeta, OnExit),
             erlang:raise(throw, Nlr, Stack);
         Class:Reason:Stack ->
             StopTime = erlang:monotonic_time(),
+            Duration = StopTime - StartTime,
+            ExcMeta = StartMeta#{kind => Class, reason => Reason, stacktrace => Stack},
             telemetry:execute(
                 EventPrefix ++ [exception],
-                #{duration => StopTime - StartTime, monotonic_time => StopTime},
-                StartMeta#{kind => Class, reason => Reason, stacktrace => Stack}
+                #{duration => Duration, monotonic_time => StopTime},
+                ExcMeta
             ),
+            OnExit({exception, ExcMeta, Duration}),
             erlang:raise(Class, Reason, Stack)
     end.
 
-emit_stop(EventPrefix, StartTime, StopMeta) ->
+emit_stop(EventPrefix, StartTime, StopMeta, OnExit) ->
     StopTime = erlang:monotonic_time(),
+    Duration = StopTime - StartTime,
     telemetry:execute(
         EventPrefix ++ [stop],
-        #{duration => StopTime - StartTime, monotonic_time => StopTime},
+        #{duration => Duration, monotonic_time => StopTime},
         StopMeta
+    ),
+    OnExit({stop, StopMeta, Duration}).
+
+-doc """
+Dispatch events off: time `Fun` and record the aggregate, nothing else.
+The duration is taken in nanoseconds directly, which is what the aggregate
+stores.
+""".
+run_recorded(Pid, Class, Selector, Mode, Fun) ->
+    StartTime = erlang:monotonic_time(nanosecond),
+    %% bt-catcher-audit: not-applicable-reraises - every clause records the exit and
+    %% re-raises the original class/reason/stacktrace (an NLR included)
+    try Fun() of
+        {Result, Outcome} ->
+            Duration = erlang:monotonic_time(nanosecond) - StartTime,
+            beamtalk_trace_store:record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class),
+            Result
+    catch
+        throw:Nlr:Stack when ?IS_NLR(Nlr) ->
+            %% A `^` out of the send is a normal exit, not an exception.
+            Duration = erlang:monotonic_time(nanosecond) - StartTime,
+            beamtalk_trace_store:record_dispatch(Pid, Selector, Duration, ok, Mode, Class),
+            erlang:raise(throw, Nlr, Stack);
+        ErrClass:Reason:Stack ->
+            Duration = erlang:monotonic_time(nanosecond) - StartTime,
+            beamtalk_trace_store:record_dispatch(Pid, Selector, Duration, error, Mode, Class),
+            erlang:raise(ErrClass, Reason, Stack)
+    end.
+
+-doc """
+Dispatch events on: the causal IDs trace capture links spans with (only
+while tracing; an atomics add), then the full span, recording the aggregate
+and trace event from its exit hook.
+""".
+run_dispatch_events(Metadata, Fun) ->
+    case beamtalk_trace_store:is_enabled() of
+        true ->
+            SpanId = beamtalk_trace_store:next_span_id(),
+            %% If no trace_id exists, this is a root span
+            case get('$beamtalk_trace_id') of
+                undefined ->
+                    put('$beamtalk_trace_id', SpanId),
+                    put('$beamtalk_span_id', SpanId);
+                _ExistingTraceId ->
+                    put('$beamtalk_span_id', SpanId)
+            end;
+        false ->
+            ok
+    end,
+    run_traced_span(
+        ?DISPATCH_PREFIX,
+        Metadata,
+        fun() ->
+            {Result, Outcome} = Fun(),
+            {Result, Metadata#{outcome => Outcome}}
+        end,
+        fun record_dispatch_exit/1
     ).
+
+-spec record_dispatch_exit(span_exit()) -> ok.
+record_dispatch_exit({stop, StopMeta, Duration}) ->
+    beamtalk_trace_store:record_dispatch_stop(StopMeta, Duration);
+record_dispatch_exit({exception, ExcMeta, Duration}) ->
+    beamtalk_trace_store:record_dispatch_exception(ExcMeta, Duration).
+
+%%====================================================================
+%% Internal: dispatch-event flag
+%%====================================================================
+
+%% A node-local lock (the requester id is this process, the node list just
+%% this node), so concurrent refreshes cannot interleave their reads and
+%% the write.
+with_dispatch_lock(Fun) ->
+    global:trans({?MODULE, self()}, Fun, [node()]).
+
+do_refresh_dispatch_events() ->
+    New =
+        beamtalk_trace_store:is_enabled() orelse
+            persistent_term:get(?PT_DISPATCH_FORCED, false) orelse
+            application:get_env(beamtalk_runtime, dispatch_telemetry, false) =:= true orelse
+            beamtalk_dispatch_handler_attached(),
+    case dispatch_events_enabled() of
+        New -> ok;
+        _ -> persistent_term:put(?PT_DISPATCH_EVENTS, New)
+    end,
+    ok.
+
+%% A Beamtalk-attached handler (handle_event/4) on any dispatch event.
+beamtalk_dispatch_handler_attached() ->
+    Fun = fun ?MODULE:handle_event/4,
+    try telemetry:list_handlers(?DISPATCH_PREFIX) of
+        Handlers -> lists:any(fun(#{function := F}) -> F =:= Fun end, Handlers)
+    catch
+        error:undef -> false;
+        exit:{noproc, _} -> false
+    end.
 
 %% Same rule as telemetry:span/3: a caller-supplied context wins.
 with_span_context(#{telemetry_span_context := _} = Meta, _Ctx) -> Meta;
@@ -335,6 +533,9 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
         end,
     case Result of
         ok ->
+            %% BT-4113: a handler on a dispatch event switches the opt-in
+            %% dispatch events on.
+            ok = refresh_dispatch_events(),
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, already_exists} ->
             beamtalk_result:from_tagged_tuple(

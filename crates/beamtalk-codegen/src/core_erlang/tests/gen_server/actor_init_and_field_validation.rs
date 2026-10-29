@@ -354,9 +354,8 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
     // InitCleanState = …` binding is emitted before the nested field-check case,
     // and the success arm replies with it.
     assert!(
-        code.contains(
-            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in"
-        ),
+        code.contains("let InitCleanState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(InitNewState)"),
         "typed-no-default post-init path must strip __local__ temps. Got:\n{code}"
     );
     assert!(

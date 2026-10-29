@@ -1126,7 +1126,8 @@ Actor subclass: Counter
     // handle_call strips codegen-internal `__local__` threading temps from
     // the committed state, then notifies + persists the cleaned state.
     assert!(
-        code.contains("let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"),
+        code.contains("let CleanNewState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(NewState)"),
         "handle_call must strip __local__ threading temps before persist/notify. Got:\n{code}"
     );
     assert!(
@@ -1136,15 +1137,118 @@ Actor subclass: Counter
     );
     // handle_cast (fire-and-forget) commits CastNewState; same strip + hook.
     assert!(
-        code.contains(
-            "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in"
-        ),
+        code.contains("let CleanCastNewState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(CastNewState)"),
         "handle_cast must strip __local__ threading temps before persist/notify. Got:\n{code}"
     );
     assert!(
         code.contains("'beamtalk_actor':'notify_state_change'(State, CleanCastNewState)"),
         "handle_cast must notify the per-object change substrate with the cleaned \
          state after committing. Got:\n{code}"
+    );
+}
+
+fn codegen_for(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    generate_module_with_warnings(&module, CodegenOptions::new(module_name))
+        .expect("codegen should succeed")
+        .code
+}
+
+/// BT-4113: the committed-state size guard every state-commit boundary
+/// emits, for a state map of `size` keys built from `src`.
+fn size_guard(dest: &str, src: &str, size: usize) -> String {
+    format!(
+        "let {dest} = case call 'erlang':'map_size'({src}) of\n\
+         \x20   <{size}> when 'true' -> {src}\n\
+         \x20   <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'({src})\n\
+         end in"
+    )
+}
+
+/// The guard as it appears nested in generated code: same lines, any indent.
+fn contains_guard(code: &str, guard: &str) -> bool {
+    let normalise = |s: &str| {
+        s.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    normalise(code).contains(&normalise(guard))
+}
+
+#[test]
+fn test_bt4113_commit_boundaries_skip_strip_scan_on_expected_state_size() {
+    // A committed state of exactly the declared size (`__class_mod__`,
+    // `__shape_version__` + the declared fields) holds no `__local__` temp,
+    // so every commit boundary keeps it without strip_local_temps/1's key
+    // scan; any other size (a threaded temp present) falls back to the scan.
+    let code = codegen_for(
+        "
+Actor subclass: Counter
+  state: value = 0
+  state: label = nil
+  initialize => self.value := 1
+  increment => self.value := self.value + 1
+",
+        "counter",
+    );
+    for (dest, src) in [
+        ("CleanNewState", "NewState"),
+        ("CleanCastNewState", "CastNewState"),
+        ("InitCleanState", "InitNewState"),
+    ] {
+        let guard = size_guard(dest, src, 4);
+        assert!(
+            contains_guard(&code, &guard),
+            "expected the size-guarded strip\n{guard}\nGot:\n{code}"
+        );
+    }
+    assert!(
+        !code.contains("= call 'beamtalk_actor':'strip_local_temps'("),
+        "no commit boundary should strip unconditionally. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt4113_server_handle_info_is_size_guarded() {
+    // A Server's handle_info commit boundary is guarded the same way.
+    let code = codegen_for(
+        "
+Server subclass: Ticker
+  state: ticks = 0
+  handleInfo: msg => self.ticks := self.ticks + 1
+",
+        "ticker",
+    );
+    let guard = size_guard("CleanInfoNewState", "NewState", 3);
+    assert!(
+        contains_guard(&code, &guard),
+        "Ticker state = 2 internal keys + ticks. Expected\n{guard}\nGot:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt4113_late_slot_disables_size_guard() {
+    // A defaultless `late` slot is absent from the state map until first
+    // assigned, so the size cannot prove there is no temporary: always strip.
+    let code = codegen_for(
+        "
+Actor subclass: Lazy
+  late state: cache :: Integer
+  fill => self.cache := 1
+",
+        "lazy",
+    );
+    assert!(
+        code.contains("let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"),
+        "a late slot must keep the unconditional strip. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'erlang':'map_size'(NewState)"),
+        "no size guard with a late slot. Got:\n{code}"
     );
 }
 
@@ -1167,9 +1271,8 @@ Actor subclass: Counter
         .code;
 
     assert!(
-        code.contains(
-            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in"
-        ),
+        code.contains("let InitCleanState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(InitNewState)"),
         "handle_continue must strip __local__ threading temps from the committed \
          post-initialize state. Got:\n{code}"
     );
@@ -1203,9 +1306,8 @@ Server subclass: TickServer
         "expected a Server-subclass handle_info dispatching handleInfo:. Got:\n{code}"
     );
     assert!(
-        code.contains(
-            "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"
-        ),
+        code.contains("let CleanInfoNewState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(NewState)"),
         "handle_info must strip __local__ threading temps before committing the \
          post-handleInfo: state. Got:\n{code}"
     );

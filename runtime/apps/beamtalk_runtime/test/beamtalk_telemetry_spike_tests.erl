@@ -243,16 +243,15 @@ pid_to_class_reverse_lookup_test() ->
     %% Register it as a 'Counter' instance
     ok = beamtalk_object_instances:register('Counter', ActorPid),
     try
-        %% Reverse lookup: find class by Pid using ets:match on the bag table
-        Matches = ets:match(beamtalk_instance_registry, {'$1', ActorPid}),
-        Classes = [Class || [Class] <- Matches],
-        ?assertEqual(['Counter'], Classes),
+        %% Reverse lookup: find class by Pid on the pid-keyed index (BT-4113;
+        %% it used to be a full-table ets:match on the class-keyed bag)
+        ?assertEqual('Counter', beamtalk_object_instances:class_of(ActorPid)),
 
         %% Measure overhead of reverse lookup (should be < 1us typically)
         {Time, _Result} = timer:tc(fun() ->
             lists:foreach(
                 fun(_) ->
-                    ets:match(beamtalk_instance_registry, {'$1', ActorPid})
+                    beamtalk_object_instances:class_of(ActorPid)
                 end,
                 lists:seq(1, 1000)
             )
@@ -260,7 +259,7 @@ pid_to_class_reverse_lookup_test() ->
         AvgUs = Time / 1000,
         %% Log the overhead for review — use ~w for portable float formatting
         io:format(user, "Pid->Class reverse lookup overhead: ~w us/call~n", [AvgUs]),
-        %% Should be well under 10us per call (ETS single-key match)
+        %% Should be well under 10us per call (ETS single-key lookup)
         ?assert(AvgUs < 10.0)
     after
         beamtalk_object_instances:unregister('Counter', ActorPid),
@@ -279,8 +278,7 @@ pid_to_class_unknown_pid_test() ->
     %% Lookup a pid that was never registered
     FakePid = spawn(fun() -> ok end),
     timer:sleep(10),
-    Matches = ets:match(beamtalk_instance_registry, {'$1', FakePid}),
-    ?assertEqual([], Matches).
+    ?assertEqual(undefined, beamtalk_object_instances:class_of(FakePid)).
 
 %%====================================================================
 %% Test 5: Microbenchmark — telemetry:span/3 + counters:add/3 overhead
