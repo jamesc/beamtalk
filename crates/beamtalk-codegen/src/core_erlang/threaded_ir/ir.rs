@@ -68,6 +68,9 @@ pub(in crate::core_erlang) enum StateAccFallbackReason {
     /// Guarded operator in the body or condition (BT-4121: a hybrid loop
     /// cannot bracket its slow path, so the loop threads `StateAcc`).
     GuardedOperator,
+    /// A call that may run user code in the body or condition, bracketed with
+    /// a `State` store/reload (ADR 0137, BT-4269).
+    SyncedUserCodeCall,
 }
 
 impl std::fmt::Display for StateAccFallbackReason {
@@ -96,6 +99,9 @@ impl std::fmt::Display for StateAccFallbackReason {
             }
             Self::GuardedOperator => {
                 write!(f, "guarded operator in loop body or condition")
+            }
+            Self::SyncedUserCodeCall => {
+                write!(f, "call that may run user code in loop body or condition")
             }
         }
     }
