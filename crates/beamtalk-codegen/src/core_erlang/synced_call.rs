@@ -1841,11 +1841,10 @@ impl CoreErlangGenerator {
         let mut names: Vec<String> = body.parameters.iter().map(|p| p.name.to_string()).collect();
         if let Some(hierarchy) = self.class_hierarchy.as_ref() {
             let fields = hierarchy.all_state(&self.class_name());
-            let blocks =
-                std::iter::once(body).chain(condition.and_then(|c| match c.unwrap_parens() {
-                    Expression::Block(block) => Some(block),
-                    _ => None,
-                }));
+            let blocks = std::iter::once(body).chain(condition.and_then(|c| match c {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            }));
             for block in blocks {
                 names.extend(
                     block_analysis::analyze_block(block)
