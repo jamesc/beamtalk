@@ -10,6 +10,10 @@
 //! `(module, function, arity)` in `NativeTypeRegistry`, checks argument
 //! types positionally against the declared signature, and emits the
 //! keyword-mismatch footgun warning.
+//!
+//! Also home of the `ffi-nested-string` hint (BT-4243): a `String` nested
+//! in a collection argument to a stock Erlang module reaches it tagged,
+//! because the FFI boundary unwraps only top-level `String` arguments.
 
 use crate::ast::{Expression, MessageSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
@@ -18,6 +22,31 @@ use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
+
+/// Collection classes whose instances reach Erlang as plain terms (lists,
+/// maps, tuples), so a `String` element inside one is visible to — and
+/// compared by — the Erlang callee (BT-4243, [`TypeChecker::nests_string`]).
+/// `Set` is not one: it is the tagged map `#{'$beamtalk_class' => 'Set', …}`,
+/// not an OTP `sets` value, so no stock function compares into it.
+const ERLANG_TERM_COLLECTIONS: &[&str] = &["List", "Dictionary", "Tuple"];
+
+fn is_erlang_term_collection(class_name: &str) -> bool {
+    ERLANG_TERM_COLLECTIONS.contains(&class_name)
+}
+
+/// Whether `ty` is a `String`, or a collection (at any depth) or union
+/// containing one — the element test behind [`TypeChecker::nests_string`].
+fn contains_string(ty: &InferredType) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. }
+            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::String) =>
+        {
+            true
+        }
+        InferredType::Union { members, .. } => members.iter().any(contains_string),
+        _ => TypeChecker::nests_string(ty),
+    }
+}
 
 impl TypeChecker {
     /// Infer the return type of an FFI call on an `ErlangModule<module_name>` receiver.
@@ -63,6 +92,10 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::UntypedFfi);
         };
 
+        // BT-4243: independent of whether the registry knows the function —
+        // the hazard is in the boundary's shallow unwrap, not the signature.
+        self.check_ffi_nested_string_args(module_name, &function_name, arity, arguments, arg_types);
+
         // Clone the signature to release the borrow on self before emitting diagnostics.
         let sig = self
             .native_type_registry
@@ -93,6 +126,139 @@ impl TypeChecker {
         // argument carries type_args (e.g., `List(String)`), propagate them to the
         // return type so downstream sends see the element type.
         Self::substitute_ffi_return_type(&sig.return_type, &sig.params, arg_types)
+    }
+
+    /// Emits the `ffi-nested-string` hint (BT-4243) for each argument of an
+    /// inline `Erlang <mod> <fn>:` call whose static type nests a `String`
+    /// inside a collection (see [`Self::nests_string`]).
+    ///
+    /// Silent for Beamtalk-owned modules (`beamtalk_*`, `bt@*`), which get
+    /// their arguments untouched and own the tagged representation, and for a
+    /// top-level `String` argument, which the proxy unwraps.
+    fn check_ffi_nested_string_args(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        arity: u8,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+    ) {
+        if crate::ast::is_beamtalk_erlang_module(module_name) {
+            return;
+        }
+        for (argument, arg_ty) in arguments.iter().zip(arg_types) {
+            if Self::nests_string(arg_ty) {
+                self.diagnostics.push(Self::ffi_nested_string_hint(
+                    "this argument",
+                    module_name,
+                    function_name,
+                    usize::from(arity),
+                    argument.span(),
+                ));
+            }
+        }
+    }
+
+    /// The `ffi-nested-string` hint (BT-4243) for a `native:` `Object`'s
+    /// `self delegate` method (ADR 0101): each declared parameter is passed to
+    /// `<backing module>:<leading keyword>` through the same stock-mode
+    /// boundary as inline FFI, so a parameter whose declared type nests a
+    /// `String` gets the same hint, on the parameter.
+    ///
+    /// Silent for a Beamtalk-owned backing module. The caller has already
+    /// established that the class is not an `Actor`: a `native:` `Actor`
+    /// delegates through `gen_server:call` to the module's own callbacks, not
+    /// through the stock-mode boundary. An instance
+    /// method passes `self` first, so its Erlang arity is one more than the
+    /// selector's.
+    pub(in crate::semantic_analysis::type_checker) fn check_native_delegate_nested_string_params(
+        &mut self,
+        backing_module: &str,
+        method: &crate::ast::MethodDefinition,
+        is_class_method: bool,
+    ) {
+        if !method.is_self_delegate() || crate::ast::is_beamtalk_erlang_module(backing_module) {
+            return;
+        }
+        let mut env = crate::semantic_analysis::type_checker::TypeEnv::new();
+        let mut ctx = crate::semantic_analysis::type_checker::type_resolver::ResolutionContext::new(
+            self.alias_registry.as_ref(),
+            &mut self.referenced_aliases,
+        );
+        Self::set_param_types(
+            &mut env,
+            &method.parameters,
+            self.protocol_registry.as_ref(),
+            &mut ctx,
+        );
+        let function_name = method.selector.leading_word().to_string();
+        let arity = method.parameters.len() + usize::from(!is_class_method);
+        for param in &method.parameters {
+            let Some(param_ty) = env.get_local(param.name.name.as_str()) else {
+                continue;
+            };
+            if Self::nests_string(&param_ty) {
+                let subject = format!("parameter `{}`", param.name.name);
+                self.diagnostics.push(Self::ffi_nested_string_hint(
+                    &subject,
+                    backing_module,
+                    &function_name,
+                    arity,
+                    param.name.span,
+                ));
+            }
+        }
+    }
+
+    /// Builds the `ffi-nested-string` hint diagnostic (BT-4243) — the one
+    /// wording shared by the inline-FFI and `native:` delegation sites.
+    fn ffi_nested_string_hint(
+        subject: &str,
+        module_name: &str,
+        function_name: &str,
+        arity: usize,
+        span: Span,
+    ) -> Diagnostic {
+        Diagnostic::hint(
+            format!(
+                "Strings nested in {subject} reach {module_name}:{function_name}/{arity} as tagged \
+                 Beamtalk Strings; an Erlang comparison against raw binaries won't match"
+            ),
+            span,
+        )
+        .with_hint(
+            "use the Beamtalk-side operation (`includes:`, `at:`, `detect:`), \
+             or pass Symbols/raw binaries",
+        )
+        .with_category(DiagnosticCategory::FfiNestedString)
+    }
+
+    /// Whether `ty` is a collection whose static type contains a `String`
+    /// below the top level (BT-4243) — the shapes the FFI boundary's shallow
+    /// unwrap does not reach.
+    ///
+    /// The collections are the ones that reach Erlang as plain terms:
+    /// `List(E)`, `Dictionary(K, V)` (keys and values) and `Tuple(T1, …, Tn)`.
+    /// Nesting is followed recursively through those same
+    /// collections (`List(List(String))`, `Dictionary(Symbol, Tuple(String,
+    /// Integer))` both count), and through unions (`List(String | Nil)`,
+    /// `List(String) | Nil`), since one `String` member is evidence enough.
+    ///
+    /// A bare `String` is *not* nested: the boundary unwraps it. `Dynamic`
+    /// or missing element types never count (ADR 0100 Rule 1: no warning
+    /// without evidence), and neither do Strings inside other classes
+    /// (`Result(String, E)`, `Set(String)`, user objects) — those are Beamtalk objects, not
+    /// collections an Erlang function compares against.
+    pub(in crate::semantic_analysis::type_checker) fn nests_string(ty: &InferredType) -> bool {
+        match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => is_erlang_term_collection(class_name) && type_args.iter().any(contains_string),
+            InferredType::Union { members, .. } => members.iter().any(Self::nests_string),
+            _ => false,
+        }
     }
 
     /// Extracts the Erlang function name and arity from a selector and arguments.

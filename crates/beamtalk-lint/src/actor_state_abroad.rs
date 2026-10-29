@@ -384,12 +384,10 @@ fn check_send(
     let receiver = send.receiver;
     let sel = &send.selector.name();
     let direct_blocks = || {
-        send.arguments
-            .iter()
-            .filter_map(|a| match a.unwrap_parens() {
-                Expression::Block(b) => Some(b),
-                _ => None,
-            })
+        send.arguments.iter().filter_map(|a| match a {
+            Expression::Block(b) => Some(b),
+            _ => None,
+        })
     };
     // Shape A': a block literal receiver whose method spawns its receiver
     // (`[...] fork`).
@@ -610,7 +608,7 @@ fn parallel_list_blocks(arguments: &[Expression]) -> Vec<&Block> {
     for arg in arguments {
         let (Expression::ListLiteral { elements, .. }
         | Expression::ArrayLiteral { elements, .. }
-        | Expression::TupleLiteral { elements, .. }) = arg.unwrap_parens()
+        | Expression::TupleLiteral { elements, .. }) = arg
         else {
             continue;
         };

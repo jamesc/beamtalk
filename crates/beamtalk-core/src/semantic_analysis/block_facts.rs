@@ -319,9 +319,10 @@ pub enum EscapeShape {
     StoredInLiteral,
 }
 
-/// The block literal an expression is, looking through parentheses.
+/// The block literal an escape operand is ([`for_each_escape_operand`] hands
+/// every operand over with its parentheses already peeled).
 fn as_block(expr: &Expression) -> Option<&Block> {
-    match expr.unwrap_parens() {
+    match expr {
         Expression::Block(block) => Some(block),
         _ => None,
     }
@@ -924,7 +925,7 @@ fn send_may_run_user_code(
         // as a threaded fold and is not one (the block's own sends are counted
         // as the block is analysed).
         SendUserCode::InlinedOrClosureCall => !arguments.iter().any(|argument| {
-            matches!(argument.unwrap_parens(), Expression::Block(block) if {
+            matches!(argument, Expression::Block(block) if {
                 let analysis = analyze_block(block);
                 !captured_local_mutations_from_analysis(&analysis).is_empty()
                     || !analysis.field_writes.is_empty()
@@ -2769,8 +2770,9 @@ pub fn block_literal_of_other_arity<'a>(
     arity: usize,
 ) -> Option<&'a Block> {
     // BT-3942: a parenthesized literal (`([t := t + 1]) value: 1`) is the
-    // same literal, so it is applied and raises `arity_mismatch` alike.
-    match receiver.unwrap_parens() {
+    // same literal, so it is applied and raises `arity_mismatch` alike: the
+    // send receiver reaches here operand-normalised (BT-4059, BT-4238).
+    match receiver {
         Expression::Block(block)
             if is_safe_value_family_selector(selector)
                 && !block_literal_arity_matches(block, arity) =>
@@ -3128,6 +3130,41 @@ fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Ve
         other => operands(other, &mut out),
     }
     out
+}
+
+/// The statements of `body` that compile to code: every one but the
+/// compile-time-only `@expect` directives. The one filter codegen's
+/// `collect_body_exprs` and the type checker's
+/// [`ends_with_self_field_write`] share, so the two always agree on which
+/// statement is a body's last.
+pub fn body_exprs(body: &[ExpressionStatement]) -> impl DoubleEndedIterator<Item = &Expression> {
+    body.iter()
+        .map(|stmt| &stmt.expression)
+        .filter(|expr| !matches!(expr, Expression::ExpectDirective { .. }))
+}
+
+/// BT-4235: whether `body`'s last statement ([`body_exprs`]), seen through
+/// statement-level parentheses (BT-4092), is a `self.<field> := …` write
+/// ([`is_self_field_target`]). On codegen's value-type body path such a
+/// method answers its updated `self` (BT-833), and the type checker infers
+/// the receiver type from this; codegen's `generate_vt_body_exprs_in_sites`
+/// makes the same decision on the same leaves. A body-level `^` ends the
+/// body where it stands (codegen emits nothing after it, `infer_stmts` stops
+/// there), so a write after one is dead and the answer is `false`.
+#[must_use]
+pub fn ends_with_self_field_write(body: &[ExpressionStatement]) -> bool {
+    let mut last = None;
+    for expr in body_exprs(body) {
+        let expr = expr.unwrap_parens();
+        if matches!(expr, Expression::Return { .. }) {
+            return false;
+        }
+        last = Some(expr);
+    }
+    matches!(
+        last,
+        Some(Expression::Assignment { target, .. }) if is_self_field_target(target)
+    )
 }
 
 /// Whether `target` is `self.<field>`, the target of a field or class-variable

@@ -89,6 +89,7 @@ TestCase subclass: ErlangInteropTest
   // container of Strings round-trips through a reshuffling callee as
   // Strings (a deep unwrap would hand them back as Binaries).
   testNestedStringsRoundTripThroughStockFfi =>
+    @expect ffi_nested_string "BT-4243: the nested Strings are the point; lists:reverse only reshuffles"
     reversed := Erlang lists reverse: #("a", "b")
     self assert: reversed equals: #("b", "a")
     self assert: reversed first class equals: String

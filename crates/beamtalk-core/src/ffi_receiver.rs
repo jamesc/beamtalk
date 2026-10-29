@@ -71,14 +71,15 @@ pub fn is_class_protocol_selector(selector: &str) -> bool {
     CLASS_PROTOCOL_SELECTORS.contains(&selector)
 }
 
-/// True when `expr` (after peeling any parentheses) is the bare, unqualified
-/// `Erlang` class reference — the compiler's built-in FFI bridge entry
-/// point. A package-qualified reference (`json@Erlang`) is excluded: it
+/// True when `expr`, a send receiver of an operand-normalised tree (BT-4059,
+/// BT-4238: `(Erlang) lists` reaches here as `Erlang lists`), is the bare,
+/// unqualified `Erlang` class reference — the compiler's built-in FFI bridge
+/// entry point. A package-qualified reference (`json@Erlang`) is excluded: it
 /// names a different, package-scoped class, not the FFI bridge.
 #[must_use]
 pub(crate) fn is_erlang_class_reference(expr: &Expression) -> bool {
     matches!(
-        expr.unwrap_parens(),
+        expr,
         Expression::ClassReference { name, package, .. }
             if package.is_none() && name.name == "Erlang"
     )
@@ -87,7 +88,9 @@ pub(crate) fn is_erlang_class_reference(expr: &Expression) -> bool {
 /// Recognizes the `Erlang <module>` FFI receiver pattern and extracts the
 /// module name.
 ///
-/// Matches, after peeling any `Parenthesized` wrapper, a `MessageSend` whose
+/// Matches, after peeling any `Parenthesized` wrapper (kept: a cascade's
+/// shared receiver can be its parenthesised first part, `(Erlang lists);
+/// reverse: xs`), a `MessageSend` whose
 /// receiver is the bare unqualified `Erlang` class reference and whose
 /// selector is a unary message naming the module — the parsed shape of
 /// `Erlang lists` and `(Erlang lists)`. Returns `None` when:

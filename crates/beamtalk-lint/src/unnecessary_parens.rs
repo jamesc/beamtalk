@@ -22,7 +22,7 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
-use crate::LintPass;
+use crate::{LintPass, LintTree};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::for_each_expr_seq;
 use beamtalk_core::source_analysis::Diagnostic;
@@ -32,6 +32,11 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct UnnecessaryParensPass;
 
 impl LintPass for UnnecessaryParensPass {
+    /// The parentheses are this pass's subject, so it reads them as written.
+    fn tree(&self) -> LintTree {
+        LintTree::Parsed
+    }
+
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
         for_each_expr_seq(module, |seq| {
             for stmt in seq {
@@ -299,6 +304,21 @@ mod tests {
             "message: {}",
             diags[0].message
         );
+    }
+
+    /// BT-4238 pin: `run_lint_passes` hands the other passes the
+    /// operand-normalised tree, but this pass still reads the parentheses as
+    /// written, so a redundant send-argument wrapper is still reported.
+    #[test]
+    fn parens_around_a_send_argument_are_flagged_from_the_parsed_tree() {
+        let src = "Object subclass: Foo\n  value: x => 1 max: (x)\n";
+        let diags: Vec<_> = lint(src)
+            .into_iter()
+            .filter(|d| d.message.contains("unnecessary parentheses"))
+            .collect();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let open = u32::try_from(src.find("(x)").unwrap()).unwrap();
+        assert_eq!(diags[0].span.start(), open);
     }
 
     #[test]

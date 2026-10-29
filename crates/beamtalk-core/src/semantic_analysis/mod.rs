@@ -624,12 +624,24 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// a write these errors already reject: it asks this function rather than
 /// keeping a second copy of their exemption rules.
 ///
+/// Reads the operand-normalised tree (BT-4238,
+/// [`normalised`](crate::ast::normalize::normalised)), as [`analyse_full`]
+/// does. A caller that matches the returned spans against its own walk must
+/// walk that tree too (`beamtalk-lint`'s pass runner hands every
+/// span-joining pass the normalised module).
+///
 /// [`DiagnosticCategory::Tier2BlockNoReturnChannel`]: crate::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel
 /// [`DiagnosticCategory::UnmigratedLocalThreading`]: crate::source_analysis::DiagnosticCategory::UnmigratedLocalThreading
 #[must_use]
 pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    validators::check_local_threading(module, hierarchy, None, &[], &mut diagnostics);
+    validators::check_local_threading(
+        &normalize::normalised(module),
+        hierarchy,
+        None,
+        &[],
+        &mut diagnostics,
+    );
     diagnostics
 }
 
@@ -1167,13 +1179,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // `self.field := value` but its last statement doesn't return the
     // updated self — the mutation is silently dropped for the test method.
     validators::check_testcase_setup_drops_field_assignments(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-    // BT-4092 (one-release migration warning): a parenthesised trailing field
-    // assignment in a value-type method now answers the updated `self`.
-    validators::check_parenthesised_trailing_field_assignment(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,

@@ -3128,9 +3128,7 @@ impl<'d> Walker<'d> {
         else {
             return false;
         };
-        let ty = facts
-            .type_map
-            .and_then(|map| map.get(receiver.unwrap_parens().span()));
+        let ty = facts.type_map.and_then(|map| map.get(receiver.span()));
         receiver_statically_not_dictionary(receiver, ty, facts.self_is_dictionary, facts.hierarchy)
     }
 
@@ -3316,7 +3314,7 @@ impl<'d> Walker<'d> {
     /// direct-called in the caller, ADR 0129 Phase 0b), or to any other method.
     fn passed_escape(&self, receiver: &Expression, selector: &EcoString) -> Escape {
         let receivers = self.receivers.as_ref();
-        let class = match receiver.unwrap_parens() {
+        let class = match receiver {
             Expression::ClassReference { name, .. } => Some(name.name.clone()),
             Expression::Identifier(id) if id.name == "self" && self.context == Class => {
                 receivers.map(|r| r.class_name.clone())

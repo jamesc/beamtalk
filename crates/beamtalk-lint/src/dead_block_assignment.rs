@@ -404,14 +404,13 @@ fn emit_dead_assignment_warning(name: &str, span: Span, diagnostics: &mut Vec<Di
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::LintPass;
     use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
     fn lint(src: &str) -> Vec<Diagnostic> {
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
-        DeadBlockAssignmentPass.check(&module, &mut diags);
+        crate::run_pass(&DeadBlockAssignmentPass, &module, &mut diags);
         diags
     }
 
@@ -436,6 +435,22 @@ mod tests {
             diags[0].message.contains("`x`"),
             "Expected variable name in message, got: {}",
             diags[0].message
+        );
+    }
+
+    /// BT-4238 pin: the pass (and the `local_threading_diagnostics` spans it
+    /// joins against) reads the operand-normalised tree, so redundant
+    /// parentheses around the receiver and the block arguments lint exactly
+    /// like the bare send.
+    #[test]
+    fn parenthesised_operands_lint_like_bare_ones() {
+        let bare = lint("x := 1.\ntrue ifTrue: [[x := 2]. 0] ifFalse: [nil]");
+        let wrapped = lint("x := 1.\n(true) ifTrue: ([[x := 2]. 0]) ifFalse: ([nil])");
+        assert_eq!(bare.len(), 1, "{bare:?}");
+        let shape = |d: &Diagnostic| (d.message.clone(), d.span.end() - d.span.start());
+        assert_eq!(
+            wrapped.iter().map(shape).collect::<Vec<_>>(),
+            bare.iter().map(shape).collect::<Vec<_>>()
         );
     }
 
@@ -922,7 +937,7 @@ sealed typed Value subclass: Foo
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
-        DeadBlockAssignmentPass.check(&module, &mut diags);
+        crate::run_pass(&DeadBlockAssignmentPass, &module, &mut diags);
         // Apply @expect directives
         beamtalk_core::compilation::diagnostics_policy::apply_expect_directives(
             &module, &mut diags,
@@ -1108,7 +1123,7 @@ sealed typed Value subclass: Foo
                         .is_some_and(|c| compile_error_categories.contains(&c))
                 });
             let mut lint_diags = Vec::new();
-            DeadBlockAssignmentPass.check(&module, &mut lint_diags);
+            crate::run_pass(&DeadBlockAssignmentPass, &module, &mut lint_diags);
             let lint = !lint_diags.is_empty();
             let actual = match (compile_error, lint) {
                 (false, false) => Neither,

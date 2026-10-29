@@ -12,7 +12,7 @@ TestCase subclass: ClassSelfDispatchExtensionTest
 
   testClassMethodSelfSendReachesClassSideExtension =>
     // Register class-side: Bt3198SelfExtHost class >> bt3198SelfExtSel => 42
-    // Before BT-3198, class_self_dispatch/4 never checked the extensions
+    // Before BT-3198, class-side self-dispatch never checked the extensions
     // table, so this self-send raised does_not_understand.
     extFun := [:a :s | 42]
     Erlang beamtalk_extensions

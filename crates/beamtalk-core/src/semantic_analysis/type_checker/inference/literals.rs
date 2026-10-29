@@ -106,7 +106,7 @@ impl TypeChecker {
         if type_args.is_empty() || arguments.len() != 1 {
             return None;
         }
-        let index = match arguments[0].unwrap_parens() {
+        let index = match &arguments[0] {
             Expression::Literal(Literal::Integer(n), _) => *n,
             _ => return None,
         };

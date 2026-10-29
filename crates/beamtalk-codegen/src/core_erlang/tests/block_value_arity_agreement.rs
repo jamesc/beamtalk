@@ -72,9 +72,13 @@ fn send(selector: &str, args: Option<usize>, arity: usize) -> String {
     }
 }
 
+/// The one statement of `src`, as analysis and codegen read it: send
+/// operands normalised (BT-4059; the shared recognizers match canonical
+/// operands, BT-4238).
 fn parse_send(src: &str) -> Expression {
-    let (module, diagnostics) = parse(lex_with_eof(src));
+    let (mut module, diagnostics) = parse(lex_with_eof(src));
     assert!(diagnostics.is_empty(), "{src}: {diagnostics:?}");
+    beamtalk_core::ast::normalize::peel_operand_parens(&mut module);
     module
         .expressions
         .into_iter()

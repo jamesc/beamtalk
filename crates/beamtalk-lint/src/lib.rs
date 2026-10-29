@@ -45,12 +45,31 @@ use beamtalk_core::ast::Module;
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
 
+/// Which tree a [`LintPass`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LintTree {
+    /// The parsed module with every redundant send-operand wrapper removed
+    /// (`beamtalk_core::ast::normalize`, BT-4238): the tree analysis reads,
+    /// so `(e) foo` lints exactly like `e foo` and a span this pass takes
+    /// from `semantic_analysis` (e.g. `local_threading_diagnostics`) names a
+    /// node of the tree it walks.
+    Normalised,
+    /// The module as parsed, parentheses and all: only for a pass whose
+    /// subject is the parentheses themselves (`unnecessary_parens`).
+    Parsed,
+}
+
 /// A single lint pass.
 ///
 /// Implementors inspect `module` and push any [`Diagnostic`]s with
 /// [`Severity::Lint`] into `diagnostics`.
 pub(crate) trait LintPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>);
+
+    /// The tree [`run_lint_passes`] hands to [`LintPass::check`].
+    fn tree(&self) -> LintTree {
+        LintTree::Normalised
+    }
 }
 
 /// Build a [`ClassHierarchy`] for ancestor-aware class-kind resolution in lint passes.
@@ -92,13 +111,38 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
 
 /// Run all lint passes on a parsed module and return any lint diagnostics.
 ///
+/// Each pass reads the tree its [`LintPass::tree`] names: the operand-
+/// normalised module (computed once, BT-4238) unless it inspects the
+/// parentheses themselves.
+///
 /// The returned diagnostics all have [`Severity::Lint`] and will not appear
 /// during normal compilation.
 #[must_use]
 pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
+    let normalised = beamtalk_core::ast::normalize::normalised(module);
     let mut diagnostics = Vec::new();
     for pass in all_passes() {
-        pass.check(module, &mut diagnostics);
+        pass.check(
+            tree_for(pass.as_ref(), module, &normalised),
+            &mut diagnostics,
+        );
     }
     diagnostics
+}
+
+/// The tree `pass` reads: `parsed` or its `normalised` form (see
+/// [`LintTree`]).
+fn tree_for<'m>(pass: &dyn LintPass, parsed: &'m Module, normalised: &'m Module) -> &'m Module {
+    match pass.tree() {
+        LintTree::Normalised => normalised,
+        LintTree::Parsed => parsed,
+    }
+}
+
+/// One pass on `module`, reading the tree [`run_lint_passes`] would hand it:
+/// for a pass's own tests.
+#[cfg(test)]
+pub(crate) fn run_pass(pass: &dyn LintPass, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    let normalised = beamtalk_core::ast::normalize::normalised(module);
+    pass.check(tree_for(pass, module, &normalised), diagnostics);
 }
