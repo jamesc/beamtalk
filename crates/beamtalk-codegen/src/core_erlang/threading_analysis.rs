@@ -886,14 +886,24 @@ impl CoreErlangGenerator {
     /// its `lowered` set ([`Self::branch_threaded_locals`]) is empty for a
     /// binding and cannot answer this.
     pub(in crate::core_erlang) fn repl_blocks_write_bindings(&self, blocks: &[&Block]) -> bool {
-        self.is_repl_mode()
-            && self
-                .threaded_locals_of_blocks(
-                    ThreadedConstruct::Inline(LocalThreadingFamily::Conditional),
-                    blocks,
-                    blocks,
-                )
-                .is_some()
+        self.is_repl_mode() && self.conditional_arms_write_outer_locals(blocks)
+    }
+
+    /// Whether a conditional's arm `blocks` write a local bound outside them
+    /// (a method local, or a REPL binding), a nested loop or fold included:
+    /// the [`Self::threaded_locals_of_blocks`] kernel's `names`, whether or
+    /// not today's lowering packs them. BT-4244: such an arm cannot be handed
+    /// to a non-Boolean receiver's method as a closure (ADR 0133).
+    pub(in crate::core_erlang) fn conditional_arms_write_outer_locals(
+        &self,
+        blocks: &[&Block],
+    ) -> bool {
+        self.threaded_locals_of_blocks(
+            ThreadedConstruct::Inline(LocalThreadingFamily::Conditional),
+            blocks,
+            blocks,
+        )
+        .is_some()
     }
 
     /// The blocks of `construct` (recognized from `expr`) whose writes

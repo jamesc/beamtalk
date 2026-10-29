@@ -32,6 +32,7 @@ to avoid temp files on disk.
     diagnostics/3,
     version/0,
     compile_core_erlang/1,
+    parse_core_erlang/1,
     register_class/2,
     remove_class/1,
     get_classes/0,
@@ -920,14 +921,31 @@ Accepts a binary — the legacy text wire (ADR 0022). Goes through
 -spec compile_core_erlang(binary()) ->
     {ok, atom(), binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
+    case parse_core_erlang(CoreErlangBin) of
+        {ok, CoreModule} ->
+            compile_core_forms(
+                CoreModule, [from_core, binary, return_errors, return_warnings, clint]
+            );
+        {error, _} = Error ->
+            Error
+    end.
+
+-doc """
+Parse Core Erlang source text into a `cerl' module tree, without compiling
+or loading it. Runs in the caller (no port, no gen_server call).
+
+The scan/parse half of `compile_core_erlang/1', shared with
+`beamtalk_compiler:class_meta_from_core_erlang/1' (BT-4285), which reads a
+pending compile's `__beamtalk_meta/0' straight off this tree.
+""".
+-spec parse_core_erlang(binary()) -> {ok, cerl:c_module()} | {error, term()}.
+parse_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
     CoreErlangStr = binary_to_list(CoreErlangBin),
     case core_scan:string(CoreErlangStr) of
         {ok, Tokens, _} ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
-                    compile_core_forms(
-                        CoreModule, [from_core, binary, return_errors, return_warnings, clint]
-                    );
+                    {ok, CoreModule};
                 {error, ParseError} ->
                     {error, {core_parse_error, ParseError}}
             end;

@@ -203,10 +203,7 @@ supervisor_unreachable_node_test() ->
     %% BT-3984: a handle to a supervisor on a node this VM cannot reach.
     %% isAlive answers optimistically (no badarg from is_process_alive/1 on a
     %% remote pid); stop raises a structured node_down, not a raw nodedown exit.
-    NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
-    RemotePid = binary_to_term(
-        <<131, 88, 118, (byte_size(NodeBin)):16, NodeBin/binary, 1:32, 0:32, 0:32>>
-    ),
+    RemotePid = beamtalk_dist_test_helper:unreachable_pid(bt3984_ghost),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, RemotePid},
     ?assertEqual(true, beamtalk_message_dispatch:send(Sup, isAlive, [])),
     ?assertError(
