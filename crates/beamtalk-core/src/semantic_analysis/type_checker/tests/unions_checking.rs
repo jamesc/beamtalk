@@ -46,6 +46,7 @@ fn union_arg_all_compatible_no_warning() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -111,6 +112,7 @@ fn union_arg_none_compatible_warns() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -182,6 +184,7 @@ fn union_arg_mixed_compatible_hints() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -253,6 +256,7 @@ fn union_arg_dynamic_still_skips() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -356,6 +360,7 @@ fn test_hierarchy_with_class_literal_arg(
                 doc: None,
 
                 origin: None,
+                primitive: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -815,6 +820,7 @@ fn union_protocol_mixed_conformance_hints() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -1095,6 +1101,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -1891,6 +1898,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -1974,6 +1982,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

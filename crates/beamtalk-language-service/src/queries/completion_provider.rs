@@ -2682,6 +2682,7 @@ mod tests {
                         doc: None,
 
                         origin: None,
+                        primitive: None,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -2696,6 +2697,7 @@ mod tests {
                         doc: None,
 
                         origin: None,
+                        primitive: None,
                     },
                 ],
                 class_methods: vec![],
@@ -2836,6 +2838,7 @@ mod tests {
                         doc: None,
 
                         origin: None,
+                        primitive: None,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -2850,6 +2853,7 @@ mod tests {
                         doc: None,
 
                         origin: None,
+                        primitive: None,
                     },
                 ],
                 class_methods: vec![],

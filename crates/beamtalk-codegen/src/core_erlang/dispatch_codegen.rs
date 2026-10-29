@@ -1428,6 +1428,13 @@ impl CoreErlangGenerator {
                 let doc = self.generate_repl_bound_class_send(&name.name, selector, arguments)?;
                 return Ok(Some(doc));
             }
+            // BT-4115: `Error signal: m` raises in the caller when the
+            // class-side method resolves to a caller-safe class primitive.
+            if let Some(doc) =
+                self.try_inline_caller_safe_class_primitive(&name.name, selector, arguments)?
+            {
+                return Ok(Some(doc));
+            }
             // ADR 0070 Phase 2: Class method calls always go through the class
             // registry using the short class name. The package qualifier doesn't
             // affect dispatch — it's used for module name resolution in spawns and
@@ -1436,6 +1443,62 @@ impl CoreErlangGenerator {
             return Ok(Some(doc));
         }
         Ok(None)
+    }
+
+    /// Inlines a class-literal send whose class-side method is a caller-safe
+    /// class primitive (BT-4115).
+    ///
+    /// `Error signal: m` resolves, through the class hierarchy, to
+    /// `Exception class >> signal: msg => @primitive "classSignal:"`. That
+    /// primitive reads nothing from the class but its name, so instead of a
+    /// `gen_server:call` into the `Error` class process (which raises there
+    /// and relays the error back to be re-raised here) the call site emits
+    /// the primitive's own `beamtalk_exception_handler` call with the
+    /// class-name atom in place of `ClassSelf`:
+    ///
+    /// ```erlang
+    /// call 'beamtalk_exception_handler':'class_signal_message'(Msg, 'Error')
+    /// ```
+    ///
+    /// The primitive name is read from the resolved method's own source
+    /// (`MethodInfo::primitive`) and the caller-safe list lives in
+    /// `primitives::error_handling`, so a subclass that overrides
+    /// `class signal:` resolves to a non-primitive method and keeps the class
+    /// send. This is decided at compile time, with the same trust model as
+    /// the other direct calls: a `class signal:` override gained by hot
+    /// reload, or a class-side extension shadowing it, is not seen by
+    /// already-compiled call sites (BT-4126, BT-4133).
+    fn try_inline_caller_safe_class_primitive(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        let Some(primitive) = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.find_class_method(class_name, &selector.name()))
+            .and_then(|method| method.primitive)
+            .filter(|p| super::primitives::is_caller_safe_class_primitive(p))
+        else {
+            return Ok(None);
+        };
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let (prelude, arg_docs) = self.thread_subexprs(&exprs, "Arg")?;
+        // The primitive was resolved from this very selector, so its arity
+        // always matches the argument count and the lowering cannot decline.
+        let call_doc = super::primitives::generate_class_signal_bif(
+            &primitive,
+            &arg_docs,
+            leaf::atom(class_name.to_string()),
+        )
+        .ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "caller-safe class primitive `{primitive}` did not lower for `{class_name} {}`",
+                selector.name()
+            ))
+        })?;
+        Ok(Some(self.close_prelude(&prelude, call_doc, "Raise")))
     }
 
     /// Handles self-sends inside actor methods.

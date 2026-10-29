@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4115: an Error subclass that overrides `class signal:`. A class-literal
+// `Bt4115LoudError signal: m` must keep the class send so the override runs,
+// rather than being inlined to the caller-safe `classSignal:` primitive.
+
+Error subclass: Bt4115LoudError
+
+  class signal: msg :: String -> Never => super signal: "loud: " ++ msg

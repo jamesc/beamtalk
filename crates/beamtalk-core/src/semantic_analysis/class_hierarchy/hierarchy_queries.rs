@@ -725,6 +725,7 @@ impl ClassHierarchy {
                     param_types: vec![],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
+                    primitive: None,
                 });
             }
 
@@ -744,6 +745,7 @@ impl ClassHierarchy {
                     param_types: vec![None],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
+                    primitive: None,
                 });
             }
         }
@@ -767,6 +769,7 @@ impl ClassHierarchy {
                     param_types: vec![None; slots.len()],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
+                    primitive: None,
                 });
             }
         }
@@ -1140,6 +1143,7 @@ impl ClassHierarchy {
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
                     origin: None,
+                    primitive: None,
                 });
             }
 
@@ -1162,6 +1166,7 @@ impl ClassHierarchy {
                     param_types: vec![None],
                     doc: Some(setter_doc.into()),
                     origin: None,
+                    primitive: None,
                 });
             }
         }
@@ -1204,6 +1209,7 @@ impl ClassHierarchy {
             param_types: vec![None; arity],
             doc: Some(ctor_doc.into()),
             origin: None,
+            primitive: None,
         });
         Some(kw_sel)
     }
