@@ -26,14 +26,23 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-/// The character every compiler temporary from [`VariableContext::fresh_var`]
-/// carries, and no user-derived Core Erlang variable can (BT-4140).
+/// The character that separates compiler-owned Core Erlang variable names
+/// from user-derived ones (BT-4140, BT-4247).
 ///
 /// Core Erlang admits `@` in variable names, but a Beamtalk identifier is
-/// ASCII alphanumerics and `_` only (the lexer's identifier rule), and
-/// [`VariableContext::to_core_var`] and `util::versioned_var` add only a
-/// capital letter or digits. So a temp can never spell a user binding, however
-/// the user names it. Pinned by `tests::fresh_temp_namespace`.
+/// ASCII alphanumerics and `_` only (the lexer's identifier rule). Three
+/// namespaces of `_`-prefixed Core variables follow from that:
+///
+/// - **Temps** from [`VariableContext::fresh_var`]: `_<base>@<counter>` — the
+///   text after the last marker is all digits.
+/// - **User `_`-identifiers**, mapped by [`VariableContext::to_core_var`] to
+///   `_@<name>` (`_x` → `_@_x`): the text after the last marker starts with
+///   `_`, so it is never a temp, and `util::versioned_var` only appends digits.
+/// - **Hand-written internal names** (`_Unit`, `_Result`, `_ExtArgs`, …):
+///   no marker at all, so no user identifier can spell one.
+///
+/// Pinned by `tests::fresh_temp_namespace`, whose corpus guard lists every
+/// hand-written name production codegen emits.
 pub(super) const TEMP_MARKER: char = '@';
 
 /// Whether `text` (rendered Core Erlang) references variable `var` as a whole
@@ -129,13 +138,12 @@ impl VariableContext {
     ///   the counter, so two calls never return the same name whatever their
     ///   bases (without the separator, base `a1` at counter 1 and base `a` at
     ///   counter 11 both spelled `_a11`).
-    /// - **Disjoint from user bindings:** no name derived from a Beamtalk
-    ///   identifier contains [`TEMP_MARKER`], so a temp never aliases a user
-    ///   variable — including `_`-prefixed ones, which
-    ///   [`Self::to_core_var`] maps into Core unchanged.
+    /// - **Disjoint from user bindings:** a user `_`-identifier maps to
+    ///   `_@<name>` ([`Self::to_core_var`]), whose text after the marker
+    ///   starts with `_`, never a digit; other user names carry no marker.
     ///
-    /// It does not guard hand-written internal names (`State`, `Self`, …);
-    /// those are outside this allocator.
+    /// It does not guard hand-written internal names; see [`TEMP_MARKER`]
+    /// for how those stay disjoint from user `_`-identifiers.
     pub(super) fn fresh_var(&mut self, base: &str) -> String {
         self.var_counter += 1;
         let counter = self.var_counter;
@@ -160,25 +168,40 @@ impl VariableContext {
     ///
     /// - Capitalizes the first letter: `"counter"` → `"Counter"`
     /// - Preserves underscores: `"my_var"` → `"My_var"`
-    /// - Handles edge cases: empty string → `"_"`
+    /// - Moves `_`-prefixed names into the user namespace (BT-4247):
+    ///   `"_private"` → `"_@_private"`, so no user name spells a hand-written
+    ///   internal `_`-name (`_Unit`, `_Result`, …) or a temp — see
+    ///   [`TEMP_MARKER`]
+    /// - Passes a name that already carries [`TEMP_MARKER`] through unchanged:
+    ///   no Beamtalk identifier contains it, so it is a compiler temp the
+    ///   generator placed in a pattern (e.g. a hoisted nested binary)
+    /// - Handles edge cases: empty string and the bare wildcard → `"_"`
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// let ctx = VariableContext::new();
     /// assert_eq!(VariableContext::to_core_var("counter"), "Counter");
     /// assert_eq!(VariableContext::to_core_var("my_var"), "My_var");
-    /// assert_eq!(VariableContext::to_core_var("_private"), "_private");
+    /// assert_eq!(VariableContext::to_core_var("_private"), "_@_private");
     /// ```
     pub(super) fn to_core_var(name: &str) -> String {
         if name.is_empty() {
             return "_".to_string();
         }
+        if name.contains(TEMP_MARKER) {
+            return name.to_string();
+        }
 
         let mut chars = name.chars();
         let first = chars.next().unwrap();
 
-        if first.is_uppercase() || first == '_' {
+        if first == '_' && name.len() > 1 {
+            let mut result = String::with_capacity(name.len() + 2);
+            result.push('_');
+            result.push(TEMP_MARKER);
+            result.push_str(name);
+            result
+        } else if first.is_uppercase() || first == '_' {
             // Already valid Core Erlang variable
             name.to_string()
         } else {
@@ -292,11 +315,25 @@ mod tests {
     #[test]
     fn test_to_core_var_preserves_valid_names() {
         assert_eq!(VariableContext::to_core_var("Counter"), "Counter");
-        assert_eq!(VariableContext::to_core_var("_private"), "_private");
+    }
+
+    #[test]
+    fn test_to_core_var_moves_underscore_names_into_user_namespace() {
+        assert_eq!(VariableContext::to_core_var("_private"), "_@_private");
+        assert_eq!(VariableContext::to_core_var("_Unit"), "_@_Unit");
+        assert_eq!(VariableContext::to_core_var("_1"), "_@_1");
+    }
+
+    #[test]
+    fn test_to_core_var_passes_temps_through() {
+        let mut ctx = VariableContext::new();
+        let temp = ctx.fresh_var("BinNested");
+        assert_eq!(VariableContext::to_core_var(&temp), temp);
     }
 
     #[test]
     fn test_to_core_var_handles_empty_string() {
         assert_eq!(VariableContext::to_core_var(""), "_");
+        assert_eq!(VariableContext::to_core_var("_"), "_");
     }
 }

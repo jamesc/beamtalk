@@ -1528,7 +1528,9 @@ impl CoreErlangGenerator {
     /// at region entry, before any slow path), an `on:do:` boundary's
     /// pre-region `State` (noted where the boundary picks `PreState`,
     /// [`Self::on_do_cell_boundary`]) and a loop plan's initial state (noted
-    /// where a lowering emits it as a source).
+    /// where a lowering emits it as a source). Its callers are counted per
+    /// file by `tests/stale_read_sites.rs` (`STORE_SITES`, BT-4256), so a
+    /// read site cannot quietly use it to skip the record.
     pub(in crate::core_erlang) fn state_var_to_store(&self) -> String {
         self.current_field_read_state_var()
     }
