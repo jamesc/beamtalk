@@ -1131,9 +1131,11 @@ require_class_responsive(ClassPid, ClassName, Selector) ->
             beamtalk_error:raise(
                 beamtalk_error:with_hint(
                     Error1,
-                    <<"The class process is busy, or is waiting on this one: a block from one of "
-                      "its class methods, running inside another class's method, cannot "
-                      "change that class.">>
+                    <<
+                        "The class process is busy, or is waiting on this one: a block from one of "
+                        "its class methods, running inside another class's method, cannot "
+                        "change that class."
+                    >>
                 )
             )
     end.
