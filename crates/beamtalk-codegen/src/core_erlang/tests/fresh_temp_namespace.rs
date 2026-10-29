@@ -343,8 +343,15 @@ fn underscore_vars(core: &str) -> Vec<&str> {
 #[test]
 fn hand_written_underscore_names_match_the_audit() {
     let root = repo_root();
-    let files =
-        corpus_files(&root, &["stdlib/src", "stdlib/test", "stdlib/bootstrap-test", "examples"]);
+    let files = corpus_files(
+        &root,
+        &[
+            "stdlib/src",
+            "stdlib/test",
+            "stdlib/bootstrap-test",
+            "examples",
+        ],
+    );
     assert!(
         files.len() > 100,
         "expected hundreds of corpus files, found {} under {}",

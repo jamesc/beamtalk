@@ -413,8 +413,15 @@ fn goto_labels_are_applied_in_tail_position_over_the_corpus() {
         return;
     };
     let root = repo_root();
-    let sources =
-        corpus_files(&root, &["stdlib/src", "stdlib/test", "stdlib/bootstrap-test", "examples"]);
+    let sources = corpus_files(
+        &root,
+        &[
+            "stdlib/src",
+            "stdlib/test",
+            "stdlib/bootstrap-test",
+            "examples",
+        ],
+    );
     let mut core_files = Vec::new();
     for (i, path) in sources.iter().enumerate() {
         let Ok(source) = std::fs::read_to_string(path) else {

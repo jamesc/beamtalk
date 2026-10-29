@@ -116,10 +116,7 @@ pub(crate) fn repo_root() -> std::path::PathBuf {
 /// all corpus directories exist in the repo, so a walk error means something
 /// unexpected went wrong and the test should not silently pass with fewer
 /// files than expected.
-pub(crate) fn corpus_files(
-    root: &std::path::Path,
-    dirs: &[&str],
-) -> Vec<std::path::PathBuf> {
+pub(crate) fn corpus_files(root: &std::path::Path, dirs: &[&str]) -> Vec<std::path::PathBuf> {
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     for dir in dirs {
         files.extend(
