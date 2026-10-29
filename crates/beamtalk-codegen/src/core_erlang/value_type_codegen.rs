@@ -4475,8 +4475,7 @@ impl CoreErlangGenerator {
 
         // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
         let immutable_hint = if is_value_class {
-            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance"
-                .to_string()
+            super::errors::VALUE_IMMUTABLE_SLOT_HINT.to_string()
         } else {
             format!("{class_name}s are immutable. Use assignment (x := newValue) instead.")
         };
