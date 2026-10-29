@@ -78,6 +78,25 @@ TestCase subclass: SealedDirectDispatchDifferentialTest
     self assert: direct equals: (self outcomeOf: dynBlock)
     direct
 
+  // Runs one selector on a widget through the module's `dispatch/3` arm and
+  // through the dynamic send, asserts they agree, and answers the outcome.
+  armOutcome: selector :: Symbol args: args :: List -> List =>
+    w := self widget
+    direct := [
+      self
+        rawDispatch: selector
+        args: args
+        to: w
+    ]
+    self
+      assertSameOutcome: direct
+      as: [
+        self
+          dynamic: selector
+          args: args
+          to: w
+      ]
+
   // === Direct shape (receiver declared SealedDirectDiffWidget) ===
   directSum: w :: SealedDirectDiffWidget => w sum
 
@@ -272,124 +291,26 @@ TestCase subclass: SealedDirectDispatchDifferentialTest
     self assert: (outcome at: 3) equals: #type_error
 
   // === Selectors an earlier handler claims: pin the dispatch/3 arm ===
-  testClassArm =>
-    w := self widget
-    self
-      assertSameOutcome: [
-        self
-          rawDispatch: #class
-          args: #()
-          to: w
-      ]
-      as: [
-        self
-          dynamic: #class
-          args: #()
-          to: w
-      ]
+  testClassArm => self armOutcome: #class args: #()
 
   testFieldAtArm =>
-    w := self widget
-    self
-      assert: (self
-        assertSameOutcome: [
-          self
-            rawDispatch: #fieldAt:
-            args: #(#y)
-            to: w
-        ]
-        as: [
-          self
-            dynamic: #fieldAt:
-            args: #(#y)
-            to: w
-        ])
-      equals: #(#returned, 4)
+    self assert: (self armOutcome: #fieldAt: args: #(#y)) equals: #(#returned, 4)
 
   testPerformArm =>
-    w := self widget
-    self
-      assert: (self
-        assertSameOutcome: [
-          self
-            rawDispatch: #perform:
-            args: #(#sum)
-            to: w
-        ]
-        as: [
-          self
-            dynamic: #perform:
-            args: #(#sum)
-            to: w
-        ])
-      equals: #(#returned, 7)
+    self assert: (self armOutcome: #perform: args: #(#sum)) equals: #(#returned, 7)
 
   testPerformWithArgumentsArm =>
-    w := self widget
-    self
-      assert: (self
-        assertSameOutcome: [
-          self
-            rawDispatch: #perform:withArguments:
-            args: #(#add:and:, #(1, 2))
-            to: w
-        ]
-        as: [
-          self
-            dynamic: #perform:withArguments:
-            args: #(#add:and:, #(1, 2))
-            to: w
-        ])
-      equals: #(#returned, 10)
+    outcome := self armOutcome: #perform:withArguments: args: #(#add:and:, #(1, 2))
+    self assert: outcome equals: #(#returned, 10)
 
-  testPerformArmReachesInheritedAndExtensionSelectors =>
-    w := self widget
-    self
-      assert: (self
-        assertSameOutcome: [
-          self
-            rawDispatch: #perform:
-            args: #(#baseOnly)
-            to: w
-        ]
-        as: [
-          self
-            dynamic: #perform:
-            args: #(#baseOnly)
-            to: w
-        ])
-      equals: #(#returned, #fromBase)
-    self
-      assert: (self
-        assertSameOutcome: [
-          self
-            rawDispatch: #perform:
-            args: #(#diffExtended)
-            to: w
-        ]
-        as: [
-          self
-            dynamic: #perform:
-            args: #(#diffExtended)
-            to: w
-        ])
-      equals: #(#returned, 70)
+  testPerformArmReachesInheritedSelector =>
+    self assert: (self armOutcome: #perform: args: #(#baseOnly)) equals: #(#returned, #fromBase)
+
+  testPerformArmReachesExtensionSelector =>
+    self assert: (self armOutcome: #perform: args: #(#diffExtended)) equals: #(#returned, 70)
 
   testPerformArmUnknownSelector =>
-    w := self widget
-    outcome := self
-      assertSameOutcome: [
-        self
-          rawDispatch: #perform:
-          args: #(#noSuchSelector)
-          to: w
-      ]
-      as: [
-        self
-          dynamic: #perform:
-          args: #(#noSuchSelector)
-          to: w
-      ]
+    outcome := self armOutcome: #perform: args: #(#noSuchSelector)
     self assert: (outcome at: 3) equals: #does_not_understand
     self assert: (outcome at: 4) equals: #noSuchSelector
 
