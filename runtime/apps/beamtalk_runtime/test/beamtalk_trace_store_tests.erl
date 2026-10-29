@@ -23,11 +23,13 @@ setup() ->
     %% Start the trace store if not already running
     case whereis(beamtalk_trace_store) of
         undefined ->
-            {ok, _Pid} = beamtalk_trace_store:start_link(),
-            ok;
+            {ok, _Pid} = beamtalk_trace_store:start_link();
         _Pid ->
             ok
-    end.
+    end,
+    %% Start from empty aggregates: actor sends in earlier suites (recorded
+    %% directly since BT-4113) must not leak into these counts.
+    beamtalk_trace_store:clear().
 
 cleanup(_State) ->
     %% Clear all data between tests

@@ -101,6 +101,7 @@ The vs-elixir microbenchmarks (rows 7a–7c) measured an actor send at +174 redu
 - A sync send costs about 140 reductions and 145 words (was 226 / 318), and a cast about 110 / 80 (was 203 / 242); see `benchmarks/vs-elixir/results/` for the measured before/after and what remains.
 - Code that attached to dispatch events with `telemetry:attach/4` (e.g. an exporter) must turn them on: set `{beamtalk_runtime, dispatch_telemetry, true}` or call `beamtalk_telemetry:enable_dispatch_events/0`. Beamtalk `Telemetry attach:` handlers need nothing.
 - A handler that `telemetry` detaches on its own (because it raised) keeps the flag on until the next refresh. That only costs the events.
+- Mixed-version clusters (ADR 0126): an older sender's `trace_ctx => #{}` still clears a new receiver's context. The reverse direction degrades slightly: an older receiver treats a missing `trace_ctx`/`otel` key as "leave alone", so a context restored from a previous traced message can stay in its logger metadata until the next message that carries one. No message is lost or misrouted.
 - Flipping the flag writes a `persistent_term`, which triggers a global GC scan. Flips happen only on attach, detach, enable and disable, which are rare control-plane operations.
 
 ## Context
