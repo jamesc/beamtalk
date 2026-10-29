@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4150: the open Value parent of SealedDirectDiffWidget. Its methods are
+// reached from the sealed subclass only through superclass delegation inside
+// the subclass's generated `dispatch/3`, so a direct `Module:dispatch/3` send
+// to the widget must resolve them exactly as the dynamic send does.
+// See sealed_direct_dispatch_differential_test.bt.
+
+Value subclass: SealedDirectDiffBase
+  field: x :: Integer = 0
+
+  scaled: k :: Integer -> Integer => self x * k
+
+  describe -> String => "base"
+
+  baseOnly -> Symbol => #fromBase

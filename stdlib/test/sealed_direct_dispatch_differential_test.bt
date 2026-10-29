@@ -1,0 +1,366 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4150: differential test for sealed-Value direct dispatch (BT-4069).
+//
+// A send to a receiver statically typed as a sealed Value class compiles to a
+// guarded direct `Module:dispatch/3` call instead of the dynamic
+// `beamtalk_message_dispatch:send/3`. That direct shape duplicates the
+// runtime's routing knowledge (which entry point, which pre-checks such as
+// `is_ivar_method`), so every case below runs one selector through the direct
+// shape AND through `beamtalk_message_dispatch:send/3`, and asserts identical
+// results and identical error shapes (class, kind, selector, errorClass,
+// message, hint). A future runtime pre-check, proxy arm or entry-point split
+// that the direct shape silently bypasses fails here.
+//
+// The shapes:
+// - `directFoo:` declares its receiver `:: SealedDirectDiffWidget`, so its
+//   send compiles to the guarded direct call (the codegen half is pinned in
+//   crates/beamtalk-codegen/src/core_erlang/tests/typed_sealed.rs).
+// - `dynFoo:` is its twin with an untyped receiver: the same send compiles to
+//   a plain `beamtalk_message_dispatch:send/3` — the reference.
+// - For selectors an earlier send handler claims before `typed_sealed`
+//   (`perform:`, `perform:withArguments:`, `class`, `fieldAt:`,
+//   `fieldAt:put:`), `rawDispatch:args:to:` calls the module's `dispatch/3`
+//   exactly as the direct shape would, and `dynamic:args:to:` calls
+//   `beamtalk_message_dispatch:send/3`, both through the same FFI call.
+//
+// Multi-package class shadowing is covered separately (BT-4151).
+//
+// Fixtures: fixtures/sealed_direct_diff_base.bt,
+// fixtures/sealed_direct_diff_widget.bt,
+// fixtures/sealed_direct_diff_impostor.bt, fixtures/counter.bt.
+
+TestCase subclass: SealedDirectDispatchDifferentialTest
+
+  // === Shared helpers ===
+
+  widget -> SealedDirectDiffWidget => SealedDirectDiffWidget new: #{#x => 3, #y => 4}
+
+  impostor -> SealedDirectDiffImpostor => SealedDirectDiffImpostor new: #{#x => 5}
+
+  // `beamtalk_message_dispatch:send/3`, called explicitly.
+  dynamic: selector :: Symbol args: args :: List to: receiver =>
+    Erlang erlang
+      apply: #beamtalk_message_dispatch
+      module: #send
+      args: #(receiver, selector, args)
+
+  // The tag-matched arm of the direct shape, spelled out: exactly the
+  // `call 'bt@...':'dispatch'(Selector, Args, Receiver)` the compiler emits.
+  // The module name is what `beamtalk test` emits for this fixture
+  // (unqualified `bt@<stem>`, BT-4152).
+  rawDispatch: selector :: Symbol args: args :: List to: w =>
+    Erlang erlang
+      apply: #'bt@sealed_direct_diff_widget'
+      module: #dispatch
+      args: #(selector, args, w)
+
+  // The observable outcome of a block: its value, or the full structured
+  // shape of the error it raised.
+  outcomeOf: aBlock :: Block -> List =>
+    [#(#returned, aBlock value)] on: Exception do: [:e |
+      #(#raised, e class name, e kind, e selector, e errorClass, e message, e hint)]
+
+  // Runs `directBlock` and `dynBlock`, asserts they agree, and answers the
+  // shared outcome so callers can also pin what it is.
+  assertSameOutcome: directBlock :: Block as: dynBlock :: Block -> List =>
+    direct := self outcomeOf: directBlock
+    self assert: direct equals: (self outcomeOf: dynBlock)
+    direct
+
+  // === Direct shape (receiver declared SealedDirectDiffWidget) ===
+
+  directSum: w :: SealedDirectDiffWidget => w sum
+
+  directAdd: w :: SealedDirectDiffWidget => w add: 10
+
+  directAddAnd: w :: SealedDirectDiffWidget => w add: 1 and: 2
+
+  directDescribe: w :: SealedDirectDiffWidget => w describe
+
+  directScaled: w :: SealedDirectDiffWidget => w scaled: 2
+
+  directBaseOnly: w :: SealedDirectDiffWidget => w baseOnly
+
+  directWithY: w :: SealedDirectDiffWidget => w withY: 40
+
+  directPrintString: w :: SealedDirectDiffWidget => w printString
+
+  directBoom: w :: SealedDirectDiffWidget => w boom
+
+  directAddWrongType: w :: SealedDirectDiffWidget =>
+    @expect type
+    w add: "ten"
+
+  directUnknown: w :: SealedDirectDiffWidget =>
+    @expect dnu
+    w noSuchSelector
+
+  directUnknownKeyword: w :: SealedDirectDiffWidget =>
+    @expect dnu
+    w noSuch: 1 selector: 2
+
+  directExtended: w :: SealedDirectDiffWidget => w diffExtended
+
+  directBaseExtended: w :: SealedDirectDiffWidget => w diffBaseExtended
+
+  directAdd: w :: SealedDirectDiffWidget from: c => w add: c increment
+
+  countedWidget: c -> SealedDirectDiffWidget =>
+    c increment
+    self widget
+
+  directSumOfCounted: c => (self countedWidget: c) sum
+
+  // === Dynamic shape (untyped receiver) ===
+
+  dynSum: w => w sum
+
+  dynAdd: w => w add: 10
+
+  dynAddAnd: w => w add: 1 and: 2
+
+  dynDescribe: w => w describe
+
+  dynScaled: w => w scaled: 2
+
+  dynBaseOnly: w => w baseOnly
+
+  dynWithY: w => w withY: 40
+
+  dynPrintString: w => w printString
+
+  dynBoom: w => w boom
+
+  dynAddWrongType: w => w add: "ten"
+
+  dynUnknown: w => w noSuchSelector
+
+  dynUnknownKeyword: w => w noSuch: 1 selector: 2
+
+  dynExtended: w => w diffExtended
+
+  dynBaseExtended: w => w diffBaseExtended
+
+  dynAdd: w from: c => w add: c increment
+
+  // === Plain and keyword sends ===
+
+  testUnarySend =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directSum: w] as: [self dynSum: w])
+      equals: #(#returned, 7)
+
+  testKeywordSend =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directAdd: w] as: [self dynAdd: w])
+      equals: #(#returned, 17)
+
+  testMultiKeywordSend =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directAddAnd: w] as: [self dynAddAnd: w])
+      equals: #(#returned, 10)
+
+  testOwnOverrideOfInheritedSelector =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directDescribe: w] as: [self dynDescribe: w])
+      equals: #(#returned, "widget")
+
+  testGeneratedFunctionalSetter =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directWithY: w] as: [self dynWithY: w])
+      equals: #(#returned, SealedDirectDiffWidget new: #{#x => 3, #y => 40})
+
+  // === Superclass-inherited selectors ===
+
+  testKeywordInheritedFromValueParent =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directScaled: w] as: [self dynScaled: w])
+      equals: #(#returned, 6)
+
+  testUnaryInheritedFromValueParent =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directBaseOnly: w] as: [self dynBaseOnly: w])
+      equals: #(#returned, #fromBase)
+
+  testSelectorInheritedFromObject =>
+    w := self widget
+    outcome := self assertSameOutcome: [self directPrintString: w] as: [self dynPrintString: w]
+    self assert: (outcome at: 1) equals: #returned
+
+  // === Extension-registry selectors ===
+
+  testExtensionOnSealedClass =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directExtended: w] as: [self dynExtended: w])
+      equals: #(#returned, 70)
+
+  testExtensionOnSuperclass =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self directBaseExtended: w] as: [self dynBaseExtended: w])
+      equals: #(#returned, #baseExtended)
+
+  // === Errors: DNU and errors raised inside the method ===
+
+  testUnknownUnarySelector =>
+    w := self widget
+    outcome := self assertSameOutcome: [self directUnknown: w] as: [self dynUnknown: w]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    self assert: (outcome at: 4) equals: #noSuchSelector
+
+  testUnknownKeywordSelector =>
+    w := self widget
+    outcome := self assertSameOutcome: [self directUnknownKeyword: w] as: [self dynUnknownKeyword: w]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    self assert: (outcome at: 4) equals: #noSuch:selector:
+
+  testErrorRaisedInsideMethod =>
+    w := self widget
+    outcome := self assertSameOutcome: [self directBoom: w] as: [self dynBoom: w]
+    self assert: (outcome at: 1) equals: #raised
+    self assert: (outcome at: 6) equals: "widget boom"
+
+  testRawErlangErrorInsideMethod =>
+    w := self widget
+    outcome := self assertSameOutcome: [self directAddWrongType: w] as: [self dynAddWrongType: w]
+    self assert: (outcome at: 3) equals: #type_error
+
+  // === Selectors an earlier handler claims: pin the dispatch/3 arm ===
+
+  testClassArm =>
+    w := self widget
+    self assertSameOutcome: [self rawDispatch: #class args: #() to: w]
+      as: [self dynamic: #class args: #() to: w]
+
+  testFieldAtArm =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self rawDispatch: #fieldAt: args: #(#y) to: w]
+        as: [self dynamic: #fieldAt: args: #(#y) to: w])
+      equals: #(#returned, 4)
+
+  testPerformArm =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self rawDispatch: #perform: args: #(#sum) to: w]
+        as: [self dynamic: #perform: args: #(#sum) to: w])
+      equals: #(#returned, 7)
+
+  testPerformWithArgumentsArm =>
+    w := self widget
+    self assert: (self assertSameOutcome:
+        [self rawDispatch: #perform:withArguments: args: #(#add:and:, #(1, 2)) to: w]
+        as: [self dynamic: #perform:withArguments: args: #(#add:and:, #(1, 2)) to: w])
+      equals: #(#returned, 10)
+
+  testPerformArmReachesInheritedAndExtensionSelectors =>
+    w := self widget
+    self assert: (self assertSameOutcome: [self rawDispatch: #perform: args: #(#baseOnly) to: w]
+        as: [self dynamic: #perform: args: #(#baseOnly) to: w])
+      equals: #(#returned, #fromBase)
+    self assert: (self assertSameOutcome: [self rawDispatch: #perform: args: #(#diffExtended) to: w]
+        as: [self dynamic: #perform: args: #(#diffExtended) to: w])
+      equals: #(#returned, 70)
+
+  testPerformArmUnknownSelector =>
+    w := self widget
+    outcome := self assertSameOutcome: [self rawDispatch: #perform: args: #(#noSuchSelector) to: w]
+      as: [self dynamic: #perform: args: #(#noSuchSelector) to: w]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    self assert: (outcome at: 4) equals: #noSuchSelector
+
+  // Source-level `perform:` on a typed receiver agrees with the dynamic send
+  // of the performed selector.
+  testSourcePerformOnTypedReceiver =>
+    w := self widget
+    self assert: (self assertSameOutcome: [w perform: #sum] as: [self dynSum: w])
+      equals: #(#returned, 7)
+    self assert: (self assertSameOutcome: [w perform: #add:and: withArguments: #(1, 2)]
+        as: [self dynAddAnd: w])
+      equals: #(#returned, 10)
+
+  // `typed_sealed` never takes `fieldAt:put:` direct because the module's
+  // `dispatch/3` arm and the runtime's `is_ivar_method` pre-check raise it
+  // with different hints. Everything but the hint agrees; the hint
+  // divergence is pinned until BT-4273 unifies it, at which point the last
+  // assertion flips and this test should assert full equality.
+  testFieldAtPutErrorShape =>
+    w := self widget
+    direct := self outcomeOf: [self rawDispatch: #fieldAt:put: args: #(#y, 99) to: w]
+    dynamic := self outcomeOf: [self dynamic: #fieldAt:put: args: #(#y, 99) to: w]
+    self assert: (direct take: 6) equals: (dynamic take: 6)
+    self assert: (direct at: 3) equals: #immutable_value
+    self assert: (direct at: 4) equals: #fieldAt:put:
+    self deny: (direct at: 7) =:= (dynamic at: 7)
+
+  // === Guard mismatch: a lying annotation takes the dynamic fallback ===
+
+  testLyingAnnotationOtherValueClassDispatches =>
+    imp := self impostor
+    @expect type
+    direct := [self directSum: imp]
+    self assert: (self assertSameOutcome: direct as: [self dynSum: imp])
+      equals: #(#returned, 1005)
+
+  testLyingAnnotationOtherValueClassOverride =>
+    imp := self impostor
+    @expect type
+    direct := [self directDescribe: imp]
+    self assert: (self assertSameOutcome: direct as: [self dynDescribe: imp])
+      equals: #(#returned, "impostor")
+
+  testLyingAnnotationOtherValueClassDnu =>
+    imp := self impostor
+    @expect type
+    direct := [self directAdd: imp]
+    outcome := self assertSameOutcome: direct as: [self dynAdd: imp]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    self assert: (outcome at: 4) equals: #add:
+
+  testLyingAnnotationNonMapReceiverDnu =>
+    @expect type
+    direct := [self directSum: 42]
+    outcome := self assertSameOutcome: direct as: [self dynSum: 42]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    self assert: (outcome at: 4) equals: #sum
+
+  testLyingAnnotationNilReceiverDnu =>
+    @expect type
+    direct := [self directAddAnd: nil]
+    outcome := self assertSameOutcome: direct as: [self dynAddAnd: nil]
+    self assert: (outcome at: 3) equals: #does_not_understand
+
+  testLyingAnnotationUntaggedMapReceiverDnu =>
+    @expect type
+    direct := [self directBaseOnly: #{#x => 1}]
+    outcome := self assertSameOutcome: direct as: [self dynBaseOnly: #{#x => 1}]
+    self assert: (outcome at: 3) equals: #does_not_understand
+
+  // === Single evaluation ===
+
+  testSideEffectingArgumentEvaluatesOnce =>
+    c := Counter spawn
+    self assert: (self directAdd: self widget from: c) equals: 8
+    self assert: c getValue equals: 1
+    c stop
+
+  testSideEffectingArgumentEvaluatesOnceOnGuardMismatch =>
+    c := Counter spawn
+    imp := self impostor
+    @expect type
+    direct := [self directAdd: imp from: c]
+    outcome := self assertSameOutcome: direct as: [self dynAdd: imp from: c]
+    self assert: (outcome at: 3) equals: #does_not_understand
+    // One increment per shape: neither evaluated its argument twice.
+    self assert: c getValue equals: 2
+    c stop
+
+  testSideEffectingReceiverEvaluatesOnce =>
+    c := Counter spawn
+    self assert: (self directSumOfCounted: c) equals: 7
+    self assert: c getValue equals: 1
+    c stop
+
+// Extension-registry selectors (ADR 0066): resolved by the runtime's
+// extension lookup inside `dispatch/3`, on the class itself and on its parent.
+SealedDirectDiffWidget >> diffExtended -> Integer => self sum * 10
+SealedDirectDiffBase >> diffBaseExtended -> Symbol => #baseExtended
