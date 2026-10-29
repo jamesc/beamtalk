@@ -32,8 +32,7 @@
 //! [`hand_written_underscore_names_match_the_audit`] fails on a new one or a
 //! user name that reaches Core unmapped.
 
-use super::control_flow::family_detector_differential::{collect_source_files, repo_root};
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_compiles_through_erlc, codegen, collect_source_files, repo_root};
 use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
 use std::collections::BTreeSet;
 
