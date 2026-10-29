@@ -2007,8 +2007,8 @@ pub fn literal_block_value_send(expr: &Expression) -> Option<(&Block, &[Expressi
 ///
 /// ADR 0131 (BT-3841, BT-4263): an evaluated literal block (`[...] value`,
 /// `[:y | ...] value: x`, see [`literal_block_value_arm`]) is the degenerate
-/// conditional: one arm that
-/// always runs. Its block is the single arm, so every rule that reads this
+/// conditional: one arm that always runs. Its block is the single arm, so
+/// every rule that reads this
 /// function (the conditional producer rule, the site rules, the Phase 0 check
 /// and codegen's producer) treats it as an inline arm-like frame.
 #[must_use]
