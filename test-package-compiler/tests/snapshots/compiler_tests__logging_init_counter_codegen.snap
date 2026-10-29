@@ -185,8 +185,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                     let _ClearStack0 = call 'erlang':'erase'('$bt_call_stack') in
                     case _InitResult0 of
                         <{'reply', _InitRet0, InitNewState}> when 'true' ->
-                            let InitCleanState = case call 'erlang':'map_size'(InitNewState) of
-                                <3> when 'true' -> InitNewState
+                            let InitCleanState = case InitNewState of
+                                <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(InitNewState), 3) -> InitNewState
                                 <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(InitNewState)
                             end in
                             {'noreply', InitCleanState}
@@ -209,8 +209,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                     let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                     case _CastDispatchResult of
                         <{'reply', _CastResult, CastNewState}> when 'true' ->
-                            let CleanCastNewState = case call 'erlang':'map_size'(CastNewState) of
-                                <3> when 'true' -> CastNewState
+                            let CleanCastNewState = case CastNewState of
+                                <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
                                 <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
                             end in
                             let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
@@ -254,8 +254,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
-                                let CleanCastNewState = case call 'erlang':'map_size'(CastNewState) of
-                                    <3> when 'true' -> CastNewState
+                                let CleanCastNewState = case CastNewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
                                     <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
                                 end in
                                 let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
@@ -284,8 +284,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
-                                let CleanCastNewState = case call 'erlang':'map_size'(CastNewState) of
-                                    <3> when 'true' -> CastNewState
+                                let CleanCastNewState = case CastNewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
                                     <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
                                 end in
                                 let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
@@ -333,8 +333,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                         let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
-                                let CleanNewState = case call 'erlang':'map_size'(NewState) of
-                                    <3> when 'true' -> NewState
+                                let CleanNewState = case NewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(NewState), 3) -> NewState
                                     <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(NewState)
                                 end in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
@@ -373,8 +373,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                         let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
-                                let CleanNewState = case call 'erlang':'map_size'(NewState) of
-                                    <3> when 'true' -> NewState
+                                let CleanNewState = case NewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'logCount' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(NewState), 3) -> NewState
                                     <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(NewState)
                                 end in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in

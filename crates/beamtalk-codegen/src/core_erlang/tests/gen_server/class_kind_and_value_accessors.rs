@@ -1156,12 +1156,22 @@ fn codegen_for(src: &str, module_name: &str) -> String {
         .code
 }
 
-/// BT-4113: the committed-state size guard every state-commit boundary
-/// emits, for a state map of `size` keys built from `src`.
-fn size_guard(dest: &str, src: &str, size: usize) -> String {
+/// BT-4113: the committed-state guard every state-commit boundary emits,
+/// for a state map built from `src` whose declared fields are `fields`: the
+/// fast path needs both internal keys and every field present, and nothing
+/// else (`map_size/1`).
+fn size_guard(dest: &str, src: &str, fields: &[&str]) -> String {
+    let pattern = ["__class_mod__", "__shape_version__"]
+        .iter()
+        .chain(fields)
+        .enumerate()
+        .map(|(i, k)| format!("'{k}' := _Key{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let size = fields.len() + 2;
     format!(
-        "let {dest} = case call 'erlang':'map_size'({src}) of\n\
-         \x20   <{size}> when 'true' -> {src}\n\
+        "let {dest} = case {src} of\n\
+         \x20   <~{{{pattern}}}~> when call 'erlang':'=:='(call 'erlang':'map_size'({src}), {size}) -> {src}\n\
          \x20   <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'({src})\n\
          end in"
     )
@@ -1181,10 +1191,10 @@ fn contains_guard(code: &str, guard: &str) -> bool {
 
 #[test]
 fn test_bt4113_commit_boundaries_skip_strip_scan_on_expected_state_size() {
-    // A committed state of exactly the declared size (`__class_mod__`,
+    // A committed state holding exactly the declared keys (`__class_mod__`,
     // `__shape_version__` + the declared fields) holds no `__local__` temp,
     // so every commit boundary keeps it without strip_local_temps/1's key
-    // scan; any other size (a threaded temp present) falls back to the scan.
+    // scan; anything else (a threaded temp present) falls back to the scan.
     let code = codegen_for(
         "
 Actor subclass: Counter
@@ -1200,7 +1210,7 @@ Actor subclass: Counter
         ("CleanCastNewState", "CastNewState"),
         ("InitCleanState", "InitNewState"),
     ] {
-        let guard = size_guard(dest, src, 4);
+        let guard = size_guard(dest, src, &["value", "label"]);
         assert!(
             contains_guard(&code, &guard),
             "expected the size-guarded strip\n{guard}\nGot:\n{code}"
@@ -1223,10 +1233,39 @@ Server subclass: Ticker
 ",
         "ticker",
     );
-    let guard = size_guard("CleanInfoNewState", "NewState", 3);
+    let guard = size_guard("CleanInfoNewState", "NewState", &["ticks"]);
     assert!(
         contains_guard(&code, &guard),
         "Ticker state = 2 internal keys + ticks. Expected\n{guard}\nGot:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt4113_guard_requires_inherited_field_presence() {
+    // A subclass's guard names every inherited field, not just the count, so
+    // a stale subclass of a redefined ancestor that dropped a field (its live
+    // state one key short of the compile-time set) can never take the fast
+    // path with a `__local__` temp filling the gap: the pattern fails on the
+    // missing field and the state is scanned.
+    let code = codegen_for(
+        // The module compiles its first class; the ancestor after it is
+        // only there for the hierarchy.
+        "
+GuardBase subclass: GuardChild
+  state: c = 0
+  bump => self.c := self.c + 1
+
+Actor subclass: GuardBase
+  state: a = 0
+  state: b = 0
+",
+        "guard_child",
+    );
+    // `all_state` order: own fields, then inherited ones.
+    let guard = size_guard("CleanNewState", "NewState", &["c", "a", "b"]);
+    assert!(
+        contains_guard(&code, &guard),
+        "the guard must match every inherited field by key. Expected\n{guard}\nGot:\n{code}"
     );
 }
 

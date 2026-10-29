@@ -51,10 +51,14 @@ events or not.
 The flag is a single `persistent_term` read on the send path. Writing a
 `persistent_term` triggers a global GC scan, which is fine here because the
 flag flips only on attach/detach/enable/disable: rare, control-plane
-operations. Refreshes are serialized with a `global:trans/3` lock local to
-the node, so two concurrent flips cannot leave a stale value behind. A
-handler `telemetry` detaches on its own (because it raised) keeps the flag
-on until the next refresh, which only costs the events.
+operations. Refreshes are serialized through the node-local
+`beamtalk_trace_store` gen_server (whose `enable/0`/`disable/0` refresh
+inline in its own process), so two concurrent flips cannot leave a stale
+value behind, and nothing waits on cluster state (no `global` lock).
+Attach and detach refresh only when the handler's event names fall under
+`[beamtalk, actor, dispatch]`. A handler `telemetry` detaches on its own
+(because it raised) keeps the flag on until the next refresh, which only
+costs the events.
 
 Every entry point degrades gracefully when the `telemetry` application is not
 loaded (a partial test harness): emitting becomes a no-op and spans just run
@@ -192,10 +196,16 @@ detach(HandlerId) ->
     Sel = 'detach:',
     check_handler_id(HandlerId, Sel),
     check_not_reserved(HandlerId, Sel),
+    %% Read before detaching: afterwards the handler's events are gone.
+    WasDispatch = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, dispatch_handlers()),
     nil = detach_handler(HandlerId),
     %% BT-4113: the last Beamtalk dispatch handler gone switches the
-    %% dispatch events back off (unless another source keeps them on).
-    ok = refresh_dispatch_events(),
+    %% dispatch events back off (unless another source keeps them on). A
+    %% handler on other events cannot change the flag: skip the refresh.
+    case WasDispatch of
+        true -> ok = refresh_dispatch_events();
+        false -> ok
+    end,
     nil.
 
 -doc """
@@ -482,11 +492,18 @@ record_dispatch_exit({exception, ExcMeta, Duration}) ->
 %% Internal: dispatch-event flag
 %%====================================================================
 
-%% A node-local lock (the requester id is this process, the node list just
-%% this node), so concurrent refreshes cannot interleave their reads and
-%% the write.
+%% Serialize a read-compute-write of the flag's persistent_terms through the
+%% node-local trace store gen_server, so concurrent refreshes cannot
+%% interleave their reads and the write. Its own init/1 and enable/disable
+%% calls already run in that process (serialized), so they run `Fun`
+%% directly; without a trace store (a partial harness) there is no
+%% concurrent flipper to serialize against.
 with_dispatch_lock(Fun) ->
-    global:trans({?MODULE, self()}, Fun, [node()]).
+    case whereis(beamtalk_trace_store) of
+        undefined -> Fun();
+        Self when Self =:= self() -> Fun();
+        _Pid -> beamtalk_trace_store:serialize_dispatch_flag(Fun)
+    end.
 
 do_refresh_dispatch_events() ->
     New =
@@ -503,12 +520,20 @@ do_refresh_dispatch_events() ->
 %% A Beamtalk-attached handler (handle_event/4) on any dispatch event.
 beamtalk_dispatch_handler_attached() ->
     Fun = fun ?MODULE:handle_event/4,
-    try telemetry:list_handlers(?DISPATCH_PREFIX) of
-        Handlers -> lists:any(fun(#{function := F}) -> F =:= Fun end, Handlers)
+    lists:any(fun(#{function := F}) -> F =:= Fun end, dispatch_handlers()).
+
+%% Every telemetry handler on an event under [beamtalk, actor, dispatch].
+dispatch_handlers() ->
+    try
+        telemetry:list_handlers(?DISPATCH_PREFIX)
     catch
-        error:undef -> false;
-        exit:{noproc, _} -> false
+        error:undef -> [];
+        exit:{noproc, _} -> []
     end.
+
+%% Whether any of these event names is a dispatch event.
+any_dispatch_event(EventNames) ->
+    lists:any(fun(Name) -> lists:prefix(?DISPATCH_PREFIX, Name) end, EventNames).
 
 %% Same rule as telemetry:span/3: a caller-supplied context wins.
 with_span_context(#{telemetry_span_context := _} = Meta, _Ctx) -> Meta;
@@ -534,8 +559,11 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
     case Result of
         ok ->
             %% BT-4113: a handler on a dispatch event switches the opt-in
-            %% dispatch events on.
-            ok = refresh_dispatch_events(),
+            %% dispatch events on; one on other events cannot change the flag.
+            case any_dispatch_event(EventNames) of
+                true -> ok = refresh_dispatch_events();
+                false -> ok
+            end,
             beamtalk_result:from_tagged_tuple({ok, nil});
         {error, already_exists} ->
             beamtalk_result:from_tagged_tuple(

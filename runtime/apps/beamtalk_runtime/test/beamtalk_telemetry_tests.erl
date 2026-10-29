@@ -48,7 +48,9 @@ telemetry_test_() ->
         fun dispatch_span_reraises_unchanged_when_disabled/0,
         fun dispatch_events_follow_erlang_api/0,
         fun dispatch_events_follow_app_env/0,
-        fun dispatch_events_follow_beamtalk_dispatch_handlers/0
+        fun dispatch_events_follow_beamtalk_dispatch_handlers/0,
+        fun non_dispatch_attach_and_detach_skip_refresh/0,
+        fun dispatch_span_survives_missing_trace_table/0
     ]}.
 
 setup() ->
@@ -421,6 +423,62 @@ dispatch_events_follow_beamtalk_dispatch_handlers() ->
     nil = beamtalk_telemetry:detach(bt4113_many),
     ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
     nil = beamtalk_telemetry:detach(bt4113_other).
+
+non_dispatch_attach_and_detach_skip_refresh() ->
+    %% Attach/detach refresh the flag only for dispatch events (BT-4113): a
+    %% stale flag survives an unrelated attach/detach and is fixed by the
+    %% next dispatch-handler change.
+    Block = fun(_, _, _) -> ok end,
+    persistent_term:put(beamtalk_dispatch_events, true),
+    try
+        #{isOk := true} = beamtalk_telemetry:attach(bt4113_skip, [bt4113, skip], Block),
+        ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+        nil = beamtalk_telemetry:detach(bt4113_skip),
+        ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+        #{isOk := true} = beamtalk_telemetry:attach(
+            bt4113_skip, [beamtalk, actor, dispatch, start], Block
+        ),
+        nil = beamtalk_telemetry:detach(bt4113_skip),
+        ?assertNot(beamtalk_telemetry:dispatch_events_enabled())
+    after
+        ok = beamtalk_telemetry:refresh_dispatch_events()
+    end.
+
+dispatch_span_survives_missing_trace_table() ->
+    %% Recording runs inline in the sender (BT-4113), so a recording failure
+    %% must not change the send's outcome: with events and tracing on and the
+    %% trace-events table missing, a send still answers its value and a
+    %% raising send still surfaces its own error.
+    ?assertEqual(undefined, ets:info(beamtalk_trace_events)),
+    OldEnabled = persistent_term:get(beamtalk_tracing_enabled, undefined),
+    HadCounter = persistent_term:get(beamtalk_span_id_counter, undefined) =/= undefined,
+    HadCounter orelse persistent_term:put(beamtalk_span_id_counter, atomics:new(1, [])),
+    persistent_term:put(beamtalk_tracing_enabled, true),
+    try
+        with_dispatch_events(fun() ->
+            ?assertEqual(
+                result,
+                beamtalk_telemetry:dispatch_span(self(), 'C', s, sync, fun() -> {result, ok} end)
+            ),
+            Raise = fun() -> erlang:raise(error, {own, error}, [{m, f, 0, []}]) end,
+            ?assertEqual(
+                {error, {own, error}, [{m, f, 0, []}]},
+                try
+                    beamtalk_telemetry:dispatch_span(self(), 'C', s, sync, Raise)
+                catch
+                    C:R:S -> {C, R, S}
+                end
+            )
+        end)
+    after
+        case OldEnabled of
+            undefined -> persistent_term:erase(beamtalk_tracing_enabled);
+            _ -> persistent_term:put(beamtalk_tracing_enabled, OldEnabled)
+        end,
+        HadCounter orelse persistent_term:erase(beamtalk_span_id_counter),
+        erase('$beamtalk_trace_id'),
+        erase('$beamtalk_span_id')
+    end.
 
 detach_rejects_bad_and_reserved_ids() ->
     ?assertEqual(type_error, kind_of(fun() -> beamtalk_telemetry:detach(42) end)),
