@@ -60,6 +60,8 @@ crypto_utils = { git = "https://github.com/someone/bt-crypto", rev = "abc1234" }
 
 Each dependency must point to a directory containing its own `beamtalk.toml`. Dependencies are resolved transitively — if `json` depends on `utils`, both are compiled and available.
 
+**Dependency diagnostics:** A dependency is compiled as its own package, with the same Erlang FFI type information (OTP specs, distribution stubs, and its own `stubs/`) as a standalone build of it, so its code type-checks the same either way. Its warnings and hints are not shown when it is built as someone else's dependency, as with cargo: the downstream package can't act on them, and `--warnings-as-errors` does not apply to them. Errors still fail the build and are reported against the dependency's own source file, as is an `InternalVerifier` warning (a compiler bug to report). To see a dependency's warnings, build it on its own.
+
 **Git references:** Exactly one of `tag`, `branch`, or `rev` must be specified for git dependencies. Tags are recommended for stable releases; branches track a moving target; revs pin an exact commit.
 
 **Registry versions:** A bare string value (`name = "X.Y.Z"`) is a registry dependency — see [Package Registry](#package-registry) below. Registry dependencies pin an exact `major.minor.patch` version; version ranges (`~>`, `>=`, `^`, etc.) are deliberately not supported, so the resolved graph is always reproducible without a constraint solver. For a moving target or a pre-release commit, use a git dependency instead.

@@ -466,6 +466,61 @@ fn build_knows_own_native_module_but_warns_on_unknown() {
         .stderr(contains("Unknown Erlang module `my_nif`").not());
 }
 
+/// BT-4225: a path dependency with OTP FFI calls in a typed class builds,
+/// as the downstream package's dependency, with the same FFI type
+/// information as standalone — no `untyped FFI` diagnostics — and its
+/// remaining warnings stay its own (cargo shows none for a dependency).
+#[test]
+fn build_dependency_ffi_calls_are_typed_and_dep_warnings_stay_quiet() {
+    let root = tempfile::tempdir().expect("create tempdir");
+
+    let dep_dir = root.path().join("ffidep");
+    std::fs::create_dir_all(dep_dir.join("src")).unwrap();
+    std::fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"ffidep\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep_dir.join("src/options.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed typed Value subclass: Options\n  \
+           field: items :: List = #()\n\
+         \n  \
+           named -> Object =>\n    \
+             Erlang proplists get_value: #name with: self.items\n\
+         \n  \
+           probe -> Object =>\n    \
+             Erlang definitely_unknown_xyz ping\n",
+    )
+    .unwrap();
+
+    let consumer_dir = root.path().join("consumer");
+    std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+    std::fs::write(
+        consumer_dir.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\n\
+         ffidep = { path = \"../ffidep\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer_dir.join("src/main.bt"),
+        "Object subclass: Main\n  run => 1\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(&consumer_dir)
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("untyped FFI").not())
+        .stderr(contains("definitely_unknown_xyz").not());
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

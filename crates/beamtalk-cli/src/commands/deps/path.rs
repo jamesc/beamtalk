@@ -394,8 +394,17 @@ fn compile_dependency_with_context(
     // `Comparable` is the current package's (shadowing the stdlib's for a bare
     // `uses: Comparable`, as its exported `ClassInfo`s say) and its own
     // `internal` classes/aliases are same-package for E0401/E0402.
+    //
+    // Its warnings stay its own (BT-4225), as cargo shows none for a
+    // dependency: the downstream package can't act on them, and they bury its
+    // own. Errors still fail the build and are shown, and so is an
+    // `InternalVerifier` warning (a compiler bug, never suppressed). The
+    // downstream `--warnings-as-errors` is capped the same way, like cargo's
+    // `--cap-lints`: a dependency's warnings never fail someone else's build.
     let options = &beamtalk_core::CompilerOptions {
         current_package: Some(dep_name.to_owned()),
+        suppress_warnings: true,
+        warnings_as_errors: false,
         ..options.clone()
     };
 
@@ -495,7 +504,7 @@ fn compile_dependency_with_context(
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
-        native_type_registry: None, // Dependencies don't need FFI type checking
+        native_type_registry: dependency_type_registry(project_root, dep_root, prior_deps),
         // ADR 0100 Rule 3: neither the root package's nor the
         // dependency's own `[diagnostics]` table is applied here — this path
         // doesn't load either manifest's `[diagnostics]` section, so
@@ -550,6 +559,24 @@ fn compile_dependency_with_context(
     info!(dep = %dep_name, "Dependency compiled successfully");
 
     Ok((ebin_path, own_class_module_index))
+}
+
+/// The FFI type registry a dependency compiles against (BT-4225): the same
+/// resolution chain as its standalone build
+/// ([`crate::commands::build::resolve_package_type_registry`] over its own
+/// `stubs/`), over the OTP and dependency specs extracted into the
+/// downstream package's type cache. Without it every OTP FFI call in the
+/// dependency inferred as `Dynamic`, which its standalone build never does.
+fn dependency_type_registry(
+    project_root: &Utf8Path,
+    dep_root: &Utf8Path,
+    prior_deps: &[ResolvedDependency],
+) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
+    let auto_extract =
+        crate::commands::build::extract_type_specs(&BuildLayout::new(project_root), true, false);
+    crate::commands::build::resolve_package_type_registry(dep_root, auto_extract, prior_deps, None)
+        .0
+        .map(std::sync::Arc::new)
 }
 
 /// Compile each source file in a dependency to Core Erlang.
@@ -1451,5 +1478,37 @@ dep_utils = { path = "dep_utils" }"#,
         assert_eq!(source.text.as_str(), trait_src);
         assert_eq!(source.package.as_deref(), Some("dep_traits"));
         assert!(!protocol_sources.contains_key("Plain"));
+    }
+
+    /// BT-4225: a dependency compiles against the same FFI type registry as
+    /// its standalone build — its own `stubs/` tier over the OTP specs —
+    /// not none, which typed every FFI call in it `Dynamic`.
+    #[test]
+    fn dependency_type_registry_loads_dep_stubs_and_otp_specs() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().join("app")).unwrap();
+        let dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep")).unwrap();
+        fs::create_dir_all(&project_root).unwrap();
+        fs::create_dir_all(dep_root.join("stubs")).unwrap();
+        fs::write(
+            dep_root.join("stubs/dep_nif.bt"),
+            "declare native: dep_nif\n  echo: x :: Integer -> Integer\n",
+        )
+        .unwrap();
+
+        let registry = dependency_type_registry(&project_root, &dep_root, &[])
+            .expect("the dependency's own stubs/ tier must seed its registry");
+        assert!(
+            registry.lookup("dep_nif", "echo", 1).is_some(),
+            "dep's stubs/ declaration must be loaded"
+        );
+        // OTP discovery is environment-dependent (no runtime → no specs);
+        // when it finds any, the dependency sees them too.
+        if registry.module_count() > 1 {
+            assert!(
+                registry.lookup("proplists", "get_value", 3).is_some(),
+                "OTP specs must reach the dependency's compile"
+            );
+        }
     }
 }
