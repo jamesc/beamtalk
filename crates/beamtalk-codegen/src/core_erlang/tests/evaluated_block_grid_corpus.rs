@@ -36,7 +36,13 @@ const PINNED_FAILURES: &[&str] = &[];
 /// source whose probe class was lost cannot pass vacuously.
 fn compile_failure(context: grid::Context, src: &str, probes: &[&str]) -> Option<String> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (mut module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    if let Some(error) = diagnostics
+        .iter()
+        .find(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+    {
+        return Some(format!("parse error: {}", error.message));
+    }
     module
         .classes
         .retain(|c| c.name.name == context.probe_class());
