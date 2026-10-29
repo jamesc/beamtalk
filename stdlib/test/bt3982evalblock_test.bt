@@ -202,3 +202,9 @@ TestCase subclass: Bt3982EvalblockTest
 
   testFieldAssignInOperand =>
     self assert: (Bt3982EvalblockActor spawn fieldAssignInOperand) equals: {4, 3}
+
+  testWhileConditionOperand =>
+    self assert: (Bt3982EvalblockActor spawn whileConditionOperand) equals: 3
+
+  testToDoBlockParam =>
+    self assert: (Bt3982EvalblockActor spawn toDoBlockParam) equals: 15

@@ -3023,24 +3023,15 @@ impl CoreErlangGenerator {
             if beamtalk_core::semantic_analysis::block_facts::is_safe_value_family_selector(
                 selector,
             ) {
-                // Inline block literal with captured mutations
-                // (e.g. [errors := errors add: #foo] value)
-                // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
+                // An inline block literal with captured or field mutations
+                // (e.g. [errors := errors add: #foo] value) yields a tuple
+                // outside a value-type method: the one rule the intrinsics
+                // inline by (`evaluated_block_yields_state_tuple`). A block
+                // that only reads state or calls out is a closure on the cell
+                // (ADR 0137).
                 if let Expression::Block(block) = receiver.as_ref() {
-                    if self.context != super::super::CodeGenContext::ValueType
-                        && !Self::captured_mutations_for_block(block).is_empty()
-                    {
+                    if self.evaluated_block_yields_state_tuple(block) {
                         return true;
-                    }
-                    // Block literal with field mutations (actor state threading)
-                    if self.context != super::super::CodeGenContext::ValueType {
-                        let analysis = super::super::block_analysis::analyze_block(block);
-                        // The same gate the evaluated-block lowering and the
-                        // bracket classification use (ADR 0137): a block that only
-                        // reads state or calls out is a closure on the cell.
-                        if self.value_block_needs_threading(&analysis) {
-                            return true;
-                        }
                     }
                 }
             }
@@ -3248,7 +3239,12 @@ impl CoreErlangGenerator {
             }
             // BT-3982: a literal block receiver is inlined by
             // `generate_block_value_inline_with_mutations`, whose raw tuple
-            // this statement's caller unpacks: the one consumed site.
+            // this statement's caller unpacks: the one consumed site. Only a
+            // block the actor producer does not claim reaches here in a normal
+            // compile (one it claims is classified to the producer), so the
+            // registration matters only under the test fault
+            // `EvaluatedBlockNotAProducer`, which keeps such a statement on this
+            // path and must not report it.
             if let Expression::Block(block) = receiver.as_ref() {
                 self.tier2_evaluated_block_sites.insert(block.span);
                 let doc = self.expression_doc(expr);

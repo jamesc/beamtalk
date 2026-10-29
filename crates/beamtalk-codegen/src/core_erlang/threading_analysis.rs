@@ -140,7 +140,18 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn is_inlined_evaluated_block(&self, expr: &Expression) -> bool {
         !self.is_repl_mode()
             && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
-                .is_some_and(|(block, _)| self.evaluated_block_inlines_with_mutations(block))
+                .is_some_and(|(block, _)| self.evaluated_block_yields_state_tuple(block))
+    }
+
+    /// Whether the evaluated literal block `block` is inlined with its writes
+    /// threaded AND yields a `{Value, State}` tuple
+    /// ([`Self::evaluated_block_inlines_with_mutations`] outside a value-type
+    /// method, which splices its body as plain `let`s instead). The one rule
+    /// the statement classifier (`is_tier2_value_call`'s literal-block arm)
+    /// and the loop plan ([`Self::is_inlined_evaluated_block`]) read.
+    pub(in crate::core_erlang) fn evaluated_block_yields_state_tuple(&self, block: &Block) -> bool {
+        self.context != CodeGenContext::ValueType
+            && self.evaluated_block_inlines_with_mutations(block)
     }
 
     /// Whether `block` writes a local bound outside it (`beamtalk_core`'s

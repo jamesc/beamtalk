@@ -80,6 +80,12 @@ const ROWS: &[(&str, &str)] = &[
         "in a protected body",
         "[{[:y | self.count := y] value: 5, self.count}] on: Error do: [:e | 0]",
     ),
+    // The condition closure of a `whileTrue:` hands the block's `State` back
+    // out each iteration (BUnit `testWhileConditionOperand` answers 3).
+    (
+        "while condition operand",
+        "[([:y | self.count := y + self.count] value: 1) < 3] whileTrue: [nil]\nself.count",
+    ),
 ];
 
 fn source(body: &str) -> String {
@@ -112,6 +118,27 @@ fn the_unthreaded_evaluated_block_check_fails_every_repro_row_when_the_producer_
             Some(report) if report.contains("UnthreadedEvaluatedBlock") => {}
             other => panic!("{row}: expected UnthreadedEvaluatedBlock, got {other:?}\n{src}"),
         }
+    }
+}
+
+/// A value-type loop body that assigns a threaded local the value of an
+/// evaluated block is lowered exactly as before BT-3982: the actor producer
+/// and its loop-plan rule (`is_inlined_evaluated_block`) are not value-type
+/// rules, so the loop keeps its direct-params mode (no `StateAcc`) instead of
+/// falling back to the `Tier2ValueCallOnThreaded` `StateAcc` loop.
+#[test]
+fn a_value_type_loop_assigning_an_evaluated_block_keeps_direct_params() {
+    let src = "Value subclass: VtLoopProbe\n  go =>\n    t := 0\n    u := 0\n    1 to: 3 do: [:i | t := [u := u + 1. u] value]\n    t\n";
+    assert_eq!(verifier_report(src, None), None, "{src}");
+    let code = codegen(src);
+    // Direct params: the counter and both threaded locals (`T`, `U`) are the
+    // loop fun's parameters; the `StateAcc` fallback would be `'loop'/2`.
+    assert!(
+        code.contains("letrec 'loop'/3 = fun (_loopidx"),
+        "the value-type loop fell back to StateAcc:\n{code}"
+    );
+    if erlc_available() {
+        assert_compiles_through_erlc("test", &code);
     }
 }
 
