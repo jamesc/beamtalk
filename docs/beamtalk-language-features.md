@@ -3420,6 +3420,13 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 
 **When there is no hop (ADR 0129 Phase 0b).** The process hop applies only to classes with class state (`classState:`), or to methods that are not `class sealed`. A `class sealed` method of a sealed class with no `classState:` is called directly, in the caller's process, however it is reached: statically, through a variable, `perform:`, `Beamtalk classNamed:`, or a class passed as an argument. For those methods a block runs where it was written, `self()` and the process dictionary are the caller's, there is no `class_send` timeout, and messaging the same class from inside does not raise `dispatch_error`. `self` is still the class object, so `self new`, `self new:`, `self spawn`, `self spawnWith:`, `self class` and class-side self-sends behave as in any other class method (BT-4029). Eligibility is computed once by the compiler and emitted as `direct_class_methods` in `__beamtalk_meta/0`; `new`/`new:` and the supervisor `startLink` family are never direct.
 
+**Hot-patching and direct calls.** The compiler bakes these verdicts (and the `new`/`new:` direct-construction verdicts of `Value` classes) into each compiled module, and the runtime trusts them without re-checking. Reloading a class updates only its own verdicts. Code that was compiled against the old class keeps the old verdict until it is recompiled, so a reload logs a warning when it leaves a stale verdict behind (BT-4126):
+
+- If a class gains a class-side `new:`, the warning names every subclass that still builds `new:` directly and so bypasses the new override.
+- If a class method that still exists stops being directly callable (for example, it is no longer `class sealed`, or the class gains `classState:`), the warning names the method. Code compiled earlier still calls it directly. The runtime cannot list those callers.
+
+Recompile the code the warning names. A release upgrade recompiles everything, so this only affects targeted hot-patches.
+
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. A `^` is not an error, so a class variable written before the block escaped keeps its write ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §4).
 
 #### Class variables and blocks (ADR 0130)
