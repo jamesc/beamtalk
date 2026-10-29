@@ -287,6 +287,7 @@ mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
+mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
 mod field_assignment_value_position;

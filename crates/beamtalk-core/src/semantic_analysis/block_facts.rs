@@ -170,25 +170,6 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
-/// BT-3981 (ADR 0133 Phase 3): whether a block literal that writes no local
-/// bound outside it, inlined where it is sent (an evaluated `[...] value`), is
-/// lowered as a state-threading block in a method of kind `root` (`None`: the
-/// REPL): the block yields a `{Value, State}` pair that the site must unpack.
-/// The gate the `EvaluatedBlockValue` residual check reads; codegen's
-/// `needs_mutation_threading` (with `State` always eligible in an actor
-/// instance method) is the rule.
-#[must_use]
-pub fn inline_block_threads(block: &Block, root: Option<RootMethodKind>) -> bool {
-    // ADR 0137: not the bracket's contribution. An evaluated block holding only
-    // calls that may run user code is a closure the call as a whole brackets.
-    analyze_block(block).needs_mutation_threading_with(root, true, false)
-        // The REPL also threads a block that writes a binding anywhere, a
-        // nested construct's block included (codegen's
-        // `repl_blocks_write_bindings`, BT-3823): every name is a binding
-        // there.
-        || (root.is_none() && !threaded_block_writes(&[block], &|_| true).is_empty())
-}
-
 /// Analyzes a method body (top-level statements, not wrapped in a
 /// `Block`) the same way [`analyze_block`] analyzes a block body — used by
 /// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)
@@ -1965,9 +1946,26 @@ fn packed_writes_agree(
 /// producer, which lowers the block as a `BranchArm` frame that always runs.
 #[must_use]
 pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
+    literal_block_value_send(expr)
+        .filter(|(_, arguments)| arguments.is_empty())
+        .map(|(block, _)| block)
+}
+
+/// BT-3982: the block and arguments of an *evaluated literal block* of the
+/// whole positional `value` family (`[...] value`, `[:y | ...] value: x`,
+/// `value:value:`, `value:value:value:`, [`is_safe_value_family_selector`]) whose block literal's arity is the
+/// send's ([`block_literal_arity_matches`]), or `None`. Parentheses around
+/// the send are peeled, not around the receiver (the receiver rule of
+/// [`literal_block_value_arm`]). `valueWithArguments:` is not one: its
+/// arguments are one runtime list, not one per parameter.
+///
+/// The one recognizer codegen's evaluated-block producers read (actor
+/// `State`, value-type `Self`) and [`literal_block_value_arm`] narrows.
+#[must_use]
+pub fn literal_block_value_send(expr: &Expression) -> Option<(&Block, &[Expression])> {
     let Expression::MessageSend {
         receiver,
-        selector: selector @ MessageSelector::Unary(_),
+        selector,
         arguments,
         is_cast: false,
         ..
@@ -1978,10 +1976,8 @@ pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
     let Expression::Block(block) = receiver.as_ref() else {
         return None;
     };
-    (selector.well_known() == Some(crate::ast::WellKnownSelector::Value)
-        && arguments.is_empty()
-        && block_literal_arity_matches(block, 0))
-    .then_some(block)
+    (is_safe_value_family_selector(selector) && block_literal_arity_matches(block, arguments.len()))
+        .then_some((block, arguments.as_slice()))
 }
 
 /// ADR 0131 Phase 3 (BT-3738): the literal arm blocks of a conditional

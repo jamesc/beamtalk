@@ -808,8 +808,12 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                // BT-3982: the right-hand side is sequenced (`thread_ahead`),
+                // so a producer there (an evaluated block that threads
+                // `State`) lands its carrier and `Bind` in this body instead
+                // of destructuring its raw `{Value, State}` tuple.
                 let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_with_value(pattern, value)?;
+                    self.generate_destructure_bindings_sequenced(pattern, value, frame, stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }

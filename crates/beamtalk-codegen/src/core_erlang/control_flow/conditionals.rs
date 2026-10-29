@@ -754,6 +754,11 @@ impl CoreErlangGenerator {
     ) -> bool {
         ((arm_is_frame || self.is_repl_mode()) && self.local_producer_locals(expr).is_some())
             || self.is_conditional_with_sequenced_receiver(expr)
+            // BT-3982: an actor evaluated block that threads `State` is a
+            // producer in every arm.
+            || self
+                .actor_evaluated_block_producer_parts(expr)
+                .is_some()
     }
 
     /// Whether a conditional in `frame` is lowered as a local-threading
@@ -1267,6 +1272,65 @@ impl CoreErlangGenerator {
             no_match_fallback,
             " end",
         ])
+    }
+
+    /// BT-3982: the [`ThreadedValue`] producer for an evaluated literal block
+    /// with its arguments (`[:y | ...] value: x`, `beamtalk_core`'s
+    /// `literal_block_value_send`): each argument is threaded in order in the
+    /// enclosing frame and bound to its parameter, **before** the body, then
+    /// the block is the degenerate conditional of
+    /// [`Self::generate_block_value_with_mutations`]: one carrier in the
+    /// enclosing frame followed by the frame's `State` `Bind` (and
+    /// `LocalRebind`s when it is a local-threading producer), answering
+    /// `element(1, Carrier)`. Its `{Value, State}` carrier never crosses an
+    /// expression boundary.
+    pub(in crate::core_erlang) fn generate_evaluated_block_producer(
+        &mut self,
+        block: &Block,
+        arguments: &[Expression],
+        tail: ProducerTail,
+        producer: bool,
+    ) -> Result<ThreadedValue> {
+        if arguments.is_empty() {
+            return self.generate_block_value_with_mutations(block, tail, producer);
+        }
+        // A local-threading producer is unary (`literal_block_value_arm`): its
+        // `LocalRebind`s would be bound in the parameter scope popped below.
+        if producer {
+            return Err(CodeGenError::Internal(
+                "an evaluated block with arguments was lowered as a local-threading producer \
+                 (its rebinds would be scoped to its parameters; BT-3982)"
+                    .to_string(),
+            ));
+        }
+        let frame = self.current_frame();
+        let mut prelude = Vec::new();
+        let mut arg_vars = Vec::with_capacity(arguments.len());
+        for (param, arg) in block.parameters.iter().zip(arguments) {
+            let tv = self.threaded_expression(arg, frame)?;
+            prelude.extend(tv.prelude);
+            let arg_var = self.fresh_temp_var(&param.name);
+            let value_doc = self.threaded_value_doc(&tv.value);
+            prelude.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(arg_var.clone()), " = ", value_doc, " in "],
+                arg.span(),
+            ));
+            arg_vars.push(arg_var);
+        }
+        // The parameters are bound in a scope of their own, like the inline
+        // path's (`bind_inline_block_value_args`).
+        self.push_scope();
+        for (param, arg_var) in block.parameters.iter().zip(&arg_vars) {
+            self.bind_var(&param.name, arg_var);
+        }
+        let body = self.generate_block_value_with_mutations(block, tail, producer);
+        self.pop_scope();
+        let body = body?;
+        prelude.extend(body.prelude);
+        Ok(ThreadedValue {
+            prelude,
+            value: body.value,
+        })
     }
 
     /// BT-3841: the [`ThreadedValue`] producer for an evaluated literal block
@@ -1836,6 +1900,11 @@ impl CoreErlangGenerator {
         if let Expression::Match { arms, .. } = expr {
             return self.match_needs_state_threading(arms);
         }
+        // BT-3982: an actor evaluated literal block that threads `State` is a
+        // producer wherever it sits (`generate_evaluated_block_producer`).
+        if self.actor_evaluated_block_producer_parts(expr).is_some() {
+            return true;
+        }
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),
@@ -1953,17 +2022,21 @@ impl CoreErlangGenerator {
             }
         }
         // BT-3841: an evaluated literal block (`[...] value`) that is a
-        // producer here is a conditional whose one arm always runs.
-        if root_producer {
-            if let Some(block) =
-                beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr)
-            {
-                return Ok(Some(self.generate_block_value_with_mutations(
-                    block,
-                    tail,
-                    root_producer,
-                )?));
-            }
+        // local-threading producer here is a conditional whose one arm always
+        // runs. BT-3982: so is an actor evaluated block of the whole `value`
+        // family that threads `State`, wherever it sits.
+        let evaluated = root_producer
+            .then(|| beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr))
+            .flatten()
+            .map(|block| (block, &[][..]))
+            .or_else(|| self.actor_evaluated_block_producer_parts(expr));
+        if let Some((block, arguments)) = evaluated {
+            return Ok(Some(self.generate_evaluated_block_producer(
+                block,
+                arguments,
+                tail,
+                root_producer,
+            )?));
         }
         let Expression::MessageSend {
             receiver,
@@ -2849,11 +2922,13 @@ impl CoreErlangGenerator {
             // BT-4000: `self.f := <conditional whose receiver is sequenced>` is
             // lowered by C1, whose `lower_field_assignment_bind` threads the
             // value ahead, so the receiver's `Bind`s are this arm's own
-            // statements rather than text inside C6's raw tuple.
+            // statements rather than text inside C6's raw tuple. BT-3982: so is
+            // `self.f := <evaluated block that is a producer>`.
             let kind = match kind {
                 BodyExprKind::FieldAssignmentControlFlow
                     if matches!(expr, Expression::Assignment { value, .. }
-                        if self.is_conditional_with_sequenced_receiver(value)) =>
+                        if self.is_conditional_with_sequenced_receiver(value)
+                            || self.evaluated_block_is_producer(value)) =>
                 {
                     BodyExprKind::FieldAssignment
                 }

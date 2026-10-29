@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4150: a tagged-map Value that is NOT a SealedDirectDiffWidget but answers
+// some of the same selectors. Passed where a widget is declared (a lying
+// annotation), its tag fails the direct-dispatch guard, so the send must take
+// the dynamic fallback and behave exactly like an untyped send.
+// See sealed_direct_dispatch_differential_test.bt.
+
+Value subclass: SealedDirectDiffImpostor
+  field: x :: Integer = 0
+
+  sum -> Integer => 1000 + self x
+
+  describe -> String => "impostor"

@@ -1,0 +1,267 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3982: runs the cells of fixtures/bt3982evalblock_actor.bt, an actor
+// evaluated literal block in value position (BEAM value oracle).
+
+TestCase subclass: Bt3982EvalblockTest
+
+  testTupleElement =>
+    self assert: (Bt3982EvalblockActor spawn tupleElement) equals: {5, 5}
+
+  testTupleUnary =>
+    self assert: (Bt3982EvalblockActor spawn tupleUnary) equals: {5, 5}
+
+  testListElement =>
+    self assert: (Bt3982EvalblockActor spawn listElement) equals: #[5, 5]
+
+  testArrayElement =>
+    self assert: (Bt3982EvalblockActor spawn arrayElement) equals: #(5, 5)
+
+  testKeywordArguments =>
+    self assert: (Bt3982EvalblockActor spawn keywordArguments) equals: #(5, 5)
+
+  testKeywordArgument =>
+    self assert: (Bt3982EvalblockActor spawn keywordArgument) equals: 5
+
+  testBinaryOperand =>
+    self assert: (Bt3982EvalblockActor spawn binaryOperand) equals: 10
+
+  testTwoArguments =>
+    self assert: (Bt3982EvalblockActor spawn twoArguments) equals: {5, 5}
+
+  testThreeArguments =>
+    self assert: (Bt3982EvalblockActor spawn threeArguments) equals: {5, 5}
+
+  testStatementThenRead =>
+    self assert: (Bt3982EvalblockActor spawn statementThenRead) equals: 5
+
+  testAssigned => self assert: (Bt3982EvalblockActor spawn assigned) equals: 10
+
+  testReturned => self assert: (Bt3982EvalblockActor spawn returned) equals: 5
+
+  testLastExpression =>
+    self assert: (Bt3982EvalblockActor spawn lastExpression) equals: 5
+
+  testArgumentWritesField =>
+    self assert: (Bt3982EvalblockActor spawn argumentWritesField) equals: {5, 5, 5}
+
+  testArgumentsInOrder =>
+    self assert: (Bt3982EvalblockActor spawn argumentsInOrder) equals: {12, 12}
+
+  testParenthesized =>
+    self assert: (Bt3982EvalblockActor spawn parenthesized) equals: 4
+
+  testParenthesizedAssigned =>
+    self assert: (Bt3982EvalblockActor spawn parenthesizedAssigned) equals: 3
+
+  testFieldAssignedValue =>
+    self assert: (Bt3982EvalblockActor spawn fieldAssignedValue) equals: 3
+
+  testSendInArgument =>
+    self assert: (Bt3982EvalblockActor spawn sendInArgument) equals: true
+
+  testCascadeReceiver =>
+    self assert: (Bt3982EvalblockActor spawn cascadeReceiver) equals: 5
+
+  testNonLastInDo =>
+    self assert: (Bt3982EvalblockActor spawn nonLastInDo) equals: 3
+
+  testNestedFive =>
+    self assert: (Bt3982EvalblockActor spawn nestedFive) equals: 3
+
+  testInUnmeasuredSelector =>
+    self assert: (Bt3982EvalblockActor spawn inUnmeasuredSelector) equals: 3
+
+  testInReject => self assert: (Bt3982EvalblockActor spawn inReject) equals: 1
+
+  testInOr => self assert: (Bt3982EvalblockActor spawn inOr) equals: true
+
+  testFoldWritesOuter =>
+    self assert: (Bt3982EvalblockActor spawn foldWritesOuter) equals: 3
+
+  testFoldWritesOuterNonLast =>
+    self assert: (Bt3982EvalblockActor spawn foldWritesOuterNonLast) equals: 3
+
+  testFoldNestedEvaluated =>
+    self assert: (Bt3982EvalblockActor spawn foldNestedEvaluated) equals: 3
+
+  testFoldOtherAssign =>
+    self assert: (Bt3982EvalblockActor spawn foldOtherAssign) equals: 6
+
+  testCollectWritesOuter =>
+    self assert: (Bt3982EvalblockActor spawn collectWritesOuter) equals: {#(3, 6), 3}
+
+  testInjectWritesOuter =>
+    self assert: (Bt3982EvalblockActor spawn injectWritesOuter) equals: {3, 2}
+
+  testStoredFieldWrite =>
+    self assert: (Bt3982EvalblockActor spawn storedFieldWrite) equals: {5, 5}
+
+  testFfiFieldWrite =>
+    self assert: (Bt3982EvalblockActor spawn ffiFieldWrite) equals: #({5, 5})
+
+  testUserFieldWrite =>
+    self assert: (Bt3982EvalblockActor spawn userFieldWrite) equals: {5, 5}
+
+  testArmTuple =>
+    self assert: (Bt3982EvalblockActor spawn armTuple) equals: {5, 5}
+
+  testCollectTuple =>
+    self assert: (Bt3982EvalblockActor spawn collectTuple) equals: #({5, 5})
+
+  testProtectedTuple =>
+    self assert: (Bt3982EvalblockActor spawn protectedTuple) equals: {5, 5}
+
+  testProtectedLastField =>
+    self assert: (Bt3982EvalblockActor spawn protectedLastField) equals: 5
+
+  testLaterStatementSees =>
+    self assert: (Bt3982EvalblockActor spawn laterStatementSees) equals: {{5, 0}, 5}
+
+  testOuterLocalUnary =>
+    self assert: (Bt3982EvalblockActor spawn outerLocalUnary) equals: {5, 5}
+
+  testDoBodyOperand =>
+    self assert: (Bt3982EvalblockActor spawn doBodyOperand) equals: 6
+
+  testCollectBodyOperand =>
+    self assert: (Bt3982EvalblockActor spawn collectBodyOperand) equals: {#(1, 3), 3}
+
+  testMethodOperand =>
+    self assert: (Bt3982EvalblockActor spawn methodOperand) equals: 2
+
+  testCountedStateBodyOperand =>
+    self assert: (Bt3982EvalblockActor spawn countedStateBodyOperand) equals: {6, 3}
+
+  testCountedStateBodyArm =>
+    self assert: (Bt3982EvalblockActor spawn countedStateBodyArm) equals: {3, 3}
+
+  testCountedStatement =>
+    self assert: (Bt3982EvalblockActor spawn countedStatement) equals: 0
+
+  testCountedFreshAssign =>
+    self assert: (Bt3982EvalblockActor spawn countedFreshAssign) equals: 0
+
+  testFieldSendInDo =>
+    self assert: (Bt3982EvalblockActor spawn fieldSendInDo) equals: {3, 2}
+
+  testSelfSendInCollect =>
+    self assert: (Bt3982EvalblockActor spawn selfSendInCollect) equals: #(2, 3)
+
+  testNestedArgumentFieldWrite =>
+    self assert: (Bt3982EvalblockActor spawn nestedArgumentFieldWrite) equals: {7, 7, 2}
+
+  testInnerFoldUnderWritingFold =>
+    self assert: (Bt3982EvalblockActor spawn innerFoldUnderWritingFold) equals: 1
+
+  testInnerCollectAssignUnderWritingFold =>
+    self assert: (Bt3982EvalblockActor spawn innerCollectAssignUnderWritingFold) equals: 1
+
+  testProtectedUnderWritingFold =>
+    self assert: (Bt3982EvalblockActor spawn protectedUnderWritingFold) equals: 1
+
+  testEvaluatedUnderWritingFold =>
+    self assert: (Bt3982EvalblockActor spawn evaluatedUnderWritingFold) equals: 1
+
+  testEnsureUnderWritingCollect =>
+    self assert: (Bt3982EvalblockActor spawn ensureUnderWritingCollect) equals: 1
+
+  testTwoFoldsDifferentLocals =>
+    self assert: (Bt3982EvalblockActor spawn twoFoldsDifferentLocals) equals: {1, 3}
+
+  testFfiAssignedRepro =>
+    self assert: (Bt3982EvalblockActor spawn ffiAssignedRepro) equals: #(3)
+
+  testFfiLoopRepro =>
+    self assert: (Bt3982EvalblockActor spawn ffiLoopRepro) equals: #(3)
+
+  testReturnInArm =>
+    self assert: (Bt3982EvalblockActor spawn returnInArm) equals: 5
+
+  testDictionaryHandler =>
+    self assert: (Bt3982EvalblockActor spawn dictionaryHandler) equals: 3
+
+  testUnmeasuredArmUnderFold =>
+    self assert: (Bt3982EvalblockActor spawn unmeasuredArmUnderFold) equals: 1
+
+  testNilArmUnderFold =>
+    self assert: (Bt3982EvalblockActor spawn nilArmUnderFold) equals: 1
+
+  testRejectAssignsOuter =>
+    self assert: (Bt3982EvalblockActor spawn rejectAssignsOuter) equals: 3
+
+  testMeasuredInUnmeasured =>
+    self assert: (Bt3982EvalblockActor spawn measuredInUnmeasured) equals: 3
+
+  testAnySatisfyBlock =>
+    self assert: (Bt3982EvalblockActor spawn anySatisfyBlock) equals: true
+
+  testKeysAndValuesBlock =>
+    self assert: (Bt3982EvalblockActor spawn keysAndValuesBlock) equals: nil
+
+  testFieldAssignInOperand =>
+    self assert: (Bt3982EvalblockActor spawn fieldAssignInOperand) equals: {4, 3}
+
+  testWhileConditionOperand =>
+    self assert: (Bt3982EvalblockActor spawn whileConditionOperand) equals: 3
+
+  testToDoBlockParam =>
+    self assert: (Bt3982EvalblockActor spawn toDoBlockParam) equals: 15
+
+  testHybridWhileOperand =>
+    self assert: (Bt3982EvalblockActor spawn hybridWhileOperand) equals: {2, 3}
+
+  testHybridToDoNested =>
+    self assert: (Bt3982EvalblockActor spawn hybridToDoNested) equals: {3, 3}
+
+  testHybridWhileUnary =>
+    self assert: (Bt3982EvalblockActor spawn hybridWhileUnary) equals: {2, 2}
+
+  testHybridDoNested =>
+    self assert: (Bt3982EvalblockActor spawn hybridDoNested) equals: {2, 2}
+
+  testCountedBodyA =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyA) equals: 3
+
+  testCountedBodyB =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyB) equals: 3
+
+  testCountedBodyC =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyC) equals: 3
+
+  testCountedBodyD =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyD) equals: 3
+
+  testCountedBodyE =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyE) equals: 3
+
+  testCountedBodyF =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyF) equals: 3
+
+  testCountedBodyG =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyG) equals: 3
+
+  testTimesBodyA =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyA) equals: 3
+
+  testTimesBodyB =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyB) equals: 3
+
+  testTimesBodyC =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyC) equals: 3
+
+  testTimesBodyD =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyD) equals: 3
+
+  testTimesBodyE =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyE) equals: 3
+
+  testTimesBodyF =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyF) equals: 3
+
+  testTimesBodyG =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyG) equals: 3
+
+  testWhileFalseAssign =>
+    self assert: (Bt3982EvalblockActor spawn whileFalseAssign) equals: 3

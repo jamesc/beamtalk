@@ -191,7 +191,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // cascade's shared receiver) and `(super)`.
     (
         "beamtalk-core/src/semantic_analysis/validators/local_threading.rs",
-        17,
+        14,
     ),
     // `send_user_code`'s `is_block`, read on a cascade's shared receiver
     // (`record_send_target` for each later cascade message) and arguments
