@@ -790,9 +790,100 @@ raise_class_self_dnu(ClassName, Selector) ->
     Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
     beamtalk_error:raise(Error).
 
--doc "Dispatch a class method call (the main logic for the catch-all clause).".
+-doc """
+Dispatch a class method call (the main logic for the catch-all clause).
+
+A send that no class-side method can answer skips the class process (BT-4073):
+when `class_chain_only_send/3` finds no class-side extension, no local or
+inherited class method and no runtime-installed class-method fun for the
+selector, the `Class`/`Behaviour` method runs in the caller straight away,
+exactly as it would after the gen_server replied `{error, not_found}`.
+""".
 -spec class_send_dispatch(pid(), selector(), list()) -> term().
 class_send_dispatch(ClassPid, Selector, Args) ->
+    case class_chain_only_send(ClassPid, Selector, Args) of
+        {ok, ClassName, Module} ->
+            class_chain_send(ClassPid, ClassName, Module, Selector, Args);
+        error ->
+            class_method_call(ClassPid, Selector, Args)
+    end.
+
+-doc """
+`{ok, ClassName, Module}` when a send of `Selector` to the class at `ClassPid`
+can only be answered by the `Class` chain, so asking the class process first
+would only learn `{error, not_found}`; else `error` (take the gen_server path).
+
+Reads the same metadata the class process's own lookup
+(`handle_class_method_call/6`) consults, through
+`class_understands_class_selector/2`: the class-side extension registry, the
+local class-method selectors (which `beamtalk_object_class` publishes from its
+`class_methods` map, runtime-installed ADR 0084 funs included, on every init,
+reload and `put_class_method`) and the inherited chain. It is general: no
+selector is special-cased here. The class process also answers the
+class-variable reflection sends (`hasField:`/`clearField:`) from its own state
+ahead of that lookup, so `beamtalk_object_class:is_class_var_reflection_send/2`
+keeps those on the gen_server path.
+
+A class with no metadata row yet (still registering), a pid with no registered
+class, or a dead class process takes the gen_server path too, so registration
+races and crash recovery (`class_send_with_recovery/3`) are unchanged.
+""".
+-spec class_chain_only_send(pid(), selector(), list()) ->
+    {ok, class_name(), module()} | error.
+class_chain_only_send(ClassPid, Selector, Args) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} ->
+            case beamtalk_class_metadata:lookup_methods(ClassName) of
+                {ok, Module, _Selectors} ->
+                    case
+                        node(ClassPid) =:= node() andalso
+                            is_process_alive(ClassPid) andalso
+                            not beamtalk_object_class:is_class_var_reflection_send(
+                                Selector, Args
+                            ) andalso
+                            not class_understands_class_selector(ClassName, Selector)
+                    of
+                        true -> {ok, ClassName, Module};
+                        false -> error
+                    end;
+                not_found ->
+                    error
+            end;
+        not_found ->
+            error
+    end.
+
+-doc """
+Run a class-object send through the `Class` chain in the caller
+(`try_class_chain_fallthrough/3`), raising `does_not_understand` on `ClassName`
+when the chain does not define `Selector` either. Shared by the gen_server
+path's `{error, not_found}` reply and the BT-4073 skip.
+""".
+-spec class_chain_send(pid(), class_name(), atom(), selector(), list()) -> term().
+class_chain_send(ClassPid, ClassName, Module, Selector, Args) ->
+    %% ADR 0032 Phase 0: Class objects are instances of 'Class'; fall through to
+    %% Class instance methods before raising does_not_understand.
+    ClassSelf = #beamtalk_object{
+        class = beamtalk_class_registry:class_object_tag(ClassName),
+        class_mod = Module,
+        pid = ClassPid
+    },
+    case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
+        {ok, Result} ->
+            Result;
+        not_found ->
+            Error = beamtalk_error:new(
+                does_not_understand,
+                ClassName,
+                Selector,
+                <<"Class does not understand this message">>
+            ),
+            beamtalk_error:raise(Error)
+    end.
+
+-doc "Ask the class process to run a class method (`class_method_call`).".
+-spec class_method_call(pid(), selector(), list()) -> term().
+class_method_call(ClassPid, Selector, Args) ->
     %% Try user-defined class methods before raising does_not_understand.
     %% Test execution may take a long time; use longer timeout.
     %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
@@ -826,27 +917,13 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %% waited for the class process; a second and third 5s-timeout
             %% `gen_server:call` here re-queue behind whatever else the class
             %% process is serving and time out when it is busy.
-            ClassName = beamtalk_object_class:class_name_safe(ClassPid),
-            %% ADR 0032 Phase 0: Try Class chain before raising does_not_understand.
-            %% Class objects are instances of 'Class'; fall through to Class instance methods.
-            ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
-            ClassSelf = #beamtalk_object{
-                class = beamtalk_class_registry:class_object_tag(ClassName),
-                class_mod = ModuleName,
-                pid = ClassPid
-            },
-            case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
-                {ok, Result} ->
-                    Result;
-                not_found ->
-                    Error = beamtalk_error:new(
-                        does_not_understand,
-                        ClassName,
-                        Selector,
-                        <<"Class does not understand this message">>
-                    ),
-                    beamtalk_error:raise(Error)
-            end;
+            class_chain_send(
+                ClassPid,
+                beamtalk_object_class:class_name_safe(ClassPid),
+                beamtalk_object_class:module_name_safe(ClassPid),
+                Selector,
+                Args
+            );
         {error, {beamtalk_script_exit, _} = ScriptExit} ->
             %% ADR 0099 §3: a connected `Program exit: N` raised inside
             %% the dispatched class method surfaces here as the class gen_server's
@@ -1556,7 +1633,9 @@ Test whether `ClassName`'s own metaclass tag understands `Selector`
 local runtime-installed (ADR 0084) class method.
 
 Backs `beamtalk_object_ops:responds_to_result/3`'s `respondsTo:` on a
-class-object receiver. `SomeClass respondsTo: #sel` previously always
+class-object receiver, and `class_chain_only_send/3`'s decision to skip the
+class process (BT-4073), so a `false` here must mean the class process's own
+lookup would answer `{error, not_found}`. `SomeClass respondsTo: #sel` previously always
 answered against the generic `'Class'` protocol only, because a
 class's metaclass tag (`'SomeClass class'`) is virtual — never registered
 as its own class in `beamtalk_class_registry`/`beamtalk_class_metadata` —
