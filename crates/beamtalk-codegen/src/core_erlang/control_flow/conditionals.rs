@@ -1277,15 +1277,6 @@ impl CoreErlangGenerator {
         if arguments.is_empty() {
             return self.generate_block_value_with_mutations(block, tail, producer);
         }
-        // A local-threading producer is unary (`literal_block_value_arm`): its
-        // `LocalRebind`s would be bound in the parameter scope popped below.
-        if producer {
-            return Err(CodeGenError::Internal(
-                "an evaluated block with arguments was lowered as a local-threading producer \
-                 (its rebinds would be scoped to its parameters; BT-3982)"
-                    .to_string(),
-            ));
-        }
         let frame = self.current_frame();
         let mut prelude = Vec::new();
         let mut arg_vars = Vec::with_capacity(arguments.len());
@@ -1309,6 +1300,29 @@ impl CoreErlangGenerator {
         let body = self.generate_block_value_with_mutations(block, tail, producer);
         self.pop_scope();
         let body = body?;
+        // BT-4263: a local-threading producer's `LocalRebind`s are the
+        // enclosing frame's: the carrier lands there, so the frame reads each
+        // rebound local from its `value_var`. `construct_rebind_prelude`
+        // bound them in the parameter scope popped above, so they are bound
+        // again in the scope the frame keeps (`VerifyError::RebindNotVisible`
+        // otherwise). A parameter is never one: it is bound only inside the
+        // block, and a write to it is the block's own binding.
+        #[cfg(test)]
+        let producer = producer
+            && super::super::threaded_expr::fault::active()
+                != Some(
+                    super::super::threaded_expr::fault::LocalRebindFault::EvaluatedBlockRebindsScoped,
+                );
+        if producer {
+            for stmt in &body.prelude {
+                if let ThreadedStmt::LocalRebind {
+                    local, value_var, ..
+                } = stmt
+                {
+                    self.bind_var(local, value_var);
+                }
+            }
+        }
         prelude.extend(body.prelude);
         Ok(ThreadedValue {
             prelude,
@@ -1837,6 +1851,9 @@ impl CoreErlangGenerator {
             None
         };
         let lowered = self.lower_inline_control_flow(expr, tail, root_producer_locals.is_some())?;
+        if let Some(tv) = &lowered {
+            self.report_rebinds_visible(&tv.prelude, expr.span());
+        }
         #[cfg(test)]
         if let (Some(_), Some(locals)) = (&lowered, &root_producer_locals) {
             super::super::threaded_expr::fault::record_producer(expr.span(), locals);
@@ -1879,12 +1896,13 @@ impl CoreErlangGenerator {
         }
         // BT-3841: an evaluated literal block (`[...] value`) that is a
         // local-threading producer here is a conditional whose one arm always
-        // runs. BT-3982: so is an actor evaluated block of the whole `value`
-        // family that threads `State`, wherever it sits.
+        // runs; BT-4263: so is one with arguments (`[:y | t := y] value: 5`),
+        // its arguments threaded first. BT-3982: so is an actor evaluated
+        // block of the whole `value` family that threads `State`, wherever it
+        // sits.
         let evaluated = root_producer
-            .then(|| beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr))
+            .then(|| beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr))
             .flatten()
-            .map(|block| (block, &[][..]))
             .or_else(|| self.actor_evaluated_block_producer_parts(expr));
         if let Some((block, arguments)) = evaluated {
             return Ok(Some(self.generate_evaluated_block_producer(

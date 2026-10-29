@@ -133,13 +133,15 @@ const LOOKUP_ARM_FRAMES: &[&str] = &[
 ];
 
 /// BT-3839: frames where a handler-writing lookup sits inside a closure that is
-/// not inlined (a block evaluated with an argument, a stored block), alone and
-/// in a loop body. The lookup producer has no frame there, so Phase 0 keeps
-/// its §6 error (ADR 0131 §6).
+/// not inlined (a stored block, evaluated with and without an argument), alone
+/// and in a loop body. The lookup producer has no frame there, so Phase 0 keeps
+/// its §6 error (ADR 0131 §6). A block literal evaluated with an argument in
+/// place (`[:z | {s}] value: 1`) is no closure since BT-4263: it is an arm
+/// frame, in [`ARM_FRAMES`].
 const CLOSURE_FRAMES: &[&str] = &[
-    "[:z | {s}] value: 1",
+    "b := [:z | {s}]\nb value: 1",
     "b := [{s}]\nb value",
-    "#(1, 2) do: [:k | [:z | {s}] value: k]",
+    "#(1, 2) do: [:k | b := [:z | {s}]. b value: k]",
     "1 to: 2 do: [:k | b := [{s}]. b value]",
 ];
 
@@ -256,7 +258,8 @@ beamtalk_core::per_family_tests! {
     lookups_in_the_arms_in_a_loop_or_holding_a_conditional_of_other_conditional_producers_agree => 3,
     lookups_in_the_evaluated_block_arms_of_other_conditional_producers_agree => 4,
     lookups_in_the_nested_evaluated_block_arms_of_other_conditional_producers_agree => 5,
-    lookups_in_the_match_arms_of_other_conditional_producers_agree => 6,
+    lookups_in_the_evaluated_block_with_arguments_arms_of_other_conditional_producers_agree => 6,
+    lookups_in_the_match_arms_of_other_conditional_producers_agree => 7,
 }
 
 #[test]
