@@ -124,9 +124,9 @@ mod control_flow;
 mod dispatch_codegen;
 mod dispatch_spec;
 mod driver;
-mod dynamic_site_report;
 #[cfg(any(test, feature = "test"))]
 pub mod dropped_assignment_probe;
+mod dynamic_site_report;
 pub mod erlang_types;
 mod error;
 mod errors;

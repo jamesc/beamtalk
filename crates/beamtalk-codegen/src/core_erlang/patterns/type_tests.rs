@@ -648,7 +648,11 @@ impl CoreErlangGenerator {
             for tag in tags {
                 clauses.push(docvec!["<", leaf::atom(tag), "> when 'true' -> 'false' "]);
             }
-            clauses.push(docvec!["<", leaf::var(not_reserved), "> when 'true' -> 'true'"]);
+            clauses.push(docvec![
+                "<",
+                leaf::var(not_reserved),
+                "> when 'true' -> 'true'"
+            ]);
             unreserved = docvec![
                 "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
                 v.clone(),

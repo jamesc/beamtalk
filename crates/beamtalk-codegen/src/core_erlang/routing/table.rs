@@ -6,7 +6,7 @@
 //! by `routing_table_tests.rs` (BT-4292). Do not edit: change the fixture and
 //! run `ROUTING_TABLE_BLESS=1 cargo test -p beamtalk-codegen --lib routing_table`.
 
-use super::{Guard, ReservedTupleTag, Representation, RoutingRow};
+use super::{Guard, Representation, ReservedTupleTag, RoutingRow};
 
 #[rustfmt::skip]
 pub(super) static ROUTING_ROWS: &[RoutingRow] = &[

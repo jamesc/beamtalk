@@ -3735,8 +3735,9 @@ mod tests {
             .filter(|selector| !string_overrides.contains(selector))
             .collect();
 
-        let fixture_path =
-            root.join("runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json");
+        let fixture_path = root.join(
+            "runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json",
+        );
         let fixture: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&fixture_path).expect("routing fixture should be readable"),
         )

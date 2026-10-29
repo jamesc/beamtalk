@@ -106,7 +106,7 @@ fn render(fixture: &Value) -> String {
          //! by `routing_table_tests.rs` (BT-4292). Do not edit: change the fixture and\n\
          //! run `ROUTING_TABLE_BLESS=1 cargo test -p beamtalk-codegen --lib routing_table`.\n\
          \n\
-         use super::{Guard, ReservedTupleTag, Representation, RoutingRow};\n\
+         use super::{Guard, Representation, ReservedTupleTag, RoutingRow};\n\
          \n\
          #[rustfmt::skip]\n\
          pub(super) static ROUTING_ROWS: &[RoutingRow] = &[\n",
@@ -136,7 +136,9 @@ fn render(fixture: &Value) -> String {
         .as_array()
         .expect("fixture `reserved_tuple_tags` list")
     {
-        let size = tag["size"].as_u64().expect("reserved tag `size` is a number");
+        let size = tag["size"]
+            .as_u64()
+            .expect("reserved tag `size` is a number");
         writeln!(
             out,
             "    ReservedTupleTag {{ tag: {:?}, size: {size} }},",
@@ -168,7 +170,8 @@ fn routing_table_is_generated_from_fixture() {
         std::fs::write(&path, &rendered).unwrap_or_else(|e| panic!("write {path:?}: {e}"));
         return;
     }
-    let checked_in = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+    let checked_in =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
     assert!(
         checked_in == rendered,
         "{TABLE} drifted from {FIXTURE}; regenerate it with \
@@ -183,7 +186,10 @@ fn routing_table_names_each_class_once() {
     let mut seen = BTreeSet::new();
     for row in table::ROUTING_ROWS {
         for name in std::iter::once(&row.class).chain(row.aliases) {
-            assert!(seen.insert(*name), "class {name:?} appears twice in the routing table");
+            assert!(
+                seen.insert(*name),
+                "class {name:?} appears twice in the routing table"
+            );
         }
     }
 }
@@ -194,7 +200,10 @@ fn routing_table_names_each_class_once() {
 fn routing_table_reserved_tags_are_distinct() {
     let mut seen = BTreeSet::new();
     for tag in table::RESERVED_TUPLE_TAGS {
-        assert!(seen.insert((tag.tag, tag.size)), "reserved tag {tag:?} listed twice");
+        assert!(
+            seen.insert((tag.tag, tag.size)),
+            "reserved tag {tag:?} listed twice"
+        );
         assert!(tag.size >= 1, "reserved tag {tag:?} has no first element");
     }
 }
@@ -212,7 +221,11 @@ fn routing_table_rows_without_a_direct_route_say_why() {
             row.class
         );
         if row.representation == Representation::SupervisorTuple {
-            assert_eq!(row.guard, None::<Guard>, "{}: supervisor rows carry no guard", row.class);
+            assert_eq!(
+                row.guard, None::<Guard>,
+                "{}: supervisor rows carry no guard",
+                row.class
+            );
         }
     }
 }

@@ -13,7 +13,7 @@
 //! only describes it, adding detail the gate does not need (the routing row
 //! of a built-in, whether an open class is abstract, an actor or in the
 //! supervisor family). Epic BT-4291 measures its baseline and progress with
-//! it (`docs/development/guarded-dispatch-baseline.md`).
+//! it (`benchmarks/vs-elixir/results/bench-bt4292-baseline.md`).
 //!
 //! Each hint reads
 //!
@@ -140,7 +140,9 @@ impl CoreErlangGenerator {
         match gate {
             StaysDynamic::Untyped => "untyped".to_string(),
             StaysDynamic::BinarySelector => "binary-selector".to_string(),
-            StaysDynamic::FieldAtPut => "fieldAt:put: — the dynamic path raises its own hint".to_string(),
+            StaysDynamic::FieldAtPut => {
+                "fieldAt:put: — the dynamic path raises its own hint".to_string()
+            }
             StaysDynamic::RepresentationRouted => describe_routed(class, selector),
             StaysDynamic::RuntimeOnlyBuiltin => {
                 format!("runtime-only — {class} has no compiled module")
@@ -174,12 +176,17 @@ impl CoreErlangGenerator {
                     .is_some_and(|row| row.representation == Representation::SupervisorTuple)
             });
         if let Some(root) = supervisor_root {
-            return format!("supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)");
+            return format!(
+                "supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)"
+            );
         }
         if kind == Some(ClassKind::Actor) {
             return format!("actor — {class} instances are actor references");
         }
-        if hierarchy.get_class(class).is_some_and(|info| info.is_abstract) {
+        if hierarchy
+            .get_class(class)
+            .is_some_and(|info| info.is_abstract)
+        {
             return format!("abstract — {class} has no instances of its own");
         }
         format!("open — {class} is not sealed")
