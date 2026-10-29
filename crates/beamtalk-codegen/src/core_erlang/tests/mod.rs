@@ -294,6 +294,7 @@ mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
 mod supervisor;

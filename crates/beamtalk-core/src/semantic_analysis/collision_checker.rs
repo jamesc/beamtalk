@@ -142,8 +142,9 @@ fn declared_by_multiple_packages<'a>(packages: impl IntoIterator<Item = Option<&
 /// `xml@Parser`) collide when both load: last-wins, with only a
 /// `record_class_collision_warning`. In such a node an instance's
 /// `'$beamtalk_class'` tag cannot say which package's class built it, so
-/// anything that pins one package's module at compile time (the
-/// sealed-Value direct dispatch in codegen) would diverge from dynamic
+/// anything that pins one package's module at compile time (codegen's
+/// sealed-Value direct dispatch, BT-4151, and its class-reference direct
+/// calls and constructors, BT-4271) would diverge from dynamic
 /// dispatch, which follows load order. Callers pass every class
 /// declaration their compilation scope can see — dependencies' and the
 /// unit's own — and treat each name returned here as unresolvable to a
@@ -326,17 +327,25 @@ fn check_ambiguous_reference(
 ) {
     if let Some(exports) = registry.lookup(class_name) {
         if registry.is_ambiguous(class_name) {
-            let qualified_suggestions: Vec<String> = exports
+            // A package that exports the name twice (e.g. from two of its own
+            // files) is listed once, in first-registration order.
+            let mut packages: Vec<&str> = Vec::new();
+            for export in exports {
+                if !packages.contains(&export.package.as_str()) {
+                    packages.push(export.package.as_str());
+                }
+            }
+
+            let qualified_suggestions: Vec<String> = packages
                 .iter()
-                .map(|e| format!("{}@{}", e.package, class_name))
+                .map(|package| format!("{package}@{class_name}"))
                 .collect();
 
-            let note_lines: Vec<String> = exports
+            let note_lines: Vec<String> = packages
                 .iter()
-                .map(|e| {
+                .map(|package| {
                     format!(
-                        "'{}' is defined in package '{}' ({}@{})",
-                        class_name, e.package, e.package, class_name
+                        "'{class_name}' is defined in package '{package}' ({package}@{class_name})"
                     )
                 })
                 .collect();
@@ -643,6 +652,30 @@ mod tests {
         assert!(
             hint.contains("xml@Parser"),
             "hint should suggest xml@Parser: {hint}"
+        );
+    }
+
+    #[test]
+    fn collision_hint_lists_a_package_registered_twice_once() {
+        // BT-4271 ride-along: `json` exports `Parser` from two of its own
+        // modules; the hint names each package once.
+        let registry = make_registry(&[
+            ("Parser", "json", "bt@json@parser"),
+            ("Parser", "json", "bt@json@sub@parser"),
+            ("Parser", "xml", "bt@xml@parser"),
+        ]);
+
+        let module = parse_bt("Parser new");
+        let mut diagnostics = Vec::new();
+        check_collision_at_use_sites(&module, &registry, &mut diagnostics);
+
+        assert_eq!(diagnostics.len(), 1);
+        let hint = diagnostics[0].hint.as_deref().unwrap_or("");
+        assert_eq!(
+            hint,
+            "'Parser' is defined in package 'json' (json@Parser)\n\
+             'Parser' is defined in package 'xml' (xml@Parser)\n\
+             Use qualified name: json@Parser or xml@Parser"
         );
     }
 

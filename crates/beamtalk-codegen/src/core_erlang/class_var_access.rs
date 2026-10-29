@@ -238,6 +238,16 @@ impl CoreErlangGenerator {
         let Some(selector) = self.current_method_selector.as_deref() else {
             return false;
         };
+        self.is_own_direct_called_class_method(selector)
+    }
+
+    /// Whether this module's own class method `selector` is direct-called
+    /// (in `direct_call_eligible`). Deliberately *not* gated on
+    /// [`Self::is_shadowed_class`]: it describes how this module's own
+    /// functions are entered (their `ClassSelf` calling convention), which
+    /// shadowing does not change; only sends to a class *reference* pin a
+    /// compile-time module (BT-4271).
+    pub(in crate::core_erlang) fn is_own_direct_called_class_method(&self, selector: &str) -> bool {
         self.direct_call_eligible
             .get(&self.class_name())
             .is_some_and(|info| info.selectors.contains(selector))

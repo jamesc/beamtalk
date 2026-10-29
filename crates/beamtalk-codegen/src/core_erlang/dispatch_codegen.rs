@@ -1814,9 +1814,7 @@ impl CoreErlangGenerator {
     /// `ClassSelf`, which the callee may read.
     fn sibling_class_self_arg(&self, selector: &str) -> &'static str {
         if self.current_class_method_is_direct_called()
-            && self
-                .direct_call_eligible_module(&self.class_name(), selector)
-                .is_some()
+            && self.is_own_direct_called_class_method(selector)
         {
             DIRECT_CLASS_SELF_PARAM
         } else {
@@ -3256,19 +3254,36 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// The `direct_call_eligible` entry a send to the class *reference*
+    /// `class_name` may pin, or `None` when the name is shadowed
+    /// ([`Self::is_shadowed_class`], BT-4271): a shadowed name is one
+    /// last-wins runtime class, so the compile-time package's module is not
+    /// necessarily the one a dynamic send reaches. The single gate behind
+    /// [`Self::direct_call_eligible_module`] and [`Self::direct_new0_module`].
+    fn class_reference_direct_call_info(
+        &self,
+        class_name: &str,
+    ) -> Option<&super::generator::DirectCallClassInfo> {
+        if self.is_shadowed_class(class_name) {
+            return None;
+        }
+        self.direct_call_eligible.get(class_name)
+    }
+
     /// Shared `direct_call_eligible` gate — returns the target module name
-    /// when `class_name`/`raw_selector` is eligible for the sealed-class
-    /// direct-call optimization (no class variables, no `gen_server`
-    /// round-trip needed). Used by every direct-call gate check
-    /// (`generate_binding_aware_class_send`, `generate_workspace_class_send`,
-    /// `generate_class_method_call`) instead of each repeating the same
-    /// `.get(class_name)` / `.selectors.contains(...)` lookup.
+    /// when a send of `raw_selector` to the class reference `class_name` is
+    /// eligible for the sealed-class direct-call optimization (no class
+    /// variables, no `gen_server` round-trip needed, name not shadowed).
+    /// Used by every class-reference direct-call gate check
+    /// (`generate_repl_bound_class_send`, `generate_class_method_call`)
+    /// instead of each repeating the same lookup.
     fn direct_call_eligible_module(&self, class_name: &str, raw_selector: &str) -> Option<String> {
-        self.direct_call_eligible.get(class_name).and_then(|info| {
-            info.selectors
-                .contains(raw_selector)
-                .then(|| info.module_name.to_string())
-        })
+        self.class_reference_direct_call_info(class_name)
+            .and_then(|info| {
+                info.selectors
+                    .contains(raw_selector)
+                    .then(|| info.module_name.to_string())
+            })
     }
 
     /// Module for a direct nullary-`new` call, if eligible.
@@ -3277,8 +3292,7 @@ impl CoreErlangGenerator {
     /// for the `new` constructor, which cannot live in `selectors` (its
     /// direct form takes no `ClassSelf` argument).
     fn direct_new0_module(&self, class_name: &str) -> Option<String> {
-        self.direct_call_eligible
-            .get(class_name)
+        self.class_reference_direct_call_info(class_name)
             .and_then(|info| info.direct_new0.then(|| info.module_name.to_string()))
     }
 
