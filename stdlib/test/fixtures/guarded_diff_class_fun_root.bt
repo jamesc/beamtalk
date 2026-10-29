@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298: the ancestor the class-side differential rows install an ADR 0084
+// runtime class-method fun on (shadowing `viaRuntimeFun`). A class of its own,
+// so the installed fun cannot leak into the other rows.
+
+Object subclass: GuardedDiffClassFunRoot
+
+  class viaRuntimeFun -> Symbol => #compiled

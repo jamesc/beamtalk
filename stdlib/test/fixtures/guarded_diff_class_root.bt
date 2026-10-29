@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298 (ADR 0142 Phase 0): an open, stateless class whose class methods
+// the class-side differential rows send (class_dispatch_differential_test.bt),
+// directly and through its stateless subclass GuardedDiffClassLeaf. On main
+// every one of these runs in the class process; ADR 0142 moves them into the
+// caller, and the rows must not see a difference.
+
+Object subclass: GuardedDiffClassRoot
+
+  class rootName -> Symbol => #root
+
+  class double: n :: Integer -> Integer => n * 2
+
+  class add: a :: Integer and: b :: Integer -> Integer => a + b
+
+  // Overridden by GuardedDiffClassLeaf.
+  class describe -> String => "root"
+
+  // Answers which class received the send: an inherited method sees the
+  // subclass as `self`.
+  class receiverName -> Symbol => self name
+
+  class boom -> Integer => self error: "class boom"
+
+  // Runs `aBlock` on each element in whichever process runs this method.
+  // A block that sends back to this class re-enters it: on main that is the
+  // class process calling itself, which raises `dispatch_error`.
+  class each: items :: List do: aBlock :: Block -> List =>
+    items collect: [:x | aBlock value: x]
+
+  // Shadowed by a class-side extension (class_dispatch_differential_test.bt).
+  class shadowedByExtension -> Symbol => #compiled

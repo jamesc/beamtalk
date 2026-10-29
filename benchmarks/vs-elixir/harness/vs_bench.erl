@@ -73,6 +73,12 @@ rows() ->
         {"3c", dispatch, "class method, open class / Mod.fun(arg)", 50000, 'openClassMethod:', none, [
             {remote_call, none}
         ]},
+        {"3d", dispatch, "class method, class in a variable / mod.fun(arg)", 50000,
+            'dynClassMethod:c:', math_class, [{dyn_remote_call, math_class}, {remote_call, none}]},
+        {"3e", dispatch, "inherited class method, open stateless subclass / Mod.fun(arg)", 50000,
+            'inheritedClassMethod:', none, [{remote_call, none}]},
+        {"3f", dispatch, "class method, class with classState: / Mod.fun(arg)", 50000,
+            'statefulClassMethod:', none, [{remote_call, none}]},
         {"4a", dispatch, "untyped receiver: o x / o.x", 200000, 'dynGetter:o:', point, [
             {getter_dot, point}
         ]},
@@ -185,6 +191,7 @@ fixtures() ->
         dict => {Bt(dict), ?EX:dict()},
         string => {Bt(string), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
+        math_class => {Bt(openMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -468,6 +475,12 @@ compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoi
 compiles_to("3a") -> "direct call Mod:'class_double:'(nil, 21)";
 compiles_to("3b") -> "whereis_class + class_send: not `class sealed`, so gen_server:call into the class process";
 compiles_to("3c") -> "whereis_class + class_send: gen_server:call into the class process";
+compiles_to("3d") ->
+    "send(C, 'double:', [21]) -> class_send: gen_server:call into the class process (BT-4300: in the caller)";
+compiles_to("3e") ->
+    "whereis_class + class_send: gen_server:call into the subclass's process, inherited lookup there";
+compiles_to("3f") ->
+    "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";

@@ -76,3 +76,15 @@ abstract TestCase subclass: DispatchDifferentialCase
       dynamic value: receiver
     ])
     direct
+
+  // One class-side row (BT-4298, ADR 0142): `literal` is a zero-argument
+  // block that sends to a class named in the source (the literal-receiver
+  // path); `dynamic` is a one-argument block that sends the same message to
+  // `cls`, a class held in a variable (a dynamic `class_send`). Both must
+  // give the same outcome; `label` names the row. Answers the outcome.
+  classSend: label :: Symbol literal: literal :: Block dynamic: dynamic :: Block on: cls -> List =>
+    direct := self outcomeOf: literal
+    self assert: #(label, direct) equals: #(label, self outcomeOf: [
+      dynamic value: cls
+    ])
+    direct

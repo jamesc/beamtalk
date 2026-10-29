@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298 (ADR 0142 §1, rule 2): a class with class variables. Its class
+// methods touch its own variables, so they always run in its class process.
+// GuardedDiffClassForgot inherits them without redeclaring the variable.
+
+Object subclass: GuardedDiffClassStateful
+  classState: hits :: Integer = 0
+
+  class peek -> Integer => self.hits
+
+  class bump -> Integer =>
+    self.hits := self.hits + 1
+    self.hits

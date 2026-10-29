@@ -44,6 +44,8 @@ sealed Object subclass: VbBench
 
   class tuple -> Tuple => Tuple withAll: #(1, 2)
 
+  class openMathClass => VbOpenMath
+
   // === Loop overhead ===
   class baseline: n :: Integer -> Integer =>
     last := 0
@@ -96,6 +98,25 @@ sealed Object subclass: VbBench
   class openClassMethod: n :: Integer -> Integer =>
     last := 0
     n timesRepeat: [last := VbOpenMath double: 21]
+    last
+
+  // ADR 0142 baselines (BT-4298, epic BT-4297): a dynamic class send from a
+  // variable (BT-4300 moves it into the caller), an inherited class method
+  // on a stateless subclass, and a class with class state (stays in its
+  // class process: the control).
+  class dynClassMethod: n :: Integer c: c -> Object =>
+    last := 0
+    n timesRepeat: [last := c double: 21]
+    last
+
+  class inheritedClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbOpenMathSub double: 21]
+    last
+
+  class statefulClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbStatefulMath double: 21]
     last
 
   // === 4. Dynamic send, receiver of unknown static type ===
