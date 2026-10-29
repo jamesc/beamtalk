@@ -1390,6 +1390,14 @@ fn check_body(
 ///   write); at the REPL, when it reads any binding (a later input may assign
 ///   it). A block that reads only its own parameters and locals, or locals
 ///   written only before it, is measured right.
+///
+///   Conservative: every block that is not a [`local_threading_construct`]
+///   body counts as escaping, consistent with ADR 0133 (a block passed to a
+///   user method escapes). So `t := 0. self withFallback: [^t]. t := 5` is
+///   rejected even when `withFallback:` runs the block before it returns and
+///   the `^` would answer right; at the REPL, so is any such block that reads
+///   a workspace binding. Narrowing to blocks that really escape is out of
+///   scope here (it would use `escape_sites`).
 /// - **A `^` in a REPL loop or fold body** (a block a loop or collection
 ///   operation runs in place, [`local_threading_construct`]) is ignored: the
 ///   loop runs on and the expression answers the loop's own value
@@ -1474,8 +1482,10 @@ impl StaleReturnScan<'_> {
                         format!(
                             "a block that returns non-locally (`^`) and is not run where it is \
                              written reads {what} `{name}`, but {why}: the block keeps the value \
-                             `{name}` had when it was created, so its `^` would answer a stale \
-                             `{name}` (BT-4003)"
+                             `{name}` had when it was created, so if it runs later its `^` may \
+                             answer a stale `{name}`. This is rejected conservatively because \
+                             the block escapes, even where it is in fact run before the \
+                             assignment (BT-4003)"
                         ),
                         block.span,
                     )
@@ -1741,7 +1751,9 @@ fn report_nlr_out_of_ensure(
                         ),
                         AbruptExit::Error => format!(
                             "assign `{name}` after the `ensure:`, or move what may raise \
-                             before the assignment"
+                             before the assignment (the check is conservative: any send after \
+                             the write counts, even one an `on:do:` inside the protected block \
+                             catches)"
                         ),
                     };
                     diagnostics.push(
@@ -1956,6 +1968,11 @@ fn nlr_dropped_local(
 /// iteration runs after a write of this one), each arm of a conditional or
 /// lookup from the state before it, and the blocks of the other constructs in
 /// order. Any other block literal is a closure, whose body does not run here.
+///
+/// This over-approximates: a raise that an `on:do:` inside the protected block
+/// catches still counts, so `[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure:
+/// [log record: t]` is rejected though the cleanup would see 9. Documented in
+/// ADR 0133 § Consequences and the language reference rather than modelled.
 fn raise_after_write(protected: &Block, tracked: &BTreeSet<EcoString>) -> Option<EcoString> {
     let mut scan = RaiseScan {
         tracked,
@@ -3564,6 +3581,10 @@ impl<'d> Walker<'d> {
         let Some(row) = residual_denied(Residual::StateFoldOperandInFold, self.context) else {
             return;
         };
+        // Conservative: this asks whether *any* enclosing container is a loop or
+        // fold body, not the innermost one, so it also rejects a fold that is an
+        // operand inside a stored closure sitting in a `do:` body (whose body
+        // does not run per iteration of that `do:`).
         if !self.containers.iter().any(|c| {
             matches!(
                 c,

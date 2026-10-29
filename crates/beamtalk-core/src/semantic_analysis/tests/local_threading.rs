@@ -4665,6 +4665,9 @@ fn bt4003_an_ensure_protected_block_that_may_raise_after_a_write_is_rejected() {
         "[true ifTrue: [t := 1]. t printString] ensure: [t printString]\nt",
         "[t := 1. [3] ensure: [4]] ensure: [t printString]\nt",
         "[t := 1. #(1, 2) match: [_ -> 0]] ensure: [t printString]\nt",
+        // BT-4248: conservative. A raise an inner `on:do:` catches still
+        // counts, though the cleanup would see 9.
+        "[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure: [t printString]\nt",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -4681,6 +4684,7 @@ fn bt4003_an_ensure_protected_block_that_may_raise_after_a_write_is_rejected() {
                 e.hint
                     .as_deref()
                     .is_some_and(|h| h.contains("after the `ensure:`")
+                        && h.contains("the check is conservative")
                         && h.contains("do not read `t` in the cleanup")),
                 "{:?}",
                 e.hint
@@ -4734,6 +4738,9 @@ fn bt4003_a_returning_closure_that_reads_a_local_assigned_later_is_rejected() {
         "b := [:x | t > 0 ifTrue: [^t]. x]\nt := 5\nb value: 1",
         "#(1, 2) do: [:x | CvA ap: [^t]. t := t + x]\n0",
         "[t < 3] whileTrue: [t := t + 1. CvA ap: [^t]]\n0",
+        // BT-4248: conservative. A block passed to a user method counts as
+        // escaping (ADR 0133) even if the method runs it before returning.
+        "CvA ap: [^t]\nt := 5\n0",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -4743,6 +4750,13 @@ fn bt4003_a_returning_closure_that_reads_a_local_assigned_later_is_rejected() {
             assert!(e.message.contains("returns non-locally"), "{}", e.message);
             assert!(e.message.contains("`t`"), "{}", e.message);
             assert!(e.message.contains("BT-4003"), "{}", e.message);
+            // BT-4248: the stale answer is not stated as a certainty.
+            assert!(e.message.contains("may answer a stale"), "{}", e.message);
+            assert!(
+                e.message.contains("rejected conservatively"),
+                "{}",
+                e.message
+            );
         }
     }
     let accepted = [
