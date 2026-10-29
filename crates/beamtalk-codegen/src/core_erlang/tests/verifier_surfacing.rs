@@ -55,10 +55,14 @@ fn only_verifier_diagnostics_are_forwarded() {
     let verifier = Diagnostic::warning("internal: x", Span::new(0, 1))
         .with_category(DiagnosticCategory::InternalVerifier);
     let opt_in_hint = Diagnostic::hint("Send 'x': dynamic dispatch (...)", Span::new(0, 1))
+        .with_category(DiagnosticCategory::CodegenReport);
+    // An unconditional hint of another category (e.g. a `trait_expansion`
+    // "provides no methods" hint) is not a codegen report: dropped.
+    let other_hint = Diagnostic::hint("provides no methods", Span::new(0, 1))
         .with_category(DiagnosticCategory::Type);
     let mixed = GeneratedModule {
         code: module.code,
-        warnings: vec![other, verifier.clone(), opt_in_hint.clone()],
+        warnings: vec![other, verifier.clone(), opt_in_hint.clone(), other_hint],
     };
     let (_, forwarded) = mixed.into_code_and_verifier_diagnostics();
     assert_eq!(forwarded, vec![verifier, opt_in_hint]);

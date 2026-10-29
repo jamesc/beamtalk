@@ -118,8 +118,8 @@ pub enum DiagnosticsTableError {
 /// kebab-case for TOML key ergonomics (e.g. `UnresolvedClass` →
 /// `unresolved-class`), except where a word is kept whole
 /// (`HandleInfoNoCatchAll` → `handleinfo-no-catch-all`, after the selector).
-/// Categories that are not user-configurable (`InternalVerifier`, the ADR
-/// 0131 local-threading errors) have no key.
+/// Categories that are not user-configurable (`InternalVerifier`,
+/// `CodegenReport`, the ADR 0131 local-threading errors) have no key.
 const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("dnu", DiagnosticCategory::Dnu),
     ("type", DiagnosticCategory::Type),

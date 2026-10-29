@@ -643,13 +643,13 @@ impl CoreErlangGenerator {
     /// These are informational diagnostics about codegen decisions (calling conventions,
     /// dynamic dispatch, NLR throw/catch, etc.). Emitted as `Diagnostic::hint` by default.
     ///
-    /// Every codegen hint is opt-in like this one: drivers surface codegen
-    /// diagnostics of `Hint` severity (`GeneratedModule::into_code_and_verifier_diagnostics`,
-    /// BT-4292), so a hint emitted unconditionally would reach every build.
+    /// Tagged [`DiagnosticCategory::CodegenReport`], the category drivers
+    /// surface (`GeneratedModule::into_code_and_verifier_diagnostics`,
+    /// BT-4292); only emit it behind the opt-in gate, or it reaches every build.
     pub(in crate::core_erlang) fn emit_codegen_diagnostic(&mut self, message: String, span: Span) {
         if self.codegen_diagnostics_enabled {
             self.add_codegen_warning(
-                Diagnostic::hint(message, span).with_category(DiagnosticCategory::Type),
+                Diagnostic::hint(message, span).with_category(DiagnosticCategory::CodegenReport),
             );
         }
     }

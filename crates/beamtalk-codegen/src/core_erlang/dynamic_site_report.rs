@@ -188,8 +188,8 @@ impl CoreErlangGenerator {
     }
 
     /// The `supervisor` reason when `class` is a `Supervisor` /
-    /// `DynamicSupervisor` (or a subclass): its instances are
-    /// `beamtalk_supervisor` tuples whatever gate stopped the send.
+    /// `DynamicSupervisor` (or a subclass) behind the `NotSealed` gate: its
+    /// instances are `beamtalk_supervisor` tuples.
     fn describe_supervisor_family(&self, class: &str) -> Option<String> {
         let hierarchy = self.class_hierarchy.as_ref()?;
         let root = std::iter::once(class.into())

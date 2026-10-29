@@ -648,9 +648,10 @@ impl CoreErlangGenerator {
     ///    check is exact — and hierarchy stubs fail closed with
     ///    `is_sealed: false`), and `Value`- or `Object`-kind (both are
     ///    `'$beamtalk_class'`-tagged maps with the same dynamic path).
-    /// 3. Its instances really are tagged maps of its own name: not in
-    ///    the routing table ([`routing::is_non_tagged_map_class`]), not a runtime-only builtin without a
-    ///    compiled module (`Future`), and not the `Exception` family (whose
+    /// 3. Its instances really are tagged maps of its own name: not in the
+    ///    routing table ([`routing::is_non_tagged_map_class`]), not a
+    ///    runtime-only builtin without a compiled module (`Future`), and not
+    ///    the `Exception` family (whose
     ///    dynamic sends route via `bt@stdlib@exception:dispatch`, a different
     ///    entry point).
     /// 4. Its ancestry is fully known (`has_cross_file_parent` fails closed —

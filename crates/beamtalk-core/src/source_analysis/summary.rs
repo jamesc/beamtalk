@@ -202,6 +202,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
+        DiagnosticCategory::CodegenReport => "CodegenReport",
     }
 }
 
@@ -439,6 +440,7 @@ mod tests {
                 "UnmigratedLocalThreading",
             ),
             (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
+            (DiagnosticCategory::CodegenReport, "CodegenReport"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);
