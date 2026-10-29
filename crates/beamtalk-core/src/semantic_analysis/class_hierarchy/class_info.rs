@@ -400,7 +400,7 @@ const PROCESS_STATE_CONSTRUCTOR_COUNT: usize = 4;
 ///   above): the `Supervisor`/`DynamicSupervisor` routing selectors, started in
 ///   the caller before `class_send_plain/3` (ADR 0135 §1).
 /// - `runAll`, `runAll:`, `run:`, `run:method:`: the `TestCase` run selectors,
-///   which answer `test_spawn` and need the class gen_server's `noreply`.
+///   which answer `test_spawn` and need the class `gen_server`'s `noreply`.
 const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
     "new",
     "new:",

@@ -76,13 +76,15 @@ reader's view.
   `removeSelector:`, a runtime `put_class_method`, and row removal
   (`beamtalk_class_metadata:delete/1`); a class-variable change erases through
   `set_class_vars/2`. The next send re-derives from the raw flags.
-- Install (`direct_call_ok/2` miss, lazy): outside the lock, cheap pre-check of
-  the raw flags (a permanently shadowed class never takes the lock per send);
-  then under the lock re-check ready and both raw flags and put the key. An
+- Install (`direct_call_ok/2` or `shadow_free/2` miss, lazy): outside the lock,
+  cheap pre-check of the raw flags (a permanently shadowed class never takes the
+  lock per send); then under the lock re-derive from readiness and the raw flags
+  and put the key (`true` or `class_vars`). An
   install that ran before a `set/2` is erased by it; one that runs after sees the
   raw flag and declines. `clear/2` does not touch the derived key: a stale
   "unsafe" only costs the walk until the next send re-installs.
-- The key is never rewritten while `true`, so a send never pays a global scan.
+- The key is never rewritten while present (either value answers both guards
+  without an install), so a send never pays a global scan.
 
 `persistent_term` writes that change a value trigger a global scan, so only
 actual transitions write (set when unset, erase when set); both are rare
