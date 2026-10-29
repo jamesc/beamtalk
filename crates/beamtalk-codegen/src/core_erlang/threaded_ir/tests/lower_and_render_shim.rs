@@ -41,7 +41,7 @@ fn lower_and_render_unpack_renders_maps_get() {
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(
         rendered,
-        "let Sum1 = call 'maps':'get'('__local__sum', Sum) in "
+        "let Sum@1 = call 'maps':'get'('__local__sum', Sum@) in "
     );
 }
 
@@ -56,7 +56,7 @@ fn lower_and_render_direct_renders_plain_let() {
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
-        "let Sum1 = Sum0 in "
+        "let Sum@1 = Sum0 in "
     );
 }
 
@@ -93,7 +93,7 @@ fn lower_and_render_threaded_direct_params_emits_real_letrec() {
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(
         rendered,
-        "letrec '_Loop@1'/1 = fun (Sum) -> let Sum1 = Sum in \
-         apply '_Loop@1'/1 (Sum1) in apply '_Loop@1'/1 (Sum)"
+        "letrec '_Loop@1'/1 = fun (Sum@) -> let Sum@1 = Sum@ in \
+         apply '_Loop@1'/1 (Sum@1) in apply '_Loop@1'/1 (Sum@)"
     );
 }

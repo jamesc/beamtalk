@@ -60,7 +60,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
     let mut legacy_gen = CoreErlangGenerator::new("dual_run_conditional_loop_direct");
     let cond_doc = docvec![
         "call 'erlang':'<'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(10),
         ")",
@@ -71,7 +71,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         "let ",
         leaf::var(sum_rebind.clone()),
         " = call 'erlang':'+'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(1),
         ") in ",
@@ -83,7 +83,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         " = call 'maps':'put'(",
         leaf::atom("__local__sum"),
         ", ",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", State) in {'nil', ",
         leaf::var(exit_sa),
         "} end ",
@@ -92,7 +92,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         "letrec ",
         leaf::fname("while", 1),
         " = fun (",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ") -> ",
         continue_header,
         body,
@@ -105,7 +105,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         "in apply ",
         leaf::fname("while", 1),
         " (",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ")",
     ]
     .to_pretty_string();
@@ -120,7 +120,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
     let mut render_gen = CoreErlangGenerator::new("dual_run_conditional_loop_direct");
     let ir_cond_doc = docvec![
         "call 'erlang':'<'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(10),
         ")",
@@ -132,7 +132,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
     let sum_v1 = VersionedVar::new(VersionPrefix::Gensym(ir_sum_rebind), 1, frame);
     let value_doc = docvec![
         "call 'erlang':'+'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(1),
         ")",
@@ -150,7 +150,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         " = call 'maps':'put'(",
         leaf::atom("__local__sum"),
         ", ",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", State) in {'nil', ",
         leaf::var(ir_exit_sa),
         "} end ",
@@ -205,7 +205,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
                 "let ",
                 leaf::var(sd_var.clone()),
                 " = call 'test':'safe_dispatch'('bumpCount', [], ",
-                leaf::var("Sum"),
+                leaf::var("Sum@"),
                 ") in ",
             ],
             span(),
@@ -232,7 +232,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
         source: sum_v0.clone(),
         op: BindOp::Direct(ValueRef::Doc(docvec![
             "call 'erlang':'+'(",
-            leaf::var("Sum"),
+            leaf::var("Sum@"),
             ", 1)",
         ])),
         span: span(),
@@ -258,7 +258,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
     let rendered_doc = render(&ir, &mut ctx).to_pretty_string();
 
     assert!(
-        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum) -> let _SD@1"),
+        rendered_doc.starts_with("letrec 'while'/1 = fun (Sum@) -> let _SD@1"),
         "the condition's own prelude must render INSIDE the loop's fun, \
          before the case. Got:\n{rendered_doc}"
     );
@@ -294,7 +294,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
     legacy_gen.in_loop_body = true;
     let cond_doc = docvec![
         "call 'erlang':'<'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(10),
         ")"
@@ -307,7 +307,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         "let ",
         leaf::var(sum_rebind.clone()),
         " = call 'erlang':'+'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(1),
         ") in ",
@@ -327,7 +327,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         " = call 'maps':'put'(",
         leaf::atom("__local__sum"),
         ", ",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", State) in {'nil', ",
         leaf::var(exit_sa),
         "} end ",
@@ -336,7 +336,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         "letrec ",
         leaf::fname("while", 1),
         " = fun (",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ") -> ",
         continue_header,
         body,
@@ -349,7 +349,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         "in apply ",
         leaf::fname("while", 1),
         " (",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ")",
     ]
     .to_pretty_string();
@@ -357,7 +357,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
     let mut render_gen = CoreErlangGenerator::new("dual_run_conditional_loop_hybrid");
     let ir_cond_doc = docvec![
         "call 'erlang':'<'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(10),
         ")"
@@ -369,7 +369,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
     let sum_v1 = VersionedVar::new(VersionPrefix::Gensym(ir_sum_rebind), 1, frame);
     let value_doc = docvec![
         "call 'erlang':'+'(",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", ",
         leaf::int_lit(1),
         ")",
@@ -399,7 +399,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         " = call 'maps':'put'(",
         leaf::atom("__local__sum"),
         ", ",
-        leaf::var("Sum"),
+        leaf::var("Sum@"),
         ", State) in {'nil', ",
         leaf::var(ir_exit_sa),
         "} end ",
@@ -512,7 +512,7 @@ fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
     // fails this assertion.
     let mut legacy_gen = CoreErlangGenerator::new("dual_run_nlr");
     let legacy_token = legacy_gen.fresh_temp_var("NlrToken");
-    let inner_body = docvec!["let ", leaf::var("Sum1"), " = ", leaf::var("Sum"), " in "];
+    let inner_body = docvec!["let ", leaf::var("Sum@1"), " = ", leaf::var("Sum@"), " in "];
     let legacy_doc = legacy_gen
         .wrap_body_with_nlr_catch(inner_body, &legacy_token, NlrBoundary::ActorReply)
         .to_pretty_string();
