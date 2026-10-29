@@ -62,6 +62,14 @@ const ROWS: &[(&str, &str)] = &[
         "[[:y | t := y] value: 5] on: Error do: [:e | 0]\nt",
     ),
     ("nested", "[:a | [:y | t := t + y] value: a] value: 5\nt"),
+    // The re-bind after the parameter scope pop rebinds only outer locals: a
+    // parameter that shadows `t` is the block's own binding, never in the
+    // rebound set, so the outer `t` keeps 0 while `u` gets the parameter's
+    // 9 (`argParamShadows` answers `#[0, 9]`).
+    (
+        "parameter shadows",
+        "u := 0\n[:t | t := 9. u := t] value: 1\n#[t, u]",
+    ),
 ];
 
 /// `body` as the probe method of a class (class side), value type or actor,
@@ -92,6 +100,23 @@ fn every_repro_row_compiles_through_the_verifier_and_erlc_in_every_context() {
                 assert_compiles_through_erlc("test", &codegen(&src));
             }
         }
+    }
+}
+
+/// The parameter that shadows the outer `t` never enters the threaded set: the
+/// producer packs and rebinds `u` only, in every context, so the re-bind
+/// after the parameter scope pop cannot point the outer `t` at the
+/// parameter's value.
+#[test]
+fn a_parameter_that_shadows_an_outer_local_is_not_rebound() {
+    let body = "u := 0\n[:t | t := 9. u := t] value: 1\n#[t, u]";
+    for src in sources(body) {
+        let code = codegen(&src);
+        assert!(code.contains("'__local__u'"), "u is not threaded:\n{code}");
+        assert!(
+            !code.contains("'__local__t'"),
+            "the shadowing parameter t was threaded as the outer local:\n{code}"
+        );
     }
 }
 

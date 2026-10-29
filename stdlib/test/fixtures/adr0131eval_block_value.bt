@@ -531,3 +531,15 @@ Value subclass: Adr0131EvalBlockValue
         ] on: Error do: [:e | 4 > 3 ifTrue: [[:v | t := t + v] value: 1]]
       ]
     t
+
+  argParamShadows =>
+    t := 0
+    u := 0
+    // The parameter shadows `t` on purpose (BT-4263): it is the block's own
+    // binding, never the outer local the producer rebinds.
+    @expect all
+    [:t |
+      t := 9
+      u := t
+    ] value: 1
+    #[t, u]

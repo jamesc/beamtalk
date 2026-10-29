@@ -248,3 +248,6 @@ TestCase subclass: Adr0131EvalBlockTest
 
   testArgThreeDeepHandler =>
     self assert: #[Adr0131EvalBlockClass argThreeDeepHandler, (Adr0131EvalBlockValue new) argThreeDeepHandler, (Adr0131EvalBlockActor spawn) argThreeDeepHandler] equals: #[2, 2, 2]
+
+  testArgParamShadows =>
+    self assert: #[Adr0131EvalBlockClass argParamShadows, (Adr0131EvalBlockValue new) argParamShadows, (Adr0131EvalBlockActor spawn) argParamShadows] equals: #[#[0, 9], #[0, 9], #[0, 9]]
