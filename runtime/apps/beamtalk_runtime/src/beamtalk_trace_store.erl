@@ -716,6 +716,12 @@ code_change(OldVsn, State, Extra) ->
     %% Ensure new ETS tables exist after live upgrade (old aggregate tables
     %% are reset by ensure_ets_tables/0).
     ensure_ets_tables(),
+    %% BT-4113: drop the pre-BT-4113 dispatch handlers and derive the
+    %% dispatch-events flag, which older code never wrote. Without this an
+    %% upgrade with tracing on records no dispatch trace events until the
+    %% next refresh. Runs inline: this is the trace store's own process.
+    lists:foreach(fun beamtalk_telemetry:detach_handler/1, retired_telemetry_handler_ids()),
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
     beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
 
 -doc """

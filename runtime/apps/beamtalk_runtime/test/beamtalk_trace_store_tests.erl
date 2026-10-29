@@ -2639,6 +2639,40 @@ upgrade_resets_aggregates_test_() ->
             end)}
     end}.
 
+upgrade_refreshes_dispatch_flag_test_() ->
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        {"code_change derives the dispatch-events flag and drops retired handlers (BT-4113)",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                %% Simulate pre-BT-4113 code: the flag was never written and
+                %% the old dispatch handler is still attached.
+                persistent_term:erase(beamtalk_dispatch_events),
+                ok = telemetry:attach(
+                    beamtalk_trace_store_dispatch_stop,
+                    [beamtalk, actor, dispatch, stop],
+                    fun(_, _, _, _) -> ok end,
+                    #{}
+                ),
+                ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+                StorePid = whereis(beamtalk_trace_store),
+                ok = sys:suspend(StorePid),
+                try
+                    ?assertEqual(ok, sys:change_code(StorePid, beamtalk_trace_store, "2", []))
+                after
+                    ok = sys:resume(StorePid)
+                end,
+                ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+                ?assertEqual(
+                    [],
+                    [
+                        H
+                     || #{id := beamtalk_trace_store_dispatch_stop} = H <-
+                            telemetry:list_handlers([beamtalk, actor, dispatch, stop])
+                    ]
+                )
+            end)}
+    end}.
+
 %%====================================================================
 %% Test: Free-list contention under concurrent churn
 %%====================================================================
