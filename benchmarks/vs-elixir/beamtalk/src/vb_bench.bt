@@ -276,6 +276,11 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := p isKindOf: VbPoint]
     last
 
+  class isKindOfBuiltin: n :: Integer s: s :: String -> Boolean =>
+    last := false
+    n timesRepeat: [last := s isKindOf: String]
+    last
+
   // === 13. FFI calls (BT-4153) ===
   class ffiInt: n :: Integer a: a :: Integer -> Integer =>
     last := 0

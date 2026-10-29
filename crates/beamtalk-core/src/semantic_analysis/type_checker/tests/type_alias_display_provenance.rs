@@ -600,6 +600,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -704,6 +705,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
             doc: None,
 
             origin: None,
+            primitive: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

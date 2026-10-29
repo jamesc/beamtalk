@@ -200,10 +200,7 @@ const CEILINGS: &[(&str, usize)] = &[
 ];
 
 fn crates_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crate dir has a parent")
-        .to_path_buf()
+    super::repo_root().join("crates")
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {

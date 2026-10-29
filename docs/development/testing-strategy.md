@@ -34,7 +34,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 just test-rust           # fast tier: cargo-nextest over every test binary (minus the corpus tier) + doctests
 just test-benches-smoke  # criterion benches in test mode, one pass each (~5 min serial); nightly only, not in `ci` (BT-3886)
-just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~10 min); `ci-changed` and CI run it only when compiler crates change
+just test-corpus         # slow tier: the state-threading agreement/corpus proofs (~10 min); `ci-changed` and CI run it only when the compiler crates, `stdlib/`, `examples/` or the runtime's shared test fixtures change (`scripts/ci/corpus-gate.sh`)
 just test-stdlib         # Bootstrap expression tests (fast, ~14s)
 just test-bunit          # BUnit TestCase tests (grows continuously — see "BUnit Tests" below for a count command)
 just test-parity         # Cross-surface parity tests (BT-2077, ~30s)

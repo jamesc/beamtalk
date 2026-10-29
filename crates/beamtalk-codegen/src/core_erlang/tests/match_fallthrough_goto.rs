@@ -18,8 +18,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
-use super::control_flow::family_detector_differential::{collect_source_files, repo_root};
-use super::{CodegenOptions, codegen, erlc_available, generate_module};
+use super::{CodegenOptions, codegen, corpus_files, erlc_available, generate_module, repo_root};
 
 /// Erlang side of the tests: `check/1` counts a Core module's `letrec_goto`
 /// labels and lists every apply of one that is not in tail position of its
@@ -409,20 +408,20 @@ fn binary_and_array_gotos_answer_every_arm() {
 /// applied only in tail position: the rule checked over every real
 /// `match:`, not just the shapes above.
 #[test]
-fn corpus_goto_labels_are_applied_in_tail_position() {
+fn goto_labels_are_applied_in_tail_position_over_the_corpus() {
     let Some(dir) = harness_dir() else {
         return;
     };
     let root = repo_root();
-    let mut sources = Vec::new();
-    for corpus_dir in [
-        "stdlib/src",
-        "stdlib/test",
-        "stdlib/bootstrap-test",
-        "examples",
-    ] {
-        collect_source_files(&root.join(corpus_dir), &mut sources);
-    }
+    let sources = corpus_files(
+        &root,
+        &[
+            "stdlib/src",
+            "stdlib/test",
+            "stdlib/bootstrap-test",
+            "examples",
+        ],
+    );
     let mut core_files = Vec::new();
     for (i, path) in sources.iter().enumerate() {
         let Ok(source) = std::fs::read_to_string(path) else {

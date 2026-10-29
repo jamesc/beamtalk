@@ -34,19 +34,8 @@
 //! `reconcile_declared/7`'s own decision logic, fails in CI rather than
 //! silently reconciling a `late` slot wrong.
 
+use super::repo_root;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-
-/// Returns the repository root (`CARGO_MANIFEST_DIR/../..`), mirroring the
-/// `repo_root` helper in `source_analysis::method_span_corpus_tests`.
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
-}
 
 /// Compile `source_fixture` (a path relative to the repo root) and return
 /// its generated Core Erlang text.

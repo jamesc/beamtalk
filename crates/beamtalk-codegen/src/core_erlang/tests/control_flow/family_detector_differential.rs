@@ -58,39 +58,6 @@ fn expected_mismatches() -> Vec<Mismatch> {
     Vec::new()
 }
 
-/// Recursively collects every `.bt`/`.btscript` file under `dir`.
-pub(in crate::core_erlang::tests) fn collect_source_files(
-    dir: &std::path::Path,
-    out: &mut Vec<std::path::PathBuf>,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<std::fs::DirEntry> = entries.filter_map(std::result::Result::ok).collect();
-    entries.sort_by_key(std::fs::DirEntry::path);
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_source_files(&path, out);
-        } else if matches!(
-            path.extension().and_then(std::ffi::OsStr::to_str),
-            Some("bt" | "btscript")
-        ) {
-            out.push(path);
-        }
-    }
-}
-
-/// Repo root, derived from this crate's own manifest directory rather than
-/// the test process's current directory (which `cargo test` does not
-/// guarantee is the workspace root).
-pub(in crate::core_erlang::tests) fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("beamtalk-codegen must be two directories below the repo root")
-}
-
 /// The 1-based source line containing byte offset `at`.
 #[allow(
     clippy::naive_bytecount,
@@ -108,10 +75,10 @@ fn line_at(source: &str, at: u32) -> u32 {
 #[test]
 fn family_detector_agrees_with_old_loop_detectors_over_the_corpus() {
     let root = repo_root();
-    let mut files = Vec::new();
-    for corpus_dir in ["stdlib/src", "stdlib/test", "stdlib/bootstrap-test"] {
-        collect_source_files(&root.join(corpus_dir), &mut files);
-    }
+    let files = corpus_files(
+        &root,
+        &["stdlib/src", "stdlib/test", "stdlib/bootstrap-test"],
+    );
     assert!(
         files.len() > 100,
         "expected hundreds of corpus files under stdlib/{{src,test,bootstrap-test}}, \

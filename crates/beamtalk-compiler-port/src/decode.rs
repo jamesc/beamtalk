@@ -301,6 +301,7 @@ pub(crate) fn parse_method_infos_from_map(
                 // live BEAM metadata loses its flattened methods' `origin`
                 // until then.
                 origin: None,
+                primitive: None,
             })
         })
         .collect()

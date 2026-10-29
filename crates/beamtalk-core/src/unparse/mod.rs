@@ -724,7 +724,9 @@ pub(crate) fn unparse_standalone_method_definition(
     } else {
         Document::Str(" >> ")
     };
-    docvec![class, separator, unparse_method_definition(&smd.method)]
+    // The target goes on the signature line, after the method's leading
+    // comments and doc comment — not in front of them (BT-4253).
+    unparse_method_definition_with_prefix(&smd.method, docvec![class, separator])
 }
 
 /// Builds a [`Document`] for a [`TypeAliasDefinition`] (ADR 0108 Phase 1).
