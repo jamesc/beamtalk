@@ -121,9 +121,9 @@ impl CoreErlangGenerator {
                 .map(|h| h.resolve_class_kind(class))
         });
         let reason = match self.typed_sealed_send_target(receiver, selector) {
-            // Unreachable from the dynamic fallthrough (the handler would
-            // have claimed the send); kept total for other callers.
-            Ok(_) => "converted — a guarded direct call applies".to_string(),
+            // The `typed_sealed` handler would have claimed this send had it
+            // reached `HANDLERS`; a dynamic send here came another way.
+            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_sealed handler".to_string(),
             Err(gate) => self.describe_gate(&gate, class_name, kind, selector.name().as_str()),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))

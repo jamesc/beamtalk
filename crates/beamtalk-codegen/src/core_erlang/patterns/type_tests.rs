@@ -684,7 +684,11 @@ impl CoreErlangGenerator {
     /// no class — no `'$beamtalk_class'` tag (a `maps:get/3` default of
     /// `'undefined'`, the same test [`Self::wrap_class_tag_test`] uses) **and**
     /// no `'__class_mod__'` key, which `class_of/1` honours for a migrated
-    /// compiled actor's state (BT-4292). `success` is emitted once.
+    /// compiled actor's state (BT-4292). Conservative by one edge: a
+    /// `'__class_mod__'` naming a module without `class_name/0` still
+    /// dispatches as a `Dictionary` at run time but fails this test, so a
+    /// guard built on it only misses (never mis-targets). `success` is
+    /// emitted once.
     fn wrap_untagged_map_test(
         &mut self,
         match_var: &str,

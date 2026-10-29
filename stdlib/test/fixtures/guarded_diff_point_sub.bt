@@ -5,4 +5,5 @@
 // Its tag names the subclass, so a guard on GuardedDiffPoint misses it.
 
 GuardedDiffPoint subclass: GuardedDiffPointSub
+
   sum -> Integer => 1000 + self x + self y

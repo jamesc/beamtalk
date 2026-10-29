@@ -65,35 +65,14 @@ abstract TestCase subclass: DispatchDifferentialCase
           to: receiver
       ]
 
-  // Send rows: each is `#(label, typed, dynamic, receiver)`. `typed` is a
-  // one-argument block whose parameter is annotated, so the send in it is
-  // compiled with that static receiver type (a guarded direct call once one
-  // applies); `dynamic` is its untyped twin. Both run on `receiver`; the
-  // label rides along in the comparison, so a failure names its row.
-  assertSendRows: rows :: List =>
-    rows do: [:row |
-      receiver := row at: 4
-      typed := self outcomeOf: [(row at: 2) value: receiver]
-      dyn := self outcomeOf: [(row at: 3) value: receiver]
-      self assert: #(row first, typed) equals: #(row first, dyn)
-    ]
-
-  // Arm rows: each is `#(selector, args)`, run on `receiver` through
-  // `module`'s `dispatch/3` and through the dynamic send.
-  assertArmRows: rows :: List on: receiver in: module :: Symbol =>
-    rows do: [:row |
-      direct := self outcomeOf: [
-        self
-          rawDispatch: row first
-          args: (row at: 2)
-          to: receiver
-          in: module
-      ]
-      dyn := self outcomeOf: [
-        self
-          dynamic: row first
-          args: (row at: 2)
-          to: receiver
-      ]
-      self assert: #(row first, direct) equals: #(row first, dyn)
-    ]
+  // One send row: `typed` is a one-argument block whose parameter is
+  // annotated, so the send in it compiles with that static receiver type (a
+  // guarded direct call once one applies); `dynamic` is its untyped twin.
+  // Both run on `receiver` and must give the same outcome; `label` rides
+  // along in the comparison, so a failure names its row. Answers the outcome.
+  send: label :: Symbol typed: typed :: Block dynamic: dynamic :: Block on: receiver -> List =>
+    direct := self outcomeOf: [typed value: receiver]
+    self assert: #(label, direct) equals: #(label, self outcomeOf: [
+      dynamic value: receiver
+    ])
+    direct

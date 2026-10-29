@@ -90,7 +90,7 @@ TestCase subclass: TypePatternMatchTest
   // `'__class_mod__'` key, so such a map is not a Dictionary (the routing
   // fixture's `untagged_map` guard).
   testClassModMapDoesNotMatchDictionaryPattern =>
-    m := #{#'__class_mod__' => #'bt@type_pattern_actor_fixture', #k => 1}
+    m := #{#__class_mod__ => #'bt@type_pattern_actor_fixture', #k => 1}
     self
       assert: (m match: [
         d :: Dictionary -> #wasDictionary;

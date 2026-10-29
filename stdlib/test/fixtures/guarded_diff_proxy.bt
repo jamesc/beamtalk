@@ -7,4 +7,5 @@
 Value subclass: GuardedDiffProxy
   field: tag :: Symbol = #proxy
 
-  doesNotUnderstand: selector args: arguments => #(#proxied, selector, arguments)
+  doesNotUnderstand: selector args: arguments =>
+    #(#proxied, selector, arguments)
