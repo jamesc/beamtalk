@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4247: a user variable spelled like a hand-written compiler name
+// (`_Unit`, `_Result`, `_ExtArgs`, ...) keeps its own value. A block body
+// used to discard a statement's value as `let _Unit = ... in`, so a user
+// `_Unit` read after that statement answered the discarded value instead.
+
+TestCase subclass: HandWrittenNameShadowingTest
+
+  testBlockDiscardDoesNotShadowUserUnit =>
+    self
+      assert: ([:y |
+        _Unit := y
+        y + 1
+        _Unit
+      ] value: 5)
+      equals: 5
+
+  testBlockDiscardDoesNotShadowOtherNames =>
+    self
+      assert: ([:y |
+        _Result := y
+        y + 1
+        _Result
+      ] value: 6)
+      equals: 6
+    self
+      assert: ([:y |
+        _ExtArgs := y
+        y + 1
+        _ExtArgs
+      ] value: 7)
+      equals: 7
+    self
+      assert: ([:y |
+        _Unit0 := y
+        y + 1
+        _Unit0
+      ] value: 8)
+      equals: 8
+
+  testUserUnitInsideOnDo =>
+    self
+      assert: ([
+        _Unit := 3
+        4 + 1
+        _Unit
+      ] on: Error do: [:e | 0])
+      equals: 3
+
+  testUserUnitInsideEnsure =>
+    self
+      assert: ([
+        _Unit := 9
+        4 + 1
+        _Unit
+      ] ensure: [1 + 1])
+      equals: 9
+
+  testUserUnitInMethodBody =>
+    _Unit := 11
+    _Result := 12
+    self assert: _Unit + _Result equals: 23
