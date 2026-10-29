@@ -41,7 +41,7 @@ that the Behaviour/Class libraries can rely on.
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
 | classClass/1                | Real metaclass object (ADR 0036)                          |
-| classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
+| classDoc/1                  | Class doc string from published metadata (ADR 0033)       |
 | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
 | classDocForMethod/2         | Get method doc string for a selector, or nil               |
@@ -1057,7 +1057,7 @@ The class gen_server stores `none` internally; we return `nil` for Beamtalk.
 -spec classDoc(#beamtalk_object{}) -> beamtalk_string:t() | 'nil'.
 classDoc(Self) ->
     ClassPid = erlang:element(4, Self),
-    case gen_server:call(ClassPid, get_doc) of
+    case class_doc(ClassPid) of
         %% BT-4173: `doc: nil` stores the atom `nil`; unset is `none`.
         none -> nil;
         nil -> nil;
@@ -1067,6 +1067,39 @@ classDoc(Self) ->
         Doc when is_binary(Doc) -> beamtalk_primitive:string_from_binary(Doc)
     end.
 
+%% BT-4262: the class doc from its published metadata row (no message to the
+%% class, so it answers from inside the class's own process and while the
+%% class waits on another one), falling back to asking the class process for
+%% a class that has not published it, or on another node (whose doc this
+%% node's metadata does not hold).
+-spec class_doc(pid()) -> term().
+class_doc(ClassPid) when node(ClassPid) =/= node() ->
+    gen_server:call(ClassPid, get_doc);
+class_doc(ClassPid) ->
+    case beamtalk_object_class:class_name_safe(ClassPid) of
+        undefined ->
+            gen_server:call(ClassPid, get_doc);
+        ClassName ->
+            case beamtalk_class_metadata:lookup_class_doc(ClassName) of
+                {ok, Doc} -> Doc;
+                not_found -> gen_server:call(ClassPid, get_doc)
+            end
+    end.
+
+%% BT-4262: a primitive that changes the receiving class has to message it
+%% (or stop it) to do so, which cannot happen from inside that class's own
+%% process. Refuse up front, with the structured `dispatch_error` every other
+%% send back to the running class raises, before any side effect: otherwise
+%% `removeFromSystem` would stop the class's actors and only then fail on
+%% `gen_server:stop/1`. Reached from a class method's `self removeFromSystem`
+%% (the class-object protocol, BT-4252) or a block sending to its own class
+%% (`beamtalk_class_dispatch:class_send_from_own_process/2`).
+-spec refuse_in_own_class_process(pid(), atom()) -> ok.
+refuse_in_own_class_process(ClassPid, Selector) when ClassPid =:= self() ->
+    beamtalk_class_dispatch:handle_class_self_call(Selector);
+refuse_in_own_class_process(_ClassPid, _Selector) ->
+    ok.
+
 -doc """
 Set the class documentation string.
 
@@ -1075,6 +1108,7 @@ ADR 0033: Post-hoc setter for class-level doc.
 -spec classSetDoc(#beamtalk_object{}, binary()) -> #beamtalk_object{}.
 classSetDoc(Self, DocBinary) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, 'doc:'),
     ok = gen_server:call(ClassPid, {set_doc, DocBinary}),
     Self.
 
@@ -1086,6 +1120,7 @@ ADR 0033: Post-hoc setter for method-level doc.
 -spec classSetMethodDoc(#beamtalk_object{}, atom(), binary()) -> #beamtalk_object{}.
 classSetMethodDoc(Self, Selector, DocBinary) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, 'setDocForMethod:to:'),
     ok = gen_server:call(ClassPid, {set_method_doc, Selector, DocBinary}),
     Self.
 
@@ -1121,6 +1156,7 @@ Delegates to classRemoveFromSystemByName/1 after extracting the class name.
 -spec classRemoveFromSystem(#beamtalk_object{}) -> 'nil'.
 classRemoveFromSystem(Self) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, removeFromSystem),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     classRemoveFromSystemByName(ClassName).
 
@@ -1301,7 +1337,7 @@ when the selector resolves nowhere.
 """.
 -spec classRemoveSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
 classRemoveSelector(Self, Selector) ->
-    case remove_selector(Self, Selector) of
+    case remove_selector(Self, Selector, 'removeSelector:') of
         removed -> Self;
         absent -> beamtalk_error:raise(selector_not_found_error(Self, Selector))
     end.
@@ -1333,7 +1369,7 @@ Returns the receiver on success, or `AbsentBlock`'s value on absence.
 -spec classRemoveSelectorIfAbsent(#beamtalk_object{}, atom(), fun(() -> term())) ->
     #beamtalk_object{} | term().
 classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
-    case remove_selector(Self, Selector) of
+    case remove_selector(Self, Selector, 'removeSelector:ifAbsent:') of
         removed -> Self;
         absent -> AbsentBlock()
     end.
@@ -1346,9 +1382,11 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 %% but then fails unexpectedly (e.g. a local-method recompile error) raises
 %% directly rather than returning through this function, so its return type
 %% only distinguishes "removed" from "nothing to remove here".
--spec remove_selector(#beamtalk_object{}, atom()) -> removed | absent.
-remove_selector(Self, Selector) ->
+%% `Sent` is the selector that reached here, for a refusal's error.
+-spec remove_selector(#beamtalk_object{}, atom(), atom()) -> removed | absent.
+remove_selector(Self, Selector, Sent) ->
     {Side, ClassPid} = removal_target(Self),
+    ok = refuse_in_own_class_process(ClassPid, Sent),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     case Side =:= instance andalso beamtalk_protocol_registry:is_protocol(ClassName) of
         true -> remove_protocol_selector(ClassName, Selector);
@@ -1697,6 +1735,7 @@ object, on success.
 -spec classRenameTo(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
 classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, 'renameTo:'),
     OldName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
@@ -2406,6 +2445,7 @@ protocol_or_class_module(ClassName, ClassPid) ->
 -spec classReload(#beamtalk_object{}) -> #beamtalk_object{}.
 classReload(Self) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, reload),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = require_class_capability(reload, ClassName, <<"reload">>),
     ModuleName = protocol_or_class_module(ClassName, ClassPid),
@@ -2542,6 +2582,7 @@ compile_source_op(ephemeral) -> 'tryCompile:source:'.
     #beamtalk_object{}.
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
+    ok = refuse_in_own_class_process(ClassPid, compile_source_op(Intent)),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace(compile_source_op(Intent), ClassName),
     ok = require_method_capability(compile_source_op(Intent), ClassName, Selector),
@@ -2826,7 +2867,7 @@ a method rename never changes the class's own identity/pid).
 classRenameSelector(Self, OldSelector, NewSelector) when
     is_atom(OldSelector), is_atom(NewSelector)
 ->
-    case rename_selector(Self, OldSelector, NewSelector) of
+    case rename_selector(Self, OldSelector, NewSelector, 'renameSelector:to:') of
         renamed -> Self;
         absent -> beamtalk_error:raise(selector_not_found_error(Self, OldSelector))
     end.
@@ -2855,7 +2896,7 @@ Returns the receiver on success, or `AbsentBlock`'s value on absence.
 classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
     is_atom(OldSelector), is_atom(NewSelector)
 ->
-    case rename_selector(Self, OldSelector, NewSelector) of
+    case rename_selector(Self, OldSelector, NewSelector, 'renameSelector:to:ifAbsent:') of
         renamed -> Self;
         absent -> AbsentBlock()
     end.
@@ -2906,8 +2947,10 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
 %% of scope). A collision or a shape-mismatch is a hard raise even from
 %% this shared helper — only "OldSelector not found" is reported as `absent`
 %% for the two public functions above to handle differently.
--spec rename_selector(#beamtalk_object{}, atom(), atom()) -> renamed | absent.
-rename_selector(Self, OldSelector, NewSelector) ->
+%% `Sent` is the selector that reached here, for a refusal's error.
+-spec rename_selector(#beamtalk_object{}, atom(), atom(), atom()) -> renamed | absent.
+rename_selector(Self, OldSelector, NewSelector, Sent) ->
+    ok = refuse_in_own_class_process(erlang:element(4, Self), Sent),
     ok = require_method_capability(
         'renameSelector:to:',
         beamtalk_object_class:class_name_safe(erlang:element(4, Self)),

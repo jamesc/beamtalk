@@ -247,6 +247,8 @@ impl CoreErlangGenerator {
             || analysis.captured_reads.iter().any(|name| {
                 !matches!(name.as_str(), "self" | "super" | "true" | "false" | "nil")
                     && self.lookup_var(name).is_none()
+                    // BT-4269: a name the loop being planned will bind.
+                    && !self.synced.probe_locals.borrow().iter().any(|l| l == name)
             })
     }
 

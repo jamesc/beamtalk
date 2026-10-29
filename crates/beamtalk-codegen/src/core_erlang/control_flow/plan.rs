@@ -408,8 +408,7 @@ impl BodyEffects {
         // bracket them with.
         let body_has_synced_sends = generator.synced_calls_active()
             && (block_analysis::analyze_block(body).has_synced_user_code_sends()
-                || generator.block_holds_bracketed_call(body)
-                || condition.is_some_and(|c| generator.expr_holds_bracketed_call(c)));
+                || generator.loop_holds_bracketed_call(body, condition));
 
         let has_guarded_operator = generator.block_contains_guarded_operator(body)
             || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));
@@ -1039,6 +1038,10 @@ impl ThreadingPlan {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {
             StateAccFallbackReason::SelfSendInBody
+        } else if effects.body_has_synced_sends {
+            // BT-4269: a call that may run user code is bracketed with a
+            // `State` store/reload, which a loop without one cannot do.
+            StateAccFallbackReason::SyncedUserCodeCall
         } else {
             StateAccFallbackReason::ControlFlowMutations
         }
