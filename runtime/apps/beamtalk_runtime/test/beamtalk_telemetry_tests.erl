@@ -448,8 +448,12 @@ dispatch_span_survives_missing_trace_table() ->
     %% Recording runs inline in the sender (BT-4113), so a recording failure
     %% must not change the send's outcome: with events and tracing on and the
     %% trace-events table missing, a send still answers its value and a
-    %% raising send still surfaces its own error.
-    ?assertEqual(undefined, ets:info(beamtalk_trace_events)),
+    %% raising send still surfaces its own error. A trace store left running
+    %% by an earlier suite owns the table: drop it for the test (it is
+    %% public) and hand a fresh one back afterwards.
+    HadTable = ets:whereis(beamtalk_trace_events) =/= undefined,
+    HadTable andalso ets:delete(beamtalk_trace_events),
+    ?assertEqual(undefined, ets:whereis(beamtalk_trace_events)),
     OldEnabled = persistent_term:get(beamtalk_tracing_enabled, undefined),
     HadCounter = persistent_term:get(beamtalk_span_id_counter, undefined) =/= undefined,
     HadCounter orelse persistent_term:put(beamtalk_span_id_counter, atomics:new(1, [])),
@@ -477,7 +481,20 @@ dispatch_span_survives_missing_trace_table() ->
         end,
         HadCounter orelse persistent_term:erase(beamtalk_span_id_counter),
         erase('$beamtalk_trace_id'),
-        erase('$beamtalk_span_id')
+        erase('$beamtalk_span_id'),
+        HadTable andalso restore_trace_events_table()
+    end.
+
+%% Recreate the trace-events table the way the trace store does and give it
+%% back to the running trace store (its 'ETS-TRANSFER' clause accepts it).
+restore_trace_events_table() ->
+    ok = beamtalk_ets_heir:ensure_table(
+        beamtalk_trace_events,
+        [ordered_set, named_table, public, {write_concurrency, true}, {read_concurrency, true}]
+    ),
+    case whereis(beamtalk_trace_store) of
+        undefined -> true;
+        Pid -> ets:give_away(beamtalk_trace_events, Pid, undefined)
     end.
 
 detach_rejects_bad_and_reserved_ids() ->
