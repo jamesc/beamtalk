@@ -653,6 +653,12 @@ impl CoreErlangGenerator {
     /// 5. It has a compiled module (`is_module_less` fails closed — a live
     ///    `ClassBuilder` class dispatches through funs in its class process,
     ///    so a direct `Module:dispatch/3` would `undef`).
+    /// 6. Its name is declared by only one package in scope (BT-4151). Two
+    ///    packages' same-named classes are legal under qualified references
+    ///    (`json@Parser` + `xml@Parser`) but collide into one last-wins
+    ///    runtime class, so the tag guard cannot tell their instances apart:
+    ///    a direct call would follow the compile-time package where dynamic
+    ///    dispatch follows load order.
     ///
     /// Why this is sound (the guard, not the annotation, is trusted):
     ///
@@ -661,9 +667,9 @@ impl CoreErlangGenerator {
     ///   byte-identical dynamic send, so no rebind analysis is needed.
     /// - A tag match means the dynamic path would route to the same module's
     ///   `dispatch/3` (`tagged_map_dispatch` → `tagged_class_dispatch`, whose
-    ///   only divergences — proxy, exception entry, stdlib shadowing — are
-    ///   excluded above or prevented by the build's cross-package collision
-    ///   detection), and `dispatch/3` preserves DNU, extensions, superclass
+    ///   only divergences — proxy, exception entry, cross-package
+    ///   shadowing — are excluded above; stdlib shadowing is a build error),
+    ///   and `dispatch/3` preserves DNU, extensions, superclass
     ///   delegation and `perform:` identically — which is why no
     ///   method-resolution check is needed. (`fieldAt:put:` is the one
     ///   selector whose dynamic path diverges — a different hint via
@@ -679,6 +685,13 @@ impl CoreErlangGenerator {
     ///   redefined into a different module is handled by pinning the unit's
     ///   own class to its emitted module (`register_own_class_module`,
     ///   BT-4200) and by deciding module-lessness from the live index first.
+    ///
+    /// Known limitation (BT-4151): condition 6 sees the scope its producer
+    /// hands in. A batch build or `beamtalk test` passes every package's
+    /// declarations; a REPL or `compile:source:` unit sees the live node,
+    /// where a name already holds one (last-wins) class, so a same-named
+    /// class from another package loaded *after* this unit compiled is not
+    /// visible — the runtime's collision warning is then the only signal.
     ///
     /// Known limitation (review A3, BT-4149; shared with `class sealed` direct calls):
     /// the target module is pinned at compile time, so if it is removed
@@ -712,6 +725,9 @@ impl CoreErlangGenerator {
         }
         let info = hierarchy.get_class(class_name)?;
         if !info.is_sealed {
+            return None;
+        }
+        if self.is_shadowed_class(class_name) {
             return None;
         }
         // BT-4200: one consistent source for the module-less gate. The live

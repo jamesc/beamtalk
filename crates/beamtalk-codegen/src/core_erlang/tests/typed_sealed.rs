@@ -553,6 +553,148 @@ fn packaged_sealed_class_with_index_entry_keeps_package_mode_target() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// BT-4151: a class name declared by more than one package stays dynamic
+// ---------------------------------------------------------------------------
+
+/// Generates the shared `Caller` (a typed send to `AmbientWidget`) against
+/// `ambient` — the cross-file/dependency declarations a batch build or
+/// `beamtalk test` hands codegen through `with_class_hierarchy`.
+fn codegen_caller_with_scope(
+    ambient: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@app@caller").with_class_hierarchy(ambient),
+    )
+    .expect("codegen should succeed")
+}
+
+#[test]
+fn sealed_class_exported_by_two_packages_stays_dynamic() {
+    // `json@AmbientWidget` and `xml@AmbientWidget` coexist under qualified
+    // references but collide into one last-wins runtime class: the tag guard
+    // cannot tell their instances apart, so the send must not pin either
+    // package's module.
+    let code = codegen_caller_with_scope(vec![
+        ambient_sealed_object(false, Some("json")),
+        ambient_sealed_object(false, Some("xml")),
+    ]);
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "a class name exported by two packages must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "the shadowed receiver send should be a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn sealed_class_shadowing_a_package_less_class_stays_dynamic() {
+    // A workspace/single-file class and a package's class of the same name
+    // collide at runtime just like two packages' classes.
+    let code = codegen_caller_with_scope(vec![
+        ambient_sealed_object(false, None),
+        ambient_sealed_object(false, Some("json")),
+    ]);
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "a class name shared with a package-less class must stay dynamic. Got:\n{code}"
+    );
+}
+
+#[test]
+fn own_sealed_class_shadowed_by_a_dependency_stays_dynamic() {
+    // The unit's own class counts as a declaration in scope: a dependency
+    // exporting the same name collides with it at runtime, so even a send
+    // inside the class's own module stays dynamic.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "sealed Object subclass: AmbientWidget\n",
+        "  frobnicate -> Object => nil\n",
+        "  poke: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@ambient_widget")
+            .with_class_hierarchy(vec![ambient_sealed_object(false, Some("json"))]),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "an own class shadowed by a dependency must stay dynamic. Got:\n{code}"
+    );
+}
+
+#[test]
+fn own_sealed_class_without_a_rival_sends_direct() {
+    // Positive control for the test above: the same own class with no
+    // same-named declaration elsewhere still direct-calls its own module,
+    // so the negative cannot pass vacuously.
+    let code = codegen(concat!(
+        "sealed Object subclass: AmbientWidget\n",
+        "  frobnicate -> Object => nil\n",
+        "  poke: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    assert!(
+        code.contains("'dispatch'('frobnicate'"),
+        "an unshadowed own sealed class should direct-call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn own_sealed_class_recompiled_over_its_live_self_sends_direct() {
+    // No overcorrection on the REPL/`compile:source:` reload path: the
+    // ambient (live) hierarchy still carries the class being recompiled,
+    // declared by the same package the unit's module name says it belongs
+    // to, so it is not a rival declaration.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "sealed Object subclass: AmbientWidget\n",
+        "  frobnicate -> Object => nil\n",
+        "  poke: w :: AmbientWidget -> Object =>\n",
+        "    w frobnicate\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@live@ambient_widget")
+            .with_class_hierarchy(vec![ambient_sealed_object(false, Some("live"))]),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'bt@live@ambient_widget':'dispatch'('frobnicate'"),
+        "recompiling a class over its own live entry should still direct-call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn sealed_class_repeated_within_one_package_sends_direct() {
+    // No overcorrection: the same package declaring the class twice (e.g. a
+    // class duplicated across the package's own files, BT-3679) is still a
+    // single export, and another package's differently-named class is no
+    // collision.
+    let mut other = ambient_sealed_object(false, Some("xml"));
+    other.name = "OtherWidget".into();
+    let code = codegen_caller_with_scope(vec![
+        ambient_sealed_object(false, Some("json")),
+        ambient_sealed_object(false, Some("json")),
+        other,
+    ]);
+    assert!(
+        code.contains("call 'bt@json@ambient_widget':'dispatch'('frobnicate'"),
+        "a single package's sealed class should still direct-call. Got:\n{code}"
+    );
+}
+
 /// BT-4069 (review F1): sealed Value/Object builtins whose instances are
 /// `'$beamtalk_class'`-tagged maps with a compiled module — the complement of
 /// [`NON_TAGGED_MAP_CLASSES`](crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES)

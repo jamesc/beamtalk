@@ -209,6 +209,28 @@ pub fn generate_module_with_warnings(
             (hierarchy, false, None)
         };
 
+    // BT-4151: before the pre-loaded entries are folded into `hierarchy`
+    // (which keeps one entry per name), record which class names more than
+    // one package in scope declares — every cross-file/dependency/ambient
+    // declaration plus this unit's own classes, which belong to the unit's
+    // own package. Each producer (batch build, `beamtalk test`, path
+    // dependencies, REPL, `compile:source:`) already hands its whole scope
+    // in through `with_class_hierarchy`, so the signal needs no per-producer
+    // plumbing.
+    let own_package = generator.own_package_id();
+    generator.set_shadowed_class_names(beamtalk_core::semantic_analysis::shadowed_class_names(
+        options
+            .pre_class_hierarchy
+            .iter()
+            .map(|info| (info.name.as_str(), info.package.as_deref()))
+            .chain(
+                module
+                    .classes
+                    .iter()
+                    .map(|class| (class.name.name.as_str(), own_package.declaring_package())),
+            ),
+    ));
+
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
     // so that add_external_superclasses (which uses contains_key before inserting)
     // does not overwrite BEAM data with partial stubs. Both calls are no-ops for

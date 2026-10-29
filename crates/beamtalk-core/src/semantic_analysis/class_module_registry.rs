@@ -96,6 +96,21 @@ pub enum PackageId {
     SingleFile,
 }
 
+impl PackageId {
+    /// The package name a [`ClassInfo::package`](super::class_hierarchy::ClassInfo::package)
+    /// declared in this package carries: `"stdlib"` for [`Self::Stdlib`],
+    /// the name for [`Self::Package`], and `None` for a package-less
+    /// [`Self::SingleFile`] unit (BT-4151).
+    #[must_use]
+    pub fn declaring_package(&self) -> Option<&str> {
+        match self {
+            Self::Stdlib => Some(super::stdlib_protocols::STDLIB_PACKAGE),
+            Self::Package(name) => Some(name.as_str()),
+            Self::SingleFile => None,
+        }
+    }
+}
+
 /// How a compilation unit assigns module names to source files it has not
 /// seen yet — used by [`ClassModuleRegistry::assign`] to mint a name for a
 /// class with no `.bt` source file (a REPL `subclass:`, or a hot-reloaded
