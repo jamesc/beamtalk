@@ -135,6 +135,33 @@ receive_shape_reload_findings_announcement() ->
 
 state0() -> beamtalk_repl_state:new(undefined, 0).
 
+%% BT-4272: `handle_load/2` returns before the shape store has captured the
+%% just-installed generation. `activate_module/4` only *casts* the capture
+%% (`spawn_shape_recheck/1` -> `beamtalk_workspace_shape_recheck_worker:
+%% enqueue/1`), and for a class's first install `prime/1` has recorded
+%% `undefined`, so until the worker runs `capture/1`,
+%% `beamtalk_workspace_shape_store:previous/1` answers `undefined` and
+%% `precheck_class_shape/2` returns `{ok, []}` ("no baseline"). A test that
+%% prechecks straight after `handle_load/2` therefore raced the worker; it
+%% lost whenever the worker was slow to be scheduled (a loaded machine).
+%%
+%% This is the sync point: the cast was sent from this process, and messages
+%% between one pair of processes arrive in order, so a `sys:get_state/1`
+%% round trip returns only after the worker has handled every cast queued
+%% ahead of it, including the capture for every `handle_load/2` above. The
+%% assertion makes a missed baseline fail here, by name, instead of as an
+%% empty findings list (or a vacuous pass) further down.
+wait_for_shape_capture(ClassNameBin) ->
+    ok = drain_shape_recheck_worker(),
+    ?assertNotEqual(undefined, beamtalk_workspace_shape_store:previous(ClassNameBin)),
+    ok.
+
+%% Block until `beamtalk_workspace_shape_recheck_worker` has handled every
+%% cast this process sent it (see `wait_for_shape_capture/1`).
+drain_shape_recheck_worker() ->
+    _ = sys:get_state(beamtalk_workspace_shape_recheck_worker),
+    ok.
+
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -454,7 +481,7 @@ skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
                     %% `enqueue/1` cast above is already queued ahead of this
                     %% synchronous system message — without depending on an
                     %% announcement this scenario deliberately never sends.
-                    _ = sys:get_state(beamtalk_workspace_shape_recheck_worker),
+                    ok = drain_shape_recheck_worker(),
 
                     %% The seeded finding's message/severity/classification
                     %% stay untouched (no diagnostics round-trip actually
@@ -720,6 +747,7 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
                         >>,
                     ok = file:write_file(Path, Gen1),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCounter">>),
 
                     %% A pending edit that would drop `name` without bumping
                     %% shapeVersion — never installed via handle_load/2 at
@@ -771,6 +799,7 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
                         >>,
                     ok = file:write_file(Path, Source),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCleanCounter">>),
 
                     {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
                         <<"LoaderShapePrecheckCleanCounter">>, Source
@@ -803,6 +832,7 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
                         >>,
                     ok = file:write_file(Path, Source),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckLeakCounter">>),
 
                     PendingSource =
                         <<
@@ -889,6 +919,7 @@ precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() 
                     {ok, _, State1} = beamtalk_repl_loader:handle_load(SuperPath, state0()),
                     ok = file:write_file(SubPath, SubSource),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(SubPath, State1),
+                    ok = wait_for_shape_capture(<<"LoaderShapeAncestorSub">>),
 
                     %% Pending edit: drop the subclass's own `count` override
                     %% entirely — never installed via handle_load/2.

@@ -20,6 +20,9 @@
 //! - [`trait_flattening`] — ADR 0127 §3/§10 (BT-3590): a `uses:` class's
 //!   flattened provisions reaching compiled output through both the
 //!   self-sufficient and driver-handoff codegen entry points
+//! - [`value_immutable_slot_hint_conformance`] — BT-4273: the Value
+//!   `immutable_value` slot hint fixture, asserted against
+//!   `beamtalk_primitive_tests.erl`
 //! - [`typed_sealed`] — BT-4069: sends to sealed-Value-typed receivers
 //!   compiling to a guarded direct `Module:dispatch/3` call
 
@@ -262,6 +265,7 @@ mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
+mod evaluated_block_grid_corpus;
 mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
@@ -292,6 +296,7 @@ mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
 mod supervisor;
@@ -305,6 +310,7 @@ mod tier2_merge;
 mod trait_flattening;
 mod tuple_acc_state_read_corpus;
 mod typed_sealed;
+mod value_immutable_slot_hint_conformance;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;

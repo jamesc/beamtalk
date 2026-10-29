@@ -10,3 +10,6 @@ Actor subclass: Bt4252ClassProtocolActorBase
   class inheritedSelfName => self name
 
   class inheritedSuperName => super name
+
+  // Runs `aBlock` in this class's process (BT-4262).
+  class runBlock: aBlock => aBlock value

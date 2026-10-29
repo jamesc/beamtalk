@@ -327,31 +327,18 @@ TestCase subclass: SealedDirectDispatchDifferentialTest
       ] as: [self dynAddAnd: w])
       equals: #(#returned, 10)
 
-  // `typed_sealed` never takes `fieldAt:put:` direct because the module's
-  // `dispatch/3` arm and the runtime's `is_ivar_method` pre-check raise it
-  // with different hints. Everything but the hint agrees; the hint
-  // divergence is pinned until BT-4273 unifies it, at which point the last
-  // assertion flips and this test should assert full equality.
+  // `fieldAt:put:` raises `immutable_value` from three places: the module's
+  // `dispatch/3` arm, the runtime's `is_ivar_method` pre-check on the
+  // dynamic path, and the source-level `fieldAt:put:` intrinsic. BT-4273
+  // unified their hints (pinned across Rust and Erlang by
+  // `value_immutable_slot_hint_conformance.json`), so the full structured
+  // outcome, hint included, agrees on all three.
   testFieldAtPutErrorShape =>
+    outcome := self armOutcome: #fieldAt:put: args: #(#y, 99)
+    self assert: (outcome at: 3) equals: #immutable_value
+    self assert: (outcome at: 4) equals: #fieldAt:put:
     w := self widget
-    direct := self
-      outcomeOf: [
-        self
-          rawDispatch: #fieldAt:put:
-          args: #(#y, 99)
-          to: w
-      ]
-    dynamic := self
-      outcomeOf: [
-        self
-          dynamic: #fieldAt:put:
-          args: #(#y, 99)
-          to: w
-      ]
-    self assert: (direct take: 6) equals: (dynamic take: 6)
-    self assert: (direct at: 3) equals: #immutable_value
-    self assert: (direct at: 4) equals: #fieldAt:put:
-    self deny: (direct at: 7) =:= (dynamic at: 7)
+    self assert: (self outcomeOf: [w fieldAt: #y put: 99]) equals: outcome
 
   // === Guard mismatch: a lying annotation takes the dynamic fallback ===
   testLyingAnnotationOtherValueClassDispatches =>
