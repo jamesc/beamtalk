@@ -561,11 +561,12 @@ fn compile_dependency_with_context(
     Ok((ebin_path, own_class_module_index))
 }
 
-/// The FFI type registry a dependency compiles against (BT-4225): the same
-/// resolution chain as its standalone build
+/// The FFI type registry a dependency compiles against (BT-4225): the
+/// resolution chain of its standalone build
 /// ([`crate::commands::build::resolve_package_type_registry`] over its own
 /// `stubs/`), over the OTP and dependency specs extracted into the
-/// downstream package's type cache. Without it every OTP FFI call in the
+/// downstream package's type cache. The package-bundled tier comes from
+/// every dependency compiled before it, a superset of its own dependencies. Without it every OTP FFI call in the
 /// dependency inferred as `Dynamic`, which its standalone build never does.
 fn dependency_type_registry(
     project_root: &Utf8Path,

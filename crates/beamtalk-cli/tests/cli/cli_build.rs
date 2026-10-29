@@ -466,12 +466,13 @@ fn build_knows_own_native_module_but_warns_on_unknown() {
         .stderr(contains("Unknown Erlang module `my_nif`").not());
 }
 
-/// BT-4225: a path dependency with OTP FFI calls in a typed class builds,
-/// as the downstream package's dependency, with the same FFI type
-/// information as standalone — no `untyped FFI` diagnostics — and its
-/// remaining warnings stay its own (cargo shows none for a dependency).
+/// BT-4225: a path dependency's warnings stay its own (cargo shows none for
+/// a dependency) — the `untyped FFI` flood a downstream build printed, and an
+/// unknown-module warning, never reach the downstream package's output. That
+/// the dependency's FFI calls are typed at all is pinned separately by
+/// `dependency_type_registry_loads_dep_stubs_and_otp_specs`.
 #[test]
-fn build_dependency_ffi_calls_are_typed_and_dep_warnings_stay_quiet() {
+fn build_does_not_show_a_dependencys_warnings() {
     let root = tempfile::tempdir().expect("create tempdir");
 
     let dep_dir = root.path().join("ffidep");
