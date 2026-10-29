@@ -23,7 +23,7 @@ also rejects some correct code:
 | BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` |
 | BT-3971 (#4442) | Tier 2 body ending in `[...] value` answers `{Value, State}` | `CodeGenError::UnsupportedFeature` |
 | BT-3952 (#4452) | Block reads `self.field`, is stored or passed to a self-send, reads stale | Compile error for every such read |
-| BT-3981 (#4448) | Evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` `EvaluatedBlockValue` |
+| BT-3981 (#4448) | Evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` `EvaluatedBlockValue`; deleted by BT-3982 (the block is a producer wherever it sits) |
 | BT-3985 (#4455) | Binary and `super` sends to `self` drop the callee's change | Extends the BT-3936 guard |
 | BT-3998 (#4463) | Send to a local bound to `self` loses its change | Compile error (`check_actor_self_alias_send`) |
 | BT-3988 | `on:do:` in a self-sending closure answers `{Result, State}` | Open |
@@ -536,7 +536,12 @@ Of the oracle rows: the five `stateful` `DENY_SET` rows are deleted (dead: every
 candidate shape is a local-threading producer, accepted before `DENY_SET`);
 `EvaluatedBlockValue` and `InlineBlockLocalInLoop` stay (re-measured on a BEAM
 with the model on: the tuple still leaks, the loop shape still fails `erlc`
-with unbound `StateAcc`). BT-3990's residuals (getter self-send in a block
+with unbound `StateAcc`). BT-3982 re-measured the `EvaluatedBlockValue` grid
+with the row bypassed: every plain-block cell (stored block, FFI argument, block
+passed to a method) answered the value, since an actor closure threads no
+`State`; only the `State`-threading hosts (method body, arm, `collect:`,
+protected body) leaked. It lowers the evaluated block as a producer there and
+deletes the row. BT-3990's residuals (getter self-send in a block
 passed to a self-send, stored, and nested) are fixed, with `BUnit` cells in
 `stdlib/test/bt3990stale_getter_test.bt`; BT-1325's alias tests are restored.
 

@@ -970,34 +970,6 @@ impl CoreErlangGenerator {
         Ok(Some(scope))
     }
 
-    /// BT-3816: the literal block and arguments of an inlined
-    /// `[body] value` / `value:` / `value:value:` / `value:value:value:` send.
-    fn literal_block_value_parts(expr: &Expression) -> Option<(&Block, &[Expression])> {
-        let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        if !selector
-            .well_known()
-            .is_some_and(WellKnownSelector::is_block_value)
-        {
-            return None;
-        }
-        let Expression::Block(block) = receiver.as_ref() else {
-            return None;
-        };
-        beamtalk_core::semantic_analysis::block_facts::block_literal_arity_matches(
-            block,
-            arguments.len(),
-        )
-        .then_some((block, arguments.as_slice()))
-    }
-
     /// BT-3816: whether `expr` is an inlined literal-block `value` send, in a
     /// value-type instance method, whose block writes a field. The block body
     /// is spliced into the enclosing statement sequence, so its `Self{N}`
@@ -1010,8 +982,9 @@ impl CoreErlangGenerator {
     ) -> bool {
         self.context == CodeGenContext::ValueType
             && !self.in_class_method()
-            && Self::literal_block_value_parts(expr).is_some_and(|(block, _)| {
-                !super::block_analysis::analyze_block(block)
+            && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+                .is_some_and(|(block, _)| {
+                    !super::block_analysis::analyze_block(block)
                     .field_writes
                     .is_empty()
                     // The block's value is its last statement's: a construct
@@ -1020,7 +993,7 @@ impl CoreErlangGenerator {
                     && super::util::collect_body_exprs(&block.body)
                         .last()
                         .is_none_or(|last| self.vt_block_stmt_is_threadable(last))
-            })
+                })
     }
 
     /// BT-3816: whether a statement of an inlined block body is lowered through
@@ -1070,7 +1043,9 @@ impl CoreErlangGenerator {
         if !self.is_vt_field_writing_block_value(expr) {
             return Ok(None);
         }
-        let Some((block, arguments)) = Self::literal_block_value_parts(expr) else {
+        let Some((block, arguments)) =
+            beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+        else {
             return Ok(None);
         };
         let children: Vec<&Expression> = arguments.iter().collect();
