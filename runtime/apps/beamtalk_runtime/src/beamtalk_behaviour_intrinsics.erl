@@ -1107,7 +1107,7 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% while the class waits on it, sends to it), the stop never returns. A
 %% process blocked in `gen_server:call/3` sits in `gen:do_call/4` and
 %% monitors the process it waits on, so follow that wait chain from the
-%% class, through any number of hops; if it reaches the caller, ask the
+%% class, through other classes and actors (bounded); if it reaches the caller, ask the
 %% class to answer, bounded, before any side effect, and raise a structured
 %% `timeout` if it does not (the probe guards against a monitor held for
 %% another reason). A class that is merely busy is not waiting on the
@@ -1115,30 +1115,33 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% primitives that message the class use a bounded `gen_server:call/2`
 %% before any side effect, so they already fail rather than hang.
 -define(CLASS_RESPONSIVE_TIMEOUT, 5000).
--define(WAIT_CHAIN_MAX_DEPTH, 32).
+-define(WAIT_CHAIN_MAX_PROCESSES, 64).
 
 -spec require_class_responsive(pid(), atom(), atom()) -> ok.
 require_class_responsive(ClassPid, ClassName, Selector) ->
-    case waits_on(ClassPid, self(), ?WAIT_CHAIN_MAX_DEPTH, #{ClassPid => true}) of
+    case waits_on([ClassPid], self(), #{ClassPid => true}, ?WAIT_CHAIN_MAX_PROCESSES) of
         false -> ok;
         true -> probe_class(ClassPid, ClassName, Selector)
     end.
 
-%% Whether `Pid` is blocked in a `gen_server:call/3` chain that reaches
-%% `Target`. Local processes only; bounded by depth and a visited set.
--spec waits_on(pid(), pid(), non_neg_integer(), #{pid() => true}) -> boolean().
-waits_on(_Pid, _Target, 0, _Seen) ->
+%% Whether the processes in `Queue` are blocked in a `gen_server:call/3`
+%% chain that reaches `Target`: a breadth-first walk with one visited set,
+%% examining at most `Budget` processes. Local processes only.
+-spec waits_on([pid()], pid(), #{pid() => true}, non_neg_integer()) -> boolean().
+waits_on([], _Target, _Seen, _Budget) ->
     false;
-waits_on(Pid, Target, Depth, Seen) ->
+waits_on(_Queue, _Target, _Seen, 0) ->
+    false;
+waits_on([Pid | Rest], Target, Seen, Budget) ->
     Callees = callees(Pid),
-    lists:member(Target, Callees) orelse
-        lists:any(
-            fun(Callee) ->
-                not maps:is_key(Callee, Seen) andalso
-                    waits_on(Callee, Target, Depth - 1, Seen#{Callee => true})
-            end,
-            Callees
-        ).
+    case lists:member(Target, Callees) of
+        true ->
+            true;
+        false ->
+            New = [Callee || Callee <- Callees, not maps:is_key(Callee, Seen)],
+            Seen1 = maps:merge(Seen, maps:from_keys(New, true)),
+            waits_on(Rest ++ New, Target, Seen1, Budget - 1)
+    end.
 
 -spec callees(pid()) -> [pid()].
 callees(Pid) when node(Pid) =:= node() ->
@@ -1174,8 +1177,9 @@ probe_class(ClassPid, ClassName, Selector) ->
                 beamtalk_error:with_hint(
                     Error1,
                     <<
-                        "A block from one of its class methods, running inside another "
-                        "class's method, cannot change that class. Change it from outside."
+                        "A block from one of its class methods, run by another class or actor "
+                        "while the class waits on it, cannot change that class. Change it from "
+                        "outside."
                     >>
                 )
             )
@@ -1819,10 +1823,10 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
     ok = refuse_in_own_class_process(ClassPid, 'renameTo:'),
     OldName = beamtalk_object_class:class_name_safe(ClassPid),
-    ok = require_class_responsive(ClassPid, OldName, 'renameTo:'),
     ok = require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
+    ok = require_class_responsive(ClassPid, OldName, 'renameTo:'),
     ok = ensure_rename_collision_free(OldName, NewName),
     OldNameBin = atom_to_binary(OldName, utf8),
     Classification = capture_class_removal_snapshot(OldNameBin),
