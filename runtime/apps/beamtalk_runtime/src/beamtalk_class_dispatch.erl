@@ -1542,7 +1542,9 @@ Test whether `ClassName`'s own metaclass tag understands `Selector`
 local runtime-installed (ADR 0084) class method.
 
 Backs `beamtalk_object_ops:responds_to_result/3`'s `respondsTo:` on a
-class-object receiver. `SomeClass respondsTo: #sel` previously always
+class-object receiver, and `class_chain_only_send/3`'s decision to skip the
+class process (BT-4073), so a `false` here must mean the class process's own
+lookup would answer `{error, not_found}`. `SomeClass respondsTo: #sel` previously always
 answered against the generic `'Class'` protocol only, because a
 class's metaclass tag (`'SomeClass class'`) is virtual — never registered
 as its own class in `beamtalk_class_registry`/`beamtalk_class_metadata` —
