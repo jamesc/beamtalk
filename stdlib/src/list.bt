@@ -164,6 +164,36 @@ sealed typed Collection(E) subclass: List(E)
   /// ```
   unique -> List(E) => @primitive
 
+  /// Remove elements whose key duplicates an earlier element's key.
+  ///
+  /// Evaluates `block` once per element to get its key, and keeps the first
+  /// element for each key, in the original order. Keys are compared with
+  /// `=:=`, as in `unique`, `Set` and `Dictionary` keys. Unlike `unique`, the
+  /// result is not sorted. This is Elixir's `Enum.uniq_by/2`.
+  ///
+  /// Like any message outside the compiler-known collection messages,
+  /// `block` may read captured variables but not assign them (ADR 0133).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(3, 1, 2, 1, 3) withoutDuplicatesBy: [:x | x]      // => #(3, 1, 2)
+  /// #("bb", "a", "cc", "d") withoutDuplicatesBy: [:s | s size]
+  /// // => #("bb", "a")
+  /// ```
+  withoutDuplicatesBy: block :: Block(E, Object) -> List(E) =>
+    // Seen keys live in a Dictionary (an Erlang map), not a Set: a Set is a
+    // sorted list, so adding to it is linear and the loop would be quadratic.
+    seen := Dictionary new
+    kept := #()
+    self do: [:each |
+      key := block value: each
+      (seen includesKey: key) ifFalse: [
+        seen := seen at: key put: true
+        kept := kept addFirst: each
+      ]
+    ]
+    kept reversed
+
   // === Searching ===
 
   /// Find the first element for which `block` returns true.
