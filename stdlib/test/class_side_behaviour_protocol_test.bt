@@ -129,9 +129,10 @@ TestCase subclass: ClassSideBehaviourProtocolTest
   // by the setter).
   testSelfDocFollowsExternalSetter =>
     original := Bt4252ClassProtocolActorChild doc
-    Bt4252ClassProtocolActorChild doc: "Set from outside"
-    self assert: Bt4252ClassProtocolActorChild selfDoc equals: "Set from outside"
-    Bt4252ClassProtocolActorChild doc: original
+    [
+      Bt4252ClassProtocolActorChild doc: "Set from outside"
+      self assert: Bt4252ClassProtocolActorChild selfDoc equals: "Set from outside"
+    ] ensure: [Bt4252ClassProtocolActorChild doc: original]
     self assert: Bt4252ClassProtocolActorChild selfDoc equals: original
 
   // BT-4262: by-name sends from inside the class process.
@@ -162,12 +163,13 @@ TestCase subclass: ClassSideBehaviourProtocolTest
     // An instance of the class: removal stops the class's actors first, so a
     // refusal that came after that would leave it dead.
     instance := Bt4262RemoveGuard spawn
-    self should: [Bt4262RemoveGuard removeSelf] raise: #dispatch_error
-    self should: [Bt4262RemoveGuard removeByName] raise: #dispatch_error
-    self should: [Bt4262RemoveGuard renameSelf] raise: #dispatch_error
-    self assert: Bt4262RemoveGuard name equals: #Bt4262RemoveGuard
-    self assert: instance isAlive
-    instance stop
+    [
+      self should: [Bt4262RemoveGuard removeSelf] raise: #dispatch_error
+      self should: [Bt4262RemoveGuard removeByName] raise: #dispatch_error
+      self should: [Bt4262RemoveGuard renameSelf] raise: #dispatch_error
+      self assert: Bt4262RemoveGuard name equals: #Bt4262RemoveGuard
+      self assert: instance isAlive
+    ] ensure: [instance isAlive ifTrue: [instance stop]]
 
   testActorClassMethodSelfIncludesSelector =>
     self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)

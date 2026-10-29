@@ -1337,7 +1337,7 @@ when the selector resolves nowhere.
 """.
 -spec classRemoveSelector(#beamtalk_object{}, atom()) -> #beamtalk_object{}.
 classRemoveSelector(Self, Selector) ->
-    case remove_selector(Self, Selector) of
+    case remove_selector(Self, Selector, 'removeSelector:') of
         removed -> Self;
         absent -> beamtalk_error:raise(selector_not_found_error(Self, Selector))
     end.
@@ -1369,7 +1369,7 @@ Returns the receiver on success, or `AbsentBlock`'s value on absence.
 -spec classRemoveSelectorIfAbsent(#beamtalk_object{}, atom(), fun(() -> term())) ->
     #beamtalk_object{} | term().
 classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
-    case remove_selector(Self, Selector) of
+    case remove_selector(Self, Selector, 'removeSelector:ifAbsent:') of
         removed -> Self;
         absent -> AbsentBlock()
     end.
@@ -1382,10 +1382,11 @@ classRemoveSelectorIfAbsent(Self, Selector, AbsentBlock) ->
 %% but then fails unexpectedly (e.g. a local-method recompile error) raises
 %% directly rather than returning through this function, so its return type
 %% only distinguishes "removed" from "nothing to remove here".
--spec remove_selector(#beamtalk_object{}, atom()) -> removed | absent.
-remove_selector(Self, Selector) ->
+%% `Sent` is the selector that reached here, for a refusal's error.
+-spec remove_selector(#beamtalk_object{}, atom(), atom()) -> removed | absent.
+remove_selector(Self, Selector, Sent) ->
     {Side, ClassPid} = removal_target(Self),
-    ok = refuse_in_own_class_process(ClassPid, 'removeSelector:'),
+    ok = refuse_in_own_class_process(ClassPid, Sent),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     case Side =:= instance andalso beamtalk_protocol_registry:is_protocol(ClassName) of
         true -> remove_protocol_selector(ClassName, Selector);
@@ -2581,7 +2582,7 @@ compile_source_op(ephemeral) -> 'tryCompile:source:'.
     #beamtalk_object{}.
 do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
-    ok = refuse_in_own_class_process(ClassPid, 'compile:source:'),
+    ok = refuse_in_own_class_process(ClassPid, compile_source_op(Intent)),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     ok = beamtalk_capability:require_workspace(compile_source_op(Intent), ClassName),
     ok = require_method_capability(compile_source_op(Intent), ClassName, Selector),
@@ -2866,7 +2867,7 @@ a method rename never changes the class's own identity/pid).
 classRenameSelector(Self, OldSelector, NewSelector) when
     is_atom(OldSelector), is_atom(NewSelector)
 ->
-    case rename_selector(Self, OldSelector, NewSelector) of
+    case rename_selector(Self, OldSelector, NewSelector, 'renameSelector:to:') of
         renamed -> Self;
         absent -> beamtalk_error:raise(selector_not_found_error(Self, OldSelector))
     end.
@@ -2895,7 +2896,7 @@ Returns the receiver on success, or `AbsentBlock`'s value on absence.
 classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
     is_atom(OldSelector), is_atom(NewSelector)
 ->
-    case rename_selector(Self, OldSelector, NewSelector) of
+    case rename_selector(Self, OldSelector, NewSelector, 'renameSelector:to:ifAbsent:') of
         renamed -> Self;
         absent -> AbsentBlock()
     end.
@@ -2946,9 +2947,10 @@ classMigrateShapeFrom(Self, Fields, FromVersion) when
 %% of scope). A collision or a shape-mismatch is a hard raise even from
 %% this shared helper — only "OldSelector not found" is reported as `absent`
 %% for the two public functions above to handle differently.
--spec rename_selector(#beamtalk_object{}, atom(), atom()) -> renamed | absent.
-rename_selector(Self, OldSelector, NewSelector) ->
-    ok = refuse_in_own_class_process(erlang:element(4, Self), 'renameSelector:to:'),
+%% `Sent` is the selector that reached here, for a refusal's error.
+-spec rename_selector(#beamtalk_object{}, atom(), atom(), atom()) -> renamed | absent.
+rename_selector(Self, OldSelector, NewSelector, Sent) ->
+    ok = refuse_in_own_class_process(erlang:element(4, Self), Sent),
     ok = require_method_capability(
         'renameSelector:to:',
         beamtalk_object_class:class_name_safe(erlang:element(4, Self)),
