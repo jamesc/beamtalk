@@ -38,6 +38,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Binary"
             | "BindingChanged"
             | "BindingsView"
+            | "Bitstring"
             | "Block"
             | "Boolean"
             | "ChangeEntry"
@@ -740,12 +741,13 @@ fn class_info_Binary() -> ClassInfo {
             has_dynamic_field_writer: false,
             methods: vec![
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the byte count of this binary.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) size   // => _\n```".into()), origin: None, primitive: Some("size".into()) },
+                MethodInfo { selector: "bitSize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the bit count of this binary: 8 times its byte count.\n\n`Bitstring>>bitSize` answers the same for an unaligned value, so\n`bitSize` works on either class (ADR 0141). On a `String` it counts\nthe UTF-8 bytes' bits, not graphemes.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2)) bitSize   // => 16\n\"é\" bitSize                            // => 16\n```".into()), origin: None, primitive: None },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Block"))], doc: Some("Iterate over each byte (Integer 0-255), evaluating `block` with each one.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]\n```".into()), origin: None, primitive: Some("do:".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\nDisplays hex representation for non-UTF-8 binaries, or quoted string\nfor valid UTF-8 binaries.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) printString   // => _\n```".into()), origin: None, primitive: Some("printString".into()) },
                 MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Return the byte value (0-255) at the given 1-based index.\n\nRaises `index_out_of_bounds` if the index is out of range.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108)) at: 1   // => 104\n```".into()), origin: None, primitive: Some("at:".into()) },
                 MethodInfo { selector: "byteAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Return the byte value (0-255) at the given 0-based offset.\n\nUses 0-based indexing to match Erlang's `binary:at/2`.\nRaises `index_out_of_bounds` if the offset is out of range.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108)) byteAt: 0   // => 104\n```".into()), origin: None, primitive: Some("byteAt:".into()) },
                 MethodInfo { selector: "part:size:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Binary")), param_types: vec![Some(DeclaredType::simple("Integer")), Some(DeclaredType::simple("Integer"))], doc: Some("Return a zero-copy slice of this binary.\n\nTakes a 0-based offset and length. Raises `index_out_of_bounds`\nif the range is invalid.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2, 3, 4, 5)) part: 1 size: 3   // => _\n```".into()), origin: None, primitive: Some("part:size:".into()) },
-                MethodInfo { selector: "concat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Binary")), param_types: vec![Some(DeclaredType::simple("Binary"))], doc: Some("Concatenate this binary with another binary.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _\n```".into()), origin: None, primitive: Some("concat:".into()) },
+                MethodInfo { selector: "concat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Binary")), param_types: vec![Some(DeclaredType::simple("Binary"))], doc: Some("Concatenate this binary with another binary.\n\nBytes only: the answer is always a `Binary`. A `Bitstring` argument is\na `type_error` — join bits from the Bitstring side\n(`Bitstring>>concat:` accepts a Binary) (ADR 0141).\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _\n```".into()), origin: None, primitive: Some("concat:".into()) },
                 MethodInfo { selector: "includesSubstring:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("Binary"))], doc: Some("Test whether `needle` occurs as a contiguous byte sequence.\n\nCompares raw bytes, so it works on non-UTF-8 haystacks. A `String`\nneedle is searched by its bytes. An empty needle is always found\n(`true`), matching `String>>includesSubstring:`.\n\n## Examples\n```beamtalk\n((Binary fromBytes: #(255, 13, 10, 0)) includesSubstring: (Binary fromBytes: #(13, 10))) // => true\n((Binary fromBytes: #(255, 1)) includesSubstring: (Binary fromBytes: #(2)))              // => false\n```".into()), origin: None, primitive: Some("includesSubstring:".into()) },
                 MethodInfo { selector: "indexOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("Binary"))], doc: Some("Return the 1-based byte index of the first occurrence of `needle`, or\n`nil` if it does not occur.\n\nCompares raw bytes, so it works on non-UTF-8 haystacks. The index is\n1-based, like `at:` and `String>>indexOf:`. An empty needle answers\n`nil` (as `String>>indexOf:` does). A `String` receiver dispatches to\n`String>>indexOf:` (a grapheme index) instead; the two agree for ASCII.\n\n## Examples\n```beamtalk\n((Binary fromBytes: #(255, 13, 10)) indexOf: (Binary fromBytes: #(13, 10))) // => 2\n((Binary fromBytes: #(255, 1)) indexOf: (Binary fromBytes: #(2)))           // => nil\n```".into()), origin: None, primitive: Some("indexOf:".into()) },
                 MethodInfo { selector: "toBytes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Integer")])), param_types: vec![], doc: Some("Convert this binary to a list of byte integers (0-255).\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)\n```".into()), origin: None, primitive: Some("toBytes".into()) },
@@ -842,6 +844,47 @@ fn class_info_BindingsView() -> ClassInfo {
                 MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the number of bindings in this view.\n\n## Examples\n```beamtalk\nSession current bindings size                // => 2\n```".into()), origin: None, primitive: None },
                 MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Object"), DeclaredType::simple("Object")]))], doc: Some("Iterate over each value, evaluating `block` with each one (matches\n`Dictionary do:`, which iterates values).\n\n## Examples\n```beamtalk\nSession current bindings do: [:v | Transcript show: v printString]\n```".into()), origin: None, primitive: None },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return a string representation rendered like a `Dictionary`, so REPL\noutput stays familiar.\n\nBuilds a snapshot `Dictionary` from the live bindings and delegates to\nits `printString`, producing the same `#{#k => v}` syntax.\n\n## Examples\n```beamtalk\nSession current bindings printString         // => \"#{#x => 42}\"\n```".into()), origin: None, primitive: None },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_Bitstring() -> ClassInfo {
+    ClassInfo {
+            name: "Bitstring".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: true,
+            handle_scope: None,
+            surface_incomplete: false,
+            is_module_less: false,
+            auto_ctors: Some(AutoConstructors { keyword_constructor: None }),
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![
+                MethodInfo { selector: "bitSize".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("Return the number of bits.\n\n`Binary>>bitSize` answers the same for a byte-aligned value, so\n`bitSize` works on either class.\n\n## Examples\n```beamtalk\ntail bitSize   // => 5\n```".into()), origin: None, primitive: None },
+                MethodInfo { selector: "toBits".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Integer")])), param_types: vec![], doc: Some("Return the bits as a List of 0/1 Integers, most significant bit first.\n\n## Examples\n```beamtalk\ntail toBits   // => #(0, 1, 0, 1, 0)\n```".into()), origin: None, primitive: None },
+                MethodInfo { selector: "concat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::simple("Bitstring"), DeclaredType::simple("Binary")])), param_types: vec![Some(DeclaredType::union(vec![DeclaredType::simple("Bitstring"), DeclaredType::simple("Binary")]))], doc: Some("Join this bitstring's bits with `other`'s.\n\n`other` may be a Bitstring, a Binary, or a String (joined by its UTF-8\nbytes, as `Binary>>concat:` does). The answer is a `Binary` when the\njoined bits are byte-aligned, and a `Bitstring` otherwise.\n\n## Examples\n```beamtalk\n(oneBit concat: sevenBits) class   // => Binary\n(oneBit concat: oneBit) class      // => Bitstring\n```".into()), origin: None, primitive: None },
+                MethodInfo { selector: "asBinary".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("Result", vec![DeclaredType::simple("Binary"), DeclaredType::simple("Error")])), param_types: vec![], doc: Some("Convert to a Binary, as a Result.\n\nA Bitstring is never byte-aligned, so this is always an error of kind\n`#unaligned_bitstring`. There is no silent padding or truncation.\n\n## Examples\n```beamtalk\ntail asBinary isError            // => true\ntail asBinary error kind         // => #unaligned_bitstring\n```".into()), origin: None, primitive: None },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return the Erlang notation for the bits, e.g. `<<2:3>>`.\n\n## Examples\n```beamtalk\ntail printString   // => \"<<10:5>>\"\n```".into()), origin: None, primitive: None },
+                MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bitstring".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("String")), param_types: vec![], doc: Some("Return the same Erlang notation as `printString`.\n\n## Examples\n```beamtalk\ntail displayString   // => \"<<10:5>>\"\n```".into()), origin: None, primitive: None },
             ],
             class_methods: vec![],
             class_variables: vec![],
@@ -5800,6 +5843,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("Binary".into(), class_info_Binary());
     classes.insert("BindingChanged".into(), class_info_BindingChanged());
     classes.insert("BindingsView".into(), class_info_BindingsView());
+    classes.insert("Bitstring".into(), class_info_Bitstring());
     classes.insert("Block".into(), class_info_Block());
     classes.insert("Boolean".into(), class_info_Boolean());
     classes.insert("ChangeEntry".into(), class_info_ChangeEntry());

@@ -38,6 +38,10 @@ enum TypeTest {
     /// and `String` is its only subclass, so the closed subclass set is a
     /// constant-time test, not ADR 0107 Phase B's general subclass dispatch.
     Binary,
+    /// `Bitstring` (ADR 0141) — `is_bitstring` and not `is_binary`: a
+    /// bitstring that is not byte-aligned. `Binary` is not its subclass
+    /// or superclass, so neither test matches the other's values.
+    Bitstring,
     /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags
     /// and the `String` 2-tuple tag.
     Tuple,
@@ -56,6 +60,7 @@ enum TypeTest {
 static TYPE_TESTS: &[(&str, TypeTest)] = &[
     ("String", TypeTest::String),
     ("Binary", TypeTest::Binary),
+    ("Bitstring", TypeTest::Bitstring),
     ("Integer", TypeTest::Bif("is_integer")),
     ("Float", TypeTest::Bif("is_float")),
     ("List", TypeTest::Bif("is_list")),
@@ -288,6 +293,7 @@ impl CoreErlangGenerator {
             TypeTest::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
             TypeTest::String => self.wrap_string_test(match_var, success, rest),
             TypeTest::Binary => self.wrap_binary_test(match_var, success, rest),
+            TypeTest::Bitstring => Self::wrap_bitstring_test(match_var, success, rest),
             TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
             TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
             TypeTest::Atom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
@@ -383,6 +389,20 @@ impl CoreErlangGenerator {
         let is_string = self.wrap_string_test(match_var, true_doc(), &false_doc());
         let is_binary = Self::wrap_bif_test(match_var, "is_binary", true_doc(), &is_string);
         Self::branch_on_test(is_binary, success, rest)
+    }
+
+    /// `Bitstring` test (ADR 0141): `is_bitstring(X) andalso not
+    /// is_binary(X)`, as two nested guard-safe BIF tests computing one
+    /// `'true'`/`'false'` that a single `case` branches on, so `success` is
+    /// emitted once (BT-4141).
+    fn wrap_bitstring_test(
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let not_binary = Self::wrap_bif_test(match_var, "is_binary", false_doc(), &true_doc());
+        let is_bitstring = Self::wrap_bif_test(match_var, "is_bitstring", not_binary, &false_doc());
+        Self::branch_on_test(is_bitstring, success, rest)
     }
 
     /// `case <test> of <'true'> -> success <'false'> -> rest end`, for a

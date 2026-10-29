@@ -250,6 +250,23 @@ class_of_port_test() ->
     ?assertEqual('Port', beamtalk_primitive:class_of(Port)),
     gen_tcp:close(Port).
 
+%% ADR 0141 (BT-4139): the class follows the bitstring's shape — byte-aligned
+%% is a Binary, anything else a Bitstring.
+class_of_bitstring_test() ->
+    ?assertEqual('Bitstring', beamtalk_primitive:class_of(<<2:3>>)),
+    ?assertEqual('Bitstring', beamtalk_primitive:class_of(<<234, 1:1>>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<1:1, 127:7>>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<>>)).
+
+bitstring_print_string_test() ->
+    ?assertEqual(<<"<<2:3>>">>, beamtalk_primitive:print_string(<<2:3>>)),
+    ?assertEqual(<<"<<234,1:1>>">>, beamtalk_primitive:print_string(<<234, 1:1>>)),
+    ?assertEqual(<<"<<2:3>>">>, beamtalk_primitive:display_string(<<2:3>>)),
+    ?assertEqual(<<"#(<<2:3>>, 1)">>, beamtalk_primitive:print_string([<<2:3>>, 1])),
+    %% One line however long (`~w`, not `~p`).
+    Long = <<0:(8 * 100), 1:1>>,
+    ?assertEqual(nomatch, binary:match(beamtalk_primitive:print_string(Long), <<"\n">>)).
+
 class_of_reference_test() ->
     Ref = make_ref(),
     ?assertEqual('Reference', beamtalk_primitive:class_of(Ref)).

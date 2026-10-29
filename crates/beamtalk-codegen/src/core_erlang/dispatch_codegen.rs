@@ -157,6 +157,7 @@ pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
     "Character",
     "String",
     "Binary",
+    "Bitstring",
     "Symbol",
     "True",
     "False",

@@ -4572,6 +4572,12 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   _ -> -1
 ]
 // => 10: bits/bitstring match possibly-unaligned bits.
+(Binary fromBytes: #(234)) match: [
+  <<_:3, rest/bits>> -> rest class;
+  _ -> nil
+]
+// => Bitstring: an unaligned tail is a Bitstring (ADR 0141); use
+// bitSize/toBits on it, not the byte protocol. An aligned tail is a Binary.
 
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
@@ -4611,7 +4617,7 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). A `/bitstring` (`/bits`) segment binds whatever the bits are: a `Binary` when they are a whole number of bytes, otherwise a [`Bitstring`](#bitstring--unaligned-bits) (ADR 0141), which understands only bit-level messages (`bitSize`, `toBits`, `concat:`, `asBinary`). A type pattern `b :: Bitstring` matches exactly the unaligned values; `b :: Binary` never matches one. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
@@ -4622,7 +4628,7 @@ Bind the match's answer instead: `timeout := value match: [...]`.
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 
-**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
+**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, `Bitstring` (ADR 0141: `is_bitstring` and not `is_binary`, so it never matches a `Binary`), user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
 
 **`Binary` is the one non-leaf exception (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
 
@@ -7448,6 +7454,49 @@ callers that already know the bytes are text may use it.
 // Byte loop over Binary data — elements are Integers throughout
 checksum: data =>
   (0 to: data size - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+```
+
+### Bitstring — Unaligned Bits
+
+A `Bitstring` is a sequence of bits that is not a whole number of bytes
+([ADR 0141](ADR/0141-bitstring-sealed-class-for-unaligned-bitstrings.md)). The
+class follows the value's shape, as in Erlang: a BEAM bitstring whose bit size
+is a multiple of 8 is a binary (`Binary`, or `String`), and any other bitstring
+is a `Bitstring`. `Bitstring` is a sealed sibling of `Binary`, not its
+superclass or subclass, so `isKindOf: Binary` and `:: Binary` are false for it.
+Bitstrings come from binary patterns: a `/bitstring` (or `/bits`) segment
+binds whatever bits are left.
+
+```beamtalk
+tail := (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+tail class                // => Bitstring
+tail bitSize              // => 5
+tail toBits               // => #(0, 1, 0, 1, 0)  (most significant bit first)
+tail printString          // => "<<10:5>>"  (Erlang notation)
+tail asBinary isError     // => true  (kind #unaligned_bitstring)
+(Binary fromBytes: #(1, 2)) bitSize   // => 16
+```
+
+| Selector | Answer |
+|---|---|
+| `bitSize` | number of bits (also on `Binary`: 8 × byte count) |
+| `toBits` | `List(Integer)` of 0/1, most significant bit first |
+| `concat:` | the joined bits — a `Binary` when byte-aligned, else a `Bitstring`; a `String` argument joins by its bytes. `Binary>>concat:` stays bytes-only: a `Bitstring` argument is a `type_error`, so join bits from the Bitstring side |
+| `asBinary` | always `Result error:` of kind `#unaligned_bitstring`; no silent padding or truncation |
+| `printString` / `displayString` | Erlang notation, e.g. `<<2:3>>` |
+| `=:=`, `==`, `hash` | structural equality, inherited |
+
+The byte protocol of `Binary` and `Collection` is deliberately not understood:
+`size`, `do:`, `at:`, `byteAt:`, `part:size:`, `toBytes`, `includesSubstring:`,
+`indexOf:`, `asString`, `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`,
+`collect:`, `select:`, `inject:into:`, `isEmpty`, `includes:`, and the rest.
+Each raises a structured `does_not_understand` whose hint names the bit size:
+
+```beamtalk
+tail size
+// => does_not_understand: Bitstring does not understand 'size'
+//    Hint: a Bitstring is not byte-aligned (5 bits); use 'bitSize'/'toBits',
+//    or 'asBinary' to check alignment
 ```
 
 ### Accessing an Empty Collection
