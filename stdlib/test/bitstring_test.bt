@@ -109,8 +109,8 @@ TestCase subclass: BitstringTest
   testFieldAccessOnABitstringIsStructured =>
     // No fields: a dynamic fieldAt: raises the same structured
     // immutable_value as a primitive class, never a raw function_clause.
-    self should: [self tail perform: #fieldAt: with: #x] raise: #immutable_value
-    self deny: (self tail perform: #hasField: with: #x)
+    self should: [self tail perform: #fieldAt: withArguments: #(#x)] raise: #immutable_value
+    self deny: (self tail perform: #hasField: withArguments: #(#x))
 
   testBinaryConcatABitstringIsATypeError =>
     // ADR 0141: Binary>>concat: is bytes-only (typed Binary -> Binary);
