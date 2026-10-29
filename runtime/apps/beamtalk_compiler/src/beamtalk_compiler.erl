@@ -21,6 +21,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
 - `diagnostics/3' — Get parse/semantic diagnostics with options (e.g. opt-in class-hierarchy awareness)
 - `version/0' — Get compiler version
 - `compile_core_erlang/1' — Core Erlang → BEAM bytecode (in-memory)
+- `class_meta_from_core_erlang/1' — read a compile's `__beamtalk_meta/0' without loading it
 """.
 
 -export([
@@ -33,6 +34,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     diagnostics/3,
     version/0,
     compile_core_erlang/1,
+    class_meta_from_core_erlang/1,
     resolve_completion_type/1,
     find_senders_in_source/2,
     find_all_sends_in_source/1,
@@ -211,6 +213,51 @@ Returns `{ok, ModuleName, Binary}' or `{error, Reason}'.
 -spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
 compile_core_erlang(CoreErlangBin) ->
     beamtalk_compiler_server:compile_core_erlang(CoreErlangBin).
+
+-doc """
+Read the static class metadata a compiled class module's `__beamtalk_meta/0'
+would return, straight from its Core Erlang text — without compiling it to
+BEAM or loading it (BT-4285).
+
+Loading a generated class module is never side-effect free: its
+`on_load' (`register_class/0') registers the class with the live runtime.
+A caller that only wants to *inspect* a pending compile (e.g.
+`beamtalk_repl_loader:precheck_class_shape/2') reads the metadata here
+instead, so no module is ever loaded and nothing is registered.
+
+`__beamtalk_meta/0' is generated as a body that is a single constant map
+(`class_meta.rs'), which `core_parse' already yields as a literal;
+`cerl:fold_literal/1' covers any constant compound data it leaves unfolded.
+Returns `not_available' when the source does not parse, defines no
+`__beamtalk_meta/0', or that function's body is not a constant map.
+""".
+-spec class_meta_from_core_erlang(binary()) -> {ok, map()} | not_available.
+class_meta_from_core_erlang(CoreErlangBin) ->
+    case beamtalk_compiler_server:parse_core_erlang(CoreErlangBin) of
+        {ok, CoreModule} ->
+            constant_meta(CoreModule);
+        {error, _} ->
+            not_available
+    end.
+
+-spec constant_meta(cerl:c_module()) -> {ok, map()} | not_available.
+constant_meta(CoreModule) ->
+    MetaFuns = [
+        Fun
+     || {Name, Fun} <- cerl:module_defs(CoreModule),
+        cerl:fname_id(Name) =:= '__beamtalk_meta',
+        cerl:fname_arity(Name) =:= 0
+    ],
+    case MetaFuns of
+        [Fun] ->
+            Body = cerl:fold_literal(cerl:fun_body(Fun)),
+            case cerl:is_literal(Body) andalso cerl:concrete(Body) of
+                Meta when is_map(Meta) -> {ok, Meta};
+                _ -> not_available
+            end;
+        _ ->
+            not_available
+    end.
 
 -doc """
 Find call sites of a selector in a single method's source.
