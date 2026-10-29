@@ -62,6 +62,17 @@ pub(in crate::core_erlang) struct UnbracketedSend {
     pub(in crate::core_erlang) site: GapSite,
 }
 
+/// A bracketed conditional fallback send
+/// ([`CoreErlangGenerator::bracket_conditional_fallback`]).
+pub(in crate::core_erlang) struct FallbackBracket {
+    /// The open `let` chain: store, send, reload.
+    pub(in crate::core_erlang) prelude: Document<'static>,
+    /// The variable bound to the send's answer.
+    pub(in crate::core_erlang) result: String,
+    /// The variable bound to the reloaded cell.
+    pub(in crate::core_erlang) state: String,
+}
+
 /// Where in the code generator a gap was compiled: [`capture_site`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in crate::core_erlang) struct GapSite {
@@ -896,6 +907,66 @@ impl CoreErlangGenerator {
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
+    }
+
+    /// BT-4244: the bracket around a boolean conditional's non-Boolean fallback
+    /// send (`CoreErlangGenerator::mutation_boolean_fallback_clause`), built
+    /// here because the mutation-path `case` is a `Document` whose arms each
+    /// answer `{Result, NewState}`: the store of `base_state` (the scratch
+    /// map the arms continue) to the cell, the send, and the reload of the
+    /// cell as the arm's state, rendered through the one `SyncedCall` node.
+    ///
+    /// Called only where [`Self::conditional_fallback_brackets`] holds.
+    pub(in crate::core_erlang) fn bracket_conditional_fallback(
+        &mut self,
+        call: Document<'static>,
+        base_state: &str,
+        span: Span,
+    ) -> FallbackBracket {
+        let result = self.fresh_temp_var("Synced");
+        let state = self.fresh_temp_var("FallbackState");
+        let frame = self.current_frame();
+        let node = ThreadedStmt::SyncedCall {
+            store: VersionedVar::new(VersionPrefix::Gensym(base_state.to_string()), 0, frame),
+            call,
+            result: Some(result.clone()),
+            load: Some(VersionedVar::new(
+                VersionPrefix::Gensym(state.clone()),
+                0,
+                frame,
+            )),
+            span,
+            tier2_local_rebinds: Vec::new(),
+            on_private_scratch: false,
+        };
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        let prelude = super::threaded_ir::render(&[node], &mut ctx);
+        FallbackBracket {
+            prelude,
+            result,
+            state,
+        }
+    }
+
+    /// BT-4244: whether a boolean conditional's fallback send is bracketed
+    /// ([`Self::bracket_conditional_fallback`]): in an actor instance method
+    /// body whose frame holds a whole `State` to store. Where the cell
+    /// protocol applies but the frame holds none (a direct-params, hybrid or
+    /// tuple-accumulator loop, [`Self::loop_holds_no_whole_state`]), the
+    /// fallback cannot bracket, so a block that touches the actor's state is
+    /// not passed as a closure at all
+    /// (`CoreErlangGenerator::conditional_fallback_stubs_state`).
+    pub(in crate::core_erlang) fn conditional_fallback_brackets(&self) -> bool {
+        self.synced_calls_active() && !self.loop_holds_no_whole_state()
+    }
+
+    /// BT-4244: whether a boolean conditional's fallback passes a block that
+    /// touches the actor's state as a raising stub rather than a closure: the
+    /// cell protocol applies, but the send cannot be bracketed
+    /// ([`Self::conditional_fallback_brackets`]), so a closure would read a
+    /// stale cell and its writes would never reach the threaded `State`.
+    pub(in crate::core_erlang) fn conditional_fallback_stubs_state(&self) -> bool {
+        self.synced_calls_active() && self.loop_holds_no_whole_state()
     }
 
     /// Records one gap.

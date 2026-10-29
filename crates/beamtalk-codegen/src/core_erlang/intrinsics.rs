@@ -3037,8 +3037,7 @@ impl CoreErlangGenerator {
                             } else {
                                 SoloBoolean::Or
                             };
-                            let doc =
-                                self.generate_solo_boolean_pure(sel, receiver, block, arguments)?;
+                            let doc = self.generate_solo_boolean_pure(sel, receiver, block)?;
                             return Ok(Some(doc));
                         }
                     }
@@ -3057,7 +3056,6 @@ impl CoreErlangGenerator {
                             SoloBoolean::IfTrue,
                             receiver,
                             block,
-                            arguments,
                         )?));
                     }
                 }
@@ -3072,7 +3070,6 @@ impl CoreErlangGenerator {
                             SoloBoolean::IfFalse,
                             receiver,
                             block,
-                            arguments,
                         )?));
                     }
                 }
@@ -3093,7 +3090,6 @@ impl CoreErlangGenerator {
                             receiver,
                             true_block,
                             false_block,
-                            arguments,
                         )?));
                     }
                 }
