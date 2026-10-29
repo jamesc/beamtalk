@@ -389,6 +389,17 @@ impl SoloAnswer {
     }
 }
 
+/// The two-block boolean conditional's selector, as the atom its non-Boolean
+/// fallback send names ([`CoreErlangGenerator::boolean_fallback_send`]).
+pub(in crate::core_erlang) const IF_TRUE_IF_FALSE: &str = "ifTrue:ifFalse:";
+
+/// BT-4244: the hint of the `stateful_block_dispatch` error a conditional's
+/// fallback closure raises when a non-Boolean receiver's method calls an arm
+/// whose state effects only the inline conditional can thread
+/// ([`CoreErlangGenerator::fallback_block_doc`]).
+const FALLBACK_WRITING_BLOCK_HINT: &str =
+    "A non-Boolean receiver called a conditional's block that only runs inline";
+
 /// BT-4189: the single-block boolean conditionals — `ifTrue:`, `ifFalse:`,
 /// `and:`, `or:` — and the ONE table of which receiver arm runs the block
 /// ([`SoloBoolean::block_on_true`]) and what the other arm answers
@@ -407,17 +418,6 @@ impl SoloAnswer {
 /// that falls back to a dynamic send for a non-Boolean receiver (the pure
 /// path's wildcard arm; BT-4244 for the mutation path) sends the same
 /// message.
-/// The two-block boolean conditional's selector, as the atom its non-Boolean
-/// fallback send names ([`CoreErlangGenerator::boolean_fallback_send`]).
-pub(in crate::core_erlang) const IF_TRUE_IF_FALSE: &str = "ifTrue:ifFalse:";
-
-/// BT-4244: the hint of the `stateful_block_dispatch` error a conditional's
-/// fallback closure raises when a non-Boolean receiver's method calls an arm
-/// whose state effects only the inline conditional can thread
-/// ([`CoreErlangGenerator::fallback_block_doc`]).
-const FALLBACK_WRITING_BLOCK_HINT: &str =
-    "A non-Boolean receiver called a conditional's block that only runs inline";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum SoloBoolean {
     /// `R ifTrue: [B]`
@@ -1825,11 +1825,11 @@ impl CoreErlangGenerator {
     /// `base_state` first and answers the reloaded cell as its state (and
     /// the method stores its final `State` on exit, `with_exit_store`). A
     /// fallback whose blocks touch nothing of the actor's needs no bracket
-    /// and costs the method no exit store. Elsewhere nothing the closures can do reaches the
-    /// scratch map (a captured local is never written by one, and a block
-    /// touching the actor's state is a stub where the send cannot bracket,
-    /// [`Self::fallback_block_doc`]), so the arm answers `base_state`
-    /// unchanged, as the non-taken arm does.
+    /// and costs the method no exit store. Elsewhere nothing the closures
+    /// can do reaches the scratch map (a captured local is never written by
+    /// one, and a block touching the actor's state is a stub where the send
+    /// cannot bracket, [`Self::fallback_block_doc`]), so the arm answers
+    /// `base_state` unchanged, as the non-taken arm does.
     fn mutation_boolean_fallback_clause(
         &mut self,
         cond_var: &str,
