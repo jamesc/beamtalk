@@ -365,3 +365,22 @@ side, main → PR. Rows not listed did not move.
   within noise): what is left is not the decision but the `String` class
   reference built per use and the inherited-method walk to `Object>>isKindOf:`
   (BT-4260).
+- **BT-4113 (#4656)** makes the actor dispatch telemetry events opt-in
+  (the always-on `{Class, Selector}` aggregates are recorded directly), passes
+  the class with the send, drops the liveness pre-check and empty context
+  propagation, and skips the receiver's `__local__` key scan when the
+  committed state holds exactly the declared keys (7 rounds, idle machine,
+  before = main c5b7f23, after = this branch at 487fb54;
+  `results/bench-bt4113-before.md`, `results/bench-bt4113-after.md`).
+  Beamtalk side, before → after: 7a 226 red / 311 w / 10.5 µs →
+  **140 / 149 / 5.3 µs**; 7b 226 / 317 / 12.7 µs → **140 / 155 / 4.1 µs**;
+  7c 199 / 239 / 8.5 µs → **110 / 76 / 1.8 µs**; 7d 283 / 388 / 14.9 µs →
+  **196 / 226 / 4.8 µs** (Elixir `GenServer.call` 37.1 / 56 / ~2.5 µs, cast
+  18.6 / 12). The review fix that makes the state guard match every declared
+  key, not just the count, leaves the reductions where they were (140, 140,
+  110, 196–198 in single-round reruns); words stay within the few-word
+  run-to-run wobble of these multi-process rows. What remains, about 100
+  reductions over Elixir per call, is `make_self` per message, the
+  `classify_receiver` class-object check, the send wrapper chain, the
+  always-on aggregate atomics and the mailbox/`From`/watch/reply checks
+  (BT-4265).
