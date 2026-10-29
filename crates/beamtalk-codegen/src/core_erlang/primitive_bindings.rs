@@ -835,12 +835,7 @@ mod tests {
     fn test_load_from_real_stdlib() {
         // This test loads the actual lib/*.bt files from the project root.
         // It verifies that the binding table is populated correctly.
-        let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("stdlib/src");
+        let lib_dir = crate::core_erlang::tests::repo_root().join("stdlib/src");
 
         if !lib_dir.exists() {
             // Skip test if lib/ doesn't exist (e.g., in CI without full repo)
