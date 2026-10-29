@@ -61,6 +61,8 @@ Actor subclass: Bt4276FoldInClosure
     t := 0
     #(1, 2)
       do: [:x |
-        t := self twice: [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]
+        t := self twice: [
+          x + (self.items inject: 0 into: [:acc :y | acc + self bump])
+        ]
       ]
     t
