@@ -133,33 +133,37 @@ impl CoreErlangGenerator {
     /// (`beamtalk_core`'s `literal_block_value_send`) inlined with its writes
     /// threaded ([`Self::evaluated_block_inlines_with_mutations`]), outside the
     /// REPL, whichever lowering takes it in the frame it is compiled in (the
-    /// producer, or the Tier 2 inline call in a frame with a private scratch
-    /// map). Frame-independent, so a loop's plan, decided in the enclosing
-    /// frame, reads the same answer the body's own frame would.
+    /// producer, or the Tier 2 inline call). Frame-independent, so a loop's
+    /// plan, decided in the enclosing frame, reads the same answer the body's
+    /// own frame would: the body's mode is chosen for it exactly as before
+    /// BT-3982, when every such block was a Tier 2 inline call.
     pub(in crate::core_erlang) fn is_inlined_evaluated_block(&self, expr: &Expression) -> bool {
         !self.is_repl_mode()
             && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
                 .is_some_and(|(block, _)| self.evaluated_block_inlines_with_mutations(block))
     }
 
-    /// BT-3982: [`Self::is_inlined_evaluated_block`] for a block that writes
-    /// only locals of its own (no field write, no send to `self`,
-    /// `has_state_effects`, and no local bound outside it, which makes it a
-    /// local-threading construct). Like a conditional whose arms write only
-    /// locals, it needs no `StateAcc` of the loop or fold body it sits in: in
-    /// a direct-params or tuple-acc body its producer seeds a private scratch
-    /// map (`conditional_scratch`).
-    pub(in crate::core_erlang) fn is_locals_only_evaluated_block(&self, expr: &Expression) -> bool {
-        self.is_inlined_evaluated_block(expr)
-            && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
-                .is_some_and(|(block, _)| {
-                    !self.block_profile_or_analyze(block).has_state_effects()
-                        && beamtalk_core::semantic_analysis::block_facts::threaded_block_writes(
-                            &[block],
-                            &|name| self.binds_threadable_local(name),
-                        )
-                        .is_empty()
-                })
+    /// Whether `block` writes a local bound outside it (`beamtalk_core`'s
+    /// `threaded_block_writes`, nested constructs' blocks included): an
+    /// evaluated block that does is a local-threading construct.
+    fn block_writes_outer_local(&self, block: &Block) -> bool {
+        !beamtalk_core::semantic_analysis::block_facts::threaded_block_writes(&[block], &|name| {
+            self.binds_threadable_local(name)
+        })
+        .is_empty()
+    }
+
+    /// BT-3982: whether the actor producer claims the evaluated literal block
+    /// `block` in the frame being lowered: the frame is one it is a producer in
+    /// ([`Self::threads_actor_evaluated_block_state`]), the block is inlined
+    /// with its writes threaded and writes no local bound outside it. The
+    /// block half of [`Self::actor_evaluated_block_producer_parts`], and the
+    /// rule under which the legacy inline lowering reaching the block outside a
+    /// consumed Tier 2 statement is `VerifyError::UnthreadedEvaluatedBlock`.
+    pub(in crate::core_erlang) fn actor_producer_claims_block(&self, block: &Block) -> bool {
+        self.threads_actor_evaluated_block_state()
+            && self.evaluated_block_inlines_with_mutations(block)
+            && !self.block_writes_outer_local(block)
     }
 
     /// BT-3982: whether the frame being lowered is one an actor evaluated
@@ -194,34 +198,20 @@ impl CoreErlangGenerator {
     /// a class method or an actor closure (ADR 0137 §3: no `State` there;
     /// fields are written in place, so only the block's locals thread). In a
     /// frame with a private scratch map (a direct-params or tuple-acc loop or
-    /// fold body, `conditional_has_private_scratch`) the block writes only
-    /// locals (one that writes a field or sends to `self` makes the body
-    /// thread `State`, [`Self::is_locals_only_evaluated_block`]), and its
-    /// producer seeds a fresh scratch map with no `State` `Bind`, as a
-    /// conditional's does there.
+    /// fold body, `conditional_has_private_scratch`) its producer seeds a
+    /// fresh scratch map and binds no `State`, as a conditional's does there.
     pub(in crate::core_erlang) fn actor_evaluated_block_producer_parts<'a>(
         &self,
         expr: &'a Expression,
     ) -> Option<(&'a Block, &'a [Expression])> {
-        if !self.threads_actor_evaluated_block_state() {
-            return None;
-        }
         #[cfg(test)]
         if super::threaded_expr::fault::active()
             == Some(super::threaded_expr::fault::LocalRebindFault::EvaluatedBlockNotAProducer)
         {
             return None;
         }
-        beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr).filter(
-            |(block, _)| {
-                self.evaluated_block_inlines_with_mutations(block)
-                    && beamtalk_core::semantic_analysis::block_facts::threaded_block_writes(
-                        &[block],
-                        &|name| self.binds_threadable_local(name),
-                    )
-                    .is_empty()
-            },
-        )
+        beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+            .filter(|(block, _)| self.actor_producer_claims_block(block))
     }
 
     /// [`Self::block_touches_actor_state`] over an already-computed analysis.

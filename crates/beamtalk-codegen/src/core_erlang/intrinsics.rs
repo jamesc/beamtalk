@@ -1591,11 +1591,11 @@ impl CoreErlangGenerator {
             return Ok(Document::Vec(parts));
         }
 
-        // BT-3982: where the actor producer applies
-        // (`threads_actor_evaluated_block_state`), the raw tuple below is the
-        // value unless a body sequencer consumes this site as a Tier 2
-        // statement: the producer gate and this lowering disagree.
-        if self.threads_actor_evaluated_block_state()
+        // BT-3982: for a block the actor producer claims
+        // (`actor_producer_claims_block`), the raw tuple below is the value
+        // unless a body sequencer consumes this site as a Tier 2 statement:
+        // the producer gate and this lowering disagree.
+        if self.actor_producer_claims_block(block)
             && !self.tier2_evaluated_block_sites.contains(&block.span)
         {
             let errors =

@@ -1138,6 +1138,15 @@ impl CoreErlangGenerator {
         if arguments.is_empty() {
             return self.generate_block_value_with_mutations(block, tail, producer);
         }
+        // A local-threading producer is unary (`literal_block_value_arm`): its
+        // `LocalRebind`s would be bound in the parameter scope popped below.
+        if producer {
+            return Err(CodeGenError::Internal(
+                "an evaluated block with arguments was lowered as a local-threading producer \
+                 (its rebinds would be scoped to its parameters; BT-3982)"
+                    .to_string(),
+            ));
+        }
         let frame = self.current_frame();
         let mut prelude = Vec::new();
         let mut arg_vars = Vec::with_capacity(arguments.len());

@@ -368,16 +368,18 @@ impl BodyEffects {
         // threads the `State` (or a hybrid body's pre-extracted field
         // parameters, which it cannot reach).
         //
-        // BT-3982: an evaluated literal block (a producer wherever it sits)
-        // counts like a conditional: only when it writes a field or sends to
-        // `self`. One that writes only locals runs on a private scratch map
-        // in a direct-params or tuple-acc body.
+        // BT-3982: not an evaluated literal block (`is_inlined_evaluated_block`,
+        // frame-independent), which `control_flow_has_mutations` claims where
+        // its producer applies: the body's mode is chosen as it was when every
+        // such block was a Tier 2 inline call (a hybrid body keeps its field
+        // parameters, a direct-params or tuple-acc body its private scratch
+        // map), and its producer lowers in whichever mode that is.
         let has_cf_mutations = body.body.iter().any(|s| {
             Self::statement_and_producer_sites(&s.expression)
                 .into_iter()
                 .any(|e| {
                     generator.control_flow_has_mutations(e)
-                        && !generator.is_locals_only_evaluated_block(e)
+                        && !generator.is_inlined_evaluated_block(e)
                 })
         });
 
