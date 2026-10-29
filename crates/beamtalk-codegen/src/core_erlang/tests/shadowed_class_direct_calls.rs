@@ -201,3 +201,48 @@ fn keyword_constructor_on_shadowed_class_stays_a_class_send() {
         "shadowed `Pt x:y:` must stay a class send. Got:\n{output}"
     );
 }
+
+#[test]
+fn qualified_reference_to_a_shadowed_class_stays_a_class_send() {
+    // Class-method sends dispatch on the bare name whatever the qualifier
+    // (ADR 0070 Phase 2), so `json@Parser parse:` is gated like `Parser`.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  useIt -> Object =>\n",
+        "    json@Parser parse: 1\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@app@caller").with_class_hierarchy(vec![
+            sealed_parser(Some("json")),
+            sealed_parser(Some("xml")),
+        ]),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        !code.contains(DIRECT_PARSE) && code.contains(CLASS_SEND),
+        "a qualified send to a shadowed class must stay a class send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn own_class_sibling_call_is_unaffected_by_shadowing() {
+    // A self-send inside the class's own module calls its own function
+    // (`self` is this module's class), shadowed or not.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "sealed Object subclass: Parser\n",
+        "  class sealed parse: x => self helper: x\n",
+        "  class sealed helper: x => x\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@parser").with_class_hierarchy(vec![sealed_parser(Some("json"))]),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("'class_helper:'("),
+        "an own-class self-send must keep its direct call under shadowing. Got:\n{code}"
+    );
+}
