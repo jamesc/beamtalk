@@ -43,6 +43,7 @@ defmodule VeBench do
   def dict, do: %{a: 1, b: 2, k: 3}
   def string, do: "hello world"
   def tuple, do: {1, 2}
+  def math_module, do: Math
   def ok_result, do: {:ok, 7}
 
   # === Loop overhead ===
@@ -64,6 +65,7 @@ defmodule VeBench do
   # === 3. Remote call ===
 
   defbench(:remote_call, _, do: Math.double(21))
+  defbench(:dyn_remote_call, mod, do: mod.double(21))
 
   # === 4. Dynamic dispatch ===
 

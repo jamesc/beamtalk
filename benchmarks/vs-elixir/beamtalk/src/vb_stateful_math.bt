@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The same class method on a class with class state (row 3f, BT-4298). The
+// method does not touch `calls`, but the class has class variables, so under
+// ADR 0142 it keeps running in the class process: the control row.
+Object subclass: VbStatefulMath
+  classState: calls :: Integer = 0
+
+  class double: x :: Integer -> Integer => x * 2

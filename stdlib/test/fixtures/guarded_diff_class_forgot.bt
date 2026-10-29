@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298 (ADR 0142 §1, rule 2): a stateless subclass of a stateful class.
+// An inherited class method that touches the parent's class variables
+// raises `undeclared_class_variable` when sent here (class variables are
+// own-only, ADR 0130), and ADR 0142 must not change that error.
+
+GuardedDiffClassStateful subclass: GuardedDiffClassForgot

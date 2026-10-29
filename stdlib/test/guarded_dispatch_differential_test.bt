@@ -37,6 +37,8 @@
 // test method for a new kind. Workspace-only mutations (a live patch that
 // recompiles the class, `removeSelector:` of a class-body method) are in
 // tests/repl-protocol/cases/guarded_dispatch_differential.btscript.
+// Class-side sends (epic BT-4297, ADR 0142) have their own rows in
+// class_dispatch_differential_test.bt (BT-4298).
 //
 // Fixtures: fixtures/guarded_diff_base.bt, fixtures/guarded_diff_point.bt,
 // fixtures/guarded_diff_point_sub.bt, fixtures/guarded_diff_impostor.bt,

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298: a childless Supervisor for the class-side differential rows'
+// `supervise` and `spawn` sends.
+
+Supervisor subclass: GuardedDiffSup
+
+  childSpecs => #()
