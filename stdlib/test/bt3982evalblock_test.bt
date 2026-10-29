@@ -36,11 +36,9 @@ TestCase subclass: Bt3982EvalblockTest
   testStatementThenRead =>
     self assert: (Bt3982EvalblockActor spawn statementThenRead) equals: 5
 
-  testAssigned =>
-    self assert: (Bt3982EvalblockActor spawn assigned) equals: 10
+  testAssigned => self assert: (Bt3982EvalblockActor spawn assigned) equals: 10
 
-  testReturned =>
-    self assert: (Bt3982EvalblockActor spawn returned) equals: 5
+  testReturned => self assert: (Bt3982EvalblockActor spawn returned) equals: 5
 
   testLastExpression =>
     self assert: (Bt3982EvalblockActor spawn lastExpression) equals: 5
@@ -75,11 +73,9 @@ TestCase subclass: Bt3982EvalblockTest
   testInUnmeasuredSelector =>
     self assert: (Bt3982EvalblockActor spawn inUnmeasuredSelector) equals: 3
 
-  testInReject =>
-    self assert: (Bt3982EvalblockActor spawn inReject) equals: 1
+  testInReject => self assert: (Bt3982EvalblockActor spawn inReject) equals: 1
 
-  testInOr =>
-    self assert: (Bt3982EvalblockActor spawn inOr) equals: true
+  testInOr => self assert: (Bt3982EvalblockActor spawn inOr) equals: true
 
   testFoldWritesOuter =>
     self assert: (Bt3982EvalblockActor spawn foldWritesOuter) equals: 3

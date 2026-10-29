@@ -1181,8 +1181,7 @@ Actor subclass: Bt3981EvalblockActor
       ] value
     ] on: Error do: [:e | 0]
 
-  protectedNestedSend =>
-    [[[self peek: 3] value] value] on: Error do: [:e | 0]
+  protectedNestedSend => [[[self peek: 3] value] value] on: Error do: [:e | 0]
 
   protectedReturnSimple =>
     [
@@ -1499,8 +1498,7 @@ Actor subclass: Bt3981EvalblockActor
       ]
       with: #(1)
 
-  ffiLastSend =>
-    (Erlang lists) map: [:z | [self peek: 3] value] with: #(1)
+  ffiLastSend => (Erlang lists) map: [:z | [self peek: 3] value] with: #(1)
 
   ffiNestedSimple =>
     (Erlang lists)
@@ -1575,8 +1573,7 @@ Actor subclass: Bt3981EvalblockActor
       ]
       with: #(1)
 
-  ffiReturnSend =>
-    (Erlang lists) map: [:z | ^[self peek: 3] value] with: #(1)
+  ffiReturnSend => (Erlang lists) map: [:z | ^[self peek: 3] value] with: #(1)
 
   ffiArgumentSimple =>
     (Erlang lists)

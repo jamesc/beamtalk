@@ -26,7 +26,8 @@ Actor subclass: Bt3982EvalblockActor
 
   arrayElement => #([:y | self.count := y] value: 5, self.count)
 
-  keywordArguments => self pair: ([:y | self.count := y] value: 5) with: self.count
+  keywordArguments =>
+    self pair: ([:y | self.count := y] value: 5) with: self.count
 
   keywordArgument => self take: ([:y | self.count := y] value: 5)
 
@@ -34,7 +35,11 @@ Actor subclass: Bt3982EvalblockActor
 
   twoArguments => {[:y :z | self.count := y + z] value: 2 value: 3, self.count}
 
-  threeArguments => {[:a :b :c | self.count := a + b + c] value: 1 value: 2 value: 2, self.count}
+  threeArguments =>
+    {[:a :b :c | self.count := a + b + c]
+      value: 1
+      value: 2
+      value: 2, self.count}
 
   statementThenRead =>
     [:y | self.count := y] value: 5
@@ -48,18 +53,32 @@ Actor subclass: Bt3982EvalblockActor
 
   lastExpression => [:y | self.count := y] value: 5
 
-  argumentWritesField => {[:y | self.m := y] value: (self.count := 5), self.count, self.m}
+  argumentWritesField =>
+    {[:y | self.m := y] value: (self.count := 5), self.count, self.m}
 
-  argumentsInOrder => {[:a :b | self.m := a * 10 + b] value: (self.count := 1) value: (self.count := self.count + 1), self.m}
+  argumentsInOrder =>
+    {[:a :b |
+      self.m := a * 10 + b
+    ] value: (self.count := 1) value: (self.count := self.count + 1), self.m}
 
-  parenthesized => ([n := 3. n] value) + 1
+  parenthesized =>
+    ([
+      n := 3
+      n
+    ] value) + 1
 
   parenthesizedAssigned =>
-    r := ([n := 3. n] value)
+    r := ([
+      n := 3
+      n
+    ] value)
     r
 
   fieldAssignedValue =>
-    self.m := [k := 3. k] value
+    self.m := [
+      k := 3
+      k
+    ] value
     self.m
 
   sendInArgument => #(3) includes: [self peek: 3] value
@@ -68,63 +87,144 @@ Actor subclass: Bt3982EvalblockActor
 
   nonLastInDo =>
     r := 0
-    #(1, 2) do: [:z | [n := 3. n] value. r := r + z]
+    #(1, 2)
+      do: [:z |
+        [
+          n := 3
+          n
+        ] value
+        r := r + z
+      ]
     r
 
-  nestedFive => [[[[[n := 3. n] value] value] value] value] value
+  nestedFive =>
+    [
+      [
+        [
+          [
+            [
+              n := 3
+              n
+            ] value
+          ] value
+        ] value
+      ] value
+    ] value
 
   inUnmeasuredSelector =>
     d := Dictionary new
-    d at: 5 ifAbsent: [[n := 3. n] value]
+    d
+      at: 5
+      ifAbsent: [
+        [
+          n := 3
+          n
+        ] value
+      ]
 
-  inReject => (#(1, 2) reject: [:z | [n := z > 1. n] value]) size
+  inReject =>
+    (#(1, 2)
+      reject: [:z |
+        [
+          n := z > 1
+          n
+        ] value
+      ]) size
 
   inOr =>
     flag := false
-    flag or: [[n := true. n] value]
-
+    flag
+      or: [
+        [
+          n := true
+          n
+        ] value
+      ]
 
   foldWritesOuter =>
     r := 0
-    #(1, 2) do: [:z | r := r + z. [n := 3. n] value]
+    #(1, 2)
+      do: [:z |
+        r := r + z
+        [
+          n := 3
+          n
+        ] value
+      ]
     r
 
   foldWritesOuterNonLast =>
     r := 0
-    #(1, 2) do: [:z | r := r + z. [n := 3. n] value. 4]
+    #(1, 2)
+      do: [:z |
+        r := r + z
+        [
+          n := 3
+          n
+        ] value
+        4
+      ]
     r
 
   foldNestedEvaluated =>
     r := 0
-    #(1, 2) do: [:z | r := r + z. [[n := 3. n] value] value]
+    #(1, 2)
+      do: [:z |
+        r := r + z
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] value
+      ]
     r
 
   foldOtherAssign =>
     r := 0
-    #(1, 2) collect: [:z | q := [n := 3. n] value. r := r + q]
+    #(1, 2)
+      collect: [:z |
+        q := [
+          n := 3
+          n
+        ] value
+        r := r + q
+      ]
     r
 
   collectWritesOuter =>
     r := 0
-    xs := #(1, 2) collect: [:z | r := r + z. [n := z * 3. n] value]
+    xs := #(1, 2)
+      collect: [:z |
+        r := r + z
+        [
+          n := z * 3
+          n
+        ] value
+      ]
     {xs, r}
 
   injectWritesOuter =>
     r := 0
-    s := #(1, 2) inject: 0 into: [:a :z | r := r + 1. a + ([n := z. n] value)]
+    s := #(1, 2)
+      inject: 0
+      into: [:a :z |
+        r := r + 1
+        a + ([
+          n := z
+          n
+        ] value)
+      ]
     {s, r}
-
-
-
-
-
 
   storedFieldWrite =>
     b := [:z | {[:y | self.count := y] value: z, self.count}]
     b value: 5
 
   ffiFieldWrite =>
-    (Erlang lists) map: [:z | {[:y | self.count := y] value: z, self.count}] with: #(5)
+    (Erlang lists) map: [:z |
+      {[:y | self.count := y] value: z, self.count}
+    ] with: #(5)
 
   userFieldWrite => self ap: [{[:y | self.count := y] value: 5, self.count}]
 
@@ -132,9 +232,11 @@ Actor subclass: Bt3982EvalblockActor
     flag := true
     flag ifTrue: [{[:y | self.count := y] value: 5, self.count}] ifFalse: [0]
 
-  collectTuple => #(5) collect: [:z | {[:y | self.count := y] value: z, self.count}]
+  collectTuple =>
+    #(5) collect: [:z | {[:y | self.count := y] value: z, self.count}]
 
-  protectedTuple => [{[:y | self.count := y] value: 5, self.count}] on: Error do: [:e | 0]
+  protectedTuple =>
+    [{[:y | self.count := y] value: 5, self.count}] on: Error do: [:e | 0]
 
   protectedLastField => [[:y | self.count := y] value: 5] on: Error do: [:e | 0]
 
@@ -142,93 +244,210 @@ Actor subclass: Bt3982EvalblockActor
     a := {[:y | self.count := y] value: 5, 0}
     {a, self.count}
 
-
   outerLocalUnary =>
     t := 0
     {[t := 5] value, t}
 
   doBodyOperand =>
     t := 0
-    #(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]
+    #(1, 2, 3)
+      do: [:i |
+        t := t + ([:z |
+          w := z
+          w
+        ] value: i)
+      ]
     t
 
   collectBodyOperand =>
     t := 0
-    xs := #(1, 2) collect: [:i | t := t + ([:z | w := z. w] value: i)]
+    xs := #(1, 2)
+      collect: [:i |
+        t := t + ([:z |
+          w := z
+          w
+        ] value: i)
+      ]
     {xs, t}
 
   methodOperand =>
     t := 0
-    t := t + ([:z | w := z. w] value: 2)
+    t := t + ([:z |
+      w := z
+      w
+    ] value: 2)
     t
 
   countedStateBodyOperand =>
     t := 0
-    1 to: 3 do: [:i |
-      self.m := self.m + 1
-      t := t + ([:z | w := z. w] value: i)]
+    1
+      to: 3
+      do: [:i |
+        self.m := self.m + 1
+        t := t + ([:z |
+          w := z
+          w
+        ] value: i)
+      ]
     {t, self.m}
 
   countedStateBodyArm =>
     t := 0
     c := true
-    1 to: 3 do: [:i |
-      self.m := self.m + 1
-      t := t + 1
-      c ifTrue: [[:z | w := z. w] value: i]]
+    1
+      to: 3
+      do: [:i |
+        self.m := self.m + 1
+        t := t + 1
+        c
+          ifTrue: [
+            [:z |
+              w := z
+              w
+            ] value: i
+          ]
+      ]
     {t, self.m}
-
 
   countedStatement =>
     t := 0
-    1 to: 3 do: [:i | [:z | w := z. w] value: i]
+    1
+      to: 3
+      do: [:i |
+        [:z |
+          w := z
+          w
+        ] value: i
+      ]
     t
 
   countedFreshAssign =>
     t := 0
-    1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]
+    1
+      to: 3
+      do: [:i |
+        r := [:z |
+          w := z
+          w
+        ] value: i
+        r
+      ]
     t
 
   fieldSendInDo =>
     t := 0
-    #(1, 2) do: [:i | t := t + ([:z | self.m := self.m + 1. z] value: i)]
+    #(1, 2)
+      do: [:i |
+        t := t + ([:z |
+          self.m := self.m + 1
+          z
+        ] value: i)
+      ]
     {t, self.m}
 
   selfSendInCollect =>
     #(1, 2) collect: [:i | ([:z | self peek: z] value: i) + 1]
 
   nestedArgumentFieldWrite =>
-    {[:y | self.count := y] value: ([:k | self.m := 2. k + 5] value: 2), self.count, self.m}
+    {[:y | self.count := y]
+      value: ([:k |
+        self.m := 2
+        k + 5
+      ] value: 2), self.count, self.m}
 
   innerFoldUnderWritingFold =>
     r := 0
-    #(1) do: [:y | r := 1. #(1) do: [:z | [n := 3. n] value. 4]]
+    #(1)
+      do: [:y |
+        r := 1
+        #(1)
+          do: [:z |
+            [
+              n := 3
+              n
+            ] value
+            4
+          ]
+      ]
     r
 
   innerCollectAssignUnderWritingFold =>
     r := 0
-    #(1) do: [:y | r := 1. #(1) collect: [:z | q := [n := 3. n] value. q]]
+    #(1)
+      do: [:y |
+        r := 1
+        #(1)
+          collect: [:z |
+            q := [
+              n := 3
+              n
+            ] value
+            q
+          ]
+      ]
     r
 
   protectedUnderWritingFold =>
     r := 0
-    #(1) do: [:y | r := 1. [[n := 3. n] value. 4] on: Error do: [:e | 0]]
+    #(1)
+      do: [:y |
+        r := 1
+        [
+          [
+            n := 3
+            n
+          ] value
+          4
+        ] on: Error do: [:e | 0]
+      ]
     r
 
   evaluatedUnderWritingFold =>
     r := 0
-    #(1) do: [:y | r := 1. [[[n := 3. n] value. 4] value. 5] value]
+    #(1)
+      do: [:y |
+        r := 1
+        [
+          [
+            [
+              n := 3
+              n
+            ] value
+            4
+          ] value
+          5
+        ] value
+      ]
     r
 
   ensureUnderWritingCollect =>
     r := 0
-    #(1) collect: [:y | r := 1. [[n := 3. n] value] ensure: [nil]]
+    #(1)
+      collect: [:y |
+        r := 1
+        [
+          [
+            n := 3
+            n
+          ] value
+        ] ensure: [nil]
+      ]
     r
 
   twoFoldsDifferentLocals =>
     r := 0
     s := 0
-    #(1) do: [:y | r := 1. #(1) do: [:z | s := [n := 3. n] value]]
+    #(1)
+      do: [:y |
+        r := 1
+        #(1)
+          do: [:z |
+            s := [
+              n := 3
+              n
+            ] value
+          ]
+      ]
     {r, s}
 
   ffiAssignedRepro =>
@@ -262,37 +481,101 @@ Actor subclass: Bt3982EvalblockActor
 
   dictionaryHandler =>
     d := Dictionary new
-    d at: 5 ifAbsent: [r := [n := 3. n] value. r]
+    d
+      at: 5
+      ifAbsent: [
+        r := [
+          n := 3
+          n
+        ] value
+        r
+      ]
 
   unmeasuredArmUnderFold =>
     r := 0
     flag := false
-    #(1) do: [:y | r := 1. flag or: [[n := true. n] value. true]]
+    #(1)
+      do: [:y |
+        r := 1
+        flag
+          or: [
+            [
+              n := true
+              n
+            ] value
+            true
+          ]
+      ]
     r
 
   nilArmUnderFold =>
     r := 0
-    #(1) do: [:y | r := 1. nil ifNil: [3] ifNotNil: [:v | [n := 3. n] value. 4]]
+    #(1)
+      do: [:y |
+        r := 1
+        nil
+          ifNil: [3]
+          ifNotNil: [:v |
+            [
+              n := 3
+              n
+            ] value
+            4
+          ]
+      ]
     r
 
   rejectAssignsOuter =>
     r := 0
-    #(1) reject: [:z | r := [n := 3. n] value. true]
+    #(1)
+      reject: [:z |
+        r := [
+          n := 3
+          n
+        ] value
+        true
+      ]
     r
 
   measuredInUnmeasured =>
     r := 0
     flag := false
     c := true
-    flag or: [c ifTrue: [r := [n := 3. n] value] ifFalse: [0]. true]
+    flag
+      or: [
+        c
+          ifTrue: [
+            r := [
+              n := 3
+              n
+            ] value
+          ]
+          ifFalse: [0]
+        true
+      ]
     r
 
   anySatisfyBlock =>
-    #(1) anySatisfy: [:z | [n := true. n] value]
+    #(1)
+      anySatisfy: [:z |
+        [
+          n := true
+          n
+        ] value
+      ]
 
   keysAndValuesBlock =>
-    #{1 => 2} keysAndValuesDo: [:k :v | [n := 3. n] value]
+    #{1 => 2}
+      keysAndValuesDo: [:k :v |
+        [
+          n := 3
+          n
+        ] value
+      ]
     nil
 
   fieldAssignInOperand =>
-    {([n := 3. n] value) + 1, [self.m := 3] value}
+    {([
+      n := 3
+      n
+    ] value) + 1, [self.m := 3] value}
