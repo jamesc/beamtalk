@@ -50,6 +50,7 @@ Bt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolObjectChild
     (Beamtalk classNamed: #Bt4252ClassProtocolObjectChild) printString
 
   class byNameDefinedSelector =>
+    @expect dnu "BT-4262: a run-time class lookup, so the send is not the class-side self-send"
     (Beamtalk classNamed: #Bt4252ClassProtocolObjectChild) selfName
 
   class byNameHasField =>
