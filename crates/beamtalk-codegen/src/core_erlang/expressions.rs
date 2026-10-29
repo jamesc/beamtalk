@@ -277,6 +277,22 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// The Core Erlang variable holding the receiver for a bare `self`
+    /// outside a REPL top-level eval: an explicit binding (e.g. a class
+    /// method's `ClassSelf`), the latest `Self{N}` snapshot in a value type
+    /// (after any preceding field assignments), else the method's `Self`
+    /// parameter. `self` is a reserved word, not a user binding, so it never
+    /// goes through `to_core_erlang_var` (BT-4267).
+    pub(super) fn receiver_var(&self) -> String {
+        if let Some(var_name) = self.lookup_var("self") {
+            var_name.clone()
+        } else if self.context == super::CodeGenContext::ValueType {
+            self.current_self_var()
+        } else {
+            "Self".to_string()
+        }
+    }
+
     /// Generates code for an identifier reference.
     ///
     /// Handles three cases:
@@ -293,14 +309,8 @@ impl CoreErlangGenerator {
             "false" => Ok(Document::Str("'false'")),
             "nil" => Ok(Document::Str("'nil'")),
             "self" => {
-                // Check if self is explicitly bound (e.g., in class methods)
-                if let Some(var_name) = self.lookup_var("self").cloned() {
-                    Ok(docvec![leaf::var(var_name)])
-                } else if self.context == super::CodeGenContext::ValueType {
-                    // In value type context, self resolves to the latest Self{N}
-                    // snapshot after any preceding field assignments.
-                    Ok(leaf::var(self.current_self_var()))
-                } else if self.context == super::CodeGenContext::Repl {
+                if self.lookup_var("self").is_none() && self.context == super::CodeGenContext::Repl
+                {
                     // ADR 0095 §1: at the top level of a REPL eval there is
                     // no enclosing-method receiver, so a bare `Self` would be an
                     // unbound Core Erlang variable. Resolve `self` from the bindings
@@ -326,7 +336,7 @@ impl CoreErlangGenerator {
                         "end",
                     ])
                 } else {
-                    Ok(Document::Str("Self")) // self → Self parameter
+                    Ok(leaf::var(self.receiver_var()))
                 }
             }
             "super" => {

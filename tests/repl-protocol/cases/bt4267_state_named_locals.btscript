@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4267: a REPL binding or an actor-method local spelled like the
+// compiler's actor state-threading variables (`State`, `StateN`, `StateAcc`)
+// keeps its own value. The REPL threads its bindings through a Core variable
+// named `State`, and lowercase names used to map onto the same spelling
+// (`state` -> `State`).
+
+// @load stdlib/test/fixtures/actor_state_name_probe.bt
+
+// ===========================================================================
+// REPL bindings
+// ===========================================================================
+
+state := 41
+// => 41
+
+state + 1
+// => 42
+
+state1 := state + 1
+// => 42
+
+stateAcc := 0
+// => 0
+
+#(1, 2) do: [:k | stateAcc := stateAcc + k]
+// => _
+
+stateAcc
+// => 3
+
+state
+// => 41
+
+// ===========================================================================
+// Actor-method locals (ActorStateNameProbe)
+// ===========================================================================
+
+p := ActorStateNameProbe spawn
+// => _
+
+p localState: 41
+// => 42
+
+p getN
+// => 42
+
+p localStateN: 20
+// => 41
+
+// `n` is still 3 from `localStateN:`, so the loop adds 11 then 21.
+p loopStateAcc1
+// => 35
+
+p stop
+// => _

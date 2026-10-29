@@ -1614,7 +1614,7 @@ mod tests {
         );
         // Direct-params: fun takes (Sum) not (StateAcc).
         assert!(
-            code.contains("fun (Sum)"),
+            code.contains("fun (Sum@)"),
             "direct-params: whileTrue: fun should take Sum as direct param. Got:\n{code}"
         );
         assert!(
@@ -1638,7 +1638,7 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    [sum >= 10] whileFalse: [sum := sum + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (Sum)"),
+            code.contains("fun (Sum@)"),
             "direct-params: whileFalse: fun should take Sum as direct param. Got:\n{code}"
         );
         assert!(
@@ -1668,7 +1668,7 @@ mod tests {
         );
         // No State in fun signature — mutated field 'n' is a direct param.
         assert!(
-            !code.contains("fun (Sum, State)"),
+            !code.contains("fun (Sum@, State)"),
             "full-extract: whileTrue: fun must not have State param. Got:\n{code}"
         );
         assert!(

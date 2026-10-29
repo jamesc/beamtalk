@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4267: an actor method's local named like the compiler's actor
+// state-threading variables keeps its own value and leaves the actor's
+// state intact. Lowercase locals used to map onto the same Core variables
+// (`state` -> `State`), so `state := x` replaced the actor state (a
+// `function_clause` crash on the next field write) and `state1` read after a
+// field write answered the actor's own state.
+
+TestCase subclass: ActorStateNameShadowingTest
+  field: probe = nil
+
+  setUp => self withProbe: ActorStateNameProbe spawn
+
+  tearDown => self.probe stop
+
+  testLocalNamedStateKeepsActorState =>
+    self assert: (self.probe localState: 41) equals: 42
+    self assert: self.probe getN equals: 42
+
+  testLocalsNamedStateNSurviveFieldWrites =>
+    self assert: (self.probe localStateN: 20) equals: 41
+    self assert: self.probe getN equals: 3
+
+  testWhileLocalNamedStateAcc => self assert: self.probe loopStateAcc equals: 20
+
+  testDoLocalNamedStateAcc1 => self assert: self.probe loopStateAcc1 equals: 32
+
+  testDestructuredState => self assert: (self.probe destructuredState: 41) equals: 41
+
+  testMatchArmBindingState => self assert: (self.probe matchedState: 41) equals: 41

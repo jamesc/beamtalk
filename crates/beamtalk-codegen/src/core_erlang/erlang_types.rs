@@ -34,7 +34,7 @@
 //! assert_eq!(var.to_string(), "Counter");
 //!
 //! let temp = ErlangVar::from_beamtalk_ident("myVar");
-//! assert_eq!(temp.to_string(), "MyVar");
+//! assert_eq!(temp.to_string(), "MyVar@");
 //! ```
 //!
 //! ## `ModuleName`
@@ -138,9 +138,9 @@ impl fmt::Display for ErlangAtom {
 /// let var = ErlangVar::new("Counter");
 /// assert_eq!(format!("{var}"), "Counter");
 ///
-/// // Convert from Beamtalk identifier (auto-capitalizes)
+/// // Convert from Beamtalk identifier (capitalized, user-namespace marker)
 /// let var = ErlangVar::from_beamtalk_ident("counter");
-/// assert_eq!(format!("{var}"), "Counter");
+/// assert_eq!(format!("{var}"), "Counter@");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ErlangVar {
@@ -163,32 +163,17 @@ impl ErlangVar {
         Self { name }
     }
 
-    /// Creates a variable from a Beamtalk identifier.
+    /// Creates a variable from a Beamtalk identifier, using the one
+    /// user-to-Core mapping (`VariableContext::to_core_var`, BT-4267):
     ///
-    /// Converts the identifier to a valid Core Erlang variable by capitalizing
-    /// the first letter if necessary.
-    ///
-    /// - `"counter"` → `"Counter"`
-    /// - `"_private"` → `"_private"`
+    /// - `"counter"` → `"Counter@"`
+    /// - `"_private"` → `"_@_private"`
     /// - `"MyVar"` → `"MyVar"`
     /// - `""` → `"_"`
     #[must_use]
     pub fn from_beamtalk_ident(name: &str) -> Self {
-        let Some(first) = name.chars().next() else {
-            return Self {
-                name: "_".to_string(),
-            };
-        };
-
-        if first.is_ascii_uppercase() || first == '_' {
-            Self {
-                name: name.to_string(),
-            }
-        } else {
-            let mut result = String::with_capacity(name.len());
-            result.push(first.to_ascii_uppercase());
-            result.push_str(&name[first.len_utf8()..]);
-            Self { name: result }
+        Self {
+            name: super::variable_context::VariableContext::to_core_var(name),
         }
     }
 
@@ -390,7 +375,7 @@ mod tests {
     #[test]
     fn var_from_beamtalk_lowercase() {
         let var = ErlangVar::from_beamtalk_ident("counter");
-        assert_eq!(var.to_string(), "Counter");
+        assert_eq!(var.to_string(), "Counter@");
     }
 
     #[test]
@@ -402,7 +387,7 @@ mod tests {
     #[test]
     fn var_from_beamtalk_underscore() {
         let var = ErlangVar::from_beamtalk_ident("_private");
-        assert_eq!(var.to_string(), "_private");
+        assert_eq!(var.to_string(), "_@_private");
     }
 
     #[test]

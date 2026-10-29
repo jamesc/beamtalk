@@ -107,13 +107,13 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
     let Pid = call 'erlang':'element'(4, Self) in
     call 'beamtalk_actor':'sync_send'(Pid, 'doWork', [])
 
-'dispatch_compute:'/2 = fun (Value, Self) ->
+'dispatch_compute:'/2 = fun (Value@, Self) ->
     let Pid = call 'erlang':'element'(4, Self) in
-    call 'beamtalk_actor':'sync_send'(Pid, 'compute:', [Value])
+    call 'beamtalk_actor':'sync_send'(Pid, 'compute:', [Value@])
 
-'dispatch_ping:'/2 = fun (Msg, Self) ->
+'dispatch_ping:'/2 = fun (Msg@, Self) ->
     let Pid = call 'erlang':'element'(4, Self) in
-    call 'beamtalk_actor':'sync_send'(Pid, 'ping:', [Msg])
+    call 'beamtalk_actor':'sync_send'(Pid, 'ping:', [Msg@])
 
 '__beamtalk_meta'/0 = fun () ->
     ~{'class' => 'NativeWorker',

@@ -101,7 +101,7 @@ fn do_loop_with_guarded_op_brackets() {
     // The loop keeps its tuple-accumulator parameters (a tuple seed, not a
     // packed `StateAcc` map).
     assert!(
-        out.contains("call 'lists':'foldl'(") && out.contains("{Acc}"),
+        out.contains("call 'lists':'foldl'(") && out.contains("{Acc@}"),
         "tuple-acc foldl kept:\n{out}"
     );
 }
@@ -126,7 +126,10 @@ fn numeric_loop_keeps_direct_params() {
         "{ACTOR_PREAMBLE}  sum: items =>\n    acc := 0.\n    items do: [:m | acc := acc + 1].\n    acc\n"
     ));
     assert_eq!(takes(&out), 1, "takes:\n{out}");
-    assert!(out.contains("{Acc}"), "tuple-accumulator seed kept:\n{out}");
+    assert!(
+        out.contains("{Acc@}"),
+        "tuple-accumulator seed kept:\n{out}"
+    );
     assert_eq!(brackets(&out), 0, "no per-operator bracket:\n{out}");
 }
 
@@ -139,7 +142,7 @@ fn while_loop_with_guarded_op_brackets() {
     assert_eq!(takes(&out), 1, "takes:\n{out}");
     // Direct params kept: the fun binds the locals, not a whole `State`.
     assert!(
-        out.contains("'while'/2 = fun (Acc, I)"),
+        out.contains("'while'/2 = fun (Acc@, I@)"),
         "direct-params fun kept:\n{out}"
     );
 }

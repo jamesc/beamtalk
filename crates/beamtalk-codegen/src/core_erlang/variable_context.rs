@@ -27,22 +27,27 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 /// The character that separates compiler-owned Core Erlang variable names
-/// from user-derived ones (BT-4140, BT-4247).
+/// from user-derived ones (BT-4140, BT-4247, BT-4267).
 ///
 /// Core Erlang admits `@` in variable names, but a Beamtalk identifier is
-/// ASCII alphanumerics and `_` only (the lexer's identifier rule). Three
-/// namespaces of `_`-prefixed Core variables follow from that:
+/// ASCII alphanumerics and `_` only (the lexer's identifier rule). Four
+/// namespaces of Core variables follow from that, and no two can collide:
 ///
-/// - **Temps** from [`VariableContext::fresh_var`]: `_<base>@<counter>` — the
-///   text after the last marker is all digits.
+/// - **Temps** from [`VariableContext::fresh_var`]: `_<base>@<counter>` —
+///   they start with `_` and the text after the last marker is all digits.
 /// - **User `_`-identifiers**, mapped by [`VariableContext::to_core_var`] to
 ///   `_@<name>` (`_x` → `_@_x`): the text after the last marker starts with
 ///   `_`, so it is never a temp, and `util::versioned_var` only appends digits.
-/// - **Hand-written internal names** (`_Unit`, `_Result`, `_ExtArgs`, …):
-///   no marker at all, so no user identifier can spell one.
+/// - **Other user identifiers**, mapped by [`VariableContext::to_core_var`]
+///   to their capitalized spelling plus the marker (`foo` → `Foo@`, versioned
+///   `Foo@3`): they start with an uppercase letter, so they are never a temp.
+/// - **Hand-written internal names** (`State`, `State1`, `StateAcc`, `Args`,
+///   `ClassSelf`, `_Unit`, `_Result`, …): no marker at all, so no user
+///   identifier can spell one.
 ///
 /// Pinned by `tests::fresh_temp_namespace`, whose corpus guard lists every
-/// hand-written name production codegen emits.
+/// hand-written `_`-name production codegen emits and checks that every user
+/// binding reaches Core marked.
 pub(super) const TEMP_MARKER: char = '@';
 
 /// Whether `text` (rendered Core Erlang) references variable `var` as a whole
@@ -126,8 +131,9 @@ impl VariableContext {
 
     /// Generates a fresh, unique variable name with the given base.
     ///
-    /// The result is `_` + the base with underscores removed + [`TEMP_MARKER`]
-    /// + a counter:
+    /// The result is `_` + the base with underscores and [`TEMP_MARKER`]s
+    /// removed + [`TEMP_MARKER`] + a counter (a base built from a user-mapped
+    /// name, such as `"N@Field"` for field `n`, loses its marker):
     ///
     /// - `fresh_var("temp")` → `"_temp@1"`, `"_temp@2"`, etc.
     /// - `fresh_var("my_var")` → `"_myvar@3"`, `"_myvar@4"`, etc.
@@ -140,7 +146,8 @@ impl VariableContext {
     ///   counter 11 both spelled `_a11`).
     /// - **Disjoint from user bindings:** a user `_`-identifier maps to
     ///   `_@<name>` ([`Self::to_core_var`]), whose text after the marker
-    ///   starts with `_`, never a digit; other user names carry no marker.
+    ///   starts with `_`, never a digit; every other user name starts with an
+    ///   uppercase letter, never `_`.
     ///
     /// It does not guard hand-written internal names; see [`TEMP_MARKER`]
     /// for how those stay disjoint from user `_`-identifiers.
@@ -151,7 +158,7 @@ impl VariableContext {
         let mut result = String::with_capacity(2 + base.len() + 4);
         result.push('_');
         for ch in base.chars() {
-            if ch != '_' {
+            if ch != '_' && ch != TEMP_MARKER {
                 result.push(ch);
             }
         }
@@ -166,8 +173,11 @@ impl VariableContext {
     /// Core Erlang variables must start with an uppercase letter or underscore.
     /// This function:
     ///
-    /// - Capitalizes the first letter: `"counter"` → `"Counter"`
-    /// - Preserves underscores: `"my_var"` → `"My_var"`
+    /// - Capitalizes the first letter and appends [`TEMP_MARKER`] (BT-4267):
+    ///   `"counter"` → `"Counter@"`, so no user name spells a hand-written
+    ///   internal name such as the actor-state family (`State`, `State1`,
+    ///   `StateAcc`, …)
+    /// - Preserves underscores: `"my_var"` → `"My_var@"`
     /// - Moves `_`-prefixed names into the user namespace (BT-4247):
     ///   `"_private"` → `"_@_private"`, so no user name spells a hand-written
     ///   internal `_`-name (`_Unit`, `_Result`, …) or a temp — see
@@ -175,13 +185,16 @@ impl VariableContext {
     /// - Passes a name that already carries [`TEMP_MARKER`] through unchanged:
     ///   no Beamtalk identifier contains it, so it is a compiler temp the
     ///   generator placed in a pattern (e.g. a hoisted nested binary)
+    /// - Passes an uppercase-initial name through unchanged: only compiler
+    ///   names reach here that way (a Beamtalk binding is lowercase or
+    ///   `_`-initial; an uppercase identifier is a class reference)
     /// - Handles edge cases: empty string and the bare wildcard → `"_"`
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// assert_eq!(VariableContext::to_core_var("counter"), "Counter");
-    /// assert_eq!(VariableContext::to_core_var("my_var"), "My_var");
+    /// assert_eq!(VariableContext::to_core_var("counter"), "Counter@");
+    /// assert_eq!(VariableContext::to_core_var("my_var"), "My_var@");
     /// assert_eq!(VariableContext::to_core_var("_private"), "_@_private");
     /// ```
     pub(super) fn to_core_var(name: &str) -> String {
@@ -205,10 +218,12 @@ impl VariableContext {
             // Already valid Core Erlang variable
             name.to_string()
         } else {
-            // Capitalize first letter
-            let mut result = String::with_capacity(name.len());
+            // Capitalize first letter and mark it as user-derived (BT-4267),
+            // so it can't spell a hand-written name such as `State`.
+            let mut result = String::with_capacity(name.len() + 1);
             result.push(first.to_uppercase().next().unwrap());
             result.push_str(chars.as_str());
+            result.push(TEMP_MARKER);
             result
         }
     }
@@ -299,6 +314,13 @@ mod tests {
     }
 
     #[test]
+    fn test_fresh_var_strips_markers_from_its_base() {
+        let mut ctx = VariableContext::new();
+        let base = format!("{}Field", VariableContext::to_core_var("n"));
+        assert_eq!(ctx.fresh_var(&base), "_NField@1");
+    }
+
+    #[test]
     fn test_fresh_var_removes_underscores() {
         let mut ctx = VariableContext::new();
         let var = ctx.fresh_var("my_var");
@@ -306,10 +328,29 @@ mod tests {
     }
 
     #[test]
-    fn test_to_core_var_capitalizes() {
-        assert_eq!(VariableContext::to_core_var("counter"), "Counter");
-        assert_eq!(VariableContext::to_core_var("my_var"), "My_var");
-        assert_eq!(VariableContext::to_core_var("x"), "X");
+    fn test_to_core_var_capitalizes_and_marks() {
+        assert_eq!(VariableContext::to_core_var("counter"), "Counter@");
+        assert_eq!(VariableContext::to_core_var("my_var"), "My_var@");
+        assert_eq!(VariableContext::to_core_var("x"), "X@");
+    }
+
+    /// BT-4267: a user local can't spell the actor-state threading family.
+    #[test]
+    fn test_to_core_var_never_spells_a_state_threading_name() {
+        for user in ["state", "state1", "state12", "stateAcc", "stateAcc1"] {
+            let core = VariableContext::to_core_var(user);
+            assert!(core.ends_with(TEMP_MARKER), "{user} -> {core}");
+            for version in 0..20 {
+                assert_ne!(
+                    core,
+                    crate::core_erlang::util::versioned_var("State", version)
+                );
+                assert_ne!(
+                    core,
+                    crate::core_erlang::util::versioned_var("StateAcc", version)
+                );
+            }
+        }
     }
 
     #[test]
