@@ -1001,7 +1001,11 @@ pub(crate) enum Residual {
     /// The same folds at the method level, and class and value-type methods,
     /// answer right (a value-type self-send never changes the caller's
     /// `self`; a value-type fold that writes a field in a fold body is already
-    /// a codegen error).
+    /// a codegen error). BT-4276: the search for the enclosing loop or fold
+    /// stops at the nearest closure boundary, so the same fold inside a block
+    /// literal that is not run in place in that body (stored, returned, or
+    /// passed to a method) is judged by the closure's own context; measured
+    /// right in `stdlib/test/bt4276fold_in_closure_test.bt`.
     StateFoldOperandInFold,
 }
 

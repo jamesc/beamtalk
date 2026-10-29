@@ -50,3 +50,17 @@ Actor subclass: Bt4276FoldInClosure
         b value
       ]
     self.n
+
+  // The closure is passed to an ordinary method (a user HOM) that runs it
+  // twice; the HOM answers the second result.
+  twice: blk =>
+    blk value
+    blk value
+
+  injectInClosurePassedToMethod =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        t := self twice: [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]
+      ]
+    t

@@ -25,3 +25,8 @@ TestCase subclass: Bt4276FoldInClosureTest
   testCollectWritingFieldInClosure =>
     a := Bt4276FoldInClosure spawn
     self assert: a collectWritingFieldInClosure equals: 4
+
+  testInjectInClosurePassedToMethod =>
+    a := Bt4276FoldInClosure spawn
+    self assert: a injectInClosurePassedToMethod equals: 17
+    self assert: a n equals: 8

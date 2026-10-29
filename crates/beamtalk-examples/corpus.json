@@ -20651,10 +20651,11 @@
         "subclassing",
         "testCollectWritingFieldInClosure",
         "testDoReceiverInClosure",
+        "testInjectInClosurePassedToMethod",
         "testInjectInClosureRunInLoop",
         "testInjectInClosuresRunAfterLoop"
       ],
-      "source": "// BT-4276: an actor-state fold as an operand inside a closure in a loop body\n// is judged by the closure's own context. Measured right on the BEAM: every\n// state change is kept and the fold answers its value, not a raw\n// `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt.\n\nTestCase subclass: Bt4276FoldInClosureTest\n\n  testInjectInClosureRunInLoop =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a injectInClosureRunInLoop equals: 9\n    self assert: a n equals: 4\n\n  testInjectInClosuresRunAfterLoop =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a injectInClosuresRunAfterLoop equals: #(4, 9)\n    self assert: a n equals: 4\n\n  testDoReceiverInClosure =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a doReceiverInClosure equals: 4\n\n  testCollectWritingFieldInClosure =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a collectWritingFieldInClosure equals: 4",
+      "source": "// BT-4276: an actor-state fold as an operand inside a closure in a loop body\n// is judged by the closure's own context. Measured right on the BEAM: every\n// state change is kept and the fold answers its value, not a raw\n// `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt.\n\nTestCase subclass: Bt4276FoldInClosureTest\n\n  testInjectInClosureRunInLoop =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a injectInClosureRunInLoop equals: 9\n    self assert: a n equals: 4\n\n  testInjectInClosuresRunAfterLoop =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a injectInClosuresRunAfterLoop equals: #(4, 9)\n    self assert: a n equals: 4\n\n  testDoReceiverInClosure =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a doReceiverInClosure equals: 4\n\n  testCollectWritingFieldInClosure =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a collectWritingFieldInClosure equals: 4\n\n  testInjectInClosurePassedToMethod =>\n    a := Bt4276FoldInClosure spawn\n    self assert: a injectInClosurePassedToMethod equals: 17\n    self assert: a n equals: 8",
       "explanation": "BT-4276: an actor-state fold as an operand inside a closure in a loop body is judged by the closure's own context. Measured right on the BEAM: every state change is kept and the fold answers its value, not a raw `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt."
     },
     {
@@ -38644,6 +38645,7 @@
         "genserver",
         "inherit",
         "inheritance",
+        "injectInClosurePassedToMethod",
         "injectInClosureRunInLoop",
         "injectInClosuresRunAfterLoop",
         "instance variable",
@@ -38660,9 +38662,10 @@
         "property",
         "set",
         "subclassing",
-        "transform"
+        "transform",
+        "twice:"
       ],
-      "source": "// BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a\n// field) as an operand inside a closure that sits in a loop or fold body. The\n// closure's body does not run per iteration of the enclosing loop, so the\n// fold is judged by the closure's own context and accepted.\n\nActor subclass: Bt4276FoldInClosure\n  state: n = 0\n  state: items = #(1, 2)\n\n  n => self.n\n\n  bump =>\n    self.n := self.n + 1\n    self.n\n\n  // The closure is run in the same iteration that creates it.\n  injectInClosureRunInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        b := [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n        t := b value\n      ]\n    t\n\n  // The closures are run after the loop that creates them.\n  injectInClosuresRunAfterLoop =>\n    r := #(1, 2) collect: [:x |\n      [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n    ]\n    r collect: [:blk | blk value]\n\n  // A `do:` whose block sends to `self`, as a receiver in the closure.\n  doReceiverInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items do: [:y | self bump]) isNil]\n        b value\n      ]\n    self.n\n\n  // A `collect:` whose block writes a field, as a receiver in the closure.\n  collectWritingFieldInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items collect: [:y | self.n := self.n + 1]) size]\n        b value\n      ]\n    self.n",
+      "source": "// BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a\n// field) as an operand inside a closure that sits in a loop or fold body. The\n// closure's body does not run per iteration of the enclosing loop, so the\n// fold is judged by the closure's own context and accepted.\n\nActor subclass: Bt4276FoldInClosure\n  state: n = 0\n  state: items = #(1, 2)\n\n  n => self.n\n\n  bump =>\n    self.n := self.n + 1\n    self.n\n\n  // The closure is run in the same iteration that creates it.\n  injectInClosureRunInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        b := [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n        t := b value\n      ]\n    t\n\n  // The closures are run after the loop that creates them.\n  injectInClosuresRunAfterLoop =>\n    r := #(1, 2) collect: [:x |\n      [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n    ]\n    r collect: [:blk | blk value]\n\n  // A `do:` whose block sends to `self`, as a receiver in the closure.\n  doReceiverInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items do: [:y | self bump]) isNil]\n        b value\n      ]\n    self.n\n\n  // A `collect:` whose block writes a field, as a receiver in the closure.\n  collectWritingFieldInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items collect: [:y | self.n := self.n + 1]) size]\n        b value\n      ]\n    self.n\n\n  // The closure is passed to an ordinary method (a user HOM) that runs it\n  // twice; the HOM answers the second result.\n  twice: blk =>\n    blk value\n    blk value\n\n  injectInClosurePassedToMethod =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := self twice: [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n      ]\n    t",
       "explanation": "BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a field) as an operand inside a closure that sits in a loop or fold body. The closure's body does not run per iteration of the enclosing loop, so the fold is judged by the closure's own context and accepted."
     },
     {
