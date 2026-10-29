@@ -10,6 +10,7 @@
 //! (BT-4099). Each negative has an unshadowed positive control so it cannot
 //! pass vacuously.
 
+use super::super::method_frame::DIRECT_CLASS_SELF_PARAM;
 use super::super::{CodegenOptions, CoreErlangGenerator, DirectCallClassInfo, generate_module};
 use beamtalk_core::ast::{
     Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodKind,
@@ -228,21 +229,55 @@ fn qualified_reference_to_a_shadowed_class_stays_a_class_send() {
 
 #[test]
 fn own_class_sibling_call_is_unaffected_by_shadowing() {
-    // A self-send inside the class's own module calls its own function
-    // (`self` is this module's class), shadowed or not.
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+    // A self-send between two direct-called class methods of the class's own
+    // module forwards the raw incoming class-self (`DIRECT_CLASS_SELF_PARAM`,
+    // possibly `nil`; BT-4029), shadowed or not: it describes how this
+    // module's own functions are entered, which shadowing does not change.
+    // Forwarding the gated `ClassSelf` instead would read a variable the
+    // direct-called method never bound.
+    //
+    // `probe` is an instance method, so its `Parser helper: 1` is a class
+    // *reference* send that goes through the shadow gate: it proves `Parser`
+    // really is shadowed in the rival compile (and not in the control).
+    const SRC: &str = concat!(
         "sealed Object subclass: Parser\n",
         "  class sealed parse: x => self helper: x\n",
         "  class sealed helper: x => x\n",
-    ));
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(
-        &module,
-        CodegenOptions::new("bt@parser").with_class_hierarchy(vec![sealed_parser(Some("json"))]),
-    )
-    .expect("codegen should succeed");
+        "  probe => Parser helper: 1\n",
+    );
+    let compile = |ambient: Vec<ClassInfo>| {
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(SRC);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        generate_module(
+            &module,
+            CodegenOptions::new("bt@parser").with_class_hierarchy(ambient),
+        )
+        .expect("codegen should succeed")
+    };
+    let forwarded = format!("'class_helper:'({DIRECT_CLASS_SELF_PARAM}, ");
+    let probe_direct = "call 'bt@parser':'class_helper:'('nil', 1)";
+
+    // Control: no rival, so the class-reference send in `probe` direct-calls.
+    let control = compile(vec![]);
     assert!(
-        code.contains("'class_helper:'("),
-        "an own-class self-send must keep its direct call under shadowing. Got:\n{code}"
+        control.contains(probe_direct),
+        "control: an unshadowed class-reference send should direct-call. Got:\n{control}"
+    );
+    assert!(
+        control.contains(&forwarded),
+        "control: the sibling call should forward `{DIRECT_CLASS_SELF_PARAM}`. Got:\n{control}"
+    );
+
+    // Rival: a dependency also declares `Parser`.
+    let code = compile(vec![sealed_parser(Some("json"))]);
+    assert!(
+        !code.contains(probe_direct) && code.contains(CLASS_SEND),
+        "precondition: `Parser` must be shadowed, so `probe`'s class-reference send \
+         stays a class send. Got:\n{code}"
+    );
+    assert!(
+        code.contains(&forwarded),
+        "the own-class sibling call must still forward `{DIRECT_CLASS_SELF_PARAM}` under \
+         shadowing. Got:\n{code}"
     );
 }
