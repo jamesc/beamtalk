@@ -1747,10 +1747,9 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let warn_len = self.codegen_warnings.len();
-        let stub_state = self.conditional_fallback_stubs_state();
         let closures: Result<Vec<_>> = blocks
             .iter()
-            .map(|block| self.fallback_block_doc(block, selector_atom, stub_state))
+            .map(|block| self.fallback_block_doc(block, selector_atom))
             .collect();
         self.decline_pure_boolean_inline = prev;
         let new_warnings = self.codegen_warnings.split_off(warn_len);
@@ -1784,13 +1783,8 @@ impl CoreErlangGenerator {
         &mut self,
         block: &Block,
         selector_atom: &str,
-        stub_state: bool,
     ) -> Result<Document<'static>> {
-        let analysis = crate::core_erlang::block_analysis::analyze_block(block);
-        if !self.conditional_arms_write_outer_locals(&[block])
-            && self.check_closure_field_writes(block, &analysis).is_ok()
-            && !(stub_state && self.analysis_touches_actor_state(&analysis))
-        {
+        if self.fallback_passes_closure(block) {
             return self.generate_block(block);
         }
         let params: Vec<Document<'static>> = block
@@ -1811,6 +1805,19 @@ impl CoreErlangGenerator {
         ])
     }
 
+    /// BT-4244: whether [`Self::fallback_block_doc`] passes `block` as a real
+    /// closure (`true`) or as a raising stub (`false`). The one decision both
+    /// the closure emission and the bracket
+    /// ([`Self::mutation_boolean_fallback_clause`]) read, so a fallback whose
+    /// blocks are all stubs is never bracketed.
+    fn fallback_passes_closure(&self, block: &Block) -> bool {
+        let analysis = crate::core_erlang::block_analysis::analyze_block(block);
+        !self.conditional_arms_write_outer_locals(&[block])
+            && self.check_closure_field_writes(block, &analysis).is_ok()
+            && !(self.conditional_fallback_stubs_state()
+                && self.analysis_touches_actor_state(&analysis))
+    }
+
     /// BT-4244: the wildcard clause of a mutation-path boolean `case`
     /// ([`Self::generate_solo_boolean_with_mutations_tuple`],
     /// [`Self::generate_if_true_if_false_with_mutations_tuple`]): the shared
@@ -1820,7 +1827,7 @@ impl CoreErlangGenerator {
     ///
     /// In an actor instance method whose frame holds a whole `State`, the
     /// send is bracketed ([`Self::conditional_fallback_brackets`]) when a
-    /// block touches the actor's state: the closures it passes read and
+    /// block passed as a closure touches the actor's state: the closures it passes read and
     /// write the actor's fields through the cell, so the arm stores
     /// `base_state` first and answers the reloaded cell as its state (and
     /// the method stores its final `State` on exit, `with_exit_store`). A
@@ -1840,10 +1847,12 @@ impl CoreErlangGenerator {
         let send = self.boolean_fallback_send(cond_var, selector_atom, blocks)?;
         let span = blocks.first().map(|b| b.span).unwrap_or_default();
         let no_match_var = self.fresh_temp_var("CondNoMatch");
+        // Bracket only when a block passed as a real closure touches the
+        // actor's state: a stub touches nothing.
         let brackets = self.conditional_fallback_brackets()
-            && blocks
-                .iter()
-                .any(|block| self.block_touches_actor_state(block));
+            && blocks.iter().any(|block| {
+                self.fallback_passes_closure(block) && self.block_touches_actor_state(block)
+            });
         let body = if brackets {
             let bracket = self.bracket_conditional_fallback(send, base_state, span);
             let tuple = self.conditional_baseline_tuple(leaf::var(bracket.result), &bracket.state);
@@ -3967,6 +3976,9 @@ mod tests {
     fn unthreadable_arm_fallback_passes_a_raising_stub() {
         for src in [
             "Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    t := 0\n    x ifTrue: [t := 1]\n    t\n",
+            // A local write that also reads a field: still a stub, so still
+            // no bracket (and no exit store for the method).
+            "Actor subclass: C\n  state: count :: Integer = 0\n\n  run: flag =>\n    n := 0\n    flag ifTrue: [n := self.count + 1]\n    n\n",
             "TestCase subclass: C\n  field: n = 0\n\n  run: x =>\n    r := x ifTrue: [self.n := 1]\n    r\n",
         ] {
             let code = codegen(src);
@@ -3978,6 +3990,10 @@ mod tests {
             assert!(
                 !clause.contains("'beamtalk_actor_state':'store'("),
                 "a stub-only fallback is not bracketed:\n{clause}"
+            );
+            assert!(
+                !code.contains("_ExitReply"),
+                "a stub-only fallback adds no exit store:\n{code}"
             );
         }
     }

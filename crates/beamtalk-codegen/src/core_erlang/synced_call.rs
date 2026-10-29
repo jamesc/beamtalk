@@ -925,7 +925,10 @@ impl CoreErlangGenerator {
     ) -> FallbackBracket {
         let result = self.fresh_temp_var("Synced");
         let state = self.fresh_temp_var("FallbackState");
-        let frame = self.current_frame();
+        // The node is a self-contained slice (verified and rendered on its
+        // own, like `conditional_baseline_tuple`'s slot): its gensym names
+        // render verbatim, so they sit in the root frame of that slice.
+        let frame = FrameId::ROOT;
         let node = ThreadedStmt::SyncedCall {
             store: VersionedVar::new(VersionPrefix::Gensym(base_state.to_string()), 0, frame),
             call,
@@ -937,8 +940,12 @@ impl CoreErlangGenerator {
             )),
             span,
             tier2_local_rebinds: Vec::new(),
-            on_private_scratch: false,
+            on_private_scratch: self.in_private_scratch,
         };
+        // The node is verified like any built `ThreadedIr`, so a bracket on a
+        // private scratch map (`SyncedCallOnPrivateScratch`) is reported.
+        let errors = self.verify_threaded_ir(std::slice::from_ref(&node));
+        self.report_threaded_ir_verify_errors(&errors, "conditional fallback bracket", span);
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         let prelude = super::threaded_ir::render(&[node], &mut ctx);
         FallbackBracket {
