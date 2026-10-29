@@ -241,16 +241,18 @@ reload(Name, Meta) ->
 
 %% Run Fun with a logger handler forwarding every event to this process, and
 %% return the BT-4126 warnings (the metadata maps carrying `Key`) it logged.
-%% test/sys.config pins the primary level to `error`; lift it for the run.
+%% Lifts the primary level to `all` for the run and restores whatever it was
+%% (test/sys.config sets `warning` so the warnings_file sink captures them).
 stale_warnings(Key, Fun) ->
     HandlerId = bt_4126_stale_verdict_test_handler,
-    logger:set_primary_config(level, all),
+    #{level := OldLevel} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
     ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
     try
         Fun()
     after
         logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
+        logger:set_primary_config(level, OldLevel)
     end,
     drain_warnings(Key, []).
 
@@ -363,6 +365,66 @@ stale_verdict_warning_test_() ->
                 ?assertMatch(
                     [#{class := 'BT4126Sealed', stale_direct_class_methods := ['make']}],
                     Warnings
+                )
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"put_class_method installing new: warns naming the stale subclass", fun() ->
+            Parent = start_class('BT4126PutParent', #{class_method_info => #{}}),
+            Child = start_subclass('BT4126PutChild', 'BT4126PutParent', #{
+                direct_constructors => ['new:']
+            }),
+            try
+                Warnings = stale_warnings(stale_direct_constructors, fun() ->
+                    ok = beamtalk_object_class:put_class_method(
+                        Parent, 'new:', fun(_Self, Args) -> Args end
+                    )
+                end),
+                ?assertMatch(
+                    [
+                        #{
+                            class := 'BT4126PutParent',
+                            stale_direct_constructors := ['BT4126PutChild']
+                        }
+                    ],
+                    Warnings
+                ),
+                %% Patching it again is not a gain: no repeat.
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_constructors, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Parent, 'new:', fun(_Self, Args) -> Args end
+                        )
+                    end)
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"put_class_method over a direct class method warns", fun() ->
+            Pid = start_class('BT4126PutDirect', #{
+                class_method_info => #{'make' => #{arity => 0}},
+                direct_class_methods => #{'make' => 'class_make'}
+            }),
+            try
+                ?assertMatch(
+                    [#{class := 'BT4126PutDirect', stale_direct_class_methods := ['make']}],
+                    stale_warnings(stale_direct_class_methods, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Pid, 'make', fun(_Self) -> made end
+                        )
+                    end)
+                ),
+                %% A selector outside the verdict has no static direct callers.
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_class_methods, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Pid, 'other', fun(_Self) -> other end
+                        )
+                    end)
                 )
             after
                 stop_class(Pid)

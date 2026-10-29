@@ -1619,6 +1619,18 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
+    %% BT-4126: the gate flag above turns this class's own direct paths off,
+    %% but verdicts baked elsewhere still route around the patched fun: a
+    %% gained `new:` strands subclasses' `direct_constructors`, and static
+    %% callers of a `direct_class_methods` entry keep calling the compiled
+    %% SafeFn.
+    warn_stale_subclass_constructors(
+        ClassName, State#class_state.class_methods, NewClassMethods
+    ),
+    case maps:is_key(Selector, beamtalk_class_metadata:lookup_direct_class_methods(ClassName)) of
+        true -> warn_stale_static_class_methods(ClassName, [Selector]);
+        false -> ok
+    end,
     %% ADR 0087 Phase 4: re-index the patched class-side method
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
@@ -2570,28 +2582,20 @@ re-deriving them. A reload re-syncs the reloaded class's own row
 re-bakes anything else, so a surgical hot-patch (as opposed to a release
 upgrade, which recompiles the world) can leave two kinds of verdict behind:
 
-* **Descendants' `direct_constructors`.** A subclass's `new:` verdict is baked
-  only when no ancestor defines a class-side `new:` (Rust's
-  `chain_has_user_new_init`). If this reload *gains* one, every transitive
-  subclass whose row still lists `new:` keeps building in the caller and
-  silently skips the new override. Those subclasses are named, so the warning
-  says exactly what to recompile. Losing a `new:` needs no warning: stale
-  descendants then just take the (correct, slower) gen_server path.
+* **Descendants' `direct_constructors`.** See
+  `warn_stale_subclass_constructors/3`.
 * **Static callers of this class's `direct_class_methods`.** Eligibility is own-class
   only and requires a sealed class, so no descendant can hold a stale entry,
   but call sites compiled against the old verdict call `SafeFn(nil, ...)`
   directly. When an entry is dropped while the method still exists (it lost
   `class sealed`, the class gained `classState:`, a keyword constructor
   became user-defined), those callers keep running it with a `nil` class
-  self: a silent wrong result, so it warns. The callers cannot be named, as
-  there is no caller reverse index. When the method is gone altogether, the
-  stale call fails loudly with `undef` and no warning is needed.
+  self: a silent wrong result, so it warns. When the method is gone
+  altogether, the stale call fails loudly with `undef` and no warning is
+  needed.
 
-"Has a class-side `new:`" is read from the class-method map, which for a
-compiled class is the module's `class_method_info` (user primary methods only,
-no synthesized `new:`). `class_new:/2` exports cannot be used here because
-`erlang:function_exported/3` answers `false` while the new module's
-`on_load` is still running, which is when a reload arrives.
+The runtime-fun hot-patch (`{put_class_method, ...}`) can strand the same two
+verdicts and calls the same two helpers.
 
 Runs only on reload (zero hot-path cost).
 """.
@@ -2602,58 +2606,93 @@ Runs only on reload (zero hot-path cost).
     NewDirect :: #{selector() => atom()}
 ) -> ok.
 warn_stale_direct_verdicts(ClassName, {OldClassMethods, NewClassMethods}, OldDirect, NewDirect) ->
-    GainedNew =
-        not maps:is_key('new:', OldClassMethods) andalso maps:is_key('new:', NewClassMethods),
-    case GainedNew of
-        true ->
-            case
-                [
-                    Sub
-                 || Sub <- beamtalk_class_registry:all_subclasses(ClassName),
-                    lists:member('new:', beamtalk_class_metadata:lookup_direct_constructors(Sub))
-                ]
-            of
-                [] ->
-                    ok;
-                Stale ->
-                    ?LOG_WARNING(
-                        "Reloaded class ~p gained a class-side new:, but subclasses ~p "
-                        "were compiled without it and still build new: directly, "
-                        "bypassing the override. Recompile them.",
-                        [ClassName, Stale],
-                        #{
-                            class => ClassName,
-                            stale_direct_constructors => Stale,
-                            domain => [beamtalk, runtime]
-                        }
-                    )
-            end;
-        false ->
-            ok
-    end,
-    case
-        lists:sort([
+    warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods),
+    warn_stale_static_class_methods(
+        ClassName,
+        [
             Sel
          || Sel <- maps:keys(OldDirect),
             not maps:is_key(Sel, NewDirect),
             maps:is_key(Sel, NewClassMethods)
-        ])
-    of
+        ]
+    ).
+
+-doc """
+Warn when `ClassName` has just gained a class-side `new:` that its subclasses'
+baked `direct_constructors` verdicts do not know about (BT-4126).
+
+A subclass's `new:` verdict is baked only when no ancestor defines a
+class-side `new:` (Rust's `chain_has_user_new_init`). If `ClassName` *gains*
+one (by a compiled reload or a runtime-fun `put_class_method`), every
+transitive subclass whose row still lists `new:` keeps building in the caller
+and silently skips the new override. Those subclasses are named, so the
+warning says exactly what to recompile. Losing a `new:` needs no warning:
+stale descendants then just take the (correct, slower) gen_server path.
+
+"Has a class-side `new:`" is read from the class-method map, which for a
+compiled class is the module's `class_method_info` (user primary methods only,
+no synthesized `new:`) and for a runtime patch includes the installed fun.
+`class_new:/2` exports cannot be used because `erlang:function_exported/3`
+answers `false` while a reloading module's `on_load` is still running, which
+is when a reload arrives.
+""".
+-spec warn_stale_subclass_constructors(class_name(), map(), map()) -> ok.
+warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
+    GainedNew =
+        not maps:is_key('new:', OldClassMethods) andalso maps:is_key('new:', NewClassMethods),
+    Stale =
+        case GainedNew of
+            true ->
+                [
+                    Sub
+                 || Sub <- beamtalk_class_registry:all_subclasses(ClassName),
+                    lists:member('new:', beamtalk_class_metadata:lookup_direct_constructors(Sub))
+                ];
+            false ->
+                []
+        end,
+    case Stale of
         [] ->
             ok;
-        Dropped ->
+        _ ->
             ?LOG_WARNING(
-                "Reloaded class ~p no longer allows direct calls to class methods ~p. "
-                "Callers compiled before the reload still call them directly. "
-                "Recompile the code that sends them.",
-                [ClassName, Dropped],
+                "Class ~p gained a class-side new:, but subclasses ~p "
+                "were compiled without it and still build new: directly, "
+                "bypassing the override. Recompile them.",
+                [ClassName, Stale],
                 #{
                     class => ClassName,
-                    stale_direct_class_methods => Dropped,
+                    stale_direct_constructors => Stale,
                     domain => [beamtalk, runtime]
                 }
             )
     end.
+
+-doc """
+Warn that call sites compiled against `ClassName`'s old `direct_class_methods`
+verdict still call `Selectors` directly (BT-4126).
+
+Static callers emit `SafeFn(nil, ...)` against the compiled module, so after
+a change that makes a still-existing method ineligible (a reload) or replaces
+it with a runtime fun (`put_class_method`), they keep running the old compiled
+code. The callers cannot be named, as there is no caller reverse index.
+""".
+-spec warn_stale_static_class_methods(class_name(), [selector()]) -> ok.
+warn_stale_static_class_methods(_ClassName, []) ->
+    ok;
+warn_stale_static_class_methods(ClassName, Selectors) ->
+    Sorted = lists:sort(Selectors),
+    ?LOG_WARNING(
+        "Class ~p changed class methods ~p so they can no longer be called directly, "
+        "but code compiled before the change still calls the compiled versions "
+        "directly. Recompile the code that sends them.",
+        [ClassName, Sorted],
+        #{
+            class => ClassName,
+            stale_direct_class_methods => Sorted,
+            domain => [beamtalk, runtime]
+        }
+    ).
 
 -doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
