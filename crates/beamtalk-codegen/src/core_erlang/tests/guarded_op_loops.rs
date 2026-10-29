@@ -1147,6 +1147,42 @@ fn non_carried_loop_in_a_while_condition_is_bracketed() {
 }
 
 #[test]
+fn inner_closure_reading_the_loops_own_names_keeps_direct_params() {
+    // BT-4269: loop mode selection probes the body before the loop binds
+    // its block parameter or body temps; a non-carried inner loop whose
+    // closure only reads them must not look like a bare field read, so the
+    // outer loop keeps its direct parameters (no `StateAcc` fun).
+    for stmt in [
+        "1 to: 3 do: [:i | acc := acc + i. 1 to: 2 do: [:j | i]]",
+        "1 to: 3 do: [:i | acc := acc + i. m := i * 2. 2 timesRepeat: [m]]",
+        "[acc < 3] whileTrue: [acc := acc + 1. m := acc. 2 timesRepeat: [m]]",
+    ] {
+        let src = format!("{ACTOR_PREAMBLE}  run =>\n    acc := 0.\n    {stmt}.\n    acc\n");
+        assert_eq!(enforce_report(&src), None, "{stmt}");
+        let out = compile(&src);
+        assert!(
+            !out.contains(", StateAcc) ->"),
+            "{stmt}: direct params\n{out}"
+        );
+    }
+}
+
+#[test]
+fn inner_closure_reading_a_field_keeps_the_loops_state() {
+    // BT-4269: a bare field name is a field read even when the body assigns
+    // a name like it, so the outer loop still keeps its `State` to bracket
+    // the inner call with.
+    for stmt in [
+        "1 to: 3 do: [:i | acc := acc + i. 1 to: 2 do: [:j | n]]",
+        "1 to: 3 do: [:i | acc := acc + i. n := i. 1 to: 2 do: [:j | n]]",
+    ] {
+        let src = format!("{ACTOR_PREAMBLE}  run =>\n    acc := 0.\n    {stmt}.\n    acc\n");
+        assert_eq!(enforce_report(&src), None, "{stmt}");
+        assert!(compile(&src).contains(", StateAcc) ->"), "{stmt}: StateAcc");
+    }
+}
+
+#[test]
 fn non_carried_loop_nested_in_a_bracketing_loop_brackets_its_send() {
     // BT-4255: the repro. The outer loop threads `State` (no direct
     // parameters any more) and the inner `to:do:` send is bracketed with it.

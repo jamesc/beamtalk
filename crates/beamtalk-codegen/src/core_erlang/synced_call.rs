@@ -245,6 +245,12 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// ([`CoreErlangGenerator::classify_inlined`]), decided once per send.
     pub(in crate::core_erlang) inlined_classes:
         std::cell::RefCell<std::collections::HashMap<Span, UserCodeCall>>,
+    /// BT-4269: names the loop being planned will bind (its block parameters
+    /// and the temps its body assigns that are not fields), seen as locals by
+    /// [`CoreErlangGenerator::analysis_touches_actor_state`] while
+    /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
+    /// before those names are in scope. Empty outside a probe.
+    pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
 }
 
 impl SyncedCallState {
@@ -257,6 +263,7 @@ impl SyncedCallState {
             stale_state_gaps: Vec::new(),
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
+            probe_locals: std::cell::RefCell::default(),
         }
     }
 }
@@ -1795,15 +1802,58 @@ impl CoreErlangGenerator {
         found
     }
 
-    /// BT-4255: whether any statement of `block` holds a bracketed call
-    /// ([`Self::expr_holds_bracketed_call`]).
-    pub(in crate::core_erlang) fn block_holds_bracketed_call(
+    /// BT-4255: whether the loop with `body` (and `condition`, for a `while`
+    /// loop) holds a bracketed call ([`Self::expr_holds_bracketed_call`]), the
+    /// question loop mode selection asks before it lets the loop drop its
+    /// `State`.
+    ///
+    /// BT-4269: the loop has not bound its own names yet, so an inner closure
+    /// reading the loop's block parameter or a temp its body assigns would
+    /// look like a bare field read. Those names are probe locals for the
+    /// duration ([`Self::loop_bound_names`]).
+    pub(in crate::core_erlang) fn loop_holds_bracketed_call(
         &self,
-        block: &beamtalk_core::ast::Block,
+        body: &beamtalk_core::ast::Block,
+        condition: Option<&Expression>,
     ) -> bool {
-        block
+        let names = self.loop_bound_names(body, condition);
+        let saved = std::mem::replace(&mut *self.synced.probe_locals.borrow_mut(), names);
+        let found = body
             .body
             .iter()
             .any(|s| self.expr_holds_bracketed_call(&s.expression))
+            || condition.is_some_and(|c| self.expr_holds_bracketed_call(c));
+        *self.synced.probe_locals.borrow_mut() = saved;
+        found
+    }
+
+    /// BT-4269: the names the loop with `body` and `condition` binds itself:
+    /// its block parameters, and the temps its body (or condition block)
+    /// assigns that are not fields of the class (a bare field name is a field
+    /// read, so it stays one). Without the class hierarchy no temp can be
+    /// told from a field, so only the parameters count.
+    fn loop_bound_names(
+        &self,
+        body: &beamtalk_core::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        use beamtalk_core::semantic_analysis::block_facts as block_analysis;
+        let mut names: Vec<String> = body.parameters.iter().map(|p| p.name.to_string()).collect();
+        if let Some(hierarchy) = self.class_hierarchy.as_ref() {
+            let fields = hierarchy.all_state(&self.class_name());
+            let blocks = std::iter::once(body).chain(condition.and_then(|c| match c {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            }));
+            for block in blocks {
+                names.extend(
+                    block_analysis::analyze_block(block)
+                        .local_writes
+                        .into_iter()
+                        .filter(|name| !fields.iter().any(|f| f.as_str() == name)),
+                );
+            }
+        }
+        names
     }
 }
