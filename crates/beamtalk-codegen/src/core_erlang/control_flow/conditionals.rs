@@ -376,6 +376,17 @@ impl SoloAnswer {
             SoloAnswer::Literal(value) => leaf::atom(if value { "true" } else { "false" }),
         }
     }
+
+    /// The Boolean this answer evaluates to on a Boolean `receiver`. Test
+    /// oracles that model a conditional's result on a BEAM read it here
+    /// rather than restating the rule (BT-4189).
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn evaluate(self, receiver: bool) -> bool {
+        match self {
+            SoloAnswer::Receiver => receiver,
+            SoloAnswer::Literal(value) => value,
+        }
+    }
 }
 
 /// BT-4189: the single-block boolean conditionals — `ifTrue:`, `ifFalse:`,

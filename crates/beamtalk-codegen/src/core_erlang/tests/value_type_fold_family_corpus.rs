@@ -31,6 +31,7 @@ use super::field_assignment_value_position::{
     VT_FOLD_REJECTING_SHAPES, VT_HEADER, VT_POSITIONS, VT_SHAPES, is_fold_writing_position,
 };
 use super::{codegen, verifier_report};
+use crate::core_erlang::control_flow::SoloBoolean;
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 use crate::core_erlang::{CodegenOptions, generate_module_surfacing_verifier};
 
@@ -551,7 +552,8 @@ fn run_arm(kind: Kind, body: &[Stmt], form: usize, x: &mut String, state: &mut S
 
 /// `(probe name, method source, expected observation)` for every generated conditional-arm
 /// program (the same loops as [`arm_programs`]): the taken arm's effects are the fold's final
-/// state and `x`; the other arm and a passthrough leave [`START`] and answer `nil`.
+/// state and `x`; the other arm and a passthrough leave [`START`]. A skipped solo arm
+/// answers its receiver ([`SoloBoolean::non_taken`], BT-4189).
 fn arm_oracle_programs() -> Vec<(String, String, String)> {
     let programs = arm_programs();
     let mut out = Vec::with_capacity(programs.len());
@@ -571,20 +573,19 @@ fn arm_oracle_programs() -> Vec<(String, String, String)> {
                             run_arm(kind, &body, form, x, state)
                         };
                         let value = match selector {
-                            // c ifTrue: [ARM]
-                            0 => {
-                                if c {
+                            // c ifTrue: [ARM] / c ifFalse: [ARM]: the skipped arm
+                            // answers the one `SoloBoolean` table's non-taken answer,
+                            // the receiver `c` (BT-4189).
+                            0 | 1 => {
+                                let sel = if selector == 0 {
+                                    SoloBoolean::IfTrue
+                                } else {
+                                    SoloBoolean::IfFalse
+                                };
+                                if c == sel.block_on_true() {
                                     arm(&mut x, &mut state)
                                 } else {
-                                    "nil".to_string()
-                                }
-                            }
-                            // c ifFalse: [ARM]
-                            1 => {
-                                if c {
-                                    "nil".to_string()
-                                } else {
-                                    arm(&mut x, &mut state)
+                                    sel.non_taken().evaluate(c).to_string()
                                 }
                             }
                             // c ifTrue: [ARM] ifFalse: [x := 5]
