@@ -1186,7 +1186,7 @@ config_step(ClassName, Selector, Fun) ->
 
 -spec config_error(atom(), atom(), atom(), term(), list()) -> #beamtalk_error{}.
 config_error(ClassName, Selector, Class, Reason, Stack) ->
-    case contains_calling_self(Reason) of
+    case beamtalk_exception_handler:contains_calling_self(Reason) of
         true ->
             Error0 = beamtalk_error:new(
                 supervisor_start_failed, ClassName, Selector, ?CALLING_SELF_HINT
@@ -1198,30 +1198,6 @@ config_error(ClassName, Selector, Class, Reason, Stack) ->
             ),
             BtError
     end.
-
-%% Does an exception reason (raw, or a wrapped Beamtalk error/exception)
-%% carry OTP's `calling_self` exit (`{calling_self, {gen_server, call, _}}`)
-%% anywhere inside it?
--spec contains_calling_self(term()) -> boolean().
-contains_calling_self({calling_self, {gen_server, _, _}}) ->
-    true;
-contains_calling_self(T) when is_tuple(T) ->
-    lists:any(fun contains_calling_self/1, tuple_to_list(T));
-contains_calling_self(M) when is_map(M) ->
-    lists:any(fun contains_calling_self/1, maps:values(M));
-contains_calling_self(L) when is_list(L) ->
-    contains_calling_self_list(L);
-contains_calling_self(_) ->
-    false.
-
-%% Walk a possibly improper list.
--spec contains_calling_self_list(maybe_improper_list()) -> boolean().
-contains_calling_self_list([]) ->
-    false;
-contains_calling_self_list([H | T]) ->
-    contains_calling_self(H) orelse contains_calling_self_list(T);
-contains_calling_self_list(Tail) ->
-    contains_calling_self(Tail).
 
 %% Unwrap a `check_*` result inside `init/1`: the validator's error ends
 %% `init/1` (reported as `supervisor_start_failed` with its hint).

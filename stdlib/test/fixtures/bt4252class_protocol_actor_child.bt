@@ -17,6 +17,14 @@ Bt4252ClassProtocolActorBase subclass: Bt4252ClassProtocolActorChild
 
   class superNameInClosure => #(1) collect: [:x | super name]
 
+  // `includesSelector:` lost its dedicated codegen path (BT-4252), so it
+  // reaches `Behaviour>>includesSelector:` through the protocol fallthrough.
+  class selfIncludesFoo => self includesSelector: #foo
+
+  class selfIncludesBar => self includesSelector: #bar
+
   // `doc`'s primitive messages the class process, so from a class method
   // running in that process it raises `dispatch_error` (BT-4262).
   class selfDoc => self doc
+
+  foo => 1

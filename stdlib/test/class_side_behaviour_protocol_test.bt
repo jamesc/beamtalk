@@ -97,5 +97,15 @@ TestCase subclass: ClassSideBehaviourProtocolTest
   testObjectClassMethodSelfDocInClassProcessRaisesDispatchError =>
     self should: [Bt4252ClassProtocolObjectChild selfDoc] raise: #dispatch_error
 
+  testActorClassMethodSelfIncludesSelector =>
+    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)
+    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo
+    self deny: Bt4252ClassProtocolActorChild selfIncludesBar
+
+  testObjectClassMethodSelfIncludesSelector =>
+    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo equals: (Bt4252ClassProtocolObjectChild includesSelector: #foo)
+    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo
+    self deny: Bt4252ClassProtocolObjectChild selfIncludesBar
+
   testSealedDirectCalledClassMethodSelfDoc =>
     self assert: Bt4252ClassProtocolSealed selfDoc equals: Bt4252ClassProtocolSealed doc
