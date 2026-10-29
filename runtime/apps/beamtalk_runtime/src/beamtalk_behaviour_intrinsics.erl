@@ -1107,18 +1107,23 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% while the class waits on it, sends to it), the stop never returns. A
 %% process blocked in `gen_server:call/3` sits in `gen:do_call/4` and
 %% monitors the process it waits on, so follow that wait chain from the
-%% class, through other classes and actors (bounded); if it reaches the caller, ask the
-%% class to answer, bounded, before any side effect, and raise a structured
-%% `timeout` if it does not (the probe guards against a monitor held for
-%% another reason). A class that is merely busy is not waiting on the
-%% caller, so removal waits for it as before. Limits, both failing before
-%% any side effect or no worse than before: the walk follows every monitor
-%% of a waiting process, so a busy class whose wait chain passes a process
-%% that monitors the caller for another reason is probed and can time out;
-%% and the check is one-shot, so a class that starts waiting on the caller
-%% after it can still hold `gen_server:stop/1` until its own call times out. `doc:` and the other
-%% primitives that message the class use a bounded `gen_server:call/2`
-%% before any side effect, so they already fail rather than hang.
+%% class, through other classes and actors (bounded). If it reaches the
+%% caller, ask the class to answer, bounded, before any side effect, and
+%% raise a structured `timeout` if it does not (the probe guards against a
+%% monitor held for another reason). A class that is merely busy is not
+%% waiting on the caller, so removal waits for it as before.
+%%
+%% Limits, each failing before any side effect or no worse than before:
+%% the walk follows every monitor of a waiting process, so a busy class
+%% whose wait chain passes a process that monitors the caller for another
+%% reason is probed and times out if it stays busy past the probe; and the
+%% check is one-shot, so a class that starts waiting on the caller after it
+%% can still hold `gen_server:stop/1` until its own class call times out
+%% (60s, `beamtalk_class_dispatch:class_method_call/3`).
+%%
+%% `doc:` and the other primitives that message the class use a bounded
+%% `gen_server:call/2` before any side effect, so they already fail rather
+%% than hang.
 -define(CLASS_RESPONSIVE_TIMEOUT, 5000).
 -define(WAIT_CHAIN_MAX_PROCESSES, 64).
 
@@ -1187,7 +1192,12 @@ probe_class(ClassPid, ClassName, Selector) ->
                         "outside."
                     >>
                 )
-            )
+            );
+        exit:_ ->
+            %% The class exited before or during the probe: nothing is
+            %% waiting on the caller any more, so carry on and let the
+            %% removal or rename report the missing class as before.
+            ok
     end.
 
 -doc """
