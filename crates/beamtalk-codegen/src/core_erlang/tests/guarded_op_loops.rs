@@ -1047,19 +1047,79 @@ fn stale_read_fires_whatever_variable_the_read_resolved_to() {
     );
 }
 
+/// BT-4255: every loop shape that can drop its `State` (direct params or a
+/// tuple accumulator), carrying the local `acc` with and without a guarded
+/// operator. `INNER` is spliced into its body.
+const STATELESS_OUTER_LOOPS: &[&str] = &[
+    "1 to: 3 do: [:i | acc := acc + x. INNER]",
+    "1 to: 3 do: [:i | acc := i. INNER]",
+    "1 to: 5 by: 2 do: [:i | acc := acc + x. INNER]",
+    "3 timesRepeat: [acc := acc + x. INNER]",
+    "[acc < 3] whileTrue: [acc := acc + x. INNER]",
+    "xs do: [:e | acc := acc + e. INNER]",
+    "xs collect: [:e | acc := acc + e. INNER]",
+];
+
+/// BT-4255: a loop or evaluated literal block that carries nothing, so it
+/// lowers to a runtime call with its blocks as closures. `BODY` is spliced in.
+const NON_CARRIED_INNER: &[&str] = &[
+    "1 to: 2 do: [:j | BODY]",
+    "1 to: 4 by: 2 do: [:j | BODY]",
+    "2 timesRepeat: [BODY]",
+    "[:j | BODY] value: 1",
+    "[BODY] value",
+    "#(1, 2) do: [:j | BODY]",
+];
+
+/// BT-4255: inner bodies that touch the actor's state (a field read, a
+/// guarded operator's slow path, a conditional, an `on:do:`, a `^`).
+const STATE_TOUCHING_BODIES: &[&str] = &[
+    "self.n",
+    "x + x",
+    "(x == 0) ifTrue: [self.n] ifFalse: [0]",
+    "[self.n] on: Error do: [:z | self.n]",
+    "^ self.n",
+];
+
 #[test]
-fn pin_bug_bt4255_non_carried_loop_nested_in_a_bracketing_loop() {
-    // PIN-BUG (BT-4255, open): a counted loop carrying no local, nested in a
-    // stateless loop that brackets a guarded operator, lowers to a runtime
-    // `to:do:` send with no `State` in scope to bracket it. The fix flips
-    // this pin to verifier-clean.
+fn non_carried_loop_nested_in_a_stateless_loop_is_bracketed() {
+    // BT-4255: a loop or evaluated block carrying no local, nested in a loop
+    // that could drop its `State`, lowers to a runtime call codegen
+    // brackets. Loop mode selection asks codegen's own classifier
+    // (`expr_holds_bracketed_call`), so the outer loop keeps a `State` to
+    // bracket it with, and every nesting compiles verifier-clean (before the
+    // fix each one was an `UnbracketedUserCodeSend`).
+    let mut cases = 0;
+    let mut reports = Vec::new();
+    for outer in STATELESS_OUTER_LOOPS {
+        for inner in NON_CARRIED_INNER {
+            for body in STATE_TOUCHING_BODIES {
+                let stmt = outer.replace("INNER", &inner.replace("BODY", body));
+                let src = format!(
+                    "{ACTOR_PREAMBLE}  run: x over: xs =>\n    acc := 0.\n    {stmt}.\n    acc\n"
+                );
+                cases += 1;
+                if let Some(report) = enforce_report(&src) {
+                    reports.push(format!("{stmt}\n  {report}"));
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 210, "the corpus covers every nesting");
+    assert!(reports.is_empty(), "{}", reports.join("\n"));
+}
+
+#[test]
+fn non_carried_loop_nested_in_a_bracketing_loop_brackets_its_send() {
+    // BT-4255: the repro. The outer loop threads `State` (no direct
+    // parameters any more) and the inner `to:do:` send is bracketed with it.
     let src = format!(
         "{ACTOR_PREAMBLE}  run: x =>\n    acc := 0.\n    1 to: 3 do: [:i | acc := acc + x. 1 to: 2 do: [:j | (x == 0) ifTrue: [self.n] ifFalse: [0]]].\n    acc\n"
     );
-    let report = enforce_report(&src).expect("PIN-BUG BT-4255: still reported");
+    assert_eq!(enforce_report(&src), None);
     assert!(
-        report.contains("UnbracketedUserCodeSend") && report.contains("to:do:"),
-        "{report}"
+        brackets(&compile(&src)) >= 1,
+        "the to:do: send is bracketed"
     );
 }
 

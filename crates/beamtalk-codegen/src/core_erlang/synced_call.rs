@@ -1762,4 +1762,40 @@ impl CoreErlangGenerator {
             .iter()
             .any(|s| self.expr_contains_guarded_operator(&s.expression))
     }
+
+    /// BT-4255: whether `expr` holds a send this classifier brackets
+    /// ([`Self::classify_send`] answers [`UserCodeCall::Yes`] or
+    /// [`UserCodeCall::SelfViaDefaultArm`]), cascades and nested blocks
+    /// included.
+    ///
+    /// Loop mode selection asks this, with the block analysis, before it
+    /// lets a loop drop its `State`: such a send compiled in a loop that holds
+    /// no whole `State` has nothing to bracket it with
+    /// ([`VerifyError::UnbracketedUserCodeSend`]). The block analysis alone
+    /// misses the sends whose class only codegen decides, such as a loop or
+    /// evaluated literal block that carries nothing and so becomes a runtime
+    /// call with its blocks as closures ([`SendUserCode::LoopOrClosureCall`]).
+    pub(in crate::core_erlang) fn expr_holds_bracketed_call(&self, expr: &Expression) -> bool {
+        let mut found = false;
+        beamtalk_core::ast_walker::walk_sends(expr, &mut |send| {
+            found = found
+                || matches!(
+                    self.classify_send(send.receiver, send.selector, send.arguments, send.is_cast),
+                    UserCodeCall::Yes | UserCodeCall::SelfViaDefaultArm
+                );
+        });
+        found
+    }
+
+    /// BT-4255: whether any statement of `block` holds a bracketed call
+    /// ([`Self::expr_holds_bracketed_call`]).
+    pub(in crate::core_erlang) fn block_holds_bracketed_call(
+        &self,
+        block: &beamtalk_core::ast::Block,
+    ) -> bool {
+        block
+            .body
+            .iter()
+            .any(|s| self.expr_holds_bracketed_call(&s.expression))
+    }
 }
