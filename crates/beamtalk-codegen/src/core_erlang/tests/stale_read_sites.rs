@@ -164,6 +164,36 @@ fn state_var_to_store_is_called_only_at_listed_store_sites() {
 }
 
 #[test]
+fn every_listed_file_still_exists() {
+    // BT-4268: the checks above walk the sources and look each file up in
+    // the lists, so an entry for a file that was deleted or renamed would sit
+    // in a list forever without failing anything. Check the other direction.
+    let walked: std::collections::HashSet<String> = code_generator_sources()
+        .into_iter()
+        .map(|(rel, _)| rel)
+        .collect();
+    let listed = ALLOWED_FILES
+        .iter()
+        .map(|f| ("ALLOWED_FILES", *f))
+        .chain(
+            NOT_READ_SOURCES
+                .iter()
+                .map(|(f, _, _)| ("NOT_READ_SOURCES", *f)),
+        )
+        .chain(STORE_SITES.iter().map(|(f, _)| ("STORE_SITES", *f)));
+    let stale: Vec<String> = listed
+        .filter(|(_, f)| !walked.contains(*f))
+        .map(|(list, f)| format!("{list}: {f}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "BT-4268: list entries naming a file the walk did not find (deleted or \
+         renamed; update or drop the entry):\n{}",
+        stale.join("\n")
+    );
+}
+
+#[test]
 fn code_only_keeps_code_after_a_slash_slash_inside_a_string() {
     let src = "// a whole-line comment .state_var_to_store()\n    \
                let url = \"http://x\"; self.state_var_to_store()\n";
