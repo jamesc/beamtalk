@@ -698,13 +698,14 @@ fn sealed_class_repeated_within_one_package_sends_direct() {
 
 /// BT-4069 (review F1): sealed Value/Object builtins whose instances are
 /// `'$beamtalk_class'`-tagged maps with a compiled module — the complement of
-/// [`NON_TAGGED_MAP_CLASSES`](crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES)
-/// over the sealed builtins. Every entry is `.bt`-defined (generated builtin:
+/// the routing table's non-tagged-map rows
+/// ([`is_non_tagged_map_class`](crate::core_erlang::routing::is_non_tagged_map_class),
+/// generated from the shared routing fixture) over the sealed builtins. Every entry is `.bt`-defined (generated builtin:
 /// a compiled `bt@stdlib@…` module exporting `dispatch/3` exists), so a
 /// tag match routes to that same module dynamically and statically alike.
 /// A newly added sealed builtin fails
 /// `all_sealed_builtins_are_classified_for_static_dispatch` until its author
-/// puts it here or in `NON_TAGGED_MAP_CLASSES` — with the routing reason —
+/// puts it here or in the routing fixture — with the routing reason —
 /// so an `ErlangModule`-like (native proxy) or `Exception`-like (alternate
 /// entry) addition cannot slip through unclassified.
 const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
@@ -800,10 +801,11 @@ fn all_sealed_builtins_are_classified_for_static_dispatch() {
             continue;
         }
         assert!(
-            crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES.contains(&name.as_str())
+            crate::core_erlang::routing::is_non_tagged_map_class(name.as_str())
                 || KNOWN_TAGGED_SEALED_BUILTINS.contains(&name.as_str()),
-            "{name} is a new sealed builtin — classify it: NON_TAGGED_MAP_CLASSES \
-             (never a tagged map of its own name) or KNOWN_TAGGED_SEALED_BUILTINS \
+            "{name} is a new sealed builtin — classify it: a row of \
+             tagged_map_routing_conformance.json (never a tagged map of its own \
+             name) or KNOWN_TAGGED_SEALED_BUILTINS \
              (.bt-defined: compiled module + tagged-map instances)"
         );
     }
@@ -830,9 +832,10 @@ fn send_handlers_keep_priority_positions() {
 
 #[test]
 fn non_tagged_exclusions_are_sealed_builtin_values() {
-    // Every `NON_TAGGED_MAP_CLASSES` entry must still be a sealed builtin of
-    // Value- or Object-kind: an entry that stopped being sealed is dead (the
-    // sealed check excludes it first) and must be removed, not carried.
+    // Every non-tagged-map row of the routing table must still be a sealed
+    // builtin of Value- or Object-kind: the typed-sealed path checks the row
+    // before the sealed gate, so a row that stopped being sealed would hide
+    // which gate excludes the class — re-check its representation.
     use beamtalk_core::ast::ClassKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
     let module = beamtalk_core::ast::Module::new(
@@ -841,13 +844,13 @@ fn non_tagged_exclusions_are_sealed_builtin_values() {
     );
     let (hierarchy_result, _) = ClassHierarchy::build(&module);
     let hierarchy = hierarchy_result.expect("builtin hierarchy should build");
-    for name in crate::core_erlang::dispatch_codegen::NON_TAGGED_MAP_CLASSES {
+    for name in crate::core_erlang::routing::non_tagged_map_classes() {
         let info = hierarchy
             .get_class(name)
             .unwrap_or_else(|| panic!("{name} should still be a builtin class"));
         assert!(
             info.is_sealed,
-            "{name} is no longer sealed — remove it from NON_TAGGED_MAP_CLASSES"
+            "{name} is no longer sealed — re-check its routing fixture row"
         );
         assert!(
             matches!(
@@ -995,57 +998,6 @@ fn abstract_value_new_stays_a_plain_builder_for_subclass_chaining() {
     );
 }
 
-/// BT-4200 (3): the exclusion set mirrors the runtime's routing special arms
-/// (`beamtalk_primitive:tagged_map_dispatch/1`), so both sides are checked
-/// against one shared fixture. The `EUnit` half is
-/// `beamtalk_tagged_map_routing_conformance_tests`; changing either side
-/// alone fails one of the two.
-#[test]
-fn non_tagged_exclusions_match_shared_runtime_routing_fixture() {
-    use crate::core_erlang::dispatch_codegen::{EXCEPTION_ROOT_CLASS, NON_TAGGED_MAP_CLASSES};
-    use std::collections::BTreeSet;
-
-    let path = super::repo_root()
-        .join("runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
-    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
-
-    let mut expected: Vec<String> = fixture["raw_term"]
-        .as_array()
-        .expect("raw_term list")
-        .iter()
-        .map(|e| e["class"].as_str().expect("raw_term.class").to_string())
-        .collect();
-    for key in ["untagged_map", "record", "proxy_routed"] {
-        expected.extend(
-            fixture[key]
-                .as_array()
-                .unwrap_or_else(|| panic!("{key} list"))
-                .iter()
-                .map(|e| e.as_str().expect("class name").to_string()),
-        );
-    }
-
-    let expected_set: BTreeSet<&str> = expected.iter().map(String::as_str).collect();
-    assert_eq!(
-        expected_set.len(),
-        expected.len(),
-        "fixture lists a class under more than one routing kind"
-    );
-    let actual_set: BTreeSet<&str> = NON_TAGGED_MAP_CLASSES.iter().copied().collect();
-    assert_eq!(
-        actual_set.len(),
-        NON_TAGGED_MAP_CLASSES.len(),
-        "NON_TAGGED_MAP_CLASSES has duplicates"
-    );
-    assert_eq!(
-        actual_set, expected_set,
-        "NON_TAGGED_MAP_CLASSES drifted from the shared runtime-routing fixture \
-         (update both it and beamtalk_primitive's tagged_map_dispatch/1 arms)"
-    );
-    assert_eq!(
-        fixture["exception_root"].as_str(),
-        Some(EXCEPTION_ROOT_CLASS),
-        "exception-family root drifted from the shared runtime-routing fixture"
-    );
-}
+// BT-4200 (3)'s exclusion-set-vs-fixture test is structural since BT-4292:
+// the exclusion set is generated from the shared fixture
+// (`routing::routing_table_tests::routing_table_is_generated_from_fixture`).

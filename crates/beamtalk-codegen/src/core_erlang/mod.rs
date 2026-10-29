@@ -124,6 +124,7 @@ mod control_flow;
 mod dispatch_codegen;
 mod dispatch_spec;
 mod driver;
+mod dynamic_site_report;
 #[cfg(any(test, feature = "test"))]
 pub mod dropped_assignment_probe;
 pub mod erlang_types;
@@ -143,6 +144,7 @@ mod options;
 mod patterns;
 pub mod primitive_bindings;
 mod primitives;
+mod routing;
 pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;

@@ -42,6 +42,7 @@ use super::control_flow::{Closure, FieldWriteSite};
 use super::expr_shape::is_character_typed_receiver;
 use super::gen_server::SpawnVariant;
 use super::method_frame::{CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM};
+use super::routing;
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -121,66 +122,57 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
     ),
 ];
 
-/// BT-4069: sealed classes whose instances are never
-/// `'$beamtalk_class'`-tagged maps carrying their own name, so a tag guard on
-/// them could never match and would only pessimize the send. Every entry is
-/// sealed (a `typed_sealed` hygiene test fails if one stops being so — a dead
-/// entry must be removed, not carried), and each cites the runtime clause that
-/// owns its representation:
-///
-/// - Raw Erlang terms, dispatched by `beamtalk_primitive:module_for_value/1`
-///   (integers, floats, binaries, atoms, funs, tuples, cons cells, pids,
-///   ports, references — including `nil`/`true`/`false` and `Character`
-///   codepoints, which are atoms and integers at runtime).
-/// - `Dictionary`: an untagged map by convention
-///   (`tagged_map_dispatch/1`'s `undefined` arm).
-/// - `Class`/`Metaclass`: `#beamtalk_object{}` records, not maps
-///   (`beamtalk_object_class`).
-/// - `ErlangModule`: tagged, but dynamically routed to the hand-written
-///   native proxy instead of a compiled module (`tagged_map_dispatch/1`'s
-///   `'ErlangModule'` arm) — excluding it is correctness, not just speed.
-///
-/// BT-4200: this list is enforced against the runtime, not just documented —
-/// the `typed_sealed` conformance test requires it to equal the shared fixture
-/// `runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`,
-/// and the `EUnit` `beamtalk_tagged_map_routing_conformance_tests` requires the
-/// runtime to route each fixture class as the fixture says.
-///
-/// Deliberately NOT here: `Future` (runtime-only, no compiled module — ruled
-/// out by the builtin/generated check in [`CoreErlangGenerator::typed_sealed_value_target`])
-/// and the `Exception` family (dynamically routed via
-/// `bt@stdlib@exception:dispatch` — ruled out by a superclass-chain walk
-/// there, so future exception subclasses are covered without listing them).
-pub(in crate::core_erlang) const NON_TAGGED_MAP_CLASSES: &[&str] = &[
-    "Integer",
-    "Float",
-    "Character",
-    "String",
-    "Binary",
-    "Bitstring",
-    "Symbol",
-    "True",
-    "False",
-    "Boolean",
-    "UndefinedObject",
-    "Block",
-    "Tuple",
-    "List",
-    "Pid",
-    "Port",
-    "Reference",
-    "Dictionary",
-    "Class",
-    "Metaclass",
-    "ErlangModule",
-];
+// BT-4069's exclusion of classes whose instances are never
+// `'$beamtalk_class'`-tagged maps carrying their own name (raw Erlang terms,
+// the untagged-map `Dictionary`, the `Class`/`Metaclass` records, the
+// `ErlangModule` native proxy), and the exception-family root, live in the
+// routing table generated from the shared fixture
+// `runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`
+// (BT-4200, BT-4292): see `routing::is_non_tagged_map_class` and
+// `routing::EXCEPTION_ROOT_CLASS`. The `EUnit`
+// `beamtalk_tagged_map_routing_conformance_tests` checks the runtime routes
+// each fixture row as the fixture says. `Future` is deliberately not a row
+// (runtime-only, no compiled module — ruled out by the builtin/generated
+// check in [`CoreErlangGenerator::typed_sealed_value_target`]), and neither
+// is the rest of the `Exception` family (ruled out by a superclass-chain walk
+// there, so future exception subclasses are covered without listing them).
 
-/// BT-4200: the root of the exception family, which the runtime routes to
-/// `bt@stdlib@exception:dispatch` (`beamtalk_primitive:tagged_map_dispatch/1`,
-/// via `is_exception_class/1`) instead of the instance's own class module. The
-/// `typed_sealed` conformance test pins this against the shared fixture
-/// `runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`.
-pub(in crate::core_erlang) const EXCEPTION_ROOT_CLASS: &str = "Exception";
+/// BT-4292: why a send whose receiver did not resolve to a
+/// [`TypedSealedTarget`] stays dynamic — one variant per gate of
+/// [`CoreErlangGenerator::typed_sealed_value_target`], so the dynamic-site
+/// report (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`) names the gate the send failed
+/// rather than re-deriving it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum StaysDynamic {
+    /// No trusted static type: none recorded, `Dynamic`, a union, a
+    /// negation, a metatype, or a `Known` type of untrusted provenance.
+    Untyped,
+    /// A binary selector: lowered by the operator path, never a guarded call.
+    BinarySelector,
+    /// `fieldAt:put:`, whose dynamic path raises a different hint.
+    FieldAtPut,
+    /// A class the routing table says is not a tagged map of its own name.
+    RepresentationRouted,
+    /// A runtime-only built-in with no compiled module (`Future`).
+    RuntimeOnlyBuiltin,
+    /// The class is not in the hierarchy this unit sees.
+    UnknownClass,
+    /// The class is not sealed (BT-4293 lifts this gate).
+    NotSealed,
+    /// The class name is declared by more than one package in scope
+    /// (BT-4151).
+    AmbiguousPackage,
+    /// A module-less (`ClassBuilder`) class (BT-4149).
+    ModuleLess,
+    /// Not a `Value`/`Object` kind: an actor, whose instances are
+    /// `#beamtalk_object{}` records.
+    NotValueKind,
+    /// The `Exception` family, routed to `bt@stdlib@exception:dispatch`.
+    ExceptionFamily,
+    /// An ancestor is declared in another file, so the chain is not fully
+    /// known.
+    CrossFileParent,
+}
 
 /// BT-4069: a send receiver's statically-known sealed dispatch target — the
 /// class tag to guard on plus the module to direct-call. Resolved by
@@ -645,7 +637,7 @@ impl CoreErlangGenerator {
     ///    `is_sealed: false`), and `Value`- or `Object`-kind (both are
     ///    `'$beamtalk_class'`-tagged maps with the same dynamic path).
     /// 3. Its instances really are tagged maps of its own name: not in
-    ///    [`NON_TAGGED_MAP_CLASSES`], not a runtime-only builtin without a
+    ///    the routing table ([`routing::is_non_tagged_map_class`]), not a runtime-only builtin without a
     ///    compiled module (`Future`), and not the `Exception` family (whose
     ///    dynamic sends route via `bt@stdlib@exception:dispatch`, a different
     ///    entry point).
@@ -698,14 +690,20 @@ impl CoreErlangGenerator {
     /// the target module is pinned at compile time, so if it is removed
     /// afterwards (`removeFromSystem`) a tag-matching send raises raw `undef`
     /// where the dynamic path would degrade to `does_not_understand`.
-    fn typed_sealed_value_target(&self, receiver: &Expression) -> Option<TypedSealedTarget> {
+    fn typed_sealed_value_target(
+        &self,
+        receiver: &Expression,
+    ) -> std::result::Result<TypedSealedTarget, StaysDynamic> {
         let beamtalk_core::semantic_analysis::InferredType::Known {
             class_name,
             provenance,
             ..
-        } = self.type_map.get(receiver.span())?
+        } = self
+            .type_map
+            .get(receiver.span())
+            .ok_or(StaysDynamic::Untyped)?
         else {
-            return None;
+            return Err(StaysDynamic::Untyped);
         };
         if !matches!(
             provenance,
@@ -713,23 +711,28 @@ impl CoreErlangGenerator {
                 | TypeProvenance::Inferred(_)
                 | TypeProvenance::Substituted(_)
         ) {
-            return None;
+            return Err(StaysDynamic::Untyped);
         }
-        if NON_TAGGED_MAP_CLASSES.contains(&class_name.as_str()) {
-            return None;
+        if routing::is_non_tagged_map_class(class_name.as_str()) {
+            return Err(StaysDynamic::RepresentationRouted);
         }
-        let hierarchy = self.class_hierarchy.as_ref()?;
+        let hierarchy = self
+            .class_hierarchy
+            .as_ref()
+            .ok_or(StaysDynamic::UnknownClass)?;
         if ClassHierarchy::is_builtin_class(class_name)
             && !ClassHierarchy::is_generated_builtin_class(class_name)
         {
-            return None;
+            return Err(StaysDynamic::RuntimeOnlyBuiltin);
         }
-        let info = hierarchy.get_class(class_name)?;
+        let info = hierarchy
+            .get_class(class_name)
+            .ok_or(StaysDynamic::UnknownClass)?;
         if !info.is_sealed {
-            return None;
+            return Err(StaysDynamic::NotSealed);
         }
         if self.is_shadowed_class(class_name) {
-            return None;
+            return Err(StaysDynamic::AmbiguousPackage);
         }
         // BT-4200: one consistent source for the module-less gate. The live
         // class-module index (REPL: `build_class_module_index/0`, read from
@@ -747,24 +750,24 @@ impl CoreErlangGenerator {
             ClassInfo::registered_module_is_module_less(module.as_str(), class_name.as_str())
         });
         if module_less {
-            return None;
+            return Err(StaysDynamic::ModuleLess);
         }
         if !matches!(
             hierarchy.resolve_class_kind(class_name),
             ClassKind::Value | ClassKind::Object
         ) {
-            return None;
+            return Err(StaysDynamic::NotValueKind);
         }
-        if class_name.as_str() == EXCEPTION_ROOT_CLASS
+        if class_name.as_str() == routing::EXCEPTION_ROOT_CLASS
             || hierarchy
                 .superclass_chain(class_name)
                 .iter()
-                .any(|ancestor| ancestor.as_str() == EXCEPTION_ROOT_CLASS)
+                .any(|ancestor| ancestor.as_str() == routing::EXCEPTION_ROOT_CLASS)
         {
-            return None;
+            return Err(StaysDynamic::ExceptionFamily);
         }
         if hierarchy.has_cross_file_parent(class_name) {
-            return None;
+            return Err(StaysDynamic::CrossFileParent);
         }
         // BT-4152: resolve through this unit's own registry entry first —
         // it names the module the unit actually emits. `beamtalk test`
@@ -781,10 +784,29 @@ impl CoreErlangGenerator {
                 || self.compiled_module_name_qualified(class_name, info.package.as_deref()),
                 |module| module.as_str().to_string(),
             );
-        Some(TypedSealedTarget {
+        Ok(TypedSealedTarget {
             class_name: class_name.to_string(),
             module_name,
         })
+    }
+
+    /// BT-4292: [`Self::typed_sealed_value_target`] plus the two selector
+    /// gates of [`Self::try_handle_typed_sealed_send`] — the one decision
+    /// whether a send becomes a guarded direct call, shared by the handler
+    /// and the dynamic-site report so the report can never disagree with
+    /// what was emitted.
+    pub(in crate::core_erlang) fn typed_sealed_send_target(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) -> std::result::Result<TypedSealedTarget, StaysDynamic> {
+        if matches!(selector, MessageSelector::Binary(_)) {
+            return Err(StaysDynamic::BinarySelector);
+        }
+        if matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut)) {
+            return Err(StaysDynamic::FieldAtPut);
+        }
+        self.typed_sealed_value_target(receiver)
     }
 
     /// BT-4069: `HANDLERS`' last entry. Converts a send to a
@@ -805,13 +827,7 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        if matches!(selector, MessageSelector::Binary(_)) {
-            return Ok(None);
-        }
-        if matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut)) {
-            return Ok(None);
-        }
-        let Some(target) = self.typed_sealed_value_target(receiver) else {
+        let Ok(target) = self.typed_sealed_send_target(receiver, selector) else {
             return Ok(None);
         };
         Ok(Some(self.generate_typed_sealed_send(
@@ -1041,16 +1057,16 @@ impl CoreErlangGenerator {
             )));
         }
 
-        // Emit dynamic dispatch fallback diagnostic.
+        // Emit the dynamic-site report entry (BT-4292): the receiver's static
+        // type and the gate that kept the send dynamic.
         if self.codegen_diagnostics_enabled {
             let span = receiver.span();
             let line_info = self
                 .span_to_line(span)
                 .map_or(String::new(), |l| format!(" at line {l}"));
+            let description = self.dynamic_site_description(receiver, selector);
             self.emit_codegen_diagnostic(
-                format!(
-                    "Send '{selector_atom}'{line_info}: dynamic dispatch (receiver type unknown)"
-                ),
+                format!("Send '{selector_atom}'{line_info}: dynamic dispatch ({description})"),
                 span,
             );
         }
