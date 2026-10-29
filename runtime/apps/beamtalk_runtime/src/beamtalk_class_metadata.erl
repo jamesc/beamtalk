@@ -94,6 +94,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-3832: class flags + per-method CompiledMethod records.
     put_flags/2,
     lookup_flag/2,
+    put_class_doc/2,
+    lookup_class_doc/1,
     put_method_records/3,
     lookup_method_record/3,
     lookup_method_records/2,
@@ -218,7 +220,13 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% the class gen_server. A plain list (at most two elements); `[]` for
     %% dynamic classes, stateful classes, and modules compiled before the
     %% key existed.
-    direct_constructors = [] :: [selector()]
+    direct_constructors = [] :: [selector()],
+    %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
+    %% the reflection state above, so `doc` answers without a `gen_server:call`
+    %% into the class (which cannot answer from inside its own process, or
+    %% while it waits on another class). Written only by `put_class_doc/2`;
+    %% `undefined` until the owning class publishes it.
+    doc :: term()
 }).
 
 -type side() :: instance | class.
@@ -549,6 +557,32 @@ put_flags(Name, #{
         ok
     catch
         error:badarg -> ok
+    end.
+
+-doc """
+Publish a class's doc (BT-4262, ADR 0033): `none` when unset, `nil` after
+`doc: nil`, else the stored binary or tagged string. Same contract as
+`put_reflection/2`: a per-field `ets:update_element/3`, and a missing row or
+table is a no-op.
+""".
+-spec put_class_doc(class_name(), term()) -> ok.
+put_class_doc(Name, Doc) ->
+    try
+        ets:update_element(?TABLE, Name, [{#class_metadata.doc, Doc}]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Look up a class's published doc (see `put_class_doc/2`); `not_found` when the
+class has not published it.
+""".
+-spec lookup_class_doc(class_name()) -> {ok, term()} | not_found.
+lookup_class_doc(Name) ->
+    case field(Name, #class_metadata.doc) of
+        undefined -> not_found;
+        Doc -> {ok, Doc}
     end.
 
 -doc """
