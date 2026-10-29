@@ -27,6 +27,8 @@ TestCase subclass: ActorStateNameShadowingTest
 
   testDoLocalNamedStateAcc1 => self assert: self.probe loopStateAcc1 equals: 32
 
-  testDestructuredState => self assert: (self.probe destructuredState: 41) equals: 41
+  testDestructuredState =>
+    self assert: (self.probe destructuredState: 41) equals: 41
 
-  testMatchArmBindingState => self assert: (self.probe matchedState: 41) equals: 41
+  testMatchArmBindingState =>
+    self assert: (self.probe matchedState: 41) equals: 41

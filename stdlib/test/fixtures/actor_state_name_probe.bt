@@ -24,19 +24,21 @@ Actor subclass: ActorStateNameProbe
 
   loopStateAcc =>
     i := 0
-    [i < 2] whileTrue: [
-      stateAcc := 10
-      self.n := self.n + stateAcc
-      i := i + 1
-    ]
+    [i < 2]
+      whileTrue: [
+        stateAcc := 10
+        self.n := self.n + stateAcc
+        i := i + 1
+      ]
     self.n
 
   loopStateAcc1 =>
-    #(1, 2) do: [:k |
-      stateAcc1 := k * 10
-      self.n := self.n + 1
-      self.n := self.n + stateAcc1
-    ]
+    #(1, 2)
+      do: [:k |
+        stateAcc1 := k * 10
+        self.n := self.n + 1
+        self.n := self.n + stateAcc1
+      ]
     self.n
 
   destructuredState: x =>
@@ -45,8 +47,9 @@ Actor subclass: ActorStateNameProbe
     state
 
   matchedState: x =>
-    x match: [
-      state -> [self.n := 1. state] value
-    ]
+    x match: [state -> [
+      self.n := 1
+      state
+    ] value]
 
   getN => self.n
