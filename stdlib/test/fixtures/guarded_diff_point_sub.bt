@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: a subclass instance flowing where a GuardedDiffPoint is declared.
+// Its tag names the subclass, so a guard on GuardedDiffPoint misses it.
+
+GuardedDiffPoint subclass: GuardedDiffPointSub
+  sum -> Integer => 1000 + self x + self y

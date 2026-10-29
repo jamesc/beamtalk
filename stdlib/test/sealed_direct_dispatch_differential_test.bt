@@ -21,17 +21,19 @@
 //   a plain `beamtalk_message_dispatch:send/3` — the reference.
 // - For selectors an earlier send handler claims before `typed_sealed`
 //   (`perform:`, `perform:withArguments:`, `class`, `fieldAt:`,
-//   `fieldAt:put:`), `rawDispatch:args:to:` calls the module's `dispatch/3`
-//   exactly as the direct shape would, and `dynamic:args:to:` calls
-//   `beamtalk_message_dispatch:send/3`, both through the same FFI call.
+//   `fieldAt:put:`), `rawDispatch:args:to:in:` calls the module's
+//   `dispatch/3` exactly as the direct shape would, and `dynamic:args:to:`
+//   calls `beamtalk_message_dispatch:send/3`, both through the same FFI call.
 //
+// The comparison machinery is shared with BT-4292's
+// guarded_dispatch_differential_test.bt (fixtures/dispatch_differential_case.bt).
 // Multi-package class shadowing is covered separately (BT-4151).
 //
 // Fixtures: fixtures/sealed_direct_diff_base.bt,
 // fixtures/sealed_direct_diff_widget.bt,
 // fixtures/sealed_direct_diff_impostor.bt, fixtures/counter.bt.
 
-TestCase subclass: SealedDirectDispatchDifferentialTest
+DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
 
   // === Shared helpers ===
   widget -> SealedDirectDiffWidget =>
@@ -40,62 +42,18 @@ TestCase subclass: SealedDirectDispatchDifferentialTest
   impostor -> SealedDirectDiffImpostor =>
     SealedDirectDiffImpostor new: #{#x => 5}
 
-  // `beamtalk_message_dispatch:send/3`, called explicitly.
-  dynamic: selector :: Symbol args: args :: List to: receiver =>
-    Erlang erlang
-      apply: #beamtalk_message_dispatch
-      module: #send
-      args: #(receiver, selector, args)
-
   // The fixture's compiled module: what `beamtalk test` emits for it
-  // (unqualified `bt@<stem>`, BT-4152). Answered from a method rather than
-  // written at the `apply` site so erlc cannot fold `rawDispatch:` into a
-  // static remote call (which would pollute the import table that
-  // `testDirectHelpersCompileToTheDirectShape` reads).
+  // (unqualified `bt@<stem>`, BT-4152).
   widgetModule -> Symbol => #'bt@sealed_direct_diff_widget'
-
-  // The tag-matched arm of the direct shape, spelled out: exactly the
-  // `call 'bt@...':'dispatch'(Selector, Args, Receiver)` the compiler emits.
-  rawDispatch: selector :: Symbol args: args :: List to: w =>
-    Erlang erlang
-      apply: self widgetModule
-      module: #dispatch
-      args: #(selector, args, w)
-
-  // The observable outcome of a block: its value, or the full structured
-  // shape of the error it raised.
-  outcomeOf: aBlock :: Block -> List =>
-    [#(#returned, aBlock value)]
-      on: Exception
-      do: [:e |
-        #(#raised, e class name, e kind, e selector, e errorClass, e message, e hint)
-      ]
-
-  // Runs `directBlock` and `dynBlock`, asserts they agree, and answers the
-  // shared outcome so callers can also pin what it is.
-  assertSameOutcome: directBlock :: Block as: dynBlock :: Block -> List =>
-    direct := self outcomeOf: directBlock
-    self assert: direct equals: (self outcomeOf: dynBlock)
-    direct
 
   // Runs one selector on a widget through the module's `dispatch/3` arm and
   // through the dynamic send, asserts they agree, and answers the outcome.
   armOutcome: selector :: Symbol args: args :: List -> List =>
-    w := self widget
-    direct := [
-      self
-        rawDispatch: selector
-        args: args
-        to: w
-    ]
     self
-      assertSameOutcome: direct
-      as: [
-        self
-          dynamic: selector
-          args: args
-          to: w
-      ]
+      armOutcome: selector
+      args: args
+      on: self widget
+      in: self widgetModule
 
   // === Direct shape (receiver declared SealedDirectDiffWidget) ===
   directSum: w :: SealedDirectDiffWidget => w sum

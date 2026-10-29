@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: an unrelated Value class passed where a GuardedDiffPoint is
+// declared (a lying annotation). It understands `sum` and `describe` but not
+// `add:`.
+
+Value subclass: GuardedDiffImpostor
+  field: x :: Integer = 0
+
+  sum -> Integer => 2000 + self x
+
+  describe -> String => "impostor"

@@ -86,6 +86,18 @@ TestCase subclass: TypePatternMatchTest
       ])
       equals: 1
 
+  // BT-4292: `beamtalk_tagged_map:class_of/1` reads a class from a map's
+  // `'__class_mod__'` key, so such a map is not a Dictionary (the routing
+  // fixture's `untagged_map` guard).
+  testClassModMapDoesNotMatchDictionaryPattern =>
+    m := #{#'__class_mod__' => #'bt@type_pattern_actor_fixture', #k => 1}
+    self
+      assert: (m match: [
+        d :: Dictionary -> #wasDictionary;
+        _ -> #other
+      ])
+      equals: #other
+
   testBooleanPatternTrue =>
     self
       assert: (true match: [

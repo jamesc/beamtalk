@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: a Value class answering every unknown selector through
+// `doesNotUnderstand:args:`.
+
+Value subclass: GuardedDiffProxy
+  field: tag :: Symbol = #proxy
+
+  doesNotUnderstand: selector args: arguments => #(#proxied, selector, arguments)
