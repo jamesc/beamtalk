@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4150: the sealed Value fixture for the sealed-Value direct-dispatch
+// differential test. Sends to a receiver statically typed as this class
+// compile to a guarded direct `Module:dispatch/3` call (BT-4069); untyped
+// sends to the same value go through `beamtalk_message_dispatch:send/3`.
+// See sealed_direct_dispatch_differential_test.bt.
+
+sealed SealedDirectDiffBase subclass: SealedDirectDiffWidget
+  field: y :: Integer = 0
+
+  sum -> Integer => self x + self y
+
+  add: n :: Integer -> Integer => self sum + n
+
+  add: a :: Integer and: b :: Integer -> Integer => self sum + a + b
+
+  // Overrides the parent's `describe`.
+  describe -> String => "widget"
+
+  boom -> Integer => self error: "widget boom"
