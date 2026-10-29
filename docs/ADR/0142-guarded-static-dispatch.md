@@ -1,4 +1,4 @@
-# ADR 0142: Guarded Static Dispatch — the Guard Is the Contract, and the Class Process Only Owns Class State
+# ADR 0142: Guarded Static Dispatch — the Guard Is the Contract
 
 ## Status
 Proposed (2026-10-28)
@@ -16,8 +16,6 @@ it in deterministic reductions and words:
 |---|---|---|---|---|
 | 1b / 4c | typed send to an **open** Value (`p x`, `p m: 1`) | 29 red / 28 w, ~160 ns | `p.x` 1.5 ns | full `beamtalk_message_dispatch:send/3` (22 calls) |
 | 5b | self-send inside an open Value | 61 red / 59 w | — | a second full send |
-| 3b | class method, sealed class, method not `class sealed` | 145 red / 444 w, 2.3 µs | `Mod.fun(arg)` 2.9 ns | `gen_server:call` into the class process |
-| 3c | class method on an open class | 146 red / 480 w, 2.6 µs | 2.8 ns | same |
 | 12b / 8a | a bare class reference (`Error`, `Point`) | rebuilt per use | a module atom | `binary_to_atom` + `whereis` + 2 ETS reads (`module_name_safe`) + a fresh tuple |
 
 The 12b/8a cause is the current code, after BT-4065. The README's table
@@ -28,11 +26,19 @@ structural, but its cost is not: a guarded direct call costs a map-key
 match". It also notes that "everything else … is fixable without changing
 the language".
 
-**What a real program actually sends.** Catalina (jamesc/beamtalk-catalina,
-0.2.0) is the Thousand Island port that motivates this epic, and every class
-in it is `typed`. A compiler instrumented to print each dynamic-dispatch site
-together with its receiver's static type finds **220 dynamic send sites**
-across its 21 source files (2026-10-29, beamtalk main f5accd5):
+Class-side sends are slow too (rows 3b/3c, ~145 red, through the class
+process). They involve a separate semantic decision and are handled by
+ADR 0143, which builds on this ADR's guard contract.
+
+### What a real program sends
+
+Catalina (jamesc/beamtalk-catalina, 0.2.0) is the Thousand Island port that
+motivates this epic. Every class in it is `typed`. All measurements below
+were taken on 2026-10-29, on beamtalk main f5accd5.
+
+**Send sites.** A compiler instrumented to print each dynamic-dispatch site
+with its receiver's static type finds **220 dynamic send sites** across
+Catalina's 21 source files:
 
 | Receiver's static type | Sites | Examples |
 |---|---|---|
@@ -45,44 +51,42 @@ across its 21 source files (2026-10-29, beamtalk main f5accd5):
 | Untyped: `Dynamic` 60, negation 6, other 4 | 70 | `Result` checks (`error`, `isError`, `isOk`), socket calls on `Dynamic` transport values (`close:`, `send:data:`) |
 
 Two-thirds of the sites already have a static type. The largest single group
-is built-in collections, which BT-4069's rule excludes entirely. The table is
-the baseline for this ADR's gates (§ Implementation).
+is built-in collections, which BT-4069's rule excludes entirely.
 
-Class-side sends have a second cost besides speed. Every caller in the node
-queues on one class process. The `class-process-ffi` lint (BT-3999 family)
-exists because running a class method in the class process is *wrong* for
-caller-sensitive FFI. For example, `gen_tcp:accept` blocks every caller, and
-`controlling_process`, `self()`, `link` and `monitor` act on the wrong
-process.
+**Per message.** `bench_profile` ran on the `echo_c10_64B` row: 10
+connections, 64-byte messages, call-time breakpoints on every server
+function, 7,651 messages in 5 s. The table shows each group's share of server
+CPU. Breakpoints inflate small, frequently called functions, so the shares
+are approximate.
 
-### Current state: three special cases, three rules
+| Group | Share | Per message | Addressed by |
+|---|---|---|---|
+| Actor state-cell sync (ADR 0137): `beamtalk_actor_state` `store`, `call_foreign`, `reflect_cell` | ~14% | 27 `store`, 6 `call_foreign` | nothing yet (BT-4279) |
+| Inherited actor self-sends: `beamtalk_dispatch` `super`/`lookup_in_class_chain`/`invoke_resolved`, plus superclass, metadata and extension lookups | ~11% | 6 | BT-4109 cached the owner, but the path around the cache remains (BT-4280) |
+| Dynamic sends to Values and built-ins: `beamtalk_message_dispatch`, `beamtalk_primitive`, `beamtalk_tagged_map` | ~9% | 9 sends (4 tagged-map, 4 by representation) | **this ADR, §2 and §2b** |
+| Class-object resolution: `whereis_class`, `registry_name` (`binary_to_atom`), `class_name_for_pid`, derived-cache reads | ~6% | 9 | **this ADR, §3** (class references); BT-4127 (`obj class`) |
+| Telemetry, `strip_local_temps` | ~6% | 2 events, 12 strips | BT-4113 |
+| Value construction: `beamtalk_class_instantiation` declared-fields walk | ~4% | 4 | nothing yet (BT-4281) |
+| FFI proxy (`apply_with_coercion`) | ~3.5% | 6 | BT-4153 (done), residual |
+| Catalina and harness code, OTP, I/O | ~30% | | the floor |
 
-Static dispatch already exists, but as three unrelated rules:
+This ADR addresses about 15% of Catalina's per-message CPU. The two largest
+runtime costs are outside its scope and are tracked separately: state-cell
+sync (~14%) and the inherited-self-send path (~11%). Class-side sends
+(ADR 0143) are about 1%.
 
-1. **Sealed-Value typed receivers (BT-4069).**
-   - When the receiver's static type is a sealed tagged-map class,
-     `typed_sealed_value_target` (`dispatch_codegen.rs`) emits:
-     `case maps:get('$beamtalk_class', R) of 'C' -> 'bt@…c':dispatch(Sel, Args, R); _ -> beamtalk_message_dispatch:send(R, Sel, Args) end`.
-   - Its doc comment says: "The guard, not the annotation, is trusted."
-   - Row 1a went from 29.1 red / 28 w to 3.0 / 0.
-2. **`class sealed` methods of sealed, stateless classes (ADR 0129 Phase 0b),
-   plus synthesized constructors (BT-4099).**
-   - These are direct `Mod:class_sel(nil, …)` calls, statically and through
-     `lookup_direct_call/3` for dynamic class sends.
-   - The eligibility verdict is computed in Rust and baked into
-     `__beamtalk_meta/0`.
-   - Static call sites trust the verdict unguarded. That causes the
-     BT-4126, BT-4133, BT-4134 and BT-4037 staleness caveats.
-3. **Open class-side self-sends (BT-3700).**
-   - `class_self_direct_ok/4` reads one `persistent_term` flag per send,
-     maintained by `beamtalk_class_shadow_flags`.
-   - The flag is erased under a per-tag lock before an extension or ADR 0084
-     runtime fun becomes visible.
+### Current state
 
-The first is gated on `sealed`, though its soundness comes entirely from the
-guard. The second is gated on `sealed` and `class sealed`, though what the
-class process actually protects is class variables (ADR 0130). The third is
-the general mechanism, used in one corner.
+`typed_sealed_value_target` (`dispatch_codegen.rs`) implements BT-4069. When a
+receiver's static type is a *sealed* tagged-map class, it emits:
+
+`case maps:get('$beamtalk_class', R) of 'C' -> 'bt@…c':dispatch(Sel, Args, R); _ -> beamtalk_message_dispatch:send(R, Sel, Args) end`
+
+- Its doc comment says: "The guard, not the annotation, is trusted."
+- Row 1a went from 29.1 red / 28 w to 3.0 / 0.
+- The rule is gated on `sealed`, but its soundness comes entirely from the
+  guard.
+- Built-in receivers (`List`, `Dictionary`, …) are excluded outright.
 
 ### Constraints
 
@@ -91,19 +95,18 @@ the general mechanism, used in one corner.
   was compiled statically.
 - **Escape hatches are guaranteed** (ADR 0100): `doesNotUnderstand:`,
   `perform:`, extensions (ADR 0066, which can override *inherited* methods),
-  ADR 0084 runtime class-method funs, `removeSelector:` re-exposing an
-  inherited method (ADR 0112), and hot reload (principles §2, §11).
+  `removeSelector:` re-exposing an inherited method (ADR 0112), and hot reload
+  (principles §2, §11).
 - **Types are warnings** (ADR 0025, non-goal "mandatory static typing"). An
-  annotation can be a lie at run time, so it may pick a target but never
-  prove one.
+  annotation can be a lie at run time, so it may pick a target but never prove
+  one.
 - **No image mechanics** (principles §4). An identifier must mean the same
   thing in every context: REPL, `beamtalk run`, `beamtalk test`, releases. A
   class process restarts, so its pid is not a constant.
 - **One rule implementation across Rust and Erlang**
-  (architecture-principles §6–7). The compiler may pick candidates, the
-  runtime decides, and any routing knowledge that crosses the boundary is
-  pinned by a shared fixture.
-- **ADR 0127 / 0112 / 0066 rely on inherited methods not being copied.**
+  (architecture-principles §6–7). Routing knowledge that crosses the boundary
+  is pinned by a shared fixture.
+- **ADRs 0127, 0112 and 0066 rely on inherited methods not being copied.**
 
 ## Decision
 
@@ -114,19 +117,19 @@ proves the direct target is exactly what dynamic dispatch would reach**. On a
 guard miss it falls back to a **byte-identical dynamic send**.
 
 - Static facts pick the candidate target: a declared or inferred type, a
-  class literal, or `self` inside its own class.
-- They never prove it.
+  class literal, or `self` inside its own class. They never prove it.
 - `sealed` and `typed` do not change what any send means. They only make
   guards hit more often, or let the compiler pick a candidate at all.
 
-This is the rule BT-4069 already follows. The ADR makes it the only rule.
+BT-4069 already follows this rule. This ADR makes it the rule for every
+static dispatch, and ADR 0143 applies it to the class side.
 
-### 2. Instance side: guarded direct calls for any known tagged-map class
+### 2. Tagged-map receivers: guarded by class tag
 
-The `is_sealed` requirement is dropped from `typed_sealed_value_target`. For
-any receiver whose static type is `Known{C}` (provenance Declared, Inferred
-or Substituted), where `C` is a tagged-map class (Value or Object kind), the
-send compiles to the existing BT-4069 shape:
+The `is_sealed` requirement is dropped. For any receiver whose static type is
+`Known{C}` (provenance Declared, Inferred or Substituted), where `C`'s
+instances are tagged maps (Value or Object kind), the send compiles to the
+existing BT-4069 shape:
 
 ```erlang
 case call 'erlang':'is_map'(R) of
@@ -138,85 +141,79 @@ case call 'erlang':'is_map'(R) of
 end
 ```
 
-**Why this is sound without `sealed`:**
+**Why this is sound without `sealed`.**
 - The tag names the receiver's *exact* class.
 - The dynamic path for a receiver tagged `C` resolves `C`'s module and calls
-  the same `Mod:dispatch/3` (`tagged_class_dispatch` → `value_type_send`).
+  the same `Mod:dispatch/3` (`tagged_class_dispatch` → `value_type_send`; its
+  one pre-check, `is_ivar_method`, only affects the excluded `fieldAt:put:`).
 - `Mod:dispatch/3` then does everything the dynamic path relies on:
   extensions first in its default arm, then `SuperMod:dispatch/3` for
   inherited selectors, then `doesNotUnderstand:args:` or the DNU error.
 - A subclass instance carries its own tag, misses the guard, and takes the
-  dynamic path, so late binding to subclass overrides is untouched.
+  dynamic path. Late binding to subclass overrides is untouched.
 
 The candidate is a module name, not a method. That is why a same-module
-reload, `removeSelector:` and extensions need no invalidation:
-- A remote call reaches the newest loaded version of `Mod`.
-- Hot reload, `removeSelector:` and extension registration all act inside
-  `Mod:dispatch/3` or the registries it reads.
+reload, `removeSelector:` and extensions need no invalidation: a remote call
+reaches the newest loaded `Mod`, and all three act inside `Mod:dispatch/3` or
+the registries it reads.
 
 **Accepted caveat: the module name is pinned at compile time.** The dynamic
-path looks the module up at run time (`beamtalk_class_metadata:lookup_module/1`).
-The guarded call names the module the compiler saw. Two cases diverge:
-- A REPL redefinition that moves the class into a *different* module (BT-4200).
-  Stale call sites keep reaching the old module's code.
-- `removeFromSystem`. Stale call sites get a raw `undef` where the dynamic path
-  gives `does_not_understand` (BT-4149).
+path looks the module up at run time (`beamtalk_class_metadata:lookup_module/1`),
+but the guarded call names the module the compiler saw. Two cases diverge:
+- A REPL redefinition that moves the class into a *different* module
+  (BT-4200): stale call sites keep reaching the old module's code.
+- `removeFromSystem`: stale call sites get a raw `undef`, where the dynamic
+  path gives `does_not_understand` (BT-4149).
 
-Both cases already exist for BT-4069's sealed receivers. Dropping `is_sealed`
-widens them to every typed receiver. Both are development-time operations, and
-recompiling the callers fixes them. This ADR accepts the caveat rather than
-pay a registry read on every send. It documents the caveat in the
-language-features hot-reload section. A zero-cost fix is a follow-up issue:
-for example, a retired class module whose `dispatch/3` forwards to
-`beamtalk_message_dispatch:send/3`.
+Both already exist for BT-4069's sealed receivers; this rule widens them to
+every typed receiver. Both happen only during development, and recompiling
+the callers fixes them. This ADR accepts the caveat rather than pay a
+registry read on every send, and the language-features hot-reload section
+documents it. A zero-cost fix is a follow-up issue: for example, a retired
+class module whose `dispatch/3` forwards to `beamtalk_message_dispatch:send/3`.
 
-Consequences of the rule:
+Scope:
 - **Self-sends in open Values** are covered when the method runs on an
-  instance of its own class. The type checker types `self` as `Known{C}`
-  (Inferred), so row 5b becomes a guarded direct call. In an *inherited*
-  method running on a subclass instance, `self` is tagged with the subclass.
-  That self-send always misses the guard and stays a full dynamic send, which
-  is correct but not faster.
-- **Unchanged exclusions:**
-  - `NON_TAGGED_MAP_CLASSES` (primitives keep their own routing, pinned by
-    `tagged_map_routing_conformance.json`);
+  instance of its own class, because the type checker types `self` as
+  `Known{C}` (Inferred). In an *inherited* method running on a subclass
+  instance, `self` is tagged with the subclass. That send misses the guard
+  and stays a full dynamic send: correct, but not faster.
+- **Excluded: classes whose instances are not tagged maps.**
+  - `Supervisor` and its subclasses: their instances are
+    `{beamtalk_supervisor, …}` tuples.
+  - The declared type `Object`, which means "any object"; a guard on the tag
+    `'Object'` would never hit.
+  - Without these two exclusions, 52 of Catalina's 220 sites would gain a
+    guard that can never hit.
+  - The representation facts come from the routing fixture (§2b).
+- **Exclusions kept from BT-4069:**
   - runtime-only builtins without a generated module;
   - module-less (ClassBuilder) classes;
   - the `Exception` hierarchy;
   - classes with a cross-file parent;
   - binary selectors;
   - `fieldAt:put:`;
-  - receivers whose class name is exported by more than one package in scope
+  - receivers whose class name more than one package in scope exports
     (BT-4151 fails closed to dynamic).
-- **Classes whose instances are not tagged maps are excluded.** The rule
-  covers only classes whose instance representation is a tagged map.
-  - `Supervisor` and its subclasses are excluded: their instances are
-    `{beamtalk_supervisor, …}` tuples.
-  - The declared type `Object` is excluded: it means "any object", and a
-    guard on the tag `'Object'` would never hit.
-  - Without these exclusions, 52 of Catalina's 220 sites would gain a guard
-    that can never hit.
-  - The representation test reads the same `tagged_map_routing_conformance.json`
-    fixture.
 - **Unions, `Dynamic` and untyped receivers** stay dynamic. Catalina's 70
   untyped sites are a typing problem at the FFI and transport boundary, not a
-  dispatch problem. Better return types there are separate work.
+  dispatch problem.
 - **Actor receivers** are out of scope. A send to an actor is a `gen_server`
-  call whatever its type, and its hook cost is BT-4113.
+  call whatever its type; BT-4113 covers its hook cost.
 
 ### 2b. Built-in receivers: guarded by representation
 
-Built-in classes such as `List`, `Dictionary` and `Tuple` have no class tag.
-Their instances *are* the Erlang term, and the dynamic path routes them by
+Instances of built-in classes such as `List`, `Dictionary` and `Tuple` have
+no class tag: they *are* the Erlang term. The dynamic path routes them by
 representation:
-- `beamtalk_primitive:send/3`, then `dispatch_via_module/3`, then
-  `module_for_value/2`, then `Mod:dispatch(Sel, Args, R)`;
-- for a map without `'$beamtalk_class'`, `send_map/3` routes to Dictionary's
+- `beamtalk_message_dispatch:send/3` → `beamtalk_primitive:send/3` →
+  `dispatch_via_module/3` → `module_for_value/2` → `Mod:dispatch(Sel, Args, R)`;
+- a map without `'$beamtalk_class'` goes through `send_map/3` to Dictionary's
   module.
 
 When a receiver's static type is `Known{B}` for one of these built-ins, the
-guard is the **representation test** that `module_for_value` itself uses, and
-the target is the module it would pick:
+guard is the **representation test** `module_for_value` uses, and the target
+is the module it would pick:
 
 ```erlang
 case call 'erlang':'is_list'(R) of
@@ -232,137 +229,26 @@ end
 | `Tuple` | `is_tuple(R)` and the first element is not a reserved tag (`beamtalk_object`, `beamtalk_future`, `beamtalk_supervisor`, …) | `bt@stdlib@tuple` |
 | `Integer`, `Float`, `Boolean`, `Symbol`, … | the matching `module_for_value/1` clause | its module |
 
-Rules:
-- **`String`/`Binary` keep their current routing.** Their selector-aware fast
-  path consults `beamtalk_extensions:has('String', Sel)`. Matching that would
-  need a run-time check of its own, so these two types are left to a later
-  phase if measurements justify it.
-- **Pin it to the fixture.** The table (guard, reserved tuple tags, target
+- **`String` and `Binary` keep their current routing.** Their selector-aware
+  fast path consults `beamtalk_extensions:has('String', Sel)` at run time.
+  Matching it would need a guard of its own, so these two wait for a later
+  phase if measurements justify one.
+- **Pinned to one fixture.** The table (guard, reserved tuple tags, target
   module) is generated from `tagged_map_routing_conformance.json`, extended
-  with the representation rows. It is never restated in Rust. The Erlang
-  side's conformance test pins `module_for_value/1`, `send/3`'s tuple and map
-  clauses and `beamtalk_message_dispatch:send/3`'s future/supervisor clauses
-  to the same rows.
+  with representation rows, and is never restated in Rust. The Erlang side's
+  conformance test pins these to the same rows:
+  - `module_for_value/1`;
+  - `beamtalk_primitive:send/3`'s tuple and map clauses;
+  - `beamtalk_message_dispatch:send/3`'s future and supervisor clauses.
 - **Why it is sound.**
   - The guard is the exact clause the dynamic path would take, and the target
     is the module it would call.
   - Extensions on built-ins and DNU are handled inside `Mod:dispatch/3`, as
-    they are today.
-  - A value that fails the guard takes the dynamic path. That includes a
+    today.
+  - Anything that fails the guard takes the dynamic path. That includes a
     lying annotation and a reserved tagged tuple typed as `Tuple`.
 
-### 3. Class side: the class process exists only to own class state
-
-A class method runs **in the caller** unless the receiving class needs its
-process. The test is a per-class run-time flag, `direct_call_ok(C)`. It is
-the existing `beamtalk_class_shadow_flags` derived flag, which gains one
-input. The flag is true exactly when all of these hold:
-
-- `C` has no class variables (`classState:`), which is the new input;
-- no ADR 0084 runtime class-method fun is installed on `C`;
-- no class-side extension shadows a compiled method of `C`;
-- the class has finished bootstrap (`mark_ready`).
-
-The **defining** class of the resolved method must also have no class
-variables. A class method may only touch the class variables its own class
-declares, and it reads them through the receiver's class-process home (ADR
-0130). Take a method defined on a stateful `Base` and sent to a stateless
-`Sub`:
-- Today it runs in `Sub`'s process and raises `undeclared_class_variable`.
-- Run in the caller, it would raise `class_state_unreachable` instead.
-
-So such a method stays in the class process, with an unchanged error. The
-memo below records the owner's flag together with the owner. Methods run in
-the caller install no class-variable home, so ADR 0130 §1's "no nested home"
-invariant is untouched.
-
-The selector must also not be process-bound. These selectors keep their
-current routing:
-- `new`, `new:`, `startLink` and `startLink:` (ADR 0129). Value constructors
-  keep their BT-4099 direct path.
-- `spawn` and `spawnWith:`, which have dedicated clauses in
-  `beamtalk_class_dispatch`.
-- `Supervisor` `supervise`/`spawn*`, which are routed before `class_send_plain`.
-- `TestCase` run selectors, which answer `test_spawn` and need the
-  gen_server's `noreply`.
-
-Rust owns this list, in `class_info.rs` next to `is_direct_call_eligible`. It
-reaches the runtime as generated metadata, and the `class-state-abroad` lint
-and the migration lint read the same list.
-
-Neither `sealed` nor `class sealed` is part of the test.
-
-**Dynamic class sends** (`beamtalk_class_dispatch:class_send_plain/3`, used
-by variables, `perform:`, `classNamed:`, a class passed as an argument, and
-Erlang callers):
-- When `direct_call_ok(C)` holds, resolve the defining class and module in
-  the caller. Use a memo `{class_method_owner, C, Sel}` in
-  `beamtalk_class_derived_cache` (the BT-4109 `resolve_owner` pattern), then
-  apply it in the caller if the owner also has no class variables.
-- Deriving the memo walks the chain exactly as the class process does today.
-  A class-side extension or an ADR 0084 runtime fun at each ancestor counts as
-  that ancestor's method. A shadow on an *ancestor* never clears the
-  receiver's flag, so the memo is what keeps it correct. Every change that
-  can alter the answer must therefore invalidate the derived cache:
-  - `beamtalk_extensions:register` and `remove` already do.
-  - `beamtalk_class_metadata:set_runtime_class_methods/2` does not today, and
-    Phase 2 adds it.
-- Otherwise use the class process, as today.
-- A subclass with class variables that inherits a method from a stateless
-  parent fails its own flag, so it still runs in its process. ADR 0130
-  semantics are preserved by construction.
-
-**Static class sends with a literal receiver** (`Point origin`, and
-class-side `self foo`) whose selector `C` itself defines compile to:
-
-```erlang
-case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Point class', 'Point') of
-  <'true'> -> call 'bt@app@point':'class_origin'(PointRef)
-  <_>      -> <today's class_send>
-end
-```
-
-- `PointRef` is the class reference of §4, passed as the real `ClassSelf`.
-  This retires the `nil` convention and its per-call prologue lookup
-  (BT-4037).
-- An **inherited** class method sent to a literal receiver stays on the
-  dynamic path, which itself now runs in the caller through the memo. No call
-  site names a superclass module, so nothing goes stale when the hierarchy
-  changes. The memo costs one ETS read; measure it in Phase 2 before
-  optimising further.
-- The flag is erased on every metadata write for `C`: reload, a change to
-  class variables, `removeSelector:`, `put_class_method`, and extension
-  register or remove. It is erased under the existing per-tag lock *before*
-  the change becomes visible. Once erased, call sites take the slow path
-  until it is re-derived.
-- This guard **replaces** the unguarded trust model for ADR 0129 static
-  direct calls. That closes the stale-verdict caveats of BT-4126, BT-4133 and
-  BT-4134 for class methods.
-
-**What moves:**
-- A block passed into such a class method runs in the caller, so the
-  `dispatch_error` on re-entrant sends to the same class goes away. Inside an
-  actor, it runs at home in the ADR 0137 sense.
-- `self()`, the process dictionary, links, monitors, timeouts and any
-  resource created through FFI (ETS tables, ports, timers) all belong to the
-  caller.
-- The services the class process adds around a call become no-ops, because
-  the caller already is the context they recreate:
-  - seeding the caller's session context;
-  - mirroring `beamtalk_dispatch_caller_pid`;
-  - adopting the entry group leader;
-  - the 60 s / 300 s class-call timeouts.
-  
-  One reader needs checking. `File open:mode:`'s handle-ownership rule reads
-  the mirrored caller pid, and Phase 2 must make its no-mirror path resolve to
-  `self()`. A test covers it in the REPL, in `beamtalk run` and in
-  `beamtalk test`.
-
-A class that needs a serialising home declares class state (`classState:`) or
-delegates to an Actor, which is the idiomatic BEAM owner. No new keyword is
-added.
-
-### 4. Class references: compile-time names, run-time pid
+### 3. Class references: compile-time names, run-time pid
 
 A bare class name compiles to a reference built from a compile-time atom, one
 BIF and the existing module lookup:
@@ -374,58 +260,53 @@ case call 'erlang':'whereis'('beamtalk_class_Point') of
 end
 ```
 
-- The registered-name atom (`beamtalk_class_<Name>`) is computed at compile
-  time with `leaf::atom`. Today `beamtalk_class_registry:registry_name/1` runs
-  `binary_to_atom` on every use.
-- The module stays a run-time lookup. The class gen_server writes it in
-  `init/1` and `merge_identity/5`, so it is still correct when the REPL
+- **The registered-name atom** (`beamtalk_class_<Name>`) is computed at
+  compile time with `leaf::atom`. Today
+  `beamtalk_class_registry:registry_name/1` runs `binary_to_atom` on every
+  use.
+- **The module stays a run-time lookup.** The class gen_server writes it in
+  `init/1` and `merge_identity/5`, so it stays correct when the REPL
   redefines a class into a new module.
-  - A `persistent_term` would save about one ETS read. But every REPL
-    redefinition would then trigger a global GC scan, so the ETS read stays.
-  - Phase 4 measures both before choosing.
-- The pid is never a constant. A class process can restart, and an
+  - A `persistent_term` would save about one ETS read, but every REPL
+    redefinition would then trigger a global GC scan.
+  - Phase 2 measures both before choosing.
+- **The pid is never a constant.** A class process can restart, and an
   identifier must mean the same thing in every context (principles §4).
-- Where only the name is needed (an `on:do:` class filter, `isKindOf:` on a
-  literal), codegen passes the atom and builds no tuple.
-- REPL session bindings that shadow a class name keep today's lookup first.
+- **Names only where only a name is used.** For an `on:do:` class filter, or
+  `isKindOf:` with a literal argument, codegen passes the atom and builds no
+  tuple.
+- **REPL session bindings** that shadow a class name keep today's lookup,
+  checked first.
 
-### 5. What does not change
+### 4. What does not change
 
-- **`perform:`** stays a dynamic send. It benefits from §3 because dynamic
-  class sends also run in the caller.
-- **DNU, `respondsTo:` and extensions** keep their order and semantics. On
-  the instance side they are reached inside `Mod:dispatch/3`; on the class
-  side the flag excludes shadowed classes.
-- **Hot reload:**
-  - A reloaded module is reached by remote calls. The module-identity caveat
-    of §2 still applies.
-  - A class that gains class variables, an extension or a runtime fun fails
-    its flag before the change is visible.
-  - `removeSelector:` is a metadata write, so it erases the flag.
+- **`perform:`** stays a dynamic send.
+- **DNU, `respondsTo:` and extensions** keep their order and semantics. They
+  are reached inside `Mod:dispatch/3`.
+- **Hot reload:** a reloaded module is reached by remote calls. The
+  module-identity caveat of §2 applies.
 - **`typed`** stays compile-time only *semantically*. ADR 0025's claim that
   generated code is "identical whether a class is typed or not" is amended:
   types may change the code, never the result.
 - **Inherited methods are never copied** (ADR 0127 stands).
 
-### REPL session
+### Example
 
 ```beamtalk
 Value subclass: Point
   field: x :: Integer = 0
   field: y :: Integer = 0
 
-  class origin -> Point => self x: 0 y: 0
   norm1 -> Integer => self.x abs + self.y abs
   double: p :: Point -> Integer => p norm1 * 2      // `p norm1` is a guarded direct call
+  tally: seen :: List -> Integer => seen size       // `seen size` is guarded by is_list (§2b)
 ```
 
 ```beamtalk
 (Point x: 3 y: -4) double: (Point x: 1 y: 1)   // => 4
-Point origin                                   // => a Point (0, 0), computed in the caller: no class-process hop
 Point >> norm1 => 42                           // recompiles Point's recorded source; same module, so the guard reaches the new code
 (Point x: 3 y: -4) double: (Point x: 1 y: 1)   // => 84
-Point class >> origin => self x: 9 y: 9        // also a recompile: the same guarded direct call reaches the new class_origin
-Point origin                                   // => a Point (9, 9), still in the caller
+(Point new) tally: #(1, 2, 3)                  // => 3
 ```
 
 ### Error behaviour
@@ -441,73 +322,50 @@ Point new double: "not a point"
 
 ## Prior Art
 
-- **Self / Strongtalk (Smalltalk family).**
+- **Self / Strongtalk.**
   - Self's customisation and polymorphic inline caches make the common case a
     class check plus a direct jump, with deoptimisation on change.
-  - Strongtalk's optional types deliberately do **not** drive dispatch:
-    types are for checking, and the VM's type feedback does the
-    optimisation.
+  - Strongtalk's optional types deliberately do **not** drive dispatch.
   - *Adopted:* "check the class, then jump" as the shape, and types as hints,
     never proofs.
-  - *Rejected:* per-site mutable caches. See Alternatives.
-- **Pharo / Squeak.** Everything is a lookup, made cheap by the Cog JIT's
-  inline caches, and only control-flow selectors are inlined by the compiler.
-  There is no class process analogue, because class methods run in the
-  caller. *Adopted:* class methods run where they are called.
-- **Erlang.**
-  - Remote calls `Mod:f()` always reach the newest loaded code. That is
-    why a guarded `Mod:dispatch/3` needs no invalidation on a same-module
-    reload.
-  - Serialisation is something you ask for by owning a process, never a side
-    effect of where code is defined. *Adopted:* the class process exists only
-    for class state.
+  - *Rejected:* per-site mutable caches.
+- **Pharo / Squeak.** Every send is a lookup, made cheap by the Cog JIT's
+  inline caches, and only control-flow selectors are inlined. Beamtalk has no
+  JIT, so its compiler supplies what Cog's caches discover.
+- **Erlang.** Remote calls `Mod:f()` always reach the newest loaded code. That
+  is why a guarded `Mod:dispatch/3` needs no invalidation on a same-module
+  reload.
 - **Elixir.**
   - Struct dispatch is a pattern match on `__struct__`, the same shape as our
     tag guard.
-  - Protocol consolidation turns protocol dispatch into a compiled `case` at
-    build time, with an unconsolidated dynamic fallback in development.
-  - *Adopted:* the tag guard. *Considered:* consolidation (see "Copy-down").
+  - Protocol consolidation compiles dispatch into a `case` at build time,
+    with an unconsolidated dynamic fallback in development.
+  - *Adopted:* the tag guard, and the representation guard of §2b, which is
+    exactly how a consolidated protocol dispatches on built-in types.
 - **JVM / Swift / Dart.**
-  - `final`/`sealed` and class-hierarchy analysis enable devirtualisation.
-    The JVM keeps it sound with guards and deoptimisation when new classes
-    load.
-  - *Adapted:* we keep the guard and drop the reliance on `sealed`, because
-    our guard is cheap enough (a map-key match) to use everywhere.
-- **Julia.** Its world-age and backedge invalidation recompiles callers when
-  a method they inlined is redefined. That is powerful but heavy. We avoid
-  the need by never naming a method body, inherited or not, at a call site.
-  We only name a module whose `dispatch/3` is itself late-bound.
+  - `final`/`sealed` plus class-hierarchy analysis enable devirtualisation,
+    and the JVM keeps it sound with guards and deoptimisation.
+  - *Adapted:* we keep the guard and drop the reliance on `sealed`, because a
+    map-key match is cheap enough to use everywhere.
+- **Julia.** World-age and backedge invalidation recompile callers when a
+  method they inlined changes. We avoid that by never naming a method body at
+  a call site, only a module whose `dispatch/3` is itself late-bound.
 
 ## User Impact
 
-- **Newcomer.**
-  - Adding `:: Point` makes a send faster and changes nothing else.
-  - Class methods behave like functions in a module, which is what someone
-    from Python, JS or Elixir expects. There is no hidden process to learn
-    about until they declare class state.
-- **Smalltalk developer.**
-  - Message-passing semantics are untouched. Every send still answers what
-    the dynamic lookup answers, and DNU, `perform:`, extensions and live
-    patching all work as before.
-  - Class methods running in the caller is how Pharo has always worked.
-- **Erlang/Elixir developer.**
-  - Hot paths compile to `case` + a remote call, readable in `.core` and in
-    `recon` traces.
-  - Class methods no longer serialise through a hidden `gen_server`, so
-    caller-sensitive FFI (`gen_tcp:accept`, `controlling_process`, `self()`)
-    does what it says.
-  - If they want a serialising process, they write an Actor, as on OTP.
-- **Production operator.**
-  - The node-wide queue on each class process disappears for stateless
-    classes, and with it a class of latency spikes and timeouts.
-  - Hot reload is unaffected.
-  - The visible change is that resources created in a stateless class method
-    are owned by the caller (the migration lint below flags them).
-- **Tooling developer.**
-  - The rules live in one place each: the compiler picks candidates, and the
-    runtime flag decides.
-  - `beamtalk build` can report which sites are guarded-direct, extending the
-    existing "dynamic dispatch (receiver type unknown)" diagnostic.
+- **Newcomer.** Adding `:: Point` or `:: List` makes a send faster and
+  changes nothing else.
+- **Smalltalk developer.** Message-passing semantics are untouched. Every
+  send answers what the dynamic lookup answers, and DNU, `perform:`,
+  extensions and live patching all work as before.
+- **Erlang/Elixir developer.** Hot paths compile to a `case` plus a remote
+  call, readable in `.core` files and in `recon` traces.
+- **Production operator.** Hot reload is unaffected, apart from the
+  development-time module-identity caveat (§2). There is nothing to
+  configure.
+- **Tooling developer.** The dynamic-site report (Phase 0) shows every send
+  that stayed dynamic and why. That makes "add a type here" an actionable
+  hint.
 
 ## Steelman Analysis
 
@@ -516,288 +374,180 @@ Option A is the decision above. Options B–E are the alternatives.
 ### B. Sealed is the contract (BT-4118's original framing)
 - 🧑‍💻 **Newcomer:** "One rule: seal it to make it fast."
 - 🎩 **Smalltalk purist:** "Dynamic stays dynamic unless I explicitly give it
-  up. Optimisation should be opt-in."
-- ⚙️ **BEAM veteran:** "Sealed classes can never gain subclasses, so a
-  sealed direct call needs no subclass reasoning."
-- 🏭 **Operator:** "A smaller blast radius: only classes someone sealed
-  change process placement."
+  up."
+- ⚙️ **BEAM veteran:** "A sealed class can never gain subclasses, so a direct
+  call needs no subclass reasoning."
 - 🎨 **Language designer:** "The keyword that already exists carries the
-  guarantee, with no new concepts."
+  guarantee."
 
 *Why not:*
-- The instance side needs the guard anyway, because annotations can lie.
-  With the guard, `sealed` adds nothing to soundness and only shrinks
-  coverage (1b, 4c and 5b stay slow).
-- On the class side it ties *where code runs* to a *subclassing* decision.
-  Sealing a class for API reasons would silently move its class methods
-  between processes.
-- Framework base classes (`Handler`, `Server`) are open by design, so the
-  code that needs the speed would never get it.
+- Annotations can lie, so the guard is needed anyway. With it in place,
+  `sealed` adds nothing to soundness and only shrinks coverage: rows 1b, 4c
+  and 5b stay slow.
+- Framework base classes (`Handler`, `Server`) are open by design.
 
 ### C. Run-time inline caches
 - 🎩 **Smalltalk purist:** "This is how Self and Cog do it, and it needs no
   types."
 - 🧑‍💻 **Newcomer:** "Untyped and REPL code get faster too."
 
-*Why not:* BEAM has no cheap mutable per-call-site slot. A `persistent_term`
-per site means global GC on every update, and the process dictionary is
-per-process and leaks. Static candidates plus a guard reach the same shape
-with no mutable state.
+*Why not:* BEAM has no cheap mutable per-call-site slot.
+- A `persistent_term` per site means a global GC on every update.
+- The process dictionary is per process and leaks.
+
+Static candidates plus a guard reach the same shape with no mutable state.
+The untyped share (70 of Catalina's 220 sites) is better reduced by typing
+the FFI and transport boundary.
 
 ### D. Copy-down / consolidation of inherited methods
 - 🏭 **Operator:** "No guard and no delegation hop in steady state."
 - ⚙️ **BEAM veteran:** "It's Elixir protocol consolidation."
 
 *Why not:*
-- BT-4109's owner memo and the Value `SuperMod:dispatch/3` delegation leave
-  about 4 reductions per inheritance level.
+- For Values, inheritance costs about 4 reductions per level
+  (`SuperMod:dispatch/3`).
 - Copy-down contradicts ADR 0127 ("inherited methods are never copied"),
-  ADR 0112 (`removeSelector:` re-exposes the inherited method with nothing to
-  invalidate) and ADR 0066 (extensions override inherited methods).
-- It also needs a recompile fan-out on every superclass edit.
+  ADR 0112 (`removeSelector:` re-exposes the inherited method) and ADR 0066
+  (extensions override inherited methods).
+- It needs a recompile fan-out on every superclass edit.
+
+The actor-side inherited path *is* expensive in Catalina (~11%). But that
+cost is the run-time path around BT-4109's cache, not the lookup, so BT-4280
+fixes it without copying.
 
 ### E. Class references as load-time constants (pid baked in)
 - 🏭 **Operator:** "Zero cost per use."
 
 *Why not:* a class process restarts, and a REPL redefinition can move a class
-to a new module. A baked pid would mean different things before and after,
-breaking principles §4. One `whereis/1` on a compile-time atom costs almost
-nothing.
+to a new module, so a baked pid breaks principles §4. A `whereis/1` on a
+compile-time atom costs almost nothing.
 
 ### Tension points
-- **Purists vs. pragmatists on §3.** Purists may want class methods to stay
-  "inside the class object". Pharo, Erlang and the newcomer intuition all
-  agree they run in the caller. The `class-process-ffi` lint is the existing
-  evidence that the class process surprises users more than it helps them.
-- **Operators are split.** They gain no node-wide queue and no timeouts, but
-  lose implicit ownership of resources created in class methods. The
-  migration lint and CHANGELOG entry cover the loss.
+- Purists would rather keep "every send is a lookup", while the measurements
+  say lookups cost about 9% of Catalina's per-message CPU. The guard keeps the
+  lookup's *answer* and drops its *cost*, which is the compromise this ADR
+  takes.
 
 ## Alternatives Considered
 
 ### Sealed is the contract
-See the steelman above. Rejected: the guard is needed regardless, so
-coupling to `sealed` buys only lost coverage and a confusing class-side rule.
-
-### Only sealed, stateless classes run class methods in the caller
-This is the smaller version of §3, considered with the user.
-- It removes the need for a subclass guard, since sealed classes have none.
-- It keeps open-class class methods at ~145 red behind the node-wide queue.
-- It makes `sealed` decide process placement.
-
-Rejected in favour of tying placement to the one thing the class process is
-for: class state (ADR 0130).
+Rejected: the guard is needed regardless (see steelman B).
 
 ### Run-time inline caches
-Rejected: no cheap mutable per-site storage on BEAM (see steelman C).
+Rejected: there is no cheap mutable per-site storage on BEAM (steelman C).
 
 ### Copy-down of inherited methods
-Rejected on cost and benefit: about 4 reductions per level saved, against
-conflicts with ADRs 0066, 0112 and 0127 and a reload fan-out (see steelman
-D). Revisit only if a profile of real programs shows inheritance hops above
-5% of a workload.
+Rejected: the cost is small for Values, and copy-down conflicts with ADRs
+0066, 0112 and 0127 (steelman D). Revisit only if a profile shows Value
+inheritance hops above 5% of a real workload.
 
 ### Load-time class constants
-Rejected: pids and REPL module names are not constants (see steelman E).
-
-### Unguarded trust in compile-time verdicts (today's ADR 0129 static path)
-Rejected: it is the source of BT-4126, BT-4133, BT-4134 and BT-4037. A
-`persistent_term` read is about one reduction.
+Rejected: pids and REPL module names are not constants (steelman E).
 
 ## Consequences
 
 ### Positive
 - Typed sends to any tagged-map class, open or sealed, and to the built-in
-  collections (§2b) cost about what row 1a costs today (~3 red / 0 w, from
-  29 / 28). Self-sends in open Values follow.
-- Class methods of stateless classes cost a flag read plus a remote call,
-  instead of ~145 red / ~450 w and a node-wide queue (rows 3b, 3c).
-  `Exception signal:` (BT-4115) and `Result ok:` follow from the general
-  rule.
-- Caller-sensitive FFI in class methods (`gen_tcp:accept`,
-  `controlling_process`, `self()`) works. The `class-process-ffi` lint's
-  original complaint disappears for stateless classes.
-- Re-entrant class methods (a block that sends to the same class) stop
-  raising `dispatch_error` for stateless classes.
-- One dispatch rule replaces three: the BT-4069 sealed gate, ADR 0129's
-  sealed + `class sealed` gate, and BT-3700's corner. The unguarded static
-  verdicts behind BT-4126, BT-4133, BT-4134 and BT-4037 go away.
-- Method-level `class sealed` no longer matters for dispatch, which removes
-  the last blocker on ADR 0049 (removing method-level `sealed`).
+  collections (§2b) cost about what row 1a costs today: ~3 red / 0 w, down
+  from 29 / 28. Self-sends in open Values follow.
+- Class references stop building an atom per use.
+- One instance-side rule replaces the sealed-only special case, and its
+  routing facts live in one fixture.
+- Catalina: §2 and §2b convert about 74 of 220 dynamic sites (34%) and
+  address ~15% of per-message CPU.
 
 ### Negative
-- **Semantic change for stateless class methods.**
-  - Resources created through FFI (ETS tables, ports, timers, links,
-    monitors) now belong to the caller and die with it.
-  - Implicit serialisation through the class process is gone.
-  - A hung class method now blocks its caller instead of timing out a
-    `gen_server:call`.
-  - An `exit` inside the method exits the caller.
-- **Blocks passed from an actor into a stateless class method now run at
-  home** (ADR 0137). They see and write live state, so findings from the
-  `actor-state-abroad` lint change.
-- **Every class-side direct call pays a guard.** It costs one
-  `persistent_term` read, where ADR 0129's static calls paid nothing (row 3a
-  moves from 2 red to ~3).
-- Per-class load is no longer visible as a class-process mailbox in
-  observer or `Tracing`.
-- Code grows slightly at typed send sites: the guard plus the fallback.
+- **Module identity is pinned at typed call sites (§2).** A REPL
+  redefinition into a new module, or `removeFromSystem`, leaves stale call
+  sites reaching the old code, or getting a raw `undef`, until they are
+  recompiled. This is already true for sealed receivers; it now applies to
+  every typed receiver.
+- Code grows slightly at typed send sites: each gets a guard plus the
+  fallback.
+- The fixture becomes load-bearing for performance as well as correctness.
 
 ### Neutral
-- `sealed` keeps its meaning ("no user subclasses"). It now only *helps* the
-  type checker pick candidates (an exact type is never a union) and no
-  longer gates dispatch.
-- ADR 0025's "identical bytecode" claim is reworded to "identical results".
-- `String` and `Binary` receivers keep their current routing (§2b).
-- **The Catalina measurement.**
-  - §2 and §2b together convert about 74 of Catalina's 220 dynamic sites
-    (34%): the 68 built-ins, less the String/Binary ones, plus the open Value
-    class sites.
-  - The 70 untyped sites stay dynamic until the FFI and transport boundary is
-    typed.
-  - Actor sends remain gen_server calls (BT-4113).
+- `sealed` keeps its meaning ("no user subclasses"). It now only *helps*
+  guards hit (an exact type is never a subclass instance) and no longer gates
+  dispatch.
+- ADR 0025's "identical bytecode" claim becomes "identical results".
+- `String`/`Binary` receivers, untyped sends and actor sends are unchanged.
+  The largest Catalina runtime costs are tracked outside this ADR:
+  - state-cell sync, BT-4279;
+  - the inherited actor self-send path, BT-4280;
+  - Value construction, BT-4281;
+  - actor hooks, BT-4113.
 
 ## Implementation
 
-All phases sit under epic BT-4112. Each phase adds a vs-elixir row or gate
-before the change and records before/after (`just bench-vs-elixir`,
-deterministic reductions and words).
+All phases sit under epic BT-4112. Each phase adds a vs-elixir row or a
+Catalina gate before the change, and records the before and after numbers.
 
 **Phase 0 — harness (S).**
 - Generalise BT-4150's differential test. A fixture runs each send shape,
-  guarded-direct versus `beamtalk_message_dispatch:send/3`, over: plain and
-  keyword sends, `perform:`, DNU, extensions (including one overriding an
-  inherited method), `removeSelector:`, a live patch, a subclass receiver, a
-  lying annotation, `perform:withArguments:timeout:` (rewritten in `send/3`
-  before classification), an inherited class method touching a stateful
-  parent's class variables (§3: its error must not change), and an extension
-  or runtime fun on an *ancestor* of the receiving class.
-- Results *and* error shapes must be identical.
-- Add vs-elixir rows for an open-Value typed send, an open-class class
-  method, a class-reference loop, and typed `List includes:`,
-  `Dictionary at:put:` and `Tuple at:` sends.
-- Add the dynamic-site report as a supported tool: the existing
+  guarded-direct against `beamtalk_message_dispatch:send/3`, over:
+  - plain and keyword sends, `perform:`, `perform:withArguments:timeout:`
+    (rewritten in `send/3` before classification);
+  - DNU, and extensions, including one overriding an inherited method;
+  - `removeSelector:`, a live patch, a subclass receiver, a lying annotation;
+  - each §2b built-in, including a reserved tagged tuple typed as `Tuple`.
+
+  Results *and* error shapes must be identical.
+- Add vs-elixir rows for an open-Value typed send, typed `List includes:`,
+  `Dictionary at:put:` and `Tuple at:` sends, and a class-reference loop.
+- Make the dynamic-site report a supported tool. The
   `BEAMTALK_CODEGEN_DIAGNOSTICS` "dynamic dispatch" hint gains the receiver's
   static type and the reason it stayed dynamic. Record Catalina's per-type
-  table (Context) as the baseline.
-- Extend the routing fixture with representation rows (§2b) and pin the
+  table and per-message profile (Context) as the baseline.
+- Extend the routing fixture with representation rows (§2b), and pin the
   Erlang side to it.
 
-**Phase 1 — instance side (S–M), codegen.**
-- Drop `is_sealed` from `typed_sealed_value_target` and rename it
-  (`typed_tagged_target`).
+**Phase 1 — tagged-map receivers (S–M), codegen.**
+- Drop `is_sealed` from `typed_sealed_value_target`, and rename it
+  `typed_tagged_target`.
 - Make sure Value self-sends in open classes reach it.
-- Keep all existing exclusions, and add the non-tagged-map exclusions:
-  `Supervisor` subclasses and the `Object` root type.
+- Add the `Supervisor` and `Object` exclusions.
 - Land BT-4151's ambiguity check first or together.
 - Files: `dispatch_codegen.rs`, `tests/typed_sealed.rs`.
-- Gate: rows 1b and 4c within 10% of 1a; 5b reduced by at least 25 red.
+- Gate: rows 1b and 4c within 10% of row 1a; row 5b down by at least 25 red.
 
 **Phase 1b — built-in receivers (M), codegen.**
-- Emit the §2b representation guards from the fixture-generated table for
-  `List`, `Dictionary`, `Tuple` and the numeric, Boolean and Symbol
-  built-ins.
+- Emit the §2b representation guards from the fixture-generated table.
 - Files: `dispatch_codegen.rs`, the routing fixture and its EUnit
   conformance test.
-- Gate: the new built-in rows cost within 10% of row 1a. Catalina's dynamic
-  sites fall from 220 to at most 150, re-measured with the Phase 0 report.
+- Gate:
+  - the built-in rows cost within 10% of row 1a;
+  - Catalina's dynamic sites fall from 220 to at most 150;
+  - the dynamic-send share of the `echo_c10_64B` profile falls by at least
+    half.
 
-**Phase 2 — class side, runtime (M).**
-- Add "has class variables" to the inputs of
-  `beamtalk_class_shadow_flags:direct_call_ok/2`, erased on class-variable
-  changes by the same per-tag lock.
-- `class_send_plain/3` runs the method in the caller when the flag holds,
-  resolving the owner through a `{class_method_owner, C, Sel}` memo in
-  `beamtalk_class_derived_cache`.
-- The memo also checks that the owner has no class variables.
-- `set_runtime_class_methods/2` invalidates the derived cache.
-- The process-bound selector list arrives as metadata.
-- Pass the real class reference as `ClassSelf`.
-- `File open:mode:`'s ownership rule resolves to `self()` without the
-  mirrored caller pid.
-- Files: `beamtalk_class_dispatch.erl`, `beamtalk_class_shadow_flags.erl`,
-  `beamtalk_class_derived_cache.erl`, `beamtalk_class_metadata.erl`,
-  `beamtalk_object_class.erl`, `beamtalk_file.erl`.
-- Subsumes BT-4073. Coordinate with BT-4115, whose part A becomes a special
-  case.
-- Gate: rows 3b and 3c ≤ 10 red, with no `'$gen_call'` in the profile.
-
-**Phase 3 — class side, codegen + lint (M).**
-- Literal-receiver and class-side self-sends to own selectors emit the
-  guarded direct call. ADR 0129 static calls get the same guard.
-- Retire the `nil` `ClassSelf` convention and its prologue.
-- Invert the `class-process-ffi` lint into `class-method-process-resource`.
-  It warns on FFI in a stateless class method that creates a process-owned
-  resource (`ets:new`, `open_port`, `spawn_link`, `link`, `monitor`,
-  `register`, timers) or relies on `self()`/the process dictionary. Name the
-  fix in the message: an Actor or `classState:`. Reuse the validator and its
-  curated table.
-- Update `is_direct_call_eligible` (`class_info.rs`, shared with the
-  `class-state-abroad` lint) to the new rule. There is still one
-  implementation.
-- REPL codegen uses the same rule (`crates/beamtalk-repl/src/codegen.rs`,
-  `set_direct_call_eligible_from_hierarchy`).
-
-**Phase 4 — class references (S).**
+**Phase 2 — class references (S).**
 - Use the compile-time registered-name atom and `whereis/1`, plus the
-  existing `module_name_safe/1` row. Measure it against a `persistent_term`
-  before switching (§4).
+  existing `module_name_safe/1` row. Measure against a `persistent_term`
+  first (§3).
 - Pass the bare name where only the name is used.
-- Gate: rows 8a and 12b.
+- Gate: rows 8a and 12b, and the `whereis_class`/`registry_name` share of
+  the Catalina profile.
 
-**Phase 5 — docs (S).**
-- Amend these ADRs:
-  - 0025 ("identical bytecode" becomes "identical results");
-  - 0129 (constraint 1);
-  - 0013 §4;
-  - 0010 (stale "zero-overhead class sends");
-  - 0137 (blocks in class methods);
-  - 0130 (§5's "class sealed, stateless" wording; the in-caller rule adds no
-    class-variable home);
-  - 0109 (§3 generalises its block-scoped `open:do:` exception);
-  - 0084 (runtime funs are applied in the caller when the class has no class
-    variables).
-- Update `docs/beamtalk-language-features.md`: *Class-Side Methods*,
-  *Passing Blocks Through Class Methods* and *Self-Sends and Overrides*.
-- Update CLAUDE.md's "Blocks into class methods" rule.
-- Add a CHANGELOG migration note.
+**Phase 3 — docs (S).**
+- Amend ADR 0025 ("identical bytecode" becomes "identical results").
+- Update `docs/beamtalk-language-features.md`:
+  - the hot-reload section: the module-identity caveat;
+  - the performance notes on typed sends;
+  - `sealed` (it no longer gates instance-side dispatch).
 
-**Conformance.**
-- The compiler only names candidates: a module for the instance side, an
-  own-selector function for the class side.
-- The runtime flag and the guard decide. No eligibility rule exists in both
-  languages.
-- The instance-side routing knowledge that crosses the boundary stays pinned
-  by `tagged_map_routing_conformance.json`, and Phase 0's differential test
-  pins behaviour.
-
-## Migration Path
-
-Only §3 changes behaviour, and only for class methods of classes **without**
-class variables.
-
-- **Resources owned by the class process.** Code that creates an ETS table,
-  port, timer, link or monitor in such a class method, and expects it to
-  outlive the caller, must move ownership:
-  - into an Actor (preferred: `Actor subclass: TableOwner` that creates the
-    resource in `initialize`), or
-  - into a class with `classState:`, which keeps its process.
-  - The `class-method-process-resource` lint flags direct FFI cases.
-- **Implicit serialisation.** Read-modify-write sequences in class methods
-  that relied on queuing must go through an Actor. There is no lint for this,
-  so the CHANGELOG calls it out.
-- **Suppressions.** `@expect class_process_ffi` suppressions in stateless
-  classes become unnecessary. The lint reports them as unused, per the
-  existing `@expect` rules.
-- **Erlang callers of `class_send`** see the same results, now computed in
-  their own process.
+**Conformance.** The compiler only names candidates. The guard decides.
+Instance-side routing knowledge that crosses the Rust/Erlang boundary is
+pinned by `tagged_map_routing_conformance.json`, and the Phase 0 differential
+test pins behaviour.
 
 ## References
-- Related issues: BT-4118 (this ADR), BT-4112 (epic), BT-4069, BT-4099,
-  BT-4109, BT-4065, BT-4073, BT-4113, BT-4115, BT-4117, BT-4126, BT-4127,
-  BT-4133, BT-4134, BT-4037, BT-4149, BT-4150, BT-4151, BT-3700
-- Related ADRs: 0005, 0006, 0010, 0013, 0025, 0032, 0049, 0066, 0084, 0100,
-  0109, 0112, 0119, 0127, 0129, 0130, 0137
-- Documentation: `benchmarks/vs-elixir/README.md`,
-  `docs/development/benchmarks.md` (BT-3676/3690/3700),
-  `docs/beamtalk-principles.md` §2, §4, §11
+- Related issues:
+  - BT-4118 (this ADR), BT-4112 (epic);
+  - BT-4069, BT-4065, BT-4117, BT-4127, BT-4149, BT-4150, BT-4151, BT-4200;
+  - outside this ADR's scope: BT-4113, BT-4279, BT-4280, BT-4281.
+- Related ADRs: 0005, 0025, 0066, 0100, 0112, 0127, 0143 (applies this
+  contract to the class side).
+- Documentation: `benchmarks/vs-elixir/README.md`, Catalina's
+  `bench/harness/bench_profile.erl`, `docs/beamtalk-principles.md` §2, §4,
+  §11.
