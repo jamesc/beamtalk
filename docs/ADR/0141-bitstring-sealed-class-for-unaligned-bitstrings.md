@@ -54,10 +54,13 @@ a `Binary`, just as `<<A/bitstring, B/bitstring>>` does in Erlang.
 | `=:=`, `==`, `hash` | inherited structural equality |
 
 `Binary` gains `bitSize` (8 × its byte count; a `String` counts its UTF-8
-bytes), so `bitSize` works on either class. `Binary>>concat:` also accepts a
-`Bitstring` argument and answers the joined bits (a `Bitstring`), so
-concatenation works in both directions, as `<<A/binary, B/bitstring>>` does in
-Erlang.
+bytes), so `bitSize` works on either class. `Binary>>concat:` stays bytes-only
+(`Binary -> Binary`): a `Bitstring` argument is a `type_error`. Widening it
+to `Binary | Bitstring -> Binary | Bitstring` would make every byte-level send
+on its result (`toBytes`, `size`, …) a static warning, for the rare bit case.
+So concatenation is asymmetric: bits are joined from the `Bitstring` side,
+whose `concat:` accepts a Binary or String and crosses back to `Binary` when
+the total is byte-aligned.
 
 Everything else on `Binary`/`Collection` stays bytes-only and is
 **deliberately not understood** by `Bitstring`: `size`, `do:`, `at:`,
@@ -126,7 +129,9 @@ statically.
 - **Smalltalk developer:** a sealed class with a small, closed protocol; no
   surprising `size` units.
 - **Erlang/BEAM developer:** the class follows `is_binary`/`is_bitstring`
-  exactly; concatenation crosses back to `Binary` as it does in Erlang.
+  exactly; `Bitstring>>concat:` crosses back to `Binary` when the result is
+  byte-aligned, as `<<A/bitstring, B/bitstring>>` does. Unlike Erlang,
+  `Binary>>concat:` does not take bits: join them from the Bitstring side.
 - **Operator:** no runtime cost on any other value: the extra `send/3` arm
   matches only unaligned bitstrings.
 
@@ -182,8 +187,9 @@ send path.
   from `concat:`, or from Erlang.
 
 ### Neutral
-- `Binary` gains `bitSize`, and `Binary>>concat:` accepts a `Bitstring`
-  argument; nothing else on `Binary` changes.
+- `Binary` gains `bitSize`; nothing else on `Binary` changes.
+  `Binary>>concat:` with a `Bitstring` argument is a `type_error` (see
+  Protocol).
 
 ## Implementation
 

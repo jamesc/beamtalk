@@ -215,17 +215,17 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   part: offset :: Integer size: length :: Integer -> Binary => @primitive
 
-  /// Concatenate this binary with another binary, or with a Bitstring.
+  /// Concatenate this binary with another binary.
   ///
-  /// The answer is whatever the joined bits are, as in Erlang: a `Binary`
-  /// when they are byte-aligned (always, for a Binary or String argument),
-  /// and a `Bitstring` when `other` is a Bitstring (ADR 0141).
+  /// Bytes only: the answer is always a `Binary`. A `Bitstring` argument is
+  /// a `type_error` — join bits from the Bitstring side
+  /// (`Bitstring>>concat:` accepts a Binary) (ADR 0141).
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _
   /// ```
-  concat: other :: Binary | Bitstring -> Binary | Bitstring => @primitive
+  concat: other :: Binary -> Binary => @primitive
 
   // === Searching ===
 

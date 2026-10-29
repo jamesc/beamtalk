@@ -7473,7 +7473,7 @@ tail asBinary isError     // => true  (kind #unaligned_bitstring)
 |---|---|
 | `bitSize` | number of bits (also on `Binary`: 8 × byte count) |
 | `toBits` | `List(Integer)` of 0/1, most significant bit first |
-| `concat:` | the joined bits — a `Binary` when byte-aligned, else a `Bitstring`; a `String` argument joins by its bytes. `Binary>>concat:` also accepts a `Bitstring` argument and answers a `Bitstring` |
+| `concat:` | the joined bits — a `Binary` when byte-aligned, else a `Bitstring`; a `String` argument joins by its bytes. `Binary>>concat:` stays bytes-only: a `Bitstring` argument is a `type_error`, so join bits from the Bitstring side |
 | `asBinary` | always `Result error:` of kind `#unaligned_bitstring`; no silent padding or truncation |
 | `printString` / `displayString` | Erlang notation, e.g. `<<2:3>>` |
 | `=:=`, `==`, `hash` | structural equality, inherited |

@@ -43,9 +43,11 @@ print_string_test() ->
     ?assertEqual({beamtalk_string, <<"<<2:3>>">>}, beamtalk_bitstring:printString(<<2:3>>)),
     ?assertEqual({beamtalk_string, <<"<<2:3>>">>}, beamtalk_bitstring:displayString(<<2:3>>)).
 
-binary_concat_bitstring_test() ->
-    ?assertEqual(<<255, 2:3>>, beamtalk_binary:concat(<<255>>, <<2:3>>)),
-    ?assertEqual(<<"A", 2:3>>, beamtalk_binary:concat({beamtalk_string, <<"A">>}, <<2:3>>)).
+binary_concat_bitstring_is_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Binary'}},
+        beamtalk_binary:concat(<<255>>, <<2:3>>)
+    ).
 
 reflection_on_a_bitstring_test() ->
     ?assertEqual([], beamtalk_reflection:field_names(<<2:3>>)),

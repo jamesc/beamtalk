@@ -112,17 +112,11 @@ TestCase subclass: BitstringTest
     self should: [self tail perform: #fieldAt: with: #x] raise: #immutable_value
     self deny: (self tail perform: #hasField: with: #x)
 
-  testBinaryConcatABitstringAnswersABitstring =>
-    // ADR 0141: concatenation works in both directions, as in Erlang.
-    joined := (Binary fromBytes: #(255)) concat: self tail
-    self assert: joined class equals: Bitstring
-    self assert: joined bitSize equals: 13
-    self assert: joined toBits equals: #(1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0)
-
-  testStringConcatABitstringJoinsItsBytes =>
-    joined := "A" concat: self tail
-    self assert: joined class equals: Bitstring
-    self assert: joined toBits equals: #(0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0)
+  testBinaryConcatABitstringIsATypeError =>
+    // ADR 0141: Binary>>concat: is bytes-only (typed Binary -> Binary);
+    // bits are joined from the Bitstring side.
+    self should: [(Binary fromBytes: #(255)) concat: self tail] raise: #type_error
+    self should: ["A" concat: self tail] raise: #type_error
 
   testBinaryConcatABinaryStaysABinary =>
     joined := (Binary fromBytes: #(1)) concat: (Binary fromBytes: #(2))
