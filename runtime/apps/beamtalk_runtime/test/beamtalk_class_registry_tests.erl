@@ -294,6 +294,11 @@ all_subclasses_test_() ->
             end},
             {"leaf class has no subclasses", fun() ->
                 ?assertEqual([], beamtalk_class_registry:all_subclasses('Counter'))
+            end},
+            {"a superclass cycle terminates, each class listed once", fun() ->
+                beamtalk_class_metadata:insert('CycA', undefined, undefined, 'CycB', undefined),
+                beamtalk_class_metadata:insert('CycB', undefined, undefined, 'CycA', undefined),
+                ?assertEqual(['CycB'], beamtalk_class_registry:all_subclasses('CycA'))
             end}
         ]}.
 

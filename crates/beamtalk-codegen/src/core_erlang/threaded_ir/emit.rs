@@ -1287,10 +1287,8 @@ mod cell_helper_conformance {
     /// (the owner) when this fails.
     #[test]
     fn the_runtime_exports_every_emitted_cell_helper() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl"
-        );
+        let path = crate::core_erlang::tests::repo_root()
+            .join("runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl");
         let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
         let exported = exported_entries(&src);
         assert!(

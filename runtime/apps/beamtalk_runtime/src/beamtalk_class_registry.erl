@@ -748,18 +748,26 @@ Return sorted list of all subclass names recursively.
 
 Walks the hierarchy tree depth-first, collecting all transitive
 subclasses. Returns sorted atom list for deterministic output.
+
+Each class is visited once, so a superclass cycle in the metadata (nothing
+stops a reload from re-parenting a class under its own descendant)
+terminates instead of looping forever. That matters because the walk also
+runs inside a class gen_server, from the reload-time stale-verdict warning
+(BT-4126).
 """.
 -spec all_subclasses(class_name()) -> [class_name()].
 all_subclasses(ClassName) ->
-    lists:sort(all_subclasses_acc([ClassName], [])).
+    lists:sort(all_subclasses_acc([ClassName], #{ClassName => true}, [])).
 
 -doc "Accumulator helper for all_subclasses/1; walks hierarchy depth-first.".
--spec all_subclasses_acc([class_name()], [class_name()]) -> [class_name()].
-all_subclasses_acc([], Acc) ->
+-spec all_subclasses_acc([class_name()], #{class_name() => true}, [class_name()]) ->
+    [class_name()].
+all_subclasses_acc([], _Seen, Acc) ->
     Acc;
-all_subclasses_acc([Current | Rest], Acc) ->
-    Children = direct_subclasses(Current),
-    all_subclasses_acc(Children ++ Rest, Children ++ Acc).
+all_subclasses_acc([Current | Rest], Seen, Acc) ->
+    Children = [C || C <- direct_subclasses(Current), not is_map_key(C, Seen)],
+    Seen1 = lists:foldl(fun(C, S) -> S#{C => true} end, Seen, Children),
+    all_subclasses_acc(Children ++ Rest, Seen1, Children ++ Acc).
 
 %%====================================================================
 %% Class Object Identity
