@@ -3260,3 +3260,111 @@ object_is_kind_of_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% objectIsKindOf/2 instance fast path (BT-4221) — one memoised decision per
+%%% (receiver class, behaviour object)
+%%% ============================================================================
+
+%% `objectIsKindOf/2` against the `includesBehaviour:` send it replaces.
+assert_same_as_send(Receiver, Behaviour) ->
+    ?assertEqual(
+        outcome(fun() ->
+            beamtalk_message_dispatch:send(
+                beamtalk_primitive:class_of_object(Receiver), 'includesBehaviour:', [Behaviour]
+            )
+        end),
+        outcome(fun() -> beamtalk_behaviour_intrinsics:objectIsKindOf(Receiver, Behaviour) end)
+    ).
+
+kind_of_entry(Class, Behaviour) ->
+    [V || {_, _, V} <- ets:lookup(beamtalk_class_derived_cache, {is_kind_of, Class, Behaviour})].
+
+stop_without_terminate(Pid) ->
+    Ref = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 5000 -> error(timeout)
+    end.
+
+object_is_kind_of_fast_path_test_() ->
+    Names = ['BT4221Grand', 'BT4221Bottom', 'BT4221Other'],
+    {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
+        [
+            ?_test(begin
+                %% A Value (tagged map) and an actor-style instance: later
+                %% calls are answered from the memoised decision and agree
+                %% with the first.
+                {Grand, _} = register_class('BT4221Grand', #{}, #{}),
+                {Bottom, _} = register_class_with_super('BT4221Bottom', 'BT4221Grand', #{}, #{}),
+                {Other, _} = register_class('BT4221Other', #{}, #{}),
+                GrandMeta = beamtalk_behaviour_intrinsics:classClass(Grand),
+                Value = #{'$beamtalk_class' => 'BT4221Bottom'},
+                Actor = #beamtalk_object{
+                    class = 'BT4221Bottom', class_mod = undefined, pid = self()
+                },
+                [
+                    begin
+                        Expected = {R, A, includes_behaviour(R, A)},
+                        ?assertEqual(
+                            Expected, {R, A, beamtalk_behaviour_intrinsics:objectIsKindOf(R, A)}
+                        ),
+                        ?assertEqual(
+                            Expected, {R, A, beamtalk_behaviour_intrinsics:objectIsKindOf(R, A)}
+                        )
+                    end
+                 || R <- [Value, Actor], A <- [Grand, Bottom, Other, GrandMeta]
+                ],
+                ?assertMatch([{kind_of, true, _, _}], kind_of_entry('BT4221Bottom', Grand)),
+                ?assertMatch([{kind_of, false, _, _}], kind_of_entry('BT4221Bottom', Other)),
+                ?assertMatch([{kind_of, false, _, _}], kind_of_entry('BT4221Bottom', GrandMeta))
+            end),
+            ?_test(begin
+                %% A class-object receiver is not an instance: it keeps the
+                %% pid-based decision and memoises nothing under its tag.
+                {Grand, _} = register_class('BT4221Grand', #{}, #{}),
+                {Bottom, _} = register_class_with_super('BT4221Bottom', 'BT4221Grand', #{}, #{}),
+                GrandMeta = beamtalk_behaviour_intrinsics:classClass(Grand),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Bottom, GrandMeta)),
+                ?assertNot(beamtalk_behaviour_intrinsics:objectIsKindOf(Bottom, Grand)),
+                ?assertEqual([], kind_of_entry('BT4221Bottom class', GrandMeta)),
+                ?assertEqual([], kind_of_entry('BT4221Bottom class', Grand))
+            end),
+            ?_test(begin
+                %% The behaviour's class process dies without terminate/2
+                %% after its answer was memoised: the hit fails the liveness
+                %% check, so the call answers exactly what the send does.
+                {Grand, GrandPid} = register_class('BT4221Grand', #{}, #{}),
+                {_, _} = register_class_with_super('BT4221Bottom', 'BT4221Grand', #{}, #{}),
+                Value = #{'$beamtalk_class' => 'BT4221Bottom'},
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Value, Grand)),
+                ?assertMatch([{kind_of, true, _, _}], kind_of_entry('BT4221Bottom', Grand)),
+                stop_without_terminate(GrandPid),
+                assert_same_as_send(Value, Grand)
+            end),
+            ?_test(begin
+                %% The same for the receiver's class process.
+                {Grand, _} = register_class('BT4221Grand', #{}, #{}),
+                {_, BottomPid} = register_class_with_super(
+                    'BT4221Bottom', 'BT4221Grand', #{}, #{}
+                ),
+                Value = #{'$beamtalk_class' => 'BT4221Bottom'},
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Value, Grand)),
+                stop_without_terminate(BottomPid),
+                assert_same_as_send(Value, Grand)
+            end),
+            ?_test(begin
+                %% A replaced (reloaded) class: the stale class object takes
+                %% the send, the fresh one is answered from the class table.
+                {Stale, StalePid} = register_class('BT4221Other', #{}, #{}),
+                Value = #{'$beamtalk_class' => 'BT4221Other'},
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Value, Stale)),
+                ok = gen_server:stop(StalePid, normal, 5000),
+                {Fresh, _} = register_class('BT4221Other', #{}, #{}),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Value, Fresh)),
+                ?assert(beamtalk_behaviour_intrinsics:objectIsKindOf(Value, Fresh)),
+                assert_same_as_send(Value, Stale)
+            end)
+        ]
+    end}.
