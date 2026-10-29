@@ -12,8 +12,10 @@
 %%   hit_en     record_dispatch/6 on an existing key, tracing enabled.
 %%   churn_en   record_dispatch/6 with a never-before-seen pid per call,
 %%              tracing enabled.
-%%   handler    handle_dispatch_stop/4 end to end (telemetry handler body:
-%%              map access, time conversion, record + enabled check), hit.
+%%   handler    record_dispatch_stop/2 end to end (the events-on recording
+%%              path, BT-4113; it was the handle_dispatch_stop/4 telemetry
+%%              handler: map access, time conversion, record + enabled
+%%              check), hit.
 %%
 %% Churn pids are pre-made dead pids (spawn + immediate exit in setup, outside
 %% the timed region); the write path never checks liveness. Each churn batch
@@ -40,7 +42,6 @@ main(_) ->
     HitPid = spawn(fun() -> receive stop -> ok end end),
     beamtalk_trace_store:record_dispatch(HitPid, increment, 1000, ok, sync, 'Counter'),
     Meta = #{pid => HitPid, selector => increment, mode => sync, outcome => ok, class => 'Counter'},
-    Meas = #{duration => 1000},
 
     io:format("~nrecord_dispatch steady state (median of 31 batches x 200000 calls, ns/call)~n"),
     report(
@@ -49,9 +50,7 @@ main(_) ->
                 beamtalk_trace_store:record_dispatch(HitPid, increment, 1000, ok, sync, 'Counter')
             end},
             {handler, fun() ->
-                beamtalk_trace_store:handle_dispatch_stop(
-                    [beamtalk, actor, dispatch, stop], Meas, Meta, #{}
-                )
+                beamtalk_trace_store:record_dispatch_stop(Meta, 1000)
             end}
         ],
         31,

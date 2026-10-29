@@ -17,6 +17,11 @@ Tracks all instances of each class to support Smalltalk-style reflection:
 Each instance is registered as a `{Class, Pid}` entry in an ETS bag table.
 A monitor process automatically cleans up entries when instances terminate.
 
+A second, pid-keyed `set` table (`beamtalk_instance_class`, `{Pid, Class}`)
+is maintained next to it so `class_of/1` answers in O(1) (BT-4113): the bag
+is keyed by class, and finding a pid's class there is a full-table scan,
+which made every actor send O(live actors) while it sat on the send path.
+
 See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
 """.
 
@@ -27,7 +32,8 @@ See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
     unregister/2,
     all/1,
     count/1,
-    each/2
+    each/2,
+    class_of/1
 ]).
 
 %% gen_server callbacks
@@ -41,6 +47,8 @@ See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
 ]).
 
 -define(INSTANCE_REGISTRY, beamtalk_instance_registry).
+%% BT-4113: pid-keyed reverse index, `{Pid, Class}`.
+-define(INSTANCE_CLASS, beamtalk_instance_class).
 
 -type class_name() :: atom().
 
@@ -99,6 +107,24 @@ count(Class) when is_atom(Class) ->
     ).
 
 -doc """
+The class a local pid was registered under, or `undefined` (a pid that was
+never registered, a remote pid, or the registry not running). One `ets:lookup`
+on the pid-keyed index — O(1) however many instances are live (BT-4113).
+Invariant: a pid is registered under one class (`spawn` registers each
+actor once). The index keeps one row per pid, so if a pid were registered
+under several classes the latest registration would win, and unregistering
+any of them would leave `class_of/1` answering `undefined`.
+""".
+-spec class_of(pid()) -> class_name() | undefined.
+class_of(Pid) ->
+    try ets:lookup(?INSTANCE_CLASS, Pid) of
+        [{_, Class}] -> Class;
+        [] -> undefined
+    catch
+        error:badarg -> undefined
+    end.
+
+-doc """
 Iterate all live instances of a class with a function.
 The function is called as `Fun(Pid)` for each instance.
 """.
@@ -114,6 +140,9 @@ init([]) ->
     %% Create the ETS table owned by this process so it survives
     %% until the gen_server terminates
     ?INSTANCE_REGISTRY = ets:new(?INSTANCE_REGISTRY, [named_table, public, bag]),
+    ?INSTANCE_CLASS = ets:new(?INSTANCE_CLASS, [
+        named_table, public, set, {read_concurrency, true}
+    ]),
     {ok, #state{}}.
 
 handle_call({register, Class, Pid}, _From, State) ->
@@ -125,6 +154,7 @@ handle_call({register, Class, Pid}, _From, State) ->
         false ->
             %% Insert into ETS
             ets:insert(?INSTANCE_REGISTRY, {Class, Pid}),
+            ets:insert(?INSTANCE_CLASS, {Pid, Class}),
             %% Monitor the process for auto-cleanup
             Ref = erlang:monitor(process, Pid),
             NewMonitors = maps:put(Key, Ref, State#state.monitors),
@@ -136,6 +166,7 @@ handle_call({unregister, Class, Pid}, _From, State) ->
         {Ref, NewMonitors} ->
             erlang:demonitor(Ref, [flush]),
             ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid}),
+            ets:delete_object(?INSTANCE_CLASS, {Pid, Class}),
             {reply, ok, State#state{monitors = NewMonitors}};
         error ->
             %% Not registered, but that's ok
@@ -154,6 +185,7 @@ handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     Classes = [Class || [Class] <- Matches],
 
     %% Remove from ETS
+    ets:delete(?INSTANCE_CLASS, Pid),
     lists:foreach(
         fun(Class) ->
             ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid})
@@ -178,4 +210,29 @@ terminate(_Reason, _State) ->
     ok.
 
 code_change(OldVsn, State, Extra) ->
+    ensure_class_index(),
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).
+
+%%====================================================================
+%% Internal
+%%====================================================================
+
+-doc """
+Create and fill the pid-keyed index when upgrading from a registry that
+predates it (BT-4113): `class_of/1` answers `undefined` until this runs.
+Runs in the registry process, which owns both tables.
+""".
+ensure_class_index() ->
+    case ets:whereis(?INSTANCE_CLASS) of
+        undefined ->
+            ?INSTANCE_CLASS = ets:new(?INSTANCE_CLASS, [
+                named_table, public, set, {read_concurrency, true}
+            ]),
+            ets:insert(?INSTANCE_CLASS, [
+                {Pid, Class}
+             || {Class, Pid} <- ets:tab2list(?INSTANCE_REGISTRY)
+            ]),
+            ok;
+        _ ->
+            ok
+    end.

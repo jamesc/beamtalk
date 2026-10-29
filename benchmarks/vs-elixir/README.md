@@ -242,17 +242,24 @@ over Elixir from the table.
 
 ### 3. Runtime machinery
 
-- **Actor sends (7a-7c)**: +174 reductions and +256 words per sync call
-  (3.5x the time of `GenServer.call`), +175 and +230 per cast (17x). Of the
-  211 reductions, 137 are in the caller (Elixir: 17) and about 75 in the actor
-  (Elixir: 21). The caller makes 140 calls per send to 98 functions, against
-  19. Per message there are two `telemetry:execute/3` spans (start and stop,
-  with handler-table ETS lookups), an always-on trace-store aggregate update
-  (`record_dispatch`, `cas_min`, `cas_max`), OpenTelemetry/propagated-context
-  get and restore, `logger:get_process_metadata/0`, 11 process-dictionary
-  `erase/1`s, a scan of the state for local temporaries
-  (`strip_local_temps`), known-class stashing, and pending-action and
-  mailbox-continuation checks. None of it is disabled by default.
+- **Actor sends (7a-7c)**: after BT-4113, about +103 reductions and +89
+  words per sync call over `GenServer.call` (was +174 / +256), and +91 / +68
+  per cast (was +184 / +230). Of the ~141 reductions, 79 are in the caller
+  (Elixir: 17) and about 61 in the actor (Elixir: 21). BT-4113 made the
+  `[beamtalk, actor, dispatch, *]` telemetry spans opt-in (the always-on
+  aggregates are now recorded directly), passed the actor's class with the
+  send instead of scanning the instance registry, propagated only context
+  that is present, dropped the liveness pre-check, and made the per-message
+  `__local__` strip and pending-action checks O(1) in the common case. What
+  remains: the always-on trace-store aggregate update (`record_dispatch`:
+  an ETS lookup, three `atomics:add`s, `cas_min`, `cas_max`), the send
+  wrapper chain (`sync_send_known` → `sync_send_pid` → `sync_send_remote` →
+  `sync_call` → `dispatch_span`), `classify_receiver`'s class-object check
+  (`atom_to_binary` + `binary:part` per send), and in the actor `make_self`
+  (class name through `class_name_from_mod`), the mailbox-continuation check,
+  actor-state install/uninstall, the call-`From` cell, the watch check in
+  `notify_state_change`, `encode_reply_for_tagged` and the pending-action
+  reads.
 - **`self hasField:` inside an actor (7d, BT-4071)**: the selector is not in
   the class module, so it falls through to the runtime method resolver, which
   builds `CompiledMethod`s with xref provenance and copies the xref table: +812
@@ -289,7 +296,7 @@ weighted by how often each appears on the path:
 
 | # | Cost | Excess per occurrence | Rows | Kind | Fixable? |
 |---|---|---|---|---|---|
-| 1 | Actor dispatch hooks (telemetry spans, trace-store aggregates, context propagation, process-dictionary churn) | +174 red, +256 words per sync send; +175 red, +230 words per cast | 7a-7c | machinery | Yes: none of it is needed for the send itself. The gen_server round trip (37 red, 56 words) is the structural floor. |
+| 1 | Actor dispatch hooks (trace-store aggregates, send wrapper chain, `make_self`, mailbox/pending-action checks; telemetry spans opt-in since BT-4113) | +103 red, +89 words per sync send; +91 red, +68 words per cast (BT-4113; was +174 / +256 and +175 / +230) | 7a-7c | machinery | Partly: the aggregates are a product decision (BT-4103); the rest is not needed for the send itself. The gen_server round trip (37 red, 56 words) is the structural floor. |
 | 2 | Class-side sends through the class process (non-`class sealed` class methods, Value keyword constructors, `Result ok:`, class objects in `on:do:` and `isKindOf:`) | +143 to +415 red, +444 to +1,358 words, 1-7 µs, and a node-wide serialization point | 3b, 3c, 2b, 9a, 8a, 12b | dispatch + machinery | Yes for sealed stateless classes and constructors (direct call); BT-4065 covers class objects, `isKindOf:` and `Result`. Classes with `classState:` structurally need their process for writes. |
 | 3 | Dynamic sends to Value instances, regardless of static type | +27 to +29 red, +28 words, about 160 ns per send; a self-send is a second one | 1a-1c, 4a-4c, 5a, 5b, 9b, 10a, 10b | dispatch + allocation | Yes for sealed receivers (BT-4069). For open classes, late binding is structural, but its cost is not: a guarded direct call costs a map-key match. |
 | 4 | Non-inlined conditionals and loops | +14 red, +4 words per conditional; +26 red, +10 words per loop step | 11d, 0b | dispatch + allocation | Yes: compile to `case` and `letrec` with a fallback send for non-Booleans. |
@@ -377,3 +384,22 @@ side, main → PR. Rows not listed did not move.
   after: 8b with a raise 2425 red / 22,970 w / 183 µs → **123 / 171 /
   5.0 µs** (Elixir 13.1 / 36 / 0.6 µs). 8a without a raise is unchanged at
   21.1 / 21.
+- **BT-4113 (#4656)** makes the actor dispatch telemetry events opt-in
+  (the always-on `{Class, Selector}` aggregates are recorded directly), passes
+  the class with the send, drops the liveness pre-check and empty context
+  propagation, and skips the receiver's `__local__` key scan when the
+  committed state holds exactly the declared keys (7 rounds, idle machine,
+  before = main c5b7f23, after = this branch at 487fb54;
+  `results/bench-bt4113-before.md`, `results/bench-bt4113-after.md`).
+  Beamtalk side, before → after: 7a 226 red / 311 w / 10.5 µs →
+  **140 / 149 / 5.3 µs**; 7b 226 / 317 / 12.7 µs → **140 / 155 / 4.1 µs**;
+  7c 199 / 239 / 8.5 µs → **110 / 76 / 1.8 µs**; 7d 283 / 388 / 14.9 µs →
+  **196 / 226 / 4.8 µs** (Elixir `GenServer.call` 37.1 / 56 / ~2.5 µs, cast
+  18.6 / 12). The review fix that makes the state guard match every declared
+  key, not just the count, leaves the reductions where they were (140, 140,
+  110, 196–198 in single-round reruns); words stay within the few-word
+  run-to-run wobble of these multi-process rows. What remains, about 100
+  reductions over Elixir per call, is `make_self` per message, the
+  `classify_receiver` class-object check, the send wrapper chain, the
+  always-on aggregate atomics and the mailbox/`From`/watch/reply checks
+  (BT-4265).

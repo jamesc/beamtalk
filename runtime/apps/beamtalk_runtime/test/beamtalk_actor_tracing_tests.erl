@@ -11,6 +11,11 @@ EUnit tests for actor send wrapper telemetry instrumentation (ADR 0069 Phase 2a)
 Tests cover: telemetry events emitted by sync_send/3, async_send/4, cast_send/3,
 aggregate counter updates, trace event capture when enabled, error handling
 preservation (timeout, actor_dead), and lifecycle method exclusion.
+
+Dispatch events are opt-in (BT-4113): `setup/0` turns them on through the
+Erlang API, as code attaching with `telemetry:attach/4` must. The
+`quiet_setup/0` tests cover the default (events off): aggregates are still
+recorded exactly once per send, and `Tracing enable` switches events on.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -42,9 +47,17 @@ setup() ->
         _ ->
             ok
     end,
+    ok = beamtalk_telemetry:enable_dispatch_events(),
+    ok.
+
+-doc "Like setup/0, but leaves dispatch events at their default (off).".
+quiet_setup() ->
+    ok = setup(),
+    ok = beamtalk_telemetry:disable_dispatch_events(),
     ok.
 
 cleanup(_State) ->
+    ok = beamtalk_telemetry:disable_dispatch_events(),
     try
         beamtalk_trace_store:clear(),
         beamtalk_trace_store:disable()
@@ -1088,9 +1101,10 @@ propagation_no_context_noop_test_() ->
                 %% Ensure no trace context set
                 erase('$beamtalk_trace_ctx'),
 
-                %% Build propagated context (no trace context)
+                %% Build propagated context (no trace context): BT-4113
+                %% omits the empty key instead of sending `trace_ctx => #{}`.
                 PropCtx = beamtalk_actor:get_propagated_ctx(),
-                ?assertMatch(#{trace_ctx := #{}}, PropCtx),
+                ?assertEqual(error, maps:find(trace_ctx, PropCtx)),
 
                 %% Restore should be a no-op
                 beamtalk_actor:restore_propagated_ctx(PropCtx),
@@ -1410,3 +1424,163 @@ causal_ctx_empty_when_none_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% BT-4113: dispatch events off by default
+%%====================================================================
+
+-doc "Every dispatch stop/exception event this process receives within 100ms.".
+drain_dispatch_events(Acc) ->
+    receive
+        {telemetry_event, [beamtalk, actor, dispatch, _] = E, _, _} ->
+            drain_dispatch_events([E | Acc])
+    after 100 -> lists:reverse(Acc)
+    end.
+
+class_method_stats(Class, Selector) ->
+    Stats = beamtalk_trace_store:get_stats(),
+    ClassKey = {beamtalk_string, <<"class:", (atom_to_binary(Class))/binary>>},
+    #{ClassKey := ClassStats} = Stats,
+    Methods = maps:get({beamtalk_string, <<"methods">>}, ClassStats),
+    maps:get({beamtalk_string, atom_to_binary(Selector)}, Methods).
+
+stat(Name, MethodStats) ->
+    maps:get({beamtalk_string, Name}, MethodStats).
+
+dispatch_events_off_still_record_aggregates_once_test_() ->
+    {setup, fun quiet_setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+                beamtalk_trace_store:clear(),
+                Handlers = [
+                    attach_handler(E)
+                 || E <- [
+                        [beamtalk, actor, dispatch, start],
+                        [beamtalk, actor, dispatch, stop],
+                        [beamtalk, actor, dispatch, exception]
+                    ]
+                ],
+                Pid = start_registered_counter(0),
+                {ok, Thrower} = test_throwing_actor:start_link(),
+                ok = beamtalk_object_instances:register('ThrowingActor', Thrower),
+                try
+                    _ = beamtalk_actor:sync_send(Pid, increment, []),
+                    _ = beamtalk_actor:sync_send(Pid, increment, []),
+                    ok = beamtalk_actor:cast_send(Pid, increment, []),
+                    caught =
+                        try
+                            beamtalk_actor:sync_send(Thrower, throwError, [])
+                        catch
+                            error:_ -> caught
+                        end,
+                    %% No dispatch events at all...
+                    ?assertEqual([], drain_dispatch_events([])),
+                    %% ...but each send counted exactly once.
+                    Inc = class_method_stats('Counter', increment),
+                    ?assertEqual(3, stat(<<"calls">>, Inc)),
+                    ?assertEqual(0, stat(<<"errors">>, Inc)),
+                    Thrown = class_method_stats('ThrowingActor', throwError),
+                    ?assertEqual(1, stat(<<"calls">>, Thrown)),
+                    ?assertEqual(1, stat(<<"errors">>, Thrown))
+                after
+                    gen_server:stop(Pid),
+                    catch gen_server:stop(Thrower),
+                    beamtalk_object_instances:unregister('ThrowingActor', Thrower),
+                    [telemetry:detach(H) || H <- Handlers]
+                end
+            end)
+        ]
+    end}.
+
+dispatch_events_on_record_aggregates_once_test_() ->
+    %% The same sends with events on: still one sample each (the trace store
+    %% no longer also counts them from a telemetry handler).
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                Pid = start_registered_counter(0),
+                try
+                    _ = beamtalk_actor:sync_send(Pid, increment, []),
+                    _ = beamtalk_actor:sync_send(Pid, increment, []),
+                    Inc = class_method_stats('Counter', increment),
+                    ?assertEqual(2, stat(<<"calls">>, Inc))
+                after
+                    gen_server:stop(Pid)
+                end
+            end)
+        ]
+    end}.
+
+tracing_enable_turns_dispatch_events_on_test_() ->
+    {setup, fun quiet_setup/0, fun cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+                ok = beamtalk_trace_store:enable(),
+                ?assert(beamtalk_telemetry:dispatch_events_enabled()),
+                StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
+                Pid = start_registered_counter(0),
+                try
+                    0 = beamtalk_actor:sync_send(Pid, getValue, []),
+                    ?assertEqual(
+                        [[beamtalk, actor, dispatch, stop]], drain_dispatch_events([])
+                    ),
+                    ok = beamtalk_trace_store:disable(),
+                    ?assertNot(beamtalk_telemetry:dispatch_events_enabled()),
+                    0 = beamtalk_actor:sync_send(Pid, getValue, []),
+                    ?assertEqual([], drain_dispatch_events([]))
+                after
+                    gen_server:stop(Pid),
+                    telemetry:detach(StopHandler)
+                end
+            end)
+        ]
+    end}.
+
+flat_send_cost_with_many_live_actors_test_() ->
+    %% BT-4113: the send path never scans the instance registry, so a
+    %% send's cost does not grow with the number of live actors. Counted in
+    %% reductions, which (unlike wall time) are deterministic.
+    {setup, fun quiet_setup/0, fun cleanup/1, fun(_) ->
+        [
+            {timeout, 60,
+                ?_test(begin
+                    Pid = start_registered_counter(0),
+                    Fillers = [spawn_registered_filler() || _ <- lists:seq(1, 10)],
+                    Small = send_reductions(Pid),
+                    MoreFillers = [spawn_registered_filler() || _ <- lists:seq(1, 9990)],
+                    Large = send_reductions(Pid),
+                    try
+                        %% A registry scan would cost thousands of reductions
+                        %% more at 10,000 actors; allow a little noise.
+                        ?assert(Large =< Small + 10)
+                    after
+                        gen_server:stop(Pid),
+                        [exit(F, kill) || F <- Fillers ++ MoreFillers]
+                    end
+                end)}
+        ]
+    end}.
+
+spawn_registered_filler() ->
+    F = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = beamtalk_object_instances:register('Filler', F),
+    F.
+
+-doc "Minimum reductions one sync send costs the caller, over a few tries.".
+send_reductions(Pid) ->
+    lists:min([
+        begin
+            {reductions, R0} = process_info(self(), reductions),
+            _ = beamtalk_actor:sync_send(Pid, getValue, []),
+            {reductions, R1} = process_info(self(), reductions),
+            R1 - R0
+        end
+     || _ <- lists:seq(1, 20)
+    ]).

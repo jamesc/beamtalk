@@ -79,9 +79,10 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
     self assert: c equals: 9
     self assert: self.m equals: 9
 
-  testIfTrueOnlyAnswersNilWhenNotTaken =>
+  // BT-4189: the non-taken solo `ifTrue:` answers its receiver, not nil.
+  testIfTrueOnlyAnswersReceiverWhenNotTaken =>
     r := self take: (self.n > 3 ifTrue: [self.m := 1])
-    self assert: r equals: nil
+    self assert: r equals: false
     self assert: self.m equals: 0
 
   testIfFalseOnlyAnswersArmValue =>

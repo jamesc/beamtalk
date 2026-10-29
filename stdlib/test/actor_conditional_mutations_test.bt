@@ -88,9 +88,10 @@ TestCase subclass: ActorConditionalMutationsTest
     self assert: result equals: 5
     self assert: self.c getCount equals: 5
     self.c reset
-    // flag=false returns nil and leaves state unchanged
+    // flag=false answers the receiver (`False>>ifTrue: => self`, BT-4189)
+    // and leaves state unchanged
     result2 := self.c conditionalLast: false
-    self assert: result2 equals: nil
+    self assert: result2 equals: false
     self assert: self.c getCount equals: 0
 
   testLocalVarInIfTrueBlock =>

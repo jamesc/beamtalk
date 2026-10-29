@@ -315,8 +315,8 @@ impl CoreErlangGenerator {
         } else {
             // handle_continue dispatches initialize after the loop starts
             push_fn(self.generate_handle_continue(module)?)?;
-            push_fn(self.generate_handle_cast()?)?;
-            push_fn(self.generate_handle_call()?)?;
+            push_fn(self.generate_handle_cast(module)?)?;
+            push_fn(self.generate_handle_call(module)?)?;
             push_fn(self.generate_handle_info(module)?)?;
             push_fn(self.generate_code_change()?)?;
             push_fn(self.generate_terminate(module)?)?;

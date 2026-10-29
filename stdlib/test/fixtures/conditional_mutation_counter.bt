@@ -36,7 +36,8 @@ Actor subclass: ConditionalMutationCounter
     outer ifTrue: [inner ifTrue: [self.count := self.count + 100]]
     self.count
 
-  // Conditional as last expression (no trailing self.count)
+  // Conditional as last expression (no trailing self.count); answers the
+  // receiver (`false`) when not taken (BT-4189)
   conditionalLast: flag => flag ifTrue: [self.count := self.count + 5]
 
   // BT-1225: Local var assigned inside ifTrue: block, then used in same block

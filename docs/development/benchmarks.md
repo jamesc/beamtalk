@@ -1704,7 +1704,8 @@ ERL_FLAGS="+S 1" escript runtime/perf/bench_trace_dispatch.escript
 Rows: `hit_dis`/`hit_en` time `record_dispatch/6` on an existing key with tracing disabled/enabled
 (median of 31 batches × 200,000 calls); `churn_dis`/`churn_en` time it with a never-before-seen pid
 per call — a wave of new short-lived actors (median of 9 batches × 20,000 calls, pids pre-made
-outside the timed region); `handler` times `handle_dispatch_stop/4` end to end. Apple arm64, OTP 28,
+outside the timed region); `handler` times `handle_dispatch_stop/4` end to end (since BT-4113 the
+escript times its replacement, `record_dispatch_stop/2`, the same body). Apple arm64, OTP 28,
 `+S 1`, 2026-10-22:
 
 | Row | Before (BT-4066 design) | After (BT-4103) |

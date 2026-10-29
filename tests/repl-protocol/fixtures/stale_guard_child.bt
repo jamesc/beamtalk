@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: subclass of StaleGuardBase whose `sumAll:` threads an outer local
+// through the state map (under a `__local__` key) on every call.
+
+StaleGuardBase subclass: StaleGuardChild
+  state: c = 0
+
+  sumAll: items =>
+    sum := 0
+    items do: [:x | sum := sum + x]
+    self.c := self.c + sum
+    sum
+
+  getC => self.c

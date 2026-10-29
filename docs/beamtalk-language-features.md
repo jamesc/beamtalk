@@ -6336,7 +6336,7 @@ The `Tracing` class provides actor observability and performance telemetry. It i
 
 Two levels of instrumentation are available:
 
-- **Always-on aggregates** — per-class, per-method call counts and durations with negligible overhead (~120ns/call). No setup required.
+- **Always-on aggregates** — per-class, per-method call counts and durations with negligible overhead (~120ns/call). No setup required. They are recorded directly on the send path and do not depend on the opt-in actor-dispatch telemetry events ([below](#application-telemetry-events-adr-0069-amendment)).
 - **Detailed trace events** — individual call/return/error records captured to a ring buffer. Requires explicit `Tracing enable`. Enabling also collects per-actor detail (see below).
 
 ### Tracing Lifecycle
@@ -6528,6 +6528,7 @@ Telemetry detach: #auditMisses
 - The handler runs **synchronously in the emitting process**, so keep it short (hand work to an actor if it is slow).
 - If a handler raises, `telemetry` logs the error and **detaches** it; the emitter is not affected.
 - A handler is not re-entered by an emit it causes itself (for example a handler on `#(#beamtalk, #actor, #dispatch, #stop)` that sends to an actor), so it cannot recurse without bound.
+- The runtime's actor-dispatch events (`#(#beamtalk, #actor, #dispatch, #start)`, `#stop`, `#exception`) are **opt-in** ([ADR 0069 amendment, BT-4113](ADR/0069-actor-observability-and-tracing.md#amendment-2026-10-28-dispatch-events-are-opt-in-bt-4113)): every actor send would pay for them otherwise. Attaching a handler to one of them through `Telemetry` turns them on, and detaching the last such handler turns them off again; `Tracing enable` also turns them on. Erlang or Elixir code that attaches with `telemetry:attach/4` must set the app env `{beamtalk_runtime, dispatch_telemetry, true}` or call `beamtalk_telemetry:enable_dispatch_events/0`. The `Tracing` aggregates do not depend on them, and the actor lifecycle events are always emitted.
 - Class variables follow [ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md): a handler running away from its home class reads the values captured when the block was created, and a write raises `class_state_unreachable`; at home, a raising handler's writes are discarded.
 - The handler block belongs to the code that created it: after redefining that class, attach the handler again.
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.

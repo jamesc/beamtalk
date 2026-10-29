@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: StaleGuardBase redefined without its `b` field. Loading it leaves
+// StaleGuardChild's module compiled against the old field set.
+
+Actor subclass: StaleGuardBase
+  state: a = 0
+
+  getA => self.a
