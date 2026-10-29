@@ -1572,6 +1572,7 @@ Value subclass: Version
                     param_types: vec![],
                     doc: None,
                     origin: None,
+                    primitive: None,
                 })
                 .collect(),
             class_variables: vec![],
@@ -1652,6 +1653,7 @@ Value subclass: Version
                     param_types: vec![],
                     doc: None,
                     origin: None,
+                    primitive: None,
                 }],
                 class_methods: vec![],
                 class_variables: vec![],

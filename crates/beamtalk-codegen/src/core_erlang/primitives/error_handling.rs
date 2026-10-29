@@ -36,53 +36,96 @@ pub(crate) fn generate_exception_bif(
                 "], Self)",
             ])
         }
-        // Class-side signal primitives — raise exceptions without instance allocation.
-        "classSignal:" => {
-            let p0 = param(params, 0, "_Msg");
-            Some(docvec![
-                "call 'beamtalk_exception_handler':'class_signal_message'(",
-                leaf::var(p0.to_string()),
-                ", ClassSelf)"
-            ])
+        // Class-side signal primitives — raise exceptions without instance
+        // allocation. Inside the class method the receiving class is the
+        // `ClassSelf` variable; a class-literal send inlines the same call with
+        // the class-name atom instead (BT-4115, `generate_class_signal_bif`).
+        _ if is_caller_safe_class_primitive(selector) => {
+            let args: Vec<Document<'static>> =
+                params.iter().map(|p| leaf::var(p.clone())).collect();
+            generate_class_signal_bif(selector, &args, leaf::var("ClassSelf"))
         }
-        "classSignal:reason:" => {
-            let p0 = param(params, 0, "_Msg");
-            let p1 = param(params, 1, "_Reason");
-            Some(docvec![
-                "call 'beamtalk_exception_handler':'class_signal_message_reason'(",
-                leaf::var(p0.to_string()),
-                ", ",
-                leaf::var(p1.to_string()),
-                ", ClassSelf)"
-            ])
-        }
-        "classSignal" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
-        )),
-        // The general, pure-Beamtalk way to signal a named error
-        // kind (index_out_of_bounds, empty_collection, or another kind in
-        // ExceptionKind) with a hint specific to the call site, instead of
-        // the generic user_error kind `self error:` always raises.
+        _ => None,
+    }
+}
+
+/// The class-side `Exception` primitives that are *caller-safe*: they read
+/// nothing from the receiving class but its name, touch no class state, and
+/// need no class process. A send of one of these to a class literal
+/// (`Error signal: m`) is inlined at the call site, raising in the caller
+/// instead of making a `gen_server:call` into the class process only to
+/// raise there and relay the error back (BT-4115).
+///
+/// This list is the one place that owns that decision;
+/// [`generate_class_signal_bif`] lowers exactly these.
+const CALLER_SAFE_CLASS_PRIMITIVES: &[&str] = &[
+    "classSignal",
+    "classSignal:",
+    "classSignal:reason:",
+    "classSignalKind:class:selector:hint:",
+];
+
+/// Whether the quoted primitive `name` is a caller-safe class primitive (see
+/// [`CALLER_SAFE_CLASS_PRIMITIVES`]).
+#[must_use]
+pub(crate) fn is_caller_safe_class_primitive(name: &str) -> bool {
+    CALLER_SAFE_CLASS_PRIMITIVES.contains(&name)
+}
+
+/// Lowers a caller-safe class primitive to its `beamtalk_exception_handler`
+/// call, given the argument documents and the receiving class's document.
+///
+/// Two callers share this one selector-to-handler mapping:
+/// [`generate_exception_bif`] (the `Exception class` method body, passing the
+/// `ClassSelf` variable and the method's parameters) and the class-literal
+/// send in `dispatch_codegen` (passing the class-name atom and the threaded
+/// argument values). Answers `None` for any other primitive, or when the
+/// argument count does not match the primitive.
+pub(crate) fn generate_class_signal_bif(
+    primitive: &str,
+    args: &[Document<'static>],
+    class_self: Document<'static>,
+) -> Option<Document<'static>> {
+    match (primitive, args) {
+        ("classSignal", []) => Some(docvec![
+            "call 'beamtalk_exception_handler':'class_signal'(",
+            class_self,
+            ")"
+        ]),
+        ("classSignal:", [msg]) => Some(docvec![
+            "call 'beamtalk_exception_handler':'class_signal_message'(",
+            msg.clone(),
+            ", ",
+            class_self,
+            ")"
+        ]),
+        ("classSignal:reason:", [msg, reason]) => Some(docvec![
+            "call 'beamtalk_exception_handler':'class_signal_message_reason'(",
+            msg.clone(),
+            ", ",
+            reason.clone(),
+            ", ",
+            class_self,
+            ")"
+        ]),
+        // The general, pure-Beamtalk way to signal a named error kind
+        // (index_out_of_bounds, empty_collection, or another kind in
+        // ExceptionKind) with a hint specific to the call site, instead of the
+        // generic user_error kind `self error:` always raises.
         // Kind/Class/Selector/Hint are caller-supplied, so — unlike
-        // classSignal:/classSignal — ClassSelf plays no role and is not
-        // threaded through.
-        "classSignalKind:class:selector:hint:" => {
-            let p0 = param(params, 0, "_Kind");
-            let p1 = param(params, 1, "_Class");
-            let p2 = param(params, 2, "_Selector");
-            let p3 = param(params, 3, "_Hint");
-            Some(docvec![
-                "call 'beamtalk_exception_handler':'class_signal_kind'(",
-                leaf::var(p0.to_string()),
-                ", ",
-                leaf::var(p1.to_string()),
-                ", ",
-                leaf::var(p2.to_string()),
-                ", ",
-                leaf::var(p3.to_string()),
-                ")"
-            ])
-        }
+        // classSignal:/classSignal — the receiving class plays no role and
+        // `class_self` is not threaded through.
+        ("classSignalKind:class:selector:hint:", [kind, class, sel, hint]) => Some(docvec![
+            "call 'beamtalk_exception_handler':'class_signal_kind'(",
+            kind.clone(),
+            ", ",
+            class.clone(),
+            ", ",
+            sel.clone(),
+            ", ",
+            hint.clone(),
+            ")"
+        ]),
         _ => None,
     }
 }
@@ -263,6 +306,58 @@ mod tests {
                 "call 'beamtalk_exception_handler':'class_signal_kind'(Kind, Class, Selector, Hint)"
                     .to_string()
             )
+        );
+    }
+
+    // BT-4115: the class-literal send's lowering of a caller-safe class
+    // primitive passes the class-name atom where the method body passes
+    // `ClassSelf`.
+    #[test]
+    fn test_class_signal_bif_with_class_name_atom() {
+        let msg = [leaf::var("Arg1".to_string())];
+        let result = doc_to_string(generate_class_signal_bif(
+            "classSignal:",
+            &msg,
+            leaf::atom("Error".to_string()),
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_exception_handler':'class_signal_message'(Arg1, 'Error')".into())
+        );
+        let result = doc_to_string(generate_class_signal_bif(
+            "classSignal",
+            &[],
+            leaf::atom("MyError".to_string()),
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_exception_handler':'class_signal'('MyError')".into())
+        );
+    }
+
+    #[test]
+    fn test_every_caller_safe_class_primitive_lowers() {
+        // The list and the lowering stay one rule: each listed primitive
+        // lowers both in the method body and at a class-literal send.
+        for &name in CALLER_SAFE_CLASS_PRIMITIVES {
+            let arity = name.matches(':').count();
+            let params: Vec<String> = (0..arity).map(|i| format!("P{i}")).collect();
+            assert!(
+                generate_exception_bif(name, &params).is_some(),
+                "{name} has no method-body lowering"
+            );
+            let args: Vec<Document<'static>> = params.into_iter().map(leaf::var).collect();
+            assert!(
+                generate_class_signal_bif(name, &args, leaf::atom("Error".to_string())).is_some(),
+                "{name} has no class-literal lowering"
+            );
+        }
+        assert!(!is_caller_safe_class_primitive("signal:"));
+        assert!(!is_caller_safe_class_primitive("classClass"));
+        assert!(
+            generate_class_signal_bif("classSignal:", &[], leaf::atom("Error".to_string()))
+                .is_none(),
+            "an argument-count mismatch must not lower"
         );
     }
 

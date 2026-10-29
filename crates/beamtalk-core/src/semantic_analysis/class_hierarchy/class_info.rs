@@ -99,6 +99,15 @@ pub struct MethodInfo {
     /// `(class, selector) -> protocol` map that `analyse_full` applies once
     /// the hierarchy is built.
     pub origin: Option<EcoString>,
+    /// The quoted primitive name when the method body is exactly
+    /// `@primitive "<name>"` (e.g. `"classSignal:"` for `Exception class >>
+    /// signal:`), else `None`. Read from the method's own source
+    /// ([`MethodDefinition::quoted_primitive_name`](crate::ast::MethodDefinition::quoted_primitive_name)),
+    /// so codegen can recognise a caller-safe class primitive at a
+    /// class-literal send without restating which selector it implements
+    /// (BT-4115).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub primitive: Option<EcoString>,
 }
 
 impl MethodInfo {
@@ -450,6 +459,7 @@ impl ClassInfo {
                 // `trait_expansion::apply_origins` (ADR 0127) — see
                 // `MethodInfo::origin`'s doc for why it can't be set here.
                 origin: None,
+                primitive: m.quoted_primitive_name().cloned(),
             })
             .collect();
 
@@ -474,6 +484,7 @@ impl ClassInfo {
                 // Class-side provisions are post-v1 (ADR 0127 §9); class
                 // methods are never flattened in v1, so this is always `None`.
                 origin: None,
+                primitive: m.quoted_primitive_name().cloned(),
             })
             .collect();
 
