@@ -98,7 +98,9 @@ Actor subclass: Bt4003ResidualsActor
   // BT-4287: a state fold as an operand inside a fold or loop body (the
   // shapes the BT-4003 row rejected until BT-4287 lowered them as producers).
   injectArgInInject =>
-    r := #(1, 2) inject: 0 into: [:a :x | a + (self.items inject: 0 into: [:b :y | b + self bump])]
+    r := #(1, 2) inject: 0 into: [:a :x |
+      a + (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
     #(r, self.n)
 
   injectOperandInDo =>
@@ -106,7 +108,9 @@ Actor subclass: Bt4003ResidualsActor
     self.n
 
   injectArgInCollect =>
-    r := #(1, 2) collect: [:x | x max: (self.items inject: 0 into: [:b :y | b + self bump])]
+    r := #(1, 2) collect: [:x |
+      x max: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
     #(r, self.n)
 
   doReceiverInDo =>
@@ -118,7 +122,9 @@ Actor subclass: Bt4003ResidualsActor
     self.n
 
   fieldCollectReceiverInCollect =>
-    r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self.n := self.n + 1]) size]
+    r := #(1, 2) collect: [:x |
+      x + (self.items collect: [:y | self.n := self.n + 1]) size
+    ]
     #(r, self.n)
 
   doElementInTimes =>
@@ -132,16 +138,24 @@ Actor subclass: Bt4003ResidualsActor
     self.n
 
   injectOperandInEvaluatedBlockInDo =>
-    #(1, 2) do: [:x | [x + (self.items inject: 0 into: [:b :y | b + self bump])] value]
+    #(1, 2) do: [:x |
+      [x + (self.items inject: 0 into: [:b :y | b + self bump])] value
+    ]
     self.n
 
   injectOperandInDoInClosure =>
-    blk := [#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]]
+    blk := [
+      #(1, 2) do: [:x |
+        x + (self.items inject: 0 into: [:b :y | b + self bump])
+      ]
+    ]
     blk value
     self.n
 
   detectArgInSelect =>
-    r := #(1, 2, 3) select: [:x | x > (self.items detect: [:y | self bump > 100] ifNone: [0])]
+    r := #(1, 2, 3) select: [:x |
+      x > (self.items detect: [:y | self bump > 100] ifNone: [0])
+    ]
     #(r, self.n)
 
   countedLoopReceiverInDo =>
@@ -150,11 +164,18 @@ Actor subclass: Bt4003ResidualsActor
 
   injectOperandInLocalThreadingDo =>
     t := 0
-    #(1, 2) do: [:x | t := t + x + (self.items inject: 0 into: [:b :y | b + self bump])]
+    #(1, 2) do: [:x |
+      t := t + x + (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
     #(t, self.n)
 
   injectInCascadeInDo =>
-    #(1, 2) do: [:x | (self.items inject: 0 into: [:b :y | b + self bump]) printString; yourself]
+    #(1, 2)
+      do: [:x |
+        (self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) printString; yourself
+      ]
     self.n
 
   // Item 4: `^` in a `do:` that threads a local and the state.
