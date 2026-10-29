@@ -4756,6 +4756,46 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
+/// BT-4276: the fold-operand check looks for a loop or fold body only up to
+/// the nearest closure boundary. A fold inside a closure that sits in a loop
+/// body is judged by the closure's own context; measured right on a BEAM
+/// (`stdlib/test/bt4276fold_in_closure_test.bt`), whether the closure runs in
+/// the iteration that makes it or after the loop. Blocks run in place (an
+/// evaluated block, an arm) are looked through, so those shapes stay
+/// rejected.
+#[test]
+fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_closure() {
+    let accepted = [
+        "#(1, 2) do: [:x | b := [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]. t := b value]\nt",
+        "r := #(1, 2) collect: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nr collect: [:blk | blk value]",
+        "#(1, 2) do: [:x | b := [(self.items do: [:y | self bump]) isNil]. b value]\nself.n",
+        "#(1, 2) do: [:x | b := [(self.items collect: [:y | self.n := self.n + 1]) size]. b value]\nself.n",
+    ];
+    for body in accepted {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
+    let rejected = [
+        // An evaluated block runs in place: still the `do:` body's.
+        "#(1, 2) do: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])] value]\nself.n",
+        // So does a conditional arm.
+        "#(1, 2) do: [:x | x > 0 ifTrue: [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nself.n",
+        // A loop body inside the closure is the closure's own context.
+        "b := [#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nb value\nself.n",
+    ];
+    for body in rejected {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert!(
+            errors[0].message.contains("BT-4003, until BT-3947"),
+            "{}",
+            errors[0].message
+        );
+    }
+}
+
 /// PIN-BUG BT-3947 (BT-4003 item 5): a `^` in the body of a loop or collection
 /// operation at the REPL is ignored (measured: `#(1, 2) do: [:x | ^x]` answers
 /// the loop's value, and `[n < 3] whileTrue: [^10]` never ends). Rejected.

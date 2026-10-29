@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4276: an actor-state fold as an operand inside a closure in a loop body
+// is judged by the closure's own context. Measured right on the BEAM: every
+// state change is kept and the fold answers its value, not a raw
+// `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt.
+
+TestCase subclass: Bt4276FoldInClosureTest
+
+  testInjectInClosureRunInLoop =>
+    a := Bt4276FoldInClosure spawn
+    self assert: a injectInClosureRunInLoop equals: 9
+    self assert: a n equals: 4
+
+  testInjectInClosuresRunAfterLoop =>
+    a := Bt4276FoldInClosure spawn
+    self assert: a injectInClosuresRunAfterLoop equals: #(4, 9)
+    self assert: a n equals: 4
+
+  testDoReceiverInClosure =>
+    a := Bt4276FoldInClosure spawn
+    self assert: a doReceiverInClosure equals: 4
+
+  testCollectWritingFieldInClosure =>
+    a := Bt4276FoldInClosure spawn
+    self assert: a collectWritingFieldInClosure equals: 4

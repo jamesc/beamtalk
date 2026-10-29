@@ -1229,8 +1229,11 @@ fn check_body(
 ///   user method escapes). So `t := 0. self withFallback: [^t]. t := 5` is
 ///   rejected even when `withFallback:` runs the block before it returns and
 ///   the `^` would answer right; at the REPL, so is any such block that reads
-///   a workspace binding. Narrowing to blocks that really escape (using
-///   `escape_sites`) is BT-4275.
+///   a workspace binding. This cannot be narrowed with `escape_sites`, which
+///   does not count a block passed to a method: `b := self keep: [^t]. t :=
+///   5. b value` hands the block back and answers the stale 0 (BT-4275, closed
+///   won't-do). Telling `withFallback:` from `keep:` would need a per-callee
+///   "does not retain its block" fact.
 /// - **A `^` in a REPL loop or fold body** (a block a loop or collection
 ///   operation runs in place, [`local_threading_construct`]) is ignored: the
 ///   loop runs on and the expression answers the loop's own value
@@ -1802,10 +1805,11 @@ fn nlr_dropped_local(
 /// lookup from the state before it, and the blocks of the other constructs in
 /// order. Any other block literal is a closure, whose body does not run here.
 ///
-/// This over-approximates: anything after the write that may raise counts, even
-/// inside an `on:do:` (in the protected block) that catches it, so `[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure:
-/// [log record: t]` is rejected though the cleanup would see 9. Documented in
-/// ADR 0133 § Consequences and the language reference rather than modelled.
+/// This over-approximates: anything after the write that may raise counts,
+/// even inside an `on:do:` (in the protected block) that catches it, so
+/// `[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure: [log record: t]` is
+/// rejected though the cleanup would see 9. Documented in ADR 0133
+/// § Consequences and the language reference rather than modelled.
 fn raise_after_write(protected: &Block, tracked: &BTreeSet<EcoString>) -> Option<EcoString> {
     let mut scan = RaiseScan {
         tracked,
@@ -3365,20 +3369,27 @@ impl<'d> Walker<'d> {
         let Some(row) = residual_denied(Residual::StateFoldOperandInFold, self.context) else {
             return;
         };
-        // Conservative: this asks whether *any* enclosing container is a loop or
-        // fold body, not the innermost one, so it also rejects a fold that is an
-        // operand inside a stored closure sitting in a `do:` body (whose body
-        // does not run per iteration of that `do:`). Testing the innermost
-        // container instead is BT-4276.
-        if !self.containers.iter().any(|c| {
-            matches!(
-                c,
-                Container::DoBody
-                    | Container::ListOpBody
-                    | Container::LoopBody
-                    | Container::CountedLoopBody
-            )
-        }) {
+        // BT-4276: a loop or fold body counts only up to the nearest closure
+        // boundary (`Container::Other`, a block value with a frame of its
+        // own). A fold inside a closure that sits in a `do:` body is judged
+        // by the closure's own context: the closure's body does not run per
+        // iteration of the `do:`. Blocks run in place (arms, protected
+        // bodies, handlers, evaluated blocks) are looked through.
+        if !self
+            .containers
+            .iter()
+            .rev()
+            .take_while(|c| **c != Container::Other)
+            .any(|c| {
+                matches!(
+                    c,
+                    Container::DoBody
+                        | Container::ListOpBody
+                        | Container::LoopBody
+                        | Container::CountedLoopBody
+                )
+            })
+        {
             return;
         }
         let Some(construct) = local_threading_construct(expr) else {

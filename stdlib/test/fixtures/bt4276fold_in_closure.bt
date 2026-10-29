@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a
+// field) as an operand inside a closure that sits in a loop or fold body. The
+// closure's body does not run per iteration of the enclosing loop, so the
+// fold is judged by the closure's own context and accepted.
+
+Actor subclass: Bt4276FoldInClosure
+  state: n = 0
+  state: items = #(1, 2)
+
+  n => self.n
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  // The closure is run in the same iteration that creates it.
+  injectInClosureRunInLoop =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        b := [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]
+        t := b value
+      ]
+    t
+
+  // The closures are run after the loop that creates them.
+  injectInClosuresRunAfterLoop =>
+    r := #(1, 2) collect: [:x |
+      [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]
+    ]
+    r collect: [:blk | blk value]
+
+  // A `do:` whose block sends to `self`, as a receiver in the closure.
+  doReceiverInClosure =>
+    #(1, 2)
+      do: [:x |
+        b := [(self.items do: [:y | self bump]) isNil]
+        b value
+      ]
+    self.n
+
+  // A `collect:` whose block writes a field, as a receiver in the closure.
+  collectWritingFieldInClosure =>
+    #(1, 2)
+      do: [:x |
+        b := [(self.items collect: [:y | self.n := self.n + 1]) size]
+        b value
+      ]
+    self.n
