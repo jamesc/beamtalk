@@ -437,6 +437,8 @@ const FOLD_BODY_OUTERS: &[(&str, Under)] = &[
         "xs collect: [:w | xs inject: 0 into: [:a :x | {s}]]",
         Under::Fold,
     ),
+    // The outer fold also threads an outer local.
+    ("xs do: [:x | t := t + x. {s}]", Under::Fold),
     ("xs do: [:x | flag ifTrue: [{s}]]", Under::EnclosingFold),
     ("xs do: [:x | [{s}] value]", Under::EnclosingFold),
     ("xs do: [:x | 2 timesRepeat: [{s}]]", Under::EnclosingFold),
@@ -452,7 +454,9 @@ const FOLD_BODY_HEADER: &str = "Actor subclass: P\n  state: hits = 0\n  wrap: x 
 fn fold_body_method(selector: &str, outer: &str, position: &str, construct: &str) -> String {
     let stmt = position.replace("{c}", construct);
     let value = outer.replace("{s}", &stmt);
-    format!("  {selector} flag =>\n    xs := #(1, 2) asList\n    r := {value}\n    r\n")
+    format!(
+        "  {selector} flag =>\n    t := 0\n    xs := #(1, 2) asList\n    r := {value}\n    #[r, t]\n"
+    )
 }
 
 /// One corpus cell: its `go:` method, and whether withholding the BT-4287 registration must

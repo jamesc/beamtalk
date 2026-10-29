@@ -1706,6 +1706,17 @@ impl CoreErlangGenerator {
     /// not understand 'plusFromNumber:'`) and the `State` it advanced was
     /// dropped (`ConstructCarrierInPlace`). `site` comes from
     /// `loop_body_producer_sites`, which answers each site without parentheses.
+    ///
+    /// The invariant, for every scope kind of an actor instance method: a
+    /// construct that compiles to a `{Value, State}` carrier at a sequenced
+    /// operand site of a frame's statement is a registered producer site of
+    /// that frame. The method root registers its `sequenced_operand_sites`;
+    /// every frame body (a fold or letrec loop body, a producer's or a plain
+    /// arm, an evaluated block, a Tier 2 block body) registers its
+    /// `body_producer_site_exprs`, which this predicate completes under a fold
+    /// frame, and checks them with `verify_producer_sites_threaded`. The REPL
+    /// has its own rule (its producers adopt the bindings map), and class and
+    /// value-type methods thread no `State`.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
         self.in_actor_instance_context()
             && !self.is_repl_mode()

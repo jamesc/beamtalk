@@ -2968,6 +2968,11 @@ impl LoopBodyContext {
 /// (`#[xs do: [...], t]`, `(xs do: [...]) printString`) wrote nothing back or
 /// crashed, so operands are out under *any* enclosing fold frame. A letrec
 /// loop frame alone lowers every value-bearing site.
+///
+/// This exclusion is about producers that rebind *outer locals*. A loop or
+/// fold that writes none but threads the actor's `State` (its block sends to
+/// `self` or writes a field) is a producer at these sites all the same:
+/// codegen registers it (`is_family_only_fold_value_site`, BT-4287).
 #[must_use]
 pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
     if !ctx.in_actor || !is_value_bearing_site(ctx.statement, site) {

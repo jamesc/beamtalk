@@ -114,6 +114,7 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4003ResidualsActor spawn detectArgInSelect equals: #(#(1, 2, 3), 6)
     self assert: Bt4003ResidualsActor spawn countedLoopReceiverInDo equals: 4
     self assert: Bt4003ResidualsActor spawn injectInCascadeInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectOperandInLocalThreadingDo equals: #(13, 4)
 
   testClassStateFoldAsAnOperandInAFoldBody =>
     self assert: Bt4003ResidualsClass injectOperandInDo equals: 4

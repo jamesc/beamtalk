@@ -148,6 +148,11 @@ Actor subclass: Bt4003ResidualsActor
     #(1, 2) do: [:x | (1 to: 2 do: [:i | self bump]) isNil]
     self.n
 
+  injectOperandInLocalThreadingDo =>
+    t := 0
+    #(1, 2) do: [:x | t := t + x + (self.items inject: 0 into: [:b :y | b + self bump])]
+    #(t, self.n)
+
   injectInCascadeInDo =>
     #(1, 2) do: [:x | (self.items inject: 0 into: [:b :y | b + self bump]) printString; yourself]
     self.n
