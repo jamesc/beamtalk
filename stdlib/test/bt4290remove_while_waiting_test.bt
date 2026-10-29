@@ -17,6 +17,16 @@ TestCase subclass: Bt4290RemoveWhileWaitingTest
       self assert: instance isAlive
     ] ensure: [instance isAlive ifTrue: [instance stop]]
 
+  // The cycle runs through a second class: Target waits on Relay, Relay on
+  // Runner, and the block runs in Runner.
+  testRemoveOfAClassWaitingThroughAnotherClassTimesOut =>
+    instance := Bt4290Target spawn
+    [
+      self should: [Bt4290Target removeViaRelay] raise: #timeout
+      self assert: Bt4290Target name equals: #Bt4290Target
+      self assert: instance isAlive
+    ] ensure: [instance isAlive ifTrue: [instance stop]]
+
   testRenameOfAClassWaitingOnTheCallerTimesOut =>
     self should: [Bt4290Target renameViaRunner] raise: #timeout
     self assert: Bt4290Target name equals: #Bt4290Target

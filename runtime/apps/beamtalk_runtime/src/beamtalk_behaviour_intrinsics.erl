@@ -1103,32 +1103,53 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% BT-4290: `removeFromSystem` and `renameTo:` end in `gen_server:stop/1`,
 %% whose timeout is `infinity`. When the class process is itself blocked
 %% waiting on the caller, which `refuse_in_own_class_process/2` cannot see
-%% (a block from one of its class methods, running inside another class's
-%% class method, sends to it), the stop never returns. A process blocked in
-%% `gen_server:call/3` monitors the process it waits on, so a class that
-%% monitors the caller may be in that cycle: ask it to answer first, bounded,
-%% before any side effect, and raise a structured `timeout` if it does not.
-%% A class that is merely busy (a long class method) does not monitor the
+%% (a block from one of its class methods, run by another class or actor
+%% while the class waits on it, sends to it), the stop never returns. A
+%% process blocked in `gen_server:call/3` sits in `gen:do_call/4` and
+%% monitors the process it waits on, so follow that wait chain from the
+%% class, through any number of hops; if it reaches the caller, ask the
+%% class to answer, bounded, before any side effect, and raise a structured
+%% `timeout` if it does not (the probe guards against a monitor held for
+%% another reason). A class that is merely busy is not waiting on the
 %% caller, so removal waits for it as before. `doc:` and the other
 %% primitives that message the class use a bounded `gen_server:call/2`
 %% before any side effect, so they already fail rather than hang.
 -define(CLASS_RESPONSIVE_TIMEOUT, 5000).
+-define(WAIT_CHAIN_MAX_DEPTH, 32).
 
 -spec require_class_responsive(pid(), atom(), atom()) -> ok.
 require_class_responsive(ClassPid, ClassName, Selector) ->
-    case monitors_caller(ClassPid) of
+    case waits_on(ClassPid, self(), ?WAIT_CHAIN_MAX_DEPTH, #{ClassPid => true}) of
         false -> ok;
         true -> probe_class(ClassPid, ClassName, Selector)
     end.
 
--spec monitors_caller(pid()) -> boolean().
-monitors_caller(ClassPid) when node(ClassPid) =:= node() ->
-    case erlang:process_info(ClassPid, monitors) of
-        {monitors, Monitors} -> lists:member({process, self()}, Monitors);
-        undefined -> false
+%% Whether `Pid` is blocked in a `gen_server:call/3` chain that reaches
+%% `Target`. Local processes only; bounded by depth and a visited set.
+-spec waits_on(pid(), pid(), non_neg_integer(), #{pid() => true}) -> boolean().
+waits_on(_Pid, _Target, 0, _Seen) ->
+    false;
+waits_on(Pid, Target, Depth, Seen) ->
+    Callees = callees(Pid),
+    lists:member(Target, Callees) orelse
+        lists:any(
+            fun(Callee) ->
+                not maps:is_key(Callee, Seen) andalso
+                    waits_on(Callee, Target, Depth - 1, Seen#{Callee => true})
+            end,
+            Callees
+        ).
+
+-spec callees(pid()) -> [pid()].
+callees(Pid) when node(Pid) =:= node() ->
+    case erlang:process_info(Pid, [current_function, monitors]) of
+        [{current_function, {gen, do_call, 4}}, {monitors, Monitors}] ->
+            [Callee || {process, Callee} <- Monitors, is_pid(Callee)];
+        _ ->
+            []
     end;
-monitors_caller(_ClassPid) ->
-    false.
+callees(_Pid) ->
+    [].
 
 -spec probe_class(pid(), atom(), atom()) -> ok.
 probe_class(ClassPid, ClassName, Selector) ->

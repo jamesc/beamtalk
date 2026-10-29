@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4290: a second class process between the waiting class and the block,
+// so the wait cycle is three processes long.
+
+Object subclass: Bt4290Relay
+
+  class run: blk => Bt4290Runner run: blk
