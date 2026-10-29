@@ -1704,14 +1704,14 @@ impl CoreErlangGenerator {
     /// `State` `Bind` land in that frame's body, and its value is element 1.
     /// Compiled in place instead, the carrier became the operand (`Tuple does
     /// not understand 'plusFromNumber:'`) and the `State` it advanced was
-    /// dropped (`ConstructCarrierInPlace`).
+    /// dropped (`ConstructCarrierInPlace`). `site` comes from
+    /// `loop_body_producer_sites`, which answers each site without parentheses.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
-        let inner = site.unwrap_parens();
         self.in_actor_instance_context()
             && !self.is_repl_mode()
-            && beamtalk_core::semantic_analysis::block_facts::producer_body_block(inner).is_some()
+            && beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
             && self
-                .producer_locals_at_site(inner)
+                .producer_locals_at_site(site)
                 .is_some_and(|locals| locals.is_empty())
     }
 
