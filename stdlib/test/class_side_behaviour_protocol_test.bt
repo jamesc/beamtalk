@@ -83,12 +83,19 @@ TestCase subclass: ClassSideBehaviourProtocolTest
   testSealedDirectCalledClassMethodSuperNameInClosure =>
     self assert: Bt4252ClassProtocolSealed superNameInClosure equals: #(#Bt4252ClassProtocolSealed)
 
-  // PIN-BUG BT-4262: `doc`'s primitive `gen_server:call`s the class process,
-  // which cannot answer from inside one of its own class methods, so this
-  // raises (wrapping the `calling_self` exit) instead of answering
-  // `Bt4252ClassProtocolActorChild doc`. BT-4262 flips it.
-  testActorClassMethodSelfDocInClassProcessPinBug =>
-    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #runtime_error
+  // `doc`'s primitive `gen_server:call`s the class process, which cannot
+  // answer from inside one of its own class methods: a structured
+  // `dispatch_error` naming the send (like any send back to the running
+  // class), not a raw `calling_self` exit. BT-4262 tracks making it answer.
+  testActorClassMethodSelfDocInClassProcessRaisesDispatchError =>
+    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #dispatch_error
+    selector := [
+      Bt4252ClassProtocolActorChild selfDoc
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #doc
+
+  testObjectClassMethodSelfDocInClassProcessRaisesDispatchError =>
+    self should: [Bt4252ClassProtocolObjectChild selfDoc] raise: #dispatch_error
 
   testSealedDirectCalledClassMethodSelfDoc =>
     self assert: Bt4252ClassProtocolSealed selfDoc equals: Bt4252ClassProtocolSealed doc

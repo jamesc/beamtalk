@@ -540,7 +540,8 @@ process or (a direct-called sealed method, ADR 0129) in the caller. The
 `beamtalk_object_class:*_safe/1` readers, so running in the class's own
 process does not self-call its gen_server; a protocol method that does
 message the receiving class (`doc`) or sends to it from a Beamtalk body
-(`printString`) cannot answer from inside that process yet (BT-4262). Raises the structured
+(`printString`) cannot answer from inside that process yet: it raises the
+structured `dispatch_error` of `handle_class_self_call/1` (BT-4262). Raises the structured
 `does_not_understand` when `Class` does not understand `Selector` either.
 """.
 -spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
@@ -560,11 +561,40 @@ class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
                 class_mod = self_dispatch_module(ReceiverName),
                 pid = ReceiverPid
             },
-            case try_class_chain_fallthrough(ClassSelf, Selector, Args) of
+            try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
                 not_found -> raise_class_self_dnu(ClassName, Selector)
+            catch
+                %% A protocol method that messages the receiving class (`doc`'s
+                %% `gen_server:call(ClassPid, get_doc)`, or a Beamtalk body
+                %% whose send reaches a raw call) cannot answer from inside that
+                %% class's own process. The `calling_self` exit reaches here
+                %% either raw or already wrapped by the method dispatch (as a
+                %% `runtime_error` carrying it under `details.reason`); report
+                %% it as the structured `dispatch_error` every other send back
+                %% to the running class raises (`handle_class_self_call/1`).
+                %% Anything else propagates unchanged.
+                exit:{calling_self, _} when ReceiverPid =:= self() ->
+                    handle_class_self_call(Selector);
+                error:Wrapped:Stack when ReceiverPid =:= self() ->
+                    case is_calling_self_error(Wrapped) of
+                        true -> handle_class_self_call(Selector);
+                        false -> erlang:raise(error, Wrapped, Stack)
+                    end
             end
     end.
+
+%% A `calling_self` exit as the method dispatch re-raises it: a wrapped
+%% exception map or a bare `#beamtalk_error{}` whose `details.reason` is the
+%% caught `{calling_self, _}` term (`beamtalk_exception_handler:wrap_raw/2`
+%% and the exit clause of `ensure_wrapped/3` both record it there).
+-spec is_calling_self_error(term()) -> boolean().
+is_calling_self_error(#{error := #beamtalk_error{} = Error}) ->
+    is_calling_self_error(Error);
+is_calling_self_error(#beamtalk_error{details = #{reason := {calling_self, _}}}) ->
+    true;
+is_calling_self_error(_) ->
+    false.
 
 -doc """
 ADR 0084: Dispatch a class-method self-send that may resolve to the
