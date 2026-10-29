@@ -1777,7 +1777,12 @@ impl CoreErlangGenerator {
     /// misses the sends whose class only codegen decides, such as a loop or
     /// evaluated literal block that carries nothing and so becomes a runtime
     /// call with its blocks as closures ([`SendUserCode::LoopOrClosureCall`]).
+    ///
+    /// A probe, not a decision: it runs before the loop's body context is set
+    /// up, so the per-send class [`Self::classify_inlined`] caches (for the
+    /// window, the gap note and the lowering to agree on) is left as it was.
     pub(in crate::core_erlang) fn expr_holds_bracketed_call(&self, expr: &Expression) -> bool {
+        let cached = self.synced.inlined_classes.borrow().clone();
         let mut found = false;
         beamtalk_core::ast_walker::walk_sends(expr, &mut |send| {
             found = found
@@ -1786,6 +1791,7 @@ impl CoreErlangGenerator {
                     UserCodeCall::Yes | UserCodeCall::SelfViaDefaultArm
                 );
         });
+        *self.synced.inlined_classes.borrow_mut() = cached;
         found
     }
 

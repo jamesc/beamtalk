@@ -1056,8 +1056,15 @@ const STATELESS_OUTER_LOOPS: &[&str] = &[
     "1 to: 5 by: 2 do: [:i | acc := acc + x. INNER]",
     "3 timesRepeat: [acc := acc + x. INNER]",
     "[acc < 3] whileTrue: [acc := acc + x. INNER]",
+    "[acc > 3] whileFalse: [acc := acc + x. INNER]",
     "xs do: [:e | acc := acc + e. INNER]",
     "xs collect: [:e | acc := acc + e. INNER]",
+    "xs select: [:e | acc := acc + e. INNER. true]",
+    "xs inject: 0 into: [:a :e | acc := acc + e. INNER. a]",
+    // A body that also writes a field (a hybrid candidate).
+    "1 to: 3 do: [:i | self.n := i. acc := acc + i. INNER]",
+    // The inner call in a conditional arm of the outer body.
+    "1 to: 3 do: [:i | acc := acc + x. (x == 0) ifTrue: [INNER]]",
 ];
 
 /// BT-4255: a loop or evaluated literal block that carries nothing, so it
@@ -1069,6 +1076,9 @@ const NON_CARRIED_INNER: &[&str] = &[
     "[:j | BODY] value: 1",
     "[BODY] value",
     "#(1, 2) do: [:j | BODY]",
+    "[x > 5] whileTrue: [BODY]",
+    // An evaluated block whose value is bound (a producer site).
+    "u := [BODY] value",
 ];
 
 /// BT-4255: inner bodies that touch the actor's state (a field read, a
@@ -1105,7 +1115,34 @@ fn non_carried_loop_nested_in_a_stateless_loop_is_bracketed() {
             }
         }
     }
-    assert_eq!(cases, 210, "the corpus covers every nesting");
+    assert_eq!(
+        cases,
+        STATELESS_OUTER_LOOPS.len() * NON_CARRIED_INNER.len() * STATE_TOUCHING_BODIES.len(),
+        "the corpus covers every nesting"
+    );
+    assert!(reports.is_empty(), "{}", reports.join("\n"));
+}
+
+#[test]
+fn non_carried_loop_in_a_while_condition_is_bracketed() {
+    // BT-4255: the gate also asks about the condition of a `whileTrue:` /
+    // `whileFalse:` that could drop its `State`.
+    let mut reports = Vec::new();
+    for inner in NON_CARRIED_INNER {
+        for body in STATE_TOUCHING_BODIES {
+            let inner = inner.replace("BODY", body);
+            for stmt in [
+                format!("[{inner}. acc < 3] whileTrue: [acc := acc + x]"),
+                format!("[{inner}. acc > 3] whileFalse: [acc := acc + x]"),
+            ] {
+                let src =
+                    format!("{ACTOR_PREAMBLE}  run: x =>\n    acc := 0.\n    {stmt}.\n    acc\n");
+                if let Some(report) = enforce_report(&src) {
+                    reports.push(format!("{stmt}\n  {report}"));
+                }
+            }
+        }
+    }
     assert!(reports.is_empty(), "{}", reports.join("\n"));
 }
 
