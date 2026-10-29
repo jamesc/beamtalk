@@ -360,6 +360,15 @@ side, main → PR. Rows not listed did not move.
   Non-FFI rows match the same base run-for-run; multi-process rows (3b, 3c,
   7a, 7b, 8b) wobble a few words between run configurations with or without
   this change.
+- **BT-4221 (#4649)** adds row 12c (`s isKindOf: String`, a built-in class)
+  and memoises the `isKindOf:` decision for instance receivers under
+  `{is_kind_of, Class, Behaviour}` in the derived cache (7 rounds, idle
+  machine, `results/bench-bt4221-before.md`, `results/bench-bt4221-after.md`).
+  Beamtalk side, before → after: 12b 74.1 red / 108 w → **52.2 / 67**;
+  12c 93.1 / 111 → **71.2 / 70**. Time barely moves (12c 2.95 µs → 2.82 µs,
+  within noise): what is left is not the decision but the `String` class
+  reference built per use and the inherited-method walk to `Object>>isKindOf:`
+  (BT-4260).
 - **BT-4115 (#4654)** moves a class-literal `Error signal:` out of the Error
   class process into the caller, stops logging a relayed signal at error
   level, and builds the stack frames only when `e stackTrace` reads them
