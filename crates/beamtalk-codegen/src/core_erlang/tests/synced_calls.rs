@@ -237,3 +237,26 @@ fn a_bracketed_method_stores_its_final_state_on_exit() {
     assert!(!without.contains("_ExitReply"), "{without}");
     super::assert_compiles_through_erlc("test", &with);
 }
+
+#[test]
+fn a_send_as_a_match_scrutinee_after_a_field_write_is_bracketed() {
+    // BT-4136 (fixed by BT-4018's match `SyncedCall` bracket): catalina's
+    // `Handler>>handleContinuation:` reported `result kind` as an
+    // `UnbracketedUserCodeSend`. Debug assertions are on, so a verifier
+    // finding panics here. The sealed-typed receiver of the original report
+    // is pinned in `typed_sealed.rs`.
+    let code = super::codegen(concat!(
+        "Server subclass: Handler\n",
+        "  state: userState :: Object = nil\n\n",
+        "  handleContinuation: result =>\n",
+        "    self.userState := result state\n",
+        "    result kind match: [\n",
+        "      #continue -> self continueReading: result;\n",
+        "      _ -> self failWith: result reason\n",
+        "    ]\n",
+        "    nil\n\n",
+        "  continueReading: result -> Nil => nil\n\n",
+        "  failWith: reason -> Nil => nil\n",
+    ));
+    super::assert_compiles_through_erlc("test", &code);
+}
