@@ -54,7 +54,10 @@ a `Binary`, just as `<<A/bitstring, B/bitstring>>` does in Erlang.
 | `=:=`, `==`, `hash` | inherited structural equality |
 
 `Binary` gains `bitSize` (8 × its byte count; a `String` counts its UTF-8
-bytes), so `bitSize` works on either class.
+bytes), so `bitSize` works on either class. `Binary>>concat:` also accepts a
+`Bitstring` argument and answers the joined bits (a `Bitstring`), so
+concatenation works in both directions, as `<<A/binary, B/bitstring>>` does in
+Erlang.
 
 Everything else on `Binary`/`Collection` stays bytes-only and is
 **deliberately not understood** by `Bitstring`: `size`, `do:`, `at:`,
@@ -179,12 +182,16 @@ send path.
   from `concat:`, or from Erlang.
 
 ### Neutral
-- `Binary` gains `bitSize`; nothing else on `Binary` changes.
+- `Binary` gains `bitSize`, and `Binary>>concat:` accepts a `Bitstring`
+  argument; nothing else on `Binary` changes.
 
 ## Implementation
 
 - Runtime: `beamtalk_primitive` — `class_of/1`, `module_for_value/1`,
-  `print_string/1`, `display_string/1`, and the `send/3` bitstring arm.
+  `print_string/1`, `display_string/1`, and the `send/3` bitstring arm;
+  `beamtalk_reflection`'s field operations are total on non-map values
+  (`fieldNames` answers `[]`, `fieldAt:` raises `immutable_value`);
+  `beamtalk_repl_json:term_to_json/1` renders a Bitstring on one line.
 - Stdlib: `stdlib/src/bitstring.bt` + `beamtalk_bitstring.erl`;
   `Binary>>bitSize` (`beamtalk_binary:bitSize/1`).
 - Codegen: `TYPE_TESTS` entry `Bitstring`; `NON_TAGGED_MAP_CLASSES` entry.

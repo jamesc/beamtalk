@@ -106,6 +106,28 @@ TestCase subclass: BitstringTest
     // (BT-4264).
     self assert: (self tail perform: #fieldNames) equals: #()
 
+  testFieldAccessOnABitstringIsStructured =>
+    // No fields: a dynamic fieldAt: raises the same structured
+    // immutable_value as a primitive class, never a raw function_clause.
+    self should: [self tail perform: #fieldAt: with: #x] raise: #immutable_value
+    self deny: (self tail perform: #hasField: with: #x)
+
+  testBinaryConcatABitstringAnswersABitstring =>
+    // ADR 0141: concatenation works in both directions, as in Erlang.
+    joined := (Binary fromBytes: #(255)) concat: self tail
+    self assert: joined class equals: Bitstring
+    self assert: joined bitSize equals: 13
+    self assert: joined toBits equals: #(1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0)
+
+  testStringConcatABitstringJoinsItsBytes =>
+    joined := "A" concat: self tail
+    self assert: joined class equals: Bitstring
+    self assert: joined toBits equals: #(0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0)
+
+  testBinaryConcatABinaryStaysABinary =>
+    joined := (Binary fromBytes: #(1)) concat: (Binary fromBytes: #(2))
+    self assert: joined class equals: Binary
+
   testEquality =>
     self assert: self tail =:= self tail
     self assert: self tail == self tail

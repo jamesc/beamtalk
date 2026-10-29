@@ -42,3 +42,24 @@ as_binary_is_unaligned_error_test() ->
 print_string_test() ->
     ?assertEqual({beamtalk_string, <<"<<2:3>>">>}, beamtalk_bitstring:printString(<<2:3>>)),
     ?assertEqual({beamtalk_string, <<"<<2:3>>">>}, beamtalk_bitstring:displayString(<<2:3>>)).
+
+binary_concat_bitstring_test() ->
+    ?assertEqual(<<255, 2:3>>, beamtalk_binary:concat(<<255>>, <<2:3>>)),
+    ?assertEqual(<<"A", 2:3>>, beamtalk_binary:concat({beamtalk_string, <<"A">>}, <<2:3>>)).
+
+reflection_on_a_bitstring_test() ->
+    ?assertEqual([], beamtalk_reflection:field_names(<<2:3>>)),
+    ?assertEqual(false, beamtalk_reflection:has_field(x, <<2:3>>)),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value, class = 'Bitstring'}},
+        beamtalk_reflection:read_field(x, <<2:3>>)
+    ),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value}},
+        beamtalk_reflection:write_field(x, 1, <<2:3>>)
+    ),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value}},
+        beamtalk_reflection:clear_field(x, <<2:3>>)
+    ),
+    ?assertEqual(<<"<<2:3>>">>, beamtalk_reflection:inspect_string(<<2:3>>)).

@@ -253,6 +253,13 @@ term_to_json_whole_float_test() ->
 term_to_json_negative_float_test() ->
     ?assertEqual(<<"-2.5">>, beamtalk_repl_json:term_to_json(-2.5)).
 
+%% ADR 0141: an unaligned Bitstring renders in Erlang notation, on one line
+%% however long (not the multi-line `~p` fallback).
+term_to_json_bitstring_test() ->
+    ?assertEqual(<<"<<2:3>>">>, beamtalk_repl_json:term_to_json(<<2:3>>)),
+    Long = beamtalk_repl_json:term_to_json(<<0:(8 * 100), 1:1>>),
+    ?assertEqual(nomatch, binary:match(Long, <<"\n">>)).
+
 term_to_json_boolean_test() ->
     ?assertEqual(true, beamtalk_repl_json:term_to_json(true)),
     ?assertEqual(false, beamtalk_repl_json:term_to_json(false)).

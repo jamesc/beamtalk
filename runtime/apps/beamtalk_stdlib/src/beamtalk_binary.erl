@@ -346,22 +346,25 @@ part(_Bin, _Pos, _Len) ->
     raise_type_error(part, <<"Position and length must be Integers">>).
 
 -doc """
-Concatenate two binaries.
+Concatenate two binaries, or a binary and a bitstring.
 
 BT-4170: either side may be a tagged `String` (`String` is a `Binary`
-of its UTF-8 bytes); the result is always a bare `Binary`.
+of its UTF-8 bytes); the result is a bare `Binary`. ADR 0141: the
+argument may also be an unaligned `Bitstring`, and then the answer is
+the joined bits, a `Bitstring` — the class follows the shape, as in
+Erlang and as `Bitstring>>concat:` answers.
 """.
--spec concat(binary_or_string(), binary_or_string()) -> binary().
+-spec concat(binary_or_string(), binary_or_string() | bitstring()) -> bitstring().
 concat({beamtalk_string, RawA}, B) when is_binary(RawA) ->
     concat(RawA, B);
 concat(A, {beamtalk_string, RawB}) when is_binary(A), is_binary(RawB) ->
     concat(A, RawB);
-concat(A, B) when is_binary(A), is_binary(B) ->
-    <<A/binary, B/binary>>;
+concat(A, B) when is_binary(A), is_bitstring(B) ->
+    <<A/binary, B/bitstring>>;
 concat(A, _B) when not is_binary(A) ->
     raise_type_error(concat, <<"Receiver must be a Binary">>);
 concat(_A, _B) ->
-    raise_type_error(concat, <<"Argument must be a Binary">>).
+    raise_type_error(concat, <<"Argument must be a Binary or Bitstring">>).
 
 -doc """
 Bit count of a binary: 8 times its byte count (ADR 0141). A `String`
