@@ -32,7 +32,7 @@
 //! [`hand_written_underscore_names_match_the_audit`] fails on a new one or a
 //! user name that reaches Core unmapped.
 
-use super::{assert_compiles_through_erlc, codegen, collect_source_files, repo_root};
+use super::{assert_compiles_through_erlc, codegen, corpus_files, repo_root};
 use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
 use std::collections::BTreeSet;
 
@@ -346,15 +346,15 @@ fn underscore_vars(core: &str) -> Vec<&str> {
 #[test]
 fn hand_written_underscore_names_match_the_audit() {
     let root = repo_root();
-    let mut files = Vec::new();
-    for dir in [
-        "stdlib/src",
-        "stdlib/test",
-        "stdlib/bootstrap-test",
-        "examples",
-    ] {
-        collect_source_files(&root.join(dir), &mut files);
-    }
+    let files = corpus_files(
+        &root,
+        &[
+            "stdlib/src",
+            "stdlib/test",
+            "stdlib/bootstrap-test",
+            "examples",
+        ],
+    );
     assert!(
         files.len() > 100,
         "expected hundreds of corpus files, found {} under {}",
