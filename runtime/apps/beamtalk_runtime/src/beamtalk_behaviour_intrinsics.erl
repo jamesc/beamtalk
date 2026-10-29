@@ -1104,15 +1104,34 @@ refuse_in_own_class_process(_ClassPid, _Selector) ->
 %% whose timeout is `infinity`. When the class process is itself blocked
 %% waiting on the caller, which `refuse_in_own_class_process/2` cannot see
 %% (a block from one of its class methods, running inside another class's
-%% class method, sends to it), the stop never returns. Ask the class to
-%% answer first, bounded, before any side effect, and raise a structured
-%% `timeout` if it does not. `doc:` and the other primitives that message
-%% the class use a bounded `gen_server:call/2` before any side effect, so
-%% they already fail rather than hang.
+%% class method, sends to it), the stop never returns. A process blocked in
+%% `gen_server:call/3` monitors the process it waits on, so a class that
+%% monitors the caller may be in that cycle: ask it to answer first, bounded,
+%% before any side effect, and raise a structured `timeout` if it does not.
+%% A class that is merely busy (a long class method) does not monitor the
+%% caller, so removal waits for it as before. `doc:` and the other
+%% primitives that message the class use a bounded `gen_server:call/2`
+%% before any side effect, so they already fail rather than hang.
 -define(CLASS_RESPONSIVE_TIMEOUT, 5000).
 
 -spec require_class_responsive(pid(), atom(), atom()) -> ok.
 require_class_responsive(ClassPid, ClassName, Selector) ->
+    case monitors_caller(ClassPid) of
+        false -> ok;
+        true -> probe_class(ClassPid, ClassName, Selector)
+    end.
+
+-spec monitors_caller(pid()) -> boolean().
+monitors_caller(ClassPid) when node(ClassPid) =:= node() ->
+    case erlang:process_info(ClassPid, monitors) of
+        {monitors, Monitors} -> lists:member({process, self()}, Monitors);
+        undefined -> false
+    end;
+monitors_caller(_ClassPid) ->
+    false.
+
+-spec probe_class(pid(), atom(), atom()) -> ok.
+probe_class(ClassPid, ClassName, Selector) ->
     try gen_server:call(ClassPid, class_name, ?CLASS_RESPONSIVE_TIMEOUT) of
         _ -> ok
     catch
@@ -1123,7 +1142,9 @@ require_class_responsive(ClassPid, ClassName, Selector) ->
                 iolist_to_binary([
                     <<"Class '">>,
                     atom_to_binary(ClassName, utf8),
-                    <<"' did not answer within 5 seconds; ">>,
+                    <<"' is waiting on this process and did not answer within ">>,
+                    integer_to_binary(?CLASS_RESPONSIVE_TIMEOUT div 1000),
+                    <<" seconds; ">>,
                     atom_to_binary(Selector, utf8),
                     <<" was not started and nothing was changed">>
                 ])
@@ -1132,9 +1153,8 @@ require_class_responsive(ClassPid, ClassName, Selector) ->
                 beamtalk_error:with_hint(
                     Error1,
                     <<
-                        "The class process is busy, or is waiting on this one: a block from one of "
-                        "its class methods, running inside another class's method, cannot "
-                        "change that class."
+                        "A block from one of its class methods, running inside another "
+                        "class's method, cannot change that class. Change it from outside."
                     >>
                 )
             )
