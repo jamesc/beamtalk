@@ -657,6 +657,8 @@ impl CoreErlangGenerator {
     /// Emits a `StateAcc` fallback diagnostic, gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
     ///
     /// Promoted to `Diagnostic::warning` when `BEAMTALK_WARN_STATEACC=1` is also set.
+    /// Either way tagged [`DiagnosticCategory::CodegenReport`], so the report
+    /// surfaces it alongside the optimized loop conventions.
     pub(in crate::core_erlang) fn emit_stateacc_fallback_diagnostic(
         &mut self,
         message: String,
@@ -667,13 +669,13 @@ impl CoreErlangGenerator {
                 self.add_codegen_warning(
                     Diagnostic::warning(message, span)
                         .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
-                        .with_category(DiagnosticCategory::Type),
+                        .with_category(DiagnosticCategory::CodegenReport),
                 );
             } else {
                 self.add_codegen_warning(
                     Diagnostic::hint(message, span)
                         .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
-                        .with_category(DiagnosticCategory::Type),
+                        .with_category(DiagnosticCategory::CodegenReport),
                 );
             }
         }

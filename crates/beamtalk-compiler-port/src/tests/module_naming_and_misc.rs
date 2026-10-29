@@ -429,7 +429,7 @@ fn with_verifier_warnings_drops_opt_in_codegen_hints() {
     // BT-4292: the dynamic-site report is a `beamtalk build` report; the
     // compiler port (REPL/MCP) keeps forwarding only verifier diagnostics.
     let hint = Diagnostic::hint("dynamic dispatch: foo", Span::new(0, 1))
-        .with_category(DiagnosticCategory::Type);
+        .with_category(DiagnosticCategory::CodegenReport);
     assert_eq!(
         crate::respond::with_verifier_warnings(&["existing".to_string()], &[hint]),
         vec!["existing".to_string()]

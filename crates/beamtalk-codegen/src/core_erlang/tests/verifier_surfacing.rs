@@ -92,3 +92,27 @@ fn codegen_hints_are_surfaced_only_on_request() {
     .unwrap();
     assert!(off.is_empty(), "{off:?}");
 }
+
+/// BT-4292: the `StateAcc` fallback line of the loop report is a codegen report
+/// hint too, surfaced next to the optimized-convention lines.
+#[test]
+fn stateacc_fallback_hint_is_surfaced_on_request() {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Actor subclass: Ctr\n",
+        "  state: n = 0\n\n",
+        "  tick => self.n := self.n + 1\n\n",
+        "  run =>\n",
+        "    x := 0\n",
+        "    [x < 10] whileTrue: [self tick. x := x + 1]\n",
+    ));
+    let module = beamtalk_core::source_analysis::parse(tokens).0;
+    let (_, on) = generate_module_surfacing_verifier(
+        &module,
+        CodegenOptions::new("probe").with_codegen_diagnostics(true),
+    )
+    .unwrap();
+    assert!(
+        on.iter().any(|d| d.message.contains("StateAcc fallback")),
+        "{on:?}"
+    );
+}
