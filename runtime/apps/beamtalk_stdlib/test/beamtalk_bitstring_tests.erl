@@ -53,7 +53,10 @@ reflection_on_a_bitstring_test() ->
     ?assertEqual([], beamtalk_reflection:field_names(<<2:3>>)),
     ?assertEqual(false, beamtalk_reflection:has_field(x, <<2:3>>)),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = immutable_value, class = 'Bitstring'}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = immutable_value, class = 'Bitstring'}
+        },
         beamtalk_reflection:read_field(x, <<2:3>>)
     ),
     ?assertError(
