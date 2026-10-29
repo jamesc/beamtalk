@@ -28,6 +28,7 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testInternalUndef/1,
     class_testRaise/1,
     class_testSignal/1,
+    class_testDnu/1,
     class_testScriptExit/1,
     class_testNlrThrow/1,
     class_testWriteThenRaise/1,
@@ -124,6 +125,15 @@ compiled `Error signal: "boom"` does (BT-4115).
 -spec class_testSignal(term()) -> no_return().
 class_testSignal(_ClassSelf) ->
     beamtalk_exception_handler:class_signal_message(<<"boom">>, 'Error').
+
+-doc """
+Zero-argument class method whose body hits a genuine runtime error: a send
+`nil` does not understand, as compiled `nil bt4115NoSuchSelector` does
+(BT-4115).
+""".
+-spec class_testDnu(term()) -> no_return().
+class_testDnu(_ClassSelf) ->
+    beamtalk_message_dispatch:send(nil, bt4115NoSuchSelector, []).
 
 -doc """
 Zero-argument class method that raises the connected `Program exit:` signal

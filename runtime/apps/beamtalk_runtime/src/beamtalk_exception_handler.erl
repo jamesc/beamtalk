@@ -66,6 +66,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     class_signal_message/2,
     class_signal_message_reason/3,
     class_signal_kind/4,
+    is_signal/1,
     kind_to_class/1,
     class_to_kind/1,
     classify_kind/1,
@@ -254,15 +255,19 @@ error's class field directly if it is a registered exception subclass
 (a user-defined error subclass).
 """.
 -spec wrap(#beamtalk_error{} | term()) -> map().
-wrap(#beamtalk_error{kind = Kind, class = ErrorClass} = Error) ->
-    Class =
-        case is_exception_class(ErrorClass) of
-            true -> ErrorClass;
-            false -> kind_to_class(Kind)
-        end,
-    #{'$beamtalk_class' => Class, error => Error};
+wrap(#beamtalk_error{} = Error) ->
+    #{'$beamtalk_class' => exception_class(Error), error => Error};
 wrap(Other) ->
     wrap_raw(Other).
+
+%% The `$beamtalk_class` a `#beamtalk_error{}` is wrapped as: its own class when
+%% that is an exception class, else the class for its kind.
+-spec exception_class(#beamtalk_error{}) -> atom().
+exception_class(#beamtalk_error{kind = Kind, class = ErrorClass}) ->
+    case is_exception_class(ErrorClass) of
+        true -> ErrorClass;
+        false -> kind_to_class(Kind)
+    end.
 
 -doc """
 Map a raw Erlang error reason to its Beamtalk error kind.
@@ -536,7 +541,8 @@ catch made a raise far more expensive than it needed to be.
 """.
 -spec ensure_wrapped(term(), list()) -> map().
 ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    Already#{raw_stacktrace => capture_stacktrace(Stacktrace)};
+    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
+    maps:remove(stacktrace, Already#{raw_stacktrace => capture_stacktrace(Stacktrace)});
 ensure_wrapped(Other, Stacktrace) ->
     Wrapped = wrap(Other),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
@@ -555,7 +561,10 @@ ExitError/ThrowError classes are used instead of RuntimeError.
 %% generic exit/throw clauses below); every branch that substitutes a Beamtalk
 %% exception for the caught term re-raises that exception as an `error`.
 ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    Already#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
+    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
+    maps:remove(stacktrace, Already#{
+        raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error
+    });
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
@@ -731,7 +740,7 @@ wrap_hint(Hint) when is_binary(Hint) ->
 
 -spec signal_instance(map()) -> no_return().
 signal_instance(#{error := Error}) ->
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_instance(#{'$beamtalk_class' := ClassName}) ->
     %% New exception instance (no error field yet) — create and raise
     signal_from_class(ClassName).
@@ -916,6 +925,36 @@ has_method('pass') -> true;
 has_method(_) -> false.
 
 -doc """
+Raise `Error` as a deliberate Beamtalk signal (BT-4115).
+
+The Exception signal API (`signal`, `signal:`, `signal:reason:`, class- and
+instance-side) raises through here. It wraps like `beamtalk_error:raise/1` and
+also sets the internal `'$beamtalk_signal'` marker, which `is_signal/1` tests.
+Errors raised by `beamtalk_error:raise/1` never carry it: runtime errors
+(does_not_understand, type_error, arity, FFI errors), and also `self error:`
+and `signalKind:class:selector:hint:`, which stdlib code uses for runtime
+errors such as index_out_of_bounds. So the marker tells a deliberate signal
+from a runtime failure whatever kind a caller chose.
+""".
+-spec raise_signal(#beamtalk_error{}) -> no_return().
+raise_signal(#beamtalk_error{} = Error) ->
+    %% Built in one step, not wrap/1 then an update, to allocate one map.
+    error(#{
+        '$beamtalk_class' => exception_class(Error),
+        error => Error,
+        '$beamtalk_signal' => true
+    }).
+
+-doc """
+Was this raised value a deliberate signal (`raise_signal/1`), rather than a
+runtime error or a raw Erlang crash? It is the one place that reads the
+marker `raise_signal/1` sets.
+""".
+-spec is_signal(term()) -> boolean().
+is_signal(#{'$beamtalk_signal' := true, error := #beamtalk_error{}}) -> true;
+is_signal(_) -> false.
+
+-doc """
 Raise an exception.
 
 Used internally for various error signaling scenarios.
@@ -923,7 +962,7 @@ Used internally for various error signaling scenarios.
 -spec signal(Kind :: atom()) -> no_return().
 signal(Kind) when is_atom(Kind) ->
     Error = beamtalk_error:new(Kind, 'Exception'),
-    beamtalk_error:raise(Error).
+    raise_signal(Error).
 
 -doc """
 Raise a new Error exception with the given message.
@@ -941,7 +980,7 @@ signal_message({beamtalk_string, _} = Message) ->
         hint = undefined,
         details = #{}
     },
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_message(Message) when is_binary(Message) ->
     signal_message(beamtalk_primitive:string_from_binary(Message));
 signal_message(Message) when is_atom(Message) ->
@@ -971,7 +1010,7 @@ signal_message({beamtalk_string, _} = Message, ExceptionClass, Details) ->
         hint = undefined,
         details = Details
     },
-    beamtalk_error:raise(Error);
+    raise_signal(Error);
 signal_message(Message, ExceptionClass, Details) when is_binary(Message) ->
     signal_message(beamtalk_primitive:string_from_binary(Message), ExceptionClass, Details);
 signal_message(Message, ExceptionClass, Details) when is_atom(Message) ->
@@ -995,7 +1034,7 @@ signal_from_class(ClassName) ->
         hint = undefined,
         details = #{}
     },
-    beamtalk_error:raise(Error).
+    raise_signal(Error).
 
 -doc """
 Class-side signal: raise an exception with message from a class object.
@@ -1063,4 +1102,7 @@ by which `Exception` subclass it was sent to.
 -spec class_signal_kind(atom(), atom(), atom(), {beamtalk_string, binary()} | binary()) ->
     no_return().
 class_signal_kind(Kind, Class, Selector, Hint) ->
+    %% Not raise_signal/1: stdlib collections use this for runtime errors
+    %% (index_out_of_bounds, empty_collection), which must keep an error-level
+    %% record when they escape a class method (BT-4115).
     beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).

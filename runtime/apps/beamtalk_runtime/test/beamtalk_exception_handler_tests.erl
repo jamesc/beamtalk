@@ -641,6 +641,38 @@ frames_falls_back_to_legacy_stacktrace_key_test() ->
     Ex = (make_test_exception())#{stacktrace => [frame1]},
     ?assertEqual([frame1], beamtalk_exception_handler:frames(Ex)).
 
+%% Re-wrapping a legacy exception replaces its `stacktrace` key with the raw
+%% capture, so the map has a single stacktrace source.
+ensure_wrapped_drops_legacy_stacktrace_key_test() ->
+    Legacy = (make_test_exception())#{stacktrace => [frame1]},
+    ST = [{m, f, 0, []}],
+    Two = beamtalk_exception_handler:ensure_wrapped(Legacy, ST),
+    Three = beamtalk_exception_handler:ensure_wrapped(error, Legacy, ST),
+    ?assertNot(is_map_key(stacktrace, Two)),
+    ?assertNot(is_map_key(stacktrace, Three)),
+    ?assertEqual(ST, maps:get(raw_stacktrace, Two)),
+    ?assertEqual(ST, maps:get(raw_stacktrace, Three)).
+
+%% Only the signal primitives mark a raise as a deliberate signal (BT-4115):
+%% a runtime error raised through beamtalk_error:raise/1 has the same wrapped
+%% shape but no marker.
+is_signal_only_for_signal_primitives_test() ->
+    Signalled =
+        try
+            beamtalk_exception_handler:class_signal_message(<<"boom">>, 'Error')
+        catch
+            error:S -> S
+        end,
+    Runtime =
+        try
+            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'UndefinedObject'))
+        catch
+            error:R -> R
+        end,
+    ?assert(beamtalk_exception_handler:is_signal(Signalled)),
+    ?assertNot(beamtalk_exception_handler:is_signal(Runtime)),
+    ?assertNot(beamtalk_exception_handler:is_signal(badarith)).
+
 frames_empty_when_nothing_captured_test() ->
     ?assertEqual([], beamtalk_exception_handler:frames(make_test_exception())).
 

@@ -3052,7 +3052,9 @@ relayed_class_method_raise_log_level_test_() ->
             {"caught Error signal: in a class method logs exactly one debug event",
                 fun test_relayed_signal_not_logged_at_error/0},
             {"a raw Erlang crash in a class method still logs at error",
-                fun test_relayed_raw_error_logged_at_error/0}
+                fun test_relayed_raw_error_logged_at_error/0},
+            {"a does_not_understand in a class method still logs at error",
+                fun test_relayed_dnu_logged_at_error/0}
         ]
     end}.
 
@@ -3068,6 +3070,17 @@ test_relayed_signal_not_logged_at_error() ->
 test_relayed_raw_error_logged_at_error() ->
     Events = relay_log_events('BT4115RaiseLogClass', testRaise, fun(Pid) ->
         ?assertError(_, beamtalk_class_dispatch:class_send(Pid, testRaise, []))
+    end),
+    ?assertMatch([#{level := error, meta := #{stacktrace := [_ | _]}}], Events).
+
+test_relayed_dnu_logged_at_error() ->
+    %% A runtime error has the same wrapped exception shape as a signal, but
+    %% no signal marker: it must keep its error-level, class-side record.
+    Events = relay_log_events('BT4115DnuLogClass', testDnu, fun(Pid) ->
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_class_dispatch:class_send(Pid, testDnu, [])
+        )
     end),
     ?assertMatch([#{level := error, meta := #{stacktrace := [_ | _]}}], Events).
 

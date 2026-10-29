@@ -1281,8 +1281,9 @@ Log a class method's raise before it is relayed to the caller as
 A deliberate Beamtalk signal (`is_beamtalk_signal/2`) is logged at debug: the
 calling process re-raises it and owns reporting it, and `?LOG_DEBUG`'s level
 check skips building an event for every caught `Error signal:`. Anything else
-(badarith, badmatch, function_clause, a failed FFI call, a raw throw or exit)
-is a crash inside the class method and is logged at error with its
+(a runtime error such as does_not_understand or type_error, badarith,
+badmatch, function_clause, a failed FFI call, a raw throw or exit) is a failure
+inside the class method and is logged at error with its
 stacktrace: the relay re-raises with the caller's stacktrace, so this event is
 the only record of where in the class method it failed.
 """.
@@ -1317,13 +1318,14 @@ log_relayed_raise(Format, ClassName, Selector, ErrClass, Error, ErrST) ->
     ok.
 
 -doc """
-Is this raise a deliberate Beamtalk signal? Every Beamtalk exception
-(`signal:`, `signal`, and runtime errors raised through
-`beamtalk_error:raise/1`) is raised as `error` with the wrapped
-`#{'$beamtalk_class' := _, error := #beamtalk_error{}}` exception object.
+Is this raise a deliberate Beamtalk signal? Only an `error` carrying the marker
+set by `beamtalk_exception_handler:raise_signal/1` (see
+`beamtalk_exception_handler:is_signal/1`) counts. A runtime error such as
+does_not_understand or type_error has the same wrapped exception shape but no
+marker, so it logs at error.
 """.
 -spec is_beamtalk_signal(atom(), term()) -> boolean().
-is_beamtalk_signal(error, #{'$beamtalk_class' := _, error := #beamtalk_error{}}) -> true;
+is_beamtalk_signal(error, Error) -> beamtalk_exception_handler:is_signal(Error);
 is_beamtalk_signal(_ErrClass, _Error) -> false.
 
 -spec classify_undef(class_name(), class_name(), atom(), selector(), atom(), list()) ->
