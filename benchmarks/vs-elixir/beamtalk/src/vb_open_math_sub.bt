@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// A stateless open subclass: `double:` is inherited from VbOpenMath (row 3e,
+// BT-4298).
+VbOpenMath subclass: VbOpenMathSub

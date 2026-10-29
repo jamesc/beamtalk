@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4298: a sealed, stateless class. `triple:` is `class sealed` (ADR 0129
+// Phase 0b: direct-called in the caller today); `double:` is not, so today
+// it runs in the class process (vs-elixir row 3b's shape). `startLink` and
+// `startLink:` are process-bound selectors (ADR 0142 §1, rule 3): never
+// direct-called, even though the class and the methods are sealed, so they
+// answer the pid of the class process, not the caller's.
+
+sealed Object subclass: GuardedDiffClassSealed
+
+  class double: n :: Integer -> Integer => n * 2
+
+  class sealed triple: n :: Integer -> Integer => n * 3
+
+  class sealed startLink -> Pid => Pid current
+
+  class sealed startLink: tag :: Symbol -> List => #(tag, Pid current)
