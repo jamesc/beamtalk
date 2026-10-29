@@ -1,0 +1,4 @@
+{
+  "description": "BT-4273: the immutable_value hint a user-defined Value raises for fieldAt:put: (and clearField:). Pinned on the Rust side by crates/beamtalk-codegen/src/core_erlang/tests/value_immutable_slot_hint_conformance.rs (errors::VALUE_IMMUTABLE_SLOT_HINT and the emitted intrinsic/dispatch arms) and on the Erlang side by beamtalk_primitive_tests:value_type_field_at_put_hint_matches_shared_fixture_test/0 (beamtalk_primitive:is_ivar_method/1).",
+  "hint": "Cannot modify slot on value type — use withSlot: to create a new instance"
+}

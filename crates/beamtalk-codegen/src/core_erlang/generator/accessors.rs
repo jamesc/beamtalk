@@ -322,6 +322,9 @@ impl CoreErlangGenerator {
 
     /// BT-4151: whether `class_name` is declared by more than one package in
     /// this generation's scope, so its runtime class is a last-wins collision.
+    /// THE predicate every codegen path that would pin a compile-time module
+    /// for a class consults before doing so (BT-4271); see the
+    /// `shadowed_class_names` field doc for the paths that read it.
     pub(in crate::core_erlang) fn is_shadowed_class(&self, class_name: &str) -> bool {
         self.class_context
             .as_ref()

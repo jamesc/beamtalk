@@ -1363,10 +1363,15 @@ return new instances rather than mutating in place.
 
 `fieldAt:` is intentionally NOT blocked here: user-defined value objects store
 their slots in the underlying map and support read-only reflection.
+
+The hint is the same text the compiled paths emit (the `fieldAt:put:`
+intrinsic and every Value `dispatch/3` arm, from the Rust
+`errors::VALUE_IMMUTABLE_SLOT_HINT`). Both sides are pinned to
+`test/fixtures/value_immutable_slot_hint_conformance.json` (BT-4273).
 """.
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('fieldAt:put:') ->
-    {true, <<"Cannot modify slot on value type; use withSlot: to create a new instance">>};
+    {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance"/utf8>>};
 is_ivar_method(_) ->
     false.
 

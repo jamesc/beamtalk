@@ -22,6 +22,24 @@ use beamtalk_cerl_doc::leaf;
 
 use super::CoreErlangGenerator;
 
+/// The `immutable_value` hint a user-defined Value raises for an in-place
+/// slot write (`fieldAt:put:`, `clearField:`) — the one source for both
+/// compiled paths: the `fieldAt:put:` object-reflection intrinsic
+/// (`intrinsics.rs`) and every generated Value `dispatch/3` arm
+/// (`value_type_codegen.rs`).
+///
+/// The runtime's dynamic path (`beamtalk_primitive:is_ivar_method/1`, hit by
+/// `beamtalk_message_dispatch:send/3` and any non-intrinsic send) raises the
+/// same hint from Erlang. That copy sits across the Rust/Erlang boundary, so
+/// both sides are pinned to the shared fixture
+/// `runtime/apps/beamtalk_runtime/test/fixtures/value_immutable_slot_hint_conformance.json`
+/// (BT-4273): `core_erlang::tests::value_immutable_slot_hint_conformance`
+/// (Rust, including the emitted Core Erlang) and
+/// `beamtalk_primitive_tests:value_type_field_at_put_hint_matches_shared_fixture_test/0`
+/// (Erlang).
+pub(super) const VALUE_IMMUTABLE_SLOT_HINT: &str =
+    "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance";
+
 /// Builds the `let Err0 = call 'beamtalk_error':'new'(Kind, Class) in <sep>
 /// let Err1 = call 'beamtalk_error':'with_selector'(Err0, Selector) in <sep>
 /// let Err2 = call 'beamtalk_error':'with_hint'(Err1, Hint) in <sep>` chain
