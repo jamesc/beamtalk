@@ -21,6 +21,7 @@
             #{name => 'Binary', module => 'bt@stdlib@binary', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
             #{name => 'BindingChanged', module => 'bt@stdlib@binding_changed', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
             #{name => 'BindingsView', module => 'bt@stdlib@bindings_view', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Bitstring', module => 'bt@stdlib@bitstring', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Block', module => 'bt@stdlib@block', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Boolean', module => 'bt@stdlib@boolean', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'ChangeEntry', module => 'bt@stdlib@change_entry', parent => 'Value', package => 'stdlib', kind => value, type_params => []},

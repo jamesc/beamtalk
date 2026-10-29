@@ -141,6 +141,19 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   size -> Integer => @primitive no_user_code
 
+  /// Return the bit count of this binary: 8 times its byte count.
+  ///
+  /// `Bitstring>>bitSize` answers the same for an unaligned value, so
+  /// `bitSize` works on either class (ADR 0141). On a `String` it counts
+  /// the UTF-8 bytes' bits, not graphemes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(1, 2)) bitSize   // => 16
+  /// "é" bitSize                            // => 16
+  /// ```
+  bitSize -> Integer => self delegate
+
   // Left as bare `Block` (not `Block(Integer, Object)`): String subclasses
   // Binary but overrides `do:` with grapheme-String elements, not bytes.
   // Parameterizing here would make String's override param type

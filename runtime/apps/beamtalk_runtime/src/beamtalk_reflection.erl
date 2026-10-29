@@ -42,10 +42,16 @@ Returns the list of user-visible instance variable names.
 
 Filters out internal metadata fields (`$beamtalk_class`, `__methods__`, etc.)
 leaving only the fields defined by the class or added at runtime.
+
+A `Value` class whose instances are not maps — `Bitstring` is a raw
+`bitstring()` (ADR 0141) — has no fields, so it answers `[]`, as the
+primitive classes' `fieldNames` does.
 """.
--spec field_names(map()) -> [atom()].
+-spec field_names(term()) -> [atom()].
 field_names(State) when is_map(State) ->
-    beamtalk_tagged_map:user_field_keys(State).
+    beamtalk_tagged_map:user_field_keys(State);
+field_names(_NotAMap) ->
+    [].
 
 -doc """
 Reads an instance variable by name.

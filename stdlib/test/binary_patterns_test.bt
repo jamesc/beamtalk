@@ -67,7 +67,22 @@ TestCase subclass: BinaryPatternsTest
     ]
     self assert: (result at: 1) equals: 7
     self assert: (result at: 2) equals: 10
+    // The tail is 8 bits, byte-aligned, so it is a Binary (ADR 0141).
     self assert: (result at: 3) equals: #(7)
+
+  testMatchUnalignedBitstringTail =>
+    // BT-4139: an unaligned tail is a Bitstring — read it with
+    // bitSize/toBits; the byte protocol is not understood (ADR 0141).
+    bin := Binary fromBytes: #(234)
+    rest := bin match: [
+      <<_:3, r/bitstring>> -> r;
+      _ -> nil
+    ]
+    self assert: rest class equals: Bitstring
+    self assert: rest bitSize equals: 5
+    self assert: rest toBits equals: #(0, 1, 0, 1, 0)
+    self should: [rest perform: #toBytes] raise: #does_not_understand
+    self should: [rest perform: #size] raise: #does_not_understand
 
   testMatchBitstringTailChained =>
     // BT-4097: an unaligned rest/bits tail matches again as a bitstring
@@ -193,6 +208,10 @@ TestCase subclass: BinaryPatternsTest
     ]
     self assert: (result at: 1) equals: 3
     self assert: (result at: 2) equals: 29
+    // BT-4139: the 11-bit tail is a Bitstring (ADR 0141).
+    self assert: (result at: 3) class equals: Bitstring
+    self assert: (result at: 3) bitSize equals: 11
+    self assert: (result at: 3) toBits equals: #(0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1)
     tail := (result at: 3) match: [
       <<b:3, c:8>> -> {b, c};
       _ -> nil

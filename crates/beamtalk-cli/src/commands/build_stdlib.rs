@@ -3726,6 +3726,7 @@ mod tests {
             "asBase64",
             "asBase64Url",
             "asHex",
+            "bitSize",
         ]
         .into_iter()
         .collect();

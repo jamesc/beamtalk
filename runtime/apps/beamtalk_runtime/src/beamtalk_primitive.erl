@@ -110,6 +110,11 @@ class_of({beamtalk_string, _}) ->
     'String';
 class_of(X) when is_binary(X) ->
     'Binary';
+class_of(X) when is_bitstring(X) ->
+    %% ADR 0141 (BT-4139): a bitstring whose bit size is a multiple of 8 is
+    %% a binary (the arm above); any other bitstring is a `Bitstring`. The
+    %% class follows the value's shape, as in Erlang — no tag.
+    'Bitstring';
 class_of(true) ->
     'True';
 class_of(false) ->
@@ -378,6 +383,8 @@ print_string(X) when is_binary(X) ->
             %% (json:encode/1, logger, …).
             binary_hex_print_string(X)
     end;
+print_string(X) when is_bitstring(X) ->
+    bitstring_print_string(X);
 print_string(true) ->
     <<"true">>;
 print_string(false) ->
@@ -500,6 +507,8 @@ display_string(X) when is_binary(X) ->
         Utf8 when is_binary(Utf8) -> Utf8;
         _ -> iolist_to_binary(io_lib:format("~p", [X]))
     end;
+display_string(X) when is_bitstring(X) ->
+    bitstring_print_string(X);
 display_string(true) ->
     <<"true">>;
 display_string(false) ->
@@ -691,9 +700,46 @@ send(X, Selector, Args) when is_map(X) ->
     send_map(X, Selector, Args);
 send(X, Selector, Args) when is_pid(X) ->
     send_pid(X, Selector, Args);
+send(X, Selector, Args) when is_bitstring(X), not is_binary(X) ->
+    send_bitstring(X, Selector, Args);
 send(X, Selector, Args) ->
     %% All other primitives: route through module_for_value/1
     dispatch_via_module(X, Selector, Args).
+
+-doc """
+Dispatch to an unaligned `Bitstring` (ADR 0141, BT-4139).
+
+A `Bitstring` deliberately does not understand the byte protocol of
+`Binary`/`Collection` (`size`, `do:`, `toBytes`, …). A selector it lacks
+raises the structured `does_not_understand` error with a hint that names
+the bit size and the bit-level protocol, rather than the generic
+spelling hint — the most likely cause is a byte-level send to an
+unaligned tail. Selectors it understands (its own, `Object`'s, and
+extensions) dispatch through its compiled class module as usual.
+""".
+-spec send_bitstring(bitstring(), atom(), list()) -> term().
+send_bitstring(X, Selector, Args) ->
+    Mod = module_for_value(X),
+    case Mod:has_method(Selector) of
+        true ->
+            Mod:dispatch(Selector, Args, X);
+        false ->
+            raise_bitstring_dnu(X, Selector)
+    end.
+
+-doc "Raise the `Bitstring` `does_not_understand` error (see `send_bitstring/3`).".
+-spec raise_bitstring_dnu(bitstring(), atom()) -> no_return().
+raise_bitstring_dnu(X, Selector) ->
+    Hint = iolist_to_binary(
+        io_lib:format(
+            "a Bitstring is not byte-aligned (~B bits); use 'bitSize'/'toBits', "
+            "or 'asBinary' to check alignment",
+            [bit_size(X)]
+        )
+    ),
+    Error0 = beamtalk_error:new(does_not_understand, 'Bitstring'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
 
 -doc """
 Tagged map dispatch — resolves the map's class once through
@@ -874,7 +920,7 @@ selector that a `String` extension has overridden — an unconditional
 fast path would skip a String-only extension on a `String` receiver.
 
 Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`:
-all 8 shared selectors are locally defined on `Binary`, and ADR
+all 9 shared selectors are locally defined on `Binary`, and ADR
 0066 extensions cannot override a class-body-defined method, so `Binary`
 itself can never have a competing extension for one of them — only
 `String`'s extension registry needs checking (done above), and going
@@ -907,7 +953,8 @@ True for selectors where `String` and `Binary` behave identically.
 Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
 primitives String inherits unchanged (`byteAt:`, `part:size:`, `concat:`,
-`toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`).
+`toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`,
+`bitSize`).
 Every other Binary-defined selector (`size`, `at:`, `do:`,
 `printString`, `asString`) is overridden by `String` with grapheme-aware
 behaviour, and every String-only selector (`uppercase`, `split:`, …) simply
@@ -950,6 +997,7 @@ is_string_binary_shared_selector(asStringUnchecked) -> true;
 is_string_binary_shared_selector(asBase64) -> true;
 is_string_binary_shared_selector(asBase64Url) -> true;
 is_string_binary_shared_selector(asHex) -> true;
+is_string_binary_shared_selector(bitSize) -> true;
 is_string_binary_shared_selector(_) -> false.
 
 -doc "Map a runtime value to its stdlib dispatch module.".
@@ -964,6 +1012,9 @@ module_for_value(X) when is_binary(X) ->
     %% module_for_value/2, which skips the string-delegation hop for
     %% selectors where String and Binary agree.
     'bt@stdlib@binary';
+module_for_value(X) when is_bitstring(X) ->
+    %% ADR 0141: an unaligned bitstring (the is_binary arm is above).
+    'bt@stdlib@bitstring';
 module_for_value(true) ->
     'bt@stdlib@true';
 module_for_value(false) ->
@@ -1453,6 +1504,16 @@ binary_hex_print_string(Bin) ->
     Hex = binary:encode_hex(Bin, uppercase),
     Spaced = lists:join(<<" ">>, [Pair || <<Pair:2/binary>> <= Hex]),
     iolist_to_binary([<<"<<">>, Spaced, <<">>">>]).
+
+-doc """
+Render an unaligned `Bitstring` in Erlang notation (ADR 0141), e.g.
+`<<2:3>>` or `<<234,2:3>>` — what `io_lib:format("~w")` prints. `~w`,
+not `~p`: `~p` breaks a long bitstring across lines. Both `printString`
+and `displayString` answer this form: a Bitstring has no text reading.
+""".
+-spec bitstring_print_string(bitstring()) -> binary().
+bitstring_print_string(X) ->
+    iolist_to_binary(io_lib:format("~w", [X])).
 
 -doc """
 Escape string content per the ADR 0138 shared escape mapping: `\\` doubles,

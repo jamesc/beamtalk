@@ -31,6 +31,7 @@
     'Binary',
     'BindingChanged',
     'BindingsView',
+    'Bitstring',
     'Block',
     'Boolean',
     'ChangeEntry',
