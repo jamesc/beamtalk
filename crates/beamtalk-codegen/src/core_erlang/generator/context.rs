@@ -112,8 +112,19 @@ pub(in crate::core_erlang) struct ClassContext {
     /// Class names declared by more than one package in this generation's
     /// scope (BT-4151) — see
     /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]. Such a
-    /// name collides into one last-wins runtime class, so no send to it may
-    /// pin a compile-time module. Set once by the driver before generation.
+    /// name collides into one last-wins runtime class, so the compile-time
+    /// package's module is not necessarily the one a dynamic send reaches.
+    /// Read only through [`CoreErlangGenerator::is_shadowed_class`], which
+    /// keeps these sends dynamic: typed sealed-Value instance sends
+    /// (`typed_sealed_value_target`, BT-4151) and sends to a class reference
+    /// that would direct-call its module — `class sealed` class methods,
+    /// keyword constructors and nullary `new` (`class_reference_direct_call_info`,
+    /// BT-4271). Own-class self-sends are unaffected (`self` is this module's
+    /// own class). The spawn family on a class reference still calls the
+    /// compile-time module's `spawn`/`spawn_monitored` (BT-4278). Set once by
+    /// the driver before generation.
+    ///
+    /// [`CoreErlangGenerator::is_shadowed_class`]: crate::core_erlang::CoreErlangGenerator::is_shadowed_class
     pub shadowed_class_names: std::collections::HashSet<ecow::EcoString>,
     /// Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
