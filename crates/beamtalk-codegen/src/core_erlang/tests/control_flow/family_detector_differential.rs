@@ -75,9 +75,13 @@ fn line_at(source: &str, at: u32) -> u32 {
 #[test]
 fn family_detector_agrees_with_old_loop_detectors_over_the_corpus() {
     let root = repo_root();
-    let mut files = Vec::new();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
     for corpus_dir in ["stdlib/src", "stdlib/test", "stdlib/bootstrap-test"] {
-        collect_source_files(&root.join(corpus_dir), &mut files);
+        files.extend(
+            beamtalk_core::file_walker::FileWalker::format_files()
+                .walk_pathbuf(&root.join(corpus_dir))
+                .unwrap_or_default(),
+        );
     }
     assert!(
         files.len() > 100,

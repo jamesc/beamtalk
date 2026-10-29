@@ -111,27 +111,6 @@ pub(crate) fn repo_root() -> std::path::PathBuf {
         .expect("beamtalk-codegen must be two directories below the repo root")
 }
 
-/// Recursively collects every `.bt`/`.btscript` file under `dir` into `out`,
-/// in sorted path order. A missing or unreadable `dir` adds nothing.
-pub(crate) fn collect_source_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<std::fs::DirEntry> = entries.filter_map(std::result::Result::ok).collect();
-    entries.sort_by_key(std::fs::DirEntry::path);
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_source_files(&path, out);
-        } else if matches!(
-            path.extension().and_then(std::ffi::OsStr::to_str),
-            Some("bt" | "btscript")
-        ) {
-            out.push(path);
-        }
-    }
-}
-
 /// Parses `src` and normalises it the way analysis and codegen see it: with
 /// redundant send-operand parentheses peeled (`ast::normalize`, BT-4059).
 ///

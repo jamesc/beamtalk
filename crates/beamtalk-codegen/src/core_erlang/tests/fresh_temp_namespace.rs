@@ -32,7 +32,7 @@
 //! [`hand_written_underscore_names_match_the_audit`] fails on a new one or a
 //! user name that reaches Core unmapped.
 
-use super::{assert_compiles_through_erlc, codegen, collect_source_files, repo_root};
+use super::{assert_compiles_through_erlc, codegen, repo_root};
 use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
 use std::collections::BTreeSet;
 
@@ -343,14 +343,18 @@ fn underscore_vars(core: &str) -> Vec<&str> {
 #[test]
 fn hand_written_underscore_names_match_the_audit() {
     let root = repo_root();
-    let mut files = Vec::new();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
     for dir in [
         "stdlib/src",
         "stdlib/test",
         "stdlib/bootstrap-test",
         "examples",
     ] {
-        collect_source_files(&root.join(dir), &mut files);
+        files.extend(
+            beamtalk_core::file_walker::FileWalker::format_files()
+                .walk_pathbuf(&root.join(dir))
+                .unwrap_or_default(),
+        );
     }
     assert!(
         files.len() > 100,
