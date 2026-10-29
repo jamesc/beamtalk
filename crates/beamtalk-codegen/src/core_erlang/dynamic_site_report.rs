@@ -26,7 +26,7 @@
 //! sites by reason.
 
 use super::CoreErlangGenerator;
-use super::dispatch_codegen::StaysDynamic;
+use super::dispatch_codegen::{StaysDynamic, is_exception_family};
 use super::routing::{self, Guard, Representation};
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
@@ -169,16 +169,11 @@ impl CoreErlangGenerator {
         let Some(hierarchy) = self.class_hierarchy.as_ref() else {
             return format!("open — {class} is not sealed");
         };
-        let supervisor_root = std::iter::once(class.into())
-            .chain(hierarchy.superclass_chain(class))
-            .find(|ancestor| {
-                routing::row(ancestor.as_str())
-                    .is_some_and(|row| row.representation == Representation::SupervisorTuple)
-            });
-        if let Some(root) = supervisor_root {
-            return format!(
-                "supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)"
-            );
+        if let Some(supervisor) = self.describe_supervisor_family(class) {
+            return supervisor;
+        }
+        if is_exception_family(hierarchy, class) {
+            return format!("exception — {class} dispatches through bt@stdlib@exception");
         }
         if kind == Some(ClassKind::Actor) {
             return format!("actor — {class} instances are actor references");
@@ -190,5 +185,21 @@ impl CoreErlangGenerator {
             return format!("abstract — {class} has no instances of its own");
         }
         format!("open — {class} is not sealed")
+    }
+
+    /// The `supervisor` reason when `class` is a `Supervisor` /
+    /// `DynamicSupervisor` (or a subclass): its instances are
+    /// `beamtalk_supervisor` tuples whatever gate stopped the send.
+    fn describe_supervisor_family(&self, class: &str) -> Option<String> {
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let root = std::iter::once(class.into())
+            .chain(hierarchy.superclass_chain(class))
+            .find(|ancestor: &ecow::EcoString| {
+                routing::row(ancestor.as_str())
+                    .is_some_and(|row| row.representation == Representation::SupervisorTuple)
+            })?;
+        Some(format!(
+            "supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)"
+        ))
     }
 }

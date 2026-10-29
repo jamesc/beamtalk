@@ -380,17 +380,18 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   // Tuple, and typed as the open Value class.
   testActorReceiverMisses =>
     c := Counter spawn
-    self
-      send: #actorTypedTuple
-      typed: [:r :: Tuple | r size]
-      dynamic: [:r | r size]
-      on: c
-    self
-      send: #actorTypedValue
-      typed: [:r :: GuardedDiffPoint | r sum]
-      dynamic: [:r | r sum]
-      on: c
-    c stop
+    [
+      self
+        send: #actorTypedTuple
+        typed: [:r :: Tuple | r size]
+        dynamic: [:r | r size]
+        on: c
+      self
+        send: #actorTypedValue
+        typed: [:r :: GuardedDiffPoint | r sum]
+        dynamic: [:r | r sum]
+        on: c
+    ] ensure: [c stop]
 
   // The arms of GuardedDiffPoint's `dispatch/3` a guarded call would run,
   // including the selectors an earlier send handler claims at a source send.

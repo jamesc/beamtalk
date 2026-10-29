@@ -152,6 +152,24 @@ fn supervisor_subclass_reports_supervisor() {
 }
 
 #[test]
+fn unsealed_exception_subclass_reports_exception() {
+    // `Error` and most user exceptions are unsealed: lifting the sealed gate
+    // would still leave them dynamic, so they count as `exception`, not `open`.
+    let hint = hint_for(
+        concat!(
+            "Object subclass: Caller\n",
+            "  run: e :: AppError => e frobnicate\n\n",
+            "Error subclass: AppError\n",
+        ),
+        "frobnicate",
+    );
+    assert!(
+        hint.contains("reason: exception — AppError dispatches through bt@stdlib@exception"),
+        "{hint}"
+    );
+}
+
+#[test]
 fn guarded_direct_send_is_not_reported() {
     let hints = report(concat!(
         "Object subclass: Caller\n",

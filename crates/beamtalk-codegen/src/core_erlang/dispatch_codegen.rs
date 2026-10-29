@@ -174,6 +174,18 @@ pub(in crate::core_erlang) enum StaysDynamic {
     CrossFileParent,
 }
 
+/// Whether `class` is `Exception` or one of its subclasses — instances route
+/// to `bt@stdlib@exception:dispatch`, so a guarded direct call never applies.
+/// The one rule behind [`StaysDynamic::ExceptionFamily`], shared with the
+/// dynamic-site report (BT-4292).
+pub(in crate::core_erlang) fn is_exception_family(hierarchy: &ClassHierarchy, class: &str) -> bool {
+    class == routing::EXCEPTION_ROOT_CLASS
+        || hierarchy
+            .superclass_chain(class)
+            .iter()
+            .any(|ancestor| ancestor.as_str() == routing::EXCEPTION_ROOT_CLASS)
+}
+
 /// BT-4069: a send receiver's statically-known sealed dispatch target — the
 /// class tag to guard on plus the module to direct-call. Resolved by
 /// [`CoreErlangGenerator::typed_sealed_value_target`]; BT-4127 reuses the
@@ -758,12 +770,7 @@ impl CoreErlangGenerator {
         ) {
             return Err(StaysDynamic::NotValueKind);
         }
-        if class_name.as_str() == routing::EXCEPTION_ROOT_CLASS
-            || hierarchy
-                .superclass_chain(class_name)
-                .iter()
-                .any(|ancestor| ancestor.as_str() == routing::EXCEPTION_ROOT_CLASS)
-        {
+        if is_exception_family(hierarchy, class_name) {
             return Err(StaysDynamic::ExceptionFamily);
         }
         if hierarchy.has_cross_file_parent(class_name) {
