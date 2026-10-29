@@ -3854,6 +3854,46 @@ fn test_class_method_super_uses_class_super_dispatch() {
     }
 }
 
+/// BT-4252: a Behaviour-protocol selector self-sent from a class method
+/// (`self name`, `self superclass`, `self includesSelector:`) takes the
+/// virtual `class_self_send/3` path, whose class-object protocol fallthrough
+/// answers what the external `C name` answers. No call site reaches a
+/// `beamtalk_behaviour_intrinsics` function directly: one runtime lookup, the
+/// same `Class` chain the type checker resolves the selector against.
+#[test]
+fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
+    let headers = [
+        "Actor subclass: C",
+        "Object subclass: C",
+        "Value subclass: C",
+        "sealed Object subclass: C",
+    ];
+    let sends = [
+        ("self name", "'name', ["),
+        ("self superclass", "'superclass', ["),
+        ("self includesSelector: #foo", "'includesSelector:', ["),
+    ];
+    for header in headers {
+        for (send, call_tail) in sends {
+            for method in ["class run", "class sealed run"] {
+                let src = format!("{header}\n  {method} => {send}\n");
+                let code = super::compile(&src)
+                    .unwrap_or_else(|e| panic!("class-side self-send must compile: {e}\n{src}"));
+                assert!(
+                    code.contains("call 'beamtalk_class_dispatch':'class_self_send'(")
+                        && code.contains(call_tail),
+                    "Behaviour-protocol self-send must route through class_self_send/3:\n{src}\n{code}"
+                );
+                assert!(
+                    !code.contains("call 'beamtalk_behaviour_intrinsics':"),
+                    "Behaviour-protocol self-send must not call an intrinsic directly:\n{src}\n{code}"
+                );
+                assert_compiles_through_erlc("test", &code);
+            }
+        }
+    }
+}
+
 /// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
 /// is keyed on the extension's *target*, not on the class (if any) whose file
 /// hosts the extension, so the walk starts at the target's superclass.

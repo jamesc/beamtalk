@@ -1,0 +1,111 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4252: Behaviour-protocol selectors (`name`, `superclass`) sent to `self`
+// or `super` from a class method answer what the external send to the class
+// object answers. The class-method chain does not define them, so the runtime
+// falls through to the class-object protocol (Class -> Behaviour -> ...), the
+// same chain the type checker resolves them against.
+//
+// Fixtures: stdlib/test/fixtures/bt4252class_protocol_*.bt
+
+TestCase subclass: ClassSideBehaviourProtocolTest
+
+  testActorClassMethodSelfName =>
+    self assert: Bt4252ClassProtocolActorChild selfName equals: Bt4252ClassProtocolActorChild name
+
+  testActorClassMethodSuperName =>
+    self assert: Bt4252ClassProtocolActorChild superName equals: #Bt4252ClassProtocolActorChild
+
+  testActorClassMethodSelfSuperclass =>
+    self assert: Bt4252ClassProtocolActorChild selfSuperclass equals: Bt4252ClassProtocolActorBase
+
+  testActorClassMethodSuperSuperclass =>
+    self assert: Bt4252ClassProtocolActorChild superSuperclass equals: Bt4252ClassProtocolActorBase
+
+  testActorClassMethodSuperNameInClosure =>
+    self assert: Bt4252ClassProtocolActorChild superNameInClosure equals: #(#Bt4252ClassProtocolActorChild)
+
+  testActorInheritedClassMethodAnswersForReceiver =>
+    self assert: Bt4252ClassProtocolActorChild inheritedSelfName equals: #Bt4252ClassProtocolActorChild
+    self assert: Bt4252ClassProtocolActorChild inheritedSuperName equals: #Bt4252ClassProtocolActorChild
+
+  testObjectClassMethodSelfName =>
+    self assert: Bt4252ClassProtocolObjectChild selfName equals: Bt4252ClassProtocolObjectChild name
+
+  testObjectClassMethodSuperName =>
+    self assert: Bt4252ClassProtocolObjectChild superName equals: #Bt4252ClassProtocolObjectChild
+
+  testObjectClassMethodSelfSuperclass =>
+    self assert: Bt4252ClassProtocolObjectChild selfSuperclass equals: Bt4252ClassProtocolObjectBase
+
+  testObjectClassMethodSuperSuperclass =>
+    self assert: Bt4252ClassProtocolObjectChild superSuperclass equals: Bt4252ClassProtocolObjectBase
+
+  testObjectClassMethodSuperNameInClosure =>
+    self assert: Bt4252ClassProtocolObjectChild superNameInClosure equals: #(#Bt4252ClassProtocolObjectChild)
+
+  testObjectInheritedClassMethodAnswersForReceiver =>
+    self assert: Bt4252ClassProtocolObjectChild inheritedSelfName equals: #Bt4252ClassProtocolObjectChild
+    self assert: Bt4252ClassProtocolObjectChild inheritedSuperName equals: #Bt4252ClassProtocolObjectChild
+
+  testValueClassMethodSelfName =>
+    self assert: Bt4252ClassProtocolValueChild selfName equals: Bt4252ClassProtocolValueChild name
+
+  testValueClassMethodSuperName =>
+    self assert: Bt4252ClassProtocolValueChild superName equals: #Bt4252ClassProtocolValueChild
+
+  testValueClassMethodSelfSuperclass =>
+    self assert: Bt4252ClassProtocolValueChild selfSuperclass equals: Bt4252ClassProtocolValueBase
+
+  testValueClassMethodSuperSuperclass =>
+    self assert: Bt4252ClassProtocolValueChild superSuperclass equals: Bt4252ClassProtocolValueBase
+
+  testValueClassMethodSuperNameInClosure =>
+    self assert: Bt4252ClassProtocolValueChild superNameInClosure equals: #(#Bt4252ClassProtocolValueChild)
+
+  testValueInheritedClassMethodAnswersForReceiver =>
+    self assert: Bt4252ClassProtocolValueChild inheritedSelfName equals: #Bt4252ClassProtocolValueChild
+    self assert: Bt4252ClassProtocolValueChild inheritedSuperName equals: #Bt4252ClassProtocolValueChild
+
+  testSealedDirectCalledClassMethodSelfName =>
+    self assert: Bt4252ClassProtocolSealed selfName equals: Bt4252ClassProtocolSealed name
+
+  testSealedDirectCalledClassMethodSuperName =>
+    self assert: Bt4252ClassProtocolSealed superName equals: #Bt4252ClassProtocolSealed
+
+  testSealedDirectCalledClassMethodSelfSuperclass =>
+    self assert: Bt4252ClassProtocolSealed selfSuperclass equals: Bt4252ClassProtocolObjectBase
+
+  testSealedDirectCalledClassMethodSuperSuperclass =>
+    self assert: Bt4252ClassProtocolSealed superSuperclass equals: Bt4252ClassProtocolObjectBase
+
+  testSealedDirectCalledClassMethodSuperNameInClosure =>
+    self assert: Bt4252ClassProtocolSealed superNameInClosure equals: #(#Bt4252ClassProtocolSealed)
+
+  // `doc`'s primitive `gen_server:call`s the class process, which cannot
+  // answer from inside one of its own class methods: a structured
+  // `dispatch_error` naming the send (like any send back to the running
+  // class), not a raw `calling_self` exit. BT-4262 tracks making it answer.
+  testActorClassMethodSelfDocInClassProcessRaisesDispatchError =>
+    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #dispatch_error
+    selector := [
+      Bt4252ClassProtocolActorChild selfDoc
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #doc
+
+  testObjectClassMethodSelfDocInClassProcessRaisesDispatchError =>
+    self should: [Bt4252ClassProtocolObjectChild selfDoc] raise: #dispatch_error
+
+  testActorClassMethodSelfIncludesSelector =>
+    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)
+    self assert: Bt4252ClassProtocolActorChild selfIncludesFoo
+    self deny: Bt4252ClassProtocolActorChild selfIncludesBar
+
+  testObjectClassMethodSelfIncludesSelector =>
+    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo equals: (Bt4252ClassProtocolObjectChild includesSelector: #foo)
+    self assert: Bt4252ClassProtocolObjectChild selfIncludesFoo
+    self deny: Bt4252ClassProtocolObjectChild selfIncludesBar
+
+  testSealedDirectCalledClassMethodSelfDoc =>
+    self assert: Bt4252ClassProtocolSealed selfDoc equals: Bt4252ClassProtocolSealed doc
