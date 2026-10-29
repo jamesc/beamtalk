@@ -552,6 +552,61 @@ fn var_tokens(core: &str) -> Vec<&str> {
     out
 }
 
+/// The [`HAND_WRITTEN_CAPITALIZED`] half of the corpus guard (BT-4267).
+#[derive(Default)]
+struct CapitalizedAudit {
+    emitted: BTreeSet<&'static str>,
+    unlisted: BTreeSet<String>,
+}
+
+impl CapitalizedAudit {
+    /// A lowercase user identifier always carries the marker, so every
+    /// marker-free capitalized variable in `core` must be hand-written.
+    fn scan(&mut self, core: &str, rel: &str) {
+        for var in capitalized_vars(core) {
+            if var.contains(TEMP_MARKER) {
+                continue;
+            }
+            let name = normalise_capitalized(var);
+            match HAND_WRITTEN_CAPITALIZED.iter().find(|&&h| h == name) {
+                Some(h) => {
+                    self.emitted.insert(h);
+                }
+                None => {
+                    self.unlisted.insert(format!("{var} ({rel})"));
+                }
+            }
+        }
+    }
+
+    fn assert_complete(self) {
+        assert!(
+            self.unlisted.is_empty(),
+            "production codegen emits a marker-free capitalized variable missing from \
+             `HAND_WRITTEN_CAPITALIZED`: either a user identifier reached Core without \
+             `to_core_var` (it could alias `State` or another hand-written name), or a \
+             new hand-written name needs auditing (no `@`, never derived from a user \
+             identifier) and listing:\n  {}",
+            self.unlisted.into_iter().collect::<Vec<_>>().join("\n  ")
+        );
+        let stale: Vec<&&str> = HAND_WRITTEN_CAPITALIZED
+            .iter()
+            .filter(|h| !self.emitted.contains(**h))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "`HAND_WRITTEN_CAPITALIZED` lists names the corpus no longer emits; remove \
+             them: {stale:?}"
+        );
+        assert!(
+            HAND_WRITTEN_CAPITALIZED
+                .iter()
+                .all(|h| !h.contains(TEMP_MARKER)),
+            "a hand-written name must not contain `{TEMP_MARKER}`"
+        );
+    }
+}
+
 /// The guard (BT-4247, BT-4267), over every `.bt`/`.btscript` file in the
 /// stdlib and the examples:
 ///
@@ -585,8 +640,7 @@ fn hand_written_names_match_the_audit() {
     let mut emitted: BTreeSet<&'static str> = BTreeSet::new();
     let mut unlisted: BTreeSet<String> = BTreeSet::new();
     let mut unmapped: Vec<String> = Vec::new();
-    let mut emitted_capitalized: BTreeSet<&'static str> = BTreeSet::new();
-    let mut unlisted_capitalized: BTreeSet<String> = BTreeSet::new();
+    let mut capitalized = CapitalizedAudit::default();
     for (i, path) in files.iter().enumerate() {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
@@ -624,7 +678,7 @@ fn hand_written_names_match_the_audit() {
                     emitted.insert(h);
                 }
                 // A user spelling of a hand-written name is told apart by
-                // `user_names_spelled_like_hand_written_names_stay_distinct`.
+                // `user_names_spelled_like_hand_written_names_stay_distinct_over_the_corpus`.
                 None if user_names.contains(var) => {
                     unmapped.push(format!("{rel}: user `{var}`"));
                 }
@@ -633,22 +687,7 @@ fn hand_written_names_match_the_audit() {
                 }
             }
         }
-        // BT-4267: a lowercase user identifier always carries the marker, so
-        // every marker-free capitalized variable is hand-written.
-        for var in capitalized_vars(&core) {
-            if var.contains(TEMP_MARKER) {
-                continue;
-            }
-            let name = normalise_capitalized(var);
-            match HAND_WRITTEN_CAPITALIZED.iter().find(|&&h| h == name) {
-                Some(h) => {
-                    emitted_capitalized.insert(h);
-                }
-                None => {
-                    unlisted_capitalized.insert(format!("{var} ({rel})"));
-                }
-            }
-        }
+        capitalized.scan(&core, &rel);
     }
 
     unmapped.sort();
@@ -674,27 +713,7 @@ fn hand_written_names_match_the_audit() {
         stale.is_empty(),
         "`HAND_WRITTEN` lists names the corpus no longer emits; remove them: {stale:?}"
     );
-    assert!(
-        unlisted_capitalized.is_empty(),
-        "production codegen emits a marker-free capitalized variable missing from \
-         `HAND_WRITTEN_CAPITALIZED`: either a user identifier reached Core without \
-         `to_core_var` (it could alias `State` or another hand-written name), or a \
-         new hand-written name needs auditing (no `@`, never derived from a user \
-         identifier) and listing:\n  {}",
-        unlisted_capitalized
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join("\n  ")
-    );
-    let stale_capitalized: Vec<&&str> = HAND_WRITTEN_CAPITALIZED
-        .iter()
-        .filter(|h| !emitted_capitalized.contains(**h))
-        .collect();
-    assert!(
-        stale_capitalized.is_empty(),
-        "`HAND_WRITTEN_CAPITALIZED` lists names the corpus no longer emits; remove \
-         them: {stale_capitalized:?}"
-    );
+    capitalized.assert_complete();
     assert!(
         HAND_WRITTEN.iter().all(|h| !h.contains(TEMP_MARKER)),
         "a hand-written name must not contain `{TEMP_MARKER}`"
