@@ -135,6 +135,33 @@ receive_shape_reload_findings_announcement() ->
 
 state0() -> beamtalk_repl_state:new(undefined, 0).
 
+%% BT-4272: `handle_load/2` returns before the shape store has captured the
+%% just-installed generation. `activate_module/4` only *casts* the capture
+%% (`spawn_shape_recheck/1` -> `beamtalk_workspace_shape_recheck_worker:
+%% enqueue/1`), and for a class's first install `prime/1` has recorded
+%% `undefined`, so until the worker runs `capture/1`,
+%% `beamtalk_workspace_shape_store:previous/1` answers `undefined` and
+%% `precheck_class_shape/2` returns `{ok, []}` ("no baseline"). A test that
+%% prechecks straight after `handle_load/2` therefore raced the worker; it
+%% lost whenever the worker was slow to be scheduled (a loaded machine).
+%%
+%% This is the sync point: the cast was sent from this process, and messages
+%% between one pair of processes arrive in order, so a `sys:get_state/1`
+%% round trip returns only after the worker has handled every cast queued
+%% ahead of it, including the capture for every `handle_load/2` above. The
+%% assertion makes a missed baseline fail here, by name, instead of as an
+%% empty findings list (or a vacuous pass) further down.
+wait_for_shape_capture(ClassNameBin) ->
+    ok = drain_shape_recheck_worker(),
+    ?assertNotEqual(undefined, beamtalk_workspace_shape_store:previous(ClassNameBin)),
+    ok.
+
+%% Block until `beamtalk_workspace_shape_recheck_worker` has handled every
+%% cast this process sent it (see `wait_for_shape_capture/1`).
+drain_shape_recheck_worker() ->
+    _ = sys:get_state(beamtalk_workspace_shape_recheck_worker),
+    ok.
+
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -454,7 +481,7 @@ skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
                     %% `enqueue/1` cast above is already queued ahead of this
                     %% synchronous system message — without depending on an
                     %% announcement this scenario deliberately never sends.
-                    _ = sys:get_state(beamtalk_workspace_shape_recheck_worker),
+                    ok = drain_shape_recheck_worker(),
 
                     %% The seeded finding's message/severity/classification
                     %% stay untouched (no diagnostics round-trip actually
@@ -720,6 +747,7 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
                         >>,
                     ok = file:write_file(Path, Gen1),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCounter">>),
 
                     %% A pending edit that would drop `name` without bumping
                     %% shapeVersion — never installed via handle_load/2 at
@@ -771,6 +799,7 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
                         >>,
                     ok = file:write_file(Path, Source),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckCleanCounter">>),
 
                     {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
                         <<"LoaderShapePrecheckCleanCounter">>, Source
@@ -780,12 +809,12 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
             ]
         end}}.
 
-%% precheck_class_shape/2 must never leak an atom per call — a per-call
-%% `unique_integer`-suffixed throwaway module name would (see
-%% `beamtalk_repl_loader:precheck_temp_module_name/0`'s doc); the fixed name
-%% + `global:trans/3` critical section fix means the node's atom count is
-%% unchanged after several calls, including a couple of failing (bad source)
-%% ones — a compile failure must not leak either.
+%% precheck_class_shape/2 must never leak an atom per call (atoms are never
+%% garbage collected, and an editor prechecks on every pending edit). It
+%% reads the pending meta off the Core Erlang text and loads no module
+%% (BT-4285), so the node's atom count is unchanged after several calls,
+%% including a couple of failing (bad source) ones — a compile failure must
+%% not leak either.
 precheck_class_shape_does_not_leak_atoms_test_() ->
     {timeout, 30,
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
@@ -803,15 +832,16 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
                         >>,
                     ok = file:write_file(Path, Source),
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckLeakCounter">>),
 
                     PendingSource =
                         <<
                             "Actor subclass: LoaderShapePrecheckLeakCounter\n"
                             "  state: count :: Integer = 0\n"
                         >>,
-                    %% Warm the fixed scratch atom once before measuring, so
-                    %% the very first load (which does mint that one atom)
-                    %% isn't counted against the repeated calls below.
+                    %% Warm up once before measuring, so any atom a first
+                    %% compile mints isn't counted against the repeated calls
+                    %% below.
                     {ok, _} = beamtalk_repl_loader:precheck_class_shape(
                         <<"LoaderShapePrecheckLeakCounter">>, PendingSource
                     ),
@@ -833,6 +863,141 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
 
                     AtomCountAfter = erlang:system_info(atom_count),
                     ?assertEqual(AtomCountBefore, AtomCountAfter)
+                end)
+            ]
+        end}}.
+
+%% BT-4285: a precheck must never mutate the live class. It used to load the
+%% pending compile under a scratch module, whose generated `on_load`
+%% `register_class/0` re-registered the REAL class onto that scratch module
+%% (then deleted it): the live class's module became
+%% `beamtalk_precheck_scratch`, a "Class redefined from different module"
+%% collision warning was recorded, and constructing an instance failed.
+precheck_class_shape_leaves_the_live_class_untouched_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_precheck_live_~p.bt", [UniqueId])
+                    ),
+                    Source =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckLiveCounter\n"
+                            "  state: count :: Integer = 7\n"
+                            "  state: name :: String = \"\"\n"
+                            "\n"
+                            "  count -> Integer => self.count\n"
+                        >>,
+                    ok = file:write_file(Path, Source),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckLiveCounter">>),
+                    ClassName = 'LoaderShapePrecheckLiveCounter',
+                    ClassPid = beamtalk_class_registry:whereis_class(ClassName),
+                    ModuleBefore = beamtalk_runtime_api:module_name(ClassPid),
+                    _ = beamtalk_class_registry:drain_class_warnings_by_names([ClassName]),
+
+                    PendingSource =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckLiveCounter\n"
+                            "  state: count :: Integer = 7\n"
+                            "\n"
+                            "  count -> Integer => self.count\n"
+                        >>,
+                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                        <<"LoaderShapePrecheckLiveCounter">>, PendingSource
+                    ),
+                    %% The precheck still sees the pending shape...
+                    _ = find_finding(dropped_without_bump, Findings),
+
+                    %% ...but the live class is exactly as it was.
+                    ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class(ClassName)),
+                    ?assertEqual(ModuleBefore, beamtalk_runtime_api:module_name(ClassPid)),
+                    ?assertEqual(
+                        [], beamtalk_class_registry:drain_class_warnings_by_names([ClassName])
+                    ),
+                    ?assertEqual(false, code:is_loaded(beamtalk_precheck_scratch)),
+                    Instance = beamtalk_class_dispatch:class_send(ClassPid, spawn, []),
+                    ?assertEqual(7, beamtalk_message_dispatch:send(Instance, count, [])),
+
+                    %% The meta the precheck reads off the Core Erlang text
+                    %% agrees with what the installed module's own
+                    %% `__beamtalk_meta/0` returns for the shape keys.
+                    ShapeKeys = [field_types, field_kinds, shape_version, shape_migrations],
+                    {ok, #{core_erlang := Core}} = beamtalk_compiler:compile(
+                        Source, beamtalk_repl_compiler:build_class_indexes()
+                    ),
+                    {ok, ParsedMeta} = beamtalk_compiler:class_meta_from_core_erlang(Core),
+                    ?assertEqual(
+                        maps:with(ShapeKeys, ModuleBefore:'__beamtalk_meta'()),
+                        maps:with(ShapeKeys, ParsedMeta)
+                    )
+                end)
+            ]
+        end}}.
+
+%% BT-4285: concurrent prechecks of different pending sources for the same
+%% class each see their OWN pending shape. The old scratch-module design
+%% loaded every pending compile under one fixed module name behind a
+%% `global:trans/3` lock whose LockRequesterId was a constant, so the lock was
+%% shared, not exclusive, and two prechecks could read each other's meta.
+concurrent_prechecks_each_see_their_own_pending_source_test_() ->
+    {timeout, 60,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(),
+                        io_lib:format("loader_shape_precheck_concurrent_~p.bt", [UniqueId])
+                    ),
+                    Source =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckConcurrent\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    ok = file:write_file(Path, Source),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                    ok = wait_for_shape_capture(<<"LoaderShapePrecheckConcurrent">>),
+                    Dropping =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckConcurrent\n"
+                            "  state: count :: Integer = 0\n"
+                        >>,
+                    Parent = self(),
+                    Jobs = lists:append(lists:duplicate(4, [Source, Dropping])),
+                    Refs = [
+                        begin
+                            Ref = make_ref(),
+                            spawn_link(fun() ->
+                                {ok, Fs} = beamtalk_repl_loader:precheck_class_shape(
+                                    <<"LoaderShapePrecheckConcurrent">>, Pending
+                                ),
+                                Parent ! {Ref, Fs}
+                            end),
+                            {Ref, Pending}
+                        end
+                     || Pending <- Jobs
+                    ],
+                    lists:foreach(
+                        fun({Ref, Pending}) ->
+                            Fs =
+                                receive
+                                    {Ref, F} -> F
+                                after 30000 -> error(timeout_waiting_for_precheck)
+                                end,
+                            case Pending of
+                                Source ->
+                                    ?assertEqual([], Fs);
+                                Dropping ->
+                                    Finding = find_finding(dropped_without_bump, Fs),
+                                    ?assertEqual([<<"name">>], maps:get(fields, Finding))
+                            end
+                        end,
+                        Refs
+                    )
                 end)
             ]
         end}}.
@@ -889,6 +1054,7 @@ precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() 
                     {ok, _, State1} = beamtalk_repl_loader:handle_load(SuperPath, state0()),
                     ok = file:write_file(SubPath, SubSource),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(SubPath, State1),
+                    ok = wait_for_shape_capture(<<"LoaderShapeAncestorSub">>),
 
                     %% Pending edit: drop the subclass's own `count` override
                     %% entirely — never installed via handle_load/2.

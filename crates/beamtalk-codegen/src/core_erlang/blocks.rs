@@ -184,43 +184,7 @@ impl CoreErlangGenerator {
         use crate::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);
 
-        // `self.field :=` inside a block that reaches this generic
-        // fallback can't correctly thread state — see `validate_stored_closure`
-        // for why. Lifting this once stored/opaque blocks get proper Tier 2
-        // support is tracked separately. Checked *before* the
-        // captured-local-mutation promotion below: a block with both a field
-        // write and a captured-local mutation (e.g. `[:x | outerCount :=
-        // outerCount + x. self.total := self.total + outerCount]`) would
-        // otherwise be routed to Tier 2 for the local mutation alone, which
-        // fixes nothing — `generate_block_value_call` and friends still call
-        // the resulting 2-arity stateful fun with only its declared params
-        // (no `StateAcc` argument), producing a `badarity` crash at runtime
-        // instead of the erlc-time failure this check exists to catch.
-        // Location is a lazy thunk: format!/span_to_line only run on the
-        // (rare) error path, not on every block that reaches this line.
-        //
-        // Guarded on field_writes specifically (not a bare call to
-        // validate_stored_closure) so a block with *only* captured-local
-        // mutations — the legitimate Tier 2 case handled below — doesn't
-        // spuriously trip validate_stored_closure's separate local-mutation
-        // branch, which only applies to blocks that never reach Tier 2 at all.
-        //
-        // ADR 0130 §3: not in a class method, where `self.x :=` can only name a
-        // class variable and is an in-place `put` that needs no threading, so a
-        // block may write class variables wherever it runs.
-        // ADR 0137: not in an actor instance method either, where the block
-        // writes the actor's state through the cell.
-        if !analysis.field_writes.is_empty() && !self.in_class_method() {
-            if self.cell_closures_apply() {
-                // The field write is legal; a captured local the block also
-                // mutates is not (ADR 0133: nothing hands it back).
-                let mut locals_only = analysis.clone();
-                locals_only.field_writes.clear();
-                Self::validate_stored_closure(&locals_only, || self.location_label(block.span))?;
-            } else {
-                Self::validate_stored_closure(&analysis, || self.location_label(block.span))?;
-            }
-        }
+        self.check_closure_field_writes(block, &analysis)?;
 
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
@@ -278,6 +242,56 @@ impl CoreErlangGenerator {
         self.loop_mode.direct_params_do_open_chain = false;
         let (header, body) = body_result?;
         Ok(docvec![header, body])
+    }
+
+    /// The rejection [`Self::generate_block`] applies to a block that writes a
+    /// field it cannot write as a closure value, as an `Err` and with no side
+    /// effects, so a caller that may compile the block as a closure can ask
+    /// first (BT-4244: a boolean conditional's non-Boolean fallback,
+    /// [`Self::boolean_fallback_send`]).
+    pub(in crate::core_erlang) fn check_closure_field_writes(
+        &self,
+        block: &Block,
+        analysis: &super::block_analysis::BlockMutationAnalysis,
+    ) -> Result<()> {
+        // `self.field :=` inside a block that reaches this generic
+        // fallback can't correctly thread state — see `validate_stored_closure`
+        // for why. Lifting this once stored/opaque blocks get proper Tier 2
+        // support is tracked separately. Checked (by `generate_block_fun`) *before* the
+        // captured-local-mutation promotion below: a block with both a field
+        // write and a captured-local mutation (e.g. `[:x | outerCount :=
+        // outerCount + x. self.total := self.total + outerCount]`) would
+        // otherwise be routed to Tier 2 for the local mutation alone, which
+        // fixes nothing — `generate_block_value_call` and friends still call
+        // the resulting 2-arity stateful fun with only its declared params
+        // (no `StateAcc` argument), producing a `badarity` crash at runtime
+        // instead of the erlc-time failure this check exists to catch.
+        // Location is a lazy thunk: format!/span_to_line only run on the
+        // (rare) error path, not on every block that reaches this line.
+        //
+        // Guarded on field_writes specifically (not a bare call to
+        // validate_stored_closure) so a block with *only* captured-local
+        // mutations — the legitimate Tier 2 case handled below — doesn't
+        // spuriously trip validate_stored_closure's separate local-mutation
+        // branch, which only applies to blocks that never reach Tier 2 at all.
+        //
+        // ADR 0130 §3: not in a class method, where `self.x :=` can only name a
+        // class variable and is an in-place `put` that needs no threading, so a
+        // block may write class variables wherever it runs.
+        // ADR 0137: not in an actor instance method either, where the block
+        // writes the actor's state through the cell.
+        if !analysis.field_writes.is_empty() && !self.in_class_method() {
+            if self.cell_closures_apply() {
+                // The field write is legal; a captured local the block also
+                // mutates is not (ADR 0133: nothing hands it back).
+                let mut locals_only = analysis.clone();
+                locals_only.field_writes.clear();
+                Self::validate_stored_closure(&locals_only, || self.location_label(block.span))?;
+            } else {
+                Self::validate_stored_closure(analysis, || self.location_label(block.span))?;
+            }
+        }
+        Ok(())
     }
 
     /// Generates a Tier 2 stateful block (ADR 0041 Phase 0).
@@ -794,8 +808,12 @@ impl CoreErlangGenerator {
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+                // BT-3982: the right-hand side is sequenced (`thread_ahead`),
+                // so a producer there (an evaluated block that threads
+                // `State`) lands its carrier and `Bind` in this body instead
+                // of destructuring its raw `{Value, State}` tuple.
                 let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_with_value(pattern, value)?;
+                    self.generate_destructure_bindings_sequenced(pattern, value, frame, stmts)?;
                 for d in binding_docs {
                     stmts.push(ThreadedStmt::Statement(d, span));
                 }

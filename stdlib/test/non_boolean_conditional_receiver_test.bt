@@ -1,0 +1,285 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: an inline `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose receiver is
+// not a Boolean sends the selector to it, whichever lowering the conditional
+// takes: the pure one (no arm writes state) or the mutation one (an arm writes
+// an outer local or a field). Before BT-4244 the mutation lowering crashed with
+// a raw `case_clause` instead. So:
+//   - `nil` and an Integer raise `does_not_understand`;
+//   - a receiver whose method ignores the block answers that method's value,
+//     and no arm's write happens;
+//   - a receiver whose method calls the block runs it as an escaping block
+//     (ADR 0133): a pure arm answers its value, an actor field write lands
+//     (ADR 0137), and an arm that writes a captured local or a value-type
+//     field raises `stateful_block_dispatch` instead of losing the write.
+// The columns are class, value-type and actor methods
+// (stdlib/test/fixtures/non_boolean_cond_{class,value,actor}.bt) and, for the
+// value-type field write, this TestCase's own field.
+
+TestCase subclass: NonBooleanConditionalReceiverTest
+  // A TestCase is the one value type whose methods may write `self.x :=`
+  // (ADR 0042): the value-type field-write column.
+  field: x = 0
+
+  vtFieldIfTrue: r =>
+    self.x := 0
+    a := r ifTrue: [self.x := self.x + 1]
+    #[a, self.x]
+
+  vtFieldIfFalse: r =>
+    self.x := 0
+    a := r ifFalse: [self.x := self.x + 1]
+    #[a, self.x]
+
+  vtFieldIfTrueIfFalse: r =>
+    self.x := 0
+    a := r ifTrue: [self.x := 1] ifFalse: [self.x := 2]
+    #[a, self.x]
+
+  vtFieldTailIfTrue: r =>
+    self.x := 0
+    r ifTrue: [self.x := self.x + 1]
+
+  // The columns every method name below exists in: [name, receiver].
+  columns =>
+    #[#[#classMethod, NonBooleanCondClass], #[#valueType, NonBooleanCondValue new], #[#actor, NonBooleanCondActor spawn]]
+
+  pureSelectors => #(#pureIfTrue:, #pureIfFalse:, #pureIfTrueIfFalse:)
+
+  localSelectors =>
+    #(#localIfTrue:, #localIfFalse:, #localIfTrueIfFalse:, #localTailIfTrue:, #localCollectIfTrue:)
+
+  fieldSelectors =>
+    #(#fieldIfTrue:, #fieldIfFalse:, #fieldIfTrueIfFalse:, #fieldTailIfTrue:, #fieldDoIfTrue:, #loopReturnIfTrue:, #returnIfTrue:)
+
+  vtFieldSelectors =>
+    #(#vtFieldIfTrue:, #vtFieldIfFalse:, #vtFieldIfTrueIfFalse:, #vtFieldTailIfTrue:)
+
+  // Runs `aBlock` on the [target, selector] pair of every cell of the matrix.
+  eachCellDo: aBlock =>
+    self columns
+      do: [:col |
+        self pureSelectors do: [:sel | aBlock value: #[col at: 2, sel]]
+        self localSelectors do: [:sel | aBlock value: #[col at: 2, sel]]
+      ]
+    actor := NonBooleanCondActor spawn
+    self fieldSelectors do: [:sel | aBlock value: #[actor, sel]]
+    self vtFieldSelectors do: [:sel | aBlock value: #[self, sel]]
+
+  run: cell with: receiver =>
+    (cell at: 1) perform: (cell at: 2) withArguments: #(receiver)
+
+  // Asserts `target sel: receiver` answers `expected`; the selector is in the
+  // compared arrays so a failure names the cell.
+  check: target sel: sel with: receiver expect: expected =>
+    got := target perform: sel withArguments: #(receiver)
+    self assert: #[sel, got] equals: #[sel, expected]
+
+  testNilRaisesDoesNotUnderstand =>
+    self eachCellDo: [:cell |
+      self should: [self run: cell with: nil] raise: #does_not_understand
+    ]
+
+  testIntegerRaisesDoesNotUnderstand =>
+    self eachCellDo: [:cell |
+      self should: [self run: cell with: 3] raise: #does_not_understand
+    ]
+
+  testIgnoringReceiverAnswersItsMethod =>
+    r := NonBooleanCondIgnoring new
+    self columns
+      do: [:col |
+        t := col at: 2
+        self
+          check: t
+          sel: #pureIfTrue:
+          with: r
+          expect: #ignoredIfTrue
+        self
+          check: t
+          sel: #pureIfFalse:
+          with: r
+          expect: #ignoredIfFalse
+        self
+          check: t
+          sel: #pureIfTrueIfFalse:
+          with: r
+          expect: #ignoredIfTrueIfFalse
+        self
+          check: t
+          sel: #localIfTrue:
+          with: r
+          expect: #[#ignoredIfTrue, 0]
+        self
+          check: t
+          sel: #localIfFalse:
+          with: r
+          expect: #[#ignoredIfFalse, 0]
+        self
+          check: t
+          sel: #localIfTrueIfFalse:
+          with: r
+          expect: #[#ignoredIfTrueIfFalse, 0]
+        self
+          check: t
+          sel: #localTailIfTrue:
+          with: r
+          expect: #ignoredIfTrue
+        self
+          check: t
+          sel: #localCollectIfTrue:
+          with: r
+          expect: #[#ignoredIfTrue, 0]
+      ]
+
+  testIgnoringReceiverLeavesFieldsUnwritten =>
+    r := NonBooleanCondIgnoring new
+    a := NonBooleanCondActor spawn
+    self
+      check: a
+      sel: #fieldIfTrue:
+      with: r
+      expect: #[#ignoredIfTrue, 0]
+    self
+      check: a
+      sel: #fieldIfFalse:
+      with: r
+      expect: #[#ignoredIfFalse, 0]
+    self
+      check: a
+      sel: #fieldIfTrueIfFalse:
+      with: r
+      expect: #[#ignoredIfTrueIfFalse, 0]
+    self
+      check: a
+      sel: #fieldTailIfTrue:
+      with: r
+      expect: #ignoredIfTrue
+    self assert: a n equals: 0
+    self
+      check: a
+      sel: #fieldDoIfTrue:
+      with: r
+      expect: 0
+    self
+      check: a
+      sel: #loopReturnIfTrue:
+      with: r
+      expect: #none
+    self
+      check: a
+      sel: #returnIfTrue:
+      with: r
+      expect: #late
+    self assert: a n equals: 0
+    self
+      check: self
+      sel: #vtFieldIfTrue:
+      with: r
+      expect: #[#ignoredIfTrue, 0]
+    self
+      check: self
+      sel: #vtFieldIfFalse:
+      with: r
+      expect: #[#ignoredIfFalse, 0]
+    self
+      check: self
+      sel: #vtFieldIfTrueIfFalse:
+      with: r
+      expect: #[#ignoredIfTrueIfFalse, 0]
+    self
+      check: self
+      sel: #vtFieldTailIfTrue:
+      with: r
+      expect: #ignoredIfTrue
+
+  testCallingReceiverRunsPureArm =>
+    r := NonBooleanCondCalling new
+    self columns
+      do: [:col |
+        t := col at: 2
+        self
+          check: t
+          sel: #pureIfTrue:
+          with: r
+          expect: #[#ifTrue, 1]
+        self
+          check: t
+          sel: #pureIfFalse:
+          with: r
+          expect: #[#ifFalse, 1]
+        self
+          check: t
+          sel: #pureIfTrueIfFalse:
+          with: r
+          expect: #[#ifTrueIfFalse, 2]
+      ]
+
+  testCallingReceiverRunsActorFieldWrite =>
+    r := NonBooleanCondCalling new
+    a := NonBooleanCondActor spawn
+    self
+      check: a
+      sel: #fieldIfTrue:
+      with: r
+      expect: #[#[#ifTrue, 1], 1]
+    self
+      check: a
+      sel: #fieldIfFalse:
+      with: r
+      expect: #[#[#ifFalse, 1], 1]
+    self
+      check: a
+      sel: #fieldIfTrueIfFalse:
+      with: r
+      expect: #[#[#ifTrueIfFalse, 2], 2]
+    a reset
+    self
+      check: a
+      sel: #fieldTailIfTrue:
+      with: r
+      expect: #[#ifTrue, 1]
+    self assert: a n equals: 1
+    self
+      check: a
+      sel: #fieldDoIfTrue:
+      with: r
+      expect: 1
+    // A `^` out of the arm returns from the method, keeping the write.
+    self
+      check: a
+      sel: #returnIfTrue:
+      with: r
+      expect: #early
+    self assert: a n equals: 7
+
+  // Where the frame holds no whole `State` (a `whileTrue:` loop with direct
+  // parameters), the fallback cannot bracket, so an arm that touches the
+  // actor's state is not run as a closure.
+  testCallingReceiverCannotRunActorStateArmInStatelessLoop =>
+    a := NonBooleanCondActor spawn
+    self should: [
+      a loopReturnIfTrue: NonBooleanCondCalling new
+    ] raise: #stateful_block_dispatch
+
+  testCallingReceiverCannotRunCapturedLocalWrite =>
+    r := NonBooleanCondCalling new
+    self columns
+      do: [:col |
+        self localSelectors
+          do: [:sel |
+            self should: [
+              (col at: 2) perform: sel withArguments: #(r)
+            ] raise: #stateful_block_dispatch
+          ]
+      ]
+
+  testCallingReceiverCannotRunValueTypeFieldWrite =>
+    r := NonBooleanCondCalling new
+    self vtFieldSelectors
+      do: [:sel |
+        self should: [
+          self perform: sel withArguments: #(r)
+        ] raise: #stateful_block_dispatch
+      ]

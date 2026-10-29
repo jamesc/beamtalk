@@ -23,7 +23,7 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::control_flow::SoloBoolean;
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
@@ -248,25 +248,16 @@ impl CoreErlangGenerator {
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
-        // Inline Tier 2 block literal with mutations.
+        // Inline Tier 2 block literal with mutations: one that writes a
+        // captured local, writes a field or sends to `self` (actor state
+        // threading), or, in the REPL, one of this arity that writes a binding
+        // anywhere, a nested construct included (BT-3823: inlined over the
+        // bindings map as a REPL arm; `beamtalk_core`'s `repl_evaluated_block`).
         if let Expression::Block(block) = receiver
-            && !Self::captured_mutations_for_block(block).is_empty()
+            && self.evaluated_block_inlines_with_mutations(block)
         {
             let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
             return Ok(Some(doc));
-        }
-        // Block literal with field mutations (actor state threading), or, in
-        // the REPL, one of this arity that writes a binding anywhere, a nested
-        // construct included (BT-3823: inlined over the bindings map as a REPL
-        // arm; `beamtalk_core`'s `repl_evaluated_block`).
-        if let Expression::Block(block) = receiver {
-            let analysis = block_analysis::analyze_block(block);
-            if self.value_block_needs_threading(&analysis)
-                || self.repl_blocks_write_bindings(&[block])
-            {
-                let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
-                return Ok(Some(doc));
-            }
         }
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
@@ -467,24 +458,13 @@ impl CoreErlangGenerator {
         {
             return Ok(Some(self.generate_block_arity_mismatch(block, arguments)?));
         }
-        // Inline Tier 2 block literal with mutations (keyword variant)
+        // Inline Tier 2 block literal with mutations (keyword variant, the
+        // same predicate as the unary one).
         if let Expression::Block(block) = receiver
-            && !Self::captured_mutations_for_block(block).is_empty()
+            && self.evaluated_block_inlines_with_mutations(block)
         {
             let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
             return Ok(Some(doc));
-        }
-        // Block literal with field mutations (actor state threading), or, in
-        // the REPL, one of this arity that writes a binding anywhere (BT-3823,
-        // as above).
-        if let Expression::Block(block) = receiver {
-            let analysis = block_analysis::analyze_block(block);
-            if self.value_block_needs_threading(&analysis)
-                || self.repl_blocks_write_bindings(&[block])
-            {
-                let doc = self.generate_block_value_inline_with_mutations(block, arguments)?;
-                return Ok(Some(doc));
-            }
         }
         // Fast path: block literal receiver -> fast inline apply
         if matches!(receiver, Expression::Block(_)) {
@@ -1612,6 +1592,22 @@ impl CoreErlangGenerator {
             return Ok(Document::Vec(parts));
         }
 
+        // BT-3982: for a block the actor producer claims
+        // (`actor_producer_claims_block`), the raw tuple below is the value
+        // unless a body sequencer consumes this site as a Tier 2 statement:
+        // the producer gate and this lowering disagree.
+        if self.actor_producer_claims_block(block)
+            && !self.tier2_evaluated_block_sites.contains(&block.span)
+        {
+            let errors =
+                [super::threaded_ir::VerifyError::UnthreadedEvaluatedBlock { at: block.span }];
+            self.report_threaded_ir_verify_errors(
+                &errors,
+                "an evaluated block that threads state must be lowered as a producer",
+                block.span,
+            );
+        }
+
         // Actor/REPL context: use StateAcc-based inlining (`generate_repl_arm_inline`,
         // which is `generate_conditional_branch_inline` outside the REPL)
         let outer_state = self.current_state_var();
@@ -2517,9 +2513,7 @@ impl CoreErlangGenerator {
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
-                        let hint = leaf::binary_lit(
-                            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
-                        );
+                        let hint = leaf::binary_lit(super::errors::VALUE_IMMUTABLE_SLOT_HINT);
 
                         let call_doc = docvec![
                             "let ",
@@ -3037,8 +3031,7 @@ impl CoreErlangGenerator {
                             } else {
                                 SoloBoolean::Or
                             };
-                            let doc =
-                                self.generate_solo_boolean_pure(sel, receiver, block, arguments)?;
+                            let doc = self.generate_solo_boolean_pure(sel, receiver, block)?;
                             return Ok(Some(doc));
                         }
                     }
@@ -3057,7 +3050,6 @@ impl CoreErlangGenerator {
                             SoloBoolean::IfTrue,
                             receiver,
                             block,
-                            arguments,
                         )?));
                     }
                 }
@@ -3072,7 +3064,6 @@ impl CoreErlangGenerator {
                             SoloBoolean::IfFalse,
                             receiver,
                             block,
-                            arguments,
                         )?));
                     }
                 }
@@ -3093,7 +3084,6 @@ impl CoreErlangGenerator {
                             receiver,
                             true_block,
                             false_block,
-                            arguments,
                         )?));
                     }
                 }

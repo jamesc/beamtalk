@@ -62,6 +62,17 @@ pub(in crate::core_erlang) struct UnbracketedSend {
     pub(in crate::core_erlang) site: GapSite,
 }
 
+/// A bracketed conditional fallback send
+/// ([`CoreErlangGenerator::bracket_conditional_fallback`]).
+pub(in crate::core_erlang) struct FallbackBracket {
+    /// The open `let` chain: store, send, reload.
+    pub(in crate::core_erlang) prelude: Document<'static>,
+    /// The variable bound to the send's answer.
+    pub(in crate::core_erlang) result: String,
+    /// The variable bound to the reloaded cell.
+    pub(in crate::core_erlang) state: String,
+}
+
 /// Where in the code generator a gap was compiled: [`capture_site`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in crate::core_erlang) struct GapSite {
@@ -245,6 +256,12 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// ([`CoreErlangGenerator::classify_inlined`]), decided once per send.
     pub(in crate::core_erlang) inlined_classes:
         std::cell::RefCell<std::collections::HashMap<Span, UserCodeCall>>,
+    /// BT-4269: names the loop being planned will bind (its block parameters
+    /// and the temps its body assigns that are not fields), seen as locals by
+    /// [`CoreErlangGenerator::analysis_touches_actor_state`] while
+    /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
+    /// before those names are in scope. Empty outside a probe.
+    pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
 }
 
 impl SyncedCallState {
@@ -257,6 +274,7 @@ impl SyncedCallState {
             stale_state_gaps: Vec::new(),
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
+            probe_locals: std::cell::RefCell::default(),
         }
     }
 }
@@ -896,6 +914,75 @@ impl CoreErlangGenerator {
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
+    }
+
+    /// BT-4244: the bracket around a boolean conditional's non-Boolean fallback
+    /// send (`CoreErlangGenerator::mutation_boolean_fallback_clause`), built
+    /// here because the mutation-path `case` is a `Document` whose arms each
+    /// answer `{Result, NewState}`: the store of `base_state` (the scratch
+    /// map the arms continue) to the cell, the send, and the reload of the
+    /// cell as the arm's state, rendered through the one `SyncedCall` node.
+    ///
+    /// Called only where [`Self::conditional_fallback_brackets`] holds.
+    pub(in crate::core_erlang) fn bracket_conditional_fallback(
+        &mut self,
+        call: Document<'static>,
+        base_state: &str,
+        span: Span,
+    ) -> FallbackBracket {
+        let result = self.fresh_temp_var("Synced");
+        let state = self.fresh_temp_var("FallbackState");
+        // The node is a self-contained slice (verified and rendered on its
+        // own, like `conditional_baseline_tuple`'s slot): its gensym names
+        // render verbatim, so they sit in the root frame of that slice.
+        let frame = FrameId::ROOT;
+        let node = ThreadedStmt::SyncedCall {
+            store: VersionedVar::new(VersionPrefix::Gensym(base_state.to_string()), 0, frame),
+            call,
+            result: Some(result.clone()),
+            load: Some(VersionedVar::new(
+                VersionPrefix::Gensym(state.clone()),
+                0,
+                frame,
+            )),
+            span,
+            tier2_local_rebinds: Vec::new(),
+            on_private_scratch: self.in_private_scratch,
+        };
+        // Today's only caller checks `conditional_fallback_brackets()` first,
+        // which excludes a private scratch map. The verify guards a future
+        // caller that skips that check: a bracket on a private scratch map is
+        // reported (`SyncedCallOnPrivateScratch`).
+        let errors = self.verify_threaded_ir(std::slice::from_ref(&node));
+        self.report_threaded_ir_verify_errors(&errors, "conditional fallback bracket", span);
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        let prelude = super::threaded_ir::render(&[node], &mut ctx);
+        FallbackBracket {
+            prelude,
+            result,
+            state,
+        }
+    }
+
+    /// BT-4244: whether a boolean conditional's fallback send is bracketed
+    /// ([`Self::bracket_conditional_fallback`]): in an actor instance method
+    /// body whose frame holds a whole `State` to store. Where the cell
+    /// protocol applies but the frame holds none (a direct-params, hybrid or
+    /// tuple-accumulator loop, [`Self::loop_holds_no_whole_state`]), the
+    /// fallback cannot bracket, so a block that touches the actor's state is
+    /// not passed as a closure at all
+    /// (`CoreErlangGenerator::conditional_fallback_stubs_state`).
+    pub(in crate::core_erlang) fn conditional_fallback_brackets(&self) -> bool {
+        self.synced_calls_active() && !self.loop_holds_no_whole_state()
+    }
+
+    /// BT-4244: whether a boolean conditional's fallback passes a block that
+    /// touches the actor's state as a raising stub rather than a closure: the
+    /// cell protocol applies, but the send cannot be bracketed
+    /// ([`Self::conditional_fallback_brackets`]), so a closure would read a
+    /// stale cell and its writes would never reach the threaded `State`.
+    pub(in crate::core_erlang) fn conditional_fallback_stubs_state(&self) -> bool {
+        self.synced_calls_active() && self.loop_holds_no_whole_state()
     }
 
     /// Records one gap.
@@ -1795,15 +1882,58 @@ impl CoreErlangGenerator {
         found
     }
 
-    /// BT-4255: whether any statement of `block` holds a bracketed call
-    /// ([`Self::expr_holds_bracketed_call`]).
-    pub(in crate::core_erlang) fn block_holds_bracketed_call(
+    /// BT-4255: whether the loop with `body` (and `condition`, for a `while`
+    /// loop) holds a bracketed call ([`Self::expr_holds_bracketed_call`]), the
+    /// question loop mode selection asks before it lets the loop drop its
+    /// `State`.
+    ///
+    /// BT-4269: the loop has not bound its own names yet, so an inner closure
+    /// reading the loop's block parameter or a temp its body assigns would
+    /// look like a bare field read. Those names are probe locals for the
+    /// duration ([`Self::loop_bound_names`]).
+    pub(in crate::core_erlang) fn loop_holds_bracketed_call(
         &self,
-        block: &beamtalk_core::ast::Block,
+        body: &beamtalk_core::ast::Block,
+        condition: Option<&Expression>,
     ) -> bool {
-        block
+        let names = self.loop_bound_names(body, condition);
+        let saved = std::mem::replace(&mut *self.synced.probe_locals.borrow_mut(), names);
+        let found = body
             .body
             .iter()
             .any(|s| self.expr_holds_bracketed_call(&s.expression))
+            || condition.is_some_and(|c| self.expr_holds_bracketed_call(c));
+        *self.synced.probe_locals.borrow_mut() = saved;
+        found
+    }
+
+    /// BT-4269: the names the loop with `body` and `condition` binds itself:
+    /// its block parameters, and the temps its body (or condition block)
+    /// assigns that are not fields of the class (a bare field name is a field
+    /// read, so it stays one). Without the class hierarchy no temp can be
+    /// told from a field, so only the parameters count.
+    fn loop_bound_names(
+        &self,
+        body: &beamtalk_core::ast::Block,
+        condition: Option<&Expression>,
+    ) -> Vec<String> {
+        use beamtalk_core::semantic_analysis::block_facts as block_analysis;
+        let mut names: Vec<String> = body.parameters.iter().map(|p| p.name.to_string()).collect();
+        if let Some(hierarchy) = self.class_hierarchy.as_ref() {
+            let fields = hierarchy.all_state(&self.class_name());
+            let blocks = std::iter::once(body).chain(condition.and_then(|c| match c {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            }));
+            for block in blocks {
+                names.extend(
+                    block_analysis::analyze_block(block)
+                        .local_writes
+                        .into_iter()
+                        .filter(|name| !fields.iter().any(|f| f.as_str() == name)),
+                );
+            }
+        }
+        names
     }
 }

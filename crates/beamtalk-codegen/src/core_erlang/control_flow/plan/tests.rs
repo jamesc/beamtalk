@@ -127,6 +127,8 @@ fn fallback_reason_display_all_variants() {
         StateAccFallbackReason::ValueTypeContext,
         StateAccFallbackReason::NotLetrec,
         StateAccFallbackReason::DestructureAsLastExpr,
+        StateAccFallbackReason::GuardedOperator,
+        StateAccFallbackReason::SyncedUserCodeCall,
     ];
     for v in &variants {
         assert!(!v.to_string().is_empty(), "variant {v:?} has empty display");
@@ -721,6 +723,17 @@ fn diagnose_nested_list_op() {
         reason,
         StateAccFallbackReason::NestedListOpCrossScope
     ));
+}
+
+#[test]
+fn diagnose_synced_user_code_call() {
+    // BT-4269: a bracketed call is named as such, not as a control-flow
+    // mutation.
+    let analysis = clean_body_analysis();
+    let mut effects = clean_effects();
+    effects.body_has_synced_sends = true;
+    let reason = ThreadingPlan::diagnose_guard_failure(&analysis, &effects);
+    assert!(matches!(reason, StateAccFallbackReason::SyncedUserCodeCall));
 }
 
 #[test]

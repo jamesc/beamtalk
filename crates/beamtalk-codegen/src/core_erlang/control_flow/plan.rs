@@ -314,12 +314,17 @@ impl BodyEffects {
 
         // Guard: if any threaded-local assignment's RHS is a Tier-2 block call,
         // fall back to StateAcc mode so `lower_local_var_assignment_bind`
-        // can properly unpack the {Result, NewStateAcc} tuple.
+        // can properly unpack the {Result, NewStateAcc} tuple. BT-3982: an
+        // evaluated literal block inlined with its writes threaded is one
+        // too, whichever lowering takes it (the producer, or the Tier 2 path
+        // in a body frame with a private scratch map): either runs on the
+        // body's `StateAcc`.
         let has_tier2_threaded_assign = body.body.iter().any(|s| {
             if let Expression::Assignment { target, value, .. } = &s.expression {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if threaded_locals.contains(&id.name.to_string()) {
-                        return generator.is_tier2_value_call(value);
+                        return generator.is_tier2_value_call(value)
+                            || generator.is_inlined_evaluated_block(value);
                     }
                 }
             }
@@ -363,10 +368,20 @@ impl BodyEffects {
         // control flow with mutations like the statement itself: its carrier
         // threads the `State` (or a hybrid body's pre-extracted field
         // parameters, which it cannot reach).
+        //
+        // BT-3982: not an evaluated literal block (`is_inlined_evaluated_block`,
+        // frame-independent), which `control_flow_has_mutations` claims where
+        // its producer applies: the body's mode is chosen as it was when every
+        // such block was a Tier 2 inline call (a hybrid body keeps its field
+        // parameters, a direct-params or tuple-acc body its private scratch
+        // map), and its producer lowers in whichever mode that is.
         let has_cf_mutations = body.body.iter().any(|s| {
             Self::statement_and_producer_sites(&s.expression)
                 .into_iter()
-                .any(|e| generator.control_flow_has_mutations(e))
+                .any(|e| {
+                    generator.control_flow_has_mutations(e)
+                        && !generator.is_inlined_evaluated_block(e)
+                })
         });
 
         // Guard: inline conditionals that write threaded locals (e.g.
@@ -393,8 +408,7 @@ impl BodyEffects {
         // bracket them with.
         let body_has_synced_sends = generator.synced_calls_active()
             && (block_analysis::analyze_block(body).has_synced_user_code_sends()
-                || generator.block_holds_bracketed_call(body)
-                || condition.is_some_and(|c| generator.expr_holds_bracketed_call(c)));
+                || generator.loop_holds_bracketed_call(body, condition));
 
         let has_guarded_operator = generator.block_contains_guarded_operator(body)
             || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));
@@ -1024,6 +1038,10 @@ impl ThreadingPlan {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {
             StateAccFallbackReason::SelfSendInBody
+        } else if effects.body_has_synced_sends {
+            // BT-4269: a call that may run user code is bracketed with a
+            // `State` store/reload, which a loop without one cannot do.
+            StateAccFallbackReason::SyncedUserCodeCall
         } else {
             StateAccFallbackReason::ControlFlowMutations
         }

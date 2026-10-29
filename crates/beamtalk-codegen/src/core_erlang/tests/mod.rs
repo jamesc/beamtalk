@@ -20,6 +20,9 @@
 //! - [`trait_flattening`] — ADR 0127 §3/§10 (BT-3590): a `uses:` class's
 //!   flattened provisions reaching compiled output through both the
 //!   self-sufficient and driver-handoff codegen entry points
+//! - [`value_immutable_slot_hint_conformance`] — BT-4273: the Value
+//!   `immutable_value` slot hint fixture, asserted against
+//!   `beamtalk_primitive_tests.erl`
 //! - [`typed_sealed`] — BT-4069: sends to sealed-Value-typed receivers
 //!   compiling to a guarded direct `Module:dispatch/3` call
 
@@ -157,6 +160,31 @@ pub(crate) fn codegen(src: &str) -> String {
         .expect("codegen should succeed")
 }
 
+/// BT-4244: asserts that every runtime send of `selector` in `code` (outside the
+/// `methodXref` metadata line) is an inline boolean conditional's non-Boolean
+/// fallback: the body of its `CondNoMatch` wildcard clause, sent to the
+/// scrutinised `Cond` variable. The `<'true'>`/`<'false'>` arms stay inline.
+pub(crate) fn assert_selector_sent_only_by_fallback(code: &str, selector: &str) {
+    let needle = format!("'{selector}', [");
+    for line in code.lines().filter(|line| !line.contains("'methodXref'")) {
+        for (at, _) in line.match_indices(&needle) {
+            let before = &line[..at];
+            let Some(start) = before.rfind("CondNoMatch") else {
+                panic!("`{selector}` sent outside a CondNoMatch clause:\n{code}")
+            };
+            let clause = &before[start..];
+            assert!(
+                !clause.contains("<'true'>") && !clause.contains("<'false'>"),
+                "`{selector}` sent from a Boolean arm, not the CondNoMatch fallback:\n{code}"
+            );
+            assert!(
+                clause.contains("'beamtalk_message_dispatch':'send'(_Cond@"),
+                "the CondNoMatch fallback should send `{selector}` to the Cond var:\n{code}"
+            );
+        }
+    }
+}
+
 /// Parse `src` as a Beamtalk module and run codegen, answering the codegen error's message
 /// instead of panicking (for the corpora that assert a shape is a compile error).
 pub(crate) fn compile(src: &str) -> std::result::Result<String, String> {
@@ -262,6 +290,8 @@ mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
+mod evaluated_block_grid_corpus;
+mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
 mod field_assignment_value_position;
@@ -290,6 +320,7 @@ mod paren_transparency;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
 mod supervisor;
@@ -303,6 +334,7 @@ mod tier2_merge;
 mod trait_flattening;
 mod tuple_acc_state_read_corpus;
 mod typed_sealed;
+mod value_immutable_slot_hint_conformance;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;

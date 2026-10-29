@@ -25,9 +25,12 @@ const CHOKE_POINT_ONLY: &[&str] = &[
     ".hybrid_readonly_field_params.get(",
 ];
 
-/// Files allowed to make those calls: the choke point and the accessor's
-/// definition.
-const ALLOWED_FILES: &[&str] = &["synced_call.rs", "generator/version.rs"];
+/// Files allowed to make those calls: the choke point. Each entry must make
+/// at least one of them (BT-4284), so an allowance never outlives its calls
+/// and silently exempts a later one. An accessor's definition
+/// (`fn current_field_read_state_var(&self)`) has no leading `.` and needs
+/// no entry.
+const ALLOWED_FILES: &[&str] = &["synced_call.rs"];
 
 /// Calls that are not read sources, with how many times each file makes one:
 /// a hybrid field write rebinds the parameter it reads the chain source of
@@ -160,6 +163,60 @@ fn state_var_to_store_is_called_only_at_listed_store_sites() {
          `actor_state_source`/`actor_state_read_var`; a new store site updates \
          `STORE_SITES`:\n{}",
         unlisted.join("\n")
+    );
+}
+
+#[test]
+fn every_listed_file_still_exists() {
+    // BT-4268: the checks above walk the sources and look each file up in
+    // the lists, so an entry for a file that was deleted or renamed would sit
+    // in a list forever without failing anything. Check the other direction.
+    let walked: std::collections::HashSet<String> = code_generator_sources()
+        .into_iter()
+        .map(|(rel, _)| rel)
+        .collect();
+    let listed = ALLOWED_FILES
+        .iter()
+        .map(|f| ("ALLOWED_FILES", *f))
+        .chain(
+            NOT_READ_SOURCES
+                .iter()
+                .map(|(f, _, _)| ("NOT_READ_SOURCES", *f)),
+        )
+        .chain(STORE_SITES.iter().map(|(f, _)| ("STORE_SITES", *f)));
+    let stale: Vec<String> = listed
+        .filter(|(_, f)| !walked.contains(*f))
+        .map(|(list, f)| format!("{list}: {f}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "BT-4268: list entries naming a file the walk did not find (deleted or \
+         renamed; update or drop the entry):\n{}",
+        stale.join("\n")
+    );
+}
+
+#[test]
+fn every_allowed_file_makes_a_guarded_call() {
+    // BT-4284: `ALLOWED_FILES` is a blanket skip with no count, so an entry
+    // whose file no longer makes any `CHOKE_POINT_ONLY` call would exempt a
+    // call added there later without anyone reviewing it.
+    let sources = code_generator_sources();
+    let idle: Vec<&str> = ALLOWED_FILES
+        .iter()
+        .copied()
+        .filter(|f| {
+            sources
+                .iter()
+                .find(|(rel, _)| rel == f)
+                .is_some_and(|(_, code)| !CHOKE_POINT_ONLY.iter().any(|c| code.contains(c)))
+        })
+        .collect();
+    assert!(
+        idle.is_empty(),
+        "BT-4284: `ALLOWED_FILES` entries that make no `CHOKE_POINT_ONLY` call \
+         (drop the entry; a missing file is `every_listed_file_still_exists`'s):\n{}",
+        idle.join("\n")
     );
 }
 

@@ -970,34 +970,6 @@ impl CoreErlangGenerator {
         Ok(Some(scope))
     }
 
-    /// BT-3816: the literal block and arguments of an inlined
-    /// `[body] value` / `value:` / `value:value:` / `value:value:value:` send.
-    fn literal_block_value_parts(expr: &Expression) -> Option<(&Block, &[Expression])> {
-        let Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        if !selector
-            .well_known()
-            .is_some_and(WellKnownSelector::is_block_value)
-        {
-            return None;
-        }
-        let Expression::Block(block) = receiver.as_ref() else {
-            return None;
-        };
-        beamtalk_core::semantic_analysis::block_facts::block_literal_arity_matches(
-            block,
-            arguments.len(),
-        )
-        .then_some((block, arguments.as_slice()))
-    }
-
     /// BT-3816: whether `expr` is an inlined literal-block `value` send, in a
     /// value-type instance method, whose block writes a field. The block body
     /// is spliced into the enclosing statement sequence, so its `Self{N}`
@@ -1010,8 +982,9 @@ impl CoreErlangGenerator {
     ) -> bool {
         self.context == CodeGenContext::ValueType
             && !self.in_class_method()
-            && Self::literal_block_value_parts(expr).is_some_and(|(block, _)| {
-                !super::block_analysis::analyze_block(block)
+            && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+                .is_some_and(|(block, _)| {
+                    !super::block_analysis::analyze_block(block)
                     .field_writes
                     .is_empty()
                     // The block's value is its last statement's: a construct
@@ -1020,7 +993,7 @@ impl CoreErlangGenerator {
                     && super::util::collect_body_exprs(&block.body)
                         .last()
                         .is_none_or(|last| self.vt_block_stmt_is_threadable(last))
-            })
+                })
     }
 
     /// BT-3816: whether a statement of an inlined block body is lowered through
@@ -1070,7 +1043,9 @@ impl CoreErlangGenerator {
         if !self.is_vt_field_writing_block_value(expr) {
             return Ok(None);
         }
-        let Some((block, arguments)) = Self::literal_block_value_parts(expr) else {
+        let Some((block, arguments)) =
+            beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+        else {
             return Ok(None);
         };
         let children: Vec<&Expression> = arguments.iter().collect();
@@ -3068,6 +3043,17 @@ impl CoreErlangGenerator {
                 }
             }
         };
+        // BT-4244: a non-Boolean receiver sends the message (the shared
+        // fallback the pure and actor paths use).
+        let blocks: Vec<&Block> = arguments
+            .iter()
+            .filter_map(|arg| match arg {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks)?;
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
         body_parts.push(docvec![
             "    let ",
             leaf::var(cond_var.clone()),
@@ -3081,6 +3067,10 @@ impl CoreErlangGenerator {
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            fallback,
             " end in\n",
         ]);
         Ok(Some(result_var))
@@ -3438,8 +3428,20 @@ impl CoreErlangGenerator {
         .into_iter()
         .collect();
         let families = ThreadedFamilies::from_matches(&mutated_families);
+        // BT-4244: a non-Boolean receiver sends the message (the shared
+        // fallback), answering the locals and `Self` unchanged.
+        let fallback_pieces = self.build_vt_conditional_fallback_pieces(
+            &selector_name,
+            &cond_var,
+            &branch_blocks,
+            &all_mutations,
+            capture_value,
+        )?;
         let true_branch = self.finish_vt_conditional_branch(true_pieces, &families, baseline);
         let false_branch = self.finish_vt_conditional_branch(false_pieces, &families, baseline);
+        let fallback_branch =
+            self.finish_vt_conditional_branch(fallback_pieces, &families, baseline);
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
@@ -3450,6 +3452,10 @@ impl CoreErlangGenerator {
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            fallback_branch,
             " end"
         ];
 
@@ -4058,6 +4064,34 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4244: the wildcard arm's pieces for a receiver that is neither
+    /// `true` nor `false`: the shared dynamic send
+    /// ([`Self::boolean_fallback_send`], the one the pure and actor paths use),
+    /// with every captured local and `Self` unchanged, as a passthrough arm
+    /// answers them. The send's answer is the arm's value in value position;
+    /// in statement position the send is bound and discarded.
+    fn build_vt_conditional_fallback_pieces(
+        &mut self,
+        selector_name: &str,
+        cond_var: &str,
+        blocks: &[&Block],
+        all_mutations: &[String],
+        capture_value: bool,
+    ) -> Result<VtBranchPieces> {
+        let send = self.boolean_fallback_send(cond_var, selector_name, blocks)?;
+        let (preamble, value) = if capture_value {
+            (Vec::new(), Some(send))
+        } else {
+            (vec![docvec!["let _ = ", send, " in "]], None)
+        };
+        Ok(VtBranchPieces {
+            preamble,
+            local_values: Self::resolve_mutation_value_docs(self, all_mutations),
+            self_mutated_version: None,
+            value,
+        })
+    }
+
     /// Resolves each of `all_mutations` to its current Core Erlang variable doc.
     fn resolve_mutation_value_docs(cg: &Self, all_mutations: &[String]) -> Vec<Document<'static>> {
         all_mutations
@@ -4500,8 +4534,7 @@ impl CoreErlangGenerator {
 
         // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
         let immutable_hint = if is_value_class {
-            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance"
-                .to_string()
+            super::errors::VALUE_IMMUTABLE_SLOT_HINT.to_string()
         } else {
             format!("{class_name}s are immutable. Use assignment (x := newValue) instead.")
         };

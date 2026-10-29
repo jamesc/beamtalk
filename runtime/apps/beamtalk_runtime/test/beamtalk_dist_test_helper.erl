@@ -54,7 +54,8 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
     start_peer/0,
     start_peer/1,
     start_peer/2,
-    stop_peer/1
+    stop_peer/1,
+    unreachable_pid/1
 ]).
 
 %% `peer:start/1`'s boot budget — see start_peer/2's doc.
@@ -391,6 +392,35 @@ itself never *introduces* one.
 ensure_epmd() ->
     _ = os:cmd("ERL_EPMD_ADDRESS=127.0.0.1 epmd -daemon"),
     ok.
+
+-doc """
+A deterministic pid on `Name@localhost`, a node that is never started, built
+from the external term format (`NEW_PID_EXT`) so no peer is needed:
+`binary_to_term/1` does not require the encoded node to exist or be
+connected. For tests of how a handle behaves when its process's node cannot
+be reached.
+
+The host part is `localhost` (?PEER_HOST), never a made-up host such as
+`nohost` (BT-4289). Once this VM is distributed (any test that called
+ensure_distribution/0 leaves it so for the rest of the run), a call or
+monitor to the pid auto-connects to its node, and that connect first
+resolves the host. `localhost` resolves from the hosts file and its epmd
+(ensure_epmd/0, 127.0.0.1) answers at once that `Name` is not registered,
+so the call fails with `nodedown` in milliseconds. An unknown host goes to
+DNS, which on a GitHub Actions runner can take over a second per lookup:
+every call then blocks that long, and a test making sixteen of them
+overran EUnit's 5-second per-test timeout. A VM that is not distributed
+fails the call at once either way.
+""".
+-spec unreachable_pid(atom()) -> pid().
+unreachable_pid(Name) ->
+    NodeBin = atom_to_binary(list_to_atom(atom_to_list(Name) ++ "@" ++ ?PEER_HOST), utf8),
+    %% 88 = NEW_PID_EXT; 118 = ATOM_UTF8_EXT, whose length is 2 bytes
+    %% (`:16`). SMALL_ATOM_UTF8_EXT (119) takes a 1-byte length: paired with
+    %% `:16` it decodes the node as the empty atom ''.
+    binary_to_term(
+        <<131, 88, 118, (byte_size(NodeBin)):16, NodeBin/binary, 1:32, 0:32, 0:32>>
+    ).
 
 -doc """
 A short node name intended to avoid collisions across repeated test runs

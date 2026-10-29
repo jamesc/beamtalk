@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::test_helpers::evaluated_block_grid::{self, in_actor, in_class, in_value, indent};
 use std::fmt::Write as _;
 
 fn adr0131_diagnostics_with(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
@@ -37,21 +38,9 @@ fn of_category(diags: &[Diagnostic], category: DiagnosticCategory) -> Vec<&Diagn
         .collect()
 }
 
-/// A class with a user higher-order class method, a value type with a user
-/// HOM, and an actor with one, followed by `body` as the given method.
-fn in_class(body: &str) -> String {
-    format!(
-        "Object subclass: CvA\n  class ap: b => b value\n\n  class probe =>\n    t := 0\n{}\n",
-        indent(body)
-    )
-}
-
-fn in_value(body: &str) -> String {
-    format!(
-        "Object subclass: CvA\n  class ap: b => b value\n\nValue subclass: Vt\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
-        indent(body)
-    )
-}
+// `in_class`, `in_value`, `in_actor`: the shared probe contexts of
+// `test_helpers::evaluated_block_grid` (BT-4274), so the generated grid's
+// cells are the programs these tests check.
 
 /// An instance method of a `TestCase` subclass: a value-type context where
 /// "Cannot assign to slot" does not fire (BT-3922).
@@ -68,20 +57,6 @@ fn in_object(body: &str) -> String {
         "Object subclass: CvA\n  class ap: b => b value\n\nObject subclass: Ob\n  ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
         indent(body)
     )
-}
-
-fn in_actor(body: &str) -> String {
-    format!(
-        "Object subclass: CvA\n  class ap: b => b value\n\nActor subclass: Ac\n  state: n = 0\n\n  sealed ap: b => b value\n\n  probe =>\n    t := 0\n{}\n",
-        indent(body)
-    )
-}
-
-fn indent(body: &str) -> String {
-    body.lines()
-        .map(|l| format!("    {l}"))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -4101,11 +4076,10 @@ fn residual_repl_match_arm_write_is_accepted_where_it_is_a_producer() {
 /// row and flips these to accepted (the repro then answers 6). Class and
 /// value-type methods, blocks that assign no local and `r := [..] value: i`
 /// of a fresh local inside an arm were measured right and stay accepted
-/// (BT-3948's row does not report them). Not every shape BT-3948's row leaves
-/// alone answers right: BT-3981 measured the `t := t + (E)` shapes in
-/// `do:` and `collect:` bodies and at the method level leaking the carrier
-/// (a "Tuple does not understand" or "expected a Dictionary" error), and
-/// rejects them with its own row.
+/// (BT-3948's row does not report them). The `t := t + (E)` shapes BT-3948's
+/// row leaves alone (in `do:` and `collect:` bodies, at the method level) leaked
+/// the carrier until BT-3982 lowered the evaluated block as a producer
+/// (`bt3982evalblock_test.bt` runs them).
 #[test]
 fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
     // The BT-3948 repro, in the language's newline syntax.
@@ -4181,8 +4155,8 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
     }
     // The shapes BT-3948's row leaves alone: other contexts, other bodies, a
     // loop that rebinds nothing or touches state, a block that assigns no
-    // local, and a nested loop. (Whether each answers right is not asserted
-    // here: the `t := t + (E)` forms do not, see BT-3981's check.)
+    // local, and a nested loop. (The `t := t + (E)` forms answer since
+    // BT-3982: `bt3982evalblock_test.bt`.)
     for src in [
         in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
         in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
@@ -4220,10 +4194,10 @@ fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
         in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
     ] {
         let messages = residual_messages(&src, None);
-        // Not BT-3948's. The `t := t + (E)` shapes here are NOT measured
-        // right: BT-3981 measured them on a BEAM (a method-level
-        // `t := t + (E)` raised "Tuple does not understand", a `do:` body
-        // "expected a Dictionary"), and its check rejects them.
+        // Not BT-3948's. The `t := t + (E)` shapes here leaked the carrier
+        // (BT-3981 measured "Tuple does not understand" at the method level,
+        // "expected a Dictionary" in a `do:` body) until BT-3982 lowered the
+        // evaluated block as a producer.
         assert!(
             messages.iter().all(|m| !m.contains("BT-3948")),
             "{src}: {messages:?}"
@@ -4249,218 +4223,127 @@ fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_p
     }
 }
 
-/// PIN-BUG BT-3947 (closes BT-3981): an actor evaluated block literal
-/// (`[...] value`) that binds a local, writes a field or sends to `self` is
-/// inlined as a state-threading block, and answered the raw `{Value, State}`
-/// tuple at every position that does not unpack it (measured on a BEAM, the
-/// generated cells of `stdlib/test/bt3981evalblock_test.bt`). BT-3981
-/// makes those positions a compile error; BT-3947 lowers the block as a frame,
-/// deletes the `EvaluatedBlockValue` row and flips these to accepted.
+/// BT-3982 (closes BT-3981): an actor evaluated block literal (`[...] value`,
+/// `[:k | ...] value: x`) that binds a local, writes a field or sends to `self`
+/// is a `ThreadedIr` producer wherever it sits (codegen's
+/// `generate_evaluated_block_producer`), so its `{Value, State}` carrier never
+/// becomes the value. BT-3981's `EvaluatedBlockValue` row is gone: the repro,
+/// verbatim, is accepted (it answers `#(3)` on a BEAM,
+/// `stdlib/test/bt3982evalblock_test.bt` `testFfiLoopRepro`).
 #[test]
-fn residual_evaluated_block_value_is_an_error_where_the_tuple_leaks() {
-    // The BT-3981 repro, verbatim.
+fn the_bt3981_evaluated_block_repro_is_accepted() {
     let repro = "Actor subclass: A\n  evalValue =>\n    xs := #(1, 2)\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 0\n          xs do: [:y | n := n + y]\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
-    let messages = residual_messages(repro, None);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(
-        messages[0].contains("an evaluated block")
-            && messages[0].contains("the value of an assignment inside a block in an actor method")
-            && messages[0].contains("BT-3981, until BT-3947"),
-        "{messages:?}"
-    );
+    assert_eq!(residual_messages(repro, None), Vec::<String>::new());
 }
 
-/// The evaluated blocks of the generated BT-3981 corpus: each binds a local,
-/// writes a field or sends to `self`, and answers 3.
-const EVALUATED_BLOCKS: &[&str] = &[
-    "[n := 3. n] value",
-    "[n := 0. #(1, 2) do: [:y | n := n + y]. n] value",
-    "[n := 1. n := n + 2. n] value",
-    "[self peek: 3] value",
-];
-
-/// `(host, position)` cells that are rejected in an actor method: the ones
-/// measured leaking the tuple on a BEAM
-/// (`stdlib/test/bt3981evalblock_test.bt` runs the others):
-/// - any argument, in every host (a statement that is not the last of its
-///   block never leaks, except in a `do:` body, see below);
-/// - `^E` in every block (at the method body it unpacks);
-/// - `r := E`, `E` as the last statement and `[E] value`, directly in a block
-///   that is a value (stored, FFI argument, passed to a method);
-/// - `E` (or `[E] value`) as the last statement of an `on:do:` protected body
-///   (conservative: its value may be the method's, which leaks).
-fn evaluated_block_leaks(host: &str, position: &str) -> bool {
-    let plain_fun = matches!(host, "stored" | "ffi" | "user");
-    match position {
-        "argument" => true,
-        "return" => host != "method",
-        "assigned" => plain_fun,
-        // A dropped statement of a plain block answers (BT-3971's `notLast`).
-        "dropped" => false,
-        "last" | "nested" => plain_fun || host == "protected",
-        other => unreachable!("{other}"),
-    }
+/// Whether `src` has no ADR 0131 position diagnostic at all.
+fn evaluated_block_accepted(src: &str) -> bool {
+    residual_messages(src, None).is_empty()
 }
 
-fn evaluated_block_program(host: &str, position: &str, block: &str) -> String {
-    let at = match position {
-        "assigned" => format!("r := {block}\nr"),
-        "last" => block.to_string(),
-        "dropped" => format!("{block}\n7"),
-        "nested" => format!("[{block}] value"),
-        "return" => format!("^{block}"),
-        "argument" => format!("#(3) includes: {block}"),
-        other => unreachable!("{other}"),
-    };
-    match host {
-        "method" => at,
-        "arm" => format!("true ifTrue: [{at}] ifFalse: [0]"),
-        "collect" => format!("#(1) collect: [:z | {at}]"),
-        "protected" => format!("[{at}] on: Error do: [:e | 0]"),
-        "stored" => format!("b := [:z | {at}]\nb value: 1"),
-        "ffi" => format!("(Erlang lists) map: [:z | {at}] with: #(1)"),
-        "user" => format!("self ap: [{at}]"),
-        other => unreachable!("{other}"),
-    }
+/// Whether `src` is rejected, and only by BT-3948
+/// (`InlineBlockLocalInLoop`, BT-3947 item 2): a block evaluated in place that
+/// assigns a local of its own inside a counted or `whileTrue:` loop, which is
+/// not this shape and stays an error. At least one diagnostic, so a shape
+/// that is silently accepted does not pass.
+fn only_bt3948(src: &str) -> bool {
+    let messages = residual_messages(src, None);
+    !messages.is_empty() && messages.iter().all(|m| m.contains("BT-3948"))
 }
 
-const EVALUATED_BLOCK_HOSTS: &[&str] = &[
-    "method",
-    "arm",
-    "collect",
-    "protected",
-    "stored",
-    "ffi",
-    "user",
-];
-const EVALUATED_BLOCK_POSITIONS: &[&str] = &[
-    "assigned", "last", "dropped", "nested", "return", "argument",
-];
-
-fn flags_bt3981(src: &str) -> bool {
-    residual_messages(src, None)
-        .iter()
-        .any(|m| m.contains("BT-3981"))
-}
-
-/// Flagged by BT-3981's check, or by BT-3948's for a block that assigns a
-/// local of its own inside a counted or `whileTrue:` loop (it reports first
-/// and the site is not reported twice).
-fn flags_leak(src: &str) -> bool {
-    residual_messages(src, None)
-        .iter()
-        .any(|m| m.contains("BT-3981") || m.contains("BT-3948"))
-}
-
-/// The generated corpus of BT-3981: hosts x positions x evaluated blocks x
-/// contexts. In an actor method a cell is an error exactly when it leaks
-/// ([`evaluated_block_leaks`]); in a class or value-type method, which answer
-/// the value everywhere, nothing is.
+/// The generated corpus of BT-3981, hosts x positions x evaluated blocks x
+/// contexts, is accepted everywhere. BT-3981 rejected the actor cells that
+/// answered the raw tuple (any argument, `^E` in a block, `r := E` / `E` last /
+/// `[E] value` in a plain block, the last statement of a protected body);
+/// BT-3982 lowers them as producers, and every cell answers on a BEAM
+/// (`stdlib/test/bt3981evalblock_test.bt`, which runs the whole grid). Measured
+/// before the lowering (BT-3982): the plain-block hosts (`stored`, `ffi`,
+/// `user`) already answered the value in every position once ADR 0137 made
+/// them actor closures (fields in place, no `State`); the leaking cells were
+/// the `State`-threading hosts (`method`, `arm`, `collect`, `protected`).
+/// The grid is generated by the shared
+/// [`evaluated_block_grid`](crate::test_helpers::evaluated_block_grid), which
+/// `beamtalk-codegen`'s `evaluated_block_grid_corpus` compiles through the
+/// `ThreadedIr` verifier and `erlc` (BT-4274).
 #[test]
-fn evaluated_block_value_corpus_is_rejected_exactly_where_it_leaks() {
-    let mut rejected = 0;
-    let mut accepted = 0;
-    for host in EVALUATED_BLOCK_HOSTS {
-        for position in EVALUATED_BLOCK_POSITIONS {
-            for block in EVALUATED_BLOCKS {
-                let body = evaluated_block_program(host, position, block);
-                let actor = in_actor(&body).replace("  probe =>", "  peek: v => v\n\n  probe =>");
-                assert_eq!(
-                    flags_bt3981(&actor),
-                    evaluated_block_leaks(host, position),
-                    "{host} x {position} x {block}:\n{actor}"
-                );
-                if evaluated_block_leaks(host, position) {
-                    rejected += 1;
-                } else {
-                    accepted += 1;
-                }
-                for src in [in_class(&body), in_value(&body)] {
-                    assert!(!flags_bt3981(&src), "{host} x {position} x {block}:\n{src}");
-                }
-            }
-        }
+fn evaluated_block_value_corpus_is_accepted_everywhere() {
+    let cells = evaluated_block_grid::cells();
+    for cell in &cells {
+        let src = cell.source();
+        assert!(
+            evaluated_block_accepted(&src),
+            "{}:\n{src}\n{:?}",
+            cell.label(),
+            residual_messages(&src, None)
+        );
     }
-    assert!(rejected > 50 && accepted > 30, "{rejected} / {accepted}");
+    assert_eq!(cells.len(), evaluated_block_grid::CELL_COUNT);
 }
 
-/// An evaluated block that binds nothing, writes nothing and sends nothing to
-/// `self` is not inlined as a state-threading block: it answers the value at
-/// every position, in a plain block too.
+/// The shapes BT-3981 rejected outside the grid are accepted too: a
+/// parenthesized evaluated block, an operand, a field assignment's value, a
+/// non-last statement of a loop body, `value:` in a plain block (each has a
+/// BEAM cell in `bt3982evalblock_test.bt`).
 #[test]
-fn a_pure_evaluated_block_is_not_this_error() {
-    for host in EVALUATED_BLOCK_HOSTS {
-        for position in EVALUATED_BLOCK_POSITIONS {
-            for block in ["[3] value", "[:k | k] value: 3", "[#(3) size] value"] {
-                let body = evaluated_block_program(host, position, block);
-                assert!(
-                    !flags_bt3981(&in_actor(&body)),
-                    "{host} x {position} x {block}"
-                );
-            }
-        }
+fn a_parenthesized_operand_or_field_valued_evaluated_block_is_accepted() {
+    for body in [
+        "r := [n := 3. n] value\nr",
+        "r := ([n := 3. n] value)\nr",
+        "([n := 3. n] value)",
+        "[:k | n := k. n] value: 3",
+        "b := [:z | [:k | n := k. n] value: 3]\nb value: 1",
+        "[n := 3. n] value + 1",
+        "self.n := [m := 3. m] value",
+        "#(1) do: [:z | [n := 3. n] value. nil]\nnil",
+        "#(1) do: [:z | [n := 3. n] value]\nnil",
+        "{[:y | self.n := y] value: 5, self.n}",
+        "#[[:y | self.n := y] value: 5, self.n]",
+        "([:y | self.n := y] value: 5) + self.n",
+        "{[:y :z | self.n := y + z] value: 2 value: 3, self.n}",
+    ] {
+        let src = in_actor(body);
+        assert!(evaluated_block_accepted(&src), "{src}");
     }
 }
 
-/// The parenthesized form answers the tuple even where the bare one unpacks;
-/// the `value:` form is the same recognizer.
-#[test]
-fn a_parenthesized_or_value_colon_evaluated_block_is_judged_too() {
-    assert!(!flags_bt3981(&in_actor("r := [n := 3. n] value\nr")));
-    assert!(flags_bt3981(&in_actor("r := ([n := 3. n] value)\nr")));
-    assert!(flags_bt3981(&in_actor("([n := 3. n] value)")));
-    assert!(!flags_bt3981(&in_actor("[:k | n := k. n] value: 3")));
-    assert!(flags_bt3981(&in_actor(
-        "b := [:z | [:k | n := k. n] value: 3]\nb value: 1"
-    )));
-    assert!(flags_bt3981(&in_actor("[n := 3. n] value + 1")));
-    assert!(flags_bt3981(&in_actor("self.n := [m := 3. m] value")));
-    // A statement that is not the last of a loop body is not unpacked
-    // (measured: a runtime error).
-    assert!(flags_bt3981(&in_actor(
-        "#(1) do: [:z | [n := 3. n] value. nil]\nnil"
-    )));
-    assert!(!flags_bt3981(&in_actor(
-        "#(1) do: [:z | [n := 3. n] value]\nnil"
-    )));
-}
-
-/// Every cell of the BEAM-run fixture
-/// (`stdlib/test/bt3981evalblock_test.bt`) is a shape the check accepts: the
-/// fixtures hold exactly the cells measured to answer the value, so a check
-/// that rejects one makes that `BUnit` cell unrunnable.
+/// Every cell of the BEAM-run fixtures (`stdlib/test/bt3981evalblock_test.bt`,
+/// `stdlib/test/bt3982evalblock_test.bt`) is a shape the check accepts.
 #[test]
 fn the_beam_run_evaluated_block_cells_are_accepted() {
     for src in [
         include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_actor.bt"),
         include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_value.bt"),
         include_str!("../../../../../stdlib/test/fixtures/bt3981evalblock_class.bt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3982evalblock_actor.bt"),
     ] {
-        assert!(!flags_bt3981(src));
+        assert!(
+            evaluated_block_accepted(src),
+            "{:?}",
+            residual_messages(src, None)
+        );
     }
 }
 
-/// PIN-BUG BT-3947 (closes BT-3981): an evaluated block that binds a local, in
-/// the body of a `do:`, collection operation or loop that writes an outer
-/// local, is a fold carrying that local. Measured in an actor: as a statement
-/// (non-last or last) the `ThreadedIr` verifier rejects it (a panic in a debug
-/// build, an `internal:` error in a release build) or `erlc` fails on an
-/// unbound `StateAcc`; assigned to a local other than the one written, or
-/// nested in another evaluated block, likewise. It answers as the value of the
-/// write to the one outer local, and inside an arm of the body. Class and
-/// value-type methods answer everywhere.
+/// BT-3982 (closes BT-3981): an evaluated block that binds a local, in the body
+/// of a `do:`, collection operation or loop that writes an outer local, is
+/// accepted at every position: before the producer, as a statement it was a
+/// `ThreadedIr` verifier rejection or an `erlc` unbound `StateAcc` (the fold
+/// body's raw Tier 2 tuple unpack), so BT-3981 rejected it. In a counted loop
+/// (`to:do:`, `timesRepeat:`) or `whileTrue:` the block's own local is still
+/// BT-3948's `InlineBlockLocalInLoop` (BT-3947 item 2). Class and value-type
+/// methods answer everywhere.
 #[test]
 fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
     let hosts = [
-        "#(1) do: [:z | {B}]",
-        "#(1) collect: [:z | {B}]",
-        "#(1) inject: 0 into: [:a :z | {B}]",
-        "#(1) select: [:z | {B}. true]",
-        "#(1) detect: [:z | {B}. true] ifNone: [0]",
-        "1 to: 1 do: [:z | {B}]",
-        "1 timesRepeat: [{B}]",
+        ("#(1) do: [:z | {B}]", false),
+        ("#(1) collect: [:z | {B}]", false),
+        ("#(1) inject: 0 into: [:a :z | {B}]", false),
+        ("#(1) select: [:z | {B}. true]", false),
+        ("#(1) detect: [:z | {B}. true] ifNone: [0]", false),
+        ("1 to: 1 do: [:z | {B}]", true),
+        ("1 timesRepeat: [{B}]", true),
     ];
-    let rejected = [
+    let bodies = [
         "r := 3. [n := 3. n] value",
         "r := 3. [n := 3. n] value. 4",
         "[n := 3. n] value. r := 3",
@@ -4468,145 +4351,85 @@ fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
         "r := 3. [:k | n := k. n] value: 3",
         "q := [n := 3. n] value. r := q",
         "r := 3. q := [n := 3. n] value. q",
-    ];
-    let accepted = [
         "r := [n := 3. n] value",
         "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
         "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
     ];
-    // A `whileTrue:` body writes its counter too, so even the assignment is
-    // not the one write.
     let src =
         in_actor("r := 0\ni := 0\n[i < 1] whileTrue: [i := i + 1. r := [n := 3. n] value]\nr");
-    assert!(flags_leak(&src), "{src}");
-    for host in hosts {
-        for body in rejected {
-            let src = in_actor(&format!("r := 0\n{}\nr", host.replace("{B}", body)));
-            assert!(flags_leak(&src), "{src}");
-            for src in [
-                in_class(&format!("r := 0\n{}\nr", host.replace("{B}", body))),
-                in_value(&format!("r := 0\n{}\nr", host.replace("{B}", body))),
-            ] {
-                assert!(!flags_leak(&src), "{src}");
+    assert!(only_bt3948(&src), "{src}");
+    // In a counted loop BT-3948 still rejects the block whose local is
+    // assigned below a nested block (another evaluated block, a conditional
+    // arm); the other bodies are accepted and answer 3 on a BEAM
+    // (`bt3982evalblock_test.bt` `testCountedBody*`, `testTimesBody*`).
+    let bt3948_in_counted = [
+        "r := 3. [[n := 3. n] value] value",
+        "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
+        "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
+    ];
+    for (host, counted) in hosts {
+        for body in bodies {
+            let program = format!("r := 0\n{}\nr", host.replace("{B}", body));
+            let actor = in_actor(&program);
+            if counted && bt3948_in_counted.contains(&body) {
+                assert!(only_bt3948(&actor), "{actor}");
+            } else {
+                assert!(evaluated_block_accepted(&actor), "{actor}");
             }
-        }
-        for body in accepted {
-            let src = in_actor(&format!("r := 0\n{}\nr", host.replace("{B}", body)));
-            assert!(!flags_bt3981(&src), "{src}");
+            for src in [in_class(&program), in_value(&program)] {
+                assert!(evaluated_block_accepted(&src), "{src}");
+            }
         }
     }
 }
 
-/// PIN-BUG BT-3947 (closes BT-3981): any enclosing fold-like block that writes
-/// an outer local rejects the evaluated block, with no conditional arm between
-/// them, not only the nearest one (conservative: the nearest-only rule left
-/// these unmeasured, and an arm is the one measured frame). The BT-3917 pins
-/// (`bt3971test.bt` `assigned`, `bt3939tier2inlined_test.bt` `evalValue`: an
-/// FFI argument block that no longer writes a captured local is a plain fun)
-/// are compile errors too.
+/// BT-3982: an evaluated block under any enclosing fold-like block that writes
+/// an outer local, through a protected body, another evaluated block or an
+/// unmeasured selector's block, nested more than four deep, under two folds
+/// that write different locals, or in a block of a selector BT-3981 had no
+/// cell for, is accepted (BEAM cells in `bt3982evalblock_test.bt`). The
+/// BT-3917 pins (`bt3971test.bt` `assigned`, `bt3939tier2inlined_test.bt`
+/// `evalValue`) too.
 #[test]
-fn evaluated_block_under_any_enclosing_fold_that_writes_an_outer_local() {
+fn evaluated_block_under_any_enclosing_construct_is_accepted() {
     for body in [
-        // The inner fold writes nothing; the outer one writes `r`.
         "r := 0\n#(1) do: [:y | r := 1. #(1) do: [:z | [n := 3. n] value. 4]]\nr",
         "r := 0\n#(1) do: [:y | r := 1. #(1) collect: [:z | q := [n := 3. n] value. q]]\nr",
-        // Through a protected body or an evaluated block.
         "r := 0\n#(1) do: [:y | r := 1. [[n := 3. n] value. 4] on: Error do: [:e | 0]]\nr",
         "r := 0\n#(1) do: [:y | r := 1. [[[n := 3. n] value. 4] value. 5] value]\nr",
         "r := 0\n#(1) collect: [:y | r := 1. [[n := 3. n] value] ensure: [nil]]\nr",
-        // The bot's shapes: an inner `do:` that writes nothing, and a protected
-        // body, under an outer `do:` that writes `r`.
         "r := 0\n#(1) do: [:z | r := 3. #(2) do: [:y | [n := 4. n] value]]\nr",
         "r := 0\n#(1) do: [:z | r := 3. [[n := 4. n] value. 5] on: Error do: [:e | 0]]\nr",
-    ] {
-        let src = in_actor(body);
-        assert!(flags_bt3981(&src), "{src}");
-    }
-    // An arm separates the site from the fold.
-    let src =
-        in_actor("r := 0\n#(1) do: [:y | r := 1. true ifTrue: [q := [n := 3. n] value. q]]\nr");
-    assert!(!flags_bt3981(&src), "{src}");
-    // The BT-3917 pins.
-    let bt3971 = "Actor subclass: A\n  state: hits = 0\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
-    assert!(flags_bt3981(bt3971));
-}
-
-/// Evaluated blocks nested more than the measured four deep are rejected.
-#[test]
-fn evaluated_blocks_nested_beyond_four_deep_are_rejected() {
-    assert!(!flags_bt3981(&in_actor(
-        "[[[[n := 3. n] value] value] value] value"
-    )));
-    assert!(flags_bt3981(&in_actor(
-        "[[[[[n := 3. n] value] value] value] value] value"
-    )));
-}
-
-/// The union of every enclosing fold's writes counts, so the inner fold's one
-/// write does not make `s := E` the one write.
-#[test]
-fn evaluated_block_assignment_under_two_folds_that_write_different_locals() {
-    let src = in_actor(
+        "r := 0\n#(1) do: [:y | r := 1. true ifTrue: [q := [n := 3. n] value. q]]\nr",
+        "[[[[n := 3. n] value] value] value] value",
+        "[[[[[n := 3. n] value] value] value] value] value",
         "r := 0\ns := 0\n#(1) do: [:y | r := 1. #(1) do: [:z | s := [n := 3. n] value]]\nr",
-    );
-    assert!(flags_bt3981(&src), "{src}");
-    let one = in_actor("s := 0\n#(1) do: [:y | #(1) do: [:z | s := [n := 3. n] value]]\ns");
-    assert!(!flags_bt3981(&one), "{one}");
-}
-
-/// A construct block of a selector without a measured cell is judged as a plain
-/// block: its last statement and assignments are rejected (a `Dictionary`
-/// lookup handler is a plain fun unless the receiver is statically one).
-#[test]
-fn evaluated_block_in_a_block_of_an_unmeasured_selector() {
-    for body in [
+        "s := 0\n#(1) do: [:y | #(1) do: [:z | s := [n := 3. n] value]]\ns",
         "#(1) at: 5 ifAbsent: [[n := 3. n] value]",
         "#(1) at: 5 ifAbsent: [r := [n := 3. n] value. r]",
         "flag := true\nflag or: [[n := true. n] value]",
         "#(1) reject: [:z | [n := true. n] value]",
         "#(1) anySatisfy: [:z | [n := true. n] value]",
-        "i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]",
         "#(1) keysAndValuesDo: [:k :v | [n := 3. n] value]",
-    ] {
-        let src = in_actor(body);
-        assert!(flags_leak(&src), "{src}");
-    }
-}
-
-/// An arm of an unmeasured selector does not end the walk to an enclosing fold
-/// that writes an outer local.
-#[test]
-fn an_unmeasured_arm_does_not_separate_a_site_from_its_fold() {
-    for body in [
         "r := 0\nflag := true\n#(1) do: [:y | r := 1. flag or: [[n := true. n] value. true]]\nr",
         "r := 0\n#(1) do: [:y | r := 1. #(1) at: 5 ifAbsent: [[n := 3. n] value. 4]]\nr",
         "r := 0\n#(1) do: [:y | r := 1. nil ifNil: [3] ifNotNil: [:v | [n := 3. n] value. 4]]\nr",
-    ] {
-        let src = in_actor(body);
-        assert!(flags_bt3981(&src), "{src}");
-    }
-    // A measured arm still separates them.
-    let src = in_actor(
-        "r := 0\nflag := true\n#(1) do: [:y | r := 1. flag and: [[n := true. n] value. true]]\nr",
-    );
-    assert!(!flags_bt3981(&src), "{src}");
-}
-
-/// Acceptance is positive: any construct block of an unmeasured selector
-/// anywhere between the site and the method body rejects it, including
-/// `outer := [...] value` there.
-#[test]
-fn an_unmeasured_container_anywhere_in_the_chain_rejects_the_site() {
-    for body in [
         "r := 0\nflag := true\n#(1) do: [:y | r := 1. flag or: [r := [n := true. n] value. true]]\nr",
         "r := 0\n#(1) reject: [:z | r := [n := 3. n] value. true]\nr",
-        "r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr",
-        // A measured container nested in an unmeasured one.
         "r := 0\nflag := true\nflag or: [true ifTrue: [r := [n := 3. n] value] ifFalse: [0]. true]\nr",
     ] {
         let src = in_actor(body);
-        assert!(flags_bt3981(&src), "{src}");
+        assert!(evaluated_block_accepted(&src), "{src}");
     }
+    // `whileFalse:` is a loop: the block's own local is BT-3948's when the
+    // body also writes the counter; assigned to the one local the loop
+    // writes it is accepted (`testWhileFalseAssign` answers 3).
+    let src = in_actor("i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]");
+    assert!(only_bt3948(&src), "{src}");
+    let src = in_actor("r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr");
+    assert!(evaluated_block_accepted(&src), "{src}");
+    let bt3971 = "Actor subclass: A\n  state: hits = 0\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
+    assert!(evaluated_block_accepted(bt3971));
 }
 
 /// PIN-BUG BT-3947: measured correct on a BEAM by BT-3981 (answers 1: a
@@ -4665,6 +4488,9 @@ fn bt4003_an_ensure_protected_block_that_may_raise_after_a_write_is_rejected() {
         "[true ifTrue: [t := 1]. t printString] ensure: [t printString]\nt",
         "[t := 1. [3] ensure: [4]] ensure: [t printString]\nt",
         "[t := 1. #(1, 2) match: [_ -> 0]] ensure: [t printString]\nt",
+        // BT-4248: conservative. A raise an inner `on:do:` catches still
+        // counts, though the cleanup would see 9.
+        "[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure: [t printString]\nt",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -4681,6 +4507,7 @@ fn bt4003_an_ensure_protected_block_that_may_raise_after_a_write_is_rejected() {
                 e.hint
                     .as_deref()
                     .is_some_and(|h| h.contains("after the `ensure:`")
+                        && h.contains("the check is conservative")
                         && h.contains("do not read `t` in the cleanup")),
                 "{:?}",
                 e.hint
@@ -4734,6 +4561,9 @@ fn bt4003_a_returning_closure_that_reads_a_local_assigned_later_is_rejected() {
         "b := [:x | t > 0 ifTrue: [^t]. x]\nt := 5\nb value: 1",
         "#(1, 2) do: [:x | CvA ap: [^t]. t := t + x]\n0",
         "[t < 3] whileTrue: [t := t + 1. CvA ap: [^t]]\n0",
+        // BT-4248: conservative. A block passed to a user method counts as
+        // escaping (ADR 0133) even if the method runs it before returning.
+        "CvA ap: [^t]\nt := 5\n0",
     ];
     for body in rejected {
         for src in [in_class(body), in_value(body), in_actor(body)] {
@@ -4743,6 +4573,13 @@ fn bt4003_a_returning_closure_that_reads_a_local_assigned_later_is_rejected() {
             assert!(e.message.contains("returns non-locally"), "{}", e.message);
             assert!(e.message.contains("`t`"), "{}", e.message);
             assert!(e.message.contains("BT-4003"), "{}", e.message);
+            // BT-4248: the stale answer is not stated as a certainty.
+            assert!(e.message.contains("may answer a stale"), "{}", e.message);
+            assert!(
+                e.message.contains("rejected conservatively"),
+                "{}",
+                e.message
+            );
         }
     }
     let accepted = [
@@ -4842,6 +4679,46 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
     let class = "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\n    self.n\n";
     let errors = analysis_errors(class, &[]);
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// BT-4276: the fold-operand check looks for a loop or fold body only up to
+/// the nearest closure boundary. A fold inside a closure that sits in a loop
+/// body is judged by the closure's own context; measured right on a BEAM
+/// (`stdlib/test/bt4276fold_in_closure_test.bt`), whether the closure runs in
+/// the iteration that makes it or after the loop. Blocks run in place (an
+/// evaluated block, an arm) are looked through, so those shapes stay
+/// rejected.
+#[test]
+fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_closure() {
+    let accepted = [
+        "#(1, 2) do: [:x | b := [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]. t := b value]\nt",
+        "r := #(1, 2) collect: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nr collect: [:blk | blk value]",
+        "#(1, 2) do: [:x | b := [(self.items do: [:y | self bump]) isNil]. b value]\nself.n",
+        "#(1, 2) do: [:x | b := [(self.items collect: [:y | self.n := self.n + 1]) size]. b value]\nself.n",
+    ];
+    for body in accepted {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
+    let rejected = [
+        // An evaluated block runs in place: still the `do:` body's.
+        "#(1, 2) do: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])] value]\nself.n",
+        // So does a conditional arm.
+        "#(1, 2) do: [:x | x > 0 ifTrue: [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nself.n",
+        // A loop body inside the closure is the closure's own context.
+        "b := [#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nb value\nself.n",
+    ];
+    for body in rejected {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+        assert!(
+            errors[0].message.contains("BT-4003, until BT-3947"),
+            "{}",
+            errors[0].message
+        );
+    }
 }
 
 /// PIN-BUG BT-3947 (BT-4003 item 5): a `^` in the body of a loop or collection

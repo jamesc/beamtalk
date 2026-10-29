@@ -2967,13 +2967,9 @@ free_slots_upgrade_recreates_unsharded_table_test_() ->
 %% Test: dead-pid sweep with remote pids and orphaned rows (BT-4197)
 %%====================================================================
 
-%% A pid of a node that is not this one, built from the external term format.
+%% A pid of a node that is not this one.
 remote_pid() ->
-    Node = <<"bt4197@nowhere">>,
-    NodeLen = byte_size(Node),
-    binary_to_term(
-        <<131, 88, 119, NodeLen, Node/binary, 1:32, 0:32, 1:32>>
-    ).
+    beamtalk_dist_test_helper:unreachable_pid(bt4197).
 
 pid_row_count() ->
     ets:info(beamtalk_agg_pid, size).

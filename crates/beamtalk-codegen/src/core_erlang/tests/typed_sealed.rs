@@ -265,10 +265,11 @@ fn sealed_exception_subclass_stays_dynamic() {
 
 #[test]
 fn field_at_put_on_sealed_receiver_never_direct() {
-    // `fieldAt:put:` is the one selector whose dynamic path diverges from
-    // `dispatch/3` (semicolon vs em dash hint). The object-reflection
-    // intrinsic claims it before dispatch selection today, so this pins the
-    // end state rather than the handler's own guard: no direct call, ever.
+    // The object-reflection intrinsic claims `fieldAt:put:` before dispatch
+    // selection, so this pins the end state rather than the handler's own
+    // guard: no direct call, ever. (The dynamic path's hint used to diverge
+    // from `dispatch/3`'s; BT-4273 unified them, so the handler's own
+    // exclusion is now redundant — see its follow-up.)
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: SealedWidget -> Object =>\n",

@@ -32,3 +32,18 @@ true ifTrue: [[t := t + 10] value]
 
 t
 // => 11
+
+// BT-3982: an evaluated block whose only write is inside a nested arm, at the
+// REPL root and in an arm: the block answers the arm value and
+// the binding is visible to the next input.
+[true ifTrue: [x := 1]] value
+// => 1
+
+x
+// => 1
+
+true ifTrue: [[true ifTrue: [x := 2]] value]
+// => 2
+
+x
+// => 2

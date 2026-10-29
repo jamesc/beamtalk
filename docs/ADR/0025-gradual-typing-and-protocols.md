@@ -3,6 +3,67 @@
 ## Status
 Implemented (Phases 1–2, 2026-02-15). Phase 3 (Protocols) was implemented under [ADR 0068: Parametric Types and Protocols](0068-parametric-types-and-protocols.md) (2026-03-20) rather than as a direct continuation of this ADR — see that ADR for the shipped `Protocol define:` syntax, structural conformance checking, and `respondsTo:`-based narrowing to protocol types. Phase 3 as sketched below (§"Phase 3: Protocols") predates and differs in some syntax details from what actually shipped (ADR 0068 §"Related issues" notes "ADR 0025's earlier `<>` examples predate the current syntax decisions and are not binding").
 
+## Amendment (2026-10-29): types may choose code, never results (BT-4118)
+
+The original text says types are erased and "the generated BEAM bytecode is
+identical whether a class is typed or not". That stopped being literally true
+with BT-4069: a send to a receiver whose static type is a sealed Value class
+compiles to a guarded direct call. Epic BT-4291 widens the same technique to
+open classes, built-in receivers and class references. This amendment
+replaces the bytecode claim with the rule those optimisations actually obey.
+
+**1. The guard is the contract.** A static type may *choose* a direct-call
+target, but it never *proves* one.
+- Every direct call that a static fact selects stands behind a run-time guard
+  that proves it reaches exactly what dynamic dispatch would reach. Static
+  facts here include a declared or inferred type, a class literal, and `self`
+  in its own class.
+- Typical guards are a class-tag match, a representation test such as
+  `is_list`, or a per-class shadow flag.
+- On a guard miss the send falls back to a byte-identical dynamic send.
+- Annotations remain warnings (this ADR's core principle), so a lying
+  annotation simply misses the guard and gets the dynamic answer, including
+  `doesNotUnderstand:`.
+- `typed` and `sealed` never change what a send *means*. They only change how
+  often a guard hits, or whether the compiler can pick a candidate at all.
+- This restates ADR 0005's "runtime dispatch is the contract, direct calls are
+  the optimization" as a rule for every static dispatch.
+
+**2. Accepted caveat: typed call sites pin the class's module name.**
+- A guarded direct call names the module the compiler saw. The dynamic path
+  looks the module up at run time.
+- Two development-time operations therefore diverge until the callers are
+  recompiled:
+  - a REPL redefinition that moves a class into a *different* module: stale
+    call sites reach the old code (BT-4200);
+  - `removeFromSystem`: stale call sites get a raw `undef` instead of
+    `does_not_understand` (BT-4149).
+- A same-module reload is unaffected, because remote calls reach the newest
+  loaded code. So are `removeSelector:`, live patches and extensions, which
+  act inside the target module's `dispatch/3`.
+- We accept the caveat rather than pay a registry read on every send. A
+  zero-cost fix is tracked under BT-4291.
+
+**3. Considered and rejected for this optimisation work.** These are recorded
+so they are not re-proposed without new evidence:
+- *Copy-down of inherited method bodies.* It conflicts with ADR 0127
+  ("inherited methods are never copied"), ADR 0112 (`removeSelector:`
+  re-exposes the inherited method) and ADR 0066 (extensions override
+  inherited methods), and it needs a recompile fan-out. Inherited-send cost
+  is attacked on the run-time path instead (BT-4280).
+- *Per-call-site inline caches.* BEAM has no cheap mutable per-site slot: a
+  `persistent_term` per site means a global GC on every update. Untyped sites
+  are better reduced by typing the FFI and transport boundary.
+- *Making `sealed` the condition for direct calls.* The guard is needed
+  anyway, because annotations can lie. Gating on `sealed` adds no soundness
+  and only loses coverage.
+- *Class references with the class process's pid baked in at load time.* A
+  class process restarts, and an identifier must mean the same thing in every
+  context (principles §4). A `whereis/1` on a compile-time atom is enough.
+
+The ADR's statements below that "bytecode is identical" and "runtime
+performance is unaffected" now read as "results are identical".
+
 ## Context
 
 Beamtalk is a dynamically-typed, Smalltalk-inspired language targeting the BEAM VM. Today, all type errors are caught at runtime — sending an unknown message crashes with `doesNotUnderstand:`, and passing the wrong type to a primitive crashes with a BEAM exception.
@@ -175,7 +236,7 @@ This enables Dialyzer to perform additional checking at the BEAM level — two l
 
 ### Phase 2b: Typed Classes (Per-Class Typing Contract)
 
-The `typed` modifier declares that a class opts into thorough type checking. This is purely a compile-time concept — the generated BEAM bytecode is identical whether a class is typed or not. Same gen_server, same dispatch, same runtime behavior. `typed` is erased during compilation, just like all other type information.
+The `typed` modifier declares that a class opts into thorough type checking. This is purely a compile-time concept — the generated BEAM bytecode is identical whether a class is typed or not (amended 2026-10-29: *results* are identical; types may select guarded direct calls, see Amendment). Same gen_server, same dispatch, same runtime behavior. `typed` is erased during compilation, just like all other type information.
 
 ```beamtalk
 // Regular class — inference warnings only
@@ -521,7 +582,7 @@ A `--strict` compiler flag that promotes type warnings to errors, like TypeScrip
 - REPL invalidation of the type cache adds complexity to the workspace model — re-defining a class must propagate type changes to all dependents
 
 ### Neutral
-- Generated BEAM bytecode is unchanged — types are erased at compile time
+- Generated BEAM bytecode is unchanged — types are erased at compile time (amended 2026-10-29: types may select guarded direct calls with identical results; see Amendment)
 - Runtime performance is unaffected (no type tags, no runtime checks)
 - Existing tests don't need modification
 - Dynamic features (`doesNotUnderstand:`, runtime class creation) continue working
