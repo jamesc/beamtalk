@@ -602,6 +602,17 @@ editor shows what is on disk. Source files are never rewritten to drop them:
 `beamtalk fmt`, and a workspace flush of a method edited in the REPL or IDE,
 keep the parentheses as written.
 
+The exception is `super`, which is not a value: it only names where a send's
+method lookup starts, so it is valid only as the direct receiver of a message
+(`super printString`, `super at: 1 put: x`, `(super printString) size`). Every
+other use is a compile error inside a method body, instance or class side:
+`(super) printString`, `x := super`, `^ super`, `super` as an argument or a
+collection element, `super.count` (fields are read through `self`), and a
+cascade on `super` (`super a; b`; send each message to `super` separately). To
+use the receiver itself as a value, write `self`
+([BT-4251](https://linear.app/beamtalk/issue/BT-4251),
+[BT-4258](https://linear.app/beamtalk/issue/BT-4258)).
+
 ### Splitting a Message Send Across Lines
 
 A newline acts as a statement separator (see "Core Syntax" above), so whether
