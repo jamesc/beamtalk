@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: generated actor callbacks keep a committed state of exactly the
+// declared size without scanning it for `__local__` threading temporaries,
+// and fall back to the scan otherwise. Whether a method threads a local or
+// not, the committed state must hold just the declared fields.
+
+TestCase subclass: StateSizeGuardTest
+
+  testThreadingMethodLeavesNoTemporaries =>
+    a := StateSizeGuardActor spawn
+    self assert: (a addAll: #(1, 2, 3)) equals: 6
+    self assert: a fieldNames equals: #(#total)
+    self assert: a total equals: 6
+    a stop
+
+  testPlainMethodCommitsState =>
+    a := StateSizeGuardActor spawn
+    self assert: (a add: 5) equals: 5
+    self assert: (a addAll: #(1, 1)) equals: 2
+    self assert: (a add: 1) equals: 8
+    self assert: a fieldNames equals: #(#total)
+    a stop
+
+  testCastThreadingMethodLeavesNoTemporaries =>
+    a := StateSizeGuardActor spawn
+    a addAll: #(4, 5)!
+    self assert: a total equals: 9
+    self assert: a fieldNames equals: #(#total)
+    a stop
+
+  testSubclassCountsInheritedFields =>
+    s := StateSizeGuardSubActor spawn
+    self assert: (s countAll: #(7, 8, 9)) equals: 3
+    self assert: (s addAll: #(10, 20)) equals: 30
+    self assert: s fieldNames asSet equals: #(#total, #seen) asSet
+    self assert: s seen equals: 3
+    self assert: s total equals: 30
+    s stop

@@ -20,6 +20,17 @@
 /// `Telemetry` is the application event bus. For actor-dispatch
 /// observability (trace capture, per-method stats, health), see `Tracing`.
 ///
+/// The runtime's own actor-dispatch events
+/// (`#(#beamtalk, #actor, #dispatch, #start)`, `#stop`, `#exception`) are
+/// **opt-in** (ADR 0069, amended by BT-4113): every actor send would pay
+/// for them otherwise. Attaching a handler here to one of them turns them on,
+/// and detaching the last such handler turns them off again; so do
+/// `Tracing enable` / `Tracing disable`. Erlang or Elixir code attaching with
+/// `telemetry:attach/4` sets the `beamtalk_runtime` app env
+/// `dispatch_telemetry` to `true` or calls
+/// `beamtalk_telemetry:enable_dispatch_events/0`. The actor lifecycle events
+/// (`#(#beamtalk, #actor, #lifecycle, ...)`) are always emitted.
+///
 /// ## Examples
 /// ```beamtalk
 /// Telemetry execute: #(#myapp, #cache, #miss) measurements: #{#count => 1} metadata: #{#key => "user:1"}
@@ -77,6 +88,9 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   /// already attached. The runtime's own handler ids (`Tracing`'s) are
   /// reserved and raise `#reserved_name`.
   ///
+  /// Attaching to an actor-dispatch event (`#(#beamtalk, #actor, #dispatch,
+  /// ...)`) also switches those opt-in events on (see the class comment).
+  ///
   /// The handler runs **in the emitting process**, synchronously, so keep it
   /// short. If it raises, `telemetry` logs the error and detaches the handler;
   /// the emitter is unaffected. A handler is not re-entered: an emit it causes
@@ -126,6 +140,8 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
 
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
   /// The runtime's own handlers (`Tracing`'s) are refused with `#reserved_name`.
+  /// Detaching the last handler on an actor-dispatch event switches those
+  /// opt-in events off again, unless something else still asks for them.
   ///
   /// ## Examples
   /// ```beamtalk

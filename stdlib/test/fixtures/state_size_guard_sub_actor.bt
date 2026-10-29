@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: a subclass of StateSizeGuardActor, so its committed state holds an
+// inherited field too (the size guard counts it), with its own threading
+// method.
+
+StateSizeGuardActor subclass: StateSizeGuardSubActor
+  state: seen = 0
+
+  countAll: items =>
+    n := 0
+    items do: [:x | n := n + 1]
+    self.seen := self.seen + n
+    n
+
+  seen => self.seen

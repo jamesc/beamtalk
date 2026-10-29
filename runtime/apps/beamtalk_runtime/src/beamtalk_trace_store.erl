@@ -74,8 +74,12 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     disable/0,
     is_enabled/0,
     clear/0,
-    %% Write-path helpers (called from telemetry handlers, NOT via gen_server)
+    %% Dispatch-events flag serialization (beamtalk_telemetry only, BT-4113)
+    serialize_dispatch_flag/1,
+    %% Write-path helpers (called in the sending process, NOT via gen_server)
     record_dispatch/6,
+    record_dispatch_stop/2,
+    record_dispatch_exception/2,
     record_trace_event/8,
     %% Query API
     get_traces/0,
@@ -101,8 +105,6 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     telemetry_attached/0,
     telemetry_handler_ids/0,
     %% Telemetry handler callbacks
-    handle_dispatch_stop/4,
-    handle_dispatch_exception/4,
     handle_lifecycle_event/4,
     handle_vm_measurements/4
 ]).
@@ -209,12 +211,36 @@ is_enabled() ->
 -doc """
 Generate the next monotonic span ID for causal trace linking.
 Uses a global atomics counter — one atomics:add_get/3 call (~10ns).
-Only called from within maybe_span when tracing is enabled.
+Only called from within `beamtalk_telemetry:dispatch_span/5` when tracing
+is enabled.
 """.
 -spec next_span_id() -> pos_integer().
 next_span_id() ->
     Ref = persistent_term:get(?PT_SPAN_ID_COUNTER),
     atomics:add_get(Ref, 1, 1).
+
+-doc """
+Run `Fun` (a read-compute-write of `beamtalk_telemetry`'s dispatch-events
+flag, BT-4113) in this gen_server, serialized with every other flag refresh
+and with `enable/0`/`disable/0`, which refresh inline here. Node-local, so
+no cluster state can stall it. Without a running trace store `Fun` runs in
+the caller. For `beamtalk_telemetry` only; answers `Fun`'s value and
+re-raises its raise in the caller.
+""".
+-spec serialize_dispatch_flag(fun(() -> T)) -> T.
+serialize_dispatch_flag(Fun) ->
+    Reply =
+        try
+            gen_server:call(?MODULE, {dispatch_flag, Fun}, infinity)
+        catch
+            %% Not running, or died mid-call: run unserialized. A restarted
+            %% trace store refreshes the flag again in init/1.
+            exit:_ -> {ok, Fun()}
+        end,
+    case Reply of
+        {ok, Result} -> Result;
+        {raise, Class, Reason, Stack} -> erlang:raise(Class, Reason, Stack)
+    end.
 
 -doc "Clear all trace events and aggregate stats.".
 -spec clear() -> ok.
@@ -222,9 +248,9 @@ clear() ->
     gen_server:call(?MODULE, clear).
 
 -doc """
-Record a dispatch aggregate (called from telemetry handler, NOT via gen_server).
-This runs in the calling process for lock-free performance.
-Class comes from telemetry metadata — the authoritative source.
+Record a dispatch aggregate (called in the sending process, NOT via
+gen_server), for lock-free performance. Class comes from the dispatch
+metadata — the authoritative source.
 """.
 -spec record_dispatch(term(), term(), non_neg_integer(), atom(), atom(), term()) -> ok.
 record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
@@ -287,8 +313,15 @@ add_sample(AtomicsRef, SlotBase, Duration, Outcome) ->
     ok.
 
 -doc """
-Record a trace event (called from telemetry handler, NOT via gen_server).
+Record a trace event (called in the recording process, NOT via gen_server).
 Only inserts if tracing is enabled. Runs in the calling process.
+
+Never raises: it runs inline in an actor send's sender
+(`beamtalk_telemetry:dispatch_span/5`, BT-4113), where a raise would fail a
+successful send or replace a failed send's own error, and in the lifecycle
+telemetry handler, which `telemetry` detaches if it raises. A missing table
+(the gen_server mid-restart, a hot upgrade before `code_change/3`, a partial
+harness) drops the event, the same way `record_dispatch/6` drops a sample.
 """.
 -spec record_trace_event(pid(), atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()) ->
     ok.
@@ -297,10 +330,14 @@ record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Pha
         true ->
             Key = {erlang:monotonic_time(nanosecond), erlang:unique_integer([monotonic])},
             WallClockUs = erlang:system_time(microsecond),
-            ets:insert(
-                ?TRACE_EVENTS,
-                {Key, Pid, Class, Selector, Mode, Duration, Outcome, Metadata, WallClockUs}
-            ),
+            try
+                ets:insert(
+                    ?TRACE_EVENTS,
+                    {Key, Pid, Class, Selector, Mode, Duration, Outcome, Metadata, WallClockUs}
+                )
+            catch
+                error:badarg -> ok
+            end,
             ok;
         false ->
             ok
@@ -410,16 +447,17 @@ max_events(Size) when is_integer(Size), Size > 0 ->
     gen_server:call(?MODULE, {max_events, Size}).
 
 -doc """
-Check whether telemetry handlers are attached to actor dispatch events.
-Returns true if the trace store's telemetry handlers are active, false if
-telemetry is unavailable or handlers failed to attach.
+Check whether the trace store's telemetry handlers (the actor lifecycle
+events) are attached. Returns false if telemetry is unavailable or the
+handlers failed to attach. Dispatch samples do not go through telemetry
+(BT-4113): `beamtalk_telemetry:dispatch_span/5` records them directly.
 """.
 -spec telemetry_attached() -> boolean().
 telemetry_attached() ->
     try
-        Handlers = telemetry:list_handlers([beamtalk, actor, dispatch, stop]),
+        Handlers = telemetry:list_handlers([beamtalk, actor, lifecycle, stop]),
         lists:any(
-            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_dispatch_stop end,
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_lifecycle_stop end,
             Handlers
         )
     catch
@@ -430,10 +468,21 @@ telemetry_attached() ->
 %% Telemetry handler callbacks
 %%====================================================================
 
--doc "Handler for [beamtalk, actor, dispatch, stop] events.".
--spec handle_dispatch_stop([atom()], map(), map(), map()) -> ok.
-handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
-    #{pid := Pid, selector := Selector, mode := Mode} = Metadata,
+-doc """
+Record one completed actor send: the always-on aggregate and, while
+tracing is enabled, a trace event. Called directly by
+`beamtalk_telemetry:dispatch_span/5` (BT-4113; it used to be the
+`[beamtalk, actor, dispatch, stop]` telemetry handler, which forced those
+events on for every send). `Duration` is in native time units. Metadata
+without `pid`/`selector`/`mode` is dropped.
+
+Never raises, because it runs inside the sender's send and observability
+must not change a send's outcome: `record_dispatch/6` and
+`record_trace_event/8` drop the sample on a missing table (their only
+failure mode), and the trace/causal context reads and merges are total.
+""".
+-spec record_dispatch_stop(map(), integer()) -> ok.
+record_dispatch_stop(#{pid := Pid, selector := Selector, mode := Mode} = Metadata, Duration) ->
     Outcome = maps:get(outcome, Metadata, ok),
     Class = maps:get(class, Metadata, unknown),
     DurationNs = erlang:convert_time_unit(Duration, native, nanosecond),
@@ -452,13 +501,18 @@ handle_dispatch_stop(_EventName, #{duration := Duration}, Metadata, _Config) ->
             ok
     end,
     ok;
-handle_dispatch_stop(_EventName, _Measurements, _Metadata, _Config) ->
+record_dispatch_stop(_Metadata, _Duration) ->
     ok.
 
--doc "Handler for [beamtalk, actor, dispatch, exception] events.".
--spec handle_dispatch_exception([atom()], map(), map(), map()) -> ok.
-handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config) ->
-    #{pid := Pid, selector := Selector, mode := Mode} = Metadata,
+-doc """
+Record one actor send that raised (`kind`/`reason` in the metadata): an
+error in the aggregate and, while tracing is enabled, an exception trace
+event. The counterpart of `record_dispatch_stop/2`, called the same way.
+""".
+-spec record_dispatch_exception(map(), integer()) -> ok.
+record_dispatch_exception(
+    #{pid := Pid, selector := Selector, mode := Mode} = Metadata, Duration
+) ->
     Class = maps:get(class, Metadata, unknown),
     Kind = maps:get(kind, Metadata, error),
     Reason = maps:get(reason, Metadata, unknown),
@@ -478,7 +532,7 @@ handle_dispatch_exception(_EventName, #{duration := Duration}, Metadata, _Config
             ok
     end,
     ok;
-handle_dispatch_exception(_EventName, _Measurements, _Metadata, _Config) ->
+record_dispatch_exception(_Metadata, _Duration) ->
     ok.
 
 -doc """
@@ -539,7 +593,7 @@ init([]) ->
     %% telemetry and telemetry_poller are declared in beamtalk_runtime.app.src,
     %% so OTP starts and loads their modules before this init/1 runs in normal
     %% application startup. Guard the attach call with a function_exported
-    %% check anyway, mirroring the maybe_span/3 and emit/3
+    %% check anyway, mirroring the run_span/4 and emit/3
     %% pattern in beamtalk_telemetry.erl, so the trace store still degrades
     %% gracefully if it's started outside its OTP application context (e.g.
     %% direct gen_server:start_link/3 in a partial test harness).
@@ -554,6 +608,9 @@ init([]) ->
         false ->
             ?LOG_INFO("telemetry not loaded, skipping handler attachment", #{})
     end,
+    %% BT-4113: the opt-in dispatch events follow the trace store's enabled
+    %% state (kept across a restart in persistent_term) and the app env.
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
 
     %% Start periodic sweep timer
     TimerRef = start_sweep_timer(),
@@ -563,13 +620,27 @@ init([]) ->
 
 handle_call(enable, _From, State) ->
     persistent_term:put(?PT_ENABLED, true),
+    %% Trace capture needs the dispatch events' causal IDs (BT-4113).
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
     ?LOG_INFO("Trace capture enabled", #{}),
     {reply, ok, State};
 handle_call(disable, _From, State) ->
     persistent_term:put(?PT_ENABLED, false),
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
     drop_pid_data(),
     ?LOG_INFO("Trace capture disabled", #{}),
     {reply, ok, State};
+handle_call({dispatch_flag, Fun}, _From, State) ->
+    %% A raise in `Fun` goes back to the caller, not into this process.
+    %% bt-catcher-audit: not-applicable-no-block - Fun is beamtalk_telemetry's
+    %% flag refresh, never a Beamtalk block
+    Reply =
+        try Fun() of
+            Result -> {ok, Result}
+        catch
+            Class:Reason:Stack -> {raise, Class, Reason, Stack}
+        end,
+    {reply, Reply, State};
 handle_call(clear, _From, State) ->
     do_clear(),
     ?LOG_INFO("Trace store cleared", #{}),
@@ -645,6 +716,12 @@ code_change(OldVsn, State, Extra) ->
     %% Ensure new ETS tables exist after live upgrade (old aggregate tables
     %% are reset by ensure_ets_tables/0).
     ensure_ets_tables(),
+    %% BT-4113: drop the pre-BT-4113 dispatch handlers and derive the
+    %% dispatch-events flag, which older code never wrote. Without this an
+    %% upgrade with tracing on records no dispatch trace events until the
+    %% next refresh. Runs inline: this is the trace store's own process.
+    lists:foreach(fun beamtalk_telemetry:detach_handler/1, retired_telemetry_handler_ids()),
+    ok = beamtalk_telemetry:refresh_dispatch_events(),
     beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
 
 -doc """
@@ -1057,18 +1134,13 @@ grow_counters() ->
 %%====================================================================
 
 -doc """
-Resolve the class atom from beamtalk_instance_registry, else `unknown`. A
-full-table scan per call: fine for one actor's health, but batch callers
-should use `bottlenecks/1` (one scan total) rather than polling per actor.
+Resolve the class atom from the instance registry, else `unknown`: one
+lookup on its pid-keyed index (BT-4113), the same as
+`beamtalk_actor:lookup_class/1`.
 """.
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
-    try ets:match(beamtalk_instance_registry, {'$1', Pid}) of
-        [[Class] | _] when is_atom(Class) -> Class;
-        _ -> unknown
-    catch
-        error:badarg -> unknown
-    end.
+    beamtalk_actor:lookup_class(Pid).
 
 %%====================================================================
 %% Internal: Telemetry handlers
@@ -1080,10 +1152,9 @@ One list drives both attach and detach so they cannot drift apart.
 """.
 telemetry_handlers() ->
     [
-        {beamtalk_trace_store_dispatch_stop, [beamtalk, actor, dispatch, stop],
-            fun ?MODULE:handle_dispatch_stop/4},
-        {beamtalk_trace_store_dispatch_exception, [beamtalk, actor, dispatch, exception],
-            fun ?MODULE:handle_dispatch_exception/4},
+        %% No dispatch handlers (BT-4113): `beamtalk_telemetry:dispatch_span/5`
+        %% records dispatch samples directly (record_dispatch_stop/2), so the
+        %% dispatch events can stay off when nobody listens.
         %% Lifecycle event handlers (start, stop, kill)
         {beamtalk_trace_store_lifecycle_start, [beamtalk, actor, lifecycle, start],
             fun ?MODULE:handle_lifecycle_event/4},
@@ -1094,10 +1165,21 @@ telemetry_handlers() ->
         {beamtalk_trace_store_vm_measurements, [vm, memory], fun ?MODULE:handle_vm_measurements/4}
     ].
 
--doc "The trace store's telemetry handler ids (refused by `Telemetry detach:`).".
+-doc """
+The trace store's telemetry handler ids, refused by `Telemetry attach:` and
+`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids, which
+`attach_telemetry_handlers/0` detaches on every (re)start: a user handler
+under one of those ids would otherwise be silently dropped.
+""".
 -spec telemetry_handler_ids() -> [atom()].
 telemetry_handler_ids() ->
-    [Id || {Id, _EventName, _Handler} <- telemetry_handlers()].
+    [Id || {Id, _EventName, _Handler} <- telemetry_handlers()] ++ retired_telemetry_handler_ids().
+
+%% Pre-BT-4113 dispatch handler ids. An older trace store can leave them
+%% attached across a hot upgrade, and their functions are gone.
+-spec retired_telemetry_handler_ids() -> [atom()].
+retired_telemetry_handler_ids() ->
+    [beamtalk_trace_store_dispatch_stop, beamtalk_trace_store_dispatch_exception].
 
 -doc """
 Attach telemetry event handlers.
@@ -1105,6 +1187,7 @@ Detach first to handle restarts after crash (terminate/2 not called on kill).
 """.
 attach_telemetry_handlers() ->
     detach_telemetry_handlers(),
+    lists:foreach(fun beamtalk_telemetry:detach_handler/1, retired_telemetry_handler_ids()),
     lists:foreach(
         fun({Id, EventName, Handler}) ->
             ok = telemetry:attach(Id, EventName, Handler, #{})

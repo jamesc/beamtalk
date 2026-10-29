@@ -168,7 +168,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
             case Continue of
                 <'initialize'> when 'true' ->
                     let InitNewState = State in
-                    let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
+                    let InitCleanState = case InitNewState of
+                        <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(InitNewState), 3) -> InitNewState
+                        <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(InitNewState)
+                    end in
                     {'noreply', InitCleanState}
                 <{'$bt_continue', [{CastSelector, CastArgs}|ContRest]}> when 'true' ->
                     let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in
@@ -178,7 +181,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                     case _CastDispatchResult of
                         <{'reply', _CastResult, CastNewState}> when 'true' ->
-                            let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                            let CleanCastNewState = case CastNewState of
+                                <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
+                                <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
+                            end in
                             let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
                             {'noreply', CleanCastNewState}
                         <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
@@ -220,7 +226,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
-                                let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                                let CleanCastNewState = case CastNewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
+                                    <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
+                                end in
                                 let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
                                 {'noreply', CleanCastNewState}
                             <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
@@ -247,7 +256,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
                         case _CastDispatchResult of
                             <{'reply', _CastResult, CastNewState}> when 'true' ->
-                                let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                                let CleanCastNewState = case CastNewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(CastNewState), 3) -> CastNewState
+                                    <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(CastNewState)
+                                end in
                                 let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
                                 {'noreply', CleanCastNewState}
                             <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
@@ -293,7 +305,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
-                                let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                                let CleanNewState = case NewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(NewState), 3) -> NewState
+                                    <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(NewState)
+                                end in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
                                 case _CallDeferred of
                                     <'true'> when 'true' ->
@@ -330,7 +345,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in
                         case _DispatchResult of
                             <{'reply', Result, NewState}> when 'true' ->
-                                let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                                let CleanNewState = case NewState of
+                                    <~{'__class_mod__' := _Key0, '__shape_version__' := _Key1, 'n' := _Key2}~> when call 'erlang':'=:='(call 'erlang':'map_size'(NewState), 3) -> NewState
+                                    <_> when 'true' -> call 'beamtalk_actor':'strip_local_temps'(NewState)
+                                end in
                                 let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
                                 case _CallDeferred of
                                     <'true'> when 'true' ->

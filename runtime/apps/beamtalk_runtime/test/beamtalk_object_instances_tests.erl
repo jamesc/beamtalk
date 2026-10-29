@@ -28,7 +28,8 @@ cleanup(_Pid) ->
     %% Don't stop the server — it may be supervised by the application.
     %% Clear all registrations to prevent leaking between tests.
     try
-        ets:delete_all_objects(beamtalk_instance_registry)
+        ets:delete_all_objects(beamtalk_instance_registry),
+        ets:delete_all_objects(beamtalk_instance_class)
     catch
         _:_ -> ok
     end,
@@ -111,6 +112,49 @@ count_test_() ->
                 I1 ! stop,
                 I2 ! stop,
                 I3 ! stop
+            end)
+        ]
+    end}.
+
+class_of_test_() ->
+    %% BT-4113: the pid-keyed index answers a pid's class in one lookup, and
+    %% follows register, unregister and process death.
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Self = self(),
+                Spawn = fun() ->
+                    P = spawn(fun() ->
+                        Self ! {ready, self()},
+                        receive
+                            stop -> ok
+                        end
+                    end),
+                    receive
+                        {ready, P} -> P
+                    end
+                end,
+                I1 = Spawn(),
+                I2 = Spawn(),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(I1)),
+                ok = beamtalk_object_instances:register('Counter', I1),
+                ok = beamtalk_object_instances:register('Point', I2),
+                ?assertEqual('Counter', beamtalk_object_instances:class_of(I1)),
+                ?assertEqual('Point', beamtalk_object_instances:class_of(I2)),
+                %% Unregistering under another class leaves the entry alone.
+                ok = beamtalk_object_instances:unregister('Point', I1),
+                ?assertEqual('Counter', beamtalk_object_instances:class_of(I1)),
+                ok = beamtalk_object_instances:unregister('Counter', I1),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(I1)),
+                %% Process death clears it (the registry handles the DOWN).
+                Ref = monitor(process, I2),
+                I2 ! stop,
+                receive
+                    {'DOWN', Ref, process, I2, _} -> ok
+                end,
+                _ = sys:get_state(beamtalk_object_instances),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(I2)),
+                I1 ! stop
             end)
         ]
     end}.

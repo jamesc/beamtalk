@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: generated actor callbacks skip the `__local__` temporary scan
+// when a committed state holds exactly the compile-time key set. Redefining
+// a superclass migrates its loaded subclasses' instances but does not
+// recompile the subclasses, so a stale subclass's live state can be one
+// field short of what its module was compiled against. The fast path must
+// still never persist a threading temporary into that state.
+
+:load tests/repl-protocol/fixtures/stale_guard_base.bt
+// => Loaded: StaleGuardBase
+
+:load tests/repl-protocol/fixtures/stale_guard_child.bt
+// => Loaded: StaleGuardChild
+
+child := StaleGuardChild spawn
+// => Actor(StaleGuardChild, _)
+
+child sumAll: #(1, 2, 3)
+// => 6
+
+child fieldNames size
+// => 3
+
+// Drop `b` from the superclass only: StaleGuardChild stays compiled
+// against a, b, c, while the live instance now holds a and c.
+
+:load tests/repl-protocol/fixtures/stale_guard_base_v2.bt
+// => Loaded: StaleGuardBase
+
+child fieldNames includes: #b
+// => false
+
+child fieldNames size
+// => 2
+
+child sumAll: #(4, 5)
+// => 9
+
+child fieldNames includes: #__local__sum
+// => false
+
+child fieldNames size
+// => 2
+
+child getC
+// => 15
+
+// A fresh instance of the stale subclass is built by the new superclass
+// init, so it holds a and c too.
+
+fresh := StaleGuardChild spawn
+// => Actor(StaleGuardChild, _)
+
+fresh sumAll: #(7)
+// => 7
+
+fresh fieldNames includes: #__local__sum
+// => false
+
+fresh fieldNames size
+// => 2
+
+child stop
+// => _
+
+fresh stop
+// => _
