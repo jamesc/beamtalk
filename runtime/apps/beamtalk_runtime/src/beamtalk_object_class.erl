@@ -68,6 +68,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_class_methods_map/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
+    is_class_var_reflection_send/2,
     %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
@@ -2055,25 +2056,55 @@ ownership when there is no session context to fall back to (tier 1).
 %% notwithstanding — `maps:is_key/2`/`maps:remove/2` are the whole
 %% operation, so there is nothing to extract into a shared helper beyond
 %% the builtin itself).
-dispatch_class_method('hasField:', [Name], _From, State, Restore) when is_atom(Name) ->
-    Restore(),
-    #class_state{class_state = ClassVars} = State,
-    %% `{ok, _}`-wrapped, matching invoke_class_method/7's own reply shape
-    %% (`{reply, {ok, Result}, ...}`) — `class_send_dispatch/3`'s caller
-    %% (`beamtalk_class_dispatch.erl`) always unwraps a `class_method_call`
-    %% reply as `{ok, Result} | {error, _}`, so a bare, unwrapped value here
-    %% falls through every clause of that `case` and crashes the class
-    %% gen_server with `function_clause` — found via this issue's own "from
-    %% outside" BUnit test.
-    {reply, {ok, maps:is_key(Name, ClassVars)}, State};
-dispatch_class_method('clearField:', [Name], _From, State, Restore) when is_atom(Name) ->
-    Restore(),
-    #class_state{class_state = ClassVars} = State,
-    NewClassVars = maps:remove(Name, ClassVars),
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    NewState = State#class_state{class_state = NewClassVars},
-    {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
 dispatch_class_method(Selector, Args, From, State, Restore) ->
+    case class_var_reflection_op(Selector, Args) of
+        {has, Name} ->
+            Restore(),
+            #class_state{class_state = ClassVars} = State,
+            %% `{ok, _}`-wrapped, matching invoke_class_method/7's own reply shape
+            %% (`{reply, {ok, Result}, ...}`) — `class_send_dispatch/3`'s caller
+            %% (`beamtalk_class_dispatch.erl`) always unwraps a `class_method_call`
+            %% reply as `{ok, Result} | {error, _}`, so a bare, unwrapped value here
+            %% falls through every clause of that `case` and crashes the class
+            %% gen_server with `function_clause` — found via this issue's own "from
+            %% outside" BUnit test.
+            {reply, {ok, maps:is_key(Name, ClassVars)}, State};
+        {clear, Name} ->
+            Restore(),
+            #class_state{class_state = ClassVars} = State,
+            NewClassVars = maps:remove(Name, ClassVars),
+            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+            NewState = State#class_state{class_state = NewClassVars},
+            {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
+        none ->
+            dispatch_class_method_lookup(Selector, Args, From, State, Restore)
+    end.
+
+-doc """
+The class-variable reflection sends `dispatch_class_method/5` answers from the
+class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x`, ADR
+0124 §1/§4i/B4), or `none` for every other send. The single decision behind
+both `dispatch_class_method/5` and `is_class_var_reflection_send/2`.
+""".
+-spec class_var_reflection_op(atom(), list()) -> {has | clear, atom()} | none.
+class_var_reflection_op('hasField:', [Name]) when is_atom(Name) -> {has, Name};
+class_var_reflection_op('clearField:', [Name]) when is_atom(Name) -> {clear, Name};
+class_var_reflection_op(_Selector, _Args) -> none.
+
+-doc """
+Does the class gen_server answer this class-object send from its own state,
+ahead of the class-method lookup? `beamtalk_class_dispatch` asks before it
+skips the class process for a send no class method defines (BT-4073): these
+sends read or write class variables, which only the class process holds.
+""".
+-spec is_class_var_reflection_send(atom(), list()) -> boolean().
+is_class_var_reflection_send(Selector, Args) ->
+    class_var_reflection_op(Selector, Args) =/= none.
+
+-spec dispatch_class_method_lookup(
+    atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
+) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
+dispatch_class_method_lookup(Selector, Args, From, State, Restore) ->
     #class_state{
         class_methods = ClassMethods,
         instance_methods = InstanceMethods,

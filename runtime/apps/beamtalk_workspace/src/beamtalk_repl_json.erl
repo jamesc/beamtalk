@@ -280,6 +280,11 @@ term_to_json(Value) when is_binary(Value) ->
     %% print_string), Binaries (non-UTF-8) as <<AB CD>> hex — distinct from
     %% each other and from bare class names. Previously both showed bare.
     beamtalk_runtime_api:print_string(Value);
+term_to_json(Value) when is_bitstring(Value) ->
+    %% ADR 0141: an unaligned Bitstring displays in Erlang notation
+    %% (`<<10:5>>`) on one line, as its printString does — not the `~p`
+    %% fallback below, which breaks a long value across lines.
+    beamtalk_runtime_api:print_string(Value);
 term_to_json(Value) when is_list(Value) ->
     case Value of
         [] ->

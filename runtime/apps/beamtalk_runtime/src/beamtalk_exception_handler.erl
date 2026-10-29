@@ -70,6 +70,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     kind_to_class/1,
     class_to_kind/1,
     classify_kind/1,
+    contains_calling_self/1,
     is_exception_class/1
 ]).
 
@@ -311,6 +312,39 @@ Equivalent to `wrap_raw/2` with no dispatch context. See `wrap_raw/2`.
 -spec wrap_raw(term()) -> map().
 wrap_raw(Reason) ->
     wrap_raw(Reason, #{}).
+
+-doc """
+Does an exception reason carry OTP's `calling_self` exit
+(`{calling_self, {gen_server, call, _}}`, a `gen_server:call` to the calling
+process itself) anywhere inside it?
+
+Accepts every shape such an exit takes on its way out of a Beamtalk send: the
+raw exit reason, a `#beamtalk_error{}` recording it under `details.reason`
+(`wrap_raw/2`, and the exit clause of `ensure_wrapped/3`), or a wrapped
+exception map (`#{error := #beamtalk_error{}}`). The one predicate behind
+`beamtalk_supervisor`'s config-error hint and
+`beamtalk_class_dispatch`'s in-class-process `dispatch_error` (BT-4252).
+""".
+-spec contains_calling_self(term()) -> boolean().
+contains_calling_self({calling_self, {gen_server, _, _}}) ->
+    true;
+contains_calling_self(T) when is_tuple(T) ->
+    lists:any(fun contains_calling_self/1, tuple_to_list(T));
+contains_calling_self(M) when is_map(M) ->
+    lists:any(fun contains_calling_self/1, maps:values(M));
+contains_calling_self(L) when is_list(L) ->
+    contains_calling_self_list(L);
+contains_calling_self(_) ->
+    false.
+
+%% Walk a possibly improper list.
+-spec contains_calling_self_list(maybe_improper_list()) -> boolean().
+contains_calling_self_list([]) ->
+    false;
+contains_calling_self_list([H | T]) ->
+    contains_calling_self(H) orelse contains_calling_self_list(T);
+contains_calling_self_list(Tail) ->
+    contains_calling_self(Tail).
 
 -doc """
 Wrap a raw Erlang error into a well-classified `#beamtalk_error{}`.

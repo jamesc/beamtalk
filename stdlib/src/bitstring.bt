@@ -1,0 +1,94 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Bitstring — a sequence of bits that is not a whole number of bytes.
+///
+/// A BEAM bitstring whose bit size is a multiple of 8 is a binary, and has
+/// class `Binary` (or `String`). Any other bitstring is a `Bitstring`. The
+/// class follows the value's shape, as in Erlang, so an operation can turn
+/// one into the other: joining 1 bit and 7 bits answers a `Binary`.
+///
+/// Bitstrings come from binary patterns: a `/bitstring` (or `/bits`)
+/// segment binds whatever bits are left, and an unaligned tail is a
+/// `Bitstring` (ADR 0141).
+///
+/// `Bitstring` is a sibling of `Binary`, not a superclass or subclass. It
+/// understands only bit-level messages. The byte protocol of `Binary` and
+/// `Collection` (`size`, `do:`, `at:`, `toBytes`, `asString`, …) is
+/// deliberately not understood: a send raises `does_not_understand` with a
+/// hint naming the bit size. Use `bitSize`/`toBits`, or `asBinary` to check
+/// alignment.
+///
+/// ## BEAM Mapping
+/// A Beamtalk Bitstring is an Erlang `bitstring()` that is not a `binary()`.
+///
+/// ## Examples
+/// ```beamtalk
+/// tail := (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+/// tail class          // => Bitstring
+/// tail bitSize        // => 5
+/// tail toBits         // => #(0, 1, 0, 1, 0)
+/// tail printString    // => "<<10:5>>"
+/// tail asBinary isError   // => true
+/// ```
+sealed typed Value subclass: Bitstring native: beamtalk_bitstring
+
+  /// Return the number of bits.
+  ///
+  /// `Binary>>bitSize` answers the same for a byte-aligned value, so
+  /// `bitSize` works on either class.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tail bitSize   // => 5
+  /// ```
+  bitSize -> Integer => self delegate
+
+  /// Return the bits as a List of 0/1 Integers, most significant bit first.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tail toBits   // => #(0, 1, 0, 1, 0)
+  /// ```
+  toBits -> List(Integer) => self delegate
+
+  /// Join this bitstring's bits with `other`'s.
+  ///
+  /// `other` may be a Bitstring, a Binary, or a String (joined by its UTF-8
+  /// bytes, as `Binary>>concat:` does). The answer is a `Binary` when the
+  /// joined bits are byte-aligned, and a `Bitstring` otherwise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (oneBit concat: sevenBits) class   // => Binary
+  /// (oneBit concat: oneBit) class      // => Bitstring
+  /// ```
+  concat: other :: Bitstring | Binary -> Bitstring | Binary => self delegate
+
+  /// Convert to a Binary, as a Result.
+  ///
+  /// A Bitstring is never byte-aligned, so this is always an error of kind
+  /// `#unaligned_bitstring`. There is no silent padding or truncation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tail asBinary isError            // => true
+  /// tail asBinary error kind         // => #unaligned_bitstring
+  /// ```
+  asBinary -> Result(Binary, Error) => self delegate
+
+  /// Return the Erlang notation for the bits, e.g. `<<2:3>>`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tail printString   // => "<<10:5>>"
+  /// ```
+  printString -> String => self delegate
+
+  /// Return the same Erlang notation as `printString`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tail displayString   // => "<<10:5>>"
+  /// ```
+  displayString -> String => self delegate

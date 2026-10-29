@@ -1,0 +1,193 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4139 / ADR 0141: Bitstring, the sealed class of unaligned bitstrings.
+// Pins every row of the protocol table, every deliberately-rejected byte
+// selector, the aligned/unaligned boundary, and the type patterns.
+
+TestCase subclass: BitstringTest
+
+  // 234 = 0b11101010: dropping 3 bits leaves 0b01010 (10, 5 bits).
+  tail => (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+
+  // 255 split as 1 bit + 7 bits: <<1:1>> and <<127:7>>.
+  oneBit =>
+    (Binary fromBytes: #(255)) match: [<<a:1/bitstring, _/bitstring>> -> a]
+
+  sevenBits => (Binary fromBytes: #(255)) match: [<<_:1, b:7/bitstring>> -> b]
+
+  classify: x =>
+    x match: [
+      b :: Bitstring -> #bitstring;
+      b :: Binary -> #binary;
+      _ -> #other
+    ]
+
+  // === Class ===
+  testUnalignedTailIsABitstring =>
+    self assert: self tail class equals: Bitstring
+    self assert: (self tail isKindOf: Bitstring)
+    self deny: (self tail isKindOf: Binary)
+    self deny: (self tail isKindOf: Collection)
+
+  testAlignedTailIsABinary =>
+    rest := (Binary fromBytes: #(234, 7)) match: [<<_:8, r/bitstring>> -> r]
+    self assert: rest class equals: Binary
+    self assert: rest toBytes equals: #(7)
+
+  testEmptyTailIsABinary =>
+    // Zero bits is a whole number of bytes.
+    rest := (Binary fromBytes: #(234)) match: [<<_:8, r/bitstring>> -> r]
+    self assert: rest class equals: Binary
+    self assert: rest bitSize equals: 0
+
+  // === Protocol ===
+  testBitSize =>
+    self assert: self tail bitSize equals: 5
+    self assert: self oneBit bitSize equals: 1
+    self assert: self sevenBits bitSize equals: 7
+
+  testBinaryBitSize =>
+    self assert: (Binary fromBytes: #(1, 2)) bitSize equals: 16
+    self assert: (Binary fromBytes: #()) bitSize equals: 0
+    // A String counts its UTF-8 bytes, not graphemes.
+    self assert: "é" bitSize equals: 16
+
+  testToBits =>
+    self assert: self tail toBits equals: #(0, 1, 0, 1, 0)
+    self assert: self oneBit toBits equals: #(1)
+    self assert: self sevenBits toBits equals: #(1, 1, 1, 1, 1, 1, 1)
+
+  testConcatReachingAByteBoundaryIsABinary =>
+    joined := self oneBit concat: self sevenBits
+    self assert: joined class equals: Binary
+    self assert: joined toBytes equals: #(255)
+
+  testConcatStayingUnalignedIsABitstring =>
+    joined := self oneBit concat: self oneBit
+    self assert: joined class equals: Bitstring
+    self assert: joined toBits equals: #(1, 1)
+
+  testConcatWithABinary =>
+    joined := self tail concat: (Binary fromBytes: #(255))
+    self assert: joined class equals: Bitstring
+    self assert: joined bitSize equals: 13
+    self assert: joined toBits equals: #(0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1)
+
+  testConcatWithAStringJoinsItsBytes =>
+    joined := self tail concat: "A"
+    self assert: joined class equals: Bitstring
+    self assert: joined toBits equals: #(0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1)
+
+  testConcatWithANonBitstringIsATypeError =>
+    self should: [self tail concat: 42] raise: #type_error
+
+  testAsBinaryIsAlwaysAnError =>
+    result := self tail asBinary
+    self assert: result isError
+    self assert: result error kind equals: #unaligned_bitstring
+    self assert: (result error hint includesSubstring: "bitSize")
+    self assert: (result error hint includesSubstring: "toBits")
+
+  testPrintString =>
+    self assert: self tail printString equals: "<<10:5>>"
+    self assert: self oneBit printString equals: "<<1:1>>"
+    joined := self tail concat: (Binary fromBytes: #(255))
+    self assert: joined printString equals: "<<87,31:5>>"
+
+  testDisplayString => self assert: self tail displayString equals: "<<10:5>>"
+
+  testPrintStringNestedInACollection =>
+    self assert: {self tail, 1} printString equals: "\{<<10:5>>, 1}"
+
+  testFieldNamesIsEmpty =>
+    // A Bitstring is a raw BEAM term with no fields. Sent dynamically: the
+    // inline `fieldNames` intrinsic mishandles every non-map value receiver
+    // (BT-4264).
+    self assert: (self tail perform: #fieldNames) equals: #()
+
+  testFieldAccessOnABitstringIsStructured =>
+    // No fields: a dynamic fieldAt: raises the same structured
+    // immutable_value as a primitive class, never a raw function_clause.
+    self should: [
+      self tail perform: #fieldAt: withArguments: #(#x)
+    ] raise: #immutable_value
+    self deny: (self tail perform: #hasField: withArguments: #(#x))
+
+  testBinaryConcatABitstringIsATypeError =>
+    // ADR 0141: Binary>>concat: is bytes-only (typed Binary -> Binary);
+    // bits are joined from the Bitstring side.
+    self should: [
+      (Binary fromBytes: #(255)) concat: self tail
+    ] raise: #type_error
+    self should: ["A" concat: self tail] raise: #type_error
+
+  testBinaryConcatABinaryStaysABinary =>
+    joined := (Binary fromBytes: #(1)) concat: (Binary fromBytes: #(2))
+    self assert: joined class equals: Binary
+
+  testEquality =>
+    self assert: self tail =:= self tail
+    self assert: self tail == self tail
+    self deny: self oneBit =:= self tail
+    self assert: self tail hash equals: self tail hash
+
+  // === Rejected byte protocol ===
+  rejectedUnary =>
+    #(#size, #toBytes, #asString, #asStringUnchecked, #asBase64, #asBase64Url, #asHex, #isEmpty, #notEmpty)
+
+  rejectedOneArg =>
+    #(#do:, #at:, #byteAt:, #includesSubstring:, #indexOf:, #collect:, #select:, #reject:, #detect:, #includes:)
+
+  testByteSelectorsAreNotUnderstood =>
+    self rejectedUnary
+      do: [:sel |
+        self should: [self tail perform: sel] raise: #does_not_understand
+        self deny: (self tail respondsTo: sel)
+      ]
+    self rejectedOneArg
+      do: [:sel |
+        self should: [
+          self tail perform: sel withArguments: #(1)
+        ] raise: #does_not_understand
+        self deny: (self tail respondsTo: sel)
+      ]
+    self should: [self tail part: 0 size: 1] raise: #does_not_understand
+    self should: [
+      self tail inject: 0 into: [:a :b | a + b]
+    ] raise: #does_not_understand
+
+  testNotUnderstoodHintNamesBitSizeAndProtocol =>
+    hint := [self tail perform: #size] on: Error do: [:e | e hint]
+    self assert: hint equals: "a Bitstring is not byte-aligned (5 bits); use 'bitSize'/'toBits', or 'asBinary' to check alignment"
+
+  testNotUnderstoodIsStructured =>
+    err := [self tail perform: #toBytes] on: Error do: [:e | e]
+    self assert: err kind equals: #does_not_understand
+    self assert: err selector equals: #toBytes
+
+  testProtocolSelectorsAreUnderstood =>
+    #(#bitSize, #toBits, #concat:, #asBinary, #printString, #displayString, #class, #hash) do: [:sel |
+      self assert: (self tail respondsTo: sel)
+    ]
+
+  // === Patterns ===
+  testTypePatterns =>
+    self assert: (self classify: self tail) equals: #bitstring
+    self assert: (self classify: (Binary fromBytes: #(1))) equals: #binary
+    self assert: (self classify: "s") equals: #binary
+    self assert: (self classify: 42) equals: #other
+
+  testBinaryPatternDoesNotMatchABitstring =>
+    result := self tail match: [
+      b :: Binary -> #binary;
+      _ -> #other
+    ]
+    self assert: result equals: #other
+
+  testBitstringMatchesAgainAsBits =>
+    result := self tail match: [
+      <<a:2, b:3>> -> {a, b};
+      _ -> nil
+    ]
+    self assert: result equals: {1, 2}

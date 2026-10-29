@@ -1432,3 +1432,42 @@ class_signal_message_reason_string_and_details_test() ->
                 nomatch, binary:match(beamtalk_error:format(Inner), <<"Reason: \"disk full\"">>)
             )
     end.
+
+%% BT-4252: `contains_calling_self/1` recognises OTP's `calling_self` exit in
+%% every shape it takes leaving a Beamtalk send — produced here by the real
+%% wrappers, not hand-built maps.
+contains_calling_self_shapes_test() ->
+    Raw = calling_self_exit_reason(),
+    ?assertMatch({calling_self, {gen_server, call, _}}, Raw),
+    ?assert(beamtalk_exception_handler:contains_calling_self(Raw)),
+    %% The exit clause of ensure_wrapped/3 (an `exit:` caught in a method body).
+    ExitWrapped = beamtalk_exception_handler:ensure_wrapped(exit, Raw, []),
+    ?assertMatch(#{error := #beamtalk_error{details = #{reason := Raw}}}, ExitWrapped),
+    ?assert(beamtalk_exception_handler:contains_calling_self(ExitWrapped)),
+    %% wrap_raw/2 (the raw term re-raised as an `error:`): a `runtime_error`
+    %% carrying it under `details.reason`.
+    RuntimeWrapped = beamtalk_exception_handler:ensure_wrapped(
+        error, Raw, [], #{selector => doc, class => 'C'}
+    ),
+    #{error := #beamtalk_error{kind = runtime_error} = Inner} = RuntimeWrapped,
+    ?assert(beamtalk_exception_handler:contains_calling_self(RuntimeWrapped)),
+    %% The bare record too.
+    ?assert(beamtalk_exception_handler:contains_calling_self(Inner)),
+    %% Unrelated reasons, and a `calling_self` atom alone, do not match.
+    ?assertNot(beamtalk_exception_handler:contains_calling_self(badarg)),
+    ?assertNot(beamtalk_exception_handler:contains_calling_self(calling_self)),
+    ?assertNot(
+        beamtalk_exception_handler:contains_calling_self(
+            beamtalk_exception_handler:ensure_wrapped(exit, {timeout, x}, [])
+        )
+    ),
+    %% Improper lists are walked without crashing.
+    ?assert(beamtalk_exception_handler:contains_calling_self([a | Raw])).
+
+%% The real exit: OTP refuses a `gen_server:call` to the calling process.
+calling_self_exit_reason() ->
+    try gen_server:call(self(), get_doc) of
+        _ -> error(expected_calling_self)
+    catch
+        exit:Reason -> Reason
+    end.

@@ -310,6 +310,24 @@ impl CoreErlangGenerator {
             .insert(pkg, class_name, module);
     }
 
+    /// BT-4151: installs the class names declared by more than one package in
+    /// this generation's scope (see
+    /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]).
+    pub(in crate::core_erlang) fn set_shadowed_class_names(
+        &mut self,
+        names: std::collections::HashSet<ecow::EcoString>,
+    ) {
+        self.class_context_mut().shadowed_class_names = names;
+    }
+
+    /// BT-4151: whether `class_name` is declared by more than one package in
+    /// this generation's scope, so its runtime class is a last-wins collision.
+    pub(in crate::core_erlang) fn is_shadowed_class(&self, class_name: &str) -> bool {
+        self.class_context
+            .as_ref()
+            .is_some_and(|ctx| ctx.shadowed_class_names.contains(class_name))
+    }
+
     /// Computes and installs the direct-call eligibility table from `hierarchy`.
     ///
     /// Reuses [`CoreErlangGenerator::compute_direct_call_eligible`] (the single
