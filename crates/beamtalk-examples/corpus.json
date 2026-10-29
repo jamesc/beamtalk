@@ -20659,6 +20659,39 @@
       "explanation": "BT-4276: an actor-state fold as an operand inside a closure in a loop body is judged by the closure's own context. Measured right on the BEAM: every state change is kept and the fold answers its value, not a raw `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt."
     },
     {
+      "id": "stdlib-test-bt4290remove-while-waiting-test",
+      "title": "Bt4290RemoveWhileWaitingTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "Bt4290RemoveWhileWaitingTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "bt4290remove_while_waiting_test",
+        "concurrent",
+        "conditional",
+        "extends",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testRemoveOfAClassWaitingOnTheCallerTimesOut",
+        "testRemoveOfAClassWaitingThroughAnotherClassTimesOut",
+        "testRenameOfAClassWaitingOnTheCallerTimesOut"
+      ],
+      "source": "// BT-4290: removing or renaming a class whose process is blocked waiting on\n// the caller raises a structured `timeout` instead of hanging, and changes\n// nothing first. Fixtures: fixtures/bt4290target.bt, fixtures/bt4290runner.bt,\n// fixtures/bt4290relay.bt.\n\nTestCase subclass: Bt4290RemoveWhileWaitingTest\n\n  testRemoveOfAClassWaitingOnTheCallerTimesOut =>\n    // An instance of the class: removal stops the class's actors first, so a\n    // failure that came after that would leave it dead.\n    instance := Bt4290Target spawn\n    [\n      self should: [Bt4290Target removeViaRunner] raise: #timeout\n      self assert: Bt4290Target name equals: #Bt4290Target\n      self assert: instance isAlive\n    ] ensure: [instance isAlive ifTrue: [instance stop]]\n\n  // The cycle runs through a second class: Target waits on Relay, Relay on\n  // Runner, and the block runs in Runner.\n  testRemoveOfAClassWaitingThroughAnotherClassTimesOut =>\n    instance := Bt4290Target spawn\n    [\n      self should: [Bt4290Target removeViaRelay] raise: #timeout\n      self assert: Bt4290Target name equals: #Bt4290Target\n      self assert: instance isAlive\n    ] ensure: [instance isAlive ifTrue: [instance stop]]\n\n  testRenameOfAClassWaitingOnTheCallerTimesOut =>\n    self should: [Bt4290Target renameViaRunner] raise: #timeout\n    self assert: Bt4290Target name equals: #Bt4290Target",
+      "explanation": "BT-4290: removing or renaming a class whose process is blocked waiting on the caller raises a structured `timeout` instead of hanging, and changes nothing first. Fixtures: fixtures/bt4290target.bt, fixtures/bt4290runner.bt, fixtures/bt4290relay.bt."
+    },
+    {
       "id": "stdlib-test-cascade-class-var-rebind-receiver-position-test",
       "title": "CascadeClassVarRebindReceiverPositionTest",
       "category": "stdlib-tests",
@@ -38667,6 +38700,67 @@
       ],
       "source": "// BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a\n// field) as an operand inside a closure that sits in a loop or fold body. The\n// closure's body does not run per iteration of the enclosing loop, so the\n// fold is judged by the closure's own context and accepted.\n\nActor subclass: Bt4276FoldInClosure\n  state: n = 0\n  state: items = #(1, 2)\n\n  n => self.n\n\n  bump =>\n    self.n := self.n + 1\n    self.n\n\n  // The closure is run in the same iteration that creates it.\n  injectInClosureRunInLoop =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        b := [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n        t := b value\n      ]\n    t\n\n  // The closures are run after the loop that creates them.\n  injectInClosuresRunAfterLoop =>\n    r := #(1, 2) collect: [:x |\n      [x + (self.items inject: 0 into: [:acc :y | acc + self bump])]\n    ]\n    r collect: [:blk | blk value]\n\n  // A `do:` whose block sends to `self`, as a receiver in the closure.\n  doReceiverInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items do: [:y | self bump]) isNil]\n        b value\n      ]\n    self.n\n\n  // A `collect:` whose block writes a field, as a receiver in the closure.\n  collectWritingFieldInClosure =>\n    #(1, 2)\n      do: [:x |\n        b := [(self.items collect: [:y | self.n := self.n + 1]) size]\n        b value\n      ]\n    self.n\n\n  // The closure is passed to an ordinary method (a user HOM) that runs it\n  // twice; the HOM answers the second result.\n  twice: blk =>\n    blk value\n    blk value\n\n  injectInClosurePassedToMethod =>\n    t := 0\n    #(1, 2)\n      do: [:x |\n        t := self twice: [\n          x + (self.items inject: 0 into: [:acc :y | acc + self bump])\n        ]\n      ]\n    t",
       "explanation": "BT-4276 fixture: an actor-state fold (its block sends to `self` or writes a field) as an operand inside a closure that sits in a loop or fold body. The closure's body does not run per iteration of the enclosing loop, so the fold is judged by the closure's own context and accepted."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4290relay",
+      "title": "Bt4290Relay",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4290Relay",
+        "Object",
+        "bt4290relay",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "run:",
+        "subclassing"
+      ],
+      "source": "// BT-4290: a second class process between the waiting class and the block,\n// so the wait cycle is three processes long.\n\nObject subclass: Bt4290Relay\n\n  class run: blk => Bt4290Runner run: blk",
+      "explanation": "BT-4290: a second class process between the waiting class and the block, so the wait cycle is three processes long."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4290runner",
+      "title": "Bt4290Runner",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4290Runner",
+        "Object",
+        "bt4290runner",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "run:",
+        "subclassing"
+      ],
+      "source": "// BT-4290: runs a block in this class's own class process.\n\nObject subclass: Bt4290Runner\n\n  class run: blk => blk value",
+      "explanation": "BT-4290: runs a block in this class's own class process."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4290target",
+      "title": "Bt4290Target",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Bt4290Target",
+        "actor",
+        "async",
+        "bt4290target",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "process",
+        "removeViaRelay",
+        "removeViaRunner",
+        "renameViaRunner",
+        "subclassing"
+      ],
+      "source": "// BT-4290: a class method of this class hands `Bt4290Runner` a block that\n// changes this class. The block runs in the runner's class process while\n// this class's process waits on the runner, so the change cannot reach it.\n\nActor subclass: Bt4290Target\n\n  class removeViaRunner =>\n    Bt4290Runner run: [(Beamtalk classNamed: #Bt4290Target) removeFromSystem]\n\n  class renameViaRunner =>\n    Bt4290Runner run: [\n      (Beamtalk classNamed: #Bt4290Target) renameTo: #Bt4290TargetRenamed\n    ]\n\n  class removeViaRelay =>\n    Bt4290Relay run: [(Beamtalk classNamed: #Bt4290Target) removeFromSystem]",
+      "explanation": "BT-4290: a class method of this class hands `Bt4290Runner` a block that changes this class. The block runs in the runner's class process while this class's process waits on the runner, so the change cannot reach it."
     },
     {
       "id": "stdlib-test-fixtures-calculator",

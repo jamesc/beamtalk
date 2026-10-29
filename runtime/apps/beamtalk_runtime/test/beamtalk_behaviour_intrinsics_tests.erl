@@ -1580,6 +1580,49 @@ class_remove_from_system_has_subclasses_test_() ->
         ]
     end}.
 
+%%% --- classRemoveFromSystemByName/1 — busy class is waited for (BT-4290) ---
+%%% The BT-4290 probe only runs when the class process is waiting on the
+%%% caller. A class that is merely busy for longer than the probe timeout
+%%% (here: suspended for 6s) is waited for and removed, as before.
+
+class_remove_from_system_waits_for_busy_class_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                {_ClassObj, Pid} = register_class('BT4290RemoveBusy', #{}, #{}),
+                try
+                    %% Only the suspending process may resume, so one helper
+                    %% does both.
+                    Self = self(),
+                    spawn(fun() ->
+                        true = erlang:suspend_process(Pid),
+                        Self ! suspended,
+                        timer:sleep(6000),
+                        erlang:resume_process(Pid)
+                    end),
+                    receive
+                        suspended -> ok
+                    end,
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                            'BT4290RemoveBusy'
+                        )
+                    ),
+                    ?assertEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT4290RemoveBusy')
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)}
+    end}.
+
 %%% --- classRemoveFromSystem/1 — dynamic (ClassBuilder) class, no BEAM module ---
 %%% BT-3895: a dynamic class has no loaded module behind it, so code:delete
 %%% answers false. That is not an unload failure; removal must succeed and
