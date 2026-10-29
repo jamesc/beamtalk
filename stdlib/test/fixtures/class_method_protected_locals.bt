@@ -24,7 +24,7 @@ Object subclass: ClassMethodProtectedLocals
   // read `t`: the inner `ensure:` and its cleanup run after the outer body's
   // write and may raise, and a cleanup that read the write after a raise would
   // see the old `t`, a compile error (BT-4003).
-  class nestedEnsureCleanupsSeeEachOther =>
+  class nestedEnsureInnerCleanupSeesTheInnerWrite =>
     t := 0
     [
       t := t + 1
@@ -38,6 +38,14 @@ Object subclass: ClassMethodProtectedLocals
         ]
     ] ensure: [self.n := 2]
     t
+
+  // The outer cleanup reads a write that is the last thing the inner protected
+  // block does: nothing that may raise runs after it (the inner cleanup only
+  // writes a class variable), so the outer cleanup sees it.
+  class nestedEnsureOuterCleanupSeesTheInnerWrite =>
+    t := 0
+    [[t := t + 5] ensure: [self.n := 3]] ensure: [t := t + 10]
+    t * 10 + self.n
 
   // An `on:do:` in the try body of another: erlc rejected the module with
   // `ambiguous_catch_try_state` until the class filter's `case` had a wildcard.

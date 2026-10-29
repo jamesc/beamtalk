@@ -10,8 +10,11 @@ TestCase subclass: ClassMethodProtectedLocalsTest
   testEnsureCleanupSeesTheBodysWrite =>
     self assert: ClassMethodProtectedLocals ensureCleanupSeesTheBodysWrite equals: 11
 
-  testNestedEnsureCleanupsSeeEachOther =>
-    self assert: ClassMethodProtectedLocals nestedEnsureCleanupsSeeEachOther equals: 16
+  testNestedEnsureInnerCleanupSeesTheInnerWrite =>
+    self assert: ClassMethodProtectedLocals nestedEnsureInnerCleanupSeesTheInnerWrite equals: 16
+
+  testNestedEnsureOuterCleanupSeesTheInnerWrite =>
+    self assert: ClassMethodProtectedLocals nestedEnsureOuterCleanupSeesTheInnerWrite equals: 153
 
   testOnDoNestedInATryBody =>
     self assert: ClassMethodProtectedLocals onDoNestedInATryBody equals: 2
