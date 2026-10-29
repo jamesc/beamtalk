@@ -368,3 +368,194 @@ fn value_type_field_writing_folds_in_match_arms_are_rejected_with_the_match_arm_
     }
     assert_eq!(checked, VT_POSITIONS.len() * VT_FIELD_FOLDS.len());
 }
+
+// ── Fold and loop bodies (BT-4287) ──────────────────────────────────────────────────────────
+//
+// The same carrier constructs at an operand site of a statement of a fold or loop body. The
+// core site rule (`is_actor_fold_value_site`) leaves an actor's value-bearing sites under a
+// fold frame out, because a producer that *rebinds locals* does not fit an actor fold's tuple
+// accumulator (BT-3797); a construct that threads only `State` rebinds none, so codegen
+// registers it there too (`is_family_only_fold_value_site`). Before BT-4287 it was compiled
+// in place: `x + (self.items inject: 0 into: [...])` in a `do:` body crashed with `Tuple does
+// not understand 'plusFromNumber:'`, a `collect:` answered the raw `{Value, State}` pairs, and
+// a `do:` as a receiver dropped every write. `ConstructCarrierInPlace` fails on each of them
+// with the registration withheld (`FoldOperandFamilyOnlyInPlace`); the right answers are run
+// on a BEAM in `stdlib/test/bt4003residuals_test.bt`.
+
+/// The inner constructs: every fold kind and counted loop, each writing no outer local but
+/// threading `State` (a self-send or a field write in its block).
+const FOLD_BODY_CONSTRUCTS: &[&str] = &[
+    "(xs do: [:s | self wrap: s])",
+    "(xs collect: [:s | self wrap: s])",
+    "(xs select: [:s | (self wrap: s) > 10])",
+    "(xs inject: 0 into: [:a :s | a + (self wrap: s)])",
+    "(xs detect: [:s | (self wrap: s) > 10] ifNone: [0])",
+    "(xs collect: [:s | self.hits := self.hits + s. s])",
+    "(1 to: 2 do: [:i | self.hits := self.hits + i])",
+    "(2 timesRepeat: [self wrap: 1])",
+    "([self.hits < 3] whileTrue: [self.hits := self.hits + 1])",
+];
+
+/// The body statement holding the construct `{c}`: a binary and a keyword argument, a
+/// receiver, a literal element, a map value, a cascade receiver, a self-send argument, an
+/// operand inside an assignment's value, and the whole value of an assignment.
+const FOLD_BODY_POSITIONS: &[&str] = &[
+    "x + {c}",
+    "0 max: {c}",
+    "{c} isNil",
+    "#[{c}, 1]",
+    "#{#k => {c}}",
+    "{c} printString; yourself",
+    "self wrap: {c}",
+    "q := 1 + {c}. q",
+    "q := {c}. q",
+];
+
+/// Where the frame holding the statement sits relative to the fold frames around it, which
+/// decides which of its value-bearing sites the core rule leaves out (`is_actor_fold_value_site`)
+/// and so which cells withholding the BT-4287 registration must be reported on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Under {
+    /// The statement's own frame is a fold body: every value-bearing site is out.
+    Fold,
+    /// A letrec loop, an arm or an evaluated block inside a fold body: the operands are out,
+    /// the whole value of an assignment is a core site.
+    EnclosingFold,
+    /// No fold frame encloses it: every site is a core site.
+    NoFold,
+}
+
+/// The outer body kinds holding the statement `{s}` (where `x` is bound).
+const FOLD_BODY_OUTERS: &[(&str, Under)] = &[
+    ("xs do: [:x | {s}]", Under::Fold),
+    ("xs collect: [:x | {s}]", Under::Fold),
+    ("xs inject: 0 into: [:a :x | {s}]", Under::Fold),
+    ("xs select: [:x | {s}. true]", Under::Fold),
+    ("xs reject: [:x | {s}. false]", Under::Fold),
+    ("xs detect: [:x | {s}. false] ifNone: [0]", Under::Fold),
+    ("xs collect: [:w | xs inject: 0 into: [:a :x | {s}]]", Under::Fold),
+    ("xs do: [:x | flag ifTrue: [{s}]]", Under::EnclosingFold),
+    ("xs do: [:x | [{s}] value]", Under::EnclosingFold),
+    ("xs do: [:x | 2 timesRepeat: [{s}]]", Under::EnclosingFold),
+    ("1 to: 2 do: [:x | {s}]", Under::NoFold),
+    ("2 timesRepeat: [x := 1. {s}]", Under::NoFold),
+    ("[self.hits > 100] whileTrue: [x := 1. {s}]", Under::NoFold),
+];
+
+const FOLD_BODY_HEADER: &str = "Actor subclass: P\n  state: hits = 0\n  wrap: x => x * 10\n";
+
+/// The method `selector` holding the cell: the outer body, with the statement holding the
+/// construct.
+fn fold_body_method(selector: &str, outer: &str, position: &str, construct: &str) -> String {
+    let stmt = position.replace("{c}", construct);
+    let value = outer.replace("{s}", &stmt);
+    format!("  {selector} flag =>\n    xs := #(1, 2) asList\n    r := {value}\n    r\n")
+}
+
+/// One corpus cell: its `go:` method, and whether withholding the BT-4287 registration must
+/// be reported on it.
+struct FoldBodyCell {
+    outer: usize,
+    method: String,
+    must_report: bool,
+}
+
+impl FoldBodyCell {
+    fn program(&self) -> String {
+        format!("{FOLD_BODY_HEADER}{}", self.method)
+    }
+}
+
+fn fold_body_cells() -> Vec<FoldBodyCell> {
+    let mut out = Vec::new();
+    for (outer_index, (outer, under)) in FOLD_BODY_OUTERS.iter().enumerate() {
+        for position in FOLD_BODY_POSITIONS {
+            for construct in FOLD_BODY_CONSTRUCTS {
+                // A cascade is not an operand site at all: its own lowering sequences its
+                // receiver (`cascade_operand_state_corpus`), so it is in the clean half only.
+                let whole_value = position.starts_with("q := {c}");
+                let cascade = position.contains(';');
+                let must_report = !cascade
+                    && match under {
+                        Under::Fold => true,
+                        Under::EnclosingFold => !whole_value,
+                        Under::NoFold => false,
+                    };
+                out.push(FoldBodyCell {
+                    outer: outer_index,
+                    method: fold_body_method("go:", outer, position, construct),
+                    must_report,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Every cell compiles clean through the verifier, its construct is lowered as a producer
+/// (its carrier bound and unpacked, never embedded in the operand), and every cell of each
+/// outer body kind, as the methods of one class, compiles through `erlc`.
+#[test]
+fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier() {
+    let mut failures = Vec::new();
+    let mut clean = 0;
+    let mut per_outer: Vec<Vec<String>> = vec![Vec::new(); FOLD_BODY_OUTERS.len()];
+    for cell in fold_body_cells() {
+        let src = cell.program();
+        match outcome(&src, None) {
+            Outcome::Clean => clean += 1,
+            Outcome::Unsupported => continue,
+            Outcome::Finding(report) => {
+                failures.push(format!("finding {report}\n{src}"));
+                continue;
+            }
+        }
+        if !clause(&codegen(&src), "go:").contains("let _ThreadedResult") {
+            failures.push(format!("the carrier construct should be a producer:\n{src}"));
+            continue;
+        }
+        let methods = &mut per_outer[cell.outer];
+        let selector = format!("go{}:", methods.len());
+        methods.push(cell.method.replacen("go:", &selector, 1));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert!(clean >= 1000, "only {clean} corpus programs compiled clean");
+    for methods in per_outer {
+        let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
+        super::assert_compiles_through_erlc("test", &codegen(&src));
+    }
+}
+
+/// With the BT-4287 sites withheld, every cell under a fold frame reports
+/// `ConstructCarrierInPlace`, and no cell reports anything else.
+#[test]
+fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
+    let mut reported = 0;
+    let mut missed = Vec::new();
+    for cell in fold_body_cells() {
+        let src = cell.program();
+        match outcome(&src, Some(LocalRebindFault::FoldOperandFamilyOnlyInPlace)) {
+            Outcome::Finding(report) => {
+                assert!(
+                    report.contains("ConstructCarrierInPlace"),
+                    "unexpected finding {report}\n{src}"
+                );
+                reported += 1;
+            }
+            Outcome::Clean if cell.must_report => missed.push(src),
+            Outcome::Clean | Outcome::Unsupported => {}
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "{} programs did not report the fault:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+    assert!(reported >= 690, "only {reported} programs reported the fault");
+}

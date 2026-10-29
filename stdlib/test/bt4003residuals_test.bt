@@ -97,10 +97,34 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4003ResidualsActor spawn collectReceiverInArmInDo equals: 4
     self assert: Bt4003ResidualsActor spawn injectOperandAtTop equals: #(4, 2)
 
+  // BT-4287: a state fold as an operand inside a fold or loop body.
+  testActorStateFoldAsAnOperandInAFoldBody =>
+    self assert: Bt4003ResidualsActor spawn injectArgInInject equals: #(10, 4)
+    self assert: Bt4003ResidualsActor spawn injectOperandInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectArgInCollect equals: #(#(3, 7), 4)
+    self assert: Bt4003ResidualsActor spawn doReceiverInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn fieldCollectReceiverInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn fieldCollectReceiverInCollect equals: #(#(3, 4), 4)
+    self assert: Bt4003ResidualsActor spawn doElementInTimes equals: 4
+    self assert: Bt4003ResidualsActor spawn injectOperandInArmInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectOperandInEvaluatedBlockInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectOperandInDoInClosure equals: 4
+    self assert: Bt4003ResidualsActor spawn detectArgInSelect equals: #(#(1, 2, 3), 6)
+    self assert: Bt4003ResidualsActor spawn countedLoopReceiverInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn injectInCascadeInDo equals: 4
+
   testClassStateFoldAsAnOperandInAFoldBody =>
     self assert: Bt4003ResidualsClass injectOperandInDo equals: 4
     self assert: Bt4003ResidualsClass doReceiverInDo equals: 4
     self assert: Bt4003ResidualsClass injectArgInCollect equals: #(#(3, 7), 4)
+    self assert: Bt4003ResidualsClass injectArgInInject equals: #(10, 4)
+    self assert: Bt4003ResidualsClass fieldCollectReceiverInDo equals: 4
+    self assert: Bt4003ResidualsClass fieldCollectReceiverInCollect equals: #(#(3, 4), 4)
+    self assert: Bt4003ResidualsClass doElementInTimes equals: 4
+    self assert: Bt4003ResidualsClass injectOperandInArmInDo equals: 4
+    self assert: Bt4003ResidualsClass detectArgInSelect equals: #(#(1, 2, 3), 6)
+    self assert: Bt4003ResidualsClass countedLoopReceiverInDo equals: 4
+    self assert: Bt4003ResidualsClass injectInCascadeInDo equals: 4
 
   testReturnInATupleAccDo =>
     self assert: self vTupleAccDoReturn equals: #(3, 2)

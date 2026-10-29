@@ -48,6 +48,49 @@ Object subclass: Bt4003ResidualsClass
 
   // Item 3: class variables are written in place, so a state fold answers
   // right as an operand in a fold body too.
+  // BT-4287: the actor shapes of `testStateFoldAsAnOperandInAFoldBody`.
+  class injectArgInInject =>
+    self.n := 0
+    r := #(1, 2) inject: 0 into: [:a :x | a + (self.items inject: 0 into: [:b :y | b + self bump])]
+    #(r, self.n)
+
+  class fieldCollectReceiverInDo =>
+    self.n := 0
+    #(1, 2) do: [:x | (self.items collect: [:y | self.n := self.n + 1]) size]
+    self.n
+
+  class fieldCollectReceiverInCollect =>
+    self.n := 0
+    r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self.n := self.n + 1]) size]
+    #(r, self.n)
+
+  class doElementInTimes =>
+    self.n := 0
+    2 timesRepeat: [#[self.items do: [:y | self bump]]]
+    self.n
+
+  class injectOperandInArmInDo =>
+    self.n := 0
+    #(1, 2) do: [:x |
+      x > 0 ifTrue: [x + (self.items inject: 0 into: [:b :y | b + self bump])]
+    ]
+    self.n
+
+  class detectArgInSelect =>
+    self.n := 0
+    r := #(1, 2, 3) select: [:x | x > (self.items detect: [:y | self bump > 100] ifNone: [0])]
+    #(r, self.n)
+
+  class countedLoopReceiverInDo =>
+    self.n := 0
+    #(1, 2) do: [:x | (1 to: 2 do: [:i | self bump]) isNil]
+    self.n
+
+  class injectInCascadeInDo =>
+    self.n := 0
+    #(1, 2) do: [:x | (self.items inject: 0 into: [:b :y | b + self bump]) printString; yourself]
+    self.n
+
   class injectOperandInDo =>
     self.n := 0
     #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]

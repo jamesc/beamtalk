@@ -1051,12 +1051,6 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         issue: "BT-3948",
         fixed_by: "BT-3947",
     },
-    ResidualDenied {
-        shape: Residual::StateFoldOperandInFold,
-        contexts: &[Actor],
-        issue: "BT-4003",
-        fixed_by: "BT-3947",
-    },
 ];
 
 /// The [`RESIDUAL_DENY_SET`] row that makes `shape` an error in `context`.
