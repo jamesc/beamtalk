@@ -42,6 +42,8 @@ sealed Object subclass: VbBench
 
   class string -> String => "hello world"
 
+  class tuple -> Tuple => Tuple withAll: #(1, 2)
+
   // === Loop overhead ===
   class baseline: n :: Integer -> Integer =>
     last := 0
@@ -279,6 +281,20 @@ sealed Object subclass: VbBench
   class isKindOfBuiltin: n :: Integer s: s :: String -> Boolean =>
     last := false
     n timesRepeat: [last := s isKindOf: String]
+    last
+
+  // === 14. Guarded static dispatch baselines (BT-4292, epic BT-4291) ===
+  // The open-Value typed send (1b, 4c), typed `List includes:` (10d) and
+  // typed `Dictionary at:put:` (10a) rows already exist; these complete the
+  // set the epic's children are measured against.
+  class tupleAt: n :: Integer t: t :: Tuple -> Object =>
+    last := 0
+    n timesRepeat: [last := t at: 1]
+    last
+
+  class classReference: n :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := VbPoint]
     last
 
   // === 13. FFI calls (BT-4153) ===

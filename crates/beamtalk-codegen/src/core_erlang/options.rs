@@ -355,18 +355,25 @@ pub struct GeneratedModule {
 }
 
 impl GeneratedModule {
-    /// Splits into the generated code and only the `ThreadedIr` verifier
-    /// diagnostics ([`DiagnosticCategory::InternalVerifier`], ADR 0111
-    /// amendment, BT-3724) — every other codegen warning is dropped, exactly
-    /// as [`generate_module`] always did. The single filter both the CLI build
-    /// path and the compiler-port handlers use.
+    /// Splits into the generated code and the diagnostics a driver surfaces:
+    /// the `ThreadedIr` verifier diagnostics
+    /// ([`DiagnosticCategory::InternalVerifier`], ADR 0111 amendment,
+    /// BT-3724) and the opt-in codegen hints (`Severity::Hint`), which the
+    /// generator emits only when `BEAMTALK_CODEGEN_DIAGNOSTICS=1` (or
+    /// [`CodegenOptions::with_codegen_diagnostics`]) asked for them — the
+    /// dynamic-site report among them (BT-4292). Every other codegen warning
+    /// is dropped, exactly as [`generate_module`] always did. The single
+    /// filter both the CLI build path and the compiler-port handlers use.
     #[must_use]
     pub fn into_code_and_verifier_diagnostics(self) -> (String, Vec<Diagnostic>) {
-        let verifier = self
+        let surfaced = self
             .warnings
             .into_iter()
-            .filter(|d| d.category == Some(DiagnosticCategory::InternalVerifier))
+            .filter(|d| {
+                d.category == Some(DiagnosticCategory::InternalVerifier)
+                    || d.severity == beamtalk_core::source_analysis::Severity::Hint
+            })
             .collect();
-        (self.code, verifier)
+        (self.code, surfaced)
     }
 }
