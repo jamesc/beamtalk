@@ -83,19 +83,47 @@ TestCase subclass: ClassSideBehaviourProtocolTest
   testSealedDirectCalledClassMethodSuperNameInClosure =>
     self assert: Bt4252ClassProtocolSealed superNameInClosure equals: #(#Bt4252ClassProtocolSealed)
 
-  // `doc`'s primitive `gen_server:call`s the class process, which cannot
-  // answer from inside one of its own class methods: a structured
-  // `dispatch_error` naming the send (like any send back to the running
-  // class), not a raw `calling_self` exit. BT-4262 tracks making it answer.
-  testActorClassMethodSelfDocInClassProcessRaisesDispatchError =>
-    self should: [Bt4252ClassProtocolActorChild selfDoc] raise: #dispatch_error
-    selector := [
-      Bt4252ClassProtocolActorChild selfDoc
-    ] on: Exception do: [:e | e selector]
-    self assert: selector equals: #doc
+  // BT-4262: `doc` reads the class doc's published copy, so it answers from a
+  // class method running in the class process, and from a block of it run
+  // while the class waits on another class.
+  testActorClassMethodSelfDocInClassProcess =>
+    self assert: Bt4252ClassProtocolActorChild selfDoc equals: Bt4252ClassProtocolActorChild doc
+    self assert: Bt4252ClassProtocolActorChild selfDoc equals: "The actor child of the BT-4252 class-protocol fixtures."
 
-  testObjectClassMethodSelfDocInClassProcessRaisesDispatchError =>
-    self should: [Bt4252ClassProtocolObjectChild selfDoc] raise: #dispatch_error
+  testObjectClassMethodSelfDocInClassProcess =>
+    self assert: Bt4252ClassProtocolObjectChild selfDoc equals: Bt4252ClassProtocolObjectChild doc
+    self assert: Bt4252ClassProtocolObjectChild selfDoc equals: "The object child of the BT-4252 class-protocol fixtures."
+
+  testActorClassMethodSelfDocAbroad =>
+    self assert: Bt4252ClassProtocolActorChild selfDocAbroad equals: Bt4252ClassProtocolActorChild doc
+
+  testObjectClassMethodSelfDocAbroad =>
+    self assert: Bt4252ClassProtocolObjectChild selfDocAbroad equals: Bt4252ClassProtocolObjectChild doc
+
+  // BT-4262: a Beamtalk-bodied protocol method that sends to its receiver.
+  testActorClassMethodSelfPrintStringInClassProcess =>
+    self assert: Bt4252ClassProtocolActorChild selfPrintString equals: Bt4252ClassProtocolActorChild printString
+
+  testObjectClassMethodSelfPrintStringInClassProcess =>
+    self assert: Bt4252ClassProtocolObjectChild selfPrintString equals: Bt4252ClassProtocolObjectChild printString
+
+  // BT-4262: the `doc:` setter still messages the class process, which
+  // cannot answer from inside one of its own class methods: a structured
+  // `dispatch_error` naming the send, and the doc is unchanged.
+  testActorClassMethodSelfSetDocInClassProcessRaisesDispatchError =>
+    self should: [
+      Bt4252ClassProtocolActorChild selfSetDoc
+    ] raise: #dispatch_error
+    selector := [
+      Bt4252ClassProtocolActorChild selfSetDoc
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #doc:
+    self assert: Bt4252ClassProtocolActorChild doc equals: "The actor child of the BT-4252 class-protocol fixtures."
+
+  testObjectClassMethodSelfSetDocInClassProcessRaisesDispatchError =>
+    self should: [
+      Bt4252ClassProtocolObjectChild selfSetDoc
+    ] raise: #dispatch_error
 
   testActorClassMethodSelfIncludesSelector =>
     self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)

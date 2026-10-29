@@ -41,7 +41,7 @@ that the Behaviour/Class libraries can rely on.
 | classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
 | classClass/1                | Real metaclass object (ADR 0036)                          |
-| classDoc/1                  | Class doc string from class gen_server state (ADR 0033)   |
+| classDoc/1                  | Class doc string from published metadata (ADR 0033)       |
 | classSetDoc/2               | Set class doc string (ADR 0033)                           |
 | classSetMethodDoc/3         | Set method doc string for a selector (ADR 0033)           |
 | classDocForMethod/2         | Get method doc string for a selector, or nil               |
@@ -1057,7 +1057,7 @@ The class gen_server stores `none` internally; we return `nil` for Beamtalk.
 -spec classDoc(#beamtalk_object{}) -> beamtalk_string:t() | 'nil'.
 classDoc(Self) ->
     ClassPid = erlang:element(4, Self),
-    case gen_server:call(ClassPid, get_doc) of
+    case class_doc(ClassPid) of
         %% BT-4173: `doc: nil` stores the atom `nil`; unset is `none`.
         none -> nil;
         nil -> nil;
@@ -1065,6 +1065,22 @@ classDoc(Self) ->
         %% to a String at the read boundary.
         {beamtalk_string, _} = Tagged -> Tagged;
         Doc when is_binary(Doc) -> beamtalk_primitive:string_from_binary(Doc)
+    end.
+
+%% BT-4262: the class doc from its published metadata row (no message to the
+%% class, so it answers from inside the class's own process and while the
+%% class waits on another one), falling back to asking the class process for
+%% a class that has not published it (a remote pid).
+-spec class_doc(pid()) -> term().
+class_doc(ClassPid) ->
+    case beamtalk_object_class:class_name_safe(ClassPid) of
+        undefined ->
+            gen_server:call(ClassPid, get_doc);
+        ClassName ->
+            case beamtalk_class_metadata:lookup_class_doc(ClassName) of
+                {ok, Doc} -> Doc;
+                not_found -> gen_server:call(ClassPid, get_doc)
+            end
     end.
 
 -doc """

@@ -1766,7 +1766,9 @@ handle_call(get_instance_methods, _From, #class_state{instance_methods = Instanc
 %% ADR 0033: Runtime-embedded documentation — class doc accessors.
 handle_call(get_doc, _From, #class_state{doc = Doc} = State) ->
     {reply, Doc, State};
-handle_call({set_doc, DocBinary}, _From, State) ->
+handle_call({set_doc, DocBinary}, _From, #class_state{name = ClassName} = State) ->
+    %% BT-4262: `doc` reads the published copy.
+    ok = beamtalk_class_metadata:put_class_doc(ClassName, DocBinary),
     {reply, ok, State#class_state{doc = DocBinary}};
 handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
@@ -2441,7 +2443,8 @@ both return-type maps, so `instance_methods_safe/1`, `instance_variables_safe/1`
 for this class without a `gen_server:call` -- which, issued from inside another
 class's handler, deadlocks two busy classes against each other. Called after
 every state change to those four fields: `init/1`, `put_method`,
-`put_class_method`, `update_class` and `rename_class`.
+`put_class_method`, `update_class` and `rename_class`. Also publishes the class
+doc (BT-4262; `set_doc` publishes it directly).
 """.
 -spec publish_reflection(#class_state{}) -> ok.
 publish_reflection(
@@ -2455,7 +2458,8 @@ publish_reflection(
         is_sealed = IsSealed,
         is_typed = IsTyped,
         is_internal = IsInternal,
-        shape_version = ShapeVersion
+        shape_version = ShapeVersion,
+        doc = Doc
     } = State
 ) ->
     beamtalk_class_metadata:put_reflection(ClassName, #{
@@ -2476,7 +2480,9 @@ publish_reflection(
     ),
     beamtalk_class_metadata:put_method_records(
         ClassName, class, method_records(class, ClassMethods, State)
-    ).
+    ),
+    %% BT-4262: the class doc, read by `beamtalk_behaviour_intrinsics:classDoc/1`.
+    beamtalk_class_metadata:put_class_doc(ClassName, Doc).
 
 %% `selector => #{info, source, signature, doc}` for one side of a class.
 -spec method_records(instance | class, #{selector() => map()}, #class_state{}) ->

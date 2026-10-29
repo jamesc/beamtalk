@@ -161,7 +161,10 @@ class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
 %% xref-visible definition of dynamic-dispatch behaviour, not the code path
 %% an external `Counter spawn` actually runs today.
 %% Every other selector aimed at the class's own gen_server from
-%% inside that gen_server. `gen_server:call(self(), ...)` does not hang — it
+%% inside that gen_server: the class-object protocol answers in place when the
+%% class itself does not understand the selector
+%% (`class_send_from_own_process/2`, BT-4262). Otherwise
+%% `gen_server:call(self(), ...)` would not hang — it
 %% exits with `{calling_self, {gen_server, call, [...]}}`, a raw tuple that
 %% says nothing about what the caller did wrong. The commonest way to get here
 %% is a block running inside a class method that messages its own class:
@@ -181,7 +184,7 @@ class_send_plain(ClassPid, Selector, Args) ->
         {ok, Module, SafeFn} ->
             erlang:apply(Module, SafeFn, [nil | Args]);
         error when ClassPid =:= self() ->
-            handle_class_self_call(Selector);
+            class_send_from_own_process(Selector, Args);
         error ->
             class_send_with_recovery(ClassPid, Selector, fun(P) ->
                 class_send_dispatch(P, Selector, Args)
@@ -259,6 +262,40 @@ lookup_direct_constructor_module(ClassPid, Selector, Arity) ->
             end;
         not_found ->
             error
+    end.
+
+-doc """
+A send to a class from inside that class's own process (BT-4262).
+
+When the class does not understand `Selector` itself (no class-side extension,
+no local, inherited or runtime-installed class method:
+`class_understands_class_selector/2`), the class process's own lookup would
+miss and fall through to the class-object protocol (`Class -> Behaviour ->
+...`). That protocol runs as instance methods of the class object, not as a
+class method, so it answers here, in this process, through
+`class_self_protocol_fallthrough/4`: the same path a class-side `self`
+send takes (BT-4252). This is what lets a Beamtalk-bodied protocol method
+that sends to its receiver (`Class>>printString => self name asString`)
+answer when it runs in the class process.
+
+A selector the class itself understands would run one of its own class
+methods re-entrantly, which has no safe route, so it still raises the
+structured `dispatch_error` (`handle_class_self_call/1`).
+""".
+-spec class_send_from_own_process(selector(), list()) -> term() | no_return().
+class_send_from_own_process(Selector, Args) ->
+    case get(beamtalk_class_name) of
+        undefined ->
+            handle_class_self_call(Selector);
+        ClassName ->
+            case class_understands_class_selector(ClassName, Selector) of
+                true ->
+                    handle_class_self_call(Selector);
+                false ->
+                    class_self_protocol_fallthrough(
+                        ClassName, Selector, Args, receiver_tag(ClassName)
+                    )
+            end
     end.
 
 -doc """
@@ -552,13 +589,16 @@ receiving class's registered pid, never `self()`-derived, so the same
 process or (a direct-called sealed method, ADR 0129) in the caller. The
 `Behaviour` primitives reach class state through the message-free
 `beamtalk_object_class:*_safe/1` readers, so running in the class's own
-process does not self-call its gen_server; a protocol method that does
-message the receiving class (`doc`) or sends to it from a Beamtalk body
-(`printString`) cannot answer from inside that process yet: it raises the
-structured `dispatch_error` of `handle_class_self_call/2` (BT-4262), naming
-the outermost protocol send, which may not be the call that actually messaged
-the class (a Beamtalk-bodied protocol method can reach it through an Erlang
-call of its own). Raises the structured
+process does not self-call its gen_server. `doc` reads the class doc's
+published copy, and a Beamtalk-bodied protocol method that sends to its
+receiver (`printString`) re-enters here through
+`class_send_from_own_process/2` (BT-4262). A protocol method that still
+messages the receiving class (the `doc:` and `setDocForMethod:to:` setters)
+cannot answer from inside that process: it raises the structured
+`dispatch_error` of `handle_class_self_call/2`, naming the outermost protocol
+send, which may not be the call that actually messaged the class (a
+Beamtalk-bodied protocol method can reach it through an Erlang call of its
+own). Raises the structured
 `does_not_understand` when `Class` does not understand `Selector` either.
 """.
 -spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
