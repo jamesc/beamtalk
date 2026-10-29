@@ -111,6 +111,130 @@ impl CoreErlangGenerator {
         self.needs_mutation_threading_with_synced(analysis, false)
     }
 
+    /// Whether the evaluated literal block `block` is inlined with its writes
+    /// threaded (`generate_block_value_inline_with_mutations`, or the actor
+    /// producer [`Self::actor_evaluated_block_producer_parts`]) rather than
+    /// applied as a plain fun: it writes a captured local, it writes a field or
+    /// sends to `self` where `State` is threaded
+    /// ([`Self::value_block_needs_threading`]), or, in the REPL, it writes a
+    /// binding anywhere (BT-3823). The one predicate the `value`-family
+    /// intrinsics and the actor producer gate read; its method half is
+    /// [`Self::evaluated_block_threads_writes`].
+    pub(in crate::core_erlang) fn evaluated_block_inlines_with_mutations(
+        &self,
+        block: &Block,
+    ) -> bool {
+        self.evaluated_block_threads_writes(block) || self.repl_blocks_write_bindings(&[block])
+    }
+
+    /// [`Self::evaluated_block_inlines_with_mutations`] without its REPL-only
+    /// binding clause: the block writes a captured local, or writes a field or
+    /// sends to `self` where `State` is threaded. The REPL clause is left out
+    /// of the statement classifier on purpose: a REPL block that writes a
+    /// binding is a REPL arm (`generate_repl_arm_inline`), classified by the
+    /// REPL's own producer rule, never a `Tier2ValueCall`.
+    fn evaluated_block_threads_writes(&self, block: &Block) -> bool {
+        !Self::captured_mutations_for_block(block).is_empty()
+            || self.value_block_needs_threading(&block_analysis::analyze_block(block))
+    }
+
+    /// BT-3982: whether `expr` (paren-unwrapped) is an evaluated literal block
+    /// (`beamtalk_core`'s `literal_block_value_send`) inlined with its writes
+    /// threaded ([`Self::evaluated_block_inlines_with_mutations`]), outside the
+    /// REPL, whichever lowering takes it in the frame it is compiled in (the
+    /// producer, or the Tier 2 inline call). Frame-independent, so a loop's
+    /// plan, decided in the enclosing frame, reads the same answer the body's
+    /// own frame would: the body's mode is chosen for it exactly as before
+    /// BT-3982, when every such block was a Tier 2 inline call.
+    pub(in crate::core_erlang) fn is_inlined_evaluated_block(&self, expr: &Expression) -> bool {
+        !self.is_repl_mode()
+            && beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+                .is_some_and(|(block, _)| self.evaluated_block_yields_state_tuple(block))
+    }
+
+    /// Whether the evaluated literal block `block` is inlined with its writes
+    /// threaded AND yields a `{Value, State}` tuple
+    /// ([`Self::evaluated_block_threads_writes`] outside a value-type method,
+    /// which splices its body as plain `let`s instead). The one rule the
+    /// statement classifier (`is_tier2_value_call`'s literal-block arm) and the
+    /// loop plan ([`Self::is_inlined_evaluated_block`]) read; it is exactly the
+    /// rule `is_tier2_value_call` applied before BT-3982 in every context, the
+    /// REPL included.
+    pub(in crate::core_erlang) fn evaluated_block_yields_state_tuple(&self, block: &Block) -> bool {
+        self.context != CodeGenContext::ValueType && self.evaluated_block_threads_writes(block)
+    }
+
+    /// Whether `block` writes a local bound outside it (`beamtalk_core`'s
+    /// `threaded_block_writes`, nested constructs' blocks included): an
+    /// evaluated block that does is a local-threading construct.
+    fn block_writes_outer_local(&self, block: &Block) -> bool {
+        !beamtalk_core::semantic_analysis::block_facts::threaded_block_writes(&[block], &|name| {
+            self.binds_threadable_local(name)
+        })
+        .is_empty()
+    }
+
+    /// BT-3982: whether the actor producer claims the evaluated literal block
+    /// `block` in the frame being lowered: the frame is one it is a producer in
+    /// ([`Self::threads_actor_evaluated_block_state`]), the block is inlined
+    /// with its writes threaded and writes no local bound outside it. The
+    /// block half of [`Self::actor_evaluated_block_producer_parts`], and the
+    /// rule under which the legacy inline lowering reaching the block outside a
+    /// consumed Tier 2 statement is `VerifyError::UnthreadedEvaluatedBlock`.
+    pub(in crate::core_erlang) fn actor_producer_claims_block(&self, block: &Block) -> bool {
+        self.threads_actor_evaluated_block_state()
+            && self.evaluated_block_inlines_with_mutations(block)
+            && !self.block_writes_outer_local(block)
+    }
+
+    /// BT-3982: whether the frame being lowered is one an actor evaluated
+    /// literal block is a producer in: an actor instance method outside the
+    /// REPL, not an actor closure (ADR 0137 §3: no `State`, fields in place).
+    /// The scope half of [`Self::actor_evaluated_block_producer_parts`], and
+    /// where the legacy inline lowering's raw `{Value, State}` tuple reports
+    /// `VerifyError::UnthreadedEvaluatedBlock` unless consumed.
+    pub(in crate::core_erlang) fn threads_actor_evaluated_block_state(&self) -> bool {
+        !self.is_repl_mode() && self.in_actor_instance_context()
+    }
+
+    /// BT-3982: the block and arguments of `expr` (paren-unwrapped) when it is
+    /// an evaluated literal block of the positional `value` family
+    /// (`beamtalk_core`'s `literal_block_value_send`) that an actor instance
+    /// method inlines with `State` threaded
+    /// ([`Self::evaluated_block_inlines_with_mutations`]), or `None`. Such a
+    /// send is a producer wherever it sits: one `ConstructTuple` in the
+    /// enclosing frame and its `State` `Bind`, answering `element(1, Carrier)`
+    /// (`generate_evaluated_block_producer`), so its `{Value, State}` carrier
+    /// never crosses an expression boundary. The one predicate behind the
+    /// producer gate ([`Self::inline_control_flow_needs_threading`], read by
+    /// the prelude probe) and its lowering (`lower_inline_control_flow`).
+    ///
+    /// Not for a block that writes a local bound outside it (`threaded_block_writes`):
+    /// that is a local-threading construct, the Phase 0 check's and the
+    /// local-threading producer's (`block_value_producer_in_frame`, BT-3841),
+    /// or, as a statement, the Tier 2 inline call that rebinds it.
+    ///
+    /// Not in the REPL (the bindings map is unpacked by `repl_loop_mutated`),
+    /// a value-type method (`vt_inline_block_value_producer` splices `Self`),
+    /// a class method or an actor closure (ADR 0137 §3: no `State` there;
+    /// fields are written in place, so only the block's locals thread). In a
+    /// frame with a private scratch map (a direct-params or tuple-acc loop or
+    /// fold body, `conditional_has_private_scratch`) its producer seeds a
+    /// fresh scratch map and binds no `State`, as a conditional's does there.
+    pub(in crate::core_erlang) fn actor_evaluated_block_producer_parts<'a>(
+        &self,
+        expr: &'a Expression,
+    ) -> Option<(&'a Block, &'a [Expression])> {
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::EvaluatedBlockNotAProducer)
+        {
+            return None;
+        }
+        beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
+            .filter(|(block, _)| self.actor_producer_claims_block(block))
+    }
+
     /// [`Self::block_touches_actor_state`] over an already-computed analysis.
     pub(in crate::core_erlang) fn analysis_touches_actor_state(
         &self,

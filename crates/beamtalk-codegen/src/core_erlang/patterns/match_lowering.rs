@@ -657,7 +657,9 @@ impl CoreErlangGenerator {
                 // call's own state via close_tier2_value_subexpr_doc.
             }
         }
-        if self.control_flow_has_mutations(body) {
+        // BT-3982: an evaluated block that is a producer takes the
+        // synthetic-block route below, never the raw tuple.
+        if self.control_flow_has_mutations(body) && !self.evaluated_block_is_producer(body) {
             return self.expression_doc(body);
         }
         // ADR 0118 phase 4: an arm body that is plain AST-directed
@@ -703,6 +705,9 @@ impl CoreErlangGenerator {
             || self.is_field_assignment(bare_body)
             || self.repl_match_arm_writes_bindings(body)
             || self.match_arm_has_producer_site(body)
+            // BT-3982: an evaluated literal block that is a producer is the
+            // arm's one statement, lowered by the producer.
+            || self.evaluated_block_is_producer(body)
         {
             let synthetic_block = Block::new(
                 Vec::new(),
