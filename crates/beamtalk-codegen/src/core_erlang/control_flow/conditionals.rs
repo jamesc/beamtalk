@@ -3898,6 +3898,88 @@ mod tests {
 
     /// BT-4244: the wildcard clause of `code`'s (first) mutation-path
     /// conditional, from `CondNoMatch` to the `case`'s `end`.
+    /// BT-4244: `(depth, CondNoMatch count, code bytes)` for each nesting
+    /// depth 1..=6 of `wrap(level, inner)` nested conditionals, in a class
+    /// body built by `class(body)`.
+    fn nested_sizes(
+        class: impl Fn(&str) -> String,
+        wrap: impl Fn(usize, &str) -> String,
+    ) -> Vec<(usize, usize, usize)> {
+        (1..=6)
+            .map(|depth| {
+                let mut body = String::from("0");
+                for level in (0..depth).rev() {
+                    body = wrap(level, &body);
+                }
+                let code = codegen(&class(&body));
+                // The arms reach the fallback as real closures (the shape in
+                // question), not raising stubs.
+                assert!(
+                    !code.contains("'stateful_block_dispatch'"),
+                    "depth {depth}: expected real fallback closures:\n{code}"
+                );
+                (depth, code.matches("CondNoMatch").count(), code.len())
+            })
+            .collect()
+    }
+
+    /// BT-4244: no doubling per level. One fallback clause per level (a
+    /// nested conditional lowered inline again inside each enclosing
+    /// fallback closure would double the clauses), and each level's added
+    /// bytes at most 1.5x the previous level's (doubling would be 2x; each
+    /// fallback closure holding its subtree once, as dynamic sends, is the
+    /// quadratic shape the pure path has too, whose step ratio falls
+    /// towards 1).
+    fn assert_grows_linearly(label: &str, sizes: &[(usize, usize, usize)]) {
+        eprintln!("{label}: (depth, CondNoMatch, bytes) = {sizes:?}");
+        for &(depth, clauses, _) in sizes {
+            assert_eq!(
+                clauses, depth,
+                "{label}: one fallback clause per level: {sizes:?}"
+            );
+        }
+        let steps: Vec<usize> = sizes.windows(2).map(|p| p[1].2 - p[0].2).collect();
+        for pair in steps.windows(2) {
+            assert!(
+                2 * pair[1] <= 3 * pair[0],
+                "{label}: byte growth per level rises from {} to {} (doubling?): {sizes:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// BT-4244: a mutation-path conditional nested in another's arm is
+    /// compiled inline and again inside the outer fallback closure, so the
+    /// code must not double per nesting level (a fallback closure's own
+    /// nested conditionals must not repeat the whole tree). Pins linear
+    /// growth in actor (field-reading arms, passed as real closures at the
+    /// method root), value-type and class-method (arms writing block temps
+    /// inside a loop body) code; the REPL shape is
+    /// `crates/beamtalk-repl/tests/repl_nested_conditional_size.rs`.
+    #[test]
+    fn nested_mutation_conditionals_grow_linearly() {
+        let actor = nested_sizes(
+            |body| format!("Actor subclass: C\n  state: n = 0\n\n  run: x =>\n    {body}\n"),
+            |level, inner| format!("x ifTrue: [self.n. {inner}. {level}]"),
+        );
+        assert_grows_linearly("actor", &actor);
+        assert!(
+            actor[0].1 >= 1,
+            "the actor shape takes the mutation path: {actor:?}"
+        );
+        let value = nested_sizes(
+            |body| format!("Value subclass: C\n  run: x =>\n    #(1) do: [:i | {body}]\n"),
+            |level, inner| format!("x ifTrue: [y{level} := i. {inner}. y{level}]"),
+        );
+        assert_grows_linearly("value type", &value);
+        let class = nested_sizes(
+            |body| format!("Object subclass: C\n  class run: x =>\n    #(1) do: [:i | {body}]\n"),
+            |level, inner| format!("x ifTrue: [y{level} := i. {inner}. y{level}]"),
+        );
+        assert_grows_linearly("class method", &class);
+    }
+
     fn fallback_clause(code: &str) -> &str {
         let start = code
             .find("<_CondNoMatch@")

@@ -942,8 +942,10 @@ impl CoreErlangGenerator {
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: self.in_private_scratch,
         };
-        // The node is verified like any built `ThreadedIr`, so a bracket on a
-        // private scratch map (`SyncedCallOnPrivateScratch`) is reported.
+        // Today's only caller checks `conditional_fallback_brackets()` first,
+        // which excludes a private scratch map. The verify guards a future
+        // caller that skips that check: a bracket on a private scratch map is
+        // reported (`SyncedCallOnPrivateScratch`).
         let errors = self.verify_threaded_ir(std::slice::from_ref(&node));
         self.report_threaded_ir_verify_errors(&errors, "conditional fallback bracket", span);
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
