@@ -669,7 +669,7 @@ reliable:
 
 | Assignment path | Actor | Value |
 |---|---|---|
-| `fieldAt:put:` | permitted | **blocked** — "Cannot modify slot on value type; use withSlot:" (`beamtalk_primitive.erl:988`) |
+| `fieldAt:put:` | permitted | **blocked** — "Cannot modify slot on value type — use withSlot:" (`beamtalk_primitive:is_ivar_method/1`) |
 | hot-patched `initialize` (ADR 0082/0084) | yes | n/a — no `initialize` |
 | `spawnWith:` | yes | n/a |
 | construction | `spawn`/`spawnWith:` | `new`, `new:`, the auto-generated keyword constructor |

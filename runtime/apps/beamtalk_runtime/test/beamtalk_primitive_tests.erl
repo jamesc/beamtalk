@@ -784,6 +784,36 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
         code:delete('bt@mock_vt_ivar')
     end.
 
+value_type_field_at_put_hint_matches_shared_fixture_test() ->
+    %% BT-4273: the runtime pre-check's hint is the one the compiled paths
+    %% (the `fieldAt:put:` intrinsic and every Value `dispatch/3` arm) emit.
+    %% Both sides are pinned to the same shared fixture; the Rust half is
+    %% `core_erlang::tests::value_immutable_slot_hint_conformance`.
+    Fixture = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "value_immutable_slot_hint_conformance.json"
+    ]),
+    Expected = maps:get(<<"hint">>, Fixture),
+    Self = #{'$beamtalk_class' => 'MockVtIvarHint', x => 42},
+    create_mock_value_type_module('bt@mock_vt_ivar_hint', 'MockVtIvarHint', []),
+    try
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = immutable_value, hint = {beamtalk_string, Expected}
+                }
+            },
+            beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
+        )
+    after
+        code:purge('bt@mock_vt_ivar_hint'),
+        code:delete('bt@mock_vt_ivar_hint')
+    end.
+
 value_type_inst_var_at_reads_slot_test() ->
     %% fieldAt: on a user-defined value type reads from the underlying map.
     %% Value objects store their slots as map keys, so reflection is read-only.
