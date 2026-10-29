@@ -195,7 +195,7 @@ fn conditional_result_is_character_typed(
 /// `False>>ifFalse:` (`<block> value`) and `Boolean>>and:`/`or:`, pinned by
 /// `single_branch_boolean_bodies_match_codegen_recognizer`, which must stay
 /// in sync with this function. The pure-inline codegen
-/// (`generate_if_true_pure` and friends) answers the same inlined block
+/// (`generate_solo_boolean_pure` and friends) answers the same inlined block
 /// value on the taken path.
 fn single_branch_result_is_character_typed(
     receiver: &Expression,

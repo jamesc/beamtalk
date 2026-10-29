@@ -981,7 +981,7 @@ pub(crate) fn compile_source_with_bindings(
     let diag_ctx =
         beamtalk_language_service::queries::diagnostic_provider::ProjectDiagnosticContext {
             options: options.clone(),
-            cross_file_classes: cross_file_classes.clone(),
+            cross_file_classes,
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
             pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),
             pre_loaded_protocol_sources: ctx.hierarchy.pre_loaded_protocol_sources.clone(),
@@ -1107,10 +1107,14 @@ pub(crate) fn compile_source_with_bindings(
         .and_then(|p| p.into_os_string().into_string().ok())
         .unwrap_or_else(|| source_path.as_str().to_string());
     let embed_source_path = Some(embed_source_path.as_str());
-    // Build a codegen-specific hierarchy with cross-file classes (filtered to
-    // exclude the current file's classes, which are added by codegen itself).
-    // `pre_loaded_aliases` is *not* filtered the way `cross_file_classes`
-    // is — it already includes the current file's own aliases (see
+    // Build a codegen-specific hierarchy with every pre-loaded class,
+    // *unfiltered*: unlike analysis's `cross_file_classes`, codegen also needs
+    // the entries sharing a name with this file's own classes, because a
+    // dependency exporting the same name is a runtime collision that keeps
+    // sealed-Value sends to it dynamic (BT-4151). Folding them into the
+    // hierarchy is still a no-op — codegen's `add_from_beam_meta` only fills
+    // vacant names, and this file's classes already occupy theirs.
+    // `pre_loaded_aliases` is likewise unfiltered — it already includes the current file's own aliases (see
     // `ClassHierarchyContext::pre_loaded_aliases`'s doc), and codegen's merge
     // (`AliasRegistry::from_module_declarations_with_pre_loaded`) lets the
     // module's own declaration take precedence over its duplicate pre-loaded
@@ -1119,7 +1123,7 @@ pub(crate) fn compile_source_with_bindings(
     let codegen_hierarchy = ClassHierarchyContext {
         class_module_index: ctx.hierarchy.class_module_index.clone(),
         class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
-        pre_loaded_classes: cross_file_classes,
+        pre_loaded_classes: ctx.hierarchy.pre_loaded_classes.clone(),
         pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
         pre_loaded_protocol_sources: ctx.hierarchy.pre_loaded_protocol_sources.clone(),
         ..ClassHierarchyContext::default()
@@ -1147,10 +1151,11 @@ pub(crate) fn compile_source_with_bindings(
         ctx.native_type_registry.clone(),
         // Hand off the `AnalysisResult` this function's own
         // `compute_project_diagnostics_with_analysis` call above already
-        // computed — `cross_file_classes` (this analysis's
-        // `AnalysisContext::pre_loaded_classes`) is exactly `codegen_hierarchy`'s
-        // `pre_loaded_classes` above, so codegen's `add_from_beam_meta` call
-        // is a guaranteed no-op and this handoff always skips the second
+        // computed — `codegen_hierarchy`'s `pre_loaded_classes` above is
+        // `cross_file_classes` (this analysis's
+        // `AnalysisContext::pre_loaded_classes`) plus only entries named like
+        // this file's own classes, so codegen's `add_from_beam_meta` call is
+        // a guaranteed no-op and this handoff always skips the second
         // type-checking pass for this driver.
         Some(analysis_result),
     )

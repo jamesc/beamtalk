@@ -1902,3 +1902,51 @@ format_erlang_type_test() ->
     ?assert(is_binary(Formatted)),
     %% Should start with -type
     ?assertMatch(<<"-type ", _/binary>>, Formatted).
+
+%%% ---------------------------------------------------------------
+%%% parallel_map/3 — internal concurrency helper (TEST export)
+%%% ---------------------------------------------------------------
+
+%% parallel_map/3 with N =< 1 takes the lists:map fast path (no spawn).
+parallel_map_single_scheduler_test() ->
+    Result = beamtalk_spec_reader:parallel_map(fun(X) -> X * 2 end, [1, 2, 3], 1),
+    ?assertEqual([2, 4, 6], Result).
+
+%%% ---------------------------------------------------------------
+%%% read_raw_specs/1 — module-qualified spec form {_Mod, Name, Arity}
+%%% ---------------------------------------------------------------
+
+%% A BEAM compiled with a module-qualified spec attribute causes read_raw_specs/1
+%% to match the {_Mod, Name, Arity} clause (lines 225-228 in beamtalk_spec_reader.erl).
+read_raw_specs_module_qualified_spec_test() ->
+    %% Build a minimal module whose only spec uses the qualified form
+    %% -spec modqual_spec_test:foo(integer()) -> integer().
+    Forms = [
+        {attribute, 1, module, modqual_spec_test},
+        {attribute, 2, export, [{foo, 1}]},
+        {attribute, 3, spec,
+            {
+                {modqual_spec_test, foo, 1},
+                [
+                    {type, 3, 'fun', [
+                        {type, 3, product, [{type, 3, integer, []}]},
+                        {type, 3, integer, []}
+                    ]}
+                ]
+            }},
+        {function, 4, foo, 1, [
+            {clause, 4, [{var, 4, 'X'}], [], [{var, 4, 'X'}]}
+        ]},
+        {eof, 5}
+    ],
+    {ok, modqual_spec_test, BeamBin} = compile:forms(Forms, [debug_info]),
+    TmpDir = make_tmp_dir(),
+    BeamFile = filename:join(TmpDir, "modqual_spec_test.beam"),
+    ok = file:write_file(BeamFile, BeamBin),
+    try
+        {ok, RawSpecs} = beamtalk_spec_reader:read_raw_specs(BeamFile),
+        FooSpecs = [{N, A, F} || {N, A, F} <- RawSpecs, N =:= foo, A =:= 1],
+        ?assert(length(FooSpecs) > 0)
+    after
+        cleanup_tmp_dir(TmpDir)
+    end.

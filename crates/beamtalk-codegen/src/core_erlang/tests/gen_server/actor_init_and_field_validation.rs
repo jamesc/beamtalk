@@ -354,9 +354,8 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
     // InitCleanState = …` binding is emitted before the nested field-check case,
     // and the success arm replies with it.
     assert!(
-        code.contains(
-            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in"
-        ),
+        code.contains("let InitCleanState = ")
+            && code.contains("call 'beamtalk_actor':'strip_local_temps'(InitNewState)"),
         "typed-no-default post-init path must strip __local__ temps. Got:\n{code}"
     );
     assert!(
@@ -863,6 +862,14 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         code.contains("'reqField'"),
         "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
     );
+
+    // The committed-state guard (BT-4113) names every declared field, so
+    // look for the nilable fields outside it only.
+    let code: String = code
+        .lines()
+        .filter(|l| !l.contains("'__class_mod__' := _Key0"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     // nilField :: Nil — excluded by is_nilable_type_name.
     assert!(

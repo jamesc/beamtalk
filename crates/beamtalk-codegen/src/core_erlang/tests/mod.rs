@@ -101,6 +101,33 @@ pub(crate) fn erlc_available() -> bool {
     }
 }
 
+/// The repository root, derived from this crate's own manifest directory
+/// rather than the test process's current directory (which `cargo test`
+/// does not guarantee is the workspace root).
+pub(crate) fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("beamtalk-codegen must be two directories below the repo root")
+}
+
+/// Collects every `.bt` / `.btscript` file under each of `dirs` (relative to
+/// `root`) into one sorted vec.  Panics if any directory cannot be walked —
+/// all corpus directories exist in the repo, so a walk error means something
+/// unexpected went wrong and the test should not silently pass with fewer
+/// files than expected.
+pub(crate) fn corpus_files(root: &std::path::Path, dirs: &[&str]) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for dir in dirs {
+        files.extend(
+            beamtalk_core::file_walker::FileWalker::format_files()
+                .walk_pathbuf(&root.join(dir))
+                .unwrap_or_else(|e| panic!("walking corpus dir {dir}: {e:?}")),
+        );
+    }
+    files
+}
+
 /// Parses `src` and normalises it the way analysis and codegen see it: with
 /// redundant send-operand parentheses peeled (`ast::normalize`, BT-4059).
 ///
@@ -228,6 +255,7 @@ mod arm_local_slot_verifier_corpus;
 mod arm_operand_carrier_corpus;
 mod block_value_arity_agreement;
 mod branch_context;
+mod caller_safe_class_primitive;
 mod cascade_operand_state_corpus;
 mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;

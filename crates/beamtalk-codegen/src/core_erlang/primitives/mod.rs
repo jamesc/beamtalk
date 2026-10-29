@@ -35,6 +35,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
+pub(crate) use error_handling::{generate_class_signal_bif, is_caller_safe_class_primitive};
+
 /// `call 'beamtalk_primitive':'string_from_binary'(<inner>)` — wrap
 /// BIF-produced bytes as a `String` value (BT-4170: `printString` and
 /// friends answer tagged `String`s, while the Erlang renderers they call
@@ -2220,12 +2222,7 @@ mod tests {
         use beamtalk_core::ast::Expression;
         use std::collections::{HashMap, HashSet};
 
-        let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("stdlib/src");
+        let lib_dir = crate::core_erlang::tests::repo_root().join("stdlib/src");
 
         if !lib_dir.exists() {
             // Skip when stdlib sources aren't present (e.g. partial checkouts).
@@ -2379,12 +2376,7 @@ mod tests {
         /// Class-side-only registry classes ADR 0101 Part 3 keeps on `@primitive`.
         const REFLECTION_FACADES: &[&str] = &["Protocol"];
 
-        let lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("stdlib/src");
+        let lib_dir = crate::core_erlang::tests::repo_root().join("stdlib/src");
         if !lib_dir.exists() {
             return;
         }

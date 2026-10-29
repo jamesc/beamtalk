@@ -1,0 +1,127 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4115: a class-literal `Error signal: m` raises in the caller instead of
+// going through the Error class process. The exception it raises must be
+// identical to the one a dynamic send (`cls signal: m`, which still goes
+// through the class) raises, and a subclass that overrides `class signal:`
+// must still run its override. Stack frames are now built when read, so
+// `e stackTrace` must still answer frames, across `pass` and across an actor
+// boundary.
+//
+// Fixtures: stdlib/test/fixtures/bt4115loud_error.bt
+//           stdlib/test/fixtures/bt4115raiser.bt
+//           stdlib/test/fixtures/my_custom_error.bt
+
+TestCase subclass: Bt4115ClassSignalTest
+
+  // Everything observable about a caught exception except its stack trace.
+  shapeOf: e =>
+    #(e class, e kind, e message, e reason, e details, e printString)
+
+  testSignalMessageStaticMatchesDynamic =>
+    cls := Error
+    static := [Error signal: "boom"] on: Exception do: [:e | self shapeOf: e]
+    dynamic := [cls signal: "boom"] on: Exception do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: static first equals: Error
+    self assert: (static at: 3) equals: "boom"
+
+  testSignalStaticMatchesDynamic =>
+    cls := Error
+    static := [Error signal] on: Exception do: [:e | self shapeOf: e]
+    dynamic := [cls signal] on: Exception do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: (static at: 3) equals: "Error"
+
+  testSignalReasonStaticMatchesDynamic =>
+    cls := Error
+    static := [
+      Error signal: "closed" reason: #econnreset
+    ] on: Exception do: [:e | self shapeOf: e]
+    dynamic := [
+      cls signal: "closed" reason: #econnreset
+    ] on: Exception do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: (static at: 4) equals: #econnreset
+
+  testSignalKindStaticMatchesDynamic =>
+    cls := Exception
+    static := [
+      Exception
+        signalKind: #not_found
+        class: #Bt4115
+        selector: #look
+        hint: "nothing there"
+    ] on: Exception do: [:e | self shapeOf: e]
+    dynamic := [
+      cls
+        signalKind: #not_found
+        class: #Bt4115
+        selector: #look
+        hint: "nothing there"
+    ] on: Exception do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: (static at: 2) equals: #not_found
+
+  testUserErrorSignalStaticMatchesDynamic =>
+    cls := MyCustomError
+    static := [
+      MyCustomError signal: "mine"
+    ] on: Exception do: [:e | self shapeOf: e]
+    dynamic := [cls signal: "mine"] on: Exception do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: static first equals: MyCustomError
+
+  testOverridingSubclassRunsItsOverride =>
+    cls := Bt4115LoudError
+    static := [Bt4115LoudError signal: "x"] on: Error do: [:e | self shapeOf: e]
+    dynamic := [cls signal: "x"] on: Error do: [:e | self shapeOf: e]
+    self assert: static equals: dynamic
+    self assert: static first equals: Bt4115LoudError
+    self assert: (static at: 3) equals: "loud: x"
+
+  testStackTraceAnswersFrames =>
+    frames := [Error signal: "x"] on: Error do: [:e | e stackTrace]
+    self deny: frames isEmpty
+    self assert: frames first class equals: StackFrame
+
+  testStackTraceIsStableAcrossReads =>
+    pair := [
+      Error signal: "x"
+    ] on: Error do: [:e | #(e stackTrace, e stackTrace)]
+    self assert: pair first equals: pair last
+
+  testStackTraceResolvesClassNames =>
+    frames := [Error signal: "x"] on: Error do: [:e | e stackTrace]
+    self assert: ((frames collect: [:f |
+      f receiverClass
+    ]) includes: #Bt4115ClassSignalTest)
+
+  testStackTraceSurvivesPass =>
+    table := Ets new: #bt4115PassStack type: #set
+    outer := [
+      [Error signal: "x"]
+        on: Error
+        do: [:e |
+          table at: #inner put: e stackTrace
+          e pass
+        ]
+    ] on: Error do: [:e | e stackTrace]
+    self assert: outer equals: (table at: #inner)
+    table delete
+
+  testStackTraceAcrossActorBoundary =>
+    raiser := Bt4115Raiser spawn
+    frames := [raiser boom: "remote"] on: Error do: [:e | e stackTrace]
+    self deny: frames isEmpty
+    self assert: frames first class equals: StackFrame
+    raiser stop
+
+  testPassedErrorAcrossActorBoundary =>
+    raiser := Bt4115Raiser spawn
+    result := [
+      raiser boomPassed: "remote"
+    ] on: Error do: [:e | #(e class, e message, e stackTrace isEmpty)]
+    self assert: result equals: #(Error, "remote", false)
+    raiser stop

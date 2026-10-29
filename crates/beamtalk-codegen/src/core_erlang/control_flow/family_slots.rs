@@ -30,7 +30,7 @@
 //!   site — an arm return value can have NO other tuple element before its
 //!   one family slot (a branch that only writes a value-type field, no
 //!   outer local) — see that function's own doc comment.
-//! - `conditionals.rs`'s `with_branch_context`/six `generate_*_with_mutations`
+//! - `conditionals.rs`'s `with_branch_context`/`generate_*_with_mutations`
 //!   (BT-3514, the Actor-path consumer, and [`append_baseline_family_slots`]'s
 //!   production caller — the Actor conditional's own
 //!   non-taken/absent-block-passthrough arm genuinely is "whichever arm ran,

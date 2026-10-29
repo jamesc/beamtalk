@@ -505,7 +505,7 @@ paths, and the choice is the one codegen already makes for the plain send:
 |---|---|
 | **Statically bound, same module** (a `self` send in a `sealed` class or to a `sealed` method, or a send to the enclosing class's own direct-called class method) | a direct call of the entry: `call 'mod':'__t2_class_twice:'(ClassSelf, B, Acc0)`. Same process, no lookup. Only ever same-module, because ADR 0040 makes every other class another module. |
 | **Late-bound `self`** (actor `safe_dispatch` on `'__class_mod__'`; class-side `class_self_send`; value-type `dispatch/3`) | the **threaded variant of the same path**: `safe_dispatch_threaded`, `class_self_send_threaded`, a threaded `dispatch/3` clause, each resolving the receiver's actual class and then looking for the entry there. Never `send_threaded/4`: a class-side self-send through the general path would hit `handle_class_self_call`'s deadlock guard. |
-| **`super`** | `super_threaded/5`, starting the walk at the superclass as the plain super send does (mirroring `class_self_dispatch/4`'s receiver-tag handling), so an override that forwards to `super` (`twice: b => self log. ^super twice: b`) never resolves back to itself. |
+| **`super`** | `super_threaded/5`, starting the walk at the superclass as the plain super send does (mirroring `class_super_dispatch/4`'s receiver-tag handling, BT-4001), so an override that forwards to `super` (`twice: b => self log. ^super twice: b`) never resolves back to itself. |
 | **Anything else** (a literal class in another module, a variable, an argument, an inferred union, `perform:`) | `call 'beamtalk_dispatch':'send_threaded'(Receiver, 'twice:', [B], Acc0)`, answering `{Result, Acc1}`. |
 
 `send_threaded/4` is **the same walk as `dispatch/3`** with one difference

@@ -209,6 +209,54 @@ pub fn generate_module_with_warnings(
             (hierarchy, false, None)
         };
 
+    // BT-4151: before the pre-loaded entries are folded into `hierarchy`
+    // (which keeps one entry per name), record which class names more than
+    // one package in scope declares — every cross-file/dependency/ambient
+    // declaration plus this unit's own classes. Each producer (batch build,
+    // `beamtalk test`, path dependencies, REPL, `compile:source:`) already
+    // hands its whole scope in through `with_class_hierarchy`, so the signal
+    // needs no per-producer plumbing.
+    //
+    // A pre-loaded entry for one of this unit's own classes is usually that
+    // same class seen from outside (its Pass 1 info, or its live entry on a
+    // REPL reload), not a rival. It counts as the unit's own declaration
+    // when its package is either name this unit goes by: the package its
+    // module name encodes (what its `__beamtalk_meta` will carry) or the
+    // package analysis stamped on the class (`current_package` — which
+    // differs for `beamtalk test`'s unqualified `bt@<stem>` modules, BT-4152).
+    let own_package = generator.own_package_id();
+    let own_module_package = own_package.declaring_package();
+    let is_own_declaration =
+        |info: &beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo| {
+            module
+                .classes
+                .iter()
+                .any(|class| class.name.name == info.name)
+                && (info.package.as_deref() == own_module_package
+                    || hierarchy
+                        .get_class(info.name.as_str())
+                        .is_some_and(|own| own.package == info.package))
+        };
+    generator.set_shadowed_class_names(beamtalk_core::semantic_analysis::shadowed_class_names(
+        options
+            .pre_class_hierarchy
+            .iter()
+            .map(|info| {
+                let package = if is_own_declaration(info) {
+                    own_module_package
+                } else {
+                    info.package.as_deref()
+                };
+                (info.name.as_str(), package)
+            })
+            .chain(
+                module
+                    .classes
+                    .iter()
+                    .map(|class| (class.name.name.as_str(), own_module_package)),
+            ),
+    ));
+
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
     // so that add_external_superclasses (which uses contains_key before inserting)
     // does not overwrite BEAM data with partial stubs. Both calls are no-ops for
@@ -694,7 +742,7 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) -> bool {
         // The routing rule itself lives in `ClassHierarchy::compiles_as_actor` so
-        // semantic checks scoped to value-type methods read the same rule (BT-4092).
+        // the type checker's value-type method rules read the same rule (BT-4235).
         module
             .classes
             .first()

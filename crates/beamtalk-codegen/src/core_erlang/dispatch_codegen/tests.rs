@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{class_self_send_reflective_primitive, is_class_auto_export_selector};
+use super::is_class_auto_export_selector;
 use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::gen_server::SpawnVariant;
@@ -75,10 +75,10 @@ fn class_method_self_send_precedes_self_dispatch() {
 
 /// The classifier must stay in sync with the actual reachable auto-exports
 /// on generated class modules. `class_name/0` is reachable via plain
-/// self-send and must short-circuit to a direct call; `superclass` moved to
-/// `class_self_send_reflective_primitive` because its raw export returns a
-/// bare atom instead of a class object,
-/// so it must NOT be classified as an auto-export here anymore.
+/// self-send and must short-circuit to a direct call; `superclass` takes the
+/// virtual self-send path (whose class-object protocol fallthrough answers a
+/// class object, BT-4252) because its raw export returns a bare atom, so it
+/// must NOT be classified as an auto-export here.
 /// `methods/0` does not exist on the current codegen (an earlier mistaken
 /// inclusion); `method_table/0` and `has_method/1` are codegen-internal
 /// reflection APIs with no Beamtalk surface and must NOT be classified as
@@ -91,8 +91,8 @@ fn class_method_self_send_precedes_self_dispatch() {
 fn is_class_auto_export_selector_matches_reachable_exports() {
     assert!(is_class_auto_export_selector("class_name", 0));
 
-    // `superclass` now routes through the reflective-primitive path (its
-    // raw export is unwrapped and identity-broken), not here.
+    // `superclass` takes the virtual self-send path (its raw export is
+    // unwrapped and identity-broken), not here.
     assert!(!is_class_auto_export_selector("superclass", 0));
 
     // Codegen-internal, not reachable via Beamtalk self-send.
@@ -113,44 +113,6 @@ fn is_class_auto_export_selector_matches_reachable_exports() {
     // Arbitrary user selectors must fall through to inherited dispatch.
     assert!(!is_class_auto_export_selector("increment", 0));
     assert!(!is_class_auto_export_selector("at:put:", 2));
-}
-
-/// `superclass` and `includesSelector:` must route to their
-/// real `beamtalk_behaviour_intrinsics` implementations so a
-/// class-method self-send produces the same value non-self-send dispatch
-/// would (a genuine `#beamtalk_object{}` for `superclass`, a proper
-/// dispatch instead of DNU for `includesSelector:`). Selectors whose
-/// intrinsic is not deadlock-safe from inside the class's own process
-/// (`subclasses`, `allSubclasses` — see the function doc) must NOT
-/// appear here; arity mismatches must not match either.
-#[test]
-fn class_self_send_reflective_primitive_matches_safe_selectors_only() {
-    assert_eq!(
-        class_self_send_reflective_primitive("superclass", 0),
-        Some("classSuperclass")
-    );
-    assert_eq!(
-        class_self_send_reflective_primitive("includesSelector:", 1),
-        Some("classIncludesSelector")
-    );
-
-    // Arity mismatches must not match.
-    assert_eq!(class_self_send_reflective_primitive("superclass", 1), None);
-    assert_eq!(
-        class_self_send_reflective_primitive("includesSelector:", 0),
-        None
-    );
-
-    // Not deadlock-safe (unconditional gen_server:call in the intrinsic) —
-    // must stay off this list until audited/fixed.
-    assert_eq!(class_self_send_reflective_primitive("subclasses", 0), None);
-    assert_eq!(
-        class_self_send_reflective_primitive("allSubclasses", 0),
-        None
-    );
-
-    // Arbitrary user selectors must fall through to inherited dispatch.
-    assert_eq!(class_self_send_reflective_primitive("increment", 0), None);
 }
 
 /// ADR 0109: `File open:…do:` is lowered at the call site so the
@@ -618,12 +580,7 @@ fn is_character_typed_receiver_recurses_through_uppercase_lowercase() {
 /// method (dispatch misrouted to Integer's BIF module).
 #[test]
 fn character_bt_character_returning_methods_match_codegen_recognizer() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf();
+    let repo_root = crate::core_erlang::tests::repo_root();
     let character_bt_path = repo_root.join("stdlib/src/character.bt");
     let Ok(source) = std::fs::read_to_string(&character_bt_path) else {
         eprintln!(
@@ -1203,12 +1160,7 @@ fn stdlib_instance_method(
 /// class, or `None` — after logging a skip — when the file is absent from
 /// this checkout. Panics if the file fails to parse or lacks the class.
 fn stdlib_class(file: &str, class_name: &str) -> Option<ClassDefinition> {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf();
+    let repo_root = crate::core_erlang::tests::repo_root();
     let path = repo_root.join(file);
     let Ok(source) = std::fs::read_to_string(&path) else {
         eprintln!("skipping: {} not present in this checkout", path.display());

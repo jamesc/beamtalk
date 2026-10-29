@@ -403,6 +403,7 @@ pub(super) fn method_info(
         doc: None,
 
         origin: None,
+        primitive: None,
     }
 }
 
@@ -453,6 +454,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: eco_string("error"),
@@ -467,6 +469,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: eco_string("map:"),
@@ -481,6 +484,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: eco_string("isOk"),
@@ -495,6 +499,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
         ],
         class_methods: vec![
@@ -511,6 +516,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
             MethodInfo {
                 selector: eco_string("error:"),
@@ -525,6 +531,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 doc: None,
 
                 origin: None,
+                primitive: None,
             },
         ],
         class_variables: vec![],

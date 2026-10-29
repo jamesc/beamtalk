@@ -198,6 +198,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
         DiagnosticCategory::ClassProcessFfi => "ClassProcessFfi",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
+        DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
@@ -428,6 +429,7 @@ mod tests {
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
             (DiagnosticCategory::ClassProcessFfi, "ClassProcessFfi"),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
+            (DiagnosticCategory::FfiNestedString, "FfiNestedString"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,
                 "Tier2BlockNoReturnChannel",

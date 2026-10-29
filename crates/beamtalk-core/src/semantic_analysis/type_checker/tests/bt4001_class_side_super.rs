@@ -114,6 +114,24 @@ C class >> extPeek: x => (super extPeek: x) + 1
 }
 
 #[test]
+fn class_side_super_skips_the_sending_classs_own_extension() {
+    // BT-4254: only `C` itself has a class-side `foo` (an extension) and no
+    // ancestor defines it, so `super foo` from `C`'s class side raises DNU at
+    // runtime (`class_super_dispatch/4` never consults the sending class's
+    // own extensions). The checker's ancestor walk must agree, from both a
+    // compiled class method and the extension override itself.
+    let diags = diagnostics_mentioning(
+        "Object subclass: Base
+Base subclass: C
+  class run => super foo
+C class >> foo => super foo
+",
+        "does not understand 'foo'",
+    );
+    assert_eq!(diags.len(), 2, "got: {diags:#?}");
+}
+
+#[test]
 fn instance_side_super_still_resolves_instance_methods() {
     let diags = diagnostics_mentioning(
         "Object subclass: Base

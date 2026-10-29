@@ -900,7 +900,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset). Pass `confirm_destructive: true` to include Tier 2 entries (`remove-class`/`rename-class`/`rename-method` — file deletion or multi-file rewrite) |
 | `list_changes` | Wraps `Workspace changes` — serialised view of the pending ChangeLog |
 | `dirty_methods` | Wraps `Workspace changes dirtyMethods` — per-class set of dirty selectors |
-| `enable-tracing` | Enable detailed trace event capture for actor dispatch |
+| `enable-tracing` | Enable detailed trace event capture for actor dispatch (also switches on the opt-in `[beamtalk, actor, dispatch, *]` telemetry events, BT-4113) |
 | `disable-tracing` | Disable trace event capture (aggregate stats remain) |
 | `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
 | `export-traces` | Export trace events to a JSON file |

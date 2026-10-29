@@ -59,16 +59,15 @@ stop_test_counter(Pid) ->
 
 get_propagated_ctx_returns_map_test_() ->
     {setup, fun setup/0, fun cleanup/1, [
-        {"returns a map with otel key", fun() ->
+        {"returns a map", fun() ->
             Ctx = beamtalk_actor:get_propagated_ctx(),
-            ?assert(is_map(Ctx)),
-            ?assert(maps:is_key(otel, Ctx))
+            ?assert(is_map(Ctx))
         end},
-        {"otel value is undefined when otel_ctx not loaded", fun() ->
+        {"omits otel when otel_ctx not loaded (BT-4113: only present context)", fun() ->
             %% otel_ctx is not loaded in test env
             ?assertNot(erlang:function_exported(otel_ctx, get_current, 0)),
             Ctx = beamtalk_actor:get_propagated_ctx(),
-            ?assertEqual(undefined, maps:get(otel, Ctx))
+            ?assertEqual(error, maps:find(otel, Ctx))
         end}
     ]}.
 
@@ -154,7 +153,8 @@ cast_send_with_context_test_() ->
             beamtalk_actor:cast_send(Collector, 'testSelector', [arg1]),
             receive
                 {collected, {cast, 'testSelector', [arg1], PropCtx}} when is_map(PropCtx) ->
-                    ?assert(maps:is_key(otel, PropCtx));
+                    %% BT-4113: no context in this process, so nothing to carry
+                    ?assertEqual(#{}, PropCtx);
                 {collected, Other} ->
                     ?assertEqual({expected_4_tuple_with_propctx}, Other)
             after 2000 ->
@@ -189,7 +189,8 @@ async_send_with_context_test_() ->
             beamtalk_actor:async_send(Collector, 'testSelector', [arg1], FuturePid),
             receive
                 {collected, {_Selector, _Args, _FuturePid, PropCtx}} when is_map(PropCtx) ->
-                    ?assert(maps:is_key(otel, PropCtx));
+                    %% BT-4113: no context in this process, so nothing to carry
+                    ?assertEqual(#{}, PropCtx);
                 {collected, Other} ->
                     ?assertEqual({expected_4_tuple_with_propctx}, Other)
             after 2000 ->
@@ -254,9 +255,15 @@ mock_otel_ctx_test_() ->
                 ok = beamtalk_actor:restore_propagated_ctx(#{otel => MockCtx}),
                 ?assertEqual(MockCtx, erlang:get(otel_ctx_attached))
             end},
-            {"restore_propagated_ctx no-op for undefined even with otel_ctx loaded", fun() ->
+            {"restore_propagated_ctx without otel clears a stale OTel context (BT-4113)", fun() ->
+                %% The sender omits an empty context, so a message without one
+                %% must drop what a previous message attached (the mock's
+                %% current context is non-empty): it attaches the empty one.
+                erlang:erase(otel_ctx_attached),
+                ok = beamtalk_actor:restore_propagated_ctx(#{}),
+                ?assertEqual(#{}, erlang:get(otel_ctx_attached)),
                 erlang:erase(otel_ctx_attached),
                 ok = beamtalk_actor:restore_propagated_ctx(#{otel => undefined}),
-                ?assertEqual(undefined, erlang:get(otel_ctx_attached))
+                ?assertEqual(#{}, erlang:get(otel_ctx_attached))
             end}
         ]}.

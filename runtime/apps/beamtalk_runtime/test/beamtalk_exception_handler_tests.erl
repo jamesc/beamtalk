@@ -574,8 +574,8 @@ ensure_wrapped_2_wraps_with_stacktrace_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
     Stacktrace = [{some_mod, some_fun, 2, [{file, "test.erl"}, {line, 10}]}],
     Result = beamtalk_exception_handler:ensure_wrapped(Error, Stacktrace),
-    ?assertMatch(#{'$beamtalk_class' := _, error := _, stacktrace := _}, Result),
-    #{stacktrace := Frames} = Result,
+    ?assertMatch(#{'$beamtalk_class' := _, error := _, raw_stacktrace := _}, Result),
+    Frames = beamtalk_exception_handler:frames(Result),
     ?assertEqual(1, length(Frames)),
     [Frame] = Frames,
     ?assertMatch(#{'$beamtalk_class' := 'StackFrame'}, Frame).
@@ -585,14 +585,104 @@ ensure_wrapped_2_already_wrapped_adds_stacktrace_test() ->
     Wrapped = beamtalk_exception_handler:wrap(Error),
     Stacktrace = [{mod, fun1, 1, []}],
     Result = beamtalk_exception_handler:ensure_wrapped(Wrapped, Stacktrace),
-    ?assertMatch(#{stacktrace := _}, Result),
-    #{stacktrace := Frames} = Result,
-    ?assertEqual(1, length(Frames)).
+    ?assertMatch(#{raw_stacktrace := _}, Result),
+    ?assertEqual(1, length(beamtalk_exception_handler:frames(Result))).
 
 ensure_wrapped_2_empty_stacktrace_test() ->
     Error = beamtalk_error:new(runtime_error, 'Object'),
     Result = beamtalk_exception_handler:ensure_wrapped(Error, []),
-    ?assertMatch(#{stacktrace := []}, Result).
+    ?assertMatch(#{raw_stacktrace := []}, Result),
+    ?assertEqual([], beamtalk_exception_handler:frames(Result)).
+
+%%% ===================================================================
+%%% Lazy stack frames (BT-4115)
+%%% ===================================================================
+
+%% A catch stores the raw stacktrace; StackFrame objects are built on read.
+ensure_wrapped_stores_raw_stacktrace_not_frames_test() ->
+    Stacktrace = [{some_mod, some_fun, 2, [{file, "test.erl"}, {line, 10}]}],
+    Result = beamtalk_exception_handler:ensure_wrapped(error, badarg, Stacktrace),
+    ?assertEqual(Stacktrace, maps:get(raw_stacktrace, Result)),
+    ?assertNot(is_map_key(stacktrace, Result)).
+
+%% A frame carrying its argument list keeps only the arity, so no argument
+%% terms are retained or shipped with the exception.
+capture_drops_frame_arguments_test() ->
+    Big = fun() -> ok end,
+    Stacktrace = [
+        {m, f, [Big, self(), <<"payload">>], [{line, 3}]},
+        {m, g, 1, []}
+    ],
+    Result = beamtalk_exception_handler:ensure_wrapped(error, function_clause, Stacktrace),
+    ?assertEqual(
+        [{m, f, 3, [{line, 3}]}, {m, g, 1, []}],
+        maps:get(raw_stacktrace, Result)
+    ).
+
+%% frames/1 answers exactly what eager wrapping used to store.
+frames_match_eager_wrap_test() ->
+    Stacktrace = [
+        {lists, map, [a, b], [{file, "lists.erl"}, {line, 12}]},
+        {erlang, apply, 2, []}
+    ],
+    Result = beamtalk_exception_handler:ensure_wrapped(error, badarg, Stacktrace),
+    ?assertEqual(
+        beamtalk_stack_frame:wrap(Stacktrace),
+        beamtalk_exception_handler:frames(Result)
+    ),
+    ?assertEqual(
+        beamtalk_stack_frame:wrap(Stacktrace),
+        beamtalk_exception_handler:dispatch('stackTrace', [], Result)
+    ).
+
+%% An exception built by an older node/code version carries StackFrame objects
+%% under `stacktrace`; they are still answered.
+frames_falls_back_to_legacy_stacktrace_key_test() ->
+    Ex = (make_test_exception())#{stacktrace => [frame1]},
+    ?assertEqual([frame1], beamtalk_exception_handler:frames(Ex)).
+
+%% Re-wrapping a legacy exception replaces its `stacktrace` key with the raw
+%% capture, so the map has a single stacktrace source.
+ensure_wrapped_drops_legacy_stacktrace_key_test() ->
+    Legacy = (make_test_exception())#{stacktrace => [frame1]},
+    ST = [{m, f, 0, []}],
+    Two = beamtalk_exception_handler:ensure_wrapped(Legacy, ST),
+    Three = beamtalk_exception_handler:ensure_wrapped(error, Legacy, ST),
+    ?assertNot(is_map_key(stacktrace, Two)),
+    ?assertNot(is_map_key(stacktrace, Three)),
+    ?assertEqual(ST, maps:get(raw_stacktrace, Two)),
+    ?assertEqual(ST, maps:get(raw_stacktrace, Three)).
+
+%% Only the signal primitives mark a raise as a deliberate signal (BT-4115):
+%% a runtime error raised through beamtalk_error:raise/1 has the same wrapped
+%% shape but no marker.
+is_signal_only_for_signal_primitives_test() ->
+    Signalled =
+        try
+            beamtalk_exception_handler:class_signal_message(<<"boom">>, 'Error')
+        catch
+            error:S -> S
+        end,
+    Runtime =
+        try
+            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'UndefinedObject'))
+        catch
+            error:R -> R
+        end,
+    ?assert(beamtalk_exception_handler:is_signal(Signalled)),
+    ?assertNot(beamtalk_exception_handler:is_signal(Runtime)),
+    ?assertNot(beamtalk_exception_handler:is_signal(badarith)).
+
+frames_empty_when_nothing_captured_test() ->
+    ?assertEqual([], beamtalk_exception_handler:frames(make_test_exception())).
+
+%% ensure_wrapped/4 keeps an inner raw capture rather than backfilling.
+ensure_wrapped_4_keeps_inner_raw_stacktrace_test() ->
+    Inner = beamtalk_exception_handler:ensure_wrapped(error, badarg, [{inner, f, 0, []}]),
+    Result = beamtalk_exception_handler:ensure_wrapped(
+        error, Inner, [{outer, g, 0, []}], #{selector => 'do:'}
+    ),
+    ?assertEqual([{inner, f, 0, []}], maps:get(raw_stacktrace, Result)).
 
 %%% ===================================================================
 %%% ensure_wrapped/3 tests (Erlang exception type)
@@ -620,7 +710,7 @@ ensure_wrapped_3_already_wrapped_passes_through_test() ->
     Error = beamtalk_error:new(type_error, 'Integer'),
     Wrapped = beamtalk_exception_handler:wrap(Error),
     Result = beamtalk_exception_handler:ensure_wrapped(error, Wrapped, []),
-    ?assertMatch(#{'$beamtalk_class' := _, stacktrace := []}, Result).
+    ?assertMatch(#{'$beamtalk_class' := _, raw_stacktrace := []}, Result).
 
 ensure_wrapped_3_beamtalk_error_wraps_correctly_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Counter'),
@@ -902,7 +992,7 @@ ensure_wrapped_4_classifies_with_context_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(
         error, badarith, [], #{selector => sum, class => 'Tuple'}
     ),
-    ?assertMatch(#{'$beamtalk_class' := 'TypeError', error := _, stacktrace := _}, Result),
+    ?assertMatch(#{'$beamtalk_class' := 'TypeError', error := _, raw_stacktrace := _}, Result),
     #{error := Inner} = Result,
     ?assertEqual(type_error, Inner#beamtalk_error.kind),
     ?assertEqual(sum, Inner#beamtalk_error.selector).
@@ -1041,9 +1131,9 @@ class_signal_message_without_class_suffix_test() ->
     end.
 
 class_signal_message_fallback_test() ->
-    %% Non-beamtalk_object falls back to 'Exception'
+    %% Neither a beamtalk_object nor a class-name atom: falls back to 'Exception'
     try
-        beamtalk_exception_handler:class_signal_message(<<"fallback">>, not_an_object),
+        beamtalk_exception_handler:class_signal_message(<<"fallback">>, {not_an_object}),
         ?assert(false)
     catch
         error:#{error := Inner} ->
@@ -1069,12 +1159,52 @@ class_signal_with_beamtalk_object_test() ->
 
 class_signal_fallback_test() ->
     try
-        beamtalk_exception_handler:class_signal(not_an_object),
+        beamtalk_exception_handler:class_signal({not_an_object}),
         ?assert(false)
     catch
         error:#{error := Inner} ->
             ?assertEqual('Exception', Inner#beamtalk_error.class),
             ?assertEqual({beamtalk_string, <<"Exception">>}, Inner#beamtalk_error.message)
+    end.
+
+%% BT-4115: a class-literal send (`Error signal: m`) raises in the caller and
+%% passes the class-name atom; the error matches the class-object path.
+class_signal_message_class_name_atom_matches_object_test() ->
+    ClassSelf = #beamtalk_object{
+        class = 'RuntimeError class', class_mod = 'bt@stdlib@runtime_error', pid = self()
+    },
+    ?assertEqual(
+        caught_error(fun() ->
+            beamtalk_exception_handler:class_signal_message(<<"m">>, ClassSelf)
+        end),
+        caught_error(fun() ->
+            beamtalk_exception_handler:class_signal_message(<<"m">>, 'RuntimeError')
+        end)
+    ),
+    ?assertEqual(
+        caught_error(fun() -> beamtalk_exception_handler:class_signal(ClassSelf) end),
+        caught_error(fun() -> beamtalk_exception_handler:class_signal('RuntimeError') end)
+    ),
+    ?assertEqual(
+        caught_error(fun() ->
+            beamtalk_exception_handler:class_signal_message_reason(<<"m">>, why, ClassSelf)
+        end),
+        caught_error(fun() ->
+            beamtalk_exception_handler:class_signal_message_reason(<<"m">>, why, 'RuntimeError')
+        end)
+    ).
+
+%% `nil` is the class-self of a direct-called class method, not a class name.
+class_signal_nil_falls_back_to_exception_test() ->
+    #{error := Inner} = caught_error(fun() -> beamtalk_exception_handler:class_signal(nil) end),
+    ?assertEqual('Exception', Inner#beamtalk_error.class).
+
+caught_error(Fun) ->
+    try
+        Fun(),
+        no_raise
+    catch
+        error:Wrapped -> Wrapped
     end.
 
 %%% ===================================================================
@@ -1170,10 +1300,20 @@ pass_rebuilds_stacktrace_from_frames_test() ->
     },
     Bad = #{'$beamtalk_class' => 'StackFrame', module => undefined, function => undefined},
     Ex0 = beamtalk_exception_handler:ensure_wrapped(exit, normal, []),
-    Ex = Ex0#{stacktrace => [Frame, Bad]},
+    %% A legacy (pre-BT-4115) exception: StackFrame objects, no raw capture.
+    Ex = (maps:remove(raw_stacktrace, Ex0))#{stacktrace => [Frame, Bad]},
     {exit, normal, Stack} =
         run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end),
     ?assertEqual([{lists, map, 2, [{file, "lists.erl"}, {line, 12}]}], Stack).
+
+%% BT-4115: `pass` re-raises the raw stacktrace captured at catch time.
+pass_re_raises_raw_stacktrace_test() ->
+    Stacktrace = [{lists, map, 2, [{file, "lists.erl"}, {line, 12}, {error_info, #{}}]}],
+    Ex = beamtalk_exception_handler:ensure_wrapped(throw, oops, Stacktrace),
+    ?assertMatch(
+        {throw, oops, Stacktrace},
+        run_caught(fun() -> beamtalk_exception_handler:dispatch('pass', [], Ex) end)
+    ).
 
 pass_without_erlang_class_behaves_like_signal_test() ->
     Ex = beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'String')),
@@ -1291,4 +1431,43 @@ class_signal_message_reason_string_and_details_test() ->
             ?assertNotEqual(
                 nomatch, binary:match(beamtalk_error:format(Inner), <<"Reason: \"disk full\"">>)
             )
+    end.
+
+%% BT-4252: `contains_calling_self/1` recognises OTP's `calling_self` exit in
+%% every shape it takes leaving a Beamtalk send — produced here by the real
+%% wrappers, not hand-built maps.
+contains_calling_self_shapes_test() ->
+    Raw = calling_self_exit_reason(),
+    ?assertMatch({calling_self, {gen_server, call, _}}, Raw),
+    ?assert(beamtalk_exception_handler:contains_calling_self(Raw)),
+    %% The exit clause of ensure_wrapped/3 (an `exit:` caught in a method body).
+    ExitWrapped = beamtalk_exception_handler:ensure_wrapped(exit, Raw, []),
+    ?assertMatch(#{error := #beamtalk_error{details = #{reason := Raw}}}, ExitWrapped),
+    ?assert(beamtalk_exception_handler:contains_calling_self(ExitWrapped)),
+    %% wrap_raw/2 (the raw term re-raised as an `error:`): a `runtime_error`
+    %% carrying it under `details.reason`.
+    RuntimeWrapped = beamtalk_exception_handler:ensure_wrapped(
+        error, Raw, [], #{selector => doc, class => 'C'}
+    ),
+    #{error := #beamtalk_error{kind = runtime_error} = Inner} = RuntimeWrapped,
+    ?assert(beamtalk_exception_handler:contains_calling_self(RuntimeWrapped)),
+    %% The bare record too.
+    ?assert(beamtalk_exception_handler:contains_calling_self(Inner)),
+    %% Unrelated reasons, and a `calling_self` atom alone, do not match.
+    ?assertNot(beamtalk_exception_handler:contains_calling_self(badarg)),
+    ?assertNot(beamtalk_exception_handler:contains_calling_self(calling_self)),
+    ?assertNot(
+        beamtalk_exception_handler:contains_calling_self(
+            beamtalk_exception_handler:ensure_wrapped(exit, {timeout, x}, [])
+        )
+    ),
+    %% Improper lists are walked without crashing.
+    ?assert(beamtalk_exception_handler:contains_calling_self([a | Raw])).
+
+%% The real exit: OTP refuses a `gen_server:call` to the calling process.
+calling_self_exit_reason() ->
+    try gen_server:call(self(), get_doc) of
+        _ -> error(expected_calling_self)
+    catch
+        exit:Reason -> Reason
     end.

@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4115: an actor that raises with `Error signal:`, directly or after
+// catching and passing it, so the caller sees the exception (and its stack
+// trace) across an actor boundary.
+
+Actor subclass: Bt4115Raiser
+
+  boom: msg :: String => Error signal: msg
+
+  boomPassed: msg :: String => [Error signal: msg] on: Error do: [:e | e pass]

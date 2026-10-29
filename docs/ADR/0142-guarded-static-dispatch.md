@@ -1,4 +1,4 @@
-# ADR 0141: Guarded Static Dispatch — the Guard Is the Contract, and the Class Process Only Owns Class State
+# ADR 0142: Guarded Static Dispatch — the Guard Is the Contract, and the Class Process Only Owns Class State
 
 ## Status
 Proposed (2026-10-28)

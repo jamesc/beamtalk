@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4113: superclass for stale_ancestor_state_guard.btscript, initial
+// version with two fields. Version 2 drops `b`.
+
+Actor subclass: StaleGuardBase
+  state: a = 0
+  state: b = 0
+
+  getA => self.a

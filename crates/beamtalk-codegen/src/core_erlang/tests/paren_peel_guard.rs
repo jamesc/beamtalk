@@ -126,8 +126,9 @@ const CEILINGS: &[(&str, usize)] = &[
     // operand alike (`local_threading_construct`, the site rules, `match_arms`,
     // `repl_*_sites`, `LoopBodyContext`), assignment and literal-element
     // escape operands, a field-write target's receiver, and `(super)`
-    // (`is_self_or_super`, `receiver_statically_not_dictionary`).
-    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 35),
+    // (`is_self_or_super`, `receiver_statically_not_dictionary`), and a
+    // method body's last statement (`ends_with_self_field_write`, BT-4235).
+    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 36),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (
@@ -199,10 +200,7 @@ const CEILINGS: &[(&str, usize)] = &[
 ];
 
 fn crates_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crate dir has a parent")
-        .to_path_buf()
+    super::repo_root().join("crates")
 }
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {

@@ -224,8 +224,8 @@ fn test_class_registration_generation() {
     // calling this export, non-self-send dispatch resolves `superclass`
     // through the Class/Behaviour chain to
     // `beamtalk_behaviour_intrinsics:classSuperclass/1` (ADR 0032 Phase 2),
-    // and self-sent `superclass` now routes through
-    // `class_self_send_reflective_primitive` to the same intrinsic. This
+    // and self-sent `superclass` reaches the same intrinsic through
+    // `class_self_send/3`'s class-object protocol fallthrough (BT-4252). This
     // assertion exists to keep the export set stable/uniform across class
     // modules regardless — not because anything currently calls it.
     assert!(

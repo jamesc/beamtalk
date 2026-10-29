@@ -42,10 +42,16 @@ Returns the list of user-visible instance variable names.
 
 Filters out internal metadata fields (`$beamtalk_class`, `__methods__`, etc.)
 leaving only the fields defined by the class or added at runtime.
+
+A `Value` class whose instances are not maps — `Bitstring` is a raw
+`bitstring()` (ADR 0141) — has no fields, so it answers `[]`, as the
+primitive classes' `fieldNames` does.
 """.
--spec field_names(map()) -> [atom()].
+-spec field_names(term()) -> [atom()].
 field_names(State) when is_map(State) ->
-    beamtalk_tagged_map:user_field_keys(State).
+    beamtalk_tagged_map:user_field_keys(State);
+field_names(_NotAMap) ->
+    [].
 
 -doc """
 Reads an instance variable by name.
@@ -62,7 +68,13 @@ on *declared* late, via
 absence — a typo'd field name is also missing, and must keep today's `nil`
 behaviour.
 """.
--spec read_field(atom(), map()) -> term().
+-spec read_field(atom(), term()) -> term().
+read_field(Name, State) when is_atom(Name), not is_map(State) ->
+    %% A `Value` class whose instances are not maps (`Bitstring`, ADR 0141)
+    %% has no fields: the same structured error a primitive class's
+    %% compiled `fieldAt:` arm raises, so a dynamic send (`perform:`)
+    %% agrees with the inline intrinsic.
+    raise_no_fields('fieldAt:', State);
 read_field(Name, State) when is_atom(Name), is_map(State) ->
     case declared_late(Name, State) of
         true ->
@@ -84,10 +96,12 @@ Creates the field if it doesn't exist (Smalltalk-80 semantics).
 Returns the written value (not the object), matching `fieldAt:put:`
 convention.
 """.
--spec write_field(atom(), term(), map()) -> {term(), map()}.
+-spec write_field(atom(), term(), term()) -> {term(), map()}.
 write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
     NewState = State#{Name => Value},
-    {Value, NewState}.
+    {Value, NewState};
+write_field(Name, _Value, State) when is_atom(Name) ->
+    raise_no_fields('fieldAt:put:', State).
 
 -doc """
 Presence test for an instance variable by name (ADR 0124 §1/§9/B4).
@@ -98,9 +112,12 @@ eager field and a declared-`late` one: absence is exactly what `hasField:`
 means to test, and there is no separate "declared but not yet assigned" case
 to special-case here the way `read_field/2` must.
 """.
--spec has_field(atom(), map()) -> boolean().
+-spec has_field(atom(), term()) -> boolean().
 has_field(Name, State) when is_atom(Name), is_map(State) ->
-    maps:is_key(Name, State).
+    maps:is_key(Name, State);
+has_field(Name, _NotAMap) when is_atom(Name) ->
+    %% No fields at all (see field_names/1).
+    false.
 
 -doc """
 Returns a `late` instance variable to unassigned (ADR 0124 §1/§4f/B4).
@@ -112,9 +129,11 @@ only a declared-`late` one, exactly as `write_field/3` writes any field —
 whether clearing a non-`late` field is a sound thing for a caller to do is a
 question for the caller, not this primitive.
 """.
--spec clear_field(atom(), map()) -> map().
+-spec clear_field(atom(), term()) -> map().
 clear_field(Name, State) when is_atom(Name), is_map(State) ->
-    maps:remove(Name, State).
+    maps:remove(Name, State);
+clear_field(Name, State) when is_atom(Name) ->
+    raise_no_fields('clearField:', State).
 
 -doc """
 Generates a structural string for an object: `ClassName(field1: val1, field2: val2)`.
@@ -126,9 +145,24 @@ byte-identical output. There are no independent formatters left.
 Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 Object modules can call it from generated dispatch/4 code.
 """.
--spec inspect_string(map()) -> binary().
+-spec inspect_string(term()) -> binary().
 inspect_string(State) when is_map(State) ->
-    beamtalk_object_printer:structural_from_state(State).
+    beamtalk_object_printer:structural_from_state(State);
+inspect_string(NotAMap) ->
+    %% No fields to render structurally: the value's own printString.
+    beamtalk_primitive:print_string(NotAMap).
+
+-doc """
+Raise the structured `immutable_value` error for a field operation on a
+value with no fields (a non-map instance such as a `Bitstring`). Same
+kind, selector and hint shape as the compiled primitive-class `fieldAt:`
+arm (`value_type_codegen.rs`, `generate_dispatch_reflection_branches`).
+""".
+-spec raise_no_fields(atom(), term()) -> no_return().
+raise_no_fields(Selector, Value) ->
+    Class = beamtalk_primitive:class_of(Value),
+    Hint = iolist_to_binary([atom_to_binary(Class, utf8), <<"s are immutable and have no fields.">>]),
+    beamtalk_error:raise(beamtalk_error:new(immutable_value, Class, Selector, Hint)).
 
 -doc """
 True for the BEAM's predefined `module_info` function, which every module

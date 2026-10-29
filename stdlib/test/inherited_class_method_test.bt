@@ -6,7 +6,8 @@
 // Before BT-2007, these all compiled to a direct call to the child's
 // module (bt@inheritedchild) for a function only exported by the parent's
 // module (bt@inheritedparent), crashing with `undef` at runtime. The fix
-// routes them through beamtalk_class_dispatch:class_self_dispatch/4.
+// routes them through the runtime class-side self-dispatch walk
+// (today beamtalk_class_dispatch:class_self_send/3).
 //
 // Covers:
 //   - inherited unary class method dispatched via `self` and via an

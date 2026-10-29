@@ -234,6 +234,30 @@ fn test_match_type_pattern_binary_compiles_to_subclass_aware_test() {
 }
 
 #[test]
+fn test_match_type_pattern_bitstring_compiles_to_unaligned_test() {
+    // ADR 0141 (BT-4139): `b :: Bitstring` matches exactly the unaligned
+    // bitstrings — `is_bitstring` and not `is_binary` — never a map tag.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Bitstring -> b;\n      _ -> \"none\"\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("'erlang':'is_bitstring'"),
+        "Bitstring type pattern should test is_bitstring. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_binary'"),
+        "Bitstring type pattern should exclude byte-aligned binaries. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'maps':'get'('$beamtalk_class', X"),
+        "Bitstring is a raw term, never a tagged-map test. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_match_type_pattern_tagged_class_compiles_to_map_tag_check() {
     // An exact tagged `Value`/sealed class reuses the `'$beamtalk_class'`
     // map-key check `generate_constructor_pattern` already uses for

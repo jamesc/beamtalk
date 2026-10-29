@@ -17,7 +17,9 @@
 //! **References:**
 //! - `docs/ADR/0070-package-namespaces-and-dependencies.md` Section 3
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+use ecow::EcoString;
 
 use crate::ast::{Expression, Module};
 use crate::ast_walker;
@@ -103,9 +105,9 @@ impl DependencyRegistry {
     /// Returns true if the given class name is ambiguous (exported by 2+ packages).
     #[must_use]
     pub fn is_ambiguous(&self, class_name: &str) -> bool {
-        self.exports
-            .get(class_name)
-            .is_some_and(|exports| exports.len() > 1)
+        self.exports.get(class_name).is_some_and(|exports| {
+            declared_by_multiple_packages(exports.iter().map(|e| Some(e.package.as_str())))
+        })
     }
 
     /// Returns all class names that are exported by dependencies.
@@ -113,6 +115,55 @@ impl DependencyRegistry {
     pub fn all_class_names(&self) -> Vec<&str> {
         self.exports.keys().map(String::as_str).collect()
     }
+}
+
+/// The one "exported by more than one package" rule (ADR 0070 Phase 3),
+/// shared by [`DependencyRegistry::is_ambiguous`] and
+/// [`shadowed_class_names`]: `packages` lists the declaring package of every
+/// declaration of a single class name (`None` for a package-less unit — a
+/// REPL workspace class or a single-file build), and the name is ambiguous
+/// when they name two or more distinct packages. Repeated declarations from
+/// one package (e.g. a class duplicated across a package's own files,
+/// BT-3679) are one package's export, not a collision.
+fn declared_by_multiple_packages<'a>(packages: impl IntoIterator<Item = Option<&'a str>>) -> bool {
+    let mut packages = packages.into_iter();
+    let Some(first) = packages.next() else {
+        return false;
+    };
+    packages.any(|package| package != first)
+}
+
+/// BT-4151: the class names declared by more than one package among
+/// `declarations` — `(class name, declaring package)` pairs, the package
+/// `None` for a package-less unit.
+///
+/// The runtime class registry is keyed by bare class name, so two packages'
+/// same-named classes (legal under qualified references, `json@Parser` +
+/// `xml@Parser`) collide when both load: last-wins, with only a
+/// `record_class_collision_warning`. In such a node an instance's
+/// `'$beamtalk_class'` tag cannot say which package's class built it, so
+/// anything that pins one package's module at compile time (the
+/// sealed-Value direct dispatch in codegen) would diverge from dynamic
+/// dispatch, which follows load order. Callers pass every class
+/// declaration their compilation scope can see — dependencies' and the
+/// unit's own — and treat each name returned here as unresolvable to a
+/// single module.
+#[must_use]
+pub fn shadowed_class_names<'a>(
+    declarations: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
+) -> HashSet<EcoString> {
+    let mut packages_by_class: HashMap<&'a str, Vec<Option<&'a str>>> = HashMap::new();
+    for (class_name, package) in declarations {
+        packages_by_class
+            .entry(class_name)
+            .or_default()
+            .push(package);
+    }
+    packages_by_class
+        .into_iter()
+        .filter(|(_, packages)| declared_by_multiple_packages(packages.iter().copied()))
+        .map(|(class_name, _)| EcoString::from(class_name))
+        .collect()
 }
 
 /// Build a `DependencyRegistry` from per-dependency class module indexes.
@@ -274,7 +325,7 @@ fn check_ambiguous_reference(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(exports) = registry.lookup(class_name) {
-        if exports.len() > 1 {
+        if registry.is_ambiguous(class_name) {
             let qualified_suggestions: Vec<String> = exports
                 .iter()
                 .map(|e| format!("{}@{}", e.package, class_name))
@@ -465,6 +516,46 @@ mod tests {
         ]);
         assert!(!registry.is_ambiguous("JsonParser"));
         assert!(!registry.is_ambiguous("XmlParser"));
+    }
+
+    #[test]
+    fn same_package_registered_twice_is_not_ambiguous() {
+        let registry = make_registry(&[
+            ("Parser", "json", "bt@json@parser"),
+            ("Parser", "json", "bt@json@sub@parser"),
+        ]);
+        assert!(!registry.is_ambiguous("Parser"));
+    }
+
+    // ── shadowed_class_names (BT-4151) ────────────────────────────────────
+
+    #[test]
+    fn shadowed_class_names_flags_two_packages() {
+        let shadowed = shadowed_class_names([
+            ("Parser", Some("json")),
+            ("Parser", Some("xml")),
+            ("Lexer", Some("json")),
+        ]);
+        assert_eq!(shadowed, HashSet::from([EcoString::from("Parser")]));
+    }
+
+    #[test]
+    fn shadowed_class_names_counts_package_less_unit_as_a_package() {
+        // A workspace/single-file class sharing a name with a package's
+        // class collides at runtime just the same.
+        let shadowed = shadowed_class_names([("Parser", None), ("Parser", Some("json"))]);
+        assert!(shadowed.contains("Parser"));
+    }
+
+    #[test]
+    fn shadowed_class_names_ignores_repeats_from_one_package() {
+        let shadowed = shadowed_class_names([
+            ("Parser", Some("json")),
+            ("Parser", Some("json")),
+            ("Widget", None),
+            ("Widget", None),
+        ]);
+        assert!(shadowed.is_empty(), "{shadowed:?}");
     }
 
     // ── build_dependency_registry ─────────────────────────────────────────

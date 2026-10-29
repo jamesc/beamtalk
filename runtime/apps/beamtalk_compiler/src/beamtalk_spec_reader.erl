@@ -37,7 +37,8 @@ types come from the first clause (Erlang convention).
     extract_param_names/1,
     extract_specs_from_forms/1,
     merge_return_types/1,
-    map_return_type/1
+    map_return_type/1,
+    parallel_map/3
 ]).
 -endif.
 

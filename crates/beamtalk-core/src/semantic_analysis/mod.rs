@@ -89,6 +89,7 @@ pub use class_module_registry::{
 pub use collision_checker::{
     DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
     check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
+    shadowed_class_names,
 };
 pub use definite_assignment::{
     admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,
@@ -1179,13 +1180,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // `self.field := value` but its last statement doesn't return the
     // updated self — the mutation is silently dropped for the test method.
     validators::check_testcase_setup_drops_field_assignments(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
-    // BT-4092 (one-release migration warning): a parenthesised trailing field
-    // assignment in a value-type method now answers the updated `self`.
-    validators::check_parenthesised_trailing_field_assignment(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,
