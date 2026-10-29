@@ -11,6 +11,39 @@
 // block.
 
 TestCase subclass: SoloBranchThreadingAnswerTest
+  // The value-type field-write column's field: a TestCase is the one value
+  // type whose methods may write `self.x :=` (ADR 0042).
+  field: x = 0
+
+  // The value-type field-write column (`vtField...`): `self.x := ...` in a
+  // value-type method threads `Self` through the conditional.
+  vtFieldTailIfTrue: flag =>
+    self.x := 0
+    flag ifTrue: [self.x := self.x + 1]
+
+  vtFieldAssignIfTrue: flag =>
+    self.x := 0
+    r := flag ifTrue: [self.x := self.x + 1]
+    #[r, self.x]
+
+  vtFieldOperandIfTrue: flag =>
+    self.x := 0
+    s := (flag ifTrue: [self.x := self.x + 1]) printString
+    #[s, self.x]
+
+  vtFieldTailIfFalse: flag =>
+    self.x := 0
+    flag ifFalse: [self.x := self.x + 1]
+
+  vtFieldAssignIfFalse: flag =>
+    self.x := 0
+    r := flag ifFalse: [self.x := self.x + 1]
+    #[r, self.x]
+
+  vtFieldOperandIfFalse: flag =>
+    self.x := 0
+    s := (flag ifFalse: [self.x := self.x + 1]) printString
+    #[s, self.x]
 
   // The columns whose block writes an outer local: [name, receiver].
   localColumns =>
@@ -192,3 +225,76 @@ TestCase subclass: SoloBranchThreadingAnswerTest
       flag: false
       expect: 1
     self assert: a x equals: 1
+
+  // The value-type field-write column: each method resets `x` first.
+  testValueFieldIfTrue =>
+    col := #[#valueField, self]
+    #(#vtFieldAssignIfTrue:)
+      do: [:sel |
+        self
+          check: col
+          sel: sel
+          flag: false
+          expect: #[false, 0]
+        self
+          check: col
+          sel: sel
+          flag: true
+          expect: #[1, 1]
+      ]
+    self
+      check: col
+      sel: #vtFieldOperandIfTrue:
+      flag: false
+      expect: #["false", 0]
+    self
+      check: col
+      sel: #vtFieldOperandIfTrue:
+      flag: true
+      expect: #["1", 1]
+    self
+      check: col
+      sel: #vtFieldTailIfTrue:
+      flag: false
+      expect: false
+    self
+      check: col
+      sel: #vtFieldTailIfTrue:
+      flag: true
+      expect: 1
+
+  testValueFieldIfFalse =>
+    col := #[#valueField, self]
+    #(#vtFieldAssignIfFalse:)
+      do: [:sel |
+        self
+          check: col
+          sel: sel
+          flag: true
+          expect: #[true, 0]
+        self
+          check: col
+          sel: sel
+          flag: false
+          expect: #[1, 1]
+      ]
+    self
+      check: col
+      sel: #vtFieldOperandIfFalse:
+      flag: true
+      expect: #["true", 0]
+    self
+      check: col
+      sel: #vtFieldOperandIfFalse:
+      flag: false
+      expect: #["1", 1]
+    self
+      check: col
+      sel: #vtFieldTailIfFalse:
+      flag: true
+      expect: true
+    self
+      check: col
+      sel: #vtFieldTailIfFalse:
+      flag: false
+      expect: 1

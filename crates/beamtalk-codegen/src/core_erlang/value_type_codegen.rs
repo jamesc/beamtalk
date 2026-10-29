@@ -16,7 +16,7 @@ use std::fmt::Write as FmtWrite;
 
 use super::control_flow::analysis::ThreadedFamilies;
 use super::control_flow::family_slots::{self, FamilyVersionStep};
-use super::control_flow::{BodyKind, ThreadingPlan};
+use super::control_flow::{BodyKind, SoloBoolean, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
@@ -3032,27 +3032,21 @@ impl CoreErlangGenerator {
             _ => return Ok(None),
         };
 
-        let nil_branch = || Document::Str("'nil'");
-        let (true_branch, false_branch) = match selector_name.as_str() {
-            "ifTrue:" => {
-                let Some(Expression::Block(block)) = arguments.first() else {
-                    return Ok(None);
-                };
-                (self.build_vt_conditional_branch_value(block)?, nil_branch())
-            }
-            "ifFalse:" => {
-                let Some(Expression::Block(block)) = arguments.first() else {
-                    return Ok(None);
-                };
-                (nil_branch(), self.build_vt_conditional_branch_value(block)?)
-            }
-            "ifTrue:ifFalse:" => {
-                let (Some(Expression::Block(tb)), Some(Expression::Block(fb))) =
-                    (arguments.first(), arguments.get(1))
-                else {
-                    return Ok(None);
-                };
-                (
+        // A solo `ifTrue:`/`ifFalse:`'s non-taken arm answers what the one
+        // `SoloBoolean` table says (the receiver, BT-4189); it is rendered once
+        // the receiver's `Cond` var is minted, below.
+        let arms = match (
+            SoloBoolean::from_keyword(&selector_name),
+            arguments.as_slice(),
+        ) {
+            (
+                Some(sel @ (SoloBoolean::IfTrue | SoloBoolean::IfFalse)),
+                [Expression::Block(block)],
+            ) => VtCondArms::Solo(sel, self.build_vt_conditional_branch_value(block)?),
+            (None, [Expression::Block(tb), Expression::Block(fb)])
+                if selector_name == "ifTrue:ifFalse:" =>
+            {
+                VtCondArms::Both(
                     self.build_vt_conditional_branch_value(tb)?,
                     self.build_vt_conditional_branch_value(fb)?,
                 )
@@ -3063,6 +3057,17 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let cond_doc = self.expression_doc(receiver)?;
         let result_var = self.fresh_temp_var("CondVal");
+        let (true_branch, false_branch) = match arms {
+            VtCondArms::Both(t, f) => (t, f),
+            VtCondArms::Solo(sel, taken) => {
+                let answer = sel.non_taken().doc(&cond_var);
+                if sel.block_on_true() {
+                    (taken, answer)
+                } else {
+                    (answer, taken)
+                }
+            }
+        };
         body_parts.push(docvec![
             "    let ",
             leaf::var(cond_var.clone()),
@@ -3410,6 +3415,7 @@ impl CoreErlangGenerator {
 
         let Some((true_pieces, false_pieces)) = self.build_vt_conditional_arm_pieces(
             &selector_name,
+            &cond_var,
             arguments,
             &all_mutations,
             baseline,
@@ -3627,48 +3633,61 @@ impl CoreErlangGenerator {
     fn build_vt_conditional_arm_pieces(
         &mut self,
         selector_name: &str,
+        cond_var: &str,
         arguments: &[Expression],
         all_mutations: &[String],
         baseline: VtCondBaseline,
         capture_value: bool,
     ) -> Result<Option<(VtBranchPieces, VtBranchPieces)>> {
-        let pair = match (selector_name, arguments) {
-            ("ifTrue:", [Expression::Block(block), ..]) => {
-                let tb = self.build_vt_conditional_branch_pieces(
-                    block,
-                    all_mutations,
-                    baseline,
-                    capture_value,
-                )?;
-                let fb = Self::build_vt_conditional_passthrough_pieces(
-                    self,
-                    all_mutations,
-                    capture_value,
-                );
-                (tb, fb)
-            }
-            ("ifFalse:", [Expression::Block(block), ..]) => {
-                let passthrough = Self::build_vt_conditional_passthrough_pieces(
-                    self,
-                    all_mutations,
-                    capture_value,
-                );
-                let fb = self.build_vt_conditional_branch_pieces(
-                    block,
-                    all_mutations,
-                    baseline,
-                    capture_value,
-                )?;
-                (passthrough, fb)
+        let pair = match (SoloBoolean::from_keyword(selector_name), arguments) {
+            (
+                Some(sel @ (SoloBoolean::IfTrue | SoloBoolean::IfFalse)),
+                [Expression::Block(block), ..],
+            ) => {
+                // The arm that runs the block and the non-taken passthrough,
+                // placed by the one `SoloBoolean` table (BT-4189). Each is
+                // built in receiver-arm order (true first), as before, so the
+                // temp numbering is unchanged.
+                if sel.block_on_true() {
+                    let taken = self.build_vt_conditional_branch_pieces(
+                        block,
+                        all_mutations,
+                        baseline,
+                        capture_value,
+                    )?;
+                    let passthrough = Self::build_vt_conditional_passthrough_pieces(
+                        self,
+                        sel,
+                        cond_var,
+                        all_mutations,
+                        capture_value,
+                    );
+                    (taken, passthrough)
+                } else {
+                    let passthrough = Self::build_vt_conditional_passthrough_pieces(
+                        self,
+                        sel,
+                        cond_var,
+                        all_mutations,
+                        capture_value,
+                    );
+                    let taken = self.build_vt_conditional_branch_pieces(
+                        block,
+                        all_mutations,
+                        baseline,
+                        capture_value,
+                    )?;
+                    (passthrough, taken)
+                }
             }
             (
-                "ifTrue:ifFalse:",
+                None,
                 [
                     Expression::Block(true_block),
                     Expression::Block(false_block),
                     ..,
                 ],
-            ) => {
+            ) if selector_name == "ifTrue:ifFalse:" => {
                 let tb = self.build_vt_conditional_branch_pieces(
                     true_block,
                     all_mutations,
@@ -4021,9 +4040,13 @@ impl CoreErlangGenerator {
     /// Generates a pass-through arm's pieces: the current (pre-branch) values of all
     /// captured mutations, leaving them unchanged, and no class-var mutation (a
     /// passthrough arm executes no branch code). In value position
-    /// (`capture_value`) the absent arm's value is `nil`.
+    /// (`capture_value`) the absent arm's value is `sel`'s non-taken answer
+    /// from the one [`SoloBoolean`] table: the receiver `cond_var` for a solo
+    /// `ifTrue:`/`ifFalse:`, as dynamic dispatch answers (BT-4189).
     fn build_vt_conditional_passthrough_pieces(
         cg: &Self,
+        sel: SoloBoolean,
+        cond_var: &str,
         all_mutations: &[String],
         capture_value: bool,
     ) -> VtBranchPieces {
@@ -4031,7 +4054,7 @@ impl CoreErlangGenerator {
             preamble: Vec::new(),
             local_values: Self::resolve_mutation_value_docs(cg, all_mutations),
             self_mutated_version: None,
-            value: capture_value.then_some(leaf::atom("nil")),
+            value: capture_value.then(|| sel.non_taken().doc(cond_var)),
         }
     }
 
@@ -5205,6 +5228,16 @@ impl CoreErlangGenerator {
             },
         ))
     }
+}
+
+/// The arms of a last-position value-type read+write conditional
+/// ([`CoreErlangGenerator::emit_vt_conditional_case_to_var`]): a solo
+/// `ifTrue:`/`ifFalse:` (its block's value; the non-taken answer comes from
+/// [`SoloBoolean`] once the receiver var exists), or both `ifTrue:ifFalse:`
+/// arms.
+enum VtCondArms {
+    Solo(SoloBoolean, Document<'static>),
+    Both(Document<'static>, Document<'static>),
 }
 
 #[cfg(test)]
