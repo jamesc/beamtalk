@@ -1484,13 +1484,19 @@ impl CoreErlangGenerator {
         };
         let exprs: Vec<&Expression> = arguments.iter().collect();
         let (prelude, arg_docs) = self.thread_subexprs(&exprs, "Arg")?;
-        let Some(call_doc) = super::primitives::generate_class_signal_bif(
+        // The primitive was resolved from this very selector, so its arity
+        // always matches the argument count and the lowering cannot decline.
+        let call_doc = super::primitives::generate_class_signal_bif(
             &primitive,
             &arg_docs,
             leaf::atom(class_name.to_string()),
-        ) else {
-            return Ok(None);
-        };
+        )
+        .ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "caller-safe class primitive `{primitive}` did not lower for `{class_name} {}`",
+                selector.name()
+            ))
+        })?;
         Ok(Some(self.close_prelude(&prelude, call_doc, "Raise")))
     }
 
