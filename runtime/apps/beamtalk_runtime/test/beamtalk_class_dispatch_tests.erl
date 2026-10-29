@@ -31,6 +31,7 @@ Test groups:
   17. handle_class_method_call/6 — class-side extension dispatch
   18. class_self_send/3 & class_self_dispatch_local/3 — self-send
       class-side extension dispatch
+  19. Class-chain sends skip the class process (BT-4073)
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -3126,3 +3127,185 @@ drain_relay_events(Acc) ->
 
 assert_relay_logged_at_debug_only(Events) ->
     ?assertMatch([#{level := debug}], Events).
+
+%%% ============================================================================
+%%% 19. Class-chain sends skip the class process (BT-4073)
+%%% ============================================================================
+
+%% Run `Fun` with `'receive'` tracing on `Pids`; return `{Result, GenCalls}`,
+%% `GenCalls` being every `'$gen_call'` request those processes received.
+with_gen_calls_traced(Pids, Fun) ->
+    Live = lists:usort([P || P <- Pids, is_pid(P)]),
+    [1 = erlang:trace(P, true, ['receive']) || P <- Live],
+    Result =
+        try
+            Fun()
+        after
+            [erlang:trace(P, false, ['receive']) || P <- Live]
+        end,
+    [
+        receive
+            {trace_delivered, P, Ref} -> ok
+        after 5000 -> error({trace_not_delivered, P})
+        end
+     || P <- Live, Ref <- [erlang:trace_delivered(P)]
+    ],
+    {Result, drain_gen_calls([])}.
+
+drain_gen_calls(Acc) ->
+    receive
+        {trace, P, 'receive', {'$gen_call', _From, Request}} ->
+            drain_gen_calls([{P, Request} | Acc]);
+        {trace, _, 'receive', _} ->
+            drain_gen_calls(Acc)
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+class_pids(Names) ->
+    [beamtalk_class_registry:whereis_class(N) || N <- Names].
+
+class_obj(Name) ->
+    beamtalk_class_registry:class_object_from_pid(beamtalk_class_registry:whereis_class(Name)).
+
+start_bt4073_class(ClassName, Superclass, ClassMethods, ClassVars) ->
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+        superclass => Superclass,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => ClassMethods,
+        class_state => ClassVars
+    }),
+    Pid.
+
+stop_quietly(Pid) ->
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end.
+
+class_chain_skip_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
+        [
+            {"Behaviour/Class-chain sends make no gen_server call to a class process",
+                fun test_class_chain_send_makes_no_gen_call/0},
+            {"a user class method still runs in the class process",
+                fun test_user_class_method_still_routes_to_class/0},
+            {"an inherited class method still runs in the class process",
+                fun test_inherited_class_method_still_routes_to_class/0},
+            {"a runtime-installed class-method fun shadows the Class chain",
+                fun test_runtime_class_fun_shadows_class_chain/0},
+            {"a class-side extension shadows the Class chain",
+                fun test_class_extension_shadows_class_chain/0},
+            {"hasField:/clearField: still answer from the class process",
+                fun test_class_var_reflection_still_routes_to_class/0},
+            {"an unknown selector still raises does_not_understand on the class",
+                fun test_class_chain_skip_dnu/0}
+        ]
+    end}.
+
+test_class_chain_send_makes_no_gen_call() ->
+    ok = ensure_counter_loaded(),
+    Counter = class_obj('Counter'),
+    Actor = class_obj('Actor'),
+    Object = class_obj('Object'),
+    Watched = class_pids(['Counter', 'Actor', 'Object', 'Class', 'Behaviour']),
+    {Results, GenCalls} = with_gen_calls_traced(Watched, fun() ->
+        [
+            beamtalk_message_dispatch:send(Counter, allSuperclasses, []),
+            beamtalk_message_dispatch:send(Counter, 'inheritsFrom:', [Actor]),
+            beamtalk_message_dispatch:send(Counter, 'isKindOf:', [Object]),
+            beamtalk_message_dispatch:send(Counter, name, [])
+        ]
+    end),
+    ?assertEqual([], GenCalls),
+    [Supers, Inherits, IsKind, _Name] = Results,
+    ?assert(lists:member(Actor, Supers)),
+    ?assert(lists:member(Object, Supers)),
+    ?assertEqual(true, Inherits),
+    ?assertEqual(true, IsKind).
+
+test_user_class_method_still_routes_to_class() ->
+    Pid = start_bt4073_class('BT4073UserMethod', none, #{testSelf => <<>>}, #{}),
+    try
+        {Result, GenCalls} = with_gen_calls_traced([Pid], fun() ->
+            beamtalk_class_dispatch:class_send(Pid, testSelf, [])
+        end),
+        ?assertEqual(Pid, Result),
+        ?assertMatch([{Pid, {class_method_call, testSelf, [], _}}], GenCalls)
+    after
+        stop_quietly(Pid)
+    end.
+
+test_inherited_class_method_still_routes_to_class() ->
+    Parent = start_bt4073_class('BT4073Parent', none, #{testSuccess => <<>>}, #{}),
+    Child = start_bt4073_class('BT4073Child', 'BT4073Parent', #{}, #{}),
+    try
+        ?assertEqual(
+            test_success_result, beamtalk_class_dispatch:class_send(Child, testSuccess, [])
+        )
+    after
+        stop_quietly(Child),
+        stop_quietly(Parent)
+    end.
+
+test_runtime_class_fun_shadows_class_chain() ->
+    Pid = start_bt4073_class('BT4073RuntimeFun', none, #{}, #{}),
+    try
+        ?assertMatch(
+            {beamtalk_string, _}, beamtalk_class_dispatch:class_send(Pid, printString, [])
+        ),
+        ok = beamtalk_object_class:put_class_method(Pid, printString, fun(_Self) ->
+            shadowed
+        end),
+        ?assertEqual(shadowed, beamtalk_class_dispatch:class_send(Pid, printString, []))
+    after
+        stop_quietly(Pid)
+    end.
+
+test_class_extension_shadows_class_chain() ->
+    ClassName = 'BT4073Extension',
+    Pid = start_bt4073_class(ClassName, none, #{}, #{}),
+    beamtalk_extensions:init(),
+    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+    try
+        ?assertMatch(
+            {beamtalk_string, _}, beamtalk_class_dispatch:class_send(Pid, printString, [])
+        ),
+        ok = beamtalk_extensions:register(
+            ClassTag, printString, fun(_Args, _Self) -> extended end, test
+        ),
+        ?assertEqual(extended, beamtalk_class_dispatch:class_send(Pid, printString, []))
+    after
+        beamtalk_extensions:unregister(ClassName, printString, true),
+        stop_quietly(Pid)
+    end.
+
+test_class_var_reflection_still_routes_to_class() ->
+    Pid = start_bt4073_class('BT4073ClassVars', none, #{}, #{counter => 1}),
+    try
+        ?assertEqual(true, beamtalk_class_dispatch:class_send(Pid, 'hasField:', [counter])),
+        ?assertEqual(false, beamtalk_class_dispatch:class_send(Pid, 'hasField:', [missing])),
+        _ = beamtalk_class_dispatch:class_send(Pid, 'clearField:', [counter]),
+        ?assertEqual(false, beamtalk_class_dispatch:class_send(Pid, 'hasField:', [counter]))
+    after
+        stop_quietly(Pid)
+    end.
+
+test_class_chain_skip_dnu() ->
+    Pid = start_bt4073_class('BT4073Dnu', none, #{}, #{}),
+    try
+        {_, GenCalls} = with_gen_calls_traced([Pid], fun() ->
+            ?assertError(
+                #{
+                    error := #beamtalk_error{
+                        kind = does_not_understand, class = 'BT4073Dnu', selector = bt4073Nope
+                    }
+                },
+                beamtalk_class_dispatch:class_send(Pid, bt4073Nope, [])
+            )
+        end),
+        ?assertEqual([], GenCalls)
+    after
+        stop_quietly(Pid)
+    end.
