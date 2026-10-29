@@ -17,6 +17,13 @@ Keyword constructors ride the `direct_class_methods` path unchanged.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Logger handler callback for the BT-4126 stale-verdict warning tests.
+-export([log/2]).
+
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {log_event, LogEvent},
+    ok.
+
 -define(HELPER, beamtalk_class_direct_ctor_helper).
 %% No `new/0` / `new/1` exports: the "missing export falls through" module.
 -define(PLAIN_HELPER, beamtalk_class_dispatch_test_helper).
@@ -30,13 +37,16 @@ start_class(Name, Meta) ->
     start_class_with_module(Name, ?HELPER, Meta).
 
 start_class_with_module(Name, Module, Meta) ->
+    start_class_with_module(Name, Module, none, Meta).
+
+start_class_with_module(Name, Module, Superclass, Meta) ->
     %% `function_exported/3` only inspects loaded code: a class whose module
     %% nobody has touched yet fails the export check and takes one gen_server
     %% fallback (which loads it) before going direct. Production classes hit
     %% that fallback naturally; the tests preload so the FIRST send is direct.
     {module, Module} = code:ensure_loaded(Module),
     ClassInfo = #{
-        superclass => none,
+        superclass => Superclass,
         module => Module,
         class_methods => #{},
         class_state => #{},
@@ -211,6 +221,227 @@ direct_constructor_test_() ->
                         )
                     end,
                     Results
+                )
+            after
+                stop_class(Pid)
+            end
+        end}
+    ]}.
+
+%%====================================================================
+%% BT-4126: reload-time warning for stale baked verdicts
+%%====================================================================
+
+start_subclass(Name, Superclass, Meta) ->
+    start_class_with_module(Name, ?HELPER, Superclass, Meta).
+
+reload(Name, Meta) ->
+    {ok, _} = beamtalk_object_class:update_class(Name, #{module => ?HELPER, meta => Meta}),
+    ok.
+
+%% Run Fun with a logger handler forwarding every event to this process, and
+%% return the BT-4126 warnings (the metadata maps carrying `Key`) it logged.
+%% Lifts the primary level to `all` for the run and restores whatever it was
+%% (test/sys.config sets `warning` so the warnings_file sink captures them).
+stale_warnings(Key, Fun) ->
+    HandlerId = bt_4126_stale_verdict_test_handler,
+    #{level := OldLevel} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
+    try
+        Fun()
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, OldLevel)
+    end,
+    drain_warnings(Key, []).
+
+drain_warnings(Key, Acc) ->
+    receive
+        {log_event, #{level := warning, meta := #{Key := _} = Meta}} ->
+            drain_warnings(Key, [Meta | Acc]);
+        {log_event, _} ->
+            drain_warnings(Key, Acc)
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+%% A class-side `new:` as `class_method_info` carries it for a compiled class.
+-define(USER_NEW1, #{'new:' => #{arity => 1}}).
+
+stale_verdict_warning_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"reload gaining new: warns naming every transitive stale subclass", fun() ->
+            Parent = start_class('BT4126Parent', #{class_method_info => #{}}),
+            Child = start_subclass('BT4126Child', 'BT4126Parent', #{
+                direct_constructors => [new, 'new:']
+            }),
+            %% Only `new` baked: `new/0` is its own override slot, never stale.
+            NewOnly = start_subclass('BT4126NewOnly', 'BT4126Parent', #{
+                direct_constructors => [new]
+            }),
+            Grandchild = start_subclass('BT4126Grandchild', 'BT4126Child', #{
+                direct_constructors => ['new:']
+            }),
+            try
+                Warnings = stale_warnings(stale_direct_constructors, fun() ->
+                    reload('BT4126Parent', #{class_method_info => ?USER_NEW1})
+                end),
+                ?assertMatch(
+                    [#{class := 'BT4126Parent', stale_direct_constructors := _}], Warnings
+                ),
+                [#{stale_direct_constructors := Stale}] = Warnings,
+                ?assertEqual(['BT4126Child', 'BT4126Grandchild'], lists:sort(Stale))
+            after
+                [stop_class(P) || P <- [Grandchild, NewOnly, Child, Parent]]
+            end
+        end},
+        {"reload without a new: change stays silent", fun() ->
+            Parent = start_class('BT4126Quiet', #{class_method_info => #{}}),
+            Child = start_subclass('BT4126QuietChild', 'BT4126Quiet', #{
+                direct_constructors => ['new:']
+            }),
+            try
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_constructors, fun() ->
+                        reload('BT4126Quiet', #{
+                            class_method_info => #{'x' => #{arity => 0}}
+                        })
+                    end)
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"reload keeping an existing new: stays silent", fun() ->
+            %% Already had `new:`: any stale child was reported when it was
+            %% gained, so reloading again must not repeat the warning.
+            Parent = start_class('BT4126Kept', #{class_method_info => ?USER_NEW1}),
+            Child = start_subclass('BT4126KeptChild', 'BT4126Kept', #{
+                direct_constructors => ['new:']
+            }),
+            try
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_constructors, fun() ->
+                        reload('BT4126Kept', #{class_method_info => ?USER_NEW1})
+                    end)
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"reload gaining new: with no stale subclass stays silent", fun() ->
+            Parent = start_class('BT4126Fresh', #{class_method_info => #{}}),
+            %% Recompiled against the new parent: verdict already omits `new:`.
+            Child = start_subclass('BT4126FreshChild', 'BT4126Fresh', #{
+                direct_constructors => [new]
+            }),
+            try
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_constructors, fun() ->
+                        reload('BT4126Fresh', #{class_method_info => ?USER_NEW1})
+                    end)
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"reload dropping a direct class method that still exists warns", fun() ->
+            Info = #{'x:y:' => #{arity => 2}, 'make' => #{arity => 0}},
+            Pid = start_class('BT4126Sealed', #{
+                class_method_info => Info,
+                direct_class_methods => #{'x:y:' => 'class_x:y:', 'make' => 'class_make'}
+            }),
+            try
+                Warnings = stale_warnings(stale_direct_class_methods, fun() ->
+                    reload('BT4126Sealed', #{
+                        class_method_info => Info,
+                        direct_class_methods => #{'x:y:' => 'class_x:y:'}
+                    })
+                end),
+                ?assertMatch(
+                    [#{class := 'BT4126Sealed', stale_direct_class_methods := ['make']}],
+                    Warnings
+                )
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"put_class_method installing new: warns naming the stale subclass", fun() ->
+            Parent = start_class('BT4126PutParent', #{class_method_info => #{}}),
+            Child = start_subclass('BT4126PutChild', 'BT4126PutParent', #{
+                direct_constructors => ['new:']
+            }),
+            try
+                Warnings = stale_warnings(stale_direct_constructors, fun() ->
+                    ok = beamtalk_object_class:put_class_method(
+                        Parent, 'new:', fun(_Self, Args) -> Args end
+                    )
+                end),
+                ?assertMatch(
+                    [
+                        #{
+                            class := 'BT4126PutParent',
+                            stale_direct_constructors := ['BT4126PutChild']
+                        }
+                    ],
+                    Warnings
+                ),
+                %% Patching it again is not a gain: no repeat.
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_constructors, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Parent, 'new:', fun(_Self, Args) -> Args end
+                        )
+                    end)
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"put_class_method over a direct class method warns", fun() ->
+            Pid = start_class('BT4126PutDirect', #{
+                class_method_info => #{'make' => #{arity => 0}},
+                direct_class_methods => #{'make' => 'class_make'}
+            }),
+            try
+                ?assertMatch(
+                    [#{class := 'BT4126PutDirect', stale_direct_class_methods := ['make']}],
+                    stale_warnings(stale_direct_class_methods, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Pid, 'make', fun(_Self) -> made end
+                        )
+                    end)
+                ),
+                %% A selector outside the verdict has no static direct callers.
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_class_methods, fun() ->
+                        ok = beamtalk_object_class:put_class_method(
+                            Pid, 'other', fun(_Self) -> other end
+                        )
+                    end)
+                )
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"reload removing a direct class method outright stays silent", fun() ->
+            %% A stale static caller of a removed method fails loudly (`undef`).
+            Pid = start_class('BT4126Removed', #{
+                class_method_info => #{'make' => #{arity => 0}},
+                direct_class_methods => #{'make' => 'class_make'}
+            }),
+            try
+                ?assertEqual(
+                    [],
+                    stale_warnings(stale_direct_class_methods, fun() ->
+                        reload('BT4126Removed', #{class_method_info => #{}})
+                    end)
                 )
             after
                 stop_class(Pid)
