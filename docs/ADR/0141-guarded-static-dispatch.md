@@ -28,6 +28,26 @@ structural, but its cost is not: a guarded direct call costs a map-key
 match". It also notes that "everything else … is fixable without changing
 the language".
 
+**What a real program actually sends.** Catalina (jamesc/beamtalk-catalina,
+0.2.0) is the Thousand Island port that motivates this epic, and every class
+in it is `typed`. A compiler instrumented to print each dynamic-dispatch site
+together with its receiver's static type finds **220 dynamic send sites**
+across its 21 source files (2026-10-29, beamtalk main f5accd5):
+
+| Receiver's static type | Sites | Examples |
+|---|---|---|
+| Built-in collections and primitives (`Dictionary` 31, `List` 22, `Tuple` 10, `Binary` 2, `Boolean` 2, `Integer` 1) | 68 | `Dictionary at:put:` 14, `List add:` 12, `Tuple at:` 8, `List includes:` 6 |
+| `Supervisor` subclasses (`ServerSupervisor`, `ConnectionSupervisor`, …) | 43 | instances are `beamtalk_supervisor` tuples, not tagged maps |
+| Declared `Object` | 9 | "any object" |
+| Open Value class (`SupervisionSpec`) | 6 | |
+| `Exception`/`Error`, `Symbol`, `Pid` | 15 | |
+| Actors (`Listener`, `Handler`) | 9 | |
+| Untyped: `Dynamic` 60, negation 6, other 4 | 70 | `Result` checks (`error`, `isError`, `isOk`), socket calls on `Dynamic` transport values (`close:`, `send:data:`) |
+
+Two-thirds of the sites already have a static type. The largest single group
+is built-in collections, which BT-4069's rule excludes entirely. The table is
+the baseline for this ADR's gates (§ Implementation).
+
 Class-side sends have a second cost besides speed. Every caller in the node
 queues on one class process. The `class-process-ffi` lint (BT-3999 family)
 exists because running a class method in the class process is *wrong* for
@@ -168,9 +188,68 @@ Consequences of the rule:
   - `fieldAt:put:`;
   - receivers whose class name is exported by more than one package in scope
     (BT-4151 fails closed to dynamic).
-- **Unions, `Dynamic` and untyped receivers** stay dynamic.
+- **Classes whose instances are not tagged maps are excluded.** The rule
+  covers only classes whose instance representation is a tagged map.
+  - `Supervisor` and its subclasses are excluded: their instances are
+    `{beamtalk_supervisor, …}` tuples.
+  - The declared type `Object` is excluded: it means "any object", and a
+    guard on the tag `'Object'` would never hit.
+  - Without these exclusions, 52 of Catalina's 220 sites would gain a guard
+    that can never hit.
+  - The representation test reads the same `tagged_map_routing_conformance.json`
+    fixture.
+- **Unions, `Dynamic` and untyped receivers** stay dynamic. Catalina's 70
+  untyped sites are a typing problem at the FFI and transport boundary, not a
+  dispatch problem. Better return types there are separate work.
 - **Actor receivers** are out of scope. A send to an actor is a `gen_server`
   call whatever its type, and its hook cost is BT-4113.
+
+### 2b. Built-in receivers: guarded by representation
+
+Built-in classes such as `List`, `Dictionary` and `Tuple` have no class tag.
+Their instances *are* the Erlang term, and the dynamic path routes them by
+representation:
+- `beamtalk_primitive:send/3`, then `dispatch_via_module/3`, then
+  `module_for_value/2`, then `Mod:dispatch(Sel, Args, R)`;
+- for a map without `'$beamtalk_class'`, `send_map/3` routes to Dictionary's
+  module.
+
+When a receiver's static type is `Known{B}` for one of these built-ins, the
+guard is the **representation test** that `module_for_value` itself uses, and
+the target is the module it would pick:
+
+```erlang
+case call 'erlang':'is_list'(R) of
+  <'true'>  -> call 'bt@stdlib@list':'dispatch'('includes:', [X], R)
+  <'false'> -> call 'beamtalk_message_dispatch':'send'(R, 'includes:', [X])
+end
+```
+
+| Static type | Guard | Target |
+|---|---|---|
+| `List` | `is_list(R)` | `bt@stdlib@list` |
+| `Dictionary` | `is_map(R)` and no `'$beamtalk_class'` key | `bt@stdlib@dictionary` |
+| `Tuple` | `is_tuple(R)` and the first element is not a reserved tag (`beamtalk_object`, `beamtalk_future`, `beamtalk_supervisor`, …) | `bt@stdlib@tuple` |
+| `Integer`, `Float`, `Boolean`, `Symbol`, … | the matching `module_for_value/1` clause | its module |
+
+Rules:
+- **`String`/`Binary` keep their current routing.** Their selector-aware fast
+  path consults `beamtalk_extensions:has('String', Sel)`. Matching that would
+  need a run-time check of its own, so these two types are left to a later
+  phase if measurements justify it.
+- **Pin it to the fixture.** The table (guard, reserved tuple tags, target
+  module) is generated from `tagged_map_routing_conformance.json`, extended
+  with the representation rows. It is never restated in Rust. The Erlang
+  side's conformance test pins `module_for_value/1`, `send/3`'s tuple and map
+  clauses and `beamtalk_message_dispatch:send/3`'s future/supervisor clauses
+  to the same rows.
+- **Why it is sound.**
+  - The guard is the exact clause the dynamic path would take, and the target
+    is the module it would call.
+  - Extensions on built-ins and DNU are handled inside `Mod:dispatch/3`, as
+    they are today.
+  - A value that fails the guard takes the dynamic path. That includes a
+    lying annotation and a reserved tagged tuple typed as `Tuple`.
 
 ### 3. Class side: the class process exists only to own class state
 
@@ -528,8 +607,9 @@ Rejected: it is the source of BT-4126, BT-4133, BT-4134 and BT-4037. A
 ## Consequences
 
 ### Positive
-- Typed sends to any tagged-map class, open or sealed, cost about what row 1a
-  costs today (~3 red / 0 w, from 29 / 28). Self-sends in open Values follow.
+- Typed sends to any tagged-map class, open or sealed, and to the built-in
+  collections (§2b) cost about what row 1a costs today (~3 red / 0 w, from
+  29 / 28). Self-sends in open Values follow.
 - Class methods of stateless classes cost a flag read plus a remote call,
   instead of ~145 red / ~450 w and a node-wide queue (rows 3b, 3c).
   `Exception signal:` (BT-4115) and `Result ok:` follow from the general
@@ -568,8 +648,14 @@ Rejected: it is the source of BT-4126, BT-4133, BT-4134 and BT-4037. A
   type checker pick candidates (an exact type is never a union) and no
   longer gates dispatch.
 - ADR 0025's "identical bytecode" claim is reworded to "identical results".
-- Primitive receivers (`NON_TAGGED_MAP_CLASSES`) are unchanged. A future ADR
-  could apply the same guard idea with `is_integer`/`is_binary` guards.
+- `String` and `Binary` receivers keep their current routing (§2b).
+- **The Catalina measurement.**
+  - §2 and §2b together convert about 74 of Catalina's 220 dynamic sites
+    (34%): the 68 built-ins, less the String/Binary ones, plus the open Value
+    class sites.
+  - The 70 untyped sites stay dynamic until the FFI and transport boundary is
+    typed.
+  - Actor sends remain gen_server calls (BT-4113).
 
 ## Implementation
 
@@ -588,16 +674,33 @@ deterministic reductions and words).
   or runtime fun on an *ancestor* of the receiving class.
 - Results *and* error shapes must be identical.
 - Add vs-elixir rows for an open-Value typed send, an open-class class
-  method, and a class-reference loop.
+  method, a class-reference loop, and typed `List includes:`,
+  `Dictionary at:put:` and `Tuple at:` sends.
+- Add the dynamic-site report as a supported tool: the existing
+  `BEAMTALK_CODEGEN_DIAGNOSTICS` "dynamic dispatch" hint gains the receiver's
+  static type and the reason it stayed dynamic. Record Catalina's per-type
+  table (Context) as the baseline.
+- Extend the routing fixture with representation rows (§2b) and pin the
+  Erlang side to it.
 
 **Phase 1 — instance side (S–M), codegen.**
 - Drop `is_sealed` from `typed_sealed_value_target` and rename it
   (`typed_tagged_target`).
 - Make sure Value self-sends in open classes reach it.
-- Keep all existing exclusions, and land BT-4151's ambiguity check first or
-  together.
+- Keep all existing exclusions, and add the non-tagged-map exclusions:
+  `Supervisor` subclasses and the `Object` root type.
+- Land BT-4151's ambiguity check first or together.
 - Files: `dispatch_codegen.rs`, `tests/typed_sealed.rs`.
 - Gate: rows 1b and 4c within 10% of 1a; 5b reduced by at least 25 red.
+
+**Phase 1b — built-in receivers (M), codegen.**
+- Emit the §2b representation guards from the fixture-generated table for
+  `List`, `Dictionary`, `Tuple` and the numeric, Boolean and Symbol
+  built-ins.
+- Files: `dispatch_codegen.rs`, the routing fixture and its EUnit
+  conformance test.
+- Gate: the new built-in rows cost within 10% of row 1a. Catalina's dynamic
+  sites fall from 220 to at most 150, re-measured with the Phase 0 report.
 
 **Phase 2 — class side, runtime (M).**
 - Add "has class variables" to the inputs of
