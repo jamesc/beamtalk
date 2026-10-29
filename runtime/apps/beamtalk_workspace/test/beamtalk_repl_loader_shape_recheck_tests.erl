@@ -919,7 +919,20 @@ precheck_class_shape_leaves_the_live_class_untouched_test_() ->
                     ),
                     ?assertEqual(false, code:is_loaded(beamtalk_precheck_scratch)),
                     Instance = beamtalk_class_dispatch:class_send(ClassPid, spawn, []),
-                    ?assertEqual(7, beamtalk_message_dispatch:send(Instance, count, []))
+                    ?assertEqual(7, beamtalk_message_dispatch:send(Instance, count, [])),
+
+                    %% The meta the precheck reads off the Core Erlang text
+                    %% agrees with what the installed module's own
+                    %% `__beamtalk_meta/0` returns for the shape keys.
+                    ShapeKeys = [field_types, field_kinds, shape_version, shape_migrations],
+                    {ok, #{core_erlang := Core}} = beamtalk_compiler:compile(
+                        Source, beamtalk_repl_compiler:build_class_indexes()
+                    ),
+                    {ok, ParsedMeta} = beamtalk_compiler:class_meta_from_core_erlang(Core),
+                    ?assertEqual(
+                        maps:with(ShapeKeys, ModuleBefore:'__beamtalk_meta'()),
+                        maps:with(ShapeKeys, ParsedMeta)
+                    )
                 end)
             ]
         end}}.
