@@ -1,7 +1,7 @@
 # ADR 0142: The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller
 
 ## Status
-Proposed (2026-10-29)
+Accepted (2026-10-29)
 
 ## Context
 
@@ -378,7 +378,7 @@ Rejected (steelman C).
 
 ## Implementation
 
-All phases sit under epic BT-4112, after BT-4292, the differential harness of
+All phases sit under epic BT-4297, after BT-4292, the differential harness of
 epic BT-4291.
 
 **Phase 0 — differential rows (S).** Add these class-side rows to BT-4292's
@@ -433,6 +433,20 @@ open-class class method.
   *Passing Blocks Through Class Methods* and *Self-Sends and Overrides*.
 - Update CLAUDE.md's "Blocks into class methods" rule.
 - Add a CHANGELOG migration note.
+
+## Implementation Tracking
+
+**Epic:** BT-4297
+
+**Issues:**
+- Phase 0: BT-4298, class-side differential rows and vs-elixir rows. Blocked by BT-4292.
+- Phase 1a: BT-4299, the flag's class-variable input and erasure points, plus process-bound selector metadata.
+- Phase 1b: BT-4300, dynamic class sends run in the caller. This subsumes BT-4114.
+- Phase 2a: BT-4301, guarded static class sends, the `nil` `ClassSelf` retired, and one eligibility rule.
+- Phase 2b: BT-4302, the `class-method-process-resource` lint.
+- Phase 3: BT-4303, REPL-protocol e2e test, docs, ADR amendments, CLAUDE.md and CHANGELOG.
+
+**Status:** Planned
 
 ## Migration Path
 
