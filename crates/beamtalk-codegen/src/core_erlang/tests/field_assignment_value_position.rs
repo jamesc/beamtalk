@@ -337,7 +337,35 @@ fn field_assignment_value_position_corpus_hybrid_loops() {
         .is_ok()
     };
     let mut failures: Vec<String> = Vec::new();
+    // BT-3982: every row also with its nested field write `(self.n := X)`
+    // spliced into each evaluated-block `EXPRS` form (`[:y | self.n := y]
+    // value: X` and friends): the loop plan leaves evaluated blocks out of
+    // its control-flow guard, so such a body may take hybrid params and its
+    // producer lowers there.
+    let evaluated = [
+        "([:y | self.n := y] value: X)",
+        "[self.n := X] value",
+        "([:a :b | self.n := a] value: X value: 0)",
+    ];
+    let mut cases: Vec<(String, String)> = Vec::new();
     for (name, body) in HYBRID_LOOP_METHODS {
+        cases.push(((*name).to_string(), (*body).to_string()));
+        let Some(start) = body.find("(self.n := ") else {
+            continue;
+        };
+        let close = start + body[start..].find(')').expect("closing paren");
+        let operand = &body[start + "(self.n := ".len()..close];
+        for form in evaluated {
+            let spliced = format!(
+                "{}{}{}",
+                &body[..start],
+                form.replace('X', operand),
+                &body[close + 1..]
+            );
+            cases.push((format!("{name} / {form}"), spliced));
+        }
+    }
+    for (name, body) in &cases {
         let src = format!("{HEADER}\n  probe =>\n{body}");
         if !passes(&src) {
             failures.push(format!("hybrid_loop / {name}:\n{src}"));

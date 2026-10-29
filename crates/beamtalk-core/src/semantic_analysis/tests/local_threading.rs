@@ -4310,14 +4310,14 @@ fn evaluated_block_accepted(src: &str) -> bool {
     residual_messages(src, None).is_empty()
 }
 
-/// Whether every ADR 0131 diagnostic of `src` is BT-3948's
+/// Whether `src` is rejected, and only by BT-3948
 /// (`InlineBlockLocalInLoop`, BT-3947 item 2): a block evaluated in place that
 /// assigns a local of its own inside a counted or `whileTrue:` loop, which is
-/// not this shape and stays an error.
+/// not this shape and stays an error. At least one diagnostic, so a shape
+/// that is silently accepted does not pass.
 fn only_bt3948(src: &str) -> bool {
-    residual_messages(src, None)
-        .iter()
-        .all(|m| m.contains("BT-3948"))
+    let messages = residual_messages(src, None);
+    !messages.is_empty() && messages.iter().all(|m| m.contains("BT-3948"))
 }
 
 /// The generated corpus of BT-3981, hosts x positions x evaluated blocks x
@@ -4433,11 +4433,20 @@ fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
     let src =
         in_actor("r := 0\ni := 0\n[i < 1] whileTrue: [i := i + 1. r := [n := 3. n] value]\nr");
     assert!(only_bt3948(&src), "{src}");
+    // In a counted loop BT-3948 still rejects the block whose local is
+    // assigned below a nested block (another evaluated block, a conditional
+    // arm); the other bodies are accepted and answer 3 on a BEAM
+    // (`bt3982evalblock_test.bt` `testCountedBody*`, `testTimesBody*`).
+    let bt3948_in_counted = [
+        "r := 3. [[n := 3. n] value] value",
+        "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
+        "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
+    ];
     for (host, counted) in hosts {
         for body in bodies {
             let program = format!("r := 0\n{}\nr", host.replace("{B}", body));
             let actor = in_actor(&program);
-            if counted {
+            if counted && bt3948_in_counted.contains(&body) {
                 assert!(only_bt3948(&actor), "{actor}");
             } else {
                 assert!(evaluated_block_accepted(&actor), "{actor}");
@@ -4487,14 +4496,13 @@ fn evaluated_block_under_any_enclosing_construct_is_accepted() {
         let src = in_actor(body);
         assert!(evaluated_block_accepted(&src), "{src}");
     }
-    // `whileFalse:` is a loop: the block's own local is BT-3948's.
-    for body in [
-        "i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]",
-        "r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr",
-    ] {
-        let src = in_actor(body);
-        assert!(only_bt3948(&src), "{src}");
-    }
+    // `whileFalse:` is a loop: the block's own local is BT-3948's when the
+    // body also writes the counter; assigned to the one local the loop
+    // writes it is accepted (`testWhileFalseAssign` answers 3).
+    let src = in_actor("i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]");
+    assert!(only_bt3948(&src), "{src}");
+    let src = in_actor("r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr");
+    assert!(evaluated_block_accepted(&src), "{src}");
     let bt3971 = "Actor subclass: A\n  state: hits = 0\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
     assert!(evaluated_block_accepted(bt3971));
 }

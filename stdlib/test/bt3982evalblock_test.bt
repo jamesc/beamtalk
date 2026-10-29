@@ -208,3 +208,60 @@ TestCase subclass: Bt3982EvalblockTest
 
   testToDoBlockParam =>
     self assert: (Bt3982EvalblockActor spawn toDoBlockParam) equals: 15
+
+  testHybridWhileOperand =>
+    self assert: (Bt3982EvalblockActor spawn hybridWhileOperand) equals: {2, 3}
+
+  testHybridToDoNested =>
+    self assert: (Bt3982EvalblockActor spawn hybridToDoNested) equals: {3, 3}
+
+  testHybridWhileUnary =>
+    self assert: (Bt3982EvalblockActor spawn hybridWhileUnary) equals: {2, 2}
+
+  testHybridDoNested =>
+    self assert: (Bt3982EvalblockActor spawn hybridDoNested) equals: {2, 2}
+
+  testCountedBodyA =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyA) equals: 3
+
+  testCountedBodyB =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyB) equals: 3
+
+  testCountedBodyC =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyC) equals: 3
+
+  testCountedBodyD =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyD) equals: 3
+
+  testCountedBodyE =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyE) equals: 3
+
+  testCountedBodyF =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyF) equals: 3
+
+  testCountedBodyG =>
+    self assert: (Bt3982EvalblockActor spawn countedBodyG) equals: 3
+
+  testTimesBodyA =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyA) equals: 3
+
+  testTimesBodyB =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyB) equals: 3
+
+  testTimesBodyC =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyC) equals: 3
+
+  testTimesBodyD =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyD) equals: 3
+
+  testTimesBodyE =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyE) equals: 3
+
+  testTimesBodyF =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyF) equals: 3
+
+  testTimesBodyG =>
+    self assert: (Bt3982EvalblockActor spawn timesBodyG) equals: 3
+
+  testWhileFalseAssign =>
+    self assert: (Bt3982EvalblockActor spawn whileFalseAssign) equals: 3

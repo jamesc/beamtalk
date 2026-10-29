@@ -118,15 +118,24 @@ impl CoreErlangGenerator {
     /// sends to `self` where `State` is threaded
     /// ([`Self::value_block_needs_threading`]), or, in the REPL, it writes a
     /// binding anywhere (BT-3823). The one predicate the `value`-family
-    /// intrinsics, the loop plan ([`Self::is_inlined_evaluated_block`]) and
-    /// the actor producer gate read.
+    /// intrinsics and the actor producer gate read; its method half is
+    /// [`Self::evaluated_block_threads_writes`].
     pub(in crate::core_erlang) fn evaluated_block_inlines_with_mutations(
         &self,
         block: &Block,
     ) -> bool {
+        self.evaluated_block_threads_writes(block) || self.repl_blocks_write_bindings(&[block])
+    }
+
+    /// [`Self::evaluated_block_inlines_with_mutations`] without its REPL-only
+    /// binding clause: the block writes a captured local, or writes a field or
+    /// sends to `self` where `State` is threaded. The REPL clause is left out
+    /// of the statement classifier on purpose: a REPL block that writes a
+    /// binding is a REPL arm (`generate_repl_arm_inline`), classified by the
+    /// REPL's own producer rule, never a `Tier2ValueCall`.
+    fn evaluated_block_threads_writes(&self, block: &Block) -> bool {
         !Self::captured_mutations_for_block(block).is_empty()
             || self.value_block_needs_threading(&block_analysis::analyze_block(block))
-            || self.repl_blocks_write_bindings(&[block])
     }
 
     /// BT-3982: whether `expr` (paren-unwrapped) is an evaluated literal block
@@ -145,13 +154,14 @@ impl CoreErlangGenerator {
 
     /// Whether the evaluated literal block `block` is inlined with its writes
     /// threaded AND yields a `{Value, State}` tuple
-    /// ([`Self::evaluated_block_inlines_with_mutations`] outside a value-type
-    /// method, which splices its body as plain `let`s instead). The one rule
-    /// the statement classifier (`is_tier2_value_call`'s literal-block arm)
-    /// and the loop plan ([`Self::is_inlined_evaluated_block`]) read.
+    /// ([`Self::evaluated_block_threads_writes`] outside a value-type method,
+    /// which splices its body as plain `let`s instead). The one rule the
+    /// statement classifier (`is_tier2_value_call`'s literal-block arm) and the
+    /// loop plan ([`Self::is_inlined_evaluated_block`]) read; it is exactly the
+    /// rule `is_tier2_value_call` applied before BT-3982 in every context, the
+    /// REPL included.
     pub(in crate::core_erlang) fn evaluated_block_yields_state_tuple(&self, block: &Block) -> bool {
-        self.context != CodeGenContext::ValueType
-            && self.evaluated_block_inlines_with_mutations(block)
+        self.context != CodeGenContext::ValueType && self.evaluated_block_threads_writes(block)
     }
 
     /// Whether `block` writes a local bound outside it (`beamtalk_core`'s

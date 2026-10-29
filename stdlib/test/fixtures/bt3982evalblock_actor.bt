@@ -591,3 +591,218 @@ Actor subclass: Bt3982EvalblockActor
       sum
     ] value: 1
     ^result
+
+  hybridWhileOperand =>
+    i := 0
+    x := 0
+    [i < 3]
+      whileTrue: [
+        x := ([:y | self.count := y] value: i) + x
+        i := i + 1
+      ]
+    {self.count, x}
+
+  hybridToDoNested =>
+    1 to: 3 do: [:i | self.m := ([:y | self.count := y] value: i)]
+    {self.count, self.m}
+
+  hybridWhileUnary =>
+    i := 0
+    [i < 3]
+      whileTrue: [
+        self.m := [self.count := i] value
+        i := i + 1
+      ]
+    {self.count, self.m}
+
+  hybridDoNested =>
+    #(1, 2) do: [:e | self.m := ([:y | self.count := y] value: e)]
+    {self.count, self.m}
+
+  countedBodyA =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  countedBodyB =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        [
+          n := 3
+          n
+        ] value
+        4
+      ]
+    r
+
+  countedBodyC =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        [
+          n := 3
+          n
+        ] value
+        r := 3
+      ]
+    r
+
+  countedBodyD =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        [:k |
+          n := k
+          n
+        ] value: 3
+      ]
+    r
+
+  countedBodyE =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        q := [
+          n := 3
+          n
+        ] value
+        r := q
+      ]
+    r
+
+  countedBodyF =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := 3
+        q := [
+          n := 3
+          n
+        ] value
+        q
+      ]
+    r
+
+  countedBodyG =>
+    r := 0
+    1
+      to: 1
+      do: [:z |
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  timesBodyA =>
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  timesBodyB =>
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        [
+          n := 3
+          n
+        ] value
+        4
+      ]
+    r
+
+  timesBodyC =>
+    r := 0
+    1
+      timesRepeat: [
+        [
+          n := 3
+          n
+        ] value
+        r := 3
+      ]
+    r
+
+  timesBodyD =>
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        [:k |
+          n := k
+          n
+        ] value: 3
+      ]
+    r
+
+  timesBodyE =>
+    r := 0
+    1
+      timesRepeat: [
+        q := [
+          n := 3
+          n
+        ] value
+        r := q
+      ]
+    r
+
+  timesBodyF =>
+    r := 0
+    1
+      timesRepeat: [
+        r := 3
+        q := [
+          n := 3
+          n
+        ] value
+        q
+      ]
+    r
+
+  timesBodyG =>
+    r := 0
+    1
+      timesRepeat: [
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
+
+  whileFalseAssign =>
+    r := 0
+    [r > 1]
+      whileFalse: [
+        r := [
+          n := 3
+          n
+        ] value
+      ]
+    r
