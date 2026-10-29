@@ -607,7 +607,7 @@ unreachable_node_handle_calls_are_node_down_test() ->
                     kind = node_down,
                     class = 'BT3984RemoteSup',
                     selector = Selector,
-                    details = #{node := 'bt3984_ghost@nohost', reason := _}
+                    details = #{node := 'bt3984_ghost@localhost', reason := _}
                 }},
                 Result,
                 Selector
@@ -709,10 +709,10 @@ args_remote_erpc_timeout_is_node_down_test() ->
         meck:unload(erpc)
     end.
 
-%% A pid on a node this VM is not connected to (`NEW_PID_EXT`).
+%% A pid on a node this VM is not connected to, `bt3984_ghost@localhost`:
+%% connecting to it fails fast whatever the runner's DNS (BT-4289).
 unreachable_remote_pid() ->
-    NodeBin = atom_to_binary('bt3984_ghost@nohost', utf8),
-    binary_to_term(<<131, 88, 118, (byte_size(NodeBin)):16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+    beamtalk_dist_test_helper:unreachable_pid(bt3984_ghost).
 
 which_and_terminate_by_class_ambiguous_test() ->
     %% Several children share the class's module: which:/terminate: refuse.

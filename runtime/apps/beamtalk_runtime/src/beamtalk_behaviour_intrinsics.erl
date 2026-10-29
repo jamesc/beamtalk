@@ -1100,6 +1100,106 @@ refuse_in_own_class_process(ClassPid, Selector) when ClassPid =:= self() ->
 refuse_in_own_class_process(_ClassPid, _Selector) ->
     ok.
 
+%% BT-4290: `removeFromSystem` and `renameTo:` end in `gen_server:stop/1`,
+%% whose timeout is `infinity`. When the class process is itself blocked
+%% waiting on the caller, which `refuse_in_own_class_process/2` cannot see
+%% (a block from one of its class methods, run by another class or actor
+%% while the class waits on it, sends to it), the stop never returns. A
+%% process blocked in `gen_server:call/3` sits in `gen:do_call/4` and
+%% monitors the process it waits on, so follow that wait chain from the
+%% class, through other classes and actors (bounded). If it reaches the
+%% caller, ask the class to answer, bounded, before any side effect, and
+%% raise a structured `timeout` if it does not (the probe guards against a
+%% monitor held for another reason). A class that is merely busy is not
+%% waiting on the caller, so removal waits for it as before.
+%%
+%% Limits, each failing before any side effect or no worse than before:
+%% the walk follows every monitor of a waiting process, so a busy class
+%% whose wait chain passes a process that monitors the caller for another
+%% reason is probed and times out if it stays busy past the probe; and the
+%% check is one-shot, so a class that starts waiting on the caller after it
+%% can still hold `gen_server:stop/1` until its own class call times out
+%% (60s, `beamtalk_class_dispatch:class_method_call/3`).
+%%
+%% `doc:` and the other primitives that message the class use a bounded
+%% `gen_server:call/2` before any side effect, so they already fail rather
+%% than hang.
+-define(CLASS_RESPONSIVE_TIMEOUT, 5000).
+-define(WAIT_CHAIN_MAX_PROCESSES, 64).
+
+-spec require_class_responsive(pid(), atom(), atom()) -> ok.
+require_class_responsive(ClassPid, ClassName, Selector) ->
+    case waits_on([ClassPid], self(), #{ClassPid => true}, ?WAIT_CHAIN_MAX_PROCESSES) of
+        false -> ok;
+        true -> probe_class(ClassPid, ClassName, Selector)
+    end.
+
+%% Whether the processes in `Queue` are blocked in a `gen_server:call/3`
+%% chain that reaches `Target`: a breadth-first walk with one visited set,
+%% examining at most `Budget` processes. Local processes only.
+-spec waits_on([pid()], pid(), #{pid() => true}, non_neg_integer()) -> boolean().
+waits_on([], _Target, _Seen, _Budget) ->
+    false;
+waits_on(_Queue, _Target, _Seen, 0) ->
+    false;
+waits_on([Pid | Rest], Target, Seen, Budget) ->
+    Callees = callees(Pid),
+    case lists:member(Target, Callees) of
+        true ->
+            true;
+        false ->
+            New = [Callee || Callee <- Callees, not maps:is_key(Callee, Seen)],
+            Seen1 = maps:merge(Seen, maps:from_keys(New, true)),
+            waits_on(Rest ++ New, Target, Seen1, Budget - 1)
+    end.
+
+-spec callees(pid()) -> [pid()].
+callees(Pid) when node(Pid) =:= node() ->
+    case erlang:process_info(Pid, [current_function, monitors]) of
+        [{current_function, {gen, do_call, 4}}, {monitors, Monitors}] ->
+            [Callee || {process, Callee} <- Monitors, is_pid(Callee)];
+        _ ->
+            []
+    end;
+callees(_Pid) ->
+    [].
+
+-spec probe_class(pid(), atom(), atom()) -> ok.
+probe_class(ClassPid, ClassName, Selector) ->
+    try gen_server:call(ClassPid, class_name, ?CLASS_RESPONSIVE_TIMEOUT) of
+        _ -> ok
+    catch
+        exit:{timeout, _} ->
+            Error0 = beamtalk_error:new(timeout, ClassName, Selector),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary([
+                    <<"Class '">>,
+                    atom_to_binary(ClassName, utf8),
+                    <<"' is waiting on this process and did not answer within ">>,
+                    integer_to_binary(?CLASS_RESPONSIVE_TIMEOUT div 1000),
+                    <<" seconds; ">>,
+                    atom_to_binary(Selector, utf8),
+                    <<" was not started and nothing was changed">>
+                ])
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1,
+                    <<
+                        "A block from one of its class methods, run by another class or actor "
+                        "while the class waits on it, cannot change that class. Change it from "
+                        "outside."
+                    >>
+                )
+            );
+        exit:_ ->
+            %% The class exited before or during the probe: nothing is
+            %% waiting on the caller any more, so carry on and let the
+            %% removal or rename report the missing class as before.
+            ok
+    end.
+
 -doc """
 Set the class documentation string.
 
@@ -1196,6 +1296,7 @@ classRemoveFromSystemByName(ClassName) ->
             ),
             beamtalk_error:raise(Error1);
         ClassPid ->
+            ok = require_class_responsive(ClassPid, ClassName, removeFromSystem),
             Module = beamtalk_object_class:module_name_safe(ClassPid),
             %% Safety: refuse to remove stdlib classes
             case is_stdlib_module_name(Module) of
@@ -1740,6 +1841,7 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     ok = require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
+    ok = require_class_responsive(ClassPid, OldName, 'renameTo:'),
     ok = ensure_rename_collision_free(OldName, NewName),
     OldNameBin = atom_to_binary(OldName, utf8),
     Classification = capture_class_removal_snapshot(OldNameBin),

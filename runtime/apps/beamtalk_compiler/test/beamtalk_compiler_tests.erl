@@ -47,6 +47,10 @@ compiler_test_() ->
         {"compile_core_erlang with invalid source", fun compile_core_erlang_invalid/0},
         {"compile_core_erlang scan error", fun compile_core_erlang_scan_error/0},
         {"compile_core_erlang parse error", fun compile_core_erlang_parse_error/0},
+        {"class_meta_from_core_erlang reads a real class compile's meta (BT-4285)",
+            fun class_meta_from_core_erlang_reads_real_compile/0},
+        {"class_meta_from_core_erlang not_available cases (BT-4285)",
+            fun class_meta_from_core_erlang_not_available/0},
         {"backend defaults to port", fun backend_default_port/0},
         {"multiple compiles on same server", fun multiple_compiles/0},
         {"compile file with default options", fun compile_file_default_options/0},
@@ -208,6 +212,36 @@ compile_core_erlang_parse_error() ->
     %% Scannable but invalid Core Erlang structure
     Result = beamtalk_compiler:compile_core_erlang(<<"module 'x' []\n">>),
     ?assertMatch({error, {core_parse_error, _}}, Result).
+
+%% BT-4285: `beamtalk_repl_loader:precheck_class_shape/2` reads a pending
+%% compile's meta with this instead of loading the module (loading runs the
+%% `on_load` registration). If codegen ever stopped emitting
+%% `__beamtalk_meta/0` as a constant map, the precheck would silently report
+%% nothing; this pins that it is readable from a real class compile.
+class_meta_from_core_erlang_reads_real_compile() ->
+    Source = <<
+        "Actor subclass: MetaFromCoreTest\n"
+        "  shapeVersion: 3\n"
+        "  state: count :: Integer = 0\n"
+        "  state: name :: String = \"\"\n"
+    >>,
+    {ok, #{core_erlang := CoreErlang}} = beamtalk_compiler:compile(Source, #{}),
+    {ok, Meta} = beamtalk_compiler:class_meta_from_core_erlang(CoreErlang),
+    ?assertEqual('MetaFromCoreTest', maps:get(class, Meta)),
+    ?assertEqual([count, name], lists:sort(maps:keys(maps:get(field_types, Meta)))),
+    ?assertEqual(3, maps:get(shape_version, Meta)).
+
+class_meta_from_core_erlang_not_available() ->
+    ?assertEqual(
+        not_available, beamtalk_compiler:class_meta_from_core_erlang(<<"not core erlang">>)
+    ),
+    NoMeta = <<"module 'x' ['f'/0] attributes []\n'f'/0 = fun () -> 'ok'\nend\n">>,
+    ?assertEqual(not_available, beamtalk_compiler:class_meta_from_core_erlang(NoMeta)),
+    NotConstant = <<
+        "module 'x' ['__beamtalk_meta'/0] attributes []\n"
+        "'__beamtalk_meta'/0 = fun () -> call 'erlang':'self'()\nend\n"
+    >>,
+    ?assertEqual(not_available, beamtalk_compiler:class_meta_from_core_erlang(NotConstant)).
 
 backend_default_port() ->
     Original = os:getenv("BEAMTALK_COMPILER"),

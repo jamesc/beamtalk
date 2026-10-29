@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: a non-Boolean receiver whose `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+// answer a symbol without calling the block. An inline boolean conditional
+// sends the message to it, so the answer is the symbol and no arm's write
+// happens. See stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+Value subclass: NonBooleanCondIgnoring
+
+  ifTrue: _aBlock => #ignoredIfTrue
+
+  ifFalse: _aBlock => #ignoredIfFalse
+
+  ifTrue: _trueBlock ifFalse: _falseBlock => #ignoredIfTrueIfFalse

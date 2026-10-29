@@ -160,6 +160,31 @@ pub(crate) fn codegen(src: &str) -> String {
         .expect("codegen should succeed")
 }
 
+/// BT-4244: asserts that every runtime send of `selector` in `code` (outside the
+/// `methodXref` metadata line) is an inline boolean conditional's non-Boolean
+/// fallback: the body of its `CondNoMatch` wildcard clause, sent to the
+/// scrutinised `Cond` variable. The `<'true'>`/`<'false'>` arms stay inline.
+pub(crate) fn assert_selector_sent_only_by_fallback(code: &str, selector: &str) {
+    let needle = format!("'{selector}', [");
+    for line in code.lines().filter(|line| !line.contains("'methodXref'")) {
+        for (at, _) in line.match_indices(&needle) {
+            let before = &line[..at];
+            let Some(start) = before.rfind("CondNoMatch") else {
+                panic!("`{selector}` sent outside a CondNoMatch clause:\n{code}")
+            };
+            let clause = &before[start..];
+            assert!(
+                !clause.contains("<'true'>") && !clause.contains("<'false'>"),
+                "`{selector}` sent from a Boolean arm, not the CondNoMatch fallback:\n{code}"
+            );
+            assert!(
+                clause.contains("'beamtalk_message_dispatch':'send'(_Cond@"),
+                "the CondNoMatch fallback should send `{selector}` to the Cond var:\n{code}"
+            );
+        }
+    }
+}
+
 /// Parse `src` as a Beamtalk module and run codegen, answering the codegen error's message
 /// instead of panicking (for the corpora that assert a shape is a compile error).
 pub(crate) fn compile(src: &str) -> std::result::Result<String, String> {

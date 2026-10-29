@@ -1,0 +1,89 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: the actor column of the non-Boolean conditional receiver matrix:
+// the methods of NonBooleanCondClass as actor instance methods, plus
+// `field...` methods whose arm writes a field (the mutation lowering, whose
+// fallback send is bracketed so a block the receiver's method runs writes
+// the actor's state) and a `^` out of an arm inside a `whileTrue:` loop. The
+// expected answers are in stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+Actor subclass: NonBooleanCondActor
+  state: n = 0
+
+  n => self.n
+
+  reset => self.n := 0
+
+  pureIfTrue: x => x ifTrue: [1]
+
+  pureIfFalse: x => x ifFalse: [1]
+
+  pureIfTrueIfFalse: x => x ifTrue: [1] ifFalse: [2]
+
+  localIfTrue: x =>
+    t := 0
+    r := x ifTrue: [t := t + 1]
+    #[r, t]
+
+  localIfFalse: x =>
+    t := 0
+    r := x ifFalse: [t := t + 1]
+    #[r, t]
+
+  localIfTrueIfFalse: x =>
+    t := 0
+    r := x ifTrue: [t := 1] ifFalse: [t := 2]
+    #[r, t]
+
+  localTailIfTrue: x =>
+    t := 0
+    x ifTrue: [t := t + 1]
+
+  localCollectIfTrue: x =>
+    t := 0
+    rs := #(1) collect: [:_i | x ifTrue: [t := t + 1]]
+    #[rs first, t]
+
+  fieldIfTrue: x =>
+    self.n := 0
+    r := x ifTrue: [self.n := self.n + 1]
+    #[r, self.n]
+
+  fieldIfFalse: x =>
+    self.n := 0
+    r := x ifFalse: [self.n := self.n + 1]
+    #[r, self.n]
+
+  fieldIfTrueIfFalse: x =>
+    self.n := 0
+    r := x ifTrue: [self.n := 1] ifFalse: [self.n := 2]
+    #[r, self.n]
+
+  fieldTailIfTrue: x =>
+    self.n := 0
+    x ifTrue: [self.n := self.n + 1]
+
+  fieldDoIfTrue: x =>
+    self.n := 0
+    #(1) do: [:_i | x ifTrue: [self.n := self.n + 1]]
+    self.n
+
+  loopReturnIfTrue: x =>
+    self.n := 5
+    i := 0
+    [i < 1]
+      whileTrue: [
+        i := i + 1
+        x ifTrue: [^self.n]
+      ]
+    #none
+
+  returnIfTrue: x =>
+    self.n := 0
+    x
+      ifTrue: [
+        self.n := 7
+        ^#early
+      ]
+    #late
