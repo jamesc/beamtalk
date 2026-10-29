@@ -411,3 +411,21 @@ TestCase subclass: Bt3947InlineBlockLoopTest
 
   testValueCell52 =>
     self assert: (Bt3947InlineBlockLoopValue new cell52) equals: 9
+
+  testActorStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopActor spawn storedClosureInvokedAfterLoop) equals: 12
+
+  testActorStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopActor spawn storedClosureInvokedInLoop) equals: 6
+
+  testClassStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopClass storedClosureInvokedAfterLoop) equals: 12
+
+  testClassStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopClass storedClosureInvokedInLoop) equals: 6
+
+  testValueStoredClosureInvokedAfterLoop =>
+    self assert: (Bt3947InlineBlockLoopValue new storedClosureInvokedAfterLoop) equals: 12
+
+  testValueStoredClosureInvokedInLoop =>
+    self assert: (Bt3947InlineBlockLoopValue new storedClosureInvokedInLoop) equals: 6

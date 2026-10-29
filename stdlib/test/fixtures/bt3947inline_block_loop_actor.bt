@@ -720,3 +720,37 @@ Actor subclass: Bt3947InlineBlockLoopActor
     t := 0
     1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]
     t
+
+  // Cell 25 (BT-3948's conservative `fs add: [:x | [:z | w := z. w] value: x]`,
+  // never measured): a closure whose body evaluates a block that assigns its
+  // own local, stored in the loop body and invoked after the loop, and one
+  // invoked inside the loop.
+  storedClosureInvokedAfterLoop =>
+    fs := #()
+    1
+      to: 3
+      do: [:i |
+        fs := fs
+          add: [:x |
+            [:z |
+              w := z + i
+              w
+            ] value: x
+          ]
+      ]
+    fs inject: 0 into: [:a :f | a + (f value: 2)]
+
+  storedClosureInvokedInLoop =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        f := [:x |
+          [:z |
+            w := z
+            w
+          ] value: x
+        ]
+        t := t + (f value: i)
+      ]
+    t
