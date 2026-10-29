@@ -126,6 +126,7 @@ mod dispatch_spec;
 mod driver;
 #[cfg(any(test, feature = "test"))]
 pub mod dropped_assignment_probe;
+mod dynamic_site_report;
 pub mod erlang_types;
 mod error;
 mod errors;
@@ -143,6 +144,7 @@ mod options;
 mod patterns;
 pub mod primitive_bindings;
 mod primitives;
+mod routing;
 pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;

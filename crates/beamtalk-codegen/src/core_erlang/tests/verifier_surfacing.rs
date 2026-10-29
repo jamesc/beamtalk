@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-3724 (ADR 0111 amendment): `ThreadedIr` verifier findings reach the
-//! driver as `internal:` warnings, and *only* those are forwarded by
+//! driver as `internal:` warnings, and — besides the opt-in codegen hints
+//! (BT-4292) — *only* those are forwarded by
 //! [`generate_module_surfacing_verifier`]; generation still succeeds.
 
 use crate::core_erlang::{
@@ -53,10 +54,65 @@ fn only_verifier_diagnostics_are_forwarded() {
     let other = Diagnostic::warning("some other codegen warning", Span::new(0, 1));
     let verifier = Diagnostic::warning("internal: x", Span::new(0, 1))
         .with_category(DiagnosticCategory::InternalVerifier);
+    let opt_in_hint = Diagnostic::hint("Send 'x': dynamic dispatch (...)", Span::new(0, 1))
+        .with_category(DiagnosticCategory::CodegenReport);
+    // An unconditional hint of another category (e.g. a `trait_expansion`
+    // "provides no methods" hint) is not a codegen report: dropped.
+    let other_hint = Diagnostic::hint("provides no methods", Span::new(0, 1))
+        .with_category(DiagnosticCategory::Type);
     let mixed = GeneratedModule {
         code: module.code,
-        warnings: vec![other, verifier.clone()],
+        warnings: vec![other, verifier.clone(), opt_in_hint.clone(), other_hint],
     };
     let (_, forwarded) = mixed.into_code_and_verifier_diagnostics();
-    assert_eq!(forwarded, vec![verifier]);
+    assert_eq!(forwarded, vec![verifier, opt_in_hint]);
+}
+
+/// BT-4292: the dynamic-site report reaches the driver when asked for, and
+/// nothing of it when not.
+#[test]
+fn codegen_hints_are_surfaced_only_on_request() {
+    let tokens =
+        beamtalk_core::source_analysis::lex_with_eof("Object subclass: Probe\n  go: x => x foo\n");
+    let module = beamtalk_core::source_analysis::parse(tokens).0;
+    let (_, on) = generate_module_surfacing_verifier(
+        &module,
+        CodegenOptions::new("probe").with_codegen_diagnostics(true),
+    )
+    .unwrap();
+    assert!(
+        on.iter()
+            .any(|d| d.severity == Severity::Hint && d.message.contains("dynamic dispatch")),
+        "{on:?}"
+    );
+    let (_, off) = generate_module_surfacing_verifier(
+        &module,
+        CodegenOptions::new("probe").with_codegen_diagnostics(false),
+    )
+    .unwrap();
+    assert!(off.is_empty(), "{off:?}");
+}
+
+/// BT-4292: the `StateAcc` fallback line of the loop report is a codegen report
+/// hint too, surfaced next to the optimized-convention lines.
+#[test]
+fn stateacc_fallback_hint_is_surfaced_on_request() {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Actor subclass: Ctr\n",
+        "  state: n = 0\n\n",
+        "  tick => self.n := self.n + 1\n\n",
+        "  run =>\n",
+        "    x := 0\n",
+        "    [x < 10] whileTrue: [self tick. x := x + 1]\n",
+    ));
+    let module = beamtalk_core::source_analysis::parse(tokens).0;
+    let (_, on) = generate_module_surfacing_verifier(
+        &module,
+        CodegenOptions::new("probe").with_codegen_diagnostics(true),
+    )
+    .unwrap();
+    assert!(
+        on.iter().any(|d| d.message.contains("StateAcc fallback")),
+        "{on:?}"
+    );
 }

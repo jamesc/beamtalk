@@ -707,6 +707,11 @@ pub enum DiagnosticCategory {
     /// blocks a build. Not suppressible by `@expect`, not a `[diagnostics]`
     /// key — the user cannot act on it except by reporting it.
     InternalVerifier,
+    /// An opt-in codegen report hint, emitted only when
+    /// `BEAMTALK_CODEGEN_DIAGNOSTICS=1` asked for it (the BT-4292
+    /// dynamic-site report among them). Drivers surface exactly this
+    /// category alongside `InternalVerifier`. Not a `[diagnostics]` key.
+    CodegenReport,
 }
 
 /// A secondary note attached to a diagnostic.

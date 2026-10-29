@@ -642,10 +642,14 @@ impl CoreErlangGenerator {
     ///
     /// These are informational diagnostics about codegen decisions (calling conventions,
     /// dynamic dispatch, NLR throw/catch, etc.). Emitted as `Diagnostic::hint` by default.
+    ///
+    /// Tagged [`DiagnosticCategory::CodegenReport`], the category drivers
+    /// surface (`GeneratedModule::into_code_and_verifier_diagnostics`,
+    /// BT-4292); only emit it behind the opt-in gate, or it reaches every build.
     pub(in crate::core_erlang) fn emit_codegen_diagnostic(&mut self, message: String, span: Span) {
         if self.codegen_diagnostics_enabled {
             self.add_codegen_warning(
-                Diagnostic::hint(message, span).with_category(DiagnosticCategory::Type),
+                Diagnostic::hint(message, span).with_category(DiagnosticCategory::CodegenReport),
             );
         }
     }
@@ -653,6 +657,8 @@ impl CoreErlangGenerator {
     /// Emits a `StateAcc` fallback diagnostic, gated by `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
     ///
     /// Promoted to `Diagnostic::warning` when `BEAMTALK_WARN_STATEACC=1` is also set.
+    /// Either way tagged [`DiagnosticCategory::CodegenReport`], so the report
+    /// surfaces it alongside the optimized loop conventions.
     pub(in crate::core_erlang) fn emit_stateacc_fallback_diagnostic(
         &mut self,
         message: String,
@@ -663,13 +669,13 @@ impl CoreErlangGenerator {
                 self.add_codegen_warning(
                     Diagnostic::warning(message, span)
                         .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
-                        .with_category(DiagnosticCategory::Type),
+                        .with_category(DiagnosticCategory::CodegenReport),
                 );
             } else {
                 self.add_codegen_warning(
                     Diagnostic::hint(message, span)
                         .with_hint("Extract the expression into a local variable or method to avoid state-accumulator fallback")
-                        .with_category(DiagnosticCategory::Type),
+                        .with_category(DiagnosticCategory::CodegenReport),
                 );
             }
         }

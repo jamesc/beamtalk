@@ -3682,14 +3682,17 @@ mod tests {
             .expect("workspace root is valid UTF-8")
     }
 
-    /// `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
-    /// the `binary.bt` instance selectors that `string.bt` inherits unchanged
-    /// (byte-level primitives, safe to route straight to the Binary module
-    /// without the string-delegation hop).
-    /// This test recomputes that set from the real `.bt` sources — Binary's own
-    /// instance selectors minus whatever String redefines — and fails if it
-    /// drifts from the hardcoded Erlang list, so a future edit to either file
-    /// that changes the override relationship is caught here instead of
+    /// The selectors `beamtalk_primitive:is_string_binary_shared_selector/1`
+    /// routes straight to the Binary module — the `binary.bt` instance
+    /// selectors that `string.bt` inherits unchanged — are the `String` row's
+    /// `special_selectors` in the shared routing fixture
+    /// (`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`,
+    /// BT-4292). This test recomputes that set from the real `.bt` sources —
+    /// Binary's own instance selectors minus whatever String redefines — and
+    /// fails if it drifts from the fixture; the Erlang half
+    /// (`beamtalk_tagged_map_routing_conformance_tests`) checks the Erlang
+    /// function against the same fixture row, so a future edit to either
+    /// file that changes the override relationship is caught instead of
     /// silently reintroducing a binary/string dispatch mismatch.
     ///
     /// This only sees overrides made by editing `binary.bt`/`string.bt`
@@ -3732,30 +3735,34 @@ mod tests {
             .filter(|selector| !string_overrides.contains(selector))
             .collect();
 
-        // Mirrors beamtalk_primitive:is_string_binary_shared_selector/1 in
-        // runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl — keep both
-        // lists identical.
-        let hardcoded: std::collections::BTreeSet<&str> = [
-            "byteAt:",
-            "part:size:",
-            "concat:",
-            "toBytes",
-            "asStringUnchecked",
-            "asBase64",
-            "asBase64Url",
-            "asHex",
-            "bitSize",
-        ]
-        .into_iter()
-        .collect();
+        let fixture_path = root.join(
+            "runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json",
+        );
+        let fixture: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&fixture_path).expect("routing fixture should be readable"),
+        )
+        .expect("routing fixture is JSON");
+        let string_row = fixture["rows"]
+            .as_array()
+            .expect("fixture `rows` list")
+            .iter()
+            .find(|row| row["class"] == "String")
+            .expect("the routing fixture has a String row");
+        let fixture_shared: std::collections::BTreeSet<&str> = string_row["special_selectors"]
+            .as_array()
+            .expect("String row `special_selectors` list")
+            .iter()
+            .map(|selector| selector.as_str().expect("selector is a string"))
+            .collect();
 
         assert_eq!(
-            inherited_unchanged, hardcoded,
+            inherited_unchanged, fixture_shared,
             "binary.bt selectors NOT overridden by string.bt (left) no longer \
-             match beamtalk_primitive.erl's is_string_binary_shared_selector/1 \
-             (right). Update that Erlang function to match — a selector only \
-             belongs there if string.bt truly inherits it unchanged from \
-             binary.bt."
+             match the String row's special_selectors in \
+             tagged_map_routing_conformance.json (right). Update the fixture \
+             and beamtalk_primitive.erl's is_string_binary_shared_selector/1 — \
+             a selector only belongs there if string.bt truly inherits it \
+             unchanged from binary.bt."
         );
     }
 

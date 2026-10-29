@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: the open parent of the guarded-dispatch differential fixtures
+// (guarded_dispatch_differential_test.bt). Its methods are what a subclass
+// receiver inherits, what an extension on the subclass overrides, and what
+// removing that extension re-exposes.
+
+Value subclass: GuardedDiffBase
+  field: x :: Integer = 0
+
+  baseOnly -> Symbol => #fromBase
+
+  describe -> String => "base"
+
+  // Overridden by an extension on GuardedDiffPoint (ADR 0066).
+  shadowedByExtension -> Symbol => #fromBase
+
+  // Overridden by an extension the test installs and then removes.
+  shadowedThenRemoved -> Symbol => #fromBase

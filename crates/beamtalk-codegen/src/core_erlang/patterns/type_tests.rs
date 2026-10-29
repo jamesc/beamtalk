@@ -10,73 +10,13 @@
 //! own doc comment for the full strategy breakdown — dispatched from
 //! `generate_match_chain` (`patterns::match_lowering`).
 
+use super::super::routing::{self, Guard};
 use super::super::{CoreErlangGenerator, Result};
 use super::match_lowering::MatchThreading;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Identifier, MatchArm};
-
-/// Which of [`CoreErlangGenerator::generate_type_pattern`]'s runtime-test
-/// shapes a class name selects — see that method's doc for the full
-/// strategy breakdown. A class name absent from [`TYPE_TESTS`] (an ordinary
-/// actor, `Supervisor`/`DynamicSupervisor` subclass, or tagged `Value`
-/// subclass) falls through to
-/// [`CoreErlangGenerator::dispatch_type_pattern_strategy`]'s
-/// hierarchy-dependent default — that choice needs a `self.class_hierarchy`
-/// lookup, not just the name, so it cannot be a static table entry.
-#[derive(Clone, Copy)]
-enum TypeTest {
-    /// A guard-safe boolean-returning BIF (`is_integer`, `is_float`,
-    /// `is_list`, `is_function`, `is_pid`, `is_reference`, `is_port`).
-    Bif(&'static str),
-    /// `String` — exactly the `{'beamtalk_string', bytes}` 2-tuple tag
-    /// (BT-4173; a bare binary is a `Binary`, never a `String`).
-    String,
-    /// `Binary` — subclass-aware (BT-4228): a bare binary **or** the
-    /// `String` tag, agreeing with `isKindOf: Binary`. `Binary` is sealed
-    /// and `String` is its only subclass, so the closed subclass set is a
-    /// constant-time test, not ADR 0107 Phase B's general subclass dispatch.
-    Binary,
-    /// `Bitstring` (ADR 0141) — `is_bitstring` and not `is_binary`: a
-    /// bitstring that is not byte-aligned. `Binary` is not its subclass
-    /// or superclass, so neither test matches the other's values.
-    Bitstring,
-    /// `Tuple` — any tuple except the reserved actor/supervisor 4-tuple tags
-    /// and the `String` 2-tuple tag.
-    Tuple,
-    /// `Symbol` — `is_atom` minus `nil`/`true`/`false`.
-    Symbol,
-    /// `True`/`False`/`Nil`/`UndefinedObject` — exact single-atom match.
-    Atom(&'static str),
-    /// `Dictionary` — tagged-class test for the "no `$beamtalk_class` key" tag.
-    UntaggedMap,
-}
-
-/// Data table replacing `dispatch_type_pattern_strategy`'s
-/// class-name match arms for every class whose runtime-test shape depends
-/// only on the name (not on `self.class_hierarchy`, unlike the actor/
-/// supervisor/generic-tagged-class fallback — see [`TypeTest`]'s doc).
-static TYPE_TESTS: &[(&str, TypeTest)] = &[
-    ("String", TypeTest::String),
-    ("Binary", TypeTest::Binary),
-    ("Bitstring", TypeTest::Bitstring),
-    ("Integer", TypeTest::Bif("is_integer")),
-    ("Float", TypeTest::Bif("is_float")),
-    ("List", TypeTest::Bif("is_list")),
-    ("Block", TypeTest::Bif("is_function")),
-    ("Pid", TypeTest::Bif("is_pid")),
-    ("Reference", TypeTest::Bif("is_reference")),
-    ("Port", TypeTest::Bif("is_port")),
-    ("Tuple", TypeTest::Tuple),
-    ("Symbol", TypeTest::Symbol),
-    ("Boolean", TypeTest::Bif("is_boolean")),
-    ("True", TypeTest::Atom("true")),
-    ("False", TypeTest::Atom("false")),
-    ("Nil", TypeTest::Atom("nil")),
-    ("UndefinedObject", TypeTest::Atom("nil")),
-    ("Dictionary", TypeTest::UntaggedMap),
-];
 
 fn true_doc() -> Document<'static> {
     Document::Str("'true'")
@@ -224,12 +164,13 @@ impl CoreErlangGenerator {
     /// `generate_type_pattern` itself under the line-count lint; see that
     /// function's doc comment for the full strategy breakdown.
     ///
-    /// `class_name` is looked up in [`TYPE_TESTS`] first — a class
-    /// name whose test shape depends only on the name, not on
-    /// `self.class_hierarchy`, is table-driven via [`Self::render_type_test`].
-    /// The fallback below (actor/supervisor/generic tagged-class) stays a
-    /// hand-written default: it needs a hierarchy lookup a static table
-    /// keyed by name alone cannot express.
+    /// `class_name` is looked up in the routing table first
+    /// ([`routing::type_test`], generated from the shared routing fixture,
+    /// BT-4292) — a class name whose test shape depends only on the name,
+    /// not on `self.class_hierarchy`, is table-driven via
+    /// [`Self::render_type_test`]. The fallback below (actor/supervisor/
+    /// generic tagged-class) stays a hand-written default: it needs a
+    /// hierarchy lookup a static table keyed by name alone cannot express.
     fn dispatch_type_pattern_strategy(
         &mut self,
         match_var: &str,
@@ -237,8 +178,8 @@ impl CoreErlangGenerator {
         bound_success: Document<'static>,
         rest_doc: &Document<'static>,
     ) -> Document<'static> {
-        if let Some((_, test)) = TYPE_TESTS.iter().find(|(name, _)| *name == class_name) {
-            return self.render_type_test(*test, match_var, bound_success, rest_doc);
+        if let Some(test) = routing::type_test(class_name) {
+            return self.render_type_test(test, match_var, bound_success, rest_doc);
         }
 
         // An actor reference is a 4-tuple (`{'beamtalk_object',
@@ -279,27 +220,24 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Dispatches a [`TypeTest`] to its renderer — the single
-    /// match [`TYPE_TESTS`]-driven strategies share, replacing what was a
-    /// 14-arm match keyed directly on class-name string literals.
+    /// Dispatches a routing-table [`Guard`] to its renderer — the one
+    /// renderer per guard kind the shared routing fixture names.
     fn render_type_test(
         &mut self,
-        test: TypeTest,
+        test: Guard,
         match_var: &str,
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
         match test {
-            TypeTest::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
-            TypeTest::String => self.wrap_string_test(match_var, success, rest),
-            TypeTest::Binary => self.wrap_binary_test(match_var, success, rest),
-            TypeTest::Bitstring => Self::wrap_bitstring_test(match_var, success, rest),
-            TypeTest::Tuple => self.wrap_tuple_test(match_var, success, rest),
-            TypeTest::Symbol => Self::wrap_symbol_test(match_var, success, rest),
-            TypeTest::Atom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
-            TypeTest::UntaggedMap => {
-                self.wrap_class_tag_test(match_var, Document::Str("'undefined'"), success, rest)
-            }
+            Guard::Bif(bif) => Self::wrap_bif_test(match_var, bif, success, rest),
+            Guard::StringTag => self.wrap_string_test(match_var, success, rest),
+            Guard::BinaryOrStringTag => self.wrap_binary_test(match_var, success, rest),
+            Guard::UnalignedBitstring => Self::wrap_bitstring_test(match_var, success, rest),
+            Guard::UnreservedTuple => self.wrap_tuple_test(match_var, success, rest),
+            Guard::Symbol => Self::wrap_symbol_test(match_var, success, rest),
+            Guard::ExactAtom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
+            Guard::UntaggedMap => self.wrap_untagged_map_test(match_var, success, rest),
         }
     }
 
@@ -662,12 +600,14 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// `Tuple` matches any Erlang tuple **except** the reserved shapes
-    /// this compiler/runtime uses internally: actor references
-    /// (`{'beamtalk_object', ...}`) and supervisor references
-    /// (`{'beamtalk_supervisor', ...}`) — both 4-tuples — and `String`
-    /// values (`{'beamtalk_string', bytes}`, BT-4173) — without these
-    /// exclusions, each is *also* a plain Erlang tuple structurally, so
+    /// `Tuple` matches any Erlang tuple **except** the reserved shapes the
+    /// runtime gives another meaning: a tuple of a reserved tag's size whose
+    /// first element is that tag ([`routing::reserved_tuple_tags`], from the
+    /// shared routing fixture — `{'beamtalk_string', _}` is a `String`,
+    /// `{'beamtalk_future', _}` a future awaited before dispatch,
+    /// `{'beamtalk_object', _, _, _}` an actor or class object and
+    /// `{'beamtalk_supervisor', _, _, _}` a supervisor handle). Without these
+    /// exclusions each is *also* a plain Erlang tuple structurally, so
     /// `x :: Tuple` would incorrectly match it too.
     /// (`Supervisor`/`DynamicSupervisor` subclasses
     /// are themselves valid type-pattern `class` names, handled by
@@ -675,90 +615,105 @@ impl CoreErlangGenerator {
     /// still applies to an *unrelated* `x :: Tuple` arm that could see one
     /// of these values flow through.)
     ///
-    /// The test reaches a match from three sites, so it computes one
-    /// `'true'`/`'false'` and `success` is emitted once (BT-4141).
+    /// The test computes one `'true'`/`'false'`, so `success` is emitted
+    /// once (BT-4141).
     fn wrap_tuple_test(
         &mut self,
         match_var: &str,
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
-        let is_tuple = self.tuple_shape_test(match_var, true_doc(), &false_doc());
+        let is_tuple = self.tuple_shape_test(match_var);
         Self::branch_on_test(is_tuple, success, rest)
     }
 
-    /// The `Tuple` test's shape ([`Self::wrap_tuple_test`]), with `success`
-    /// at each of its three matching sites.
-    fn tuple_shape_test(
+    /// The `Tuple` test's shape ([`Self::wrap_tuple_test`]), evaluating to
+    /// `'true'`/`'false'`: `is_tuple`, then for each reserved tag size (in
+    /// first-seen fixture order) a `tuple_size` check whose `'true'` branch
+    /// rejects that size's tags at `element(1)`, falling through size by
+    /// size to `'true'`.
+    fn tuple_shape_test(&mut self, match_var: &str) -> Document<'static> {
+        let v = leaf::var(match_var.to_string());
+        let mut sizes: Vec<(u32, Vec<&'static str>)> = Vec::new();
+        for reserved in routing::reserved_tuple_tags() {
+            match sizes.iter_mut().find(|(size, _)| *size == reserved.size) {
+                Some((_, tags)) => tags.push(reserved.tag),
+                None => sizes.push((reserved.size, vec![reserved.tag])),
+            }
+        }
+        let mut unreserved = true_doc();
+        for (size, tags) in sizes.into_iter().rev() {
+            let not_reserved = self.fresh_temp_var("NotReserved");
+            let mut clauses: Vec<Document<'static>> = Vec::with_capacity(tags.len() + 1);
+            for tag in tags {
+                clauses.push(docvec!["<", leaf::atom(tag), "> when 'true' -> 'false' "]);
+            }
+            clauses.push(docvec![
+                "<",
+                leaf::var(not_reserved),
+                "> when 'true' -> 'true'"
+            ]);
+            unreserved = docvec![
+                "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+                v.clone(),
+                "), ",
+                leaf::int_lit(i64::from(size)),
+                ") of ",
+                "<'true'> when 'true' -> ",
+                "case call 'erlang':'element'(1, ",
+                v.clone(),
+                ") of ",
+                Document::Vec(clauses),
+                " end ",
+                "<'false'> when 'true' -> ",
+                unreserved,
+                " end"
+            ];
+        }
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v,
+            ") of ",
+            "<'true'> when 'true' -> ",
+            unreserved,
+            " <'false'> when 'true' -> 'false' end"
+        ]
+    }
+
+    /// `Dictionary`: a map from which `beamtalk_tagged_map:class_of/1` reads
+    /// no class — no `'$beamtalk_class'` tag (a `maps:get/3` default of
+    /// `'undefined'`, the same test [`Self::wrap_class_tag_test`] uses) **and**
+    /// no `'__class_mod__'` key, which `class_of/1` honours for a migrated
+    /// compiled actor's state (BT-4292). Conservative by one edge: a
+    /// `'__class_mod__'` naming a module without `class_name/0` still
+    /// dispatches as a `Dictionary` at run time but fails this test, so a
+    /// guard built on it only misses (never mis-targets). `success` is
+    /// emitted once.
+    fn wrap_untagged_map_test(
         &mut self,
         match_var: &str,
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
+        let tagged = self.fresh_temp_var("Tagged");
         let v = leaf::var(match_var.to_string());
-        let not_reserved = self.fresh_temp_var("NotReserved");
-        let not_string = self.fresh_temp_var("NotString");
-        docvec![
-            "case call 'erlang':'is_tuple'(",
+        let is_untagged = docvec![
+            "case call 'erlang':'is_map'(",
             v.clone(),
             ") of ",
             "<'true'> when 'true' -> ",
-            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            "case call 'maps':'get'('$beamtalk_class', ",
             v.clone(),
-            "), 2) of ",
-            "<'true'> when 'true' -> ",
-            "case call 'erlang':'element'(1, ",
-            v.clone(),
-            ") of ",
-            "<'beamtalk_string'> when 'true' -> ",
-            rest.clone(),
-            " <",
-            leaf::var(not_string),
-            "> when 'true' -> ",
-            success.clone(),
-            " end ",
-            "<'false'> when 'true' -> ",
-            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
-            v.clone(),
-            "), 4) of ",
-            "<'true'> when 'true' -> ",
-            "case call 'erlang':'element'(1, ",
+            ", 'undefined') of ",
+            "<'undefined'> when 'true' -> ",
+            "call 'erlang':'not'(call 'erlang':'is_map_key'('__class_mod__', ",
             v,
-            ") of ",
-            "<'beamtalk_object'> when 'true' -> ",
-            rest.clone(),
-            " <'beamtalk_supervisor'> when 'true' -> ",
-            rest.clone(),
-            " <",
-            leaf::var(not_reserved),
-            "> when 'true' -> ",
-            success.clone(),
-            " end ",
-            "<'false'> when 'true' -> ",
-            success,
-            " end ",
-            " end ",
-            "<'false'> when 'true' -> ",
-            rest.clone(),
-            " end"
-        ]
-    }
-}
-
-#[cfg(test)]
-mod type_tests_tests {
-    use super::TYPE_TESTS;
-    use std::collections::HashSet;
-
-    /// A duplicated key would silently shadow: `Iterator::find` returns the
-    /// *first* match, so a second entry for the same class name compiles
-    /// (nothing rejects it) but is permanently dead — its `TypeTest` would
-    /// never render, however wrong it might be.
-    #[test]
-    fn no_duplicate_class_names() {
-        let mut seen = HashSet::new();
-        for (name, _) in TYPE_TESTS {
-            assert!(seen.insert(*name), "duplicate TYPE_TESTS entry: {name:?}");
-        }
+            ")) ",
+            "<",
+            leaf::var(tagged),
+            "> when 'true' -> 'false' end ",
+            "<'false'> when 'true' -> 'false' end"
+        ];
+        Self::branch_on_test(is_untagged, success, rest)
     }
 }

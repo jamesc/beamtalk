@@ -39,8 +39,14 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %% fixture the compiler's sealed-dispatch exclusion set is checked against;
 %% BT-4206: `proxy_routes/0` lets it enumerate every class-to-fixed-module
 %% arm, so a new one fails the test until the fixture names it.
+%% BT-4292: the special-selector sets the fixture's `special_selectors` name.
 -ifdef(TEST).
--export([tagged_map_dispatch/1, proxy_routes/0]).
+-export([
+    tagged_map_dispatch/1,
+    proxy_routes/0,
+    future_selectors/0,
+    is_string_binary_shared_selector/1
+]).
 -endif.
 
 %% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
@@ -793,12 +799,18 @@ Used by both send_pid/3 and responds_to/2 to recognise Future-specific
 messages on bare pids.
 """.
 -spec is_future_selector(atom()) -> boolean().
-is_future_selector(await) -> true;
-is_future_selector(awaitForever) -> true;
-is_future_selector('await:') -> true;
-is_future_selector('whenResolved:') -> true;
-is_future_selector('whenRejected:') -> true;
-is_future_selector(_) -> false.
+is_future_selector(Selector) ->
+    lists:member(Selector, future_selectors()).
+
+-doc """
+The Future protocol `send_pid/3` answers on a bare pid instead of the `Pid`
+module. The routing conformance test pins this list against the `Pid` row's
+`special_selectors` in `test/fixtures/tagged_map_routing_conformance.json`
+(BT-4292); `send_pid/3` has one clause per selector.
+""".
+-spec future_selectors() -> [atom()].
+future_selectors() ->
+    [await, awaitForever, 'await:', 'whenResolved:', 'whenRejected:'].
 
 -doc """
 Check if a value responds to a given selector.
@@ -966,9 +978,12 @@ behaviour, and every String-only selector (`uppercase`, `split:`, …) simply
 doesn't exist on `Binary` — both cases dispatch on the representation tag
 (`module_for_value/1`) instead of taking this fast path.
 
-Kept in sync with the two source files by
-`build_stdlib.rs`'s `test_binary_string_shared_selectors_stay_in_sync`,
-which fails the build if either file's method list drifts from this set.
+Pinned to the `String` row's `special_selectors` in the shared fixture
+`test/fixtures/tagged_map_routing_conformance.json` (BT-4292) from both
+sides: `build_stdlib.rs`'s `test_binary_string_shared_selectors_stay_in_sync`
+recomputes the set from `binary.bt`/`string.bt`, and
+`beamtalk_tagged_map_routing_conformance_tests` checks this function against
+it over every `Binary` instance selector.
 
 Soundness depends on a codegen invariant, not just name-matching: a selector
 `string.bt` doesn't locally define is never duplicated into

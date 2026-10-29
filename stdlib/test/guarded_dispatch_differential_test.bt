@@ -1,0 +1,507 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: the differential send fixture of epic BT-4291 (guarded static
+// dispatch). The governing rule is the ADR 0025 amendment (2026-10-29): a
+// static type may choose a direct-call target, but a run-time guard must
+// prove it reaches exactly what dynamic dispatch reaches, and a guard miss
+// falls back to the dynamic send. This fixture pins "exactly what dynamic
+// dispatch reaches" for every send shape the epic's children convert, before
+// they convert it — on main every typed send below is still dynamic, and the
+// fixture must stay green as BT-4293 (open tagged-map classes), BT-4294
+// (built-in receivers) and BT-4295 (class references) turn them into guarded
+// direct calls.
+//
+// It generalises BT-4150's sealed_direct_dispatch_differential_test.bt (same
+// machinery: fixtures/dispatch_differential_case.bt) from one sealed class to
+// rows, one statement each:
+//
+// - A send row, `self send: #label typed: [:r :: T | r sel] dynamic: [:r |
+//   r sel] on: receiver`. The typed block annotates its parameter, so the
+//   send inside compiles with that static receiver type; the dynamic block
+//   is its untyped twin. Both run on `receiver` and the outcomes (value, or
+//   full error shape) must agree.
+// - An arm row, `self armOutcome: #sel args: #(...) on: receiver in: module`:
+//   the class module's `dispatch/3` — exactly the tag-matched arm a guarded
+//   call emits — against `beamtalk_message_dispatch:send/3`.
+//
+// The built-in rows follow the routing fixture
+// (runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json):
+// every guarded row gets a hit row, plus the misses its guard must reject (the
+// reserved tagged tuples typed as `Tuple`, `true`/`false`/`nil` typed as
+// `Symbol`, a `'__class_mod__'` map typed as `Dictionary`). The runtime half
+// of that fixture checks `Module:dispatch/3` against `send/3` per built-in row
+// directly (beamtalk_tagged_map_routing_conformance_tests).
+//
+// To add a case, add a row to the test method for its receiver kind, or a new
+// test method for a new kind. Workspace-only mutations (a live patch that
+// recompiles the class, `removeSelector:` of a class-body method) are in
+// tests/repl-protocol/cases/guarded_dispatch_differential.btscript.
+//
+// Fixtures: fixtures/guarded_diff_base.bt, fixtures/guarded_diff_point.bt,
+// fixtures/guarded_diff_point_sub.bt, fixtures/guarded_diff_impostor.bt,
+// fixtures/guarded_diff_proxy.bt, fixtures/type_pattern_actor_fixture.bt,
+// fixtures/counter.bt.
+
+DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
+
+  // === Receivers ===
+  point -> GuardedDiffPoint => GuardedDiffPoint new: #{#x => 3, #y => 4}
+
+  pointSub -> GuardedDiffPointSub =>
+    GuardedDiffPointSub new: #{#x => 3, #y => 4}
+
+  impostor -> GuardedDiffImpostor => GuardedDiffImpostor new: #{#x => 5}
+
+  // The fixture's compiled module (unqualified `bt@<stem>` under
+  // `beamtalk test`, BT-4152).
+  pointModule -> Symbol => #'bt@guarded_diff_point'
+
+  // A map whose `'__class_mod__'` key names a compiled actor module:
+  // `beamtalk_tagged_map:class_of/1` reads its class from that module, so it
+  // is not a `Dictionary`.
+  classModMap => #{#__class_mod__ => #'bt@type_pattern_actor_fixture', #k => 1}
+
+  // A `{beamtalk_supervisor, Class, Module, Pid}` handle.
+  supervisorHandle =>
+    Erlang erlang list_to_tuple: #(#beamtalk_supervisor, #Supervisor, #'bt@stdlib@supervisor', Pid current)
+
+  // === Typed sends that DNU, in methods so `@expect` can mark them ===
+  typedUnknown: r :: GuardedDiffPoint =>
+    @expect dnu
+    r noSuchSelector
+
+  typedUnknownKeyword: r :: GuardedDiffPoint =>
+    @expect dnu
+    r noSuch: 1 selector: 2
+
+  // === Open Value class: plain and keyword sends, inheritance, errors ===
+  testOpenValueSends =>
+    p := self point
+    self
+      send: #unary
+      typed: [:r :: GuardedDiffPoint | r sum]
+      dynamic: [:r | r sum]
+      on: p
+    self
+      send: #keyword
+      typed: [:r :: GuardedDiffPoint | r add: 10]
+      dynamic: [:r | r add: 10]
+      on: p
+    self
+      send: #multiKeyword
+      typed: [:r :: GuardedDiffPoint | r add: 1 and: 2]
+      dynamic: [:r | r add: 1 and: 2]
+      on: p
+    self
+      send: #ownOverride
+      typed: [:r :: GuardedDiffPoint | r describe]
+      dynamic: [:r | r describe]
+      on: p
+    self
+      send: #inherited
+      typed: [:r :: GuardedDiffPoint | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: p
+    self
+      send: #objectProtocol
+      typed: [:r :: GuardedDiffPoint | r printString]
+      dynamic: [:r | r printString]
+      on: p
+    self
+      send: #generatedSetter
+      typed: [:r :: GuardedDiffPoint | r withY: 40]
+      dynamic: [:r | r withY: 40]
+      on: p
+    self
+      send: #dnuUnary
+      typed: [:r | self typedUnknown: r]
+      dynamic: [:r | r noSuchSelector]
+      on: p
+    self
+      send: #dnuKeyword
+      typed: [:r | self typedUnknownKeyword: r]
+      dynamic: [:r | r noSuch: 1 selector: 2]
+      on: p
+    self
+      send: #errorInMethod
+      typed: [:r :: GuardedDiffPoint | r boom]
+      dynamic: [:r | r boom]
+      on: p
+
+  // `perform:` and its family, including `perform:withArguments:timeout:`,
+  // which `send/3` rewrites before it classifies the receiver.
+  testPerformFamily =>
+    p := self point
+    self
+      send: #perform
+      typed: [:r :: GuardedDiffPoint | r perform: #sum]
+      dynamic: [:r | r perform: #sum]
+      on: p
+    self
+      send: #performUnknown
+      typed: [:r :: GuardedDiffPoint | r perform: #noSuchSelector]
+      dynamic: [:r | r perform: #noSuchSelector]
+      on: p
+    self
+      send: #performWithArguments
+      typed: [:r :: GuardedDiffPoint |
+        r perform: #add:and: withArguments: #(1, 2)
+      ]
+      dynamic: [:r | r perform: #add:and: withArguments: #(1, 2)]
+      on: p
+    self
+      send: #performWithArgumentsTimeout
+      typed: [:r :: GuardedDiffPoint |
+        r
+          perform: #add:and:
+          withArguments: #(1, 2)
+          timeout: 1000
+      ]
+      dynamic: [:r |
+        r
+          perform: #add:and:
+          withArguments: #(1, 2)
+          timeout: 1000
+      ]
+      on: p
+
+  // Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`.
+  testExtensions =>
+    p := self point
+    self
+      send: #extension
+      typed: [:r :: GuardedDiffPoint | r diffExtended]
+      dynamic: [:r | r diffExtended]
+      on: p
+    self
+      send: #extensionOverridesInherited
+      typed: [:r :: GuardedDiffPoint | r shadowedByExtension]
+      dynamic: [:r | r shadowedByExtension]
+      on: p
+
+  // `doesNotUnderstand:args:` answers every unknown selector.
+  testDoesNotUnderstandArgs =>
+    px := GuardedDiffProxy new
+    self
+      send: #proxiedKeyword
+      typed: [:r :: GuardedDiffProxy | r anything: 1 else: 2]
+      dynamic: [:r | r anything: 1 else: 2]
+      on: px
+    self
+      send: #proxiedPerform
+      typed: [:r :: GuardedDiffProxy | r perform: #anything]
+      dynamic: [:r | r perform: #anything]
+      on: px
+
+  // A subclass instance and lying annotations: the guard must miss and the
+  // dynamic answer win, `doesNotUnderstand:` included.
+  testGuardMisses =>
+    sub := self pointSub
+    imp := self impostor
+    self
+      send: #subclassOverride
+      typed: [:r :: GuardedDiffPoint | r sum]
+      dynamic: [:r | r sum]
+      on: sub
+    self
+      send: #subclassInherits
+      typed: [:r :: GuardedDiffPoint | r describe]
+      dynamic: [:r | r describe]
+      on: sub
+    self
+      send: #subclassKeyword
+      typed: [:r :: GuardedDiffPoint | r add: 10]
+      dynamic: [:r | r add: 10]
+      on: sub
+    self
+      send: #lyingOtherValue
+      typed: [:r :: GuardedDiffPoint | r sum]
+      dynamic: [:r | r sum]
+      on: imp
+    self
+      send: #lyingOtherValueDnu
+      typed: [:r :: GuardedDiffPoint | r add: 10]
+      dynamic: [:r | r add: 10]
+      on: imp
+    self
+      send: #lyingInteger
+      typed: [:r :: GuardedDiffPoint | r sum]
+      dynamic: [:r | r sum]
+      on: 42
+    self
+      send: #lyingNil
+      typed: [:r :: GuardedDiffPoint | r add: 1 and: 2]
+      dynamic: [:r | r add: 1 and: 2]
+      on: nil
+    self
+      send: #lyingDictionary
+      typed: [:r :: GuardedDiffPoint | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: #{#x => 1}
+
+  // One hit per guarded row of the routing fixture.
+  testBuiltinReceivers =>
+    self
+      send: #integer
+      typed: [:r :: Integer | r printString]
+      dynamic: [:r | r printString]
+      on: 42
+    self
+      send: #float
+      typed: [:r :: Float | r printString]
+      dynamic: [:r | r printString]
+      on: 1.5
+    self
+      send: #string
+      typed: [:r :: String | r size]
+      dynamic: [:r | r size]
+      on: "abc"
+    self
+      send: #stringSpecialSelector
+      typed: [:r :: String | r asHex]
+      dynamic: [:r | r asHex]
+      on: "abc"
+    self
+      send: #binary
+      typed: [:r :: Binary | r size]
+      dynamic: [:r | r size]
+      on: (Erlang erlang list_to_binary: #(1, 2))
+    self
+      send: #symbol
+      typed: [:r :: Symbol | r asString]
+      dynamic: [:r | r asString]
+      on: #abc
+    self
+      send: #true
+      typed: [:r :: True | r printString]
+      dynamic: [:r | r printString]
+      on: true
+    self
+      send: #false
+      typed: [:r :: False | r printString]
+      dynamic: [:r | r printString]
+      on: false
+    self
+      send: #nil
+      typed: [:r :: UndefinedObject | r printString]
+      dynamic: [:r | r printString]
+      on: nil
+    self
+      send: #block
+      typed: [:r :: Block | r arity]
+      dynamic: [:r | r arity]
+      on: [:a | a]
+    self
+      send: #tuple
+      typed: [:r :: Tuple | r at: 1]
+      dynamic: [:r | r at: 1]
+      on: (Tuple withAll: #(7, 8))
+    self
+      send: #list
+      typed: [:r :: List | r includes: 2]
+      dynamic: [:r | r includes: 2]
+      on: #(1, 2)
+    self
+      send: #dictionary
+      typed: [:r :: Dictionary | r at: #k put: 1]
+      dynamic: [:r | r at: #k put: 1]
+      on: #{#a => 1}
+    self
+      send: #pid
+      typed: [:r :: Pid | r isAlive]
+      dynamic: [:r | r isAlive]
+      on: Pid current
+    self
+      send: #reference
+      typed: [:r :: Reference | r printString]
+      dynamic: [:r | r printString]
+      on: Erlang erlang make_ref
+    self
+      send: #port
+      typed: [:r :: Port | r printString]
+      dynamic: [:r | r printString]
+      on: (Erlang erlang ports) first
+
+  // Values each built-in guard must reject.
+  testBuiltinGuardMisses =>
+    self
+      send: #stringTypedTuple
+      typed: [:r :: Tuple | r size]
+      dynamic: [:r | r size]
+      on: "abc"
+    self
+      send: #supervisorTypedTuple
+      typed: [:r :: Tuple | r size]
+      dynamic: [:r | r size]
+      on: self supervisorHandle
+    self
+      send: #trueTypedSymbol
+      typed: [:r :: Symbol | r asString]
+      dynamic: [:r | r asString]
+      on: true
+    self
+      send: #falseTypedSymbol
+      typed: [:r :: Symbol | r asString]
+      dynamic: [:r | r asString]
+      on: false
+    self
+      send: #nilTypedSymbol
+      typed: [:r :: Symbol | r asString]
+      dynamic: [:r | r asString]
+      on: nil
+    self
+      send: #classModMapTypedDictionary
+      typed: [:r :: Dictionary | r size]
+      dynamic: [:r | r size]
+      on: self classModMap
+    self
+      send: #taggedValueTypedDictionary
+      typed: [:r :: Dictionary | r size]
+      dynamic: [:r | r size]
+      on: self point
+    self
+      send: #integerTypedList
+      typed: [:r :: List | r includes: 2]
+      dynamic: [:r | r includes: 2]
+      on: 42
+    self
+      send: #stringTypedBinary
+      typed: [:r :: Binary | r size]
+      dynamic: [:r | r size]
+      on: "abc"
+    self
+      send: #binaryTypedString
+      typed: [:r :: String | r size]
+      dynamic: [:r | r size]
+      on: (Erlang erlang list_to_binary: #(1, 2))
+
+  // An actor reference (a reserved `beamtalk_object` tuple) typed as a
+  // Tuple, and typed as the open Value class.
+  testActorReceiverMisses =>
+    c := Counter spawn
+    [
+      self
+        send: #actorTypedTuple
+        typed: [:r :: Tuple | r size]
+        dynamic: [:r | r size]
+        on: c
+      self
+        send: #actorTypedValue
+        typed: [:r :: GuardedDiffPoint | r sum]
+        dynamic: [:r | r sum]
+        on: c
+    ] ensure: [c stop]
+
+  // The arms of GuardedDiffPoint's `dispatch/3` a guarded call would run,
+  // including the selectors an earlier send handler claims at a source send.
+  testPointDispatchArms =>
+    p := self point
+    m := self pointModule
+    self
+      armOutcome: #sum
+      args: #()
+      on: p
+      in: m
+    self
+      armOutcome: #add:and:
+      args: #(1, 2)
+      on: p
+      in: m
+    self
+      armOutcome: #baseOnly
+      args: #()
+      on: p
+      in: m
+    self
+      armOutcome: #class
+      args: #()
+      on: p
+      in: m
+    self
+      armOutcome: #fieldAt:
+      args: #(#y)
+      on: p
+      in: m
+    self
+      armOutcome: #fieldAt:put:
+      args: #(#y, 99)
+      on: p
+      in: m
+    self
+      armOutcome: #perform:
+      args: #(#sum)
+      on: p
+      in: m
+    self
+      armOutcome: #perform:
+      args: #(#noSuchSelector)
+      on: p
+      in: m
+    self
+      armOutcome: #perform:withArguments:
+      args: #(#add:and:, #(1, 2))
+      on: p
+      in: m
+    self
+      armOutcome: #respondsTo:
+      args: #(#sum)
+      on: p
+      in: m
+    self
+      armOutcome: #noSuchSelector
+      args: #()
+      on: p
+      in: m
+    self
+      armOutcome: #doesNotUnderstand:args:
+      args: #(#noSuchSelector, #())
+      on: p
+      in: m
+    self
+      armOutcome: #diffExtended
+      args: #()
+      on: p
+      in: m
+    self
+      armOutcome: #shadowedByExtension
+      args: #()
+      on: p
+      in: m
+
+  // `removeSelector:` of an extension re-exposes the inherited method, and
+  // an extension registered at run time (the in-memory half of a live patch)
+  // is reached at once: both act inside the class module's `dispatch/3`, so
+  // a guarded direct call sees them exactly as the dynamic send does.
+  // (A workspace live patch that recompiles the class body is in the REPL
+  // fixture named in the header.)
+  testRuntimeExtensionAndRemoveSelector =>
+    p := self point
+    self checkShadowed: #beforePatch on: p
+    self assert: p shadowedThenRemoved equals: #fromBase
+    Erlang beamtalk_extensions
+      register: #GuardedDiffPoint
+      selector: #shadowedThenRemoved
+      fun: [:args :receiver | #fromPatch]
+      owner: #bt4292
+    [
+      self checkShadowed: #afterPatch on: p
+      self assert: p shadowedThenRemoved equals: #fromPatch
+      GuardedDiffPoint removeSelector: #shadowedThenRemoved
+      self checkShadowed: #afterRemoveSelector on: p
+      self assert: p shadowedThenRemoved equals: #fromBase
+    ] ensure: [
+      GuardedDiffPoint removeSelector: #shadowedThenRemoved ifAbsent: [nil]
+    ]
+
+  checkShadowed: label :: Symbol on: p =>
+    self
+      send: label
+      typed: [:r :: GuardedDiffPoint | r shadowedThenRemoved]
+      dynamic: [:r | r shadowedThenRemoved]
+      on: p
+
+// Extension-registry selectors (ADR 0066), resolved inside `dispatch/3`: one
+// adding a selector, one overriding a selector GuardedDiffBase defines.
+GuardedDiffPoint >> diffExtended -> Integer => self sum * 10
+GuardedDiffPoint >> shadowedByExtension -> Symbol => #fromExtension

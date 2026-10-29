@@ -158,7 +158,12 @@ rows() ->
         ]},
         {"13d", ffi, "FFI call, ok-atom result / apply", 100000, 'ffiOk:', none, [
             {apply_ffi_ok, none}
-        ]}
+        ]},
+        {"14a", dispatch, "typed Tuple at: / elem(t, 0)", 200000, 'tupleAt:t:', tuple, [
+            {tuple_elem, tuple}
+        ]},
+        {"14b", machinery, "class reference: last := VbPoint / Point", 50000, 'classReference:',
+            none, [{module_ref, none}]}
     ].
 
 %%====================================================================
@@ -179,6 +184,7 @@ fixtures() ->
         list100 => {Bt(list100), ?EX:list100()},
         dict => {Bt(dict), ?EX:dict()},
         string => {Bt(string), ?EX:string()},
+        tuple => {Bt(tuple), ?EX:tuple()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -497,6 +503,8 @@ compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode pr
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
+compiles_to("14a") -> "send(T, 'at:', [1]) -> Tuple:dispatch/3 (typed built-in stays dynamic until BT-4294)";
+compiles_to("14b") -> "class reference built per use (whereis_class), BT-4295";
 compiles_to(_) -> "".
 
 %%====================================================================
