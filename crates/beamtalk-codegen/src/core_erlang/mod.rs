@@ -210,7 +210,10 @@ impl CoreErlangGenerator {
             }
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
-                // as a message receiver (e.g., `super increment`)
+                // as a message receiver (e.g., `super increment`). Semantic
+                // analysis rejects the shapes that reach here (bare `super`
+                // outside a method; a cascade on `super`, BT-4251), so this
+                // is an internal-error backstop.
                 Err(CodeGenError::UnsupportedFeature {
                     feature: "'super' must be used with a message send".to_string(),
                     span: Some(expr.span()),

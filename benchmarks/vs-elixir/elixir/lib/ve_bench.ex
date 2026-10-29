@@ -155,6 +155,7 @@ defmodule VeBench do
 
   defbench(:struct_of, p, do: p.__struct__)
   defbench(:is_struct_check, p, do: is_struct(p, Point))
+  defbench(:is_binary_check, s, do: is_binary(s))
 
   # === 13. FFI calls (BT-4153) ===
 

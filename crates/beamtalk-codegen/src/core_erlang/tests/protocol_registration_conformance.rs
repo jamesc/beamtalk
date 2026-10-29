@@ -14,16 +14,7 @@
 //! protocol_registration_shape_conformance_test/0`) asserts the registry
 //! keeps every key it is handed.
 
-use std::path::{Path, PathBuf};
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crates/")
-        .parent()
-        .expect("repo root")
-        .to_path_buf()
-}
+use super::repo_root;
 
 #[test]
 fn compiled_protocol_registration_carries_every_key_in_the_shared_fixture() {

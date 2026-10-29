@@ -19,6 +19,7 @@ use crate::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MatchArm,
     MessageSelector, MethodDefinition, Module, Pattern,
 };
+use crate::ast_walker::cascade_shared_receiver;
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -270,8 +271,22 @@ impl NameResolver {
             }
 
             Cascade {
-                receiver, messages, ..
+                receiver,
+                messages,
+                span,
             } => {
+                // BT-4251: a cascade re-sends to its shared receiver, and
+                // `super` is not a value that can be bound and re-sent to —
+                // each `super` send names its own lookup. Reject the shape
+                // here rather than let codegen fail on it.
+                if matches!(cascade_shared_receiver(receiver), Super(_)) {
+                    self.diagnostics.push(
+                        Diagnostic::error("a cascade cannot be sent to `super`", *span).with_hint(
+                            "Send each message to `super` separately, e.g. \
+                                 `super a.` then `super b.`",
+                        ),
+                    );
+                }
                 // ADR 0084: in a `classBuilder … classMethods: #{…};
                 // register` cascade, resolve each `classMethods:` block value as a
                 // class-method body so `super`/`self` and class-var access resolve

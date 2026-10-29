@@ -145,6 +145,8 @@ rows() ->
         ]},
         {"12b", machinery, "p isKindOf: VbPoint / is_struct(p, Point)", 20000, 'isKindOf:p:', point,
             [{is_struct_check, point}]},
+        {"12c", machinery, "s isKindOf: String / is_binary(s)", 200000, 'isKindOfBuiltin:s:', string,
+            [{is_binary_check, string}]},
         {"13a", ffi, "FFI call, integer result / apply", 100000, 'ffiInt:a:', int, [
             {apply_phash2, int}, {direct_phash2, int}
         ]},
@@ -489,7 +491,8 @@ compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
 compiles_to("12a") -> "beamtalk_primitive:class_of_object: derived-cache hit (counter + ETS read + pid liveness)";
-compiles_to("12b") -> "class ref built per call (gen_server:call) + send(P, 'isKindOf:') -> includesBehaviour: via class processes";
+compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> objectIsKindOf/2: one memoised {is_kind_of, C, B} lookup (BT-4221)";
+compiles_to("12c") -> "as 12b, but the send walks String/Binary/Collection/Value/Object dispatch (an extensions lookup per level) to Object>>isKindOf:";
 compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode precomputed (BT-4153), integer fast path";
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
