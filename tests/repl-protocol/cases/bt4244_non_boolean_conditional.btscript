@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: a conditional whose block writes a workspace binding compiles
+// through the REPL's mutation/threading path. A receiver that is not a
+// Boolean gets the message sent, as with pure blocks, so `nil` and an
+// Integer raise does_not_understand (not a raw case_clause) and the binding
+// is unchanged. The same shapes in class, value-type and actor methods are
+// stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+x := 0
+// => 0
+
+nil ifTrue: [x := 1]
+// => ERROR: does not understand 'ifTrue:'
+
+x
+// => 0
+
+3 ifFalse: [x := 1]
+// => ERROR: does not understand 'ifFalse:'
+
+nil ifTrue: [x := 1] ifFalse: [x := 2]
+// => ERROR: does not understand 'ifTrue:ifFalse:'
+
+x
+// => 0
+
+// Pure-block control: the same send.
+nil ifTrue: [1]
+// => ERROR: does not understand 'ifTrue:'

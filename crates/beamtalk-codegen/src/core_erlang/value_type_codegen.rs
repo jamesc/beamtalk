@@ -3043,6 +3043,17 @@ impl CoreErlangGenerator {
                 }
             }
         };
+        // BT-4244: a non-Boolean receiver sends the message (the shared
+        // fallback the pure and actor paths use).
+        let blocks: Vec<&Block> = arguments
+            .iter()
+            .filter_map(|arg| match arg {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks)?;
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
         body_parts.push(docvec![
             "    let ",
             leaf::var(cond_var.clone()),
@@ -3056,6 +3067,10 @@ impl CoreErlangGenerator {
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            fallback,
             " end in\n",
         ]);
         Ok(Some(result_var))
@@ -3413,8 +3428,20 @@ impl CoreErlangGenerator {
         .into_iter()
         .collect();
         let families = ThreadedFamilies::from_matches(&mutated_families);
+        // BT-4244: a non-Boolean receiver sends the message (the shared
+        // fallback), answering the locals and `Self` unchanged.
+        let fallback_pieces = self.build_vt_conditional_fallback_pieces(
+            &selector_name,
+            &cond_var,
+            &branch_blocks,
+            &all_mutations,
+            capture_value,
+        )?;
         let true_branch = self.finish_vt_conditional_branch(true_pieces, &families, baseline);
         let false_branch = self.finish_vt_conditional_branch(false_pieces, &families, baseline);
+        let fallback_branch =
+            self.finish_vt_conditional_branch(fallback_pieces, &families, baseline);
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
 
         // Generate the case expression and rebind variables after it.
         let result_var = self.fresh_temp_var("CondResult");
@@ -3425,6 +3452,10 @@ impl CoreErlangGenerator {
             true_branch,
             " <'false'> when 'true' -> ",
             false_branch,
+            " <",
+            leaf::var(no_match_var),
+            "> when 'true' -> ",
+            fallback_branch,
             " end"
         ];
 
@@ -4031,6 +4062,34 @@ impl CoreErlangGenerator {
             self_mutated_version: None,
             value: capture_value.then(|| sel.non_taken().doc(cond_var)),
         }
+    }
+
+    /// BT-4244: the wildcard arm's pieces for a receiver that is neither
+    /// `true` nor `false`: the shared dynamic send
+    /// ([`Self::boolean_fallback_send`], the one the pure and actor paths use),
+    /// with every captured local and `Self` unchanged, as a passthrough arm
+    /// answers them. The send's answer is the arm's value in value position;
+    /// in statement position the send is bound and discarded.
+    fn build_vt_conditional_fallback_pieces(
+        &mut self,
+        selector_name: &str,
+        cond_var: &str,
+        blocks: &[&Block],
+        all_mutations: &[String],
+        capture_value: bool,
+    ) -> Result<VtBranchPieces> {
+        let send = self.boolean_fallback_send(cond_var, selector_name, blocks)?;
+        let (preamble, value) = if capture_value {
+            (Vec::new(), Some(send))
+        } else {
+            (vec![docvec!["let _ = ", send, " in "]], None)
+        };
+        Ok(VtBranchPieces {
+            preamble,
+            local_values: Self::resolve_mutation_value_docs(self, all_mutations),
+            self_mutated_version: None,
+            value,
+        })
     }
 
     /// Resolves each of `all_mutations` to its current Core Erlang variable doc.

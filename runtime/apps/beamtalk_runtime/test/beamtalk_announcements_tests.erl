@@ -1579,18 +1579,9 @@ stale_orphan_index_test_() ->
 %% Helpers
 %%====================================================================
 
-%% A deterministic pid on a *non-local* node, built via the external term format
-%% (`NEW_PID_EXT`) so the tests need no distribution / peer node —
-%% `binary_to_term` does not require the encoded node to exist or be connected.
-%% (The `beamtalk_inspector_tests` precedent.)
+%% A deterministic pid on a *non-local* node that is never started.
 a_remote_pid() ->
-    NodeBin = atom_to_binary('announcements_remote@nohost', utf8),
-    Len = byte_size(NodeBin),
-    %% 118 = ATOM_UTF8_EXT (2-byte length, matching Len:16). The superficially
-    %% similar SMALL_ATOM_UTF8_EXT (119) takes a 1-byte length — pairing it with
-    %% Len:16 decodes the node as the empty atom '' (still remote-shaped, but
-    %% not the intended node name).
-    binary_to_term(<<131, 88, 118, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+    beamtalk_dist_test_helper:unreachable_pid(announcements_remote).
 
 %% Insert a subscription row directly into both public ETS tables (system
 %% announcer namespace), bypassing the gen_server. Used by the remote-pid tests:

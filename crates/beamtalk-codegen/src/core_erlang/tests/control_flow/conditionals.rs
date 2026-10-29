@@ -21,13 +21,11 @@ fn test_if_true_with_field_mutation_generates_inline_case() {
 
     eprintln!("Generated code for ifTrue: with field mutation:\n{code}");
 
-    // Should use inline case expression — not a runtime `ifTrue:` send. (The
-    // untyped `self.count + 1` has its own operator guard, whose fallback is a
-    // `send` of `+`, BT-3925.)
-    assert!(
-        !code.contains(", 'ifTrue:', ["),
-        "ifTrue: with mutation should NOT go through runtime dispatch. Got:\n{code}"
-    );
+    // Should use inline case expression — the only runtime `ifTrue:` send is
+    // the non-Boolean receiver's fallback (BT-4244). (The untyped
+    // `self.count + 1` has its own operator guard, whose fallback is a `send`
+    // of `+`, BT-3925.)
+    crate::core_erlang::tests::assert_selector_sent_only_by_fallback(&code, "ifTrue:");
 
     // The conditional should be compiled as an inline case
     assert!(

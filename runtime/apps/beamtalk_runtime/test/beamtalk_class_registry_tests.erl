@@ -514,10 +514,8 @@ class_identity_skips_unregistered_dead_and_remote_pids_test() ->
     after
         Live ! stop
     end,
-    %% Remote pid (external term format, different node).
-    Remote = binary_to_term(
-        <<131, 88, 100, 0, 12, "other@nohost", 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0, 1>>
-    ),
+    %% Remote pid (different node).
+    Remote = beamtalk_dist_test_helper:unreachable_pid(bt3820_other),
     ?assertNotEqual(node(), node(Remote)),
     ?assertEqual(skip, beamtalk_class_registry:class_identity(Remote)),
     %% A genuinely registered class resolves.

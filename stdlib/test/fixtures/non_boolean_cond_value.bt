@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4244: the value-type column of the non-Boolean conditional receiver
+// matrix: the same methods as NonBooleanCondClass, as instance methods of a
+// value type. The expected answers are in
+// stdlib/test/non_boolean_conditional_receiver_test.bt.
+
+Value subclass: NonBooleanCondValue
+
+  pureIfTrue: x => x ifTrue: [1]
+
+  pureIfFalse: x => x ifFalse: [1]
+
+  pureIfTrueIfFalse: x => x ifTrue: [1] ifFalse: [2]
+
+  localIfTrue: x =>
+    t := 0
+    r := x ifTrue: [t := t + 1]
+    #[r, t]
+
+  localIfFalse: x =>
+    t := 0
+    r := x ifFalse: [t := t + 1]
+    #[r, t]
+
+  localIfTrueIfFalse: x =>
+    t := 0
+    r := x ifTrue: [t := 1] ifFalse: [t := 2]
+    #[r, t]
+
+  localTailIfTrue: x =>
+    t := 0
+    x ifTrue: [t := t + 1]
+
+  localCollectIfTrue: x =>
+    t := 0
+    rs := #(1) collect: [:_i | x ifTrue: [t := t + 1]]
+    #[rs first, t]
