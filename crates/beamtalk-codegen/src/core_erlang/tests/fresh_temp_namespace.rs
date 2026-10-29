@@ -215,6 +215,9 @@ const HAND_WRITTEN: &[&str] = &[
     "_InstReg",
     "_IvaBadArgs",
     "_IvapBad",
+    // `clean_state_binding`'s committed-state key pattern (BT-4113):
+    // `_Key0`, `_Key1`, ..., one per internal key and declared field.
+    "_Key",
     "_Marker",
     "_Msg",
     "_NewState",

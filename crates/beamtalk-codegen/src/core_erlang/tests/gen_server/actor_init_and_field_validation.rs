@@ -863,6 +863,14 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
         "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
     );
 
+    // The committed-state guard (BT-4113) names every declared field, so
+    // look for the nilable fields outside it only.
+    let code: String = code
+        .lines()
+        .filter(|l| !l.contains("'__class_mod__' := _Key0"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     // nilField :: Nil — excluded by is_nilable_type_name.
     assert!(
         !code.contains("'nilField'"),
