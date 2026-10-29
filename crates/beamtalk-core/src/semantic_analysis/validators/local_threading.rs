@@ -1396,8 +1396,8 @@ fn check_body(
 ///   user method escapes). So `t := 0. self withFallback: [^t]. t := 5` is
 ///   rejected even when `withFallback:` runs the block before it returns and
 ///   the `^` would answer right; at the REPL, so is any such block that reads
-///   a workspace binding. Narrowing to blocks that really escape is out of
-///   scope here (it would use `escape_sites`).
+///   a workspace binding. Narrowing to blocks that really escape (using
+///   `escape_sites`) is BT-4275.
 /// - **A `^` in a REPL loop or fold body** (a block a loop or collection
 ///   operation runs in place, [`local_threading_construct`]) is ignored: the
 ///   loop runs on and the expression answers the loop's own value
@@ -1751,9 +1751,9 @@ fn report_nlr_out_of_ensure(
                         ),
                         AbruptExit::Error => format!(
                             "assign `{name}` after the `ensure:`, or move what may raise \
-                             before the assignment (the check is conservative: any send after \
-                             the write counts, even one an `on:do:` inside the protected block \
-                             catches)"
+                             before the assignment (the check is conservative: anything after \
+                             the write that may raise counts, even inside an `on:do:` that \
+                             catches it)"
                         ),
                     };
                     diagnostics.push(
@@ -1969,8 +1969,8 @@ fn nlr_dropped_local(
 /// lookup from the state before it, and the blocks of the other constructs in
 /// order. Any other block literal is a closure, whose body does not run here.
 ///
-/// This over-approximates: a raise that an `on:do:` inside the protected block
-/// catches still counts, so `[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure:
+/// This over-approximates: anything after the write that may raise counts, even
+/// inside an `on:do:` (in the protected block) that catches it, so `[[t := 9. 1 / 0] on: Error do: [:e | 0]] ensure:
 /// [log record: t]` is rejected though the cleanup would see 9. Documented in
 /// ADR 0133 § Consequences and the language reference rather than modelled.
 fn raise_after_write(protected: &Block, tracked: &BTreeSet<EcoString>) -> Option<EcoString> {
@@ -3584,7 +3584,8 @@ impl<'d> Walker<'d> {
         // Conservative: this asks whether *any* enclosing container is a loop or
         // fold body, not the innermost one, so it also rejects a fold that is an
         // operand inside a stored closure sitting in a `do:` body (whose body
-        // does not run per iteration of that `do:`).
+        // does not run per iteration of that `do:`). Testing the innermost
+        // container instead is BT-4276.
         if !self.containers.iter().any(|c| {
             matches!(
                 c,

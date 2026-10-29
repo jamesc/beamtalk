@@ -636,10 +636,10 @@ code.
   `match:`, a loop body's next iteration), a cleanup that reads the written
   local is a compile error, by design: seeing the new value would need a new
   runtime mechanism that carries the protected block's locals out with the
-  throw, and that was rejected (BT-4063). The check over-approximates: any
-  send after the write counts, even one whose error an `on:do:` inside the
-  protected block catches (`[[t := 9. 1 / 0] on: Error do: [:e | 0]]
-  ensure: [log record: t]` is rejected though the cleanup would see 9). A
+  throw, and that was rejected (BT-4063). The check over-approximates:
+  anything after the write that may raise counts, even inside an `on:do:` (in
+  the protected block) that catches it (`[[t := 9. 1 / 0] on: Error do: [:e |
+  0]] ensure: [log record: t]` is rejected though the cleanup would see 9). A
   write that is the last thing the protected block does is seen. The idiom is
   to assign the local after the `ensure:` (or compute the value outside the
   protected block), or not to read it in the cleanup:
