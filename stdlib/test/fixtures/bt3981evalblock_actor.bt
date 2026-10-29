@@ -868,7 +868,7 @@ Actor subclass: Bt3981EvalblockActor
       ]
     r
 
-  // Loop bodies (BEAM-measured; BT-3948's row accepts them too).
+  // Loop bodies (BEAM-measured).
   whileBodyLast =>
     self.hits := 0
     [self.hits < 1]
@@ -903,6 +903,19 @@ Actor subclass: Bt3981EvalblockActor
         ] value
         self.hits := self.hits + q - 2
       ]
+    self.hits
+
+  // A `whileTrue:` condition whose first statement is the block (BT-3948's
+  // row rejected it conservatively until BT-3947 deleted it).
+  whileCondNonLast =>
+    self.hits := 0
+    [
+      [
+        w := 3
+        w
+      ] value
+      self.hits < 1
+    ] whileTrue: [self.hits := self.hits + 1]
     self.hits
 
   countedLastStatement =>

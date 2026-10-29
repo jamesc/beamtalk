@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: an open (unsealed) Value class — the receiver type BT-4293 turns
+// into guarded direct calls. See guarded_dispatch_differential_test.bt.
+
+GuardedDiffBase subclass: GuardedDiffPoint
+  field: y :: Integer = 0
+
+  sum -> Integer => self x + self y
+
+  add: n :: Integer -> Integer => self sum + n
+
+  add: a :: Integer and: b :: Integer -> Integer => self sum + a + b
+
+  // Overrides the parent's `describe`.
+  describe -> String => "point"
+
+  boom -> Integer => self error: "point boom"

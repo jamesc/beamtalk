@@ -127,11 +127,11 @@ fn test_value_type_field_write_in_if_true_merges_self_out_of_branch() {
         .expect("value-type field write inside ifTrue: must compile");
 
     assert!(
-        code.contains("{Seen, Self1}"),
+        code.contains("{Seen@, Self1}"),
         "the taken arm must return its own mutated Self in the merge tuple. Got:\n{code}"
     );
     assert!(
-        code.contains("{Seen, Self}"),
+        code.contains("{Seen@, Self}"),
         "the untaken arm must pass the pre-case Self through the same slot. Got:\n{code}"
     );
     assert!(

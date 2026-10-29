@@ -107,7 +107,7 @@ fn test_bt1290_local_var_captured_by_nested_timer_block() {
     // Y (CoreErlang name for y) must appear inside the nested fun's argument list
     // (ADR 0137: the closure's self-send is a message to `Self`).
     assert!(
-        code.contains("'send'(Self, 'use:', [Y])"),
+        code.contains("'send'(Self, 'use:', [Y@])"),
         "Y should be captured by nested block. Got:\n{code}"
     );
     // The foldl lambda must use `let _ = <Timer_expr> in StateAcc`, not bare `<Timer_expr> in StateAcc`
@@ -720,7 +720,7 @@ fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
     // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
     // position 2 inside the lambda accumulator tuple.
     assert!(
-        code.contains("let Count = call 'erlang':'element'(2, "),
+        code.contains("let Count@ = call 'erlang':'element'(2, "),
         "anySatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     // the fold packs the final 'count' into the StateAcc map at exit so the
@@ -752,7 +752,7 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
     let code = codegen(src);
     // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
     assert!(
-        code.contains("let Count = call 'erlang':'element'(3, "),
+        code.contains("let Count@ = call 'erlang':'element'(3, "),
         "detect: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     assert!(
@@ -789,7 +789,7 @@ fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
     // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
     // position 2 inside the lambda accumulator tuple.
     assert!(
-        code.contains("let Count = call 'erlang':'element'(2, "),
+        code.contains("let Count@ = call 'erlang':'element'(2, "),
         "allSatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     // the fold packs the final 'count' into the StateAcc map at exit so the
@@ -821,7 +821,7 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
     let code = codegen(src);
     // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
     assert!(
-        code.contains("let Count = call 'erlang':'element'(3, "),
+        code.contains("let Count@ = call 'erlang':'element'(3, "),
         "detect:ifNone: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
     assert!(
@@ -1059,7 +1059,7 @@ fn test_count_with_local_mutation_uses_tuple_acc() {
     );
     // CountAcc is at position 1; 'n' is the first threaded local at position 2.
     assert!(
-        code.contains("let N = call 'erlang':'element'(2, "),
+        code.contains("let N@ = call 'erlang':'element'(2, "),
         "count: tuple-acc should extract 'n' via element(2, AccSt) inside the lambda. Got:\n{code}"
     );
     // Packs 'n' into StateAcc at fold exit and threads it back via maps:get.
@@ -1140,7 +1140,7 @@ fn test_flat_map_with_local_mutation_uses_tuple_acc() {
         "flatMap: with local mutation should NOT use lists:flatmap. Got:\n{code}"
     );
     assert!(
-        code.contains("let N = call 'erlang':'element'(2, "),
+        code.contains("let N@ = call 'erlang':'element'(2, "),
         "flatMap: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
@@ -1174,7 +1174,7 @@ fn test_take_while_with_local_mutation_uses_tuple_acc() {
     );
     assert!(
         // State vars start at position 3 (after AccList and StillTaking).
-        code.contains("let N = call 'erlang':'element'(3, "),
+        code.contains("let N@ = call 'erlang':'element'(3, "),
         "takeWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
@@ -1208,7 +1208,7 @@ fn test_drop_while_with_local_mutation_uses_tuple_acc() {
     );
     assert!(
         // State vars start at position 3 (after AccList and StillDropping).
-        code.contains("let N = call 'erlang':'element'(3, "),
+        code.contains("let N@ = call 'erlang':'element'(3, "),
         "dropWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
@@ -1257,7 +1257,7 @@ fn test_partition_with_local_mutation_uses_tuple_acc() {
     );
     assert!(
         // State vars start at position 3 (after MatchList and NoMatchList).
-        code.contains("let N = call 'erlang':'element'(3, "),
+        code.contains("let N@ = call 'erlang':'element'(3, "),
         "partition: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
@@ -1306,7 +1306,7 @@ fn test_group_by_with_local_mutation_uses_tuple_acc() {
     );
     assert!(
         // State vars start at position 2 (after GroupMap only).
-        code.contains("let N = call 'erlang':'element'(2, "),
+        code.contains("let N@ = call 'erlang':'element'(2, "),
         "groupBy: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
@@ -1796,7 +1796,7 @@ fn test_list_reject_with_local_mutation_uses_tuple_acc() {
     );
     // ResultList is at element(1, AccSt); 'count' is the first threaded local at element(2, ...).
     assert!(
-        code.contains("let Count = call 'erlang':'element'(2, "),
+        code.contains("let Count@ = call 'erlang':'element'(2, "),
         "reject: tuple-acc should extract 'count' via element(2, AccSt) inside lambda. Got:\n{code}"
     );
     // negate=true: the tuple-acc case expression wraps the predicate with erlang:not.
@@ -2075,7 +2075,7 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
     assert!(
-        code.contains("'send'(_items@4, 'eachWithIndex:', [Blk]"),
+        code.contains("'send'(_items@4, 'eachWithIndex:', [Blk@]"),
         "eachWithIndex: non-literal callable: should dispatch via message send. Got:\n{code}"
     );
     assert!(

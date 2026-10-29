@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// PIN-BUG BT-3947 (BT-4003): the residuals found during BT-3912, measured on a
+// BT-4003: the residuals found during BT-3912, measured on a
 // BEAM in class, value-type and actor methods (the REPL column is
 // tests/repl-protocol/cases/bt4003_repl_returns.btscript). The shapes that
 // answered wrong silently or crashed are compile errors now (their rejection
@@ -13,8 +13,9 @@
 //    error can follow the write (a permanent rule, ADR 0133);
 // 2. a `^` closure that reads only its own locals, or locals written before it;
 // 3. an actor fold that sends to `self` or writes a field, in the positions of
-//    a fold body measured right (class and value-type methods answer right
-//    everywhere; a value-type self-send never changes the caller's `self`);
+//    a fold body measured right (the others are PIN-BUG BT-4287; class and
+//    value-type methods answer right everywhere; a value-type self-send never
+//    changes the caller's `self`);
 // 4. a `^` in a `do:` that threads a local and the actor's state.
 //
 // Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt.

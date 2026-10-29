@@ -191,7 +191,8 @@ fn generate_repl_expressions_impl(
 /// Like [`generate_repl_expressions_with_hierarchy`] /
 /// [`generate_repl_expressions_with_index`] (`hierarchy` is `None` for the
 /// latter) but also returns the `ThreadedIr` verifier diagnostics (ADR 0111
-/// Addendum 17, BT-3778) — only those, through the same
+/// Addendum 17, BT-3778) and, when `BEAMTALK_CODEGEN_DIAGNOSTICS=1` asked for
+/// them, the codegen report hints (BT-4292), through the same
 /// [`GeneratedModule::into_code_and_verifier_diagnostics`] filter the module
 /// compile path uses; every other codegen warning is dropped. The diagnostics
 /// are warnings: generation still succeeds with the generator's output.
@@ -357,7 +358,8 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
 }
 
 /// Like [`generate_test_expression`] but also returns the `ThreadedIr`
-/// verifier diagnostics (ADR 0111 Addendum 17, BT-3778), filtered by
+/// verifier diagnostics (ADR 0111 Addendum 17, BT-3778) and any opt-in
+/// codegen report hints (BT-4292), filtered by
 /// [`GeneratedModule::into_code_and_verifier_diagnostics`].
 ///
 /// # Errors

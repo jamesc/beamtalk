@@ -25,13 +25,24 @@ pub(crate) fn build_warning_terms(warnings: &[String]) -> Vec<Term> {
 /// Appends the `ThreadedIr` verifier diagnostics (`internal: ...`, ADR 0111
 /// amendment, BT-3724) to a response's warning messages. The only codegen
 /// warnings the compiler port forwards; they are warnings, so the compile
-/// still succeeds.
+/// still succeeds. The opt-in codegen hints the shared filter also passes
+/// (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`, the BT-4292 dynamic-site report) are a
+/// `beamtalk build` report, so they are dropped here and REPL/MCP output is
+/// unchanged.
 pub(crate) fn with_verifier_warnings(
     warnings: &[String],
     verifier_diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
 ) -> Vec<String> {
     let mut all = warnings.to_vec();
-    all.extend(verifier_diagnostics.iter().map(|d| d.message.to_string()));
+    all.extend(
+        verifier_diagnostics
+            .iter()
+            .filter(|d| {
+                d.category
+                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::InternalVerifier)
+            })
+            .map(|d| d.message.to_string()),
+    );
     all
 }
 

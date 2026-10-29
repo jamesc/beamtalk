@@ -107,7 +107,7 @@ fn lowering(code: &str) -> Lowering {
         return Lowering::Applied;
     };
     let start = code[..marker]
-        .rfind("let T = 0 in")
+        .rfind("let T@ = 0 in")
         .unwrap_or_else(|| panic!("no `t := 0` before the block body:\n{code}"));
     if code[start..marker].contains("fun (") {
         Lowering::Closure

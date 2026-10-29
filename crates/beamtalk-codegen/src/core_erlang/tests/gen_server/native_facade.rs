@@ -618,7 +618,7 @@ fn test_native_facade_dispatch_calls_sync_send() {
         "dispatch_doWork should call sync_send with empty args. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'process:', [Data])"),
+        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'process:', [Data@])"),
         "dispatch_process: should call sync_send with [Data] args. Got:\n{code}"
     );
 }
@@ -642,7 +642,7 @@ fn test_native_facade_dispatch_keyword_arity() {
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
     assert!(
-        code.contains("'dispatch_process:'/2 = fun (Data, Self) ->"),
+        code.contains("'dispatch_process:'/2 = fun (Data@, Self) ->"),
         "Keyword dispatch should take params then Self. Got:\n{code}"
     );
 }

@@ -1897,7 +1897,7 @@ fn test_binary_pattern_outer_size_stays_inline() {
     let doc = generator.generate_pattern(&pattern).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("#<Payload>(N,"),
+        output.contains("#<Payload@>(N,"),
         "Expected size to reference outer variable N, got: {output}"
     );
     assert!(
@@ -2080,7 +2080,7 @@ fn test_segmented_binary_arm_splits() {
         "Expected an ('all',1,'binary') split tail, got: {output}"
     );
     assert!(
-        output.contains("#<Payload>(N,"),
+        output.contains("#<Payload@>(N@,"),
         "Expected the inner chunk to use N bound by the outer match, got: {output}"
     );
 }

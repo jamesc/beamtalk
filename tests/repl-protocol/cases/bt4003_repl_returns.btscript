@@ -26,7 +26,7 @@ w
 #(1, 2) inject: 0 into: [:a :x | ^x]
 // => ERROR: a non-local return (`^`) in the body of a loop or collection
 
-// PIN-BUG BT-3947: measured right, a `^` at the root, in an arm, an evaluated
+// PIN-BUG BT-4288: measured right, a `^` at the root, in an arm, an evaluated
 // block, a protected block and a stored closure.
 ^7
 // => 7

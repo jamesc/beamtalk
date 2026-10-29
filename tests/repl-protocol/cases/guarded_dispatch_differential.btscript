@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: the workspace half of the guarded-dispatch differential fixture
+// (stdlib/test/guarded_dispatch_differential_test.bt holds the rest). A
+// guarded direct call names the class module the compiler saw; the ADR 0025
+// amendment (2026-10-29, §2) says a same-module recompile, a live patch and
+// `removeSelector:` all act inside that module's `dispatch/3`, so a typed
+// call site keeps agreeing with the dynamic send. Both need a live workspace
+// (they recompile the class), which BUnit does not have.
+//
+// `DiffReplWidget` is sealed, so on main `DiffReplTypedProbe>>greet:` already
+// compiles to the BT-4069 guarded direct call; `DiffReplDynamicProbe>>greet:`
+// is its dynamic twin. Each step
+// asserts both answer the same. Later children of epic BT-4291 add rows for
+// the receiver kinds they convert the same way: a typed and an untyped probe
+// class, and one assertion per probe after each mutation.
+
+Value subclass: DiffReplBase
+  field: x :: Integer = 0
+  greet -> String => "base"
+// => "DiffReplBase"
+
+sealed DiffReplBase subclass: DiffReplWidget
+  greet -> String => "widget"
+// => "DiffReplWidget"
+
+Value subclass: DiffReplTypedProbe
+  greet: w :: DiffReplWidget => w greet
+// => "DiffReplTypedProbe"
+
+Value subclass: DiffReplDynamicProbe
+  greet: w => w greet
+// => "DiffReplDynamicProbe"
+
+w := DiffReplWidget new
+// => _
+
+typedProbe := DiffReplTypedProbe new
+// => _
+
+dynamicProbe := DiffReplDynamicProbe new
+// => _
+
+typedProbe greet: w
+// => "widget"
+
+dynamicProbe greet: w
+// => "widget"
+
+// Removing the class-body method re-exposes the inherited one (ADR 0112).
+DiffReplWidget removeSelector: #greet
+// => DiffReplWidget
+
+typedProbe greet: w
+// => "base"
+
+dynamicProbe greet: w
+// => "base"
+
+// A live patch recompiles the class body in place: same module, new code.
+DiffReplWidget >> greet => "patched"
+// => "DiffReplWidget>>greet"
+
+typedProbe greet: w
+// => "patched"
+
+dynamicProbe greet: w
+// => "patched"

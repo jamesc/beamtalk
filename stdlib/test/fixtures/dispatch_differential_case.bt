@@ -1,0 +1,78 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4292: the shared machinery of the differential send tests — BT-4150's
+// sealed_direct_dispatch_differential_test.bt and BT-4292's
+// guarded_dispatch_differential_test.bt. A differential test runs one send
+// two ways and asserts the two give the same result, or raise the same error
+// shape (class, kind, selector, errorClass, message, hint). The governing
+// rule is the ADR 0025 amendment (2026-10-29): a guarded direct call must
+// reach exactly what dynamic dispatch would reach.
+//
+// This class lives under fixtures/ so the test runner does not run it: only
+// its concrete subclasses are test cases.
+
+abstract TestCase subclass: DispatchDifferentialCase
+
+  // `beamtalk_message_dispatch:send/3`, called explicitly: the dynamic path.
+  dynamic: selector :: Symbol args: args :: List to: receiver =>
+    Erlang erlang
+      apply: #beamtalk_message_dispatch
+      module: #send
+      args: #(receiver, selector, args)
+
+  // `Module:dispatch/3`, called explicitly: exactly the call the tag-matched
+  // arm of a guarded direct call emits. The module is a method argument, not
+  // a literal at the `apply` site, so erlc cannot fold it into a static remote
+  // call (BT-4150 reads its test module's import table).
+  rawDispatch: selector :: Symbol args: args :: List to: receiver in: module :: Symbol =>
+    Erlang erlang
+      apply: module
+      module: #dispatch
+      args: #(selector, args, receiver)
+
+  // The observable outcome of a block: its value, or the full structured
+  // shape of the error it raised.
+  outcomeOf: aBlock :: Block -> List =>
+    [#(#returned, aBlock value)]
+      on: Exception
+      do: [:e |
+        #(#raised, e class name, e kind, e selector, e errorClass, e message, e hint)
+      ]
+
+  // Runs `directBlock` and `dynBlock`, asserts they agree, and answers the
+  // shared outcome so callers can also pin what it is.
+  assertSameOutcome: directBlock :: Block as: dynBlock :: Block -> List =>
+    direct := self outcomeOf: directBlock
+    self assert: direct equals: (self outcomeOf: dynBlock)
+    direct
+
+  // Runs one selector on `receiver` through `module`'s `dispatch/3` and
+  // through the dynamic send, asserts they agree, and answers the outcome.
+  armOutcome: selector :: Symbol args: args :: List on: receiver in: module :: Symbol -> List =>
+    self
+      assertSameOutcome: [
+        self
+          rawDispatch: selector
+          args: args
+          to: receiver
+          in: module
+      ]
+      as: [
+        self
+          dynamic: selector
+          args: args
+          to: receiver
+      ]
+
+  // One send row: `typed` is a one-argument block whose parameter is
+  // annotated, so the send in it compiles with that static receiver type (a
+  // guarded direct call once one applies); `dynamic` is its untyped twin.
+  // Both run on `receiver` and must give the same outcome; `label` rides
+  // along in the comparison, so a failure names its row. Answers the outcome.
+  send: label :: Symbol typed: typed :: Block dynamic: dynamic :: Block on: receiver -> List =>
+    direct := self outcomeOf: [typed value: receiver]
+    self assert: #(label, direct) equals: #(label, self outcomeOf: [
+      dynamic value: receiver
+    ])
+    direct

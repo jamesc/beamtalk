@@ -587,9 +587,32 @@ Example: `Self-send 'self bar' inside loop at line 30: synchronous call to own m
 **5. Dynamic dispatch fallback**
 
 When a message send can't be statically resolved and uses runtime dispatch
-via `beamtalk_message_dispatch:send/3`.
+via `beamtalk_message_dispatch:send/3`. This is the dynamic-site report
+(BT-4292): each hint names the receiver's static type (class, kind and
+provenance, or `Dynamic`/union/negation) and the reason the send stayed
+dynamic. The word after `reason:` is a stable token for counting sites
+(`untyped`, `builtin`, `supervisor`, `abstract`, `actor`, `open`,
+`exception`, `binary-selector`, …); for a built-in receiver the rest names
+its row of the shared routing fixture
+(`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`).
+The reason is the gate of the same decision the guarded direct call is
+emitted from (`typed_sealed_send_target` in `dispatch_codegen.rs`), so the
+report cannot disagree with the generated code.
 
-Example: `Send 'foo:' at line 23: dynamic dispatch (receiver type unknown)`
+Examples:
+
+```text
+Send 'foo:' at line 23: dynamic dispatch (receiver: Dynamic (unannotated parameter) [dynamic]; reason: untyped)
+Send 'at:put:' at line 12: dynamic dispatch (receiver: Dictionary [Object, declared]; reason: builtin — representation-routed: untagged_map guard -> bt@stdlib@dictionary)
+Send 'start' at line 40: dynamic dispatch (receiver: AppSupervisor [Object, declared]; reason: supervisor — AppSupervisor instances are Supervisor handles (beamtalk_supervisor tuples))
+```
+
+Count a project's dynamic sites by reason with:
+
+```bash
+BEAMTALK_CODEGEN_DIAGNOSTICS=1 beamtalk build --force 2>&1 \
+  | grep -o 'reason: [a-z-]*' | sort | uniq -c
+```
 
 **6. Large extracted arity**
 

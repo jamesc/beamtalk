@@ -1130,6 +1130,9 @@ TestCase subclass: Bt3981EvalblockTest
   testActorWhileBodyAssigned =>
     self assert: (Bt3981EvalblockActor spawn whileBodyAssigned) equals: 1
 
+  testActorWhileCondNonLast =>
+    self assert: (Bt3981EvalblockActor spawn whileCondNonLast) equals: 1
+
   testActorCountedLastStatement =>
     self assert: (Bt3981EvalblockActor spawn countedLastStatement) equals: 3
 

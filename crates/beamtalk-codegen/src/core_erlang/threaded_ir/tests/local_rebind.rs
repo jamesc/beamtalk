@@ -380,7 +380,7 @@ fn direct_params_non_member_is_a_plain_let_outside_the_loop_chain() {
         "{rendered}"
     );
     assert!(
-        rendered.contains("apply 'while'/1 (T)"),
+        rendered.contains("apply 'while'/1 (T@)"),
         "a non-member must not be forced into the loop's parameter list: {rendered}"
     );
 }

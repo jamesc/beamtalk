@@ -42,6 +42,7 @@ defmodule VeBench do
   def list100, do: Enum.to_list(1..100)
   def dict, do: %{a: 1, b: 2, k: 3}
   def string, do: "hello world"
+  def tuple, do: {1, 2}
   def ok_result, do: {:ok, 7}
 
   # === Loop overhead ===
@@ -156,6 +157,11 @@ defmodule VeBench do
   defbench(:struct_of, p, do: p.__struct__)
   defbench(:is_struct_check, p, do: is_struct(p, Point))
   defbench(:is_binary_check, s, do: is_binary(s))
+
+  # === 14. Guarded static dispatch baselines (BT-4292) ===
+
+  defbench(:tuple_elem, t, do: elem(t, 0))
+  defbench(:module_ref, _, do: Point)
 
   # === 13. FFI calls (BT-4153) ===
 

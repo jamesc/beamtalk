@@ -1,6 +1,6 @@
 // BT-3971: a Tier 2 block body ending in `[...] value` that assigns a local
 // answered the raw `{Value, State}` tuple in an Erlang FFI argument block
-// (a compile error now, BT-3947 parks the right answer). This pins the REPL
+// (a compile error under BT-3971; BT-3982 lowers it). This pins the REPL
 // host: the root evaluated block answers 3, and the FFI block that writes a
 // captured local is now rejected earlier, as an ADR 0133 escaping block
 // (BT-3917), before the BT-3971 error can apply.

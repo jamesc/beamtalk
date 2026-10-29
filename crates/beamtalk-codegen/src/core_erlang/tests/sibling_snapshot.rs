@@ -34,7 +34,7 @@ fn assert_t_snapshot_before_construct(body: &str) {
     let tmp = &body[snapshot + "let ".len()..];
     let tmp = &tmp[..tmp.find(' ').unwrap_or(tmp.len())];
     assert!(
-        body.contains(&format!("let {tmp} = T in")),
+        body.contains(&format!("let {tmp} = T@ in")),
         "the snapshot reads `t`: {body}"
     );
     assert!(

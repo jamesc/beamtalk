@@ -72,7 +72,7 @@ fn sort_comparator_field_write_reads_its_own_stateacc() {
 ",
     );
     let comparator = code
-        .split("fun (E, F) -> ")
+        .split("fun (E@, F@) -> ")
         .nth(1)
         .and_then(|rest| rest.split("'lists':'sort'").next())
         .expect("the comparator fun");

@@ -4133,145 +4133,118 @@ fn residual_repl_match_arm_write_is_accepted_where_it_is_a_producer() {
     );
 }
 
-/// PIN-BUG BT-3947 (closes BT-3948): in an actor method, a literal block
-/// applied in place (`[:z | ...] value: i`) that assigns a local of its own,
-/// in a `to:do:`/`whileTrue:`/`timesRepeat:` body that rebinds an outer
-/// local, below a conditional arm of such a body, in a loop condition, or
-/// with the loop inside another block, emitted an unbound `StateAcc`
-/// (`erlc` rejected the module), raised, or answered a `{Value, Locals}`
-/// carrier (every row below was measured on a BEAM). BT-3948 makes it a compile error; BT-3947 gives
-/// closure bodies a frame of their own, deletes the `InlineBlockLocalInLoop`
-/// row and flips these to accepted (the repro then answers 6). Class and
-/// value-type methods, blocks that assign no local and `r := [..] value: i`
-/// of a fresh local inside an arm were measured right and stay accepted
-/// (BT-3948's row does not report them). The `t := t + (E)` shapes BT-3948's
-/// row leaves alone (in `do:` and `collect:` bodies, at the method level) leaked
-/// the carrier until BT-3982 lowered the evaluated block as a producer
-/// (`bt3982evalblock_test.bt` runs them).
+/// BT-3947 (closes BT-3948): in an actor method, a literal block applied in
+/// place (`[:z | ...] value: i`, `[v := 1. v] value`) that assigns a local of
+/// its own, in a `to:do:`/`whileTrue:`/`timesRepeat:` body, below a
+/// conditional arm of one, in a loop condition, or with the loop inside
+/// another block, emitted an unbound `StateAcc` (`erlc` rejected the module),
+/// raised, or answered a `{Value, Locals}` carrier (every row below was
+/// measured on a BEAM by BT-3948), so BT-3948's `InlineBlockLocalInLoop` row
+/// made it a compile error. With BT-3912's closure-body frames and BT-3982's
+/// evaluated-block producer every one of them answers what the same body
+/// answers in a class method (re-measured on a BEAM with the row bypassed,
+/// 2026-10-29), so BT-3947 deleted the row: they are accepted in every
+/// context. `stdlib/test/bt3947inline_block_loop_test.bt` runs them (the
+/// repro answers 6) and the codegen corpus
+/// `inline_block_local_in_loop_corpus.rs` compiles the generated grid.
 #[test]
-fn residual_inline_block_local_in_loop_is_an_error_in_actors() {
+fn inline_block_local_in_loop_is_accepted_in_every_context() {
     // The BT-3948 repro, in the language's newline syntax.
-    let body = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
-    let messages = residual_messages(&in_actor(body), None);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(
-        messages[0].contains("assigns its local `w`")
-            && messages[0].contains("BT-3948, until BT-3947"),
-        "{messages:?}"
-    );
-    // The siblings measured failing on a BEAM: no conditional, a parameter
-    // rebind, no parameter, two arguments, statement and assignment
-    // positions, and the other counted and condition loops.
-    for body in [
-        "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
-        "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
-        "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
-        "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
-        "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
-        "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
-        "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
-        "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
-        // Below a conditional arm (BEAM-measured wrong or erlc failure).
-        "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
-        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
-        "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
-        "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
-        "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
-        "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
-        // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
-        // `value`, a `do:` body or another loop answered a carrier or
-        // raised; a `do:`, `collect:` or `inject:` body below the loop too.
-        "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
-        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
-        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
-        "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] value\nt",
-        "#(1) do: [:e | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
-        "c := true\nc ifTrue: [c ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
-        "2 timesRepeat: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
-        "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
-        "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
-        "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
-        // Conservative rejections (not measured failing; BT-3947 flips
-        // them): a loop in a closure stored by `add:`, and one in a
-        // method-level arm with the block as a bare statement.
-        "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
-        "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
-        // An assignment in a nested `do:` body or closure of a condition
-        // statement is not the BT-3911 cell.
-        "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
-        // An arm inside a `do:` body or closure is not a bare arm.
-        "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
-        "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
-        // A state-touching body: the arm operand and `and:` shapes.
-        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
-        "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
-        // In a loop condition, whatever the body does.
-        "[([:z | w := z. w] value: t) < 3] whileTrue: [self.n := self.n + 1\n  t := t + 1]\nt",
-        "[([:z | z > 5 ifTrue: [z := 0]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
-        "[([:z | z > 0 ifTrue: [w := z]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
-        "[[:z | w := z. w] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
-        "[[:z | z > 0 ifTrue: [w := z]\n  z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
-        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
-        "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
-        "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
-        "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
-        "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
-    ] {
-        let messages = residual_messages(&in_actor(body), None);
-        assert_eq!(messages.len(), 1, "{body}: {messages:?}");
-        assert!(messages[0].contains("BT-3948"), "{body}: {messages:?}");
+    let repro = "1 to: 3 do: [:i |\n  t := t + ([:z |\n    w := 0\n    z > 0 ifTrue: [w := z]\n    w] value: i)]\nt";
+    for body in std::iter::once(repro).chain(INLINE_BLOCK_LOOP_BODIES.iter().copied()) {
+        let mut srcs = vec![in_actor(body)];
+        // A field write is the actor's (a class method has no `n`, a value
+        // type cannot assign one).
+        if !body.contains("self.n") {
+            srcs.push(in_class(body));
+            srcs.push(in_value(body));
+        }
+        for src in srcs {
+            let messages = residual_messages(&src, None);
+            assert!(messages.is_empty(), "{src}: {messages:?}");
+        }
     }
-    // The shapes BT-3948's row leaves alone: other contexts, other bodies, a
-    // loop that rebinds nothing or touches state, a block that assigns no
-    // local, and a nested loop. (The `t := t + (E)` forms answer since
-    // BT-3982: `bt3982evalblock_test.bt`.)
+    // Every cell of the BEAM-run fixtures too.
     for src in [
-        in_class("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
-        in_value("1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
-        in_actor("#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt"),
-        in_actor("1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt"),
-        in_actor("1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt"),
-        in_actor("1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt"),
-        in_actor(
-            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
-        ),
-        in_actor("t := t + ([:z | w := z. w] value: 2)\nt"),
-        // `r := [..] value: i` of a fresh local in an arm answers right in
-        // every arm family and loop kind (BEAM-measured).
-        in_actor(
-            "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
-        ),
-        in_actor(
-            "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
-        ),
-        in_actor(
-            "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
-        ),
-        in_actor(
-            "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
-        ),
-        // A state-touching body answers right directly and for a statement
-        // of an arm (BEAM-measured).
-        in_actor(
-            "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
-        ),
-        in_actor(
-            "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
-        ),
-        // The BT-3911 cell: one arm-only statement in a condition.
-        in_actor("[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3947inline_block_loop_actor.bt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3947inline_block_loop_class.bt"),
+        include_str!("../../../../../stdlib/test/fixtures/bt3947inline_block_loop_value.bt"),
     ] {
-        let messages = residual_messages(&src, None);
-        // Not BT-3948's. The `t := t + (E)` shapes here leaked the carrier
-        // (BT-3981 measured "Tuple does not understand" at the method level,
-        // "expected a Dictionary" in a `do:` body) until BT-3982 lowered the
-        // evaluated block as a producer.
-        assert!(
-            messages.iter().all(|m| !m.contains("BT-3948")),
-            "{src}: {messages:?}"
-        );
+        let messages = residual_messages(src, None);
+        assert!(messages.is_empty(), "{messages:?}");
     }
 }
+
+/// The bodies BT-3948's row rejected in an actor method (measured failing on a
+/// BEAM unless marked conservative), and the neighbouring shapes it accepted.
+const INLINE_BLOCK_LOOP_BODIES: &[&str] = &[
+    "1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+    "1 to: 3 do: [:i | t := t + ([:z | z := z + 1. z] value: i)]\nt",
+    "1 to: 3 do: [:i | t := t + ([v := 1. v] value)]\nt",
+    "1 to: 3 do: [:i | t := t + ([:z :y | v := z + y. v] value: i value: 1)]\nt",
+    "1 to: 3 do: [:i |\n  t := t + 1\n  [:z | w := z. w] value: i]\nt",
+    "1 to: 3 do: [:i |\n  t := t + 1\n  r := [:z | w := z. w] value: i\n  r]\nt",
+    "[t < 3] whileTrue: [t := t + ([:z | w := z. w] value: 1)]\nt",
+    "3 timesRepeat: [t := t + ([:z | w := z. w] value: 1)]\nt",
+    // Below a conditional arm (BEAM-measured wrong or erlc failure).
+    "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+    "c := true\n1 to: 3 do: [:i | c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+    "c := true\n1 to: 3 do: [:i | c and: [([:z | w := z. w] value: i) > 0]]\nt",
+    "c := true\n1 to: 3 do: [:i | c ifTrue: [t := ([:z | w := z. w] value: i)]]\nt",
+    "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [t := t + ([:z | w := z. w] value: i)]]]\nt",
+    "c := true\n[t < 3] whileTrue: [t := t + 1\n  c and: [([:z | w := z. w] value: 1) > 0]]\nt",
+    // Measured: a loop inside a method-level arm, `on:do:`, `ensure:`,
+    // `value`, a `do:` body or another loop answered a carrier or
+    // raised; a `do:`, `collect:` or `inject:` body below the loop too.
+    "c := true\nc ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+    "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] on: Error do: [:e | 0]\nt",
+    "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] ensure: [0]\nt",
+    "[1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]] value\nt",
+    "#(1) do: [:e | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+    "c := true\nc ifTrue: [c ifTrue: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+    "2 timesRepeat: [1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+    "1 to: 2 do: [:j | 1 to: 2 do: [:k | 1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]]\nt",
+    "q := 0\n1 to: 2 do: [:j | q := q + 1\n  1 to: 3 do: [:i | t := t + ([:z | w := z. w] value: i)]]\nt",
+    "1 to: 3 do: [:i | #(1, 2) do: [:e | t := t + ([:z | w := z. w] value: e)]]\nt",
+    // Conservative rejections (not measured failing): a loop in a closure
+    // stored by `add:`, and one in a method-level arm with the block
+    // as a bare statement.
+    "fs := OrderedCollection new\n1 to: 3 do: [:i | fs add: [:x | [:z | w := z. w] value: x]]\nt",
+    "c := true\nc ifTrue: [1 to: 3 do: [:i | [:z | w := z. w] value: i]]\nt",
+    // An assignment in a nested `do:` body or closure of a condition
+    // statement is not the BT-3911 cell.
+    "[[:z | #(1) do: [:e | w := e]. z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+    // An arm inside a `do:` body or closure is not a bare arm.
+    "[[:z | #(1) do: [:e | e > 0 ifTrue: [w := e]]] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+    "[[:z | [:y | y > 0 ifTrue: [w := y]] value: z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+    // A state-touching body: the arm operand and `and:` shapes.
+    "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c ifTrue: [t := t + ([:z | w := z. w] value: i)]]\nt",
+    "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  c and: [([:z | w := z. w] value: i) > 0]]\nt",
+    // In a loop condition, whatever the body does.
+    "[([:z | w := z. w] value: t) < 3] whileTrue: [self.n := self.n + 1\n  t := t + 1]\nt",
+    "[([:z | z > 5 ifTrue: [z := 0]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+    "[([:z | z > 0 ifTrue: [w := z]\n  z] value: t) < 3] whileTrue: [t := t + 1]\nt",
+    "[[:z | w := z. w] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+    "[[:z | z > 0 ifTrue: [w := z]\n  z] value: t\n  t < 3] whileTrue: [t := t + 1]\nt",
+    "[([:z | w := z. w] value: t) < 0] whileTrue: [t := t + 1]\nt",
+    "[([:z | w := z. w] value: t) > 5] whileFalse: [t := t + 1]\nt",
+    "[([:z | w := z. w] value: t) < 0] whileTrue: [t := 5]\nt",
+    "[t < 3 and: [([:z | w := z. w] value: t) > 0]] whileTrue: [t := t + 1]\nt",
+    "[t < 3 ifTrue: [([:z | w := z. w] value: t) > 0] ifFalse: [false]] whileTrue: [t := t + 1]\nt",
+    // The shapes BT-3948's row accepted.
+    "#(1, 2, 3) do: [:i | t := t + ([:z | w := z. w] value: i)]\nt",
+    "1 to: 3 do: [:i | [:z | w := z. w] value: i]\nt",
+    "1 to: 3 do: [:i | r := [:z | w := z. w] value: i. r]\nt",
+    "1 to: 3 do: [:i | t := t + ([:z | z + 1] value: i)]\nt",
+    "1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + ([:z | w := z. w] value: i)]\nt",
+    "t := t + ([:z | w := z. w] value: 2)\nt",
+    "c := true\n1 to: 3 do: [:i |\n  t := t + 1\n  c ifTrue: [r := [:z | w := z. w] value: i\n    t := t + r]]\nt",
+    "c := true\n1 to: 3 do: [:i | c ifTrue: [c ifTrue: [r := [:z | w := z. w] value: i\n  t := t + r]]]\nt",
+    "c := true\n3 timesRepeat: [c and: [r := [:z | w := z. w] value: 2\n  t := t + r\n  true]]\nt",
+    "c := true\n[t < 9] whileTrue: [c ifNotNil: [:u | r := [:z | w := z. w] value: 2\n  t := t + r + 1]]\nt",
+    "c := true\n1 to: 3 do: [:i |\n  self.n := self.n + 1\n  t := t + 1\n  c ifTrue: [[:z | w := z. w] value: i]]\nt",
+    "[[:k | true ifTrue: [x := k]] value: 1\n  t < 3] whileTrue: [t := t + 1]\nt",
+];
 
 /// BT-3948: an in-place block that assigns its own local AND writes an outer
 /// local inside a loop is no BT-3948 shape: it was left to the Phase 0 position
@@ -4309,16 +4282,6 @@ fn the_bt3981_evaluated_block_repro_is_accepted() {
 /// Whether `src` has no ADR 0131 position diagnostic at all.
 fn evaluated_block_accepted(src: &str) -> bool {
     residual_messages(src, None).is_empty()
-}
-
-/// Whether `src` is rejected, and only by BT-3948
-/// (`InlineBlockLocalInLoop`, BT-3947 item 2): a block evaluated in place that
-/// assigns a local of its own inside a counted or `whileTrue:` loop, which is
-/// not this shape and stays an error. At least one diagnostic, so a shape
-/// that is silently accepted does not pass.
-fn only_bt3948(src: &str) -> bool {
-    let messages = residual_messages(src, None);
-    !messages.is_empty() && messages.iter().all(|m| m.contains("BT-3948"))
 }
 
 /// The generated corpus of BT-3981, hosts x positions x evaluated blocks x
@@ -4399,19 +4362,21 @@ fn the_beam_run_evaluated_block_cells_are_accepted() {
 /// accepted at every position: before the producer, as a statement it was a
 /// `ThreadedIr` verifier rejection or an `erlc` unbound `StateAcc` (the fold
 /// body's raw Tier 2 tuple unpack), so BT-3981 rejected it. In a counted loop
-/// (`to:do:`, `timesRepeat:`) or `whileTrue:` the block's own local is still
-/// BT-3948's `InlineBlockLocalInLoop` (BT-3947 item 2). Class and value-type
-/// methods answer everywhere.
+/// (`to:do:`, `timesRepeat:`) or `whileTrue:` too, since BT-3947 deleted
+/// BT-3948's `InlineBlockLocalInLoop` row (BEAM cells in
+/// `bt3947inline_block_loop_test.bt`). Class and value-type methods answer
+/// everywhere.
 #[test]
 fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
     let hosts = [
-        ("#(1) do: [:z | {B}]", false),
-        ("#(1) collect: [:z | {B}]", false),
-        ("#(1) inject: 0 into: [:a :z | {B}]", false),
-        ("#(1) select: [:z | {B}. true]", false),
-        ("#(1) detect: [:z | {B}. true] ifNone: [0]", false),
-        ("1 to: 1 do: [:z | {B}]", true),
-        ("1 timesRepeat: [{B}]", true),
+        "#(1) do: [:z | {B}]",
+        "#(1) collect: [:z | {B}]",
+        "#(1) inject: 0 into: [:a :z | {B}]",
+        "#(1) select: [:z | {B}. true]",
+        "#(1) detect: [:z | {B}. true] ifNone: [0]",
+        "1 to: 1 do: [:z | {B}]",
+        "1 timesRepeat: [{B}]",
+        "i := 0. [i < 1] whileTrue: [i := i + 1. {B}]",
     ];
     let bodies = [
         "r := 3. [n := 3. n] value",
@@ -4425,28 +4390,10 @@ fn evaluated_block_in_a_fold_that_writes_an_outer_local() {
         "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
         "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
     ];
-    let src =
-        in_actor("r := 0\ni := 0\n[i < 1] whileTrue: [i := i + 1. r := [n := 3. n] value]\nr");
-    assert!(only_bt3948(&src), "{src}");
-    // In a counted loop BT-3948 still rejects the block whose local is
-    // assigned below a nested block (another evaluated block, a conditional
-    // arm); the other bodies are accepted and answer 3 on a BEAM
-    // (`bt3982evalblock_test.bt` `testCountedBody*`, `testTimesBody*`).
-    let bt3948_in_counted = [
-        "r := 3. [[n := 3. n] value] value",
-        "r := 3. true ifTrue: [[n := 4. n] value] ifFalse: [0]",
-        "true ifTrue: [r := [n := 3. n] value] ifFalse: [0]",
-    ];
-    for (host, counted) in hosts {
+    for host in hosts {
         for body in bodies {
             let program = format!("r := 0\n{}\nr", host.replace("{B}", body));
-            let actor = in_actor(&program);
-            if counted && bt3948_in_counted.contains(&body) {
-                assert!(only_bt3948(&actor), "{actor}");
-            } else {
-                assert!(evaluated_block_accepted(&actor), "{actor}");
-            }
-            for src in [in_class(&program), in_value(&program)] {
+            for src in [in_actor(&program), in_class(&program), in_value(&program)] {
                 assert!(evaluated_block_accepted(&src), "{src}");
             }
         }
@@ -4491,45 +4438,35 @@ fn evaluated_block_under_any_enclosing_construct_is_accepted() {
         let src = in_actor(body);
         assert!(evaluated_block_accepted(&src), "{src}");
     }
-    // `whileFalse:` is a loop: the block's own local is BT-3948's when the
-    // body also writes the counter; assigned to the one local the loop
-    // writes it is accepted (`testWhileFalseAssign` answers 3).
-    let src = in_actor("i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]");
-    assert!(only_bt3948(&src), "{src}");
-    let src = in_actor("r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr");
-    assert!(evaluated_block_accepted(&src), "{src}");
+    // `whileFalse:` is a loop: the block's own local is accepted whether or
+    // not the body also writes the counter (`testWhileFalseAssign` answers 3;
+    // the first was BT-3948's until BT-3947, `bt3947inline_block_loop_test.bt`).
+    for body in [
+        "i := 0\n[i >= 1] whileFalse: [i := i + 1. [n := 3. n] value]\ni",
+        "r := 0\n[r > 1] whileFalse: [r := [n := 3. n] value]\nr",
+    ] {
+        let src = in_actor(body);
+        assert!(evaluated_block_accepted(&src), "{src}");
+    }
     let bt3971 = "Actor subclass: A\n  state: hits = 0\n  assigned =>\n    (Erlang lists)\n      map: [:x |\n        r := [\n          n := 3\n          n\n        ] value\n        r\n      ]\n      with: #(1)\n";
     assert!(evaluated_block_accepted(bt3971));
 }
 
-/// PIN-BUG BT-3947: measured correct on a BEAM by BT-3981 (answers 1: a
-/// `whileTrue:` condition whose first statement is an evaluated block that
-/// assigns a local, then `self.n < 1`); conservatively rejected by BT-3948's
-/// `InlineBlockLocalInLoop` — flip to accepted (and restore the `BUnit` cell
-/// `whileCondNonLast`) when BT-3947 lands. The other loop cells BT-3981
-/// measured (`whileTrue:` body, `to:do:` and `timesRepeat:`) are not reported by
-/// BT-3948 and stay in `bt3981evalblock_test.bt`.
+/// BT-3947: measured correct on a BEAM by BT-3981 (answers 1: a `whileTrue:`
+/// condition whose first statement is an evaluated block that assigns a
+/// local, then `self.n < 1`), and conservatively rejected by BT-3948's
+/// `InlineBlockLocalInLoop` until BT-3947 deleted the row. Accepted; the
+/// `BUnit` cell `whileCondNonLast` (`bt3981evalblock_test.bt`) runs it, and so
+/// does a nested evaluated block in a counted loop body.
 #[test]
-fn bt3981_measured_while_condition_cell_is_conservatively_rejected_by_bt3948() {
-    let src = in_actor(
+fn bt3981_measured_while_condition_cell_is_accepted() {
+    for body in [
         "self.n := 0\n[\n  [w := 3. w] value\n  self.n < 1] whileTrue: [self.n := self.n + 1]\nself.n",
-    );
-    let messages = residual_messages(&src, None);
-    assert!(
-        messages.iter().any(|m| m.contains("BT-3948")),
-        "{messages:?}"
-    );
-}
-
-/// A site nested in a span BT-3948 already reported is not reported twice.
-#[test]
-fn evaluated_block_nested_in_a_bt3948_site_is_reported_once() {
-    let messages = residual_messages(
-        &in_actor("1 to: 3 do: [:i | t := t + ([[n := 3. n] value] value)]\nt"),
-        None,
-    );
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("BT-3948"), "{messages:?}");
+        "1 to: 3 do: [:i | t := t + ([[n := 3. n] value] value)]\nt",
+    ] {
+        let src = in_actor(body);
+        assert!(evaluated_block_accepted(&src), "{src}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4695,7 +4632,7 @@ fn in_items_actor(body: &str) -> String {
     )
 }
 
-/// PIN-BUG BT-3947 (BT-4003 item 3): in an actor method, a loop or fold whose
+/// PIN-BUG BT-4287 (BT-4003 item 3): in an actor method, a loop or fold whose
 /// block sends to `self` or writes a field (and writes no outer local), as an
 /// operand inside another loop or fold body, loses its state changes, answers
 /// the raw `{Value, State}` pair or crashes. Measured on a BEAM
@@ -4720,7 +4657,7 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
         let errors = analysis_errors(&src, &[]);
         assert_eq!(errors.len(), 1, "{src}: {errors:?}");
         assert!(
-            errors[0].message.contains("BT-4003, until BT-3947"),
+            errors[0].message.contains("BT-4003, until BT-4287"),
             "{}",
             errors[0].message
         );
@@ -4784,14 +4721,14 @@ fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_clos
         let errors = analysis_errors(&src, &[]);
         assert_eq!(errors.len(), 1, "{src}: {errors:?}");
         assert!(
-            errors[0].message.contains("BT-4003, until BT-3947"),
+            errors[0].message.contains("BT-4003, until BT-4287"),
             "{}",
             errors[0].message
         );
     }
 }
 
-/// PIN-BUG BT-3947 (BT-4003 item 5): a `^` in the body of a loop or collection
+/// PIN-BUG BT-4288 (BT-4003 item 5): a `^` in the body of a loop or collection
 /// operation at the REPL is ignored (measured: `#(1, 2) do: [:x | ^x]` answers
 /// the loop's value, and `[n < 3] whileTrue: [^10]` never ends). Rejected.
 /// Accepted (measured right): a `^` at the root, in a conditional arm, an
