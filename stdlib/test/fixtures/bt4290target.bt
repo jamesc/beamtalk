@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4290: a class method of this class hands `Bt4290Runner` a block that
+// changes this class. The block runs in the runner's class process while
+// this class's process waits on the runner, so the change cannot reach it.
+
+Actor subclass: Bt4290Target
+
+  class removeViaRunner =>
+    Bt4290Runner run: [(Beamtalk classNamed: #Bt4290Target) removeFromSystem]
+
+  class renameViaRunner =>
+    Bt4290Runner run: [
+      (Beamtalk classNamed: #Bt4290Target) renameTo: #Bt4290TargetRenamed
+    ]

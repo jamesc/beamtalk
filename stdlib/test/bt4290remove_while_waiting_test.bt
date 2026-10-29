@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4290: removing or renaming a class whose process is blocked waiting on
+// the caller raises a structured `timeout` instead of hanging, and changes
+// nothing first. Fixtures: fixtures/bt4290target.bt, fixtures/bt4290runner.bt.
+
+TestCase subclass: Bt4290RemoveWhileWaitingTest
+
+  testRemoveOfAClassWaitingOnTheCallerTimesOut =>
+    // An instance of the class: removal stops the class's actors first, so a
+    // failure that came after that would leave it dead.
+    instance := Bt4290Target spawn
+    [
+      self should: [Bt4290Target removeViaRunner] raise: #timeout
+      self assert: Bt4290Target name equals: #Bt4290Target
+      self assert: instance isAlive
+    ] ensure: [instance isAlive ifTrue: [instance stop]]
+
+  testRenameOfAClassWaitingOnTheCallerTimesOut =>
+    self should: [Bt4290Target renameViaRunner] raise: #timeout
+    self assert: Bt4290Target name equals: #Bt4290Target

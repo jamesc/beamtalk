@@ -1100,6 +1100,44 @@ refuse_in_own_class_process(ClassPid, Selector) when ClassPid =:= self() ->
 refuse_in_own_class_process(_ClassPid, _Selector) ->
     ok.
 
+%% BT-4290: `removeFromSystem` and `renameTo:` end in `gen_server:stop/1`,
+%% whose timeout is `infinity`. When the class process is itself blocked
+%% waiting on the caller, which `refuse_in_own_class_process/2` cannot see
+%% (a block from one of its class methods, running inside another class's
+%% class method, sends to it), the stop never returns. Ask the class to
+%% answer first, bounded, before any side effect, and raise a structured
+%% `timeout` if it does not. `doc:` and the other primitives that message
+%% the class use a bounded `gen_server:call/2` before any side effect, so
+%% they already fail rather than hang.
+-define(CLASS_RESPONSIVE_TIMEOUT, 5000).
+
+-spec require_class_responsive(pid(), atom(), atom()) -> ok.
+require_class_responsive(ClassPid, ClassName, Selector) ->
+    try gen_server:call(ClassPid, class_name, ?CLASS_RESPONSIVE_TIMEOUT) of
+        _ -> ok
+    catch
+        exit:{timeout, _} ->
+            Error0 = beamtalk_error:new(timeout, ClassName, Selector),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary([
+                    <<"Class '">>,
+                    atom_to_binary(ClassName, utf8),
+                    <<"' did not answer within 5 seconds; ">>,
+                    atom_to_binary(Selector, utf8),
+                    <<" was not started and nothing was changed">>
+                ])
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1,
+                    <<"The class process is busy, or is waiting on this one: a block from one of "
+                      "its class methods, running inside another class's method, cannot "
+                      "change that class.">>
+                )
+            )
+    end.
+
 -doc """
 Set the class documentation string.
 
@@ -1196,6 +1234,7 @@ classRemoveFromSystemByName(ClassName) ->
             ),
             beamtalk_error:raise(Error1);
         ClassPid ->
+            ok = require_class_responsive(ClassPid, ClassName, removeFromSystem),
             Module = beamtalk_object_class:module_name_safe(ClassPid),
             %% Safety: refuse to remove stdlib classes
             case is_stdlib_module_name(Module) of
@@ -1737,6 +1776,7 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     ClassPid = erlang:element(4, Self),
     ok = refuse_in_own_class_process(ClassPid, 'renameTo:'),
     OldName = beamtalk_object_class:class_name_safe(ClassPid),
+    ok = require_class_responsive(ClassPid, OldName, 'renameTo:'),
     ok = require_class_capability(
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
