@@ -66,8 +66,10 @@ jobs:
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
       desktop: ${{ steps.filter.outputs.desktop }}
-      # crates/beamtalk-core|codegen|repl, stdlib/, examples/,
-      # runtime/apps/*/test/fixtures/, Cargo.toml/lock, Justfile, ci.yml: can change the Rust corpus tier's verdict (scripts/ci/corpus-gate.sh).
+      # crates/beamtalk-core|codegen|repl, stdlib/, examples/, the runtime
+      # fixtures and the other corpus sources the tier's tests read,
+      # Cargo.toml/lock, Justfile, ci.yml: can change the Rust corpus tier's
+      # verdict (scripts/ci/corpus-gate.sh).
       corpus: ${{ steps.filter.outputs.corpus }}
       # crates/beamtalk-codegen/ changed: core-diff has something to report.
       codegen: ${{ steps.filter.outputs.codegen }}
