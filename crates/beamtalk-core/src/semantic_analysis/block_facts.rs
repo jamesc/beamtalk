@@ -2771,6 +2771,123 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     operand_sites_of_statement(stmt, false)
 }
 
+/// BT-4287: every loop or fold ([`local_threading_construct`] of the `Loop` or
+/// `Fold` family) among the operands of the statement `stmt`, at any depth,
+/// without paren wrappers: a send's receiver and arguments (a cast's too), a
+/// cascade's receiver and message arguments, a literal's elements, an
+/// interpolated segment, a destructuring's or `match:`'s subject. Nothing
+/// inside a block literal or a `match:` arm (those are statements of their own
+/// frames), and not the statement's own value (the statement, or the value of
+/// `x := V`, `self.f := V` or `^V`), which its statement lowering handles.
+///
+/// The superset of a statement's sites ([`sequenced_operand_sites`],
+/// [`loop_body_producer_sites`]): a construct here that is not one of them
+/// sits behind an operand the sequencing rule leaves to another lowering (a
+/// conditional's receiver, an `operands_not_sequenced` send, a cast, a
+/// cascade message, a lookup), which compiles it in place.
+#[must_use]
+pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
+    // A wrapper the normalisation pass keeps (a literal element's) is walked
+    // through by `children`'s `Parenthesized` arm, so `walk` pushes the
+    // unwrapped construct, as the site lists do.
+    fn walk<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+        if !matches!(expr, Expression::Parenthesized { .. })
+            && local_threading_construct(expr).is_some_and(|c| {
+                matches!(
+                    c.family,
+                    LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                )
+            })
+        {
+            out.push(expr);
+        }
+        children(expr, out);
+    }
+    fn children<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                walk(receiver, out);
+                for arg in arguments {
+                    walk(arg, out);
+                }
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // The shared receiver is the cascade lowering's own: it binds
+                // it once, unpacking a construct's carrier
+                // (`cascade_operand_state_corpus`), so only what is inside it
+                // and the messages' arguments are operands here.
+                let shared = crate::ast_walker::cascade_shared_receiver(receiver);
+                children(shared.unwrap_parens(), out);
+                if let Expression::MessageSend { arguments, .. } = receiver.as_ref() {
+                    for arg in arguments {
+                        walk(arg, out);
+                    }
+                }
+                for message in messages {
+                    for arg in &message.arguments {
+                        walk(arg, out);
+                    }
+                }
+            }
+            Expression::ArrayLiteral { elements, .. }
+            | Expression::TupleLiteral { elements, .. } => {
+                for e in elements {
+                    walk(e, out);
+                }
+            }
+            Expression::ListLiteral { elements, tail, .. } => {
+                for e in elements {
+                    walk(e, out);
+                }
+                if let Some(t) = tail {
+                    walk(t, out);
+                }
+            }
+            Expression::MapLiteral { pairs, .. } => {
+                for pair in pairs {
+                    walk(&pair.key, out);
+                    walk(&pair.value, out);
+                }
+            }
+            Expression::StringInterpolation { segments, .. } => {
+                for segment in segments {
+                    if let crate::ast::StringSegment::Interpolation(e) = segment {
+                        walk(e, out);
+                    }
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => walk(receiver, out),
+            Expression::Assignment { value, .. }
+            | Expression::DestructureAssignment { value, .. }
+            | Expression::Return { value, .. }
+            | Expression::Match { value, .. } => walk(value, out),
+            Expression::Parenthesized { expression, .. } => walk(expression, out),
+            _ => {}
+        }
+    }
+    // The statement's own value: the statement, or the value of `x := V`,
+    // `self.f := V` or `^V`, seen through its parentheses.
+    let value = match stmt.unwrap_parens() {
+        Expression::Assignment { target, value, .. }
+            if matches!(target.as_ref(), Expression::Identifier(_))
+                || is_self_field_target(target) =>
+        {
+            value.as_ref()
+        }
+        Expression::Return { value, .. } => value.as_ref(),
+        other => other,
+    };
+    let mut out = Vec::new();
+    children(value.unwrap_parens(), &mut out);
+    out
+}
+
 /// ADR 0131 Phase 2d (BT-3795): the sub-expressions of the REPL input
 /// statement `stmt` where a loop or fold is a local-threading producer
 /// (ADR 0131 §2's `MethodBody (REPL)` row): its [`sequenced_operand_sites`],
@@ -3070,6 +3187,11 @@ impl LoopBodyContext {
 /// (`#[xs do: [...], t]`, `(xs do: [...]) printString`) wrote nothing back or
 /// crashed, so operands are out under *any* enclosing fold frame. A letrec
 /// loop frame alone lowers every value-bearing site.
+///
+/// This exclusion is about producers that rebind *outer locals*. A loop or
+/// fold that writes none but threads the actor's `State` (its block sends to
+/// `self` or writes a field) is a producer at these sites all the same:
+/// codegen registers it (`is_family_only_fold_value_site`, BT-4287).
 #[must_use]
 pub fn is_actor_fold_value_site(site: &Expression, ctx: &LoopBodyContext) -> bool {
     if !ctx.in_actor || !is_value_bearing_site(ctx.statement, site) {

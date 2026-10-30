@@ -20,7 +20,8 @@ also rejects some correct code:
 |---|---|---|
 | BT-3922 (#4426) | Block assigns `self.field` and escapes | Compile error (`WriteKind::ObjectState`) |
 | BT-3936 (#4450) | Self-send in a closure changes state, change lost | Runtime `stateful_block_dispatch` (`closure_self_dispatch_state_guard`) |
-| BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop` |
+| BT-3948 (#4444) | Inline-block local in an actor loop body, unbound `StateAcc` | `RESIDUAL_DENY_SET` `InlineBlockLocalInLoop`; deleted by BT-3947 (closure-body frames and the evaluated-block producer) |
+| BT-4003 | Self-sending or field-writing fold as an operand in an actor fold body leaks `{Value, State}` or drops writes | `RESIDUAL_DENY_SET` `StateFoldOperandInFold`; deleted by BT-4287 (a producer site of every frame); at an operand that is no producer site it stays `StateFoldUnsequencedOperand` (BT-4310) |
 | BT-3971 (#4442) | Tier 2 body ending in `[...] value` answers `{Value, State}` | `CodeGenError::UnsupportedFeature` |
 | BT-3952 (#4452) | Block reads `self.field`, is stored or passed to a self-send, reads stale | Compile error for every such read |
 | BT-3981 (#4448) | Evaluated `[...] value` in an actor leaks `{Value, State}` | `RESIDUAL_DENY_SET` `EvaluatedBlockValue`; deleted by BT-3982 (the block is a producer wherever it sits) |

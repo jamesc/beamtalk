@@ -192,6 +192,13 @@ pub(super) mod fault {
         /// legacy inline lowering, whose raw `{Value, State}` tuple becomes
         /// the value (`UnthreadedEvaluatedBlock`).
         EvaluatedBlockNotAProducer,
+        /// BT-4287: a frame registers none of its statements' value-bearing
+        /// sites that hold an actor loop or fold threading only `State`
+        /// (`is_family_only_fold_value_site`), as before BT-4287, so such a
+        /// fold as an operand in a fold body is compiled in place and its
+        /// `{Value, State}` carrier becomes the operand
+        /// (`ConstructCarrierInPlace`).
+        FoldOperandFamilyOnlyInPlace,
         /// BT-4263: an evaluated block with arguments that is a
         /// local-threading producer leaves its `LocalRebind`s bound only in
         /// the parameter scope it pops (`generate_evaluated_block_producer`
@@ -1642,6 +1649,37 @@ impl CoreErlangGenerator {
         fold: bool,
         arm: bool,
     ) -> Vec<&'a Expression> {
+        self.body_producer_site_exprs_with(stmt, fold, arm, true)
+    }
+
+    /// The sites [`Self::with_body_producer_sites`] and
+    /// [`Self::with_plain_arm_producer_sites`] register for `stmt`:
+    /// [`Self::body_producer_site_exprs`], except that the test-only fault
+    /// `FoldOperandFamilyOnlyInPlace` withholds the BT-4287 sites
+    /// ([`Self::is_family_only_fold_value_site`]) while the check still reads
+    /// them.
+    fn registered_body_producer_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+        fold: bool,
+        arm: bool,
+    ) -> Vec<&'a Expression> {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::FoldOperandFamilyOnlyInPlace) {
+            return self.body_producer_site_exprs_with(stmt, fold, arm, false);
+        }
+        self.body_producer_site_exprs(stmt, fold, arm)
+    }
+
+    /// [`Self::body_producer_site_exprs`], with the BT-4287 family-only sites
+    /// when `family_only`.
+    fn body_producer_site_exprs_with<'a>(
+        &self,
+        stmt: &'a Expression,
+        fold: bool,
+        arm: bool,
+        family_only: bool,
+    ) -> Vec<&'a Expression> {
         use beamtalk_core::semantic_analysis::block_facts::{
             LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
         };
@@ -1656,8 +1694,55 @@ impl CoreErlangGenerator {
         }
         loop_body_producer_sites(stmt)
             .into_iter()
-            .filter(|site| is_loop_body_producer_site(site, &ctx))
+            .filter(|site| {
+                is_loop_body_producer_site(site, &ctx)
+                    || (family_only && self.is_family_only_fold_value_site(site))
+            })
             .collect()
+    }
+
+    /// BT-4287: whether `site`, a value-bearing site of a frame-body statement
+    /// in an actor method that the core rule leaves out
+    /// (`is_actor_fold_value_site`: an operand under a fold frame), is a loop
+    /// or fold that writes no outer local but threads the `State` family (its
+    /// block sends to `self` or writes a field). The core rule's exclusion is
+    /// about the *locals* a producer rebinds, which an actor fold's tuple
+    /// accumulator does not fit (BT-3797); such a construct rebinds none. It
+    /// still compiles to a `{Value, State}` carrier, so it is a producer of
+    /// the frame that lowers it, at every site: its `ConstructTuple` and
+    /// `State` `Bind` land in that frame's body, and its value is element 1.
+    /// Compiled in place instead, the carrier became the operand (`Tuple does
+    /// not understand 'plusFromNumber:'`) and the `State` it advanced was
+    /// dropped (`ConstructCarrierInPlace`). `site` comes from
+    /// `loop_body_producer_sites`, which answers each site without parentheses.
+    ///
+    /// The invariant, for an actor instance method: such a construct at a
+    /// producer site of its statement is lowered as a producer of the frame
+    /// that holds the statement, its carrier bound and unpacked there; at any
+    /// other operand (a conditional's receiver, a lookup key, a `match:`
+    /// guard, an argument of a `super`, `error:`, block-invocation, cast or
+    /// block-taking send) the analysis rejects it (`beamtalk_core`'s
+    /// `StateFoldUnsequencedOperand` row, until BT-4310), reading the same
+    /// site lists (`sequenced_operand_sites` at the method root,
+    /// `loop_body_producer_sites` in a block) over `operand_loop_constructs`.
+    /// `arm_operand_carrier_corpus.rs` proves both halves over the frame
+    /// kinds it generates: fold, letrec and `whileTrue:` bodies and
+    /// conditions, plain and producer conditional arms, plain and producer
+    /// `on:do:`/`ensure:` bodies and handlers, `match:` arms, lookup and
+    /// `ifNone:` handlers, evaluated, applied and stored blocks, and the
+    /// method root. A lookup handler that is a real closure compiles no
+    /// carrier at all (its self-sends go through the actor-state cell, ADR
+    /// 0137). The fold, letrec, arm and closure frames also check their sites
+    /// with `verify_producer_sites_threaded`; an exception arm does not. The
+    /// REPL has its own rule (its producers adopt the bindings map), and
+    /// class and value-type methods thread no `State`.
+    fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
+        self.in_actor_instance_context()
+            && !self.is_repl_mode()
+            && beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
+            && self
+                .producer_locals_at_site(site)
+                .is_some_and(|locals| locals.is_empty())
     }
 
     /// BT-3939 / BT-4014: the producer sites of the frame-body statement
@@ -1743,7 +1828,7 @@ impl CoreErlangGenerator {
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
             sites.extend(
-                self.body_producer_site_exprs(stmt, fold, arm)
+                self.registered_body_producer_site_exprs(stmt, fold, arm)
                     .into_iter()
                     .map(Expression::span),
             );
@@ -1769,7 +1854,12 @@ impl CoreErlangGenerator {
         &self,
         stmt: &'a Expression,
     ) -> Vec<&'a Expression> {
-        self.body_producer_site_exprs(stmt, false, true)
+        Self::loop_or_fold_sites(self.body_producer_site_exprs(stmt, false, true))
+    }
+
+    /// The loop or fold sites (`producer_body_block`) among `sites`.
+    fn loop_or_fold_sites(sites: Vec<&Expression>) -> Vec<&Expression> {
+        sites
             .into_iter()
             .filter(|site| {
                 beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
@@ -1787,9 +1877,11 @@ impl CoreErlangGenerator {
         let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
         for stmt in body {
             sites.extend(
-                self.plain_arm_producer_site_exprs(stmt)
-                    .into_iter()
-                    .map(Expression::span),
+                Self::loop_or_fold_sites(
+                    self.registered_body_producer_site_exprs(stmt, false, true),
+                )
+                .into_iter()
+                .map(Expression::span),
             );
         }
         self.with_producer_site_set(sites, false, f)

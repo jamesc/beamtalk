@@ -960,25 +960,26 @@ pub(crate) enum Residual {
     /// not a producer there: a guard that writes, or a `match:` at no producer
     /// site (the subject of another `match:`).
     MatchArmWrite,
-    /// BT-4003: in an actor method, a loop or fold whose block sends to `self`
-    /// or writes a field, and writes no outer local (one that does is a
-    /// local-threading producer, the Phase 0 check's), used as an operand
-    /// inside the body of another loop or fold. Measured on a BEAM: an `inject:into:` as a binary or keyword
-    /// argument crashes (`Tuple does not understand 'plusFromNumber:'`) or
-    /// answers the raw `{Value, State}` pair, a `do:` as a receiver drops
-    /// every write, and a `collect:` whose block writes a field drops half of
-    /// them. Measured right, and accepted: the statement of the body, the
-    /// value of an assignment in it, and a `collect:`/`select:` whose block
-    /// writes no field (only sends to `self`) as the receiver of a message.
-    /// The same folds at the method level, and class and value-type methods,
-    /// answer right (a value-type self-send never changes the caller's
-    /// `self`; a value-type fold that writes a field in a fold body is already
-    /// a codegen error). BT-4276: the search for the enclosing loop or fold
-    /// stops at the nearest closure boundary, so the same fold inside a block
-    /// literal that is not run in place in that body (stored, returned, or
-    /// passed to a method) is judged by the closure's own context; measured
-    /// right in `stdlib/test/bt4276fold_in_closure_test.bt`.
-    StateFoldOperandInFold,
+    /// BT-4310 (found in the BT-4287 review): in an actor method, a loop or
+    /// fold whose block sends to `self` or writes a field, and writes no
+    /// outer local, at an operand of a statement that is not one of the
+    /// statement's producer sites ([`sequenced_operand_sites`] at the method
+    /// root, [`loop_body_producer_sites`] in a block body). It compiles to a
+    /// `{Value, State}` carrier that only a producer site unpacks; at an
+    /// operand the sequencing rule leaves to another lowering it is compiled
+    /// in place. Measured on a BEAM, at the method root and in a fold body
+    /// alike: the receiver of a conditional (`(fold > 3) ifTrue:`, `and:`,
+    /// `or:`, `ifNil:ifNotNil:`) crashes (`Tuple does not understand '>'`) or
+    /// drops the writes, a lookup key answers the `ifAbsent:` value, and the
+    /// argument of a `super` send, an `error:`, a block invocation
+    /// (`[:z | z] value: fold`), a self-send that also takes a block literal
+    /// or a cast crashes, answers the raw carrier or drops the writes.
+    /// Accepted (measured right, BT-4287): every producer site, which codegen
+    /// registers in the frame that lowers the statement
+    /// (`is_family_only_fold_value_site`), and a cascade's shared receiver.
+    /// A `match:` arm body is a statement of its plain arm frame; a guard is
+    /// evaluated in place, so nothing in it is a site.
+    StateFoldUnsequencedOperand,
 }
 
 /// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
@@ -1007,6 +1008,16 @@ struct ResidualDenied {
 /// producer every shape it denied answers right on a BEAM
 /// (`bt3947inline_block_loop_test.bt`), and the codegen corpus
 /// `inline_block_local_in_loop_corpus.rs` compiles the generated grid.
+/// BT-4287 deleted the `StateFoldOperandInFold` row (BT-4003: an actor loop or
+/// fold that threads only `State`, as an operand inside a loop or fold body):
+/// codegen registers it as a producer site of every frame that lowers it
+/// (`is_family_only_fold_value_site`), so its `{Value, State}` carrier is
+/// bound and unpacked in that frame; measured right in
+/// `bt4003residuals_test.bt`, and the codegen corpus
+/// `arm_operand_carrier_corpus.rs` compiles the generated grid. What stays
+/// is the `StateFoldUnsequencedOperand` row (BT-4310): the same constructs at
+/// an operand that is no producer site of its statement, at the method root
+/// as in a block.
 const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     // Class, value-type and actor methods since BT-3817; the REPL since
     // BT-3909 (maintainer-approved REPL output change: the same input drew
@@ -1019,10 +1030,10 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
         fixed_by: "BT-3913",
     },
     ResidualDenied {
-        shape: Residual::StateFoldOperandInFold,
+        shape: Residual::StateFoldUnsequencedOperand,
         contexts: &[Actor],
-        issue: "BT-4003",
-        fixed_by: "BT-4287",
+        issue: "BT-4287",
+        fixed_by: "BT-4310",
     },
 ];
 
@@ -2440,9 +2451,114 @@ impl<'d> Walker<'d> {
                     self.report_literal(block, &Escape::CollectionResult);
                 }
             }
+            self.check_unsequenced_state_folds(&stmt.expression);
             self.expr(&stmt.expression, Position::Statement);
         }
         self.last_statements.pop();
+    }
+
+    /// [`Residual::StateFoldUnsequencedOperand`] (BT-4310): see the shape's
+    /// documentation for what was measured. `stmt` is a statement of the
+    /// method body (depth 0) or of a block body.
+    fn check_unsequenced_state_folds(&mut self, stmt: &Expression) {
+        // The sites codegen registers for this statement: the method root's
+        // `with_local_producer_sites`, and every block frame's
+        // `body_producer_site_exprs` (completed for these constructs by
+        // `is_family_only_fold_value_site`).
+        let sites = if self.depth == 0 {
+            sequenced_operand_sites(stmt)
+        } else {
+            loop_body_producer_sites(stmt)
+        };
+        let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(stmt);
+        self.report_unsequenced_state_folds(constructs, &sites);
+    }
+
+    /// [`Walker::check_unsequenced_state_folds`] for a `match:` that is not a
+    /// local-threading producer: each arm body is a statement of a plain arm
+    /// frame (codegen's `generate_plain_arm`, which registers the loop and fold
+    /// among its `body_producer_site_exprs`), and a guard is evaluated in
+    /// place, so nothing in it is a site, itself included.
+    fn check_unsequenced_state_folds_in_match_arm(&mut self, arm: &MatchArm) {
+        let sites = loop_body_producer_sites(&arm.body);
+        let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(&arm.body);
+        self.report_unsequenced_state_folds(constructs, &sites);
+        self.check_unsequenced_state_folds_in_guard(arm);
+    }
+
+    /// The guard half of [`Walker::check_unsequenced_state_folds_in_match_arm`],
+    /// for every `match:` (a producer or not): a guard is evaluated in place
+    /// before its arm's frame exists, so nothing in it is a site, the guard
+    /// itself included. A guard's State-only fold writes no outer local, so it
+    /// never stops a `match:` from being a producer.
+    fn check_unsequenced_state_folds_in_guard(&mut self, arm: &MatchArm) {
+        if let Some(guard) = &arm.guard {
+            let mut constructs =
+                crate::semantic_analysis::block_facts::operand_loop_constructs(guard);
+            if local_threading_construct(guard).is_some() {
+                constructs.push(guard);
+            }
+            self.report_unsequenced_state_folds(constructs, &[]);
+        }
+    }
+
+    /// Reports each of `constructs` that threads only `State`
+    /// ([`Walker::is_state_only_loop`]) and is not one of `sites`.
+    fn report_unsequenced_state_folds(
+        &mut self,
+        constructs: Vec<&Expression>,
+        sites: &[&Expression],
+    ) {
+        let Some(row) = residual_denied(Residual::StateFoldUnsequencedOperand, self.context) else {
+            return;
+        };
+        let sites: HashSet<Span> = sites.iter().map(|site| site.span()).collect();
+        for construct in constructs {
+            if sites.contains(&construct.span()) || !self.is_state_only_loop(construct) {
+                continue;
+            }
+            let selector = local_threading_construct(construct)
+                .map(|c| c.selector)
+                .unwrap_or_default();
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "a `{selector}` whose block sends to `self` or writes a field is used \
+                         where its value is not sequenced (a conditional's receiver, a lookup, \
+                         a `match:` guard, or an argument of a `super`, `error:`, \
+                         block-invocation, cast or block-taking send), which is not supported \
+                         yet in {context}: its state changes would be lost or its value would \
+                         be wrong (found in {issue}, until {fixed_by})",
+                        context = self.context,
+                        issue = row.issue,
+                        fixed_by = row.fixed_by,
+                    ),
+                    construct.span(),
+                )
+                .with_hint(
+                    "assign its value to a local in a statement before this one \
+                     (`r := ...`) and use the local here",
+                )
+                .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+            );
+        }
+    }
+
+    /// Whether `expr` is a loop or fold that writes no outer local (one that
+    /// does is a local-threading producer, the Phase 0 check's) and whose
+    /// blocks send to `self` or write a field, so it threads only `State`.
+    fn is_state_only_loop(&self, expr: &Expression) -> bool {
+        let Some(construct) = local_threading_construct(expr) else {
+            return false;
+        };
+        construct_outer_local_writes(&construct, &|name| self.is_bound(name)).is_empty()
+            && construct.blocks.iter().flat_map(|b| &b.body).any(|stmt| {
+                crate::semantic_analysis::facts::compute_state_effects_for_expr(
+                    &stmt.expression,
+                    false,
+                )
+                .any()
+            })
     }
 
     fn block(&mut self, block: &Block, container: Container) {
@@ -2546,7 +2662,6 @@ impl<'d> Walker<'d> {
                 arguments,
                 ..
             } => {
-                self.check_residuals(expr, position);
                 self.check_construct(expr, position);
                 let lookup_producer = self.lookup_producers.contains(&expr.unwrap_parens().span());
                 let dispatched = self.is_actor_self_send_fold(expr);
@@ -2671,6 +2786,7 @@ impl<'d> Walker<'d> {
                             fold: false,
                             arm: true,
                         });
+                        self.check_unsequenced_state_folds_in_guard(arm);
                         if let Some(guard) = &arm.guard {
                             self.operand(guard, Position::MatchArm);
                         }
@@ -2686,6 +2802,7 @@ impl<'d> Walker<'d> {
                     if let Some(row) = residual_denied(Residual::MatchArmWrite, self.context) {
                         self.report_match_arm_writes(arm, row);
                     }
+                    self.check_unsequenced_state_folds_in_match_arm(arm);
                     if let Some(guard) = &arm.guard {
                         self.operand(guard, Position::MatchArm);
                     }
@@ -3363,101 +3480,6 @@ impl<'d> Walker<'d> {
             }
             _ => Escape::Passed(selector.clone()),
         }
-    }
-
-    /// The [`RESIDUAL_DENY_SET`] checks of a send.
-    fn check_residuals(&mut self, expr: &Expression, position: Position) {
-        self.check_state_fold_operand_in_fold(expr, position);
-    }
-
-    /// [`Residual::StateFoldOperandInFold`] (BT-4003): see the shape's
-    /// documentation for what was measured.
-    fn check_state_fold_operand_in_fold(&mut self, expr: &Expression, position: Position) {
-        let Some(row) = residual_denied(Residual::StateFoldOperandInFold, self.context) else {
-            return;
-        };
-        // BT-4276: a loop or fold body counts only up to the nearest closure
-        // boundary (`Container::Other`, a block value with a frame of its
-        // own). A fold inside a closure that sits in a `do:` body is judged
-        // by the closure's own context: the closure's body does not run per
-        // iteration of the `do:`. Blocks run in place (arms, protected
-        // bodies, handlers, evaluated blocks) are looked through.
-        if !self
-            .containers
-            .iter()
-            .rev()
-            .take_while(|c| **c != Container::Other)
-            .any(|c| {
-                matches!(
-                    c,
-                    Container::DoBody
-                        | Container::ListOpBody
-                        | Container::LoopBody
-                        | Container::CountedLoopBody
-                )
-            })
-        {
-            return;
-        }
-        let Some(construct) = local_threading_construct(expr) else {
-            return;
-        };
-        if !matches!(
-            construct.family,
-            LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
-        ) {
-            return;
-        }
-        // One that writes an outer local is a local-threading producer, judged
-        // (and measured right where accepted) by the Phase 0 check.
-        if !construct_outer_local_writes(&construct, &|name| self.is_bound(name)).is_empty() {
-            return;
-        }
-        let effects: Vec<_> = construct
-            .blocks
-            .iter()
-            .flat_map(|b| &b.body)
-            .map(|stmt| {
-                crate::semantic_analysis::facts::compute_state_effects_for_expr(
-                    &stmt.expression,
-                    false,
-                )
-            })
-            .collect();
-        if !effects.iter().any(|e| e.any()) {
-            return;
-        }
-        let writes_field = effects.iter().any(|e| e.field_write);
-        let accepted = match position {
-            Position::Statement | Position::AssignValue { .. } => true,
-            Position::Receiver => {
-                !writes_field && matches!(construct.selector.as_str(), "collect:" | "select:")
-            }
-            _ => false,
-        };
-        if accepted {
-            return;
-        }
-        self.diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "a `{selector}` whose block sends to `self` or writes a field is {position} \
-                     inside the body of another loop or collection operation, which is not \
-                     supported yet in {context}: its state changes would be lost or its value \
-                     would be wrong ({issue}, until {fixed_by})",
-                    selector = construct.selector,
-                    context = self.context,
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
-                ),
-                expr.span(),
-            )
-            .with_hint(
-                "assign its value to a local in a statement of the body (`r := ...`) and use \
-                 the local here",
-            )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-        );
     }
 
     /// A `match:` arm that assigns an outer local, in a `match:` that is not a

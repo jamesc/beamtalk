@@ -4632,18 +4632,21 @@ fn in_items_actor(body: &str) -> String {
     )
 }
 
-/// PIN-BUG BT-4287 (BT-4003 item 3): in an actor method, a loop or fold whose
-/// block sends to `self` or writes a field (and writes no outer local), as an
-/// operand inside another loop or fold body, loses its state changes, answers
-/// the raw `{Value, State}` pair or crashes. Measured on a BEAM
-/// (`stdlib/test/bt4003residuals_test.bt` pins the right answers): rejected
-/// unless it is the statement of the body, an assignment's value, or a
-/// `collect:`/`select:` that writes no field as the receiver of a message.
-/// Class and value-type methods answer right, and so does the same fold at the
-/// method level.
+/// BT-4287 (BT-4003 item 3, closing the BT-4276 narrowing): in an actor
+/// method, a loop or fold whose block sends to `self` or writes a field (and
+/// writes no outer local), as an operand inside another loop or fold body, is
+/// accepted at every producer site of its statement (the operands that are
+/// not one are `bt4310_*`'s). It was rejected until BT-4287: compiled in place,
+/// it lost its state changes, answered the raw `{Value, State}` pair or
+/// crashed. Codegen now lowers it as a producer of the frame that holds it
+/// (`is_family_only_fold_value_site`, proved over
+/// `arm_operand_carrier_corpus.rs`); measured right on a BEAM in
+/// `stdlib/test/bt4003residuals_test.bt` (actor and class columns) and
+/// `stdlib/test/bt4276fold_in_closure_test.bt`.
 #[test]
-fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
-    let rejected = [
+fn bt4287_an_actor_state_fold_as_an_operand_in_a_fold_body_is_accepted() {
+    let accepted = [
+        // The shapes the BT-4003 row rejected.
         "r := #(1, 2) inject: 0 into: [:a :x | a + (self.items inject: 0 into: [:b :y | b + self bump])]\nr",
         "#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\nself.n",
         "r := #(1, 2) collect: [:x | x max: (self.items inject: 0 into: [:b :y | b + self bump])]\nr",
@@ -4651,18 +4654,10 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
         "#(1, 2) do: [:x | (self.items collect: [:y | self.n := self.n + 1]) size]\nself.n",
         "r := #(1, 2) collect: [:x | x + (self.items collect: [:y | self.n := self.n + 1]) size]\nr",
         "2 timesRepeat: [#[self.items do: [:y | self bump]]]\nself.n",
-    ];
-    for body in rejected {
-        let src = in_items_actor(body);
-        let errors = analysis_errors(&src, &[]);
-        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-        assert!(
-            errors[0].message.contains("BT-4003, until BT-4287"),
-            "{}",
-            errors[0].message
-        );
-    }
-    let accepted = [
+        "#(1, 2) do: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])] value]\nself.n",
+        "#(1, 2) do: [:x | x > 0 ifTrue: [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nself.n",
+        "b := [#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nb value\nself.n",
+        // The shapes it accepted.
         "#(1, 2) do: [:x | self.items do: [:y | self bump]]\nself.n",
         "#(1, 2) do: [:x | q := self.items inject: 0 into: [:b :y | b + self bump]. q]\nself.n",
         "#(1, 2) do: [:x | self.items do: [:y | self.n := self.n + 1]]\nself.n",
@@ -4671,6 +4666,10 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
         "r := #(1, 2) collect: [:x | (self.items select: [:y | self bump > 0]) size]\nr",
         "2 timesRepeat: [(self.items collect: [:y | self bump]) size]\nself.n",
         "#(1, 2) do: [:x | x > 0 ifTrue: [(self.items collect: [:y | self bump]) size]]\nself.n",
+        "#(1, 2) do: [:x | b := [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]. t := b value]\nt",
+        "r := #(1, 2) collect: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nr collect: [:blk | blk value]",
+        "#(1, 2) do: [:x | b := [(self.items do: [:y | self bump]) isNil]. b value]\nself.n",
+        "#(1, 2) do: [:x | b := [(self.items collect: [:y | self.n := self.n + 1]) size]. b value]\nself.n",
         // At the method level, and with a pure inner fold.
         "r := 1 + (self.items inject: 0 into: [:b :y | b + self bump])\nr",
         "#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + y])]\nself.n",
@@ -4682,50 +4681,96 @@ fn bt4003_an_actor_state_fold_as_an_operand_in_a_fold_body_is_rejected() {
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
     }
-    // Class methods answer right.
+    // Class methods answer right too.
     let class = "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\n    self.n\n";
     let errors = analysis_errors(class, &[]);
     assert!(errors.is_empty(), "{errors:?}");
 }
 
-/// BT-4276: the fold-operand check looks for a loop or fold body only up to
-/// the nearest closure boundary. A fold inside a closure that sits in a loop
-/// body is judged by the closure's own context; measured right on a BEAM
-/// (`stdlib/test/bt4276fold_in_closure_test.bt`), whether the closure runs in
-/// the iteration that makes it or after the loop. Blocks run in place (an
-/// evaluated block, an arm) are looked through, so those shapes stay
-/// rejected.
+/// PIN-BUG BT-4310 (found in the BT-4287 review): in an actor method, a loop
+/// or fold whose block sends to `self` or writes a field, at an operand that
+/// is not a producer site of its statement, is compiled in place. Measured on
+/// a BEAM, at the method root and in a fold body alike, every shape below
+/// crashed (`Tuple does not understand '>'`), answered the raw carrier or a
+/// wrong value, or dropped the writes. Rejected. A fold in a conditional's arm
+/// block, two operands deep, or as a cascade's shared receiver is a site and
+/// answers right (`stdlib/test/bt4003residuals_test.bt`).
 #[test]
-fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_closure() {
-    let accepted = [
-        "#(1, 2) do: [:x | b := [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]. t := b value]\nt",
-        "r := #(1, 2) collect: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nr collect: [:blk | blk value]",
-        "#(1, 2) do: [:x | b := [(self.items do: [:y | self bump]) isNil]. b value]\nself.n",
-        "#(1, 2) do: [:x | b := [(self.items collect: [:y | self.n := self.n + 1]) size]. b value]\nself.n",
+fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
+    let fold = "(self.items inject: 0 into: [:b :y | b + self bump])";
+    let positions = [
+        "({f} > 3) ifTrue: [1] ifFalse: [0]",
+        "(0 < {f}) ifTrue: [1] ifFalse: [0]",
+        "({f} > 3) and: [true]",
+        "({f} > 3) or: [false]",
+        "{f} ifNil: [0] ifNotNil: [:v | v + 1]",
+        "#{3 => 30} at: {f} ifAbsent: [0]",
+        "super printString: {f}",
+        "self error: {f} printString",
+        "[:z | z + 1] value: {f}",
+        "self apply: {f} with: [:z | z]",
     ];
-    for body in accepted {
-        let src = in_items_actor(body);
-        let errors = analysis_errors(&src, &[]);
-        assert!(errors.is_empty(), "{src}: {errors:?}");
+    for position in positions {
+        let value = position.replace("{f}", fold);
+        for body in [
+            format!("r := {value}\nr"),
+            format!("r := #(1, 2) collect: [:x | {value}]\nr"),
+            format!("#(1, 2) do: [:x | 2 timesRepeat: [{value}]]\nself.n"),
+            // A plain `match:` arm is a statement of its own frame.
+            format!("#(1, 2) do: [:x | x match: [1 -> {value}; _ -> 0]]\nself.n"),
+            format!("r := 1 match: [1 -> {value}; _ -> 0]\nr"),
+        ] {
+            let src = in_items_actor(&body);
+            let errors = analysis_errors(&src, &[]);
+            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
+            assert!(
+                errors[0]
+                    .message
+                    .contains("found in BT-4287, until BT-4310"),
+                "{}",
+                errors[0].message
+            );
+        }
     }
-    let rejected = [
-        // An evaluated block runs in place: still the `do:` body's.
-        "#(1, 2) do: [:x | [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])] value]\nself.n",
-        // So does a conditional arm.
-        "#(1, 2) do: [:x | x > 0 ifTrue: [x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nself.n",
-        // A loop body inside the closure is the closure's own context.
-        "b := [#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b2 :y | b2 + self bump])]]\nb value\nself.n",
-    ];
-    for body in rejected {
-        let src = in_items_actor(body);
+    // A cast's argument (a cast is a statement only), and a `match:` guard,
+    // evaluated in place.
+    for body in [
+        format!("r := 1 match: [y when: [{fold} > 3] -> y; _ -> 0]\nr"),
+        // A guard of a `match:` that is a producer (its arm writes `t`).
+        format!("r := 1 match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]\n#[r, t]"),
+        format!(
+            "#(1, 2) do: [:x | x match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]]\n#[t, self.n]"
+        ),
+        format!("Transcript show: {fold} printString!\nself.n"),
+        format!("#(1, 2) do: [:x | Transcript show: {fold} printString!]\nself.n"),
+    ] {
+        let src = in_items_actor(&body);
         let errors = analysis_errors(&src, &[]);
         assert_eq!(errors.len(), 1, "{src}: {errors:?}");
         assert!(
-            errors[0].message.contains("BT-4003, until BT-4287"),
+            errors[0].message.contains("BT-4310"),
             "{}",
             errors[0].message
         );
     }
+    let accepted = [
+        format!("r := #(1, 2) collect: [:x | (x > 0) and: [{fold} > 3]]\nr"),
+        format!("r := #(1, 2) collect: [:x | x + (1 + {fold})]\nr"),
+        format!("#(1, 2) do: [:x | {fold} printString; yourself]\nself.n"),
+        format!("r := 1 + (1 + {fold})\nr"),
+        // A pure fold, and one in a class method, are not the row's.
+        "r := (#(1, 2) inject: 0 into: [:b :y | b + y]) > 3\nr".to_string(),
+    ];
+    for body in &accepted {
+        let src = in_items_actor(body);
+        let errors = analysis_errors(&src, &[]);
+        assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
+    let class = format!(
+        "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    r := ({fold} > 3) ifTrue: [1] ifFalse: [0]\n    r\n"
+    );
+    let errors = analysis_errors(&class, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 /// BT-4288 (BT-4003 item 5): a `^` in the body of a loop or collection
