@@ -11,3 +11,5 @@ InCallerProbe subclass: InCallerProbeSub
 
   // A class-side `super` send that answers `self`.
   class superMe => super me
+
+  class overridden -> Symbol => #sub

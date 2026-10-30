@@ -1738,7 +1738,11 @@ lc_class(Name, N) ->
         name => Name,
         module => ?MODULE,
         superclass => none,
-        class_methods => #{},
+        %% BT-4300: performLocally: resolves through the published class-method
+        %% selectors (the class-method chain), not any export of the module.
+        class_methods => #{
+            lcRead => #{arity => 0}, lcWrite => #{arity => 0}, lcSelf => #{arity => 0}
+        },
         class_state => #{n => N}
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),

@@ -357,10 +357,12 @@ owner_of(ClassName, DefiningClass, DefiningModule, Selector) ->
 Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
 reference of the receiving class, the value its class literal evaluates to
 (its metaclass tag, its own module and its registered pid), even for an
-inherited method. (The class-process path gives an inherited method a
-`ClassSelf` whose `class_mod` is the defining module; nothing reads that
-field as the class's module, see
-`beamtalk_class_instantiation:resolve_module_or_raise/2`.) No class-variable
+inherited method, as every class-side path now builds it
+(`receiver_class_self/3`, `invoke_class_method/7`). `performLocally:`
+(`beamtalk_object_class:local_call/3`) used to apply its selector from
+`class_mod` alone; it now walks the class-method chain from the receiving
+class, so an inherited selector is found and a subclass override wins
+(BT-4300). No class-variable
 home is installed: the chain has no class variables, and ADR 0130 §1's
 no-nesting rule concerns only homes. The class-process services (session
 context seeding, the mirrored caller pid, the entry group leader, the call

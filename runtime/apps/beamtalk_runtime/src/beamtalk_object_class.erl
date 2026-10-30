@@ -726,9 +726,11 @@ class_send(ClassPid, Selector, Args) ->
 -doc """
 Execute a class method in the caller's process.
 
-Resolves the target module from the class object, then calls
-Module:class_<Selector>(Receiver, Args...) directly — bypassing the class
-object's gen_server. The receiver class object is passed as `ClassSelf` and the
+Resolves `Selector` through the class-method chain starting at the receiving
+class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
+class process uses), so a subclass override wins and an inherited method is
+found (BT-4300), then calls DefiningModule:class_<Selector>(Receiver, Args...)
+directly — bypassing the class object's gen_server. The receiver class object is passed as `ClassSelf` and the
 call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
 class-variable reads see the snapshot (the ETS mirror as of the last completed
 invocation), writes raise `class_state_read_only`, and when called from inside
@@ -738,19 +740,18 @@ Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
 """.
 -spec local_call(term(), atom(), list()) -> term().
-local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
+local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
     is_atom(Selector), is_list(Args)
 ->
     case beamtalk_class_registry:is_class_object(Receiver) of
         true ->
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
-            code:ensure_loaded(Module),
-            case erlang:function_exported(Module, FunName, length(Args) + 1) of
-                true ->
+            case local_call_module(Tag, Selector, FunName, length(Args) + 1) of
+                {ok, Module} ->
                     beamtalk_class_vars:with_snapshot(Receiver, fun() ->
                         erlang:apply(Module, FunName, [Receiver | Args])
                     end);
-                false ->
+                not_found ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
                         does_not_understand,
@@ -783,6 +784,29 @@ local_call(Receiver, _Selector, _Args) ->
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).
+
+%% The module whose compiled `FunName/Arity` answers a class-side `Selector`
+%% sent to the class tagged `Tag`: the defining class the class-method chain
+%% walk reaches from the receiving class (BT-4300), or `not_found` when no
+%% class in the chain defines it or its definition has no compiled export
+%% (an ADR 0084 runtime fun, which `performLocally:` has never applied).
+-spec local_call_module(atom(), atom(), atom(), arity()) -> {ok, module()} | not_found.
+local_call_module(Tag, Selector, FunName, Arity) ->
+    case beamtalk_primitive:class_name_from_tag(Tag) of
+        undefined ->
+            not_found;
+        ClassName ->
+            case beamtalk_class_dispatch:find_class_method_from_class(Selector, ClassName) of
+                {ok, _DefiningClass, Module} ->
+                    _ = code:ensure_loaded(Module),
+                    case erlang:function_exported(Module, FunName, Arity) of
+                        true -> {ok, Module};
+                        false -> not_found
+                    end;
+                not_found ->
+                    not_found
+            end
+    end.
 
 -doc """
 Get a compiled method object.

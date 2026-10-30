@@ -72,6 +72,16 @@ TestCase subclass: ClassMethodInCallerTest
     self assert: InCallerProbeSub clearMissing == InCallerProbeSub
     self deny: InCallerProbe hasMissing
 
+  // `performLocally:` resolves through the receiving class's class-method
+  // chain: a parent-only selector is found from an inherited method and
+  // from outside, and a subclass override is the one reached.
+  testPerformLocallyWalksTheReceivingClassChain =>
+    self assert: InCallerProbeSub viaLocally equals: #parent
+    self assert: InCallerProbeSub viaLocallyOverridden equals: #sub
+    self assert: InCallerProbe viaLocallyOverridden equals: #parent
+    self assert: (InCallerProbeSub performLocally: #parentOnly withArguments: #()) equals: #parent
+    self assert: (InCallerProbeSub performLocally: #overridden withArguments: #()) equals: #sub
+
   // Errors keep the value they had through the class process.
   testErrorsAreUnchanged =>
     cls := InCallerProbe
