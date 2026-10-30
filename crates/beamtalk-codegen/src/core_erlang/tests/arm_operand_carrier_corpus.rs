@@ -636,10 +636,11 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
 // block-invocation, cast or block-taking send, a cascade message's arguments. A carrier
 // construct there is compiled in place (measured on a BEAM at the method root and in a fold
 // body: a crash, the raw carrier or dropped writes; BT-4310). So "accepted at every site" is
-// two halves, tested here over the same constructs and outer bodies: the analysis rejects
-// every one of these cells (`StateFoldUnsequencedOperand`), and it accepts every cell of the
-// corpus above, whose lowering is proved there. (A cast is a statement only, so it cannot be
-// a fold body's value; its cells are in `bt4310_*` in `semantic_analysis/tests`.)
+// two halves, tested here over the same constructs and outer bodies (and `match:` guards):
+// the analysis rejects every one of these cells (`StateFoldUnsequencedOperand`), and it
+// accepts every cell of the corpus above, whose lowering is proved there. (A cast is a
+// statement only, so it cannot be a fold body's value; its cells are in `bt4310_*` in
+// `semantic_analysis/tests`.)
 
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 
@@ -657,6 +658,19 @@ const UNSEQUENCED_POSITIONS: &[&str] = &[
     "self apply: {c} with: [:z | z]",
     "xs size; + {c} size",
 ];
+
+/// The `match:`es whose guard (`{s}`) holds the construct: a plain one and a producer (its
+/// arm writes `t`), at the method root and in a `do:` body.
+const GUARD_OUTERS: &[&str] = &[
+    "1 match: [y when: [{s}] -> y; _ -> 0]",
+    "1 match: [y when: [{s}] -> t := t + 1; _ -> 0]",
+    "xs do: [:x | x match: [y when: [{s}] -> y; _ -> 0]]",
+    "xs do: [:x | x match: [y when: [{s}] -> t := t + 1; _ -> 0]]",
+];
+
+/// The guard holding the construct `{c}`: the guard itself, a receiver, and an operand two
+/// deep.
+const GUARD_POSITIONS: &[&str] = &["{c}", "{c} isNil", "0 < ({c} size)"];
 
 /// Whether the analysis rejects `src` with a local-threading error.
 fn analysis_rejects(src: &str) -> bool {
@@ -696,6 +710,24 @@ fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
             if outer.contains("->") && position.contains(';') {
                 continue;
             }
+            for construct in FOLD_BODY_CONSTRUCTS {
+                cells += 1;
+                let src = format!(
+                    "{FOLD_BODY_HEADER}{}",
+                    fold_body_method("go:", outer, position, construct)
+                );
+                if unsequenced_errors(&src) == 1 {
+                    rejected += 1;
+                } else {
+                    failures.push(format!("should be one BT-4310 error:\n{src}"));
+                }
+            }
+        }
+    }
+    // A `match:` guard is evaluated in place, in a `match:` that is a producer (its arm
+    // writes `t`) or not, at the method root or in a fold body: nothing in it is a site.
+    for outer in GUARD_OUTERS {
+        for position in GUARD_POSITIONS {
             for construct in FOLD_BODY_CONSTRUCTS {
                 cells += 1;
                 let src = format!(

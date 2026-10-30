@@ -4736,6 +4736,11 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
     // evaluated in place.
     for body in [
         format!("r := 1 match: [y when: [{fold} > 3] -> y; _ -> 0]\nr"),
+        // A guard of a `match:` that is a producer (its arm writes `t`).
+        format!("r := 1 match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]\n#[r, t]"),
+        format!(
+            "#(1, 2) do: [:x | x match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]]\n#[t, self.n]"
+        ),
         format!("Transcript show: {fold} printString!\nself.n"),
         format!("#(1, 2) do: [:x | Transcript show: {fold} printString!]\nself.n"),
     ] {

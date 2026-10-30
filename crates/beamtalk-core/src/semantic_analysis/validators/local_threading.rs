@@ -2433,6 +2433,15 @@ impl<'d> Walker<'d> {
         let sites = loop_body_producer_sites(&arm.body);
         let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(&arm.body);
         self.report_unsequenced_state_folds(constructs, &sites);
+        self.check_unsequenced_state_folds_in_guard(arm);
+    }
+
+    /// The guard half of [`Walker::check_unsequenced_state_folds_in_match_arm`],
+    /// for every `match:` (a producer or not): a guard is evaluated in place
+    /// before its arm's frame exists, so nothing in it is a site, the guard
+    /// itself included. A guard's State-only fold writes no outer local, so it
+    /// never stops a `match:` from being a producer.
+    fn check_unsequenced_state_folds_in_guard(&mut self, arm: &MatchArm) {
         if let Some(guard) = &arm.guard {
             let mut constructs =
                 crate::semantic_analysis::block_facts::operand_loop_constructs(guard);
@@ -2727,6 +2736,7 @@ impl<'d> Walker<'d> {
                             fold: false,
                             arm: true,
                         });
+                        self.check_unsequenced_state_folds_in_guard(arm);
                         if let Some(guard) = &arm.guard {
                             self.operand(guard, Position::MatchArm);
                         }
