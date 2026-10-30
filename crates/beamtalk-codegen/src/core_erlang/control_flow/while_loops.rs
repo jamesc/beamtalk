@@ -608,6 +608,14 @@ impl CoreErlangGenerator {
             // than panicking on a hand-built fixture.
             return Ok(Document::Str("{'true', StateAcc}"));
         };
+        // BT-4310: the condition's loops and folds threading only `State` at
+        // an operand another lowering compiles (`family_only_operand_site_exprs`)
+        // are checked against the lowered frame, as a loop body's sites are.
+        let family_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> = filtered
+            .iter()
+            .flat_map(|stmt| self.family_only_operand_site_exprs(stmt))
+            .map(|site| (site.span(), Vec::new()))
+            .collect();
         let stmts = self.with_body_producer_sites(&filtered, false, false, |this| {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
             for expr in rest {
@@ -672,6 +680,13 @@ impl CoreErlangGenerator {
             tail_out?;
             Ok::<_, CodeGenError>(stmts)
         })?;
+        let errors = threaded_ir::verify_producer_sites_threaded(&stmts, &family_sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "while condition's loop or fold threading only `State` at an operand, compiled in \
+             place instead of as a producer of the condition",
+            condition.span(),
+        );
         // The condition's frame is a `StateAcc` frame because the condition
         // hands its map back (`ConditionStateEffects`), whatever reason the
         // loop's own plan records: a loop that threads no local but carries

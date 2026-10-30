@@ -199,6 +199,17 @@ pub(super) mod fault {
         /// `{Value, State}` carrier becomes the operand
         /// (`ConstructCarrierInPlace`).
         FoldOperandFamilyOnlyInPlace,
+        /// BT-4310: a frame (the method root included) registers none of
+        /// its statements' operands that the sequencing rule leaves to
+        /// another lowering (a conditional's receiver, a lookup key, a cascade
+        /// message's argument, an argument of a `super`, `error:`,
+        /// block-invocation, cast or block-taking send) holding an actor loop
+        /// or fold that threads only `State`
+        /// ([`super::CoreErlangGenerator::family_only_operand_site_exprs`]),
+        /// as before BT-4310, so such a fold there is compiled in place and
+        /// its `{Value, State}` carrier becomes the operand
+        /// (`ConstructCarrierInPlace`).
+        UnsequencedOperandInPlace,
         /// BT-4263: an evaluated block with arguments that is a
         /// local-threading producer leaves its `LocalRebind`s bound only in
         /// the parameter scope it pops (`generate_evaluated_block_producer`
@@ -253,6 +264,26 @@ pub(super) mod fault {
         let _reset = Reset;
         body()
     }
+}
+
+/// Which sites of an actor loop or fold threading only `State` a frame body
+/// registers beyond the core rule's (`is_loop_body_producer_site`): both,
+/// except under a test-only fault that withholds one kind.
+#[derive(Debug, Clone, Copy)]
+struct FamilyOnlySites {
+    /// BT-4287: the value-bearing sites the core rule leaves out under a fold
+    /// frame (`is_family_only_fold_value_site`).
+    value_sites: bool,
+    /// BT-4310: the operands the sequencing rule leaves to another lowering
+    /// (`family_only_operand_site_exprs`).
+    unsequenced_operands: bool,
+}
+
+impl FamilyOnlySites {
+    const ALL: Self = Self {
+        value_sites: true,
+        unsequenced_operands: true,
+    };
 }
 
 /// What a local-threading producer does with its construct's threaded
@@ -732,15 +763,40 @@ impl CoreErlangGenerator {
     ) -> Result<T> {
         let sites = body
             .iter()
-            .flat_map(|stmt| {
-                beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
-            })
+            .flat_map(|stmt| self.registered_root_producer_site_exprs(stmt))
             .map(Expression::span)
             .collect();
         let saved = std::mem::replace(&mut self.local_producer_sites, sites);
         let result = self.with_value_assign_sites(body, f);
         self.local_producer_sites = saved;
         result
+    }
+
+    /// The producer sites of the method-body statement `stmt`: its
+    /// `sequenced_operand_sites` (`beamtalk_core`, the rule the Phase 0 check
+    /// reads too) and, in an actor method, the loops and folds threading only
+    /// `State` at its other operands ([`Self::family_only_operand_site_exprs`],
+    /// BT-4310). The one list [`Self::with_local_producer_sites`] registers,
+    /// [`Self::statement_has_local_producer`] routes on and
+    /// `lower_root_statement_with_producer` checks.
+    pub(super) fn root_producer_site_exprs<'a>(&self, stmt: &'a Expression) -> Vec<&'a Expression> {
+        let mut sites =
+            beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt);
+        Self::extend_new_sites(&mut sites, self.family_only_operand_site_exprs(stmt));
+        sites
+    }
+
+    /// [`Self::root_producer_site_exprs`] as [`Self::with_local_producer_sites`]
+    /// registers them (the test-only fault `UnsequencedOperandInPlace`
+    /// withholds the BT-4310 sites).
+    fn registered_root_producer_site_exprs<'a>(&self, stmt: &'a Expression) -> Vec<&'a Expression> {
+        let mut sites =
+            beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt);
+        Self::extend_new_sites(
+            &mut sites,
+            self.registered_family_only_operand_site_exprs(stmt),
+        );
+        sites
     }
 
     /// BT-3912 (ADR 0133 Phase 3, BT-3947 cell 2): runs `f` (the lowering of a
@@ -1289,7 +1345,8 @@ impl CoreErlangGenerator {
         // a producer too.
         !self.contained_local_assignment_targets(stmt).is_empty()
             || !self.local_producer_sites.is_empty()
-                && beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(stmt)
+                && self
+                    .root_producer_site_exprs(stmt)
                     .into_iter()
                     .any(|site| self.local_producer_locals(site).is_some())
     }
@@ -1649,7 +1706,7 @@ impl CoreErlangGenerator {
         fold: bool,
         arm: bool,
     ) -> Vec<&'a Expression> {
-        self.body_producer_site_exprs_with(stmt, fold, arm, true)
+        self.body_producer_site_exprs_with(stmt, fold, arm, FamilyOnlySites::ALL)
     }
 
     /// The sites [`Self::with_body_producer_sites`] and
@@ -1665,20 +1722,42 @@ impl CoreErlangGenerator {
         arm: bool,
     ) -> Vec<&'a Expression> {
         #[cfg(test)]
-        if fault::active() == Some(fault::LocalRebindFault::FoldOperandFamilyOnlyInPlace) {
-            return self.body_producer_site_exprs_with(stmt, fold, arm, false);
+        match fault::active() {
+            Some(fault::LocalRebindFault::FoldOperandFamilyOnlyInPlace) => {
+                return self.body_producer_site_exprs_with(
+                    stmt,
+                    fold,
+                    arm,
+                    FamilyOnlySites {
+                        value_sites: false,
+                        unsequenced_operands: true,
+                    },
+                );
+            }
+            Some(fault::LocalRebindFault::UnsequencedOperandInPlace) => {
+                return self.body_producer_site_exprs_with(
+                    stmt,
+                    fold,
+                    arm,
+                    FamilyOnlySites {
+                        value_sites: true,
+                        unsequenced_operands: false,
+                    },
+                );
+            }
+            _ => {}
         }
         self.body_producer_site_exprs(stmt, fold, arm)
     }
 
-    /// [`Self::body_producer_site_exprs`], with the BT-4287 family-only sites
-    /// when `family_only`.
+    /// [`Self::body_producer_site_exprs`], with the family-only sites `family`
+    /// names.
     fn body_producer_site_exprs_with<'a>(
         &self,
         stmt: &'a Expression,
         fold: bool,
         arm: bool,
-        family_only: bool,
+        family: FamilyOnlySites,
     ) -> Vec<&'a Expression> {
         use beamtalk_core::semantic_analysis::block_facts::{
             LoopBodyContext, is_loop_body_producer_site, loop_body_producer_sites,
@@ -1692,13 +1771,79 @@ impl CoreErlangGenerator {
         if arm {
             ctx = ctx.in_arm();
         }
-        loop_body_producer_sites(stmt)
+        let mut sites: Vec<&Expression> = loop_body_producer_sites(stmt)
             .into_iter()
             .filter(|site| {
                 is_loop_body_producer_site(site, &ctx)
-                    || (family_only && self.is_family_only_fold_value_site(site))
+                    || (family.value_sites && self.is_family_only_fold_value_site(site))
             })
+            .collect();
+        if family.unsequenced_operands {
+            Self::extend_new_sites(&mut sites, self.family_only_operand_site_exprs(stmt));
+        }
+        sites
+    }
+
+    /// Appends each of `more` that `sites` does not already hold (by span).
+    fn extend_new_sites<'a>(sites: &mut Vec<&'a Expression>, more: Vec<&'a Expression>) {
+        for site in more {
+            if !sites.iter().any(|s| s.span() == site.span()) {
+                sites.push(site);
+            }
+        }
+    }
+
+    /// BT-4310: the actor loops and folds threading only `State`
+    /// ([`Self::is_family_only_fold_value_site`]) among the operands of the
+    /// statement `stmt`, at any depth (`beamtalk_core`'s
+    /// `operand_loop_constructs`): every one of them is a producer site of the
+    /// frame that lowers `stmt`, the method root included, whichever lowering
+    /// owns the operand that holds it.
+    ///
+    /// The sequencing rule's site lists (`sequenced_operand_sites`,
+    /// `loop_body_producer_sites`) stop at the operands another lowering
+    /// compiles itself: a conditional's receiver, a lookup's key, a cascade
+    /// message's argument, the arguments of a `super`, `error:`,
+    /// block-invocation, cast or block-taking send. They stop there for a
+    /// producer that rebinds *outer locals*, which the analysis still
+    /// rejects at those operands. A construct that rebinds none but threads
+    /// `State` compiles to a `{Value, State}` carrier all the same, and every
+    /// one of those lowerings compiles the operand through
+    /// [`Self::threaded_expression`] (the conditional receiver splice,
+    /// `sequence_children` over a send's or a cascade's operands, the
+    /// evaluated-block producer's arguments), which lowers a registered
+    /// construct as a producer: its `ConstructTuple` and `State` `Bind` land
+    /// in the frame's body ahead of the operand's consumer, and its value is
+    /// element 1. Compiled in place instead (before BT-4310) the carrier
+    /// became the operand (`Tuple does not understand '>'`, a lookup that
+    /// missed its key, a raw `{Value, State}` answer) or the advanced `State`
+    /// was dropped (`ConstructCarrierInPlace`, which every frame and the
+    /// method root check over these sites).
+    pub(super) fn family_only_operand_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+    ) -> Vec<&'a Expression> {
+        if !self.in_actor_instance_context() || self.is_repl_mode() {
+            return Vec::new();
+        }
+        beamtalk_core::semantic_analysis::block_facts::operand_loop_constructs(stmt)
+            .into_iter()
+            .filter(|site| self.is_family_only_fold_value_site(site))
             .collect()
+    }
+
+    /// [`Self::family_only_operand_site_exprs`] as the method root registers
+    /// them: none under the test-only fault `UnsequencedOperandInPlace`, while
+    /// the method root's check still reads them.
+    fn registered_family_only_operand_site_exprs<'a>(
+        &self,
+        stmt: &'a Expression,
+    ) -> Vec<&'a Expression> {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::UnsequencedOperandInPlace) {
+            return Vec::new();
+        }
+        self.family_only_operand_site_exprs(stmt)
     }
 
     /// BT-4287: whether `site`, a value-bearing site of a frame-body statement
@@ -1719,23 +1864,23 @@ impl CoreErlangGenerator {
     /// The invariant, for an actor instance method: such a construct at a
     /// producer site of its statement is lowered as a producer of the frame
     /// that holds the statement, its carrier bound and unpacked there; at any
-    /// other operand (a conditional's receiver, a lookup key, a `match:`
-    /// guard, an argument of a `super`, `error:`, block-invocation, cast or
-    /// block-taking send) the analysis rejects it (`beamtalk_core`'s
-    /// `StateFoldUnsequencedOperand` row, until BT-4310), reading the same
-    /// site lists (`sequenced_operand_sites` at the method root,
-    /// `loop_body_producer_sites` in a block) over `operand_loop_constructs`.
-    /// `arm_operand_carrier_corpus.rs` proves both halves over the frame
-    /// kinds it generates: fold, letrec and `whileTrue:` bodies and
-    /// conditions, plain and producer conditional arms, plain and producer
-    /// `on:do:`/`ensure:` bodies and handlers, `match:` arms, lookup and
-    /// `ifNone:` handlers, evaluated, applied and stored blocks, and the
-    /// method root. A lookup handler that is a real closure compiles no
-    /// carrier at all (its self-sends go through the actor-state cell, ADR
-    /// 0137). The fold, letrec, arm and closure frames also check their sites
-    /// with `verify_producer_sites_threaded`; an exception arm does not. The
-    /// REPL has its own rule (its producers adopt the bindings map), and
-    /// class and value-type methods thread no `State`.
+    /// other operand (a conditional's receiver, a lookup key, a cascade
+    /// message's argument, an argument of a `super`, `error:`,
+    /// block-invocation, cast or block-taking send) it is one too, BT-4310
+    /// ([`Self::family_only_operand_site_exprs`]). (A `match:` guard allows
+    /// only comparisons and arithmetic, so it never holds one.)
+    /// `arm_operand_carrier_corpus.rs` proves both over the frame kinds it
+    /// generates: fold, letrec and `whileTrue:` bodies and conditions, plain
+    /// and producer conditional arms, plain and producer `on:do:`/`ensure:`
+    /// bodies and handlers, `match:` arms, lookup and `ifNone:` handlers,
+    /// evaluated, applied and stored blocks, and the method root. A block that
+    /// is a real closure (a stored block, a lookup handler that is not
+    /// inlined) compiles no carrier at all (its self-sends go through the
+    /// actor-state cell, ADR 0137). The method root, the fold, letrec, arm,
+    /// closure and `whileTrue:` condition frames also check their sites with
+    /// `verify_producer_sites_threaded`; an exception arm does not. The REPL
+    /// has its own rule (its producers adopt the bindings map), and class and
+    /// value-type methods thread no `State`.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
         self.in_actor_instance_context()
             && !self.is_repl_mode()
@@ -1982,6 +2127,7 @@ impl CoreErlangGenerator {
             || self.local_producer_locals(expr).is_some()
             || beamtalk_core::semantic_analysis::block_facts::loop_body_operand_sites(expr)
                 .into_iter()
+                .chain(self.family_only_operand_site_exprs(expr))
                 .any(|site| self.local_producer_locals(site).is_some())
     }
 

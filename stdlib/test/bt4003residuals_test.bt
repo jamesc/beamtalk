@@ -13,18 +13,21 @@
 //    inside a fold or loop body: BT-4287 lowered it as a producer of the frame
 //    that holds it, at every producer site of the statement (the
 //    `bt4287_*` acceptance test in
-//    crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs).
-//    At an operand that is not a producer site (a conditional's receiver, a
-//    lookup, the argument of a `super`, `error:`, block-invocation, cast or
-//    block-taking send) it is still a compile error (the `bt4310_*` pin
-//    test, until BT-4310). Class and value-type methods answer right
-//    everywhere; a value-type self-send never changes the caller's `self`;
+//    crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs),
+//    and BT-4310 at every other operand (a conditional's receiver, a lookup
+//    key, a cascade message's argument, the argument of a `super`, `error:`,
+//    block-invocation, cast or block-taking send; the `bt4310_*` acceptance
+//    test), at the method root and in every frame. Class and value-type
+//    methods answer right everywhere; a value-type self-send never changes
+//    the caller's `self`;
 // 4. a `^` in a `do:` that threads a local and the actor's state.
 //
 // The shapes of items 1 and 2 that answered wrong are compile errors (the
 // `bt4003_*` tests in the same file).
 //
-// Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt.
+// Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt,
+// and for BT-4310 fixtures/bt4310unsequenced_actor.bt (its superclass
+// fixtures/bt4310unsequenced_base.bt) and fixtures/bt4310unsequenced_class.bt.
 
 TestCase subclass: Bt4003ResidualsTest
   field: n = 0
@@ -182,3 +185,65 @@ TestCase subclass: Bt4003ResidualsTest
     b := Bt4003ResidualsActor spawn
     self assert: b tupleAccDoReturnBump equals: #(3, 2)
     self assert: b n equals: 2
+
+  // BT-4310: the fold (3, then 7; `n` advances by 2 each time) at an operand
+  // the sequencing rule leaves to another lowering, at the method root.
+  testStateFoldAtAnUnsequencedOperandAtTheRoot =>
+    self assert: Bt4310UnsequencedActor spawn condRoot equals: #(1, 2)
+    self assert: Bt4310UnsequencedClass condRoot equals: #(1, 2)
+    self assert: Bt4310UnsequencedActor spawn condLeftRoot equals: #(1, 2)
+    self assert: Bt4310UnsequencedClass condLeftRoot equals: #(1, 2)
+    self assert: Bt4310UnsequencedActor spawn andRoot equals: #(true, 2)
+    self assert: Bt4310UnsequencedClass andRoot equals: #(true, 2)
+    self assert: Bt4310UnsequencedActor spawn orRoot equals: #(false, 2)
+    self assert: Bt4310UnsequencedClass orRoot equals: #(false, 2)
+    self assert: Bt4310UnsequencedActor spawn ifNilRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedClass ifNilRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedActor spawn keyRoot equals: #(30, 2)
+    self assert: Bt4310UnsequencedClass keyRoot equals: #(30, 2)
+    self assert: Bt4310UnsequencedActor spawn superRoot equals: 302
+    self assert: ([
+      Bt4310UnsequencedActor spawn errorRoot
+    ] on: Error do: [:e | e message]) equals: "3"
+    self assert: ([
+      Bt4310UnsequencedClass errorRoot
+    ] on: Error do: [:e | e message]) equals: "3"
+    self assert: Bt4310UnsequencedActor spawn blockArgRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedClass blockArgRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedActor spawn selfBlockRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedClass selfBlockRoot equals: #(4, 2)
+    self assert: Bt4310UnsequencedActor spawn cascadeRoot equals: #(3, 2)
+    self assert: Bt4310UnsequencedClass cascadeRoot equals: #(3, 2)
+    self assert: (Bt4310UnsequencedActor spawn castRoot: ClosureCellRecorder spawn) equals: #(3, 2)
+    self assert: (Bt4310UnsequencedClass castRoot: ClosureCellRecorder spawn) equals: #(3, 2)
+
+  // BT-4310: the same operands in a `collect:` or `do:` body.
+  testStateFoldAtAnUnsequencedOperandInAFoldBody =>
+    self assert: Bt4310UnsequencedActor spawn condInCollect equals: #(#(0, 1), 4)
+    self assert: Bt4310UnsequencedClass condInCollect equals: #(#(0, 1), 4)
+    self assert: Bt4310UnsequencedActor spawn andInCollect equals: #(#(false, true), 4)
+    self assert: Bt4310UnsequencedActor spawn ifNilInCollect equals: #(#(4, 8), 4)
+    self assert: Bt4310UnsequencedClass ifNilInCollect equals: #(#(4, 8), 4)
+    self assert: Bt4310UnsequencedActor spawn keyInCollect equals: #(#(30, 70), 4)
+    self assert: Bt4310UnsequencedClass keyInCollect equals: #(#(30, 70), 4)
+    self assert: Bt4310UnsequencedActor spawn superInCollect equals: #(#(30, 70), 4)
+    self assert: Bt4310UnsequencedActor spawn blockArgInCollect equals: #(#(4, 8), 4)
+    self assert: Bt4310UnsequencedClass blockArgInCollect equals: #(#(4, 8), 4)
+    self assert: Bt4310UnsequencedActor spawn selfBlockInCollect equals: #(#(4, 8), 4)
+    self assert: Bt4310UnsequencedActor spawn cascadeInCollect equals: #(#(3, 7), 4)
+    self assert: Bt4310UnsequencedClass cascadeInCollect equals: #(#(3, 7), 4)
+    self assert: (Bt4310UnsequencedActor spawn castInDo: ClosureCellRecorder spawn) equals: #(7, 4)
+
+  // BT-4310: in the other frame kinds, and in real closures (which run
+  // against the actor-state cell and answered right before too).
+  testStateFoldAtAnUnsequencedOperandInEveryFrameKind =>
+    self assert: Bt4310UnsequencedActor spawn condInMatchArm equals: #(1, 2)
+    self assert: Bt4310UnsequencedClass condInMatchArm equals: #(1, 2)
+    self assert: Bt4310UnsequencedActor spawn condInMatchArmInDo equals: #(1, 2)
+    self assert: Bt4310UnsequencedActor spawn andInArm equals: #(true, 2)
+    self assert: Bt4310UnsequencedActor spawn keyInEvaluatedBlock equals: #(30, 2)
+    self assert: Bt4310UnsequencedActor spawn ifNilInTimesRepeat equals: #(10, 4)
+    self assert: Bt4310UnsequencedClass ifNilInTimesRepeat equals: #(10, 4)
+    self assert: Bt4310UnsequencedActor spawn condInProtectedBody equals: #(1, 2)
+    self assert: Bt4310UnsequencedActor spawn superInStoredClosure equals: #(30, 2)
+    self assert: Bt4310UnsequencedActor spawn blockArgInLookupHandler equals: #(4, 2)

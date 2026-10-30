@@ -2784,7 +2784,11 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 /// [`loop_body_producer_sites`]): a construct here that is not one of them
 /// sits behind an operand the sequencing rule leaves to another lowering (a
 /// conditional's receiver, an `operands_not_sequenced` send, a cast, a
-/// cascade message, a lookup), which compiles it in place.
+/// cascade message, a lookup). Such a construct that writes an outer local
+/// is the Phase 0 check's; one that threads only an actor's `State` is a
+/// producer site of the frame that lowers the statement all the same
+/// (BT-4310, codegen's `family_only_operand_site_exprs`), and each of those
+/// lowerings sequences the operand that holds it.
 #[must_use]
 pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
     // A wrapper the normalisation pass keeps (a literal element's) is walked
@@ -3426,7 +3430,10 @@ pub fn is_self_field_target(target: &Expression) -> bool {
 /// literal block, a call result, a parenthesised expression). Deciding from
 /// the receiver would duplicate codegen's `is_tier2_value_call`, and the two
 /// could drift. A producer the over-approximation leaves out of the sites is
-/// never a miscompile: it keeps its Phase 0 diagnostic.
+/// never a miscompile: it keeps its Phase 0 diagnostic. (A loop or fold that
+/// rebinds no local but threads an actor's `State` is a producer at these
+/// operands too, BT-4310: each of these lowerings sequences its operands for
+/// it, `operand_loop_constructs`.)
 #[must_use]
 fn operands_not_sequenced(
     receiver: &Expression,

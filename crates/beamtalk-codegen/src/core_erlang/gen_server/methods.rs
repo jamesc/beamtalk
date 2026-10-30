@@ -432,15 +432,17 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
-    /// BT-3814 / BT-3819: the one lowering of a `super` send's operands in a
-    /// method-body statement (`super take: (self bump)`, `^super take: (c
-    /// ifTrue: [self.n := 1 ...])`). Their state-effecting sub-expressions
-    /// thread ahead of the super dispatch into `stmts` (the sequencing rule),
-    /// so the dispatch reads the post-operand `State` and an operand's rebind
-    /// is not scoped away inside the dispatch's closed argument list. The
-    /// returned scope goes back to [`Self::finish_precompiled_scope`] once the
-    /// send itself is compiled.
-    fn thread_super_send_operands(
+    /// BT-3814 / BT-3819: the one lowering of the arguments of a `super` send
+    /// (`super take: (self bump)`, `^super take: (c ifTrue: [self.n := 1
+    /// ...])`) or, BT-4310, of a `self error:` send in a method-body
+    /// statement. Their state-effecting sub-expressions thread ahead of the
+    /// send into `stmts` (the sequencing rule), so the send reads the
+    /// post-operand `State` and an operand's rebind is not scoped away inside
+    /// its closed argument list; a loop or fold threading only `State` there
+    /// (`family_only_operand_site_exprs`) is a producer whose carrier is
+    /// unpacked ahead of the send. The returned scope goes back to
+    /// [`Self::finish_precompiled_scope`] once the send itself is compiled.
+    fn thread_send_arguments(
         &mut self,
         send: &Expression,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
@@ -690,9 +692,29 @@ impl CoreErlangGenerator {
         // where a loop or fold is a local-threading producer. A legacy
         // workspace block body (`supports_early_return: false`) has none.
         if supports_early_return {
-            self.with_local_producer_sites(body, |this| {
+            // BT-4310: the loops and folds threading only `State` at the
+            // statements' other operands (`family_only_operand_site_exprs`),
+            // read by the rule `with_local_producer_sites` registers them by,
+            // are checked against the lowered body: each one's
+            // `ConstructTuple` is a statement of the method body, never a
+            // carrier compiled in place inside an operand
+            // (`ConstructCarrierInPlace`), as every frame body checks its own.
+            let sites: Vec<(Span, Vec<String>)> = body
+                .iter()
+                .flat_map(|stmt| self.family_only_operand_site_exprs(stmt))
+                .map(|site| (site.span(), Vec::new()))
+                .collect();
+            let stmts = self.with_local_producer_sites(body, |this| {
                 this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
-            })
+            })?;
+            let errors = threaded_ir::verify_producer_sites_threaded(&stmts, &sites);
+            self.report_threaded_ir_verify_errors(
+                &errors,
+                "actor method-root loop or fold threading only `State` at an operand, \
+                 compiled in place instead of as a producer of the method body",
+                body.first().map_or_else(Span::default, |e| e.span()),
+            );
+            Ok(stmts)
         } else {
             // BT-3910: it still has value-position local assignments to lower.
             self.with_value_assign_sites(body, |this| {
@@ -792,7 +814,7 @@ impl CoreErlangGenerator {
                         BodyExprKind::SuperSend => {
                             // BT-3819: `^super take: (c ifTrue: [self.n := 1. ...])`
                             // sequences its operands like the statement form.
-                            let super_scope = self.thread_super_send_operands(value, &mut stmts)?;
+                            let super_scope = self.thread_send_arguments(value, &mut stmts)?;
                             let expr_str = self.expression_doc(value)?;
                             self.finish_precompiled_scope(super_scope)?;
                             stmts.push(ThreadedStmt::Statement(
@@ -1617,7 +1639,7 @@ impl CoreErlangGenerator {
                     // statement shape here), so the dispatch reads the
                     // post-operand `State` and the operand's rebind is not
                     // scoped away inside the dispatch's argument list.
-                    let super_scope = self.thread_super_send_operands(expr, &mut stmts)?;
+                    let super_scope = self.thread_send_arguments(expr, &mut stmts)?;
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
@@ -1638,6 +1660,10 @@ impl CoreErlangGenerator {
                     self.finish_precompiled_scope(super_scope)?;
                 }
                 BodyExprKind::ErrorSend => {
+                    // BT-4310: `self error: (xs inject: ...) printString` — the
+                    // argument is sequenced ahead of the send, like a `super`
+                    // send's.
+                    let error_scope = self.thread_send_arguments(expr, &mut stmts)?;
                     if is_last {
                         // Error send never returns — no reply tuple needed.
                         let expr_str = self.expression_doc(expr)?;
@@ -1650,6 +1676,7 @@ impl CoreErlangGenerator {
                             span,
                         ));
                     }
+                    self.finish_precompiled_scope(error_scope)?;
                 }
                 BodyExprKind::Tier2ValueCall => {
                     if is_last {
@@ -2689,14 +2716,14 @@ impl CoreErlangGenerator {
     ) -> Result<Option<String>> {
         // Read before the statement is lowered, by the one rule every frame
         // reads (`producer_site_locals`).
-        let sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> =
-            beamtalk_core::semantic_analysis::block_facts::sequenced_operand_sites(expr)
-                .into_iter()
-                .filter_map(|site| {
-                    self.producer_site_locals(site)
-                        .map(|locals| (site.span(), locals))
-                })
-                .collect();
+        let sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> = self
+            .root_producer_site_exprs(expr)
+            .into_iter()
+            .filter_map(|site| {
+                self.producer_site_locals(site)
+                    .map(|locals| (site.span(), locals))
+            })
+            .collect();
         let start = stmts.len();
         let result = self.lower_root_statement_with_producer_in_place(expr, stmts)?;
         // Checked whether or not the statement took the producer path: a

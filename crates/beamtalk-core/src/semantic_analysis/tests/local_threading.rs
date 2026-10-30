@@ -4635,8 +4635,8 @@ fn in_items_actor(body: &str) -> String {
 /// BT-4287 (BT-4003 item 3, closing the BT-4276 narrowing): in an actor
 /// method, a loop or fold whose block sends to `self` or writes a field (and
 /// writes no outer local), as an operand inside another loop or fold body, is
-/// accepted at every producer site of its statement (the operands that are
-/// not one are `bt4310_*`'s). It was rejected until BT-4287: compiled in place,
+/// accepted at every producer site of its statement (and, since BT-4310, at
+/// every other operand: `bt4310_*`). It was rejected until BT-4287: compiled in place,
 /// it lost its state changes, answered the raw `{Value, State}` pair or
 /// crashed. Codegen now lowers it as a producer of the frame that holds it
 /// (`is_family_only_fold_value_site`, proved over
@@ -4687,16 +4687,21 @@ fn bt4287_an_actor_state_fold_as_an_operand_in_a_fold_body_is_accepted() {
     assert!(errors.is_empty(), "{errors:?}");
 }
 
-/// PIN-BUG BT-4310 (found in the BT-4287 review): in an actor method, a loop
-/// or fold whose block sends to `self` or writes a field, at an operand that
-/// is not a producer site of its statement, is compiled in place. Measured on
-/// a BEAM, at the method root and in a fold body alike, every shape below
+/// BT-4310 (found in the BT-4287 review; was PIN-BUG
+/// `bt4310_..._is_rejected`): in an actor method, a loop or fold whose block
+/// sends to `self` or writes a field, at an operand the sequencing rule leaves
+/// to another lowering (a conditional's receiver, a lookup key, a cascade
+/// message's argument, an argument of a `super`, `error:`, block-invocation,
+/// cast or block-taking send), at the method root and in every frame, is
+/// accepted. Measured on a BEAM before BT-4310 lowered it, every shape below
 /// crashed (`Tuple does not understand '>'`), answered the raw carrier or a
-/// wrong value, or dropped the writes. Rejected. A fold in a conditional's arm
-/// block, two operands deep, or as a cascade's shared receiver is a site and
-/// answers right (`stdlib/test/bt4003residuals_test.bt`).
+/// wrong value, or dropped the writes, so the `StateFoldUnsequencedOperand`
+/// row rejected it. Codegen now registers it as a producer site of the frame
+/// that lowers the statement (`family_only_operand_site_exprs`, proved over
+/// `arm_operand_carrier_corpus.rs`); measured right in
+/// `stdlib/test/bt4003residuals_test.bt` (actor and class columns).
 #[test]
-fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
+fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_accepted() {
     let fold = "(self.items inject: 0 into: [:b :y | b + self bump])";
     let positions = [
         "({f} > 3) ifTrue: [1] ifFalse: [0]",
@@ -4709,6 +4714,7 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
         "self error: {f} printString",
         "[:z | z + 1] value: {f}",
         "self apply: {f} with: [:z | z]",
+        "0 max: 1; max: {f}",
     ];
     for position in positions {
         let value = position.replace("{f}", fold);
@@ -4716,53 +4722,25 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
             format!("r := {value}\nr"),
             format!("r := #(1, 2) collect: [:x | {value}]\nr"),
             format!("#(1, 2) do: [:x | 2 timesRepeat: [{value}]]\nself.n"),
-            // A plain `match:` arm is a statement of its own frame.
             format!("#(1, 2) do: [:x | x match: [1 -> {value}; _ -> 0]]\nself.n"),
             format!("r := 1 match: [1 -> {value}; _ -> 0]\nr"),
+            format!("b := [{value}]\nb value"),
         ] {
+            // A `match:` arm holds an expression, not a cascade.
+            if body.contains("->") && position.contains(';') {
+                continue;
+            }
             let src = in_items_actor(&body);
             let errors = analysis_errors(&src, &[]);
-            assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-            assert!(
-                errors[0]
-                    .message
-                    .contains("found in BT-4287, until BT-4310"),
-                "{}",
-                errors[0].message
-            );
+            assert!(errors.is_empty(), "{src}: {errors:?}");
         }
     }
-    // A cast's argument (a cast is a statement only), and a `match:` guard,
-    // evaluated in place.
+    // A cast's argument (a cast is a statement only).
     for body in [
-        format!("r := 1 match: [y when: [{fold} > 3] -> y; _ -> 0]\nr"),
-        // A guard of a `match:` that is a producer (its arm writes `t`).
-        format!("r := 1 match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]\n#[r, t]"),
-        format!(
-            "#(1, 2) do: [:x | x match: [y when: [{fold} > 3] -> t := t + 1; _ -> 0]]\n#[t, self.n]"
-        ),
         format!("Transcript show: {fold} printString!\nself.n"),
         format!("#(1, 2) do: [:x | Transcript show: {fold} printString!]\nself.n"),
     ] {
         let src = in_items_actor(&body);
-        let errors = analysis_errors(&src, &[]);
-        assert_eq!(errors.len(), 1, "{src}: {errors:?}");
-        assert!(
-            errors[0].message.contains("BT-4310"),
-            "{}",
-            errors[0].message
-        );
-    }
-    let accepted = [
-        format!("r := #(1, 2) collect: [:x | (x > 0) and: [{fold} > 3]]\nr"),
-        format!("r := #(1, 2) collect: [:x | x + (1 + {fold})]\nr"),
-        format!("#(1, 2) do: [:x | {fold} printString; yourself]\nself.n"),
-        format!("r := 1 + (1 + {fold})\nr"),
-        // A pure fold, and one in a class method, are not the row's.
-        "r := (#(1, 2) inject: 0 into: [:b :y | b + y]) > 3\nr".to_string(),
-    ];
-    for body in &accepted {
-        let src = in_items_actor(body);
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
     }
