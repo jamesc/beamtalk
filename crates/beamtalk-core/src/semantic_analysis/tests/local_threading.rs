@@ -38,6 +38,26 @@ fn of_category(diags: &[Diagnostic], category: DiagnosticCategory) -> Vec<&Diagn
         .collect()
 }
 
+/// BT-4263: an evaluated block with arguments that is no producer in a class
+/// method, because its block holds a construct that is not one either (a
+/// `detect:ifNone:` with a stored search block, so its handler's write is not
+/// packed, and `conditional_arms_lower_as_producer` declines the block). The
+/// Phase 0 error names the `value:` send at the position it sits in; the
+/// `detect:ifNone:` inside gets an error of its own. `b` is bound first by
+/// [`NON_PRODUCER_VALUE_PRELUDE`].
+const NON_PRODUCER_VALUE: &str = "[:v | #(1, 2) detect: b ifNone: [t := t + v]. 1] value: 2";
+
+/// The statement that binds [`NON_PRODUCER_VALUE`]'s search block.
+const NON_PRODUCER_VALUE_PRELUDE: &str = "b := [:q | q > 5]\n";
+
+/// The Phase 0 errors that name a `value:` send.
+fn value_send_errors(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
+    of_category(diags, DiagnosticCategory::UnmigratedLocalThreading)
+        .into_iter()
+        .filter(|d| d.message.starts_with("`value:`"))
+        .collect()
+}
+
 // `in_class`, `in_value`, `in_actor`: the shared probe contexts of
 // `test_helpers::evaluated_block_grid` (BT-4274), so the generated grid's
 // cells are the programs these tests check.
@@ -807,12 +827,14 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 #[test]
 fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     // o1's operand shape with a construct that is not a producer: a `value:`
-    // sent to a block literal (an `on:do:` is one since BT-3817, ADR 0131 Phase
-    // 3b, and a unary `value` since BT-3841: its argument-binding form keeps the
-    // legacy rows).
-    let src = in_class("r := ([:v | t := t + v. 1] value: 2) + 1\n#[r, t]");
+    // sent to a block literal whose block the producer cannot lower (an
+    // `on:do:` is one since BT-3817, ADR 0131 Phase 3b, a unary `value` since
+    // BT-3841 and a `value:` whose block it can lower since BT-4263).
+    let src = in_class(&format!(
+        "{NON_PRODUCER_VALUE_PRELUDE}r := ({NON_PRODUCER_VALUE}) + 1\n#[r, t]"
+    ));
     let diags = adr0131_diagnostics(&src);
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    let p0 = value_send_errors(&diags);
     assert_eq!(p0.len(), 1, "{diags:?}");
     let d = p0[0];
     assert_eq!(d.severity, Severity::Error);
@@ -914,13 +936,16 @@ fn a_loop_nested_in_an_actor_fold_through_a_closure_is_rejected() {
     // frame now (the conditional is a producer in the fold body), so the loop in
     // it is a frame site in every context: `armLoopInFoldStatement` and
     // `armLoopInFoldAssigned` in `adr0131loop_body_producer_test.bt` pin the
-    // answers.
-    let body = "r := 0\n#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]] value: k]\n#[t, r]";
+    // answers. BT-4263: so is an evaluated block with arguments (the arm that
+    // always runs, `argFoldLoopInBlock` in adr0131eval_block_test.bt), so the
+    // closure here is a block passed to a user method.
+    let body = "r := 0\n#(1, 2) do: [:k | self ap: [1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]]]\n#[t, r]";
     assert!(
         !adr0131_diagnostics(&in_actor(body)).is_empty(),
         "an actor accepted {body}"
     );
     for body in [
+        "r := 0\n#(1, 2) do: [:k | [:z | 1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]] value: k]\n#[t, r]",
         "r := 0\n#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | r := #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]]]\n#[t, r]",
         "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | t := t + 1]]]\nt",
         "#(1, 2) do: [:k | k > 0 ifTrue: [1 to: 2 do: [:i | #(1, 2) do: [:x | t := t + x]]]]\nt",
@@ -947,28 +972,46 @@ fn allow_set_do_assignment_is_accepted_in_every_context() {
 #[test]
 fn allow_set_field_assignment_in_class_method_is_an_error() {
     // o5's shape with a construct that is not a producer yet (an `on:do:` is one
-    // since BT-3817): the tuple would be stored in the class variable.
-    let src = "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    self.n := [:v | t := t + v] value: 1\n    t\n";
-    let diags = adr0131_diagnostics(src);
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    // since BT-3817, a `value:` whose block the producer lowers since BT-4263):
+    // the tuple would be stored in the class variable.
+    let class = |body: &str| {
+        format!(
+            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{body}    t\n"
+        )
+    };
+    let src = class(&format!(
+        "    {NON_PRODUCER_VALUE_PRELUDE}    self.n := {NON_PRODUCER_VALUE}\n"
+    ));
+    let diags = adr0131_diagnostics(&src);
+    let p0 = value_send_errors(&diags);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(p0[0].message.contains("the value of a field assignment"));
+    // BT-4263: accepted when the block is one the producer lowers (`argFieldMix`
+    // in adr0131eval_block_test.bt answers `#[1, 1]`).
+    let src = class("    self.n := [:v | t := t + v] value: 1\n");
+    assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
 }
 
 #[test]
 fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
     // local needs the loop to thread it on. A construct that is not a
-    // local-threading producer in the body keeps the error.
-    let src = in_class("r := 0\n#(1, 2) do: [:x | r := [:v | t := t + y] value: 1]\n#[r, t]");
-    let diags = adr0131_diagnostics(&src);
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    // local-threading producer in the body keeps the error: an actor's fold
+    // frame does not lower a value-bearing site (`is_actor_fold_value_site`).
+    let body = "r := 0\n#(1, 2) do: [:x | r := [:v | t := t + v] value: x]\n#[r, t]";
+    let diags = adr0131_diagnostics(&in_actor(body));
+    let p0 = value_send_errors(&diags);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(
         p0[0].message.contains("inside a block"),
         "{}",
         p0[0].message
     );
+    // BT-4263: a class or value-type `do:` frame lowers it (the `value:` is a
+    // producer there like a conditional is).
+    for src in [in_class(body), in_value(body)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+    }
 }
 
 #[test]
@@ -1619,9 +1662,11 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 
 #[test]
 fn deny_set_nested_statement_names_the_enclosing_block() {
-    let src = in_class("4 > 3 ifTrue: [[:v | t := t + v] value: 1]\nt");
+    let src = in_class(&format!(
+        "{NON_PRODUCER_VALUE_PRELUDE}4 > 3 ifTrue: [{NON_PRODUCER_VALUE}]\nt"
+    ));
     let diags = adr0131_diagnostics(&src);
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    let p0 = value_send_errors(&diags);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
@@ -1640,14 +1685,19 @@ fn deny_set_nested_statement_names_the_enclosing_block() {
 
 #[test]
 fn deny_set_method_body_statement_is_rejected_per_context() {
-    // A `[...] value` loses the write as a class method statement and answers
-    // right in an actor method.
-    let body = "[:v | t := t + v] value: 1\nt";
-    let diags = adr0131_diagnostics(&in_class(body));
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    // A `value:` whose block the producer cannot lower in a class method loses
+    // the write as a class method statement.
+    let body = format!("{NON_PRODUCER_VALUE_PRELUDE}{NON_PRODUCER_VALUE}\nt");
+    let diags = adr0131_diagnostics(&in_class(&body));
+    let p0 = value_send_errors(&diags);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(p0[0].message.contains("as a statement in"), "{:?}", p0[0]);
-    assert!(adr0131_diagnostics(&in_actor(body)).is_empty());
+    // BT-4263: one whose block it can lower is a producer in every context
+    // (`argStA` in adr0131eval_block_test.bt).
+    let body = "t := 0\n[:v | t := t + v] value: 1\nt";
+    for src in [in_class(body), in_value(body), in_actor(body)] {
+        assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+    }
 }
 
 /// BT-3841: `eachWithIndex:`/`do:separatedBy:` are producers like `do:`
@@ -2035,16 +2085,17 @@ fn adr0131_phase0_summary_is_checked_in() {
     );
 }
 
-/// BT-3841 review: the unfinished families (`detect:ifNone:` and a block
-/// `value`; `anySatisfy:`, the keyed iterations and the enumerations were here
-/// until their producers landed) are rejected past depth two unless a row names the exact
-/// shape. An `eachWithIndex:` in an arm in a protected body in a `do:` body
-/// (depth 3) is unmeasured and stays rejected in a value-type method, as does
-/// depth four in every context. (This chain used to be accepted for
-/// `anySatisfy:` by the coarse rows and raised `bad argument` in a value-type
-/// method, measured on a BEAM; the producer now answers 4 in all three.)
+/// BT-3841 review: the unfinished families were rejected past depth two unless
+/// a row named the exact shape (`anySatisfy:`, the keyed iterations, the
+/// enumerations and `detect:ifNone:` were here until their producers landed;
+/// an `anySatisfy:` chain once accepted by the coarse rows raised `bad
+/// argument` in a value-type method). BT-4263: a block `value:` was the last
+/// one. It is a producer by rule at any depth, like `[...] value` (BT-3841):
+/// the depth-3 chain (a `value:` in an arm in a protected body in a `do:`
+/// body) and the depth-4 one are accepted in every context and answer 2 and 4
+/// on a BEAM (`argDeep3`/`argDeep4` in `adr0131eval_block_test.bt`).
 #[test]
-fn unfinished_families_are_rejected_past_the_measured_depth() {
+fn block_value_chains_past_the_measured_depth_are_producers() {
     let header = |context: &str| match context {
         "class" => {
             "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class probe: c =>\n"
@@ -2058,49 +2109,41 @@ fn unfinished_families_are_rejected_past_the_measured_depth() {
             .fold(String::new(), |acc, l| acc + "    " + l + "\n");
         format!("{}{lines}", header(context))
     };
-    let depth3 = "t := 0\n#(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]\nt";
-    assert!(
-        !adr0131_diagnostics(&source("value", depth3)).is_empty(),
-        "the value-type depth-3 shape is unmeasured and must be rejected"
-    );
-    let depth4 = "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]]\nt";
-    for context in ["class", "value", "actor"] {
-        assert!(
-            !adr0131_diagnostics(&source(context, depth4)).is_empty(),
-            "{context}: depth-4 shape accepted"
-        );
+    for depth in [
+        "t := 0\n#(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]\nt",
+        "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | [c ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]]]\nt",
+    ] {
+        for context in ["class", "value", "actor"] {
+            let src = source(context, depth);
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{context}: {src}: {diags:?}");
+        }
     }
 }
 
-/// BT-3841 review: unmeasured middle roles of a three-block nesting stay
-/// rejected for the unfinished families, whatever the outermost and innermost
-/// roles are (no `RIGHT_STATEMENTS` row exists past depth two). (An evaluated
-/// literal block is not one of them since BT-3841: it is a producer by rule at
-/// any depth, `evaluated_literal_blocks_are_producers_at_any_depth`.)
+/// BT-3841 review: the middle roles of a three-block nesting were rejected for
+/// the unfinished families, whatever the outermost and innermost roles were
+/// (no `RIGHT_STATEMENTS` row exists past depth two). An evaluated literal
+/// block is not one of them since BT-3841, nor one with arguments since
+/// BT-4263: it is a producer by rule at any depth
+/// (`evaluated_literal_blocks_are_producers_at_any_depth`), and these chains
+/// answer 6, 2 and 2 on a BEAM (`argThreeDeep*` in
+/// `adr0131eval_block_test.bt`).
 #[test]
-fn unmeasured_three_deep_chains_stay_rejected() {
-    for (context, src) in [
-        (
-            "actor",
-            in_actor(
-                "t := 0\n#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[:v | t := t + v] value: 1]]] on: Error do: [:e | 0]]\nt",
-            ),
+fn three_deep_block_value_chains_are_producers() {
+    for src in [
+        in_actor(
+            "t := 0\n#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]\n#(1, 2) do: [:z | [#(1, 2) do: [:y | true ifTrue: [[:v | t := t + v] value: 1]]] on: Error do: [:e | 0]]\nt",
         ),
-        (
-            "actor",
-            in_actor(
-                "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
-            ),
+        in_actor(
+            "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
         ),
-        (
-            "actor",
-            in_actor(
-                "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
-            ),
+        in_actor(
+            "t := 0\n#(1, 2) do: [:z | [Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
         ),
     ] {
         let diags = adr0131_diagnostics(&src);
-        assert!(!diags.is_empty(), "{context}: accepted:\n{src}");
+        assert!(diags.is_empty(), "accepted:\n{src}: {diags:?}");
     }
 }
 
@@ -2119,6 +2162,10 @@ fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
             format!("t := 0\n[{kv}] on: Error do: [:e | 0]\nt"),
             format!("t := 0\n[{kv}] value\nt"),
             format!("t := 0\ntrue ifTrue: [[{kv}] value]\nt"),
+            // BT-4263: an evaluated block with arguments is the same arm frame
+            // (`argKeyedInDo` answers 1, `argKeyedReturnInDo` `nil`).
+            format!("t := 0\n#(1) do: [:z | [:y | {kv}] value: z]\nt"),
+            format!("t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"),
         ] {
             for src in [in_class(&body), in_value(&body), in_actor(&body)] {
                 let diags = adr0131_diagnostics(&src);
@@ -2126,7 +2173,7 @@ fn keyed_iterations_are_producers_where_the_frame_lowers_them() {
             }
         }
         for body in [format!(
-            "t := 0\n#(1, 2) do: [:z | [:y | ^{kv}] value: z]\nt"
+            "t := 0\n#(1, 2) do: [:z | b := [:y | ^{kv}]. b value: z]\nt"
         )] {
             for src in [in_class(&body), in_value(&body)] {
                 assert!(
@@ -2201,7 +2248,7 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
         let kv = format!("#{{#a => 1}} {sel} [:k :v | t := t + v]");
         for body in [
             format!("t := 0\nself ap: [{kv}]\nt"),
-            format!("t := 0\n#(1) do: [:z | [:y | {kv}] value: z]\nt"),
+            format!("t := 0\n#(1) do: [:z | self ap: [{kv}]]\nt"),
         ] {
             for src in [in_class(&body), in_value(&body)] {
                 assert!(
@@ -2250,8 +2297,14 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
         ),
         // A closure between the frame and the construct.
         (
-            "s := 0\n1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]\ns",
+            "s := 0\n1 to: 3 do: [:i | self ap: [[s < i] whileTrue: [s := s + 1]]]\ns",
             [true, true, true],
+        ),
+        // BT-4263: an evaluated block with arguments is no closure: its block
+        // is an arm frame that always runs (`argWhileInToDo` answers 3).
+        (
+            "s := 0\n1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]\ns",
+            [false, false, false],
         ),
         // A search-block write inside a `do:` body answers right in every
         // context (`iter`/`outer`/`dinS` in `adr0131_statement_measured.tsv`;
@@ -3226,7 +3279,7 @@ fn dictionary_lookup_that_the_producer_cannot_lower_keeps_the_section6_error() {
         // In a closure that is not inlined (BT-3839 keeps this: the lookup
         // producer has no frame there), alone and in a loop body.
         "d := #{#a => 1}\nb := [d at: #k ifAbsent: [t := t + 1. 0]]\nb value",
-        "d := #{#a => 1}\n#(1, 2) do: [:x | [:z | d at: z ifAbsent: [t := t + 1. 0]] value: x]\nt",
+        "d := #{#a => 1}\n#(1, 2) do: [:x | self ap: [d at: x ifAbsent: [t := t + 1. 0]]]\nt",
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
@@ -3516,9 +3569,10 @@ fn while_condition_without_outer_write_is_accepted() {
 /// is an arm-like local-threading producer by rule, the one `conditional_arm_blocks`
 /// site rule: accepted as a statement, as an operand, in an arm, a protected body,
 /// a handler and a loop body, and nested in itself, at any depth, in every method
-/// context. What is not a producer keeps the legacy verdict: `value:` (its
-/// arguments bind the block's parameters outside the frame) and the REPL. A
-/// parenthesised receiver is the literal it wraps (BT-4059,
+/// context. BT-4263: so is one with arguments (`value:`, `value:value:`): its
+/// arguments are operands of the enclosing frame, threaded first. The REPL
+/// keeps its own lowering and its verdict. A parenthesised receiver is the
+/// literal it wraps (BT-4059,
 /// `parenthesised_block_operands_analyse_like_bare_ones`).
 #[test]
 fn evaluated_literal_blocks_are_producers_at_any_depth() {
@@ -3541,13 +3595,27 @@ fn evaluated_literal_blocks_are_producers_at_any_depth() {
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
-    // Not a producer: a `value:` send keeps its legacy verdict.
-    for body in ["t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt"] {
-        for src in [in_class(body), in_value(body)] {
-            assert!(
-                !adr0131_diagnostics(&src).is_empty(),
-                "{src}: accepted but not a producer"
-            );
+    // BT-4263: the `value:` family, in the same positions (the `arg*` cells of
+    // adr0131eval_block_test.bt pin the answers).
+    for body in [
+        "t := 0\n[:v | t := t + v] value: 1\nt",
+        "t := 0\nr := [:v | t := t + v. 5] value: 1\n#[r, t]",
+        "t := 0\nr := t + ([:v | t := t + v. 5] value: 1)\n#[r, t]",
+        "t := 0\n{[:y | t := y] value: 5, t}",
+        "t := 0\n{[:a :b | t := a + b] value: 2 value: 3, t}",
+        "t := 0\ntrue ifTrue: [[:v | t := t + v] value: 1]\nt",
+        "t := 0\n[:v | [:w | t := t + w] value: v] value: 1\nt",
+        "t := 0\n#(1, 2) do: [:z | [:v | t := t + v] value: z]\nt",
+        "t := 0\n#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]\nt",
+        "t := 0\n[[:v | t := t + v] value: 1] on: Error do: [:e | 0]\nt",
+        "t := 0\n[Error signal: \"x\"] on: Error do: [:e | true ifTrue: [[:v | t := t + v] value: 1]]\nt",
+        "t := 0\ntrue ifTrue: [#(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
+        "t := 0\n#(1, 2) do: [:y | #(1, 2) do: [:z | true ifTrue: [[:v | t := t + v] value: 1]]]\nt",
+        "t := 0\n{[:y | t := t + y] value: (t := 5), t}",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
         }
     }
     // The REPL keeps its own lowering and its verdict.
@@ -4179,20 +4247,22 @@ const INLINE_BLOCK_LOOP_BODIES: &[&str] = &[
 ];
 
 /// BT-3948: an in-place block that assigns its own local AND writes an outer
-/// local inside a loop is left to the Phase 0 position check, which rejects it
-/// (measured with the CLI, 2026-10-20), so neither form slips past both checks.
+/// local inside a loop is no BT-3948 shape: it was left to the Phase 0 position
+/// check, which rejected it (measured with the CLI, 2026-10-20). BT-4263 makes
+/// the `value:` a local-threading producer in the loop body, so it is accepted
+/// and answers 6 on a BEAM in every context
+/// (`argBlockLocalInToDo`/`argBlockLocalOperandInToDo` in
+/// `adr0131eval_block_test.bt`).
 #[test]
-fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_rejected_by_phase_0() {
+fn inline_block_local_that_also_writes_an_outer_local_in_a_loop_is_a_producer() {
     for body in [
         "1 to: 3 do: [:i | [:z | w := z. t := t + w] value: i]\nt",
         "1 to: 3 do: [:i | t := t + ([:z | w := z. t := t + w. w] value: i)]\nt",
     ] {
-        let diags = adr0131_diagnostics(&in_actor(body));
-        assert!(
-            diags.iter().any(|d| d.severity == Severity::Error)
-                && diags.iter().all(|d| !d.message.contains("BT-3948")),
-            "{body}: {diags:?}"
-        );
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
     }
 }
 

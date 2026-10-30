@@ -197,6 +197,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::MatchArmBlock => "MatchArmBlock",
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
         DiagnosticCategory::ClassProcessFfi => "ClassProcessFfi",
+        DiagnosticCategory::ClassMethodProcessResource => "ClassMethodProcessResource",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
@@ -429,6 +430,10 @@ mod tests {
             (DiagnosticCategory::MatchArmBlock, "MatchArmBlock"),
             (DiagnosticCategory::ClassStateAbroad, "ClassStateAbroad"),
             (DiagnosticCategory::ClassProcessFfi, "ClassProcessFfi"),
+            (
+                DiagnosticCategory::ClassMethodProcessResource,
+                "ClassMethodProcessResource",
+            ),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (DiagnosticCategory::FfiNestedString, "FfiNestedString"),
             (

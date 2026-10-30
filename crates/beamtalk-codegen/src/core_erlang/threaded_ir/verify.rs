@@ -288,6 +288,24 @@ pub(in crate::core_erlang) enum VerifyError {
     /// of such a sibling to a `Tmp`; see [`verify_sibling_reads`].
     LocalReadAfterSiblingRebind { local: String, at: Span },
 
+    /// BT-4263 (ADR 0131 §2): a producer handed its enclosing frame a prelude
+    /// whose top-level [`ThreadedStmt::LocalRebind`] of `local` (the last one
+    /// for that local) binds `value_var`, but the frame's later code reads
+    /// `local` from another variable (`bound`, or none): the producer bound the
+    /// rebind in a variable scope it then popped. Every statement after the
+    /// construct reads the pre-construct value, so the write is silently lost
+    /// (`erlc`-clean). The repro is an evaluated block with arguments,
+    /// `{[:y | t := y] value: 5, t}`, whose producer binds the parameters in a
+    /// scope of its own (`generate_evaluated_block_producer`) and answered
+    /// `{5, 0}`. Applies to every producer funnel in every frame, whatever the
+    /// scope kind; checked by [`verify_rebinds_visible`].
+    RebindNotVisible {
+        local: String,
+        value_var: String,
+        bound: Option<String>,
+        at: Span,
+    },
+
     /// BT-3821: a [`ThreadedStmt::ConstructTuple`] declares that its arms or
     /// body advanced `family` (`families`), but no `Direct` [`ThreadedStmt::Bind`]
     /// of that family follows it in the same frame before anything else does.
@@ -1910,7 +1928,61 @@ pub(in crate::core_erlang) fn verify_sibling_reads(
     errors
 }
 
+/// [`VerifyError::RebindNotVisible`] (BT-4263): for each local the prelude a
+/// producer hands its enclosing frame rebinds at top level, the last such
+/// [`ThreadedStmt::LocalRebind`]'s `value_var` must be what `lookup` (the
+/// generator's variable scope at the hand-off) answers for the local, so the
+/// frame's later code reads the rebound value. A rebind nested inside a frame
+/// node belongs to the inner frame, as in [`verify_sibling_reads`]. Reached in
+/// production through [`CoreErlangGenerator::report_rebinds_visible`].
+pub(in crate::core_erlang) fn verify_rebinds_visible<'a>(
+    prelude: &[ThreadedStmt],
+    lookup: impl Fn(&str) -> Option<&'a String>,
+) -> Vec<VerifyError> {
+    let mut last: Vec<(&str, &str, Span)> = Vec::new();
+    for stmt in prelude {
+        if let ThreadedStmt::LocalRebind {
+            local,
+            value_var,
+            span,
+            ..
+        } = stmt
+        {
+            last.retain(|(l, _, _)| *l != local.as_str());
+            last.push((local.as_str(), value_var.as_str(), *span));
+        }
+    }
+    last.into_iter()
+        .filter_map(|(local, value_var, at)| {
+            let bound = lookup(local);
+            (bound.map(String::as_str) != Some(value_var)).then(|| VerifyError::RebindNotVisible {
+                local: local.to_string(),
+                value_var: value_var.to_string(),
+                bound: bound.cloned(),
+                at,
+            })
+        })
+        .collect()
+}
+
 impl CoreErlangGenerator {
+    /// BT-4263: reports [`VerifyError::RebindNotVisible`] for the prelude a
+    /// producer returns to the frame being lowered ([`verify_rebinds_visible`]
+    /// against the current variable scope). Called by every producer funnel
+    /// once the construct is lowered and any scope of its own is popped.
+    pub(in crate::core_erlang) fn report_rebinds_visible(
+        &mut self,
+        prelude: &[ThreadedStmt],
+        span: Span,
+    ) {
+        let errors = verify_rebinds_visible(prelude, |name| self.lookup_var(name));
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "producer rebind not visible to its enclosing frame",
+            span,
+        );
+    }
+
     /// The [`ScopeKind`] the generator is currently lowering — the one place
     /// that maps generator state to the verifier's scope (BT-3725).
     pub(in crate::core_erlang) fn threaded_scope(&self) -> ScopeKind {

@@ -59,6 +59,47 @@ pub(crate) fn extract_type_specs(
     beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
 }
 
+/// ADR 0075's full FFI type resolution chain for a manifest-backed package
+/// rooted at `package_root`: each stub tier overrides `auto_extract` at the
+/// function/arity level, applied lowest-precedence first so project-local
+/// always wins — extracted -> distribution -> package-bundled (each of
+/// `resolved_deps`' own `stubs_dir`) -> project-local (`package_root/stubs/`).
+/// Every tier is checked for drift against the pre-merge `auto_extract`.
+///
+/// The one merge `beamtalk build`, `beamtalk lint`, `beamtalk test` and a
+/// dependency's compile for a downstream package (BT-4225) all share, so a
+/// package's FFI calls type the same on every surface and whether it is
+/// built standalone or as someone else's dependency. `echo` is passed to the
+/// stub loaders ([`load_project_stub_registry`]); the returned diagnostics
+/// are the stub tiers' own (skipped signatures, version drift, collisions).
+pub(crate) fn resolve_package_type_registry(
+    package_root: &Utf8Path,
+    auto_extract: Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    resolved_deps: &[crate::commands::deps::path::ResolvedDependency],
+    echo: Option<OutputFormat>,
+) -> (
+    Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+) {
+    let dependency_stubs = load_dependency_stub_registries(
+        resolved_deps,
+        distribution_stubs_dir().as_deref(),
+        auto_extract.as_ref(),
+        echo,
+    );
+    let project_stubs = load_project_stub_registry(package_root, auto_extract.as_ref(), echo);
+    if dependency_stubs.is_none() && project_stubs.is_none() {
+        return (auto_extract, Vec::new());
+    }
+    let mut merged = auto_extract.unwrap_or_default();
+    let mut diagnostics = Vec::new();
+    for (registry, diags) in [dependency_stubs, project_stubs].into_iter().flatten() {
+        merged.apply_overrides(registry);
+        diagnostics.extend(diags);
+    }
+    (Some(merged), diagnostics)
+}
+
 /// Locate the compiler distribution's own curated FFI type stubs (ADR 0075
 /// layer 3), installed alongside the stdlib sources under
 /// `{sysroot}/share/beamtalk/stubs/` — the same sysroot convention used by
@@ -112,22 +153,23 @@ pub(crate) fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
 /// [`extract_type_specs`]'s "single source of truth" role, so both surfaces
 /// agree on stub-derived types by construction.
 ///
-/// `format` controls how each stub diagnostic (skipped signature, version
+/// `echo` controls how each stub diagnostic (skipped signature, version
 /// drift) is rendered as it's discovered — `beamtalk build` always passes
 /// [`OutputFormat::Text`] (it has no JSON mode); `beamtalk lint` passes its
 /// own `--format`, so a stub diagnostic streams as a JSON line under
 /// `lint --format=json` the same way every other lint diagnostic does,
 /// instead of always printing miette text regardless of the caller's
-/// requested format.
+/// requested format. `None` renders nothing: a dependency compiled for a
+/// downstream package keeps its diagnostics to itself (BT-4225).
 pub(crate) fn load_project_stub_registry(
     project_root: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    format: OutputFormat,
+    echo: Option<OutputFormat>,
 ) -> Option<(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
 )> {
-    load_stub_registry_from_dir(&project_root.join("stubs"), auto_extract, format)
+    load_stub_registry_from_dir(&project_root.join("stubs"), auto_extract, echo)
 }
 
 /// Load and merge the package-bundled (ADR 0075 layer 2) and distribution
@@ -158,7 +200,7 @@ pub(crate) fn load_dependency_stub_registries(
     resolved_deps: &[crate::commands::deps::path::ResolvedDependency],
     distribution_stubs_dir: Option<&Utf8Path>,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    format: OutputFormat,
+    echo: Option<OutputFormat>,
 ) -> Option<(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
@@ -169,7 +211,7 @@ pub(crate) fn load_dependency_stub_registries(
 
     if let Some(dist_dir) = distribution_stubs_dir {
         if let Some((dist_registry, dist_diagnostics)) =
-            load_stub_registry_from_dir(dist_dir, auto_extract, format)
+            load_stub_registry_from_dir(dist_dir, auto_extract, echo)
         {
             registry.apply_overrides(dist_registry);
             diagnostics.extend(dist_diagnostics);
@@ -187,13 +229,13 @@ pub(crate) fn load_dependency_stub_registries(
             continue;
         };
         if let Some((dep_registry, dep_diagnostics)) =
-            load_stub_registry_from_dir(stubs_dir, auto_extract, format)
+            load_stub_registry_from_dir(stubs_dir, auto_extract, echo)
         {
             diagnostics.extend(warn_on_package_stub_collisions(
                 &dep_registry,
                 &dep.name,
                 &mut package_stub_owners,
-                format,
+                echo,
             ));
             registry.apply_overrides(dep_registry);
             diagnostics.extend(dep_diagnostics);
@@ -210,7 +252,7 @@ pub(crate) fn load_dependency_stub_registries(
 /// between two sibling dependencies' own package-bundled stubs (see
 /// [`load_dependency_stub_registries`]).
 ///
-/// Each collision is rendered immediately (respecting `format`), mirroring
+/// Each collision is rendered immediately (respecting `echo`), mirroring
 /// [`load_stub_registry_from_dir`]'s own drift/skipped-signature
 /// diagnostics — without it, a collision would only ever show up as an
 /// anonymous count in the build summary (`beamtalk build`) or be silently
@@ -223,7 +265,7 @@ fn warn_on_package_stub_collisions(
     dep_registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     dep_name: &str,
     owners: &mut HashMap<(String, String, u8), String>,
-    format: OutputFormat,
+    echo: Option<OutputFormat>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let mut collisions = Vec::new();
 
@@ -259,9 +301,10 @@ fn warn_on_package_stub_collisions(
                     );
                     let diagnostic =
                         beamtalk_core::source_analysis::Diagnostic::warning(message, span);
-                    match format {
-                        OutputFormat::Text => eprintln!("warning: {}", diagnostic.message),
-                        OutputFormat::Json => {
+                    match echo {
+                        None => {}
+                        Some(OutputFormat::Text) => eprintln!("warning: {}", diagnostic.message),
+                        Some(OutputFormat::Json) => {
                             println!(
                                 "{}",
                                 crate::diagnostic::diagnostic_to_json(dep_name, &diagnostic)
@@ -288,7 +331,7 @@ fn warn_on_package_stub_collisions(
 fn load_stub_registry_from_dir(
     stubs_dir: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    format: OutputFormat,
+    echo: Option<OutputFormat>,
 ) -> Option<(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
@@ -367,14 +410,15 @@ fn load_stub_registry_from_dir(
         // `compile_source_with_bindings`'s rendering for src/ files —
         // without it, a drift or skipped-signature warning would only ever
         // show up as an anonymous count in the build summary. Respects
-        // `format` so `lint --format=json` gets these as JSON lines too
+        // `echo` so `lint --format=json` gets these as JSON lines too
         // (see this function's doc).
         for diagnostic in &file_diagnostics {
             if diagnostic.severity == beamtalk_core::source_analysis::Severity::Lint {
                 continue;
             }
-            match format {
-                OutputFormat::Text => {
+            match echo {
+                None => {}
+                Some(OutputFormat::Text) => {
                     let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
                         diagnostic,
                         file.as_str(),
@@ -382,7 +426,7 @@ fn load_stub_registry_from_dir(
                     );
                     eprintln!("{:?}", miette::Report::new(compile_diag));
                 }
-                OutputFormat::Json => {
+                Some(OutputFormat::Json) => {
                     let json = crate::diagnostic::diagnostic_to_json(file.as_str(), diagnostic);
                     println!("{json}");
                 }

@@ -248,3 +248,46 @@ TestCase subclass: CollectionsTest
   testUniqueIsStrict =>
     self assert: #(1, 1.0, 1, 1.0) unique equals: #(1, 1.0)
     self assert: #(3, 1, 2, 1, 3) unique equals: #(1, 2, 3)
+
+  // BT-4306: order-preserving dedupe by key, Elixir's Enum.uniq_by/2.
+  testWithoutDuplicatesByKeepsFirstInOrder =>
+    // Identity key: same elements as `unique`, but in first-occurrence order.
+    self assert: (#(3, 1, 2, 1, 3) withoutDuplicatesBy: [:x |
+      x
+    ]) equals: #(3, 1, 2)
+    self assert: (#(3, 1, 2, 1, 3) withoutDuplicatesBy: [:x |
+      x
+    ]) sort equals: #(3, 1, 2, 1, 3) unique
+    // The first element for each key wins.
+    self assert: (#("bb", "a", "cc", "d") withoutDuplicatesBy: [:s |
+      s size
+    ]) equals: #("bb", "a")
+    self assert: (#() withoutDuplicatesBy: [:x | x]) equals: #()
+    self assert: (#(7) withoutDuplicatesBy: [:x | x]) equals: #(7)
+
+  testWithoutDuplicatesByIsStrict =>
+    // Keys compare with =:=, like `unique`: 1 and 1.0 are distinct keys.
+    self assert: (#(1, 1.0, 1, 1.0) withoutDuplicatesBy: [:x |
+      x
+    ]) equals: #(1, 1.0)
+
+  testWithoutDuplicatesByStringKeys =>
+    headers := #({"accept", "text/html"}, {"host", "a.example"}, {"accept", "*/*"})
+    self assert: (headers withoutDuplicatesBy: [:h |
+      h at: 1
+    ]) equals: #({"accept", "text/html"}, {"host", "a.example"})
+
+  testWithoutDuplicatesByOptionList =>
+    // Thousand Island's resolve_options/1: required ++ user ++ defaults, first
+    // entry per key wins, where a bare atom is its own key.
+    options := #(#binary, {#binary, false}, {#backlog, 1}, #inet, {#backlog, 2})
+    keyOf := [:o | (o isKindOf: Tuple) ifTrue: [o at: 1] ifFalse: [o]]
+    self assert: (options withoutDuplicatesBy: keyOf) equals: #(#binary, {#backlog, 1}, #inet)
+
+  testWithoutDuplicatesByBlockReadsCapturedVariables =>
+    // A block passed to a non-compiler-known message may read captured
+    // variables (writing them is a compile error, ADR 0133).
+    modulus := 3
+    self assert: (#(1, 2, 3, 4, 5, 6) withoutDuplicatesBy: [:x |
+      x % modulus
+    ]) equals: #(1, 2, 3)

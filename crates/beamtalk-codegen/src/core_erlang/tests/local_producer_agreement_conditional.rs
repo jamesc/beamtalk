@@ -87,10 +87,22 @@ pub(super) const CONDITIONALS: &[&str] = &[
     "s match: [n when: [n > 1] -> (t := t + n); _ -> 0]",
     "s match: [0 -> ([t := t + 1. 2] value); _ -> 0]",
     "s match: [0 -> (#(1, 2) detect: [:x | x == 5] ifNone: [t := t + 1]); _ -> 0]",
-    // Not producers: a literal with parameters or arguments (`value:`), and a
-    // parenthesised block receiver.
+    // BT-4263: and so is one with arguments (`value:`, `value:value:`): its
+    // arguments are operands of the enclosing frame, threaded first, and its
+    // block is the same arm.
     "[:v | t := t + v] value: 2",
+    "[:v | t := v. 2] value: 9",
+    "[:a :b | t := t + a. u := u + b. 2] value: 1 value: 2",
+    "[:v | #(1, 2) do: [:x | t := t + x + v]] value: 1",
+    "[:v | [:w | t := t + w. 1] value: v. 3] value: 1",
+    "[:v | (s == v) ifTrue: [t := t + 1. 1] ifFalse: [2]] value: 3",
+    "[:v | t := t + v. ^t] value: 1",
+    "[:v | [t := t + v] on: Error do: [:e | 0]] value: 1",
+    "[:v | t := t + v] value: (t := t + 1)",
+    "[:v | t := t + v. 2] value: ((s == 3) ifTrue: [t := t + 1. 1] ifFalse: [2])",
+    // A parenthesised block receiver is the literal it wraps (BT-4059).
     "([t := t + 1. 2]) value",
+    "([:v | t := t + v. 2]) value: 1",
 ];
 
 /// [`POSITIONS`] plus the positions a conditional is a producer in without
@@ -134,6 +146,11 @@ pub(super) const ARM_FRAMES: &[&str] = &[
     "#(1, 2) do: [:k | [{s}] value]",
     "[#(1, 2) do: [:k | {s}]] value",
     "[[{s}] on: Error do: [:e | 0]] value",
+    // BT-4263: the arm frame of an evaluated block with arguments.
+    "[:z | {s}] value: 1",
+    "[:z | {s}. z] value: 1",
+    "#(1, 2) do: [:k | [:z | {s}] value: k]",
+    "(s == 3) ifTrue: [[:z :y | {s}] value: 1 value: 2]",
     // BT-3947: the arm frame of a `match:` producer.
     "s match: [0 -> ({s}); _ -> 1]",
     "s match: [_ -> ({s})]",
@@ -161,6 +178,7 @@ pub(super) const ARM_CONSTRUCTS: &[&str] = &[
     "[(s == 3) ifTrue: [t := 1]. 1] on: Error do: [:e | 0]",
     "Result tryDo: [t := 5. 2]",
     "[t := t + 1. 2] value",
+    "[:v | t := t + v. 2] value: 1",
 ];
 
 /// The core rule's verdict for every conditional and `on:do:`/`ensure:`
@@ -324,9 +342,10 @@ fn every_conditional_site_the_core_rule_accepts_is_lowered_by_the_producer() {
 /// `ifTrue:`/`ifFalse:` arms; the boolean and nil-testing arms; an arm nested
 /// in another producer; an arm in a loop or holding a conditional; an
 /// evaluated literal block's arm alone; the same nested in or around other
-/// frames; a `match:` producer's arms (BT-3947).
+/// frames; an evaluated block with arguments (BT-4263); a `match:` producer's
+/// arms (BT-3947).
 pub(super) const ARM_FRAME_FAMILIES: &[std::ops::Range<usize>] =
-    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23, 23..28];
+    &[0..4, 4..8, 8..11, 11..14, 14..19, 19..23, 23..27, 27..32];
 
 /// Both ways, for a loop, fold, conditional or exception in a statement of
 /// one family of [`ARM_FRAMES`]: the whole proof is the per-family tests
@@ -361,7 +380,8 @@ beamtalk_core::per_family_tests! {
     every_arm_frame_site_in_a_loop_or_holding_a_conditional_the_core_rule_accepts_is_lowered_by_the_producer => 3,
     every_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 4,
     every_nested_evaluated_block_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 5,
-    every_match_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 6,
+    every_evaluated_block_with_arguments_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 6,
+    every_match_arm_frame_site_the_core_rule_accepts_is_lowered_by_the_producer => 7,
 }
 
 /// Actor conditionals the core rule does not name as producers (the arm writes a
