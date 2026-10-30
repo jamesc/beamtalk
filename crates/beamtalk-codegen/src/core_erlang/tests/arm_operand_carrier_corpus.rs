@@ -778,17 +778,32 @@ fn unsequenced_cells() -> Vec<UnsequencedCell> {
     out
 }
 
-/// Every cell is accepted, compiles clean, and lowers its construct as a producer of the
-/// frame, or (in a real closure) compiles no carrier for it; every cell of each outer body
-/// kind, as the methods of one class, compiles through `erlc`.
-#[test]
-fn every_unsequenced_operand_cell_is_lowered_as_a_producer() {
+/// The corpus is checked in [`UNSEQUENCED_PARTITIONS`] parts, by outer body, so no test runs
+/// over a minute (BT-3888).
+const UNSEQUENCED_PARTITIONS: usize = 6;
+
+impl UnsequencedCell {
+    /// The part of the corpus the cell is checked in: every cell of one outer body in the
+    /// same part, so each part compiles its outer bodies' classes through `erlc` whole.
+    fn partition(&self) -> usize {
+        self.outer.map_or(0, |o| o + 1) % UNSEQUENCED_PARTITIONS
+    }
+}
+
+/// Every cell of part `part` is accepted, compiles clean, and lowers its construct as a
+/// producer of the frame, or (in a real closure) compiles no carrier for it; every cell of
+/// each outer body kind, as the methods of one class, compiles through `erlc`. Answers how
+/// many cells were lowered as producers.
+fn check_unsequenced_partition(part: usize) -> usize {
     let mut failures = Vec::new();
     let mut lowered = 0;
     let mut cell_frames = 0;
     let mut per_outer: std::collections::BTreeMap<Option<usize>, Vec<String>> =
         std::collections::BTreeMap::new();
-    let cells = unsequenced_cells();
+    let cells: Vec<UnsequencedCell> = unsequenced_cells()
+        .into_iter()
+        .filter(|c| c.partition() == part)
+        .collect();
     for cell in &cells {
         if analysis_rejects(&cell.src) {
             failures.push(format!("the analysis should accept:\n{}", cell.src));
@@ -841,11 +856,41 @@ fn every_unsequenced_operand_cell_is_lowered_as_a_producer() {
         "{} cells: {lowered} lowered as producers, {cell_frames} compiled no carrier",
         cells.len()
     );
-    assert!(lowered >= 2500, "only {lowered} cells lowered as producers");
     for methods in per_outer.into_values() {
         let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
         super::assert_compiles_through_erlc("test", &codegen(&src));
     }
+    lowered
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_0() {
+    assert!(check_unsequenced_partition(0) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_1() {
+    assert!(check_unsequenced_partition(1) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_2() {
+    assert!(check_unsequenced_partition(2) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_3() {
+    assert!(check_unsequenced_partition(3) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_4() {
+    assert!(check_unsequenced_partition(4) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_5() {
+    assert!(check_unsequenced_partition(5) >= 400);
 }
 
 /// With the BT-4310 sites withheld, every cell whose construct the unbroken compile lowers
