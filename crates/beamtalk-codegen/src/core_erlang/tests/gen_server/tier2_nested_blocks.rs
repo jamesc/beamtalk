@@ -151,8 +151,19 @@ fn bt3777_class_methods_computed_value_lowers_in_enclosing_method_context() {
     );
     let code = generate_module(&module, CodegenOptions::new("bt3777_computed_value"))
         .unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    // BT-4310: the computed value is a `collect:` that self-sends, so it is a
+    // producer of the method body (its carrier is unpacked: the map holds its
+    // element 1), and the cascade binds its message arguments ahead of the
+    // sends, the literal block among them.
     assert!(
-        code.contains("'answer' => fun (ClassSelf"),
+        code.contains("'k' => call 'erlang':'element'(1, _ThreadedResult"),
+        "the computed value must be the collect's value, not its carrier. Got:\n{code}"
+    );
+    assert!(
+        regex::Regex::new(r"'answer' => (fun \(ClassSelf|_CascadeArg@\d+)")
+            .unwrap()
+            .is_match(&code)
+            && code.contains("= fun (ClassSelf"),
         "the literal-block entry must still lower as a class-method fun. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt3777_computed_value", &code);

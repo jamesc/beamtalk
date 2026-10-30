@@ -2650,10 +2650,12 @@ impl CoreErlangGenerator {
             let name_var = self.fresh_var("Name");
             let val_var = self.fresh_temp_var("Val");
             let name_code = self.expression_doc(&arguments[0])?;
-            // Capture state before value expression, consistent with
-            // generate_field_assignment_open. If the value expression itself
-            // threads state (e.g., contains a nested field assignment), the
-            // maps:put uses the pre-value state — same semantics as self.x := expr.
+            // The state the put builds on. Every caller has sequenced the name
+            // and value first (BT-4310, `thread_send_arguments`), so a value
+            // that changes the state (a self-send, a nested field write, a
+            // State-only fold) has already stepped it, and this is the state
+            // after the value: its change survives the put. (Before BT-4310
+            // this read the state from before the value and dropped it.)
             let current_state = self.current_state_var();
             let val_code = self.expression_doc(&arguments[1])?;
             let new_state = self.next_state_var();

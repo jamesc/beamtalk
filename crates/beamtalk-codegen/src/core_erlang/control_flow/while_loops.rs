@@ -608,6 +608,10 @@ impl CoreErlangGenerator {
             // than panicking on a hand-built fixture.
             return Ok(Document::Str("{'true', StateAcc}"));
         };
+        // BT-4310: the condition's loops and folds threading only `State` at
+        // an operand another lowering compiles (`family_only_operand_site_exprs`)
+        // are checked against the lowered frame, as a loop body's sites are.
+        let family_sites = self.family_only_operand_sites_of(&filtered);
         let stmts = self.with_body_producer_sites(&filtered, false, false, |this| {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
             for expr in rest {
@@ -672,6 +676,12 @@ impl CoreErlangGenerator {
             tail_out?;
             Ok::<_, CodeGenError>(stmts)
         })?;
+        self.check_family_only_operand_sites(
+            &stmts,
+            &family_sites,
+            "while condition",
+            condition.span(),
+        );
         // The condition's frame is a `StateAcc` frame because the condition
         // hands its map back (`ConditionStateEffects`), whatever reason the
         // loop's own plan records: a loop that threads no local but carries

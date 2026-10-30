@@ -1820,6 +1820,10 @@ impl CoreErlangGenerator {
 
         let mut result_var = "'nil'".to_string();
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
+        // BT-4310: the arm's loops and folds threading only `State` at an
+        // operand another lowering compiles, checked against the lowered arm.
+        let family_sites =
+            self.family_only_operand_sites_of(&super::super::util::collect_body_exprs(&body.body));
 
         // ADR 0131 §2 (Phase 3b): an arm entered after the try body (the
         // success-path cleanup of `ensure:`) reads the locals the try body
@@ -2063,6 +2067,12 @@ impl CoreErlangGenerator {
             (after != before).then_some((prefix, after))
         });
         self.pop_scope();
+        self.check_family_only_operand_sites(
+            &stmts,
+            &family_sites,
+            "`on:do:`/`ensure:` arm",
+            body.span,
+        );
         let (doc, _) = self.render_branch_arm(stmts, frame, final_state_version, body.span, arm);
         Ok(ExceptionArm {
             doc,

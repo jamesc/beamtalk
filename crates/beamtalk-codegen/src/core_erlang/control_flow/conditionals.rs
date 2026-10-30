@@ -3094,6 +3094,13 @@ impl CoreErlangGenerator {
                 // name ⇒ §Dynamic-field-puts option 1 (Direct, not Put).
                 BodyExprKind::SelfFieldAtPut => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        // BT-4310: the name and value are sequenced ahead of
+                        // the put, so the `State` read below is the one after
+                        // the value: a value's own change (a self-send, a
+                        // nested field write, a State-only fold) survives the
+                        // put, which before BT-4310 built on the state from
+                        // before the value and dropped it.
+                        let scope = self.thread_send_arguments(expr, frame, &mut stmts)?;
                         let name_var = self.fresh_var("Name");
                         let val_var = self.fresh_temp_var("Val");
                         let name_code = self.expression_doc(&arguments[0])?;
@@ -3130,6 +3137,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        self.finish_precompiled_scope(scope)?;
                         if is_last {
                             last_result = Some(ValueRef::Var(val_var));
                         }
@@ -3143,8 +3151,10 @@ impl CoreErlangGenerator {
                 // than a written value.
                 BodyExprKind::SelfClearField => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        let scope = self.thread_send_arguments(expr, frame, &mut stmts)?;
                         let name_var = self.fresh_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
+                        self.finish_precompiled_scope(scope)?;
                         let source_version = self.state_version();
                         let current_state_name = self.current_state_var();
                         stmts.push(ThreadedStmt::Statement(

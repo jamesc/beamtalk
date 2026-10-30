@@ -2784,13 +2784,36 @@ pub fn sequenced_operand_sites(stmt: &Expression) -> Vec<&Expression> {
 /// [`loop_body_producer_sites`]): a construct here that is not one of them
 /// sits behind an operand the sequencing rule leaves to another lowering (a
 /// conditional's receiver, an `operands_not_sequenced` send, a cast, a
-/// cascade message, a lookup), which compiles it in place.
+/// cascade message, a lookup). Such a construct that writes an outer local
+/// is the Phase 0 check's; one that threads only an actor's `State` is a
+/// producer site of the frame that lowers the statement all the same
+/// (BT-4310, codegen's `family_only_operand_site_exprs`), and each of those
+/// lowerings sequences the operand that holds it.
 #[must_use]
 pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
+    operand_loop_constructs_with_holders(stmt)
+        .into_iter()
+        .map(|(construct, _)| construct)
+        .collect()
+}
+
+/// [`operand_loop_constructs`], each with the kinds of the operand holders
+/// the site walk stops at between the statement and the construct
+/// ([`unsequenced_operand_holder`]; empty for a construct at a sequenced
+/// site), outermost first.
+#[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk over every operand-holding expression kind, mirroring the site walk"
+)]
+pub fn operand_loop_constructs_with_holders(
+    stmt: &Expression,
+) -> Vec<(&Expression, Vec<UnsequencedOperand>)> {
+    type Found<'a> = Vec<(&'a Expression, Vec<UnsequencedOperand>)>;
     // A wrapper the normalisation pass keeps (a literal element's) is walked
     // through by `children`'s `Parenthesized` arm, so `walk` pushes the
     // unwrapped construct, as the site lists do.
-    fn walk<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    fn walk<'a>(expr: &'a Expression, holders: &mut Vec<UnsequencedOperand>, out: &mut Found<'a>) {
         if !matches!(expr, Expression::Parenthesized { .. })
             && local_threading_construct(expr).is_some_and(|c| {
                 matches!(
@@ -2799,20 +2822,32 @@ pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
                 )
             })
         {
-            out.push(expr);
+            out.push((expr, holders.clone()));
         }
-        children(expr, out);
+        children(expr, holders, out);
     }
-    fn children<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    fn children<'a>(
+        expr: &'a Expression,
+        holders: &mut Vec<UnsequencedOperand>,
+        out: &mut Found<'a>,
+    ) {
+        let holder = if matches!(expr, Expression::Parenthesized { .. }) {
+            None
+        } else {
+            unsequenced_operand_holder(expr)
+        };
+        if let Some(kind) = holder {
+            holders.push(kind);
+        }
         match expr {
             Expression::MessageSend {
                 receiver,
                 arguments,
                 ..
             } => {
-                walk(receiver, out);
+                walk(receiver, holders, out);
                 for arg in arguments {
-                    walk(arg, out);
+                    walk(arg, holders, out);
                 }
             }
             Expression::Cascade {
@@ -2823,68 +2858,78 @@ pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
                 // (`cascade_operand_state_corpus`), so only what is inside it
                 // and the messages' arguments are operands here.
                 let shared = crate::ast_walker::cascade_shared_receiver(receiver);
-                children(shared.unwrap_parens(), out);
+                children(shared.unwrap_parens(), holders, out);
                 if let Expression::MessageSend { arguments, .. } = receiver.as_ref() {
                     for arg in arguments {
-                        walk(arg, out);
+                        walk(arg, holders, out);
                     }
                 }
                 for message in messages {
                     for arg in &message.arguments {
-                        walk(arg, out);
+                        walk(arg, holders, out);
                     }
                 }
             }
             Expression::ArrayLiteral { elements, .. }
             | Expression::TupleLiteral { elements, .. } => {
                 for e in elements {
-                    walk(e, out);
+                    walk(e, holders, out);
                 }
             }
             Expression::ListLiteral { elements, tail, .. } => {
                 for e in elements {
-                    walk(e, out);
+                    walk(e, holders, out);
                 }
                 if let Some(t) = tail {
-                    walk(t, out);
+                    walk(t, holders, out);
                 }
             }
             Expression::MapLiteral { pairs, .. } => {
                 for pair in pairs {
-                    walk(&pair.key, out);
-                    walk(&pair.value, out);
+                    walk(&pair.key, holders, out);
+                    walk(&pair.value, holders, out);
                 }
             }
             Expression::StringInterpolation { segments, .. } => {
                 for segment in segments {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        walk(e, out);
+                        walk(e, holders, out);
                     }
                 }
             }
-            Expression::FieldAccess { receiver, .. } => walk(receiver, out),
+            Expression::FieldAccess { receiver, .. } => walk(receiver, holders, out),
             Expression::Assignment { value, .. }
             | Expression::DestructureAssignment { value, .. }
             | Expression::Return { value, .. }
-            | Expression::Match { value, .. } => walk(value, out),
-            Expression::Parenthesized { expression, .. } => walk(expression, out),
+            | Expression::Match { value, .. } => walk(value, holders, out),
+            Expression::Parenthesized { expression, .. } => walk(expression, holders, out),
             _ => {}
+        }
+        if holder.is_some() {
+            holders.pop();
         }
     }
     // The statement's own value: the statement, or the value of `x := V`,
     // `self.f := V` or `^V`, seen through its parentheses.
-    let value = match stmt.unwrap_parens() {
+    let (value, statement) = match stmt.unwrap_parens() {
         Expression::Assignment { target, value, .. }
             if matches!(target.as_ref(), Expression::Identifier(_))
                 || is_self_field_target(target) =>
         {
-            value.as_ref()
+            (value.as_ref(), false)
         }
-        Expression::Return { value, .. } => value.as_ref(),
-        other => other,
+        Expression::Return { value, .. } => (value.as_ref(), false),
+        other => (other, true),
     };
+    let value = value.unwrap_parens();
+    let mut holders = Vec::new();
+    // A method-body statement that is a construct compiles its own operands
+    // (`sequenced_operand_sites`).
+    if statement && local_threading_construct(value).is_some() {
+        holders.push(UnsequencedOperand::ConstructStatement);
+    }
     let mut out = Vec::new();
-    children(value.unwrap_parens(), &mut out);
+    children(value, &mut holders, &mut out);
     out
 }
 
@@ -3275,26 +3320,14 @@ pub fn is_fold_frame_body(expr: &Expression, block: &Block) -> bool {
 
 fn operand_sites_of_statement(stmt: &Expression, construct_operands: bool) -> Vec<&Expression> {
     fn operands<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
-        match expr.unwrap_parens() {
+        let expr = expr.unwrap_parens();
+        match expr {
+            _ if unsequenced_operand_holder(expr).is_some() => {}
             Expression::MessageSend {
                 receiver,
-                selector,
                 arguments,
-                is_cast: false,
                 ..
             } => {
-                let nested_construct = local_threading_construct(expr).is_some_and(|c| {
-                    !matches!(
-                        c.family,
-                        LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
-                    )
-                });
-                if nested_construct
-                    || crate::state_threading_selectors::is_conditional_selector(&selector.name())
-                    || operands_not_sequenced(receiver, selector, arguments)
-                {
-                    return;
-                }
                 if crate::ffi_receiver::erlang_module_of_receiver(receiver).is_none() {
                     site(receiver, out);
                 }
@@ -3426,28 +3459,156 @@ pub fn is_self_field_target(target: &Expression) -> bool {
 /// literal block, a call result, a parenthesised expression). Deciding from
 /// the receiver would duplicate codegen's `is_tier2_value_call`, and the two
 /// could drift. A producer the over-approximation leaves out of the sites is
-/// never a miscompile: it keeps its Phase 0 diagnostic.
+/// never a miscompile: it keeps its Phase 0 diagnostic. (A loop or fold that
+/// rebinds no local but threads an actor's `State` is a producer at these
+/// operands too, BT-4310: each of these lowerings sequences its operands for
+/// it, `operand_loop_constructs`.)
 #[must_use]
 fn operands_not_sequenced(
     receiver: &Expression,
     selector: &MessageSelector,
     arguments: &[Expression],
-) -> bool {
+) -> Option<UnsequencedOperand> {
     use crate::ast::WellKnownSelector;
     let is_self = matches!(receiver, Expression::Identifier(id) if id.name == "self");
-    matches!(receiver, Expression::Super(_))
-        || matches!(
-            selector.well_known(),
-            Some(WellKnownSelector::Error)
-                if arguments.len() == 1
-        )
-        || (is_self
-            && matches!(
-                selector.well_known(),
-                Some(WellKnownSelector::FieldAtPut | WellKnownSelector::ClearField)
-            ))
-        || selector.is_block_invocation()
-        || (is_self && arguments.iter().any(|a| matches!(a, Expression::Block(_))))
+    if matches!(receiver, Expression::Super(_)) {
+        return Some(UnsequencedOperand::SuperSend);
+    }
+    match selector.well_known() {
+        Some(WellKnownSelector::Error) if arguments.len() == 1 => {
+            return Some(UnsequencedOperand::ErrorSend);
+        }
+        Some(WellKnownSelector::FieldAtPut) if is_self => {
+            return Some(UnsequencedOperand::FieldAtPut);
+        }
+        Some(WellKnownSelector::ClearField) if is_self => {
+            return Some(UnsequencedOperand::ClearField);
+        }
+        _ => {}
+    }
+    if selector.is_block_invocation() {
+        return Some(UnsequencedOperand::BlockInvocation);
+    }
+    (is_self && arguments.iter().any(|a| matches!(a, Expression::Block(_))))
+        .then_some(UnsequencedOperand::BlockTakingSelfSend)
+}
+
+/// BT-4310: why the sequencing rule's site walk ([`sequenced_operand_sites`],
+/// [`loop_body_producer_sites`]) does not descend into the operands of an
+/// expression, while [`operand_loop_constructs`] does: the lowering of each
+/// of these compiles its operands itself. A loop or fold that writes an outer
+/// local is the Phase 0 check's there; one that threads only an actor's
+/// `State` is a producer site of the frame all the same (codegen's
+/// `family_only_operand_site_exprs`), and each of these lowerings sequences
+/// its operands for it. [`unsequenced_operand_holder`] is the one classifier
+/// both walks read, so a generated corpus can check that it covers every kind
+/// ([`UnsequencedOperand::ALL`], [`operand_loop_constructs_with_holders`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum UnsequencedOperand {
+    /// A method-body statement that is itself a local-threading construct
+    /// (`(xs collect: [...]) do: [...]`, a conditional): its statement
+    /// lowering compiles its receiver and arguments. (A loop or fold body's
+    /// statement walks them: `loop_body_operand_sites`.)
+    ConstructStatement,
+    /// The receiver of a conditional (`ifTrue:`, `and:`, `ifNil:`, ...).
+    ConditionalReceiver,
+    /// An operand of a nested construct other than a loop or fold: a lookup
+    /// (`at:ifAbsent:`), an `on:do:`/`ensure:`, an evaluated block, a
+    /// `Result tryDo:`.
+    NestedConstruct,
+    /// An operand of a cast (`x foo: y!`).
+    Cast,
+    /// An argument of a `super` send.
+    SuperSend,
+    /// The argument of an `error:` send.
+    ErrorSend,
+    /// An argument of `self fieldAt:put:`.
+    FieldAtPut,
+    /// The argument of `self clearField:`.
+    ClearField,
+    /// An operand of a block invocation (`value:`, `valueWithArguments:`).
+    BlockInvocation,
+    /// An argument of a self-send that also takes a block literal.
+    BlockTakingSelfSend,
+    /// Inside a cascade: what its shared receiver holds, and its messages'
+    /// arguments.
+    Cascade,
+    /// An interpolated segment of a string.
+    Interpolation,
+    /// The value of an assignment nested in an operand (`(q := xs size) + 1`).
+    Assignment,
+    /// The value of a destructuring assignment.
+    Destructure,
+    /// The subject of a `match:`.
+    MatchSubject,
+}
+
+impl UnsequencedOperand {
+    /// Every kind, in declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::ConstructStatement,
+        Self::ConditionalReceiver,
+        Self::NestedConstruct,
+        Self::Cast,
+        Self::SuperSend,
+        Self::ErrorSend,
+        Self::FieldAtPut,
+        Self::ClearField,
+        Self::BlockInvocation,
+        Self::BlockTakingSelfSend,
+        Self::Cascade,
+        Self::Interpolation,
+        Self::Assignment,
+        Self::Destructure,
+        Self::MatchSubject,
+    ];
+}
+
+/// BT-4310: why the site walk stops at the operands of `expr` (already
+/// without parentheses, as both walks hand it over), or `None` when it walks
+/// them (a plain send, a loop or fold, a literal collection). See
+/// [`UnsequencedOperand`].
+#[must_use]
+pub fn unsequenced_operand_holder(expr: &Expression) -> Option<UnsequencedOperand> {
+    match expr {
+        Expression::MessageSend { is_cast: true, .. } => Some(UnsequencedOperand::Cast),
+        Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } => {
+            if local_threading_construct(expr).is_some_and(|c| {
+                !matches!(
+                    c.family,
+                    LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                )
+            }) {
+                // A conditional is a construct too; its receiver is the one
+                // operand it has.
+                return Some(
+                    if crate::state_threading_selectors::is_conditional_selector(&selector.name()) {
+                        UnsequencedOperand::ConditionalReceiver
+                    } else {
+                        UnsequencedOperand::NestedConstruct
+                    },
+                );
+            }
+            if crate::state_threading_selectors::is_conditional_selector(&selector.name()) {
+                return Some(UnsequencedOperand::ConditionalReceiver);
+            }
+            operands_not_sequenced(receiver, selector, arguments)
+        }
+        Expression::Cascade { .. } => Some(UnsequencedOperand::Cascade),
+        Expression::StringInterpolation { .. } => Some(UnsequencedOperand::Interpolation),
+        Expression::Assignment { .. } => Some(UnsequencedOperand::Assignment),
+        Expression::DestructureAssignment { .. } => Some(UnsequencedOperand::Destructure),
+        Expression::Match { .. } => Some(UnsequencedOperand::MatchSubject),
+        // A literal collection's elements are walked. Nothing else holds an
+        // operand the walks reach that can be a loop or fold (a field access's
+        // receiver is an identifier: the parser forms one only after it).
+        _ => None,
+    }
 }
 
 fn walk_construct_blocks(

@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4310: the superclass of fixtures/bt4310unsequenced_actor.bt, so its
+// methods have a `super` send to make.
+
+Actor subclass: Bt4310UnsequencedBase
+  state: n = 0
+  state: items = #(1, 2)
+
+  wrap: x => x * 10
+
+  // Writes the field the subclass's fold advances, so a `super` statement's
+  // own change and the fold's both show.
+  note: x =>
+    self.n := self.n + (x * 100)
+    x

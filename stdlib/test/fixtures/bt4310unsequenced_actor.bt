@@ -1,0 +1,318 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4310: the actor column of the BT-4310 cells of
+// stdlib/test/bt4003residuals_test.bt. A fold whose block sends to `self`
+// (`self.items inject: 0 into: [:b :y | b + self bump]`, 3 on a fresh actor,
+// advancing `n` by 2) at an operand the sequencing rule leaves to another
+// lowering: a conditional's receiver, a lookup key, a cascade message's
+// argument, the argument of a `super`, `error:`, block-invocation, cast or
+// block-taking send. Before BT-4310 each of these crashed (`Tuple does not
+// understand '>'`), answered a wrong value or the raw `{Value, State}`
+// carrier, or dropped the writes, and was a compile error until it was
+// lowered as a producer of the frame that holds it.
+
+Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  apply: v with: blk => blk value: v
+
+  n => self.n
+
+  // The method's last statement (its value is the reply) and a `^` value.
+  condLast =>
+    ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+
+  condReturn =>
+    ^((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+
+  keyReturn =>
+    ^#{
+      3 => 30
+    } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+
+  superLast => super wrap: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  superReturn =>
+    ^super wrap: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  blockArgLast =>
+    [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  cascadeLast =>
+    0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  cascadeReturn =>
+    ^(0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump]))
+
+  // The value of `self fieldAt:put:`, at the root, in a `do:` body and in an
+  // arm: the put builds on the fold's writes.
+  fieldAtPutRoot =>
+    self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) max: 1)
+    #(self.items, self.n)
+
+  fieldAtPutBareRoot =>
+    self fieldAt: #items put: (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ])
+    #(self.items, self.n)
+
+  fieldAtPutInDo =>
+    #(1)
+      do: [:w |
+        self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) max: 1)
+      ]
+    #(self.items, self.n)
+
+  fieldAtPutInArm =>
+    (self.n == 0)
+      ifTrue: [
+        self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) max: 1)
+      ]
+    #(self.items, self.n)
+
+  // The value's own state change survives the put: on main the put was built
+  // on the state from before the value (a `self bump` value dropped its write;
+  // a nested field write was a verifier error).
+  fieldAtPutSelfSendRoot =>
+    self fieldAt: #items put: self bump
+    #(self.items, self.n)
+
+  fieldAtPutSelfSendInArm =>
+    (self.n == 0) ifTrue: [self fieldAt: #items put: self bump]
+    #(self.items, self.n)
+
+  fieldAtPutFieldWriteRoot =>
+    self fieldAt: #items put: (self.n := 5)
+    #(self.items, self.n)
+
+  fieldAtPutFieldWriteInArm =>
+    (self.n == 0) ifTrue: [self fieldAt: #items put: (self.n := 5)]
+    #(self.items, self.n)
+
+  // A mutating conditional arm and the fold in one value.
+  fieldAtPutMixedArm =>
+    self
+      fieldAt: #items
+      put: ((self.items inject: 0 into: [:b :y | b + self bump]) notNil
+        ifTrue: [
+          self.n := self.n + 100
+          1
+        ]
+        ifFalse: [0])
+    #(self.items, self.n)
+
+  // The fold in `clearField:`'s argument.
+  clearFieldRoot =>
+    self
+      clearField: ((self.items inject: 0 into: [:b :y |
+        b + self bump
+      ]) > 2 ifTrue: [#items] ifFalse: [#items])
+    self.n
+
+  // At the method root.
+  condRoot =>
+    r := ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+    #(r, self.n)
+
+  condLeftRoot =>
+    r := (0 < (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ])) ifTrue: [1] ifFalse: [0]
+    #(r, self.n)
+
+  andRoot =>
+    r := ((self.items inject: 0 into: [:b :y | b + self bump]) > 2) and: [true]
+    #(r, self.n)
+
+  orRoot =>
+    r := ((self.items inject: 0 into: [:b :y | b + self bump]) > 5) or: [false]
+    #(r, self.n)
+
+  ifNilRoot =>
+    r := (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) ifNil: [0] ifNotNil: [:v | v + 1]
+    #(r, self.n)
+
+  keyRoot =>
+    r := #{
+      3 => 30
+    } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+    #(r, self.n)
+
+  superRoot =>
+    super note: (self.items inject: 0 into: [:b :y | b + self bump])
+    self.n
+
+  errorRoot =>
+    self error: (self.items inject: 0 into: [:b :y | b + self bump]) printString
+
+  blockArgRoot =>
+    r := [:z |
+      z + 1
+    ] value: (self.items inject: 0 into: [:b :y | b + self bump])
+    #(r, self.n)
+
+  selfBlockRoot =>
+    r := self apply: (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) with: [:z | z + 1]
+    #(r, self.n)
+
+  cascadeRoot =>
+    r := 0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+    #(r, self.n)
+
+  castRoot: rec =>
+    rec record: (self.items inject: 0 into: [:b :y | b + self bump])!
+    #(rec last, self.n)
+
+  // In a `collect:` body: the fold answers 3, then 7.
+  condInCollect =>
+    r := #(1, 2)
+      collect: [:x |
+        ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) > 5) ifTrue: [1] ifFalse: [0]
+      ]
+    #(r, self.n)
+
+  andInCollect =>
+    r := #(1, 2) collect: [:x |
+      ((self.items inject: 0 into: [:b :y | b + self bump]) > 5) and: [true]
+    ]
+    #(r, self.n)
+
+  ifNilInCollect =>
+    r := #(1, 2)
+      collect: [:x |
+        (self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) ifNil: [0] ifNotNil: [:v | v + 1]
+      ]
+    #(r, self.n)
+
+  keyInCollect =>
+    r := #(1, 2)
+      collect: [:x |
+        #{
+          3 => 30,
+          7 => 70
+        } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+      ]
+    #(r, self.n)
+
+  superInCollect =>
+    r := #(1, 2) collect: [:x |
+      super wrap: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  blockArgInCollect =>
+    r := #(1, 2) collect: [:x |
+      [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  selfBlockInCollect =>
+    r := #(1, 2)
+      collect: [:x |
+        self apply: (self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) with: [:z | z + 1]
+      ]
+    #(r, self.n)
+
+  cascadeInCollect =>
+    r := #(1, 2) collect: [:x |
+      0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  castInDo: rec =>
+    #(1, 2) do: [:x |
+      rec record: (self.items inject: 0 into: [:b :y | b + self bump])!
+    ]
+    #(rec last, self.n)
+
+  // In the other frame kinds.
+  condInMatchArm =>
+    r := 1 match: [
+      1 -> ((self.items inject: 0 into: [:b :y |
+        b + self bump
+      ]) > 2) ifTrue: [1] ifFalse: [0];
+      _ -> 0
+    ]
+    #(r, self.n)
+
+  condInMatchArmInDo =>
+    r := 0
+    #(5)
+      do: [:x |
+        r := x match: [
+          5 -> (0 < (self.items inject: 0 into: [:b :y |
+            b + self bump
+          ])) ifTrue: [1];
+          _ -> 0
+        ]
+      ]
+    #(r, self.n)
+
+  andInArm =>
+    r := (self.n == 0) ifTrue: [
+      ((self.items inject: 0 into: [:b :y | b + self bump]) > 2) and: [true]
+    ]
+    #(r, self.n)
+
+  keyInEvaluatedBlock =>
+    r := [:w |
+      #{
+        3 => 30
+      } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [w]
+    ] value: 0
+    #(r, self.n)
+
+  ifNilInTimesRepeat =>
+    r := 0
+    2
+      timesRepeat: [
+        r := r + ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) ifNil: [0] ifNotNil: [:v | v])
+      ]
+    #(r, self.n)
+
+  condInProtectedBody =>
+    r := [
+      ((self.items inject: 0 into: [:b :y |
+        b + self bump
+      ]) > 2) ifTrue: [1] ifFalse: [0]
+    ] on: Error do: [:e | -1]
+    #(r, self.n)
+
+  // Real closures: their folds run against the actor-state cell (ADR 0137).
+  superInStoredClosure =>
+    blk := [super wrap: (self.items inject: 0 into: [:b :y | b + self bump])]
+    #(blk value, self.n)
+
+  blockArgInLookupHandler =>
+    r := #{} at: #k ifAbsent: [
+      [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)

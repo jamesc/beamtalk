@@ -658,8 +658,16 @@ impl CoreErlangGenerator {
             }
         }
         // BT-3982: an evaluated block that is a producer takes the
-        // synthetic-block route below, never the raw tuple.
-        if self.control_flow_has_mutations(body) && !self.evaluated_block_is_producer(body) {
+        // synthetic-block route below, never the raw tuple. BT-4310: so does a
+        // conditional whose receiver is sequenced ahead (a loop or fold
+        // threading only `State` in it, a producer site of the arm): the arm
+        // statement's lowering splices the receiver's prelude
+        // (`conditional_receiver_operand`); the conditional's own tuple
+        // builder would compile the receiver, carrier and all, in place.
+        if self.control_flow_has_mutations(body)
+            && !self.evaluated_block_is_producer(body)
+            && !self.is_conditional_with_sequenced_receiver(body)
+        {
             return self.expression_doc(body);
         }
         // ADR 0118 phase 4: an arm body that is plain AST-directed

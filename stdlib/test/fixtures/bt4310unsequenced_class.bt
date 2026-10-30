@@ -1,0 +1,149 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4310: the class column of the BT-4310 cells of
+// stdlib/test/bt4003residuals_test.bt: the actor column's shapes over class
+// variables, which a class method writes in place (ADR 0130). They answered
+// right before BT-4310 too; the actor column must answer the same.
+
+Object subclass: Bt4310UnsequencedClass
+  classState: n = 0
+  classState: items = #(1, 2)
+
+  class bump =>
+    self.n := self.n + 1
+    self.n
+
+  class apply: v with: blk => blk value: v
+
+  class condRoot =>
+    self.n := 0
+    r := ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+    #(r, self.n)
+
+  class condLeftRoot =>
+    self.n := 0
+    r := (0 < (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ])) ifTrue: [1] ifFalse: [0]
+    #(r, self.n)
+
+  class andRoot =>
+    self.n := 0
+    r := ((self.items inject: 0 into: [:b :y | b + self bump]) > 2) and: [true]
+    #(r, self.n)
+
+  class orRoot =>
+    self.n := 0
+    r := ((self.items inject: 0 into: [:b :y | b + self bump]) > 5) or: [false]
+    #(r, self.n)
+
+  class ifNilRoot =>
+    self.n := 0
+    r := (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) ifNil: [0] ifNotNil: [:v | v + 1]
+    #(r, self.n)
+
+  class keyRoot =>
+    self.n := 0
+    r := #{
+      3 => 30
+    } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+    #(r, self.n)
+
+  class errorRoot =>
+    self.n := 0
+    self error: (self.items inject: 0 into: [:b :y | b + self bump]) printString
+
+  class blockArgRoot =>
+    self.n := 0
+    r := [:z |
+      z + 1
+    ] value: (self.items inject: 0 into: [:b :y | b + self bump])
+    #(r, self.n)
+
+  class selfBlockRoot =>
+    self.n := 0
+    r := self apply: (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) with: [:z | z + 1]
+    #(r, self.n)
+
+  class cascadeRoot =>
+    self.n := 0
+    r := 0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+    #(r, self.n)
+
+  class castRoot: rec =>
+    self.n := 0
+    rec record: (self.items inject: 0 into: [:b :y | b + self bump])!
+    #(rec last, self.n)
+
+  class condInCollect =>
+    self.n := 0
+    r := #(1, 2)
+      collect: [:x |
+        ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) > 5) ifTrue: [1] ifFalse: [0]
+      ]
+    #(r, self.n)
+
+  class ifNilInCollect =>
+    self.n := 0
+    r := #(1, 2)
+      collect: [:x |
+        (self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) ifNil: [0] ifNotNil: [:v | v + 1]
+      ]
+    #(r, self.n)
+
+  class keyInCollect =>
+    self.n := 0
+    r := #(1, 2)
+      collect: [:x |
+        #{
+          3 => 30,
+          7 => 70
+        } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+      ]
+    #(r, self.n)
+
+  class blockArgInCollect =>
+    self.n := 0
+    r := #(1, 2) collect: [:x |
+      [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  class cascadeInCollect =>
+    self.n := 0
+    r := #(1, 2) collect: [:x |
+      0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    #(r, self.n)
+
+  class condInMatchArm =>
+    self.n := 0
+    r := 1 match: [
+      1 -> ((self.items inject: 0 into: [:b :y |
+        b + self bump
+      ]) > 2) ifTrue: [1] ifFalse: [0];
+      _ -> 0
+    ]
+    #(r, self.n)
+
+  class ifNilInTimesRepeat =>
+    self.n := 0
+    r := 0
+    2
+      timesRepeat: [
+        r := r + ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) ifNil: [0] ifNotNil: [:v | v])
+      ]
+    #(r, self.n)

@@ -546,17 +546,12 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
     let mut failures = Vec::new();
     let mut clean = 0;
     let mut per_outer: Vec<Vec<String>> = vec![Vec::new(); FOLD_BODY_OUTERS.len()];
-    let mut rejected = 0;
     for cell in fold_body_cells() {
         let src = cell.program();
-        // A cell the analysis rejects never reaches codegen (BT-4310's row): only an
-        // accepted one has to lower as a producer.
+        // BT-4310: the analysis accepts every cell (the `StateFoldUnsequencedOperand` row
+        // is gone), so every one reaches codegen.
         if analysis_rejects(&src) {
-            assert!(
-                matches!(FOLD_BODY_OUTERS[cell.outer].1, Under::Other),
-                "a site cell should be accepted:\n{src}"
-            );
-            rejected += 1;
+            failures.push(format!("the analysis should accept:\n{src}"));
             continue;
         }
         match outcome(&src, None) {
@@ -590,7 +585,7 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
         failures.join("\n")
     );
     assert!(clean >= 1000, "only {clean} corpus programs compiled clean");
-    println!("{clean} lowered, {rejected} rejected by the analysis");
+    println!("{clean} lowered");
     for methods in per_outer.into_iter().filter(|m| !m.is_empty()) {
         let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
         super::assert_compiles_through_erlc("test", &codegen(&src));
@@ -629,48 +624,127 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
     );
 }
 
-// ── Operands that are no producer site (BT-4287 review, BT-4310) ────────────────────────────
+// ── Operands the sequencing rule leaves to another lowering (BT-4310) ──────────────────────
 //
 // The site walk (`operand_sites_of_statement`) stops at operands another lowering compiles
-// itself: a conditional's receiver, a lookup key, the arguments of a `super`, `error:`,
-// block-invocation, cast or block-taking send, a cascade message's arguments. A carrier
-// construct there is compiled in place (measured on a BEAM at the method root and in a fold
-// body: a crash, the raw carrier or dropped writes; BT-4310). So "accepted at every site" is
-// two halves, tested here over the same constructs and outer bodies (and `match:` guards):
-// the analysis rejects every one of these cells (`StateFoldUnsequencedOperand`), and it
-// accepts every cell of the corpus above, whose lowering is proved there. (A cast is a
-// statement only, so it cannot be a fold body's value; its cells are in `bt4310_*` in
-// `semantic_analysis/tests`.)
+// itself: a conditional's receiver, a lookup key, a cascade message's argument, the arguments
+// of a `super`, `error:`, `fieldAt:put:`, `clearField:`, block-invocation or block-taking send
+// (every `UnsequencedOperand` kind; `the_unsequenced_positions_cover_every_unsequenced_operand_kind`
+// checks the positions against the classifier the site walk reads). A carrier construct there was
+// compiled in place (measured on a BEAM at the method root and in a fold body: a crash, the
+// raw carrier or dropped writes), and the analysis rejected it (`StateFoldUnsequencedOperand`).
+// BT-4310 registers it as a producer site of the frame that lowers its statement, the method
+// root included (`family_only_operand_site_exprs`), and each of those lowerings sequences the
+// operand through `threaded_expression`. Proved here over every outer body of the fold-body
+// corpus and the method root, in both directions: every cell is accepted, compiles clean and
+// lowers its construct as a producer of the frame (or, in a real closure, compiles no carrier
+// at all: it runs against the actor-state cell, ADR 0137); and with the registration withheld
+// (`UnsequencedOperandInPlace`) every cell whose construct was a producer reports
+// `ConstructCarrierInPlace`, in every frame kind (an `on:do:`/`ensure:` arm included). The
+// right answers are run on a BEAM in `stdlib/test/bt4003residuals_test.bt`. (A cast, a
+// destructuring and a loop statement's receiver are statements only:
+// `STATEMENT_ONLY_POSITIONS`, at the method root. A `match:` guard allows only comparisons
+// and arithmetic, so it cannot hold one at all.)
 
+use crate::core_erlang::threaded_expr::fault::recording_producers;
+use beamtalk_core::semantic_analysis::block_facts::{
+    UnsequencedOperand, operand_loop_constructs_with_holders,
+};
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 
-/// The statement holding the construct `{c}` at an operand that is no producer site.
+/// The statement holding the construct `{c}` at an operand the sequencing rule leaves to
+/// another lowering.
 const UNSEQUENCED_POSITIONS: &[&str] = &[
     "({c} isNil) ifTrue: [1] ifFalse: [0]",
     "(0 < {c} size) ifTrue: [1]",
     "{c} isNil and: [true]",
     "{c} isNil or: [false]",
     "{c} ifNil: [0] ifNotNil: [:v | v]",
+    "{c} isNil ifFalse: [1]",
     "#{} at: {c} ifAbsent: [0]",
+    "#{} at: {c} ifPresent: [:v | v] ifAbsent: [0]",
     "super printString: {c}",
     "self error: {c} printString",
     "[:z | z] value: {c}",
     "self apply: {c} with: [:z | z]",
-    "xs size; + {c} size",
+    "xs size; max: {c} size",
+    "self wrap: 1; wrap: {c} size",
+    "self fieldAt: #hits put: {c} size",
+    "self fieldAt: #hits put: {c}",
+    "self fieldAt: #hits put: ({c} isNil ifTrue: [self.hits := 1. 1] ifFalse: [0])",
+    "self clearField: ({c} isNil ifTrue: [#hits] ifFalse: [#hits])",
+    "(xs at: 1) value: {c}",
+    "\"v{{c}}\" size",
+    "(q := {c}) isNil",
+    "{c} match: [_ -> 0]",
 ];
 
-/// The `match:`es whose guard (`{s}`) holds the construct: a plain one and a producer (its
-/// arm writes `t`), at the method root and in a `do:` body.
-const GUARD_OUTERS: &[&str] = &[
-    "1 match: [y when: [{s}] -> y; _ -> 0]",
-    "1 match: [y when: [{s}] -> t := t + 1; _ -> 0]",
-    "xs do: [:x | x match: [y when: [{s}] -> y; _ -> 0]]",
-    "xs do: [:x | x match: [y when: [{s}] -> t := t + 1; _ -> 0]]",
+/// Operands only a statement holds: a cast's (a cast answers no value), a destructuring's
+/// value, and the receiver of a method-body statement that is itself a loop. Checked as a
+/// method-root statement followed by another.
+const STATEMENT_ONLY_POSITIONS: &[&str] = &[
+    "xs add: {c} size!",
+    "{dq, dr} := {{c}, 1}",
+    "{c} do: [:z | z]",
 ];
 
-/// The guard holding the construct `{c}`: the guard itself, a receiver, and an operand two
-/// deep.
-const GUARD_POSITIONS: &[&str] = &["{c}", "{c} isNil", "0 < ({c} size)"];
+/// The unsequenced operand kinds the core walk reports between each cell's statement and
+/// its construct (`operand_loop_constructs_with_holders`), over the method-root statement
+/// cells of every position.
+fn covered_unsequenced_kinds() -> std::collections::BTreeSet<UnsequencedOperand> {
+    let mut kinds = std::collections::BTreeSet::new();
+    for position in UNSEQUENCED_POSITIONS.iter().chain(STATEMENT_ONLY_POSITIONS) {
+        for construct in FOLD_BODY_CONSTRUCTS {
+            let stmt_src = position.replace("{c}", construct);
+            let src = format!(
+                "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n    {stmt_src}\n    #[0, t]\n"
+            );
+            let (module, diags) = super::parse_normalised(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+            let method = module.classes[0]
+                .methods
+                .iter()
+                .find(|m| m.selector.name() == "go:")
+                .expect("the go: method");
+            let stmt = &method.body[2].expression;
+            let start = u32::try_from(src.find(construct).expect("the construct"))
+                .expect("a small program");
+            let found = operand_loop_constructs_with_holders(stmt);
+            let (_, holders) = found
+                .iter()
+                .find(|(c, _)| c.span().start() >= start && c.span().start() <= start + 1)
+                .unwrap_or_else(|| panic!("the construct is an operand loop construct:\n{src}"));
+            assert!(
+                !holders.is_empty(),
+                "the construct should sit behind an unsequenced operand:\n{src}"
+            );
+            kinds.extend(holders.iter().copied());
+        }
+    }
+    kinds
+}
+
+/// Every kind of operand the sequencing rule leaves to another lowering
+/// (`UnsequencedOperand::ALL`, the classifier the site walk itself reads) has a position in
+/// the corpus, so no registered operand family can be missing from it.
+#[test]
+fn the_unsequenced_positions_cover_every_unsequenced_operand_kind() {
+    let covered = covered_unsequenced_kinds();
+    let missing: Vec<_> = UnsequencedOperand::ALL
+        .iter()
+        .filter(|k| !covered.contains(k))
+        .collect();
+    assert!(missing.is_empty(), "no corpus position for {missing:?}");
+}
+
+/// The outer bodies of [`FOLD_BODY_OUTERS`] whose statement is in a real closure: a lookup
+/// handler that writes no outer local (the lookup is not inlined; `x` is the handler's own
+/// local) and a stored block.
+const CLOSURE_OUTERS: &[&str] = &[
+    "xs do: [:x | #{} at: x ifAbsent: [{s}]]",
+    "#{} at: 1 ifAbsent: [x := 1. {s}]",
+    "xs do: [:w | b := [:x | {s}]. b value: w]",
+];
 
 /// Whether the analysis rejects `src` with a local-threading error.
 fn analysis_rejects(src: &str) -> bool {
@@ -686,70 +760,188 @@ fn analysis_rejects(src: &str) -> bool {
         })
 }
 
-/// The analysis's BT-4310 errors for `src`.
-fn unsequenced_errors(src: &str) -> usize {
-    let (module, parse_diags) = super::parse_normalised(src);
-    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
-    analyse_full(&module, AnalysisContext::default())
-        .diagnostics
-        .iter()
-        .filter(|d| d.message.contains("BT-4310"))
-        .count()
+/// One BT-4310 cell: its program, the outer body it sits in (`None` at the method root),
+/// and the byte range of its construct in the program.
+struct UnsequencedCell {
+    outer: Option<usize>,
+    src: String,
+    construct: std::ops::Range<usize>,
+    /// The index of the cell's position in [`UNSEQUENCED_POSITIONS`].
+    position: usize,
 }
 
-#[test]
-fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
-    let mut outers: Vec<&str> = FOLD_BODY_OUTERS.iter().map(|(o, _)| *o).collect();
+impl UnsequencedCell {
+    /// Whether the cell's statement is in a real closure (a block that is stored, or the
+    /// handler of a lookup that is not inlined), which compiles no carrier.
+    fn in_real_closure(&self) -> bool {
+        self.outer
+            .is_some_and(|o| CLOSURE_OUTERS.contains(&FOLD_BODY_OUTERS[o].0))
+    }
+
+    /// Whether the codegen of the cell lowered its construct as a producer.
+    fn construct_is_producer(
+        &self,
+        records: &[(beamtalk_core::source_analysis::Span, Vec<String>)],
+    ) -> bool {
+        records.iter().any(|(span, _)| {
+            span.start() as usize >= self.construct.start
+                && span.end() as usize <= self.construct.end
+        })
+    }
+}
+
+fn unsequenced_cells() -> Vec<UnsequencedCell> {
+    let mut outers: Vec<(Option<usize>, &str)> = FOLD_BODY_OUTERS
+        .iter()
+        .enumerate()
+        .map(|(i, (o, _))| (Some(i), *o))
+        .collect();
     // The method root holds the statement itself.
-    outers.push("{s}");
-    let mut failures = Vec::new();
-    let mut rejected = 0;
-    let mut cells = 0;
-    for outer in &outers {
-        for position in UNSEQUENCED_POSITIONS {
+    outers.push((None, "{s}"));
+    let mut out = Vec::new();
+    for (outer_index, outer) in outers {
+        for (position_index, position) in UNSEQUENCED_POSITIONS.iter().enumerate() {
+            // A `match:` arm holds an expression, not a cascade.
             if outer.contains("->") && position.contains(';') {
                 continue;
             }
             for construct in FOLD_BODY_CONSTRUCTS {
-                cells += 1;
                 let src = format!(
                     "{FOLD_BODY_HEADER}{}",
                     fold_body_method("go:", outer, position, construct)
                 );
-                if unsequenced_errors(&src) == 1 {
-                    rejected += 1;
-                } else {
-                    failures.push(format!("should be one BT-4310 error:\n{src}"));
-                }
+                let start = src
+                    .find(construct)
+                    .expect("the construct is in the program");
+                out.push(UnsequencedCell {
+                    outer: outer_index,
+                    position: position_index,
+                    src,
+                    construct: start..start + construct.len(),
+                });
             }
         }
     }
-    // A `match:` guard is evaluated in place, in a `match:` that is a producer (its arm
-    // writes `t`) or not, at the method root or in a fold body: nothing in it is a site.
-    for outer in GUARD_OUTERS {
-        for position in GUARD_POSITIONS {
-            for construct in FOLD_BODY_CONSTRUCTS {
-                cells += 1;
+    // The statement itself at the method root, not an assignment's value: each statement
+    // kind's own lowering (a `super` or `error:` send, a cascade, a conditional) holds it.
+    // Each shape three ways: a statement followed by another, the method's last statement
+    // (its value is the reply), and the value of a `^` (a cascade parenthesised there).
+    for (position_index, position) in UNSEQUENCED_POSITIONS.iter().enumerate() {
+        for construct in FOLD_BODY_CONSTRUCTS {
+            let stmt = position.replace("{c}", construct);
+            let returned = if stmt.contains(';') {
+                format!("^({stmt})")
+            } else {
+                format!("^{stmt}")
+            };
+            for tail in [
+                format!("    {stmt}\n    #[0, t]\n"),
+                format!("    {stmt}\n"),
+                format!("    {returned}\n"),
+            ] {
                 let src = format!(
-                    "{FOLD_BODY_HEADER}{}",
-                    fold_body_method("go:", outer, position, construct)
+                    "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n{tail}"
                 );
-                if unsequenced_errors(&src) == 1 {
-                    rejected += 1;
-                } else {
-                    failures.push(format!("should be one BT-4310 error:\n{src}"));
-                }
+                let start = src
+                    .find(construct)
+                    .expect("the construct is in the program");
+                out.push(UnsequencedCell {
+                    outer: None,
+                    position: position_index,
+                    src,
+                    construct: start..start + construct.len(),
+                });
             }
         }
     }
-    for cell in fold_body_cells()
+    for (index, position) in STATEMENT_ONLY_POSITIONS.iter().enumerate() {
+        for construct in FOLD_BODY_CONSTRUCTS {
+            let stmt = position.replace("{c}", construct);
+            let src = format!(
+                "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n    {stmt}\n    #[0, t]\n"
+            );
+            let start = src
+                .find(construct)
+                .expect("the construct is in the program");
+            out.push(UnsequencedCell {
+                outer: None,
+                position: UNSEQUENCED_POSITIONS.len() + index,
+                src,
+                construct: start..start + construct.len(),
+            });
+        }
+    }
+    out
+}
+
+/// The corpus is checked in [`UNSEQUENCED_PARTITIONS`] parts, by outer body, so no test runs
+/// over a minute (BT-3888).
+const UNSEQUENCED_PARTITIONS: usize = 6;
+
+impl UnsequencedCell {
+    /// The part of the corpus the cell is checked in: every cell of one outer body in the
+    /// same part, and the method-root cells (the most numerous) spread over the parts by
+    /// position.
+    fn partition(&self) -> usize {
+        self.outer.map_or(self.position, |o| o + 1) % UNSEQUENCED_PARTITIONS
+    }
+}
+
+/// Every cell of part `part` is accepted, compiles clean, and lowers its construct as a
+/// producer of the frame, or (in a real closure) compiles no carrier for it; every cell of
+/// each outer body kind, as the methods of one class, compiles through `erlc`. Answers how
+/// many cells were lowered as producers.
+fn check_unsequenced_partition(part: usize) -> usize {
+    let mut failures = Vec::new();
+    let mut lowered = 0;
+    let mut cell_frames = 0;
+    let mut per_outer: std::collections::BTreeMap<Option<usize>, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let cells: Vec<UnsequencedCell> = unsequenced_cells()
         .into_iter()
-        .filter(|c| !matches!(FOLD_BODY_OUTERS[c.outer].1, Under::Other))
-    {
-        let src = cell.program();
-        if unsequenced_errors(&src) != 0 {
-            failures.push(format!("should be accepted:\n{src}"));
+        .filter(|c| c.partition() == part)
+        .collect();
+    for cell in &cells {
+        if analysis_rejects(&cell.src) {
+            failures.push(format!("the analysis should accept:\n{}", cell.src));
+            continue;
         }
+        match outcome(&cell.src, None) {
+            Outcome::Clean => {}
+            Outcome::Unsupported => {
+                failures.push(format!("unsupported:\n{}", cell.src));
+                continue;
+            }
+            Outcome::Finding(report) => {
+                failures.push(format!("finding {report}\n{}", cell.src));
+                continue;
+            }
+        }
+        let (_, records) = recording_producers(|| codegen(&cell.src));
+        match (cell.construct_is_producer(&records), cell.in_real_closure()) {
+            (true, false) => lowered += 1,
+            // A real closure compiles no carrier: its fold runs against the actor-state
+            // cell (ADR 0137), so it is no producer there.
+            (false, true) => cell_frames += 1,
+            (true, true) => {
+                failures.push(format!(
+                    "a closure's construct is no producer:\n{}",
+                    cell.src
+                ));
+                continue;
+            }
+            (false, false) => {
+                failures.push(format!(
+                    "the carrier construct should be a producer:\n{}",
+                    cell.src
+                ));
+                continue;
+            }
+        }
+        let methods = per_outer.entry(cell.outer).or_default();
+        let selector = format!("go{}:", methods.len());
+        let method = cell.src[FOLD_BODY_HEADER.len()..].replacen("go:", &selector, 1);
+        methods.push(method);
     }
     assert!(
         failures.is_empty(),
@@ -757,5 +949,143 @@ fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(rejected, cells);
+    println!(
+        "{} cells: {lowered} lowered as producers, {cell_frames} compiled no carrier",
+        cells.len()
+    );
+    for methods in per_outer.into_values() {
+        let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
+        super::assert_compiles_through_erlc("test", &codegen(&src));
+    }
+    lowered
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_0() {
+    assert!(check_unsequenced_partition(0) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_1() {
+    assert!(check_unsequenced_partition(1) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_2() {
+    assert!(check_unsequenced_partition(2) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_3() {
+    assert!(check_unsequenced_partition(3) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_4() {
+    assert!(check_unsequenced_partition(4) >= 400);
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_5() {
+    assert!(check_unsequenced_partition(5) >= 400);
+}
+
+/// With the BT-4310 sites withheld, every cell of the parts `parts` whose construct the
+/// unbroken compile lowers as a producer reports `ConstructCarrierInPlace`, and no cell
+/// reports anything else. Answers how many reported.
+fn check_withholding_unsequenced_sites(parts: &[usize]) -> usize {
+    let mut reported = 0;
+    let mut missed = Vec::new();
+    for cell in unsequenced_cells()
+        .into_iter()
+        .filter(|c| parts.contains(&c.partition()))
+    {
+        let (_, records) = recording_producers(|| codegen(&cell.src));
+        let must_report = cell.construct_is_producer(&records);
+        match outcome(&cell.src, Some(LocalRebindFault::UnsequencedOperandInPlace)) {
+            Outcome::Finding(report) => {
+                assert!(
+                    report.contains("ConstructCarrierInPlace"),
+                    "unexpected finding {report}\n{}",
+                    cell.src
+                );
+                reported += 1;
+            }
+            Outcome::Clean if must_report => missed.push(cell.src),
+            Outcome::Clean | Outcome::Unsupported => {}
+        }
+    }
+    assert!(
+        missed.is_empty(),
+        "{} programs did not report the fault:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+    reported
+}
+
+#[test]
+fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus_part_a() {
+    let reported = check_withholding_unsequenced_sites(&[0, 1, 2]);
+    assert!(
+        reported >= 1500,
+        "only {reported} programs reported the fault"
+    );
+}
+
+#[test]
+fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus_part_b() {
+    let reported = check_withholding_unsequenced_sites(&[3, 4, 5]);
+    assert!(
+        reported >= 1500,
+        "only {reported} programs reported the fault"
+    );
+}
+
+/// The issue's repros (measured on a BEAM before BT-4310: a crash, a wrong value, the raw
+/// carrier or dropped writes), at the method root and in a `collect:` body: lowered as a
+/// producer now, and `ConstructCarrierInPlace` with the BT-4310 sites withheld.
+#[test]
+fn the_bt4310_repros_are_producers_and_withholding_their_sites_is_reported() {
+    let fold = "(self.items inject: 0 into: [:b :y | b + self bump])";
+    let header = "Actor subclass: P\n  state: n = 0\n  state: items = #(1, 2)\n  \
+                  bump =>\n    self.n := self.n + 1\n    self.n\n  \
+                  apply: v with: blk => blk value: v\n";
+    let positions = [
+        "({f} > 3) ifTrue: [1] ifFalse: [0]",
+        "(0 < {f}) ifTrue: [1] ifFalse: [0]",
+        "({f} > 3) and: [true]",
+        "({f} > 3) or: [false]",
+        "{f} ifNil: [0] ifNotNil: [:v | v + 1]",
+        "#{3 => 30} at: {f} ifAbsent: [0]",
+        "super printString: {f}",
+        "self error: {f} printString",
+        "[:z | z + 1] value: {f}",
+        "self apply: {f} with: [:z | z]",
+        "0 max: 1; max: {f}",
+    ];
+    for position in positions {
+        let value = position.replace("{f}", fold);
+        for body in [
+            format!("    r := {value}\n    r\n"),
+            format!("    r := #(1, 2) collect: [:x | {value}]\n    r\n"),
+        ] {
+            let src = format!("{header}  go =>\n{body}");
+            let (_, records) = recording_producers(|| codegen(&src));
+            let start = src.find(fold).expect("the fold");
+            assert!(
+                records
+                    .iter()
+                    .any(|(span, _)| span.start() as usize >= start
+                        && span.end() as usize <= start + fold.len()),
+                "the fold should be a producer:\n{src}"
+            );
+            let report = verifier_report(&src, Some(LocalRebindFault::UnsequencedOperandInPlace))
+                .unwrap_or_else(|| panic!("the in-place lowering should be reported:\n{src}"));
+            assert!(
+                report.contains("ConstructCarrierInPlace"),
+                "expected ConstructCarrierInPlace, got {report}\n{src}"
+            );
+        }
+    }
 }

@@ -295,10 +295,16 @@ pub(in crate::core_erlang) fn condition_has_state_effects(
 impl BodyEffects {
     /// `stmt` and the sub-expressions of it where a loop body lowers a
     /// local-threading producer (`loop_body_producer_sites`, the one rule the
-    /// Phase 0 check and the body lowerings read).
-    fn statement_and_producer_sites(stmt: &Expression) -> Vec<&Expression> {
+    /// Phase 0 check and the body lowerings read), with the actor loops and
+    /// folds threading only `State` at its other operands (BT-4310,
+    /// `family_only_operand_site_exprs`).
+    fn statement_and_producer_sites<'a>(
+        generator: &CoreErlangGenerator,
+        stmt: &'a Expression,
+    ) -> Vec<&'a Expression> {
         let mut out = vec![stmt];
         out.extend(beamtalk_core::semantic_analysis::block_facts::loop_body_producer_sites(stmt));
+        out.extend(generator.family_only_operand_site_exprs(stmt));
         out
     }
 
@@ -342,7 +348,7 @@ impl BodyEffects {
         // examined too: a producer there rebinds through this loop's frame, and
         // a body that is not `StateAcc` has no `State` chain for its carrier.
         let has_non_tuple_safe_list_op = body.body.iter().any(|s| {
-            Self::statement_and_producer_sites(&s.expression)
+            Self::statement_and_producer_sites(generator, &s.expression)
                 .into_iter()
                 .any(|e| {
                     CoreErlangGenerator::list_op_needs_stateacc_fallback_recursive(
@@ -356,7 +362,7 @@ impl BodyEffects {
         // Such an inner loop returns a `{value, StateAcc}` tuple; the outer loop must
         // unpack `element(2, …)` to propagate the local — only possible in StateAcc mode.
         let has_nested_counted_loop_mutation = body.body.iter().any(|s| {
-            Self::statement_and_producer_sites(&s.expression)
+            Self::statement_and_producer_sites(generator, &s.expression)
                 .into_iter()
                 .any(|e| generator.expr_has_nested_counted_loop_threading(e, threaded_locals))
         });
@@ -376,7 +382,7 @@ impl BodyEffects {
         // parameters, a direct-params or tuple-acc body its private scratch
         // map), and its producer lowers in whichever mode that is.
         let has_cf_mutations = body.body.iter().any(|s| {
-            Self::statement_and_producer_sites(&s.expression)
+            Self::statement_and_producer_sites(generator, &s.expression)
                 .into_iter()
                 .any(|e| {
                     generator.control_flow_has_mutations(e)
