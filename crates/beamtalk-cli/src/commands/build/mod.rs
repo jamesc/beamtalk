@@ -63,10 +63,11 @@ pub(crate) use sources::{
     collect_project_source_files, compile_file, compile_to_beam, compute_file_module_pairs,
     compute_relative_module,
 };
+#[cfg(test)]
 pub(crate) use stubs::{
-    distribution_stubs_dir, extract_type_specs, load_dependency_stub_registries,
-    load_project_stub_registry,
+    distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
 };
+pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
 // every build-stage helper as if this were still one flat file). None of
@@ -214,40 +215,13 @@ fn execute_build_passes(
         env.pkg_manifest().is_some(),
         options.stdlib_mode,
     );
-    // ADR 0075 full resolution chain: each stub tier
-    // overrides auto-extract at the function/arity level, applied
-    // lowest-precedence first so project-local always wins —
-    // extracted -> distribution -> package-bundled -> project-local. Every
-    // tier is checked for drift against the pre-merge auto-extract registry
-    // so the drift check has real ground truth.
-    let dependency_stubs = load_dependency_stub_registries(
-        &dep_ctx.resolved_deps,
-        distribution_stubs_dir().as_deref(),
-        auto_extract_registry.as_ref(),
-        OutputFormat::Text,
-    );
-    let project_stubs = load_project_stub_registry(
+    // ADR 0075 full resolution chain over the auto-extracted registry.
+    let (native_type_registry, stub_diagnostics) = resolve_package_type_registry(
         &env.project_root,
-        auto_extract_registry.as_ref(),
-        OutputFormat::Text,
+        auto_extract_registry,
+        &dep_ctx.resolved_deps,
+        Some(OutputFormat::Text),
     );
-
-    let (native_type_registry, stub_diagnostics) =
-        if dependency_stubs.is_none() && project_stubs.is_none() {
-            (auto_extract_registry, Vec::new())
-        } else {
-            let mut merged = auto_extract_registry.unwrap_or_default();
-            let mut diagnostics = Vec::new();
-            if let Some((dep_registry, dep_diags)) = dependency_stubs {
-                merged.apply_overrides(dep_registry);
-                diagnostics.extend(dep_diags);
-            }
-            if let Some((stub_registry, diags)) = project_stubs {
-                merged.apply_overrides(stub_registry);
-                diagnostics.extend(diags);
-            }
-            (Some(merged), diagnostics)
-        };
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;

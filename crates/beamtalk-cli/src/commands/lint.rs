@@ -308,27 +308,13 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let layout = crate::commands::build_layout::BuildLayout::new(root);
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
-        let dependency_stubs = super::build::load_dependency_stub_registries(
+        super::build::resolve_package_type_registry(
+            root,
+            auto_extract,
             &resolved_deps,
-            super::build::distribution_stubs_dir().as_deref(),
-            auto_extract.as_ref(),
-            format,
-        );
-        let project_stubs =
-            super::build::load_project_stub_registry(root, auto_extract.as_ref(), format);
-
-        if dependency_stubs.is_none() && project_stubs.is_none() {
-            auto_extract
-        } else {
-            let mut merged = auto_extract.unwrap_or_default();
-            if let Some((dep_registry, _dep_diags)) = dependency_stubs {
-                merged.apply_overrides(dep_registry);
-            }
-            if let Some((stub_registry, _stub_diags)) = project_stubs {
-                merged.apply_overrides(stub_registry);
-            }
-            Some(merged)
-        }
+            Some(format),
+        )
+        .0
         .map(std::sync::Arc::new)
     } else if is_stdlib_lint_target {
         super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
