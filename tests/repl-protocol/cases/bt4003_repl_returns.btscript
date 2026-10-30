@@ -23,7 +23,7 @@ w
 // => 3
 
 [w < 30] whileTrue: [w := w + 1. w == 7 ifTrue: [^#done]]
-// => #done
+// => done
 
 w
 // => 7
