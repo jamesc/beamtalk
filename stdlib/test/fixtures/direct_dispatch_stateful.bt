@@ -8,7 +8,9 @@
 sealed Object subclass: DirectDispatchStateful
   classState: hits = 0
 
-  class sealed callerPid => Erlang erlang self
+  class sealed callerPid =>
+    @expect class_process_ffi "the test observes that the method runs in the class process"
+    Erlang erlang self
 
   class sealed bump =>
     self.hits := self.hits + 1
