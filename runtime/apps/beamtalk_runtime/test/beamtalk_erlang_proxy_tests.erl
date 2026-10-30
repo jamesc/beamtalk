@@ -1708,22 +1708,26 @@ is_beamtalk_module_conformance_test_() ->
         "fixtures",
         "is_beamtalk_module_conformance.json"
     ]),
+    ?assertNotEqual([], Cases),
     [
-        {binary_to_list(ModBin), fun() ->
-            Atom = list_to_atom(binary_to_list(ModBin)),
-            case IsBeamtalk of
-                true ->
-                    ?assertEqual(
-                        "hi", beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
-                    );
-                false ->
-                    ?assertEqual(
-                        {beamtalk_string, <<"hi">>},
-                        beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
-                    )
-            end
-        end}
-     || #{<<"module">> := ModBin, <<"is_beamtalk">> := IsBeamtalk} <- Cases
+        begin
+            #{<<"module">> := ModBin, <<"is_beamtalk">> := IsBeamtalk} = Case,
+            {binary_to_list(ModBin), fun() ->
+                Atom = list_to_atom(binary_to_list(ModBin)),
+                case IsBeamtalk of
+                    true ->
+                        ?assertEqual(
+                            "hi", beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
+                        );
+                    false ->
+                        ?assertEqual(
+                            {beamtalk_string, <<"hi">>},
+                            beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
+                        )
+                end
+            end}
+        end
+     || Case <- Cases
     ].
 
 coerce_ffi_result_3_equivalence_test() ->
