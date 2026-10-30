@@ -10,6 +10,11 @@
 // block literal, so no other class's `value` can run. The methods under test
 // are in stdlib/test/fixtures/adr0131eval_block_{class,value,actor}.bt; the
 // expected answers are the assertions below.
+//
+// BT-4263: the `arg*` methods are the same producer for the `value:` family
+// (`[:y | t := y] value: 5`, `value:value:`, `value:value:value:`): its
+// arguments are evaluated first, in order, in the enclosing frame, then the
+// block is the same arm (`{[:y | t := y] value: 5, t}` answers `{5, 5}`).
 
 TestCase subclass: Adr0131EvalBlockTest
 
@@ -105,3 +110,144 @@ TestCase subclass: Adr0131EvalBlockTest
 
   testFieldInDo =>
     self assert: #[Adr0131EvalBlockClass fieldInDo, (Adr0131EvalBlockActor spawn) fieldInDo] equals: #[#[3, 2], #[3, 2]]
+
+  testArgStA =>
+    self assert: #[Adr0131EvalBlockClass argStA, (Adr0131EvalBlockValue new) argStA, (Adr0131EvalBlockActor spawn) argStA] equals: #[1, 1, 1]
+
+  testArgStSeq =>
+    self assert: #[Adr0131EvalBlockClass argStSeq, (Adr0131EvalBlockValue new) argStSeq, (Adr0131EvalBlockActor spawn) argStSeq] equals: #[11, 11, 11]
+
+  testArgLast =>
+    self assert: #[Adr0131EvalBlockClass argLast, (Adr0131EvalBlockValue new) argLast, (Adr0131EvalBlockActor spawn) argLast] equals: #[1, 1, 1]
+
+  testArgAssign =>
+    self assert: #[Adr0131EvalBlockClass argAssign, (Adr0131EvalBlockValue new) argAssign, (Adr0131EvalBlockActor spawn) argAssign] equals: #[#[7, 5], #[7, 5], #[7, 5]]
+
+  testArgOperand =>
+    self assert: #[Adr0131EvalBlockClass argOperand, (Adr0131EvalBlockValue new) argOperand, (Adr0131EvalBlockActor spawn) argOperand] equals: #[#[5, 1], #[5, 1], #[5, 1]]
+
+  testArgTuple =>
+    self assert: #[Adr0131EvalBlockClass argTuple, (Adr0131EvalBlockValue new) argTuple, (Adr0131EvalBlockActor spawn) argTuple] equals: #[{5, 5}, {5, 5}, {5, 5}]
+
+  testArgList =>
+    self assert: #[Adr0131EvalBlockClass argList, (Adr0131EvalBlockValue new) argList, (Adr0131EvalBlockActor spawn) argList] equals: #[#[5, 5], #[5, 5], #[5, 5]]
+
+  testArgKeyword =>
+    self assert: #[Adr0131EvalBlockClass argKeyword, (Adr0131EvalBlockValue new) argKeyword, (Adr0131EvalBlockActor spawn) argKeyword] equals: #[5, 5, 5]
+
+  testArgKeywordValue =>
+    self assert: #[Adr0131EvalBlockClass argKeywordValue, (Adr0131EvalBlockValue new) argKeywordValue, (Adr0131EvalBlockActor spawn) argKeywordValue] equals: #[{5, 5}, {5, 5}, {5, 5}]
+
+  testArgTwo =>
+    self assert: #[Adr0131EvalBlockClass argTwo, (Adr0131EvalBlockValue new) argTwo, (Adr0131EvalBlockActor spawn) argTwo] equals: #[{5, 5}, {5, 5}, {5, 5}]
+
+  testArgThree =>
+    self assert: #[Adr0131EvalBlockClass argThree, (Adr0131EvalBlockValue new) argThree, (Adr0131EvalBlockActor spawn) argThree] equals: #[{6, 6}, {6, 6}, {6, 6}]
+
+  testArgWritesArgument =>
+    self assert: #[Adr0131EvalBlockClass argWritesArgument, (Adr0131EvalBlockValue new) argWritesArgument, (Adr0131EvalBlockActor spawn) argWritesArgument] equals: #[{10, 10}, {10, 10}, {10, 10}]
+
+  testArgReadsOuter =>
+    self assert: #[Adr0131EvalBlockClass argReadsOuter, (Adr0131EvalBlockValue new) argReadsOuter, (Adr0131EvalBlockActor spawn) argReadsOuter] equals: #[#[12, 12], #[12, 12], #[12, 12]]
+
+  testArgOrder =>
+    self assert: #[Adr0131EvalBlockClass argOrder, (Adr0131EvalBlockValue new) argOrder, (Adr0131EvalBlockActor spawn) argOrder] equals: #[{12, 12}, {12, 12}, {12, 12}]
+
+  testArgArm =>
+    self assert: #[Adr0131EvalBlockClass argArm, (Adr0131EvalBlockValue new) argArm, (Adr0131EvalBlockActor spawn) argArm] equals: #[1, 1, 1]
+
+  testArgArmNotTaken =>
+    self assert: #[Adr0131EvalBlockClass argArmNotTaken, (Adr0131EvalBlockValue new) argArmNotTaken, (Adr0131EvalBlockActor spawn) argArmNotTaken] equals: #[0, 0, 0]
+
+  testArgArmValue =>
+    self assert: #[Adr0131EvalBlockClass argArmValue, (Adr0131EvalBlockValue new) argArmValue, (Adr0131EvalBlockActor spawn) argArmValue] equals: #[#[{5, 5}, 5], #[{5, 5}, 5], #[{5, 5}, 5]]
+
+  testArgNested =>
+    self assert: #[Adr0131EvalBlockClass argNested, (Adr0131EvalBlockValue new) argNested, (Adr0131EvalBlockActor spawn) argNested] equals: #[11, 11, 11]
+
+  testArgInUnary =>
+    self assert: #[Adr0131EvalBlockClass argInUnary, (Adr0131EvalBlockValue new) argInUnary, (Adr0131EvalBlockActor spawn) argInUnary] equals: #[3, 3, 3]
+
+  testArgInDo =>
+    self assert: #[Adr0131EvalBlockClass argInDo, (Adr0131EvalBlockValue new) argInDo, (Adr0131EvalBlockActor spawn) argInDo] equals: #[6, 6, 6]
+
+  testArgInDoArm =>
+    self assert: #[Adr0131EvalBlockClass argInDoArm, (Adr0131EvalBlockValue new) argInDoArm, (Adr0131EvalBlockActor spawn) argInDoArm] equals: #[5, 5, 5]
+
+  testArgInToDo =>
+    self assert: #[Adr0131EvalBlockClass argInToDo, (Adr0131EvalBlockValue new) argInToDo, (Adr0131EvalBlockActor spawn) argInToDo] equals: #[6, 6, 6]
+
+  testArgInWhile =>
+    self assert: #[Adr0131EvalBlockClass argInWhile, (Adr0131EvalBlockValue new) argInWhile, (Adr0131EvalBlockActor spawn) argInWhile] equals: #[6, 6, 6]
+
+  testArgInTimes =>
+    self assert: #[Adr0131EvalBlockClass argInTimes, (Adr0131EvalBlockValue new) argInTimes, (Adr0131EvalBlockActor spawn) argInTimes] equals: #[3, 3, 3]
+
+  testArgInCollect =>
+    self assert: #[Adr0131EvalBlockClass argInCollect, (Adr0131EvalBlockValue new) argInCollect, (Adr0131EvalBlockActor spawn) argInCollect] equals: #[306, 306, 306]
+
+  testArgInHandler =>
+    self assert: #[Adr0131EvalBlockClass argInHandler, (Adr0131EvalBlockValue new) argInHandler, (Adr0131EvalBlockActor spawn) argInHandler] equals: #[100, 100, 100]
+
+  testArgInProtected =>
+    self assert: #[Adr0131EvalBlockClass argInProtected, (Adr0131EvalBlockValue new) argInProtected, (Adr0131EvalBlockActor spawn) argInProtected] equals: #[1, 1, 1]
+
+  testArgInProtectedRaise =>
+    self assert: #[Adr0131EvalBlockClass argInProtectedRaise, (Adr0131EvalBlockValue new) argInProtectedRaise, (Adr0131EvalBlockActor spawn) argInProtectedRaise] equals: #[0, 0, 0]
+
+  testArgInEnsure =>
+    self assert: #[Adr0131EvalBlockClass argInEnsure, (Adr0131EvalBlockValue new) argInEnsure, (Adr0131EvalBlockActor spawn) argInEnsure] equals: #[11, 11, 11]
+
+  testArgEarlyReturn =>
+    self assert: #[Adr0131EvalBlockClass argEarlyReturn, (Adr0131EvalBlockValue new) argEarlyReturn, (Adr0131EvalBlockActor spawn) argEarlyReturn] equals: #[1, 1, 1]
+
+  testArgLoopInBlock =>
+    self assert: #[Adr0131EvalBlockClass argLoopInBlock, (Adr0131EvalBlockValue new) argLoopInBlock, (Adr0131EvalBlockActor spawn) argLoopInBlock] equals: #[6, 6, 6]
+
+  testArgCondInBlock =>
+    self assert: #[Adr0131EvalBlockClass argCondInBlock, (Adr0131EvalBlockValue new) argCondInBlock, (Adr0131EvalBlockActor spawn) argCondInBlock] equals: #[1, 1, 1]
+
+  testArgFieldMix =>
+    self assert: #[Adr0131EvalBlockClass argFieldMix, (Adr0131EvalBlockActor spawn) argFieldMix] equals: #[#[1, 1], #[1, 1]]
+
+  testArgFoldLoopInBlock =>
+    self assert: #[Adr0131EvalBlockClass argFoldLoopInBlock, (Adr0131EvalBlockValue new) argFoldLoopInBlock, (Adr0131EvalBlockActor spawn) argFoldLoopInBlock] equals: #[#[12, 3], #[12, 3], #[12, 3]]
+
+  testArgAssignedInDo =>
+    self assert: #[Adr0131EvalBlockClass argAssignedInDo, (Adr0131EvalBlockValue new) argAssignedInDo] equals: #[#[3, 3], #[3, 3]]
+
+  testArgLookupInDo =>
+    self assert: #[Adr0131EvalBlockClass argLookupInDo, (Adr0131EvalBlockValue new) argLookupInDo, (Adr0131EvalBlockActor spawn) argLookupInDo] equals: #[2, 2, 2]
+
+  testArgBlockLocalInToDo =>
+    self assert: #[Adr0131EvalBlockClass argBlockLocalInToDo, (Adr0131EvalBlockValue new) argBlockLocalInToDo, (Adr0131EvalBlockActor spawn) argBlockLocalInToDo] equals: #[6, 6, 6]
+
+  testArgBlockLocalOperandInToDo =>
+    self assert: #[Adr0131EvalBlockClass argBlockLocalOperandInToDo, (Adr0131EvalBlockValue new) argBlockLocalOperandInToDo, (Adr0131EvalBlockActor spawn) argBlockLocalOperandInToDo] equals: #[6, 6, 6]
+
+  testArgWhileInToDo =>
+    self assert: #[Adr0131EvalBlockClass argWhileInToDo, (Adr0131EvalBlockValue new) argWhileInToDo, (Adr0131EvalBlockActor spawn) argWhileInToDo] equals: #[3, 3, 3]
+
+  testArgKeyedInDo =>
+    self assert: #[Adr0131EvalBlockClass argKeyedInDo, (Adr0131EvalBlockValue new) argKeyedInDo, (Adr0131EvalBlockActor spawn) argKeyedInDo] equals: #[1, 1, 1]
+
+  testArgKeyedReturnInDo =>
+    self assert: #[Adr0131EvalBlockClass argKeyedReturnInDo, (Adr0131EvalBlockValue new) argKeyedReturnInDo, (Adr0131EvalBlockActor spawn) argKeyedReturnInDo] equals: #[nil, nil, nil]
+
+  testArgDeep3 =>
+    self assert: #[Adr0131EvalBlockClass argDeep3, (Adr0131EvalBlockValue new) argDeep3, (Adr0131EvalBlockActor spawn) argDeep3] equals: #[2, 2, 2]
+
+  testArgDeep4 =>
+    self assert: #[Adr0131EvalBlockClass argDeep4, (Adr0131EvalBlockValue new) argDeep4, (Adr0131EvalBlockActor spawn) argDeep4] equals: #[4, 4, 4]
+
+  testArgThreeDeepTwoFolds =>
+    self assert: #[Adr0131EvalBlockClass argThreeDeepTwoFolds, (Adr0131EvalBlockValue new) argThreeDeepTwoFolds, (Adr0131EvalBlockActor spawn) argThreeDeepTwoFolds] equals: #[6, 6, 6]
+
+  testArgThreeDeepArm =>
+    self assert: #[Adr0131EvalBlockClass argThreeDeepArm, (Adr0131EvalBlockValue new) argThreeDeepArm, (Adr0131EvalBlockActor spawn) argThreeDeepArm] equals: #[2, 2, 2]
+
+  testArgThreeDeepHandler =>
+    self assert: #[Adr0131EvalBlockClass argThreeDeepHandler, (Adr0131EvalBlockValue new) argThreeDeepHandler, (Adr0131EvalBlockActor spawn) argThreeDeepHandler] equals: #[2, 2, 2]
+
+  testArgParamShadows =>
+    self assert: #[Adr0131EvalBlockClass argParamShadows, (Adr0131EvalBlockValue new) argParamShadows, (Adr0131EvalBlockActor spawn) argParamShadows] equals: #[#[0, 9], #[0, 9], #[0, 9]]
