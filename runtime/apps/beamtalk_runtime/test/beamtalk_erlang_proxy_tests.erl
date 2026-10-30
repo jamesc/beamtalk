@@ -1693,37 +1693,37 @@ native_call_badarg_with_fun_arg_is_not_retried_test() ->
 %%% BT-4153: coercion fast path (shape-first + precomputed mode)
 %%% ===================================================================
 
-is_beamtalk_module_conformance_test() ->
-    %% Same table as `test_is_beamtalk_module` in
-    %% crates/beamtalk-codegen/src/core_erlang/util.rs. A rule change applied
-    %% to only one side (impl plus its own test) stays green on both sides
-    %% while codegen and runtime diverge — so update both tables together,
-    %% never one alone. Probed through coerce_ffi_result/2: a charlist result
-    %% comes back a binary in stock mode and an unchanged list in beamtalk
-    %% mode.
-    Beamtalk = [
-        beamtalk_actor, beamtalk_stream, beamtalk_, 'bt@stdlib@list', 'bt@test@foo', 'bt@'
-    ],
-    Stock = [
-        lists,
-        erlang,
-        maps,
-        vs_bench,
-        beamtalk,
-        beamtalkx,
-        bt,
-        'btx@foo',
-        my_beamtalk_mod,
-        'BEAMTALK_FOO',
-        ''
-    ],
+is_beamtalk_module_conformance_test_() ->
+    %% Single source of truth: shared JSON corpus also used by
+    %% `test_is_beamtalk_module_conformance` in
+    %% crates/beamtalk-codegen/src/core_erlang/util.rs.
+    %% To add or change a case, edit the JSON only — both sides pick it up.
+    %% Probed through coerce_ffi_result/2: a charlist result comes back
+    %% unchanged in beamtalk mode and converted to a binary in stock mode.
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "is_beamtalk_module_conformance.json"
+    ]),
     [
-        ?assertEqual("hi", beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
-     || M <- Beamtalk
-    ],
-    [
-        ?assertEqual({beamtalk_string, <<"hi">>}, beamtalk_erlang_proxy:coerce_ffi_result(M, "hi"))
-     || M <- Stock
+        {binary_to_list(ModBin), fun() ->
+            Atom = list_to_atom(binary_to_list(ModBin)),
+            case IsBeamtalk of
+                true ->
+                    ?assertEqual(
+                        "hi", beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
+                    );
+                false ->
+                    ?assertEqual(
+                        {beamtalk_string, <<"hi">>},
+                        beamtalk_erlang_proxy:coerce_ffi_result(Atom, "hi")
+                    )
+            end
+        end}
+     || #{<<"module">> := ModBin, <<"is_beamtalk">> := IsBeamtalk} <- Cases
     ].
 
 coerce_ffi_result_3_equivalence_test() ->

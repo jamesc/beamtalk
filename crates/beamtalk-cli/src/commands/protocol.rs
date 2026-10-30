@@ -10,7 +10,6 @@
 //! provides the shared transport layer with cookie-based authentication.
 
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use beamtalk_repl_protocol::handshake;
@@ -19,15 +18,6 @@ use tungstenite::{Error as WsError, Message, WebSocket};
 
 /// Default connection timeout in milliseconds.
 const CONNECT_TIMEOUT_MS: u64 = 5000;
-
-/// Counter for generating unique message IDs across all protocol clients.
-static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-/// Generate a unique message ID.
-pub fn next_msg_id() -> String {
-    let n = MSG_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("msg-{n:03}")
-}
 
 /// Check if a tungstenite error is a transport-level failure worth retrying.
 /// Protocol, UTF-8, and capacity errors indicate a message-level problem

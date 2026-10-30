@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
 
-use crate::commands::protocol::{self, ProtocolClient};
+use beamtalk_repl_protocol::next_msg_id;
+
+use crate::commands::protocol::ProtocolClient;
 use crate::commands::workspace;
 
 /// Polling interval for transcript updates in milliseconds.
@@ -159,7 +161,7 @@ impl TranscriptClient {
     fn fetch_recent(&mut self) -> Result<Vec<String>> {
         let request = serde_json::json!({
             "op": "eval",
-            "id": protocol::next_msg_id(),
+            "id": next_msg_id(),
             "code": "Transcript recent"
         });
 
