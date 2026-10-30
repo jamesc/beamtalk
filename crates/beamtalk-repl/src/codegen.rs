@@ -391,18 +391,52 @@ pub fn generate_test_expression_surfacing_verifier(
 /// to the wrapped [`CoreErlangGenerator`].
 pub(crate) struct ReplAssembler<'a> {
     generator: &'a mut CoreErlangGenerator,
+    /// BT-4288: the eval's non-local-return boundary, while an input that
+    /// holds a `^` in a loop or fold body is assembled: its token and, in
+    /// trace mode, the input's source text.
+    eval_boundary: Option<(String, Option<String>)>,
 }
 
 impl<'a> ReplAssembler<'a> {
     /// Creates a new REPL assembler wrapping the given generator.
     pub(crate) fn new(generator: &'a mut CoreErlangGenerator) -> Self {
-        Self { generator }
+        Self {
+            generator,
+            eval_boundary: None,
+        }
+    }
+
+    /// Runs `assemble` for the REPL input `expressions` inside the eval's
+    /// non-local-return boundary (BT-4288, `repl_nlr`): opened before any of
+    /// the input is compiled, so a `^` in a loop or fold body throws to it,
+    /// and closed on every path. `trace_source` is the input's source text in
+    /// trace mode.
+    fn with_eval_boundary(
+        &mut self,
+        expressions: &[Expression],
+        trace_source: Option<String>,
+        assemble: impl FnOnce(&mut Self) -> Result<Document<'static>>,
+    ) -> Result<Document<'static>> {
+        let token = self.generator.enter_repl_eval_boundary(expressions);
+        self.eval_boundary = token.map(|token| (token, trace_source));
+        let result = assemble(self);
+        self.eval_boundary = None;
+        self.generator.exit_repl_eval_boundary();
+        result
     }
 
     /// Wraps an `eval/1` body (everything after `let State = Bindings in`)
     /// in the shared module skeleton, which also exports and defines
-    /// `module_info/0,1` (BT-4067).
-    fn eval_module(&self, eval_body: Document<'static>) -> Document<'static> {
+    /// `module_info/0,1` (BT-4067). Inside an eval boundary (BT-4288) the
+    /// body is wrapped in its catch first.
+    fn eval_module(&mut self, eval_body: Document<'static>) -> Document<'static> {
+        let eval_body = match self.eval_boundary.clone() {
+            Some((token, trace_source)) => {
+                self.generator
+                    .wrap_repl_eval_body(eval_body, &token, trace_source.as_deref())
+            }
+            None => eval_body,
+        };
         core_module(
             self.generator.module_name.clone(),
             leaf::fname("eval", 1),
@@ -541,7 +575,9 @@ impl<'a> ReplAssembler<'a> {
         let previous_sites = self.set_value_assign_sites(std::slice::from_ref(expression));
 
         // Restore generator state unconditionally, then propagate error.
-        let result = self.generate_eval_module_body(expression);
+        let result = self.with_eval_boundary(std::slice::from_ref(expression), None, |this| {
+            this.generate_eval_module_body(expression)
+        });
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;
@@ -572,11 +608,13 @@ impl<'a> ReplAssembler<'a> {
         let previous_sites = self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
-        let result = if expressions.len() == 1 {
-            self.generate_repl_single_traced(&expressions[0], &source_texts[0])
-        } else {
-            self.generate_repl_multi_traced_body(expressions, source_texts)
-        };
+        let result = self.with_eval_boundary(expressions, Some(source_texts.join("\n")), |this| {
+            if expressions.len() == 1 {
+                this.generate_repl_single_traced(&expressions[0], &source_texts[0])
+            } else {
+                this.generate_repl_multi_traced_body(expressions, source_texts)
+            }
+        });
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;
@@ -827,7 +865,9 @@ impl<'a> ReplAssembler<'a> {
         let previous_sites = self.set_value_assign_sites(expressions);
 
         // Restore generator state unconditionally, then propagate error.
-        let result = self.generate_repl_multi_module_body(expressions);
+        let result = self.with_eval_boundary(expressions, None, |this| {
+            this.generate_repl_multi_module_body(expressions)
+        });
 
         self.generator.set_is_repl_mode(previous_is_repl_mode);
         self.generator.context = previous_context;

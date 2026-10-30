@@ -8,7 +8,7 @@ fn wrap_body_with_nlr_catch_class_method_no_vars_contains_nlr_scaffolding() {
     let mut generator = CoreErlangGenerator::new("nlr_test");
     let token = generator.fresh_temp_var("NlrToken");
     let body = leaf::var("Body".to_string());
-    let doc = generator.wrap_body_with_nlr_catch(body, &token, NlrBoundary::ClassMethod);
+    let doc = generator.wrap_body_with_nlr_catch(body, &token, &NlrBoundary::ClassMethod);
     let out = doc.to_pretty_string();
     assert!(
         out.contains("'erlang':'make_ref'()"),
@@ -35,7 +35,7 @@ fn wrap_body_with_nlr_catch_actor_reply_catch_arm_contains_reply_atom() {
     let mut generator = CoreErlangGenerator::new("nlr_test");
     let token = generator.fresh_temp_var("NlrToken");
     let body = leaf::var("Body".to_string());
-    let doc = generator.wrap_body_with_nlr_catch(body, &token, NlrBoundary::ActorReply);
+    let doc = generator.wrap_body_with_nlr_catch(body, &token, &NlrBoundary::ActorReply);
     let out = doc.to_pretty_string();
     assert!(out.contains("'reply'"), "missing reply atom: {out}");
     assert!(out.contains("'$bt_nlr'"), "missing bt_nlr tag: {out}");
@@ -60,7 +60,7 @@ fn wrap_value_type_body_with_nlr_catch_suffix_contains_nlr_tag_and_raw_raise() {
     let token = generator.fresh_temp_var("NlrToken");
     let vars = generator.wrap_value_type_body_with_nlr_catch(&token);
     let suffix = vars
-        .format_catch_suffix(NlrBoundary::ValueType)
+        .format_catch_suffix(&NlrBoundary::ValueType)
         .to_pretty_string();
     assert!(
         suffix.contains("'$bt_nlr'"),

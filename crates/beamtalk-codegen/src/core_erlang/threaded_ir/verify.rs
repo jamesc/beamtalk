@@ -467,6 +467,18 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
 
+    /// BT-4288: a `^` in the body of a loop or fold run in place
+    /// (`beamtalk-core`'s `loop_body_returns`) lowered with no NLR boundary to
+    /// throw to, so it compiles to its bare value inside the loop's `fun`: the
+    /// loop ignores it and runs on (`#(1, 2) do: [:x | ^x]` answered the loop's
+    /// value; `[n < 3] whileTrue: [^10]` never ended). Invariant, in every
+    /// scope: such a `^` is a throw to the scope's boundary. A method, a
+    /// class method and a value-type method mint theirs whenever a block holds
+    /// a `^` (`body_has_block_nlr`); the REPL eval mints its own for exactly
+    /// these returns (`repl_nlr`). The repro was every REPL loop or fold whose
+    /// body held a `^`.
+    LoopReturnWithoutBoundary { at: Span },
+
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
     /// the condition slot hands the condition's version back into the loop's

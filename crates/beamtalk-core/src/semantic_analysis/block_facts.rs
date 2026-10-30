@@ -1722,6 +1722,75 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
     }
 }
 
+/// BT-4288: the spans of the `^`s in `exprs` that sit in the body of a loop or
+/// fold the compiler runs in place: a block of a [`local_threading_construct`]
+/// of the [`LocalThreadingFamily::Loop`] or [`LocalThreadingFamily::Fold`]
+/// family that codegen threads today
+/// ([`LocalThreadingConstruct::is_threaded_today`]), reached from the `^`
+/// through blocks lowered in place only (a conditional arm, an evaluated
+/// block, a protected block, a nested loop or fold body). A block literal that
+/// is no construct block (stored, passed to a method, ...) is a closure and
+/// ends the search: its `^` is the closure's.
+///
+/// Such a `^` is compiled inside the loop's `fun`, so it reaches the end of the
+/// method or REPL input only as a non-local-return throw to that scope's
+/// boundary. At the REPL, codegen establishes the eval's boundary for exactly
+/// these returns, and `beamtalk-core`'s REPL check reads the same set.
+#[must_use]
+pub fn loop_body_returns<'a>(exprs: impl IntoIterator<Item = &'a Expression>) -> Vec<Span> {
+    let mut in_place: HashSet<Span> = HashSet::new();
+    let mut loop_bodies: HashSet<Span> = HashSet::new();
+    let mut blocks: Vec<Span> = Vec::new();
+    let mut returns: Vec<Span> = Vec::new();
+    for expr in exprs {
+        crate::ast_walker::walk_expression(expr, &mut |e| match e {
+            Expression::Block(b) => blocks.push(b.span),
+            Expression::Return { span, .. } => returns.push(*span),
+            Expression::MessageSend { .. } => {
+                let Some(construct) =
+                    local_threading_construct(e).filter(LocalThreadingConstruct::is_threaded_today)
+                else {
+                    return;
+                };
+                let is_loop = matches!(
+                    construct.family,
+                    LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                );
+                for block in construct.blocks {
+                    in_place.insert(block.span);
+                    if is_loop {
+                        loop_bodies.insert(block.span);
+                    }
+                }
+            }
+            _ => {}
+        });
+    }
+    let encloses =
+        |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
+    returns
+        .into_iter()
+        .filter(|ret| {
+            // The blocks enclosing the `^`, innermost first.
+            let mut enclosing: Vec<Span> = blocks
+                .iter()
+                .copied()
+                .filter(|b| encloses(*b, *ret))
+                .collect();
+            enclosing.sort_by_key(|b| b.end() - b.start());
+            for block in enclosing {
+                if !in_place.contains(&block) {
+                    return false;
+                }
+                if loop_bodies.contains(&block) {
+                    return true;
+                }
+            }
+            false
+        })
+        .collect()
+}
+
 /// ADR 0131 §1 "Transitive closure" (BT-3746): the outer locals a
 /// local-threading construct writes, in source order (first write of each
 /// name only). This is the construct's threaded set.

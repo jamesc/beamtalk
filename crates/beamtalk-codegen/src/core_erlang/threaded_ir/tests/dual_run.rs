@@ -514,7 +514,7 @@ fn dual_run_nlr_catch_reuses_wrap_body_with_nlr_catch_verbatim() {
     let legacy_token = legacy_gen.fresh_temp_var("NlrToken");
     let inner_body = docvec!["let ", leaf::var("Sum@1"), " = ", leaf::var("Sum@"), " in "];
     let legacy_doc = legacy_gen
-        .wrap_body_with_nlr_catch(inner_body, &legacy_token, NlrBoundary::ActorReply)
+        .wrap_body_with_nlr_catch(inner_body, &legacy_token, &NlrBoundary::ActorReply)
         .to_pretty_string();
 
     let mut render_gen = CoreErlangGenerator::new("dual_run_nlr");

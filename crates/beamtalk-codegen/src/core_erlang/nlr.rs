@@ -48,7 +48,7 @@ pub(in crate::core_erlang) struct NlrCatchVars {
 /// the matching catch arm yields. This enum captures that single axis so the catch
 /// scaffolding can be written once (see [`nlr_arm_result`]) instead of being
 /// copy-evolved per context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum NlrBoundary {
     /// Actor (`gen_server`) methods: the catch arm yields `{'reply', Value, State}`.
     ActorReply,
@@ -59,6 +59,12 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// Value-type methods: the catch arm yields `{Value, State}` so the normal and
     /// NLR-catch paths produce the same `{Result, Self{N}}` shape.
     ValueType,
+    /// BT-4288: a REPL eval (`repl_nlr`). The throw's state is the workspace
+    /// bindings map at the `^`, so the catch arm yields the eval's own
+    /// `{Value, Bindings}`; in trace mode (`trace_source` is the input's
+    /// source text) `{[{<<Source>>, Value}], Bindings}`, one step for the
+    /// input the `^` ended.
+    Repl { trace_source: Option<String> },
 }
 
 /// Builds the Document the matching NLR catch arm yields for `boundary`.
@@ -70,7 +76,7 @@ pub(in crate::core_erlang) enum NlrBoundary {
 /// [`NlrCatchVars::format_catch_suffix`].
 ///
 /// Use Document/docvec! — never format!() for Core Erlang fragments.
-fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Document<'static> {
+fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Document<'static> {
     match boundary {
         NlrBoundary::ActorReply => docvec![
             "{'reply', ",
@@ -80,7 +86,18 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Docu
             "}",
         ],
         NlrBoundary::ClassMethod => leaf::var(val_var.to_string()),
-        NlrBoundary::ValueType => docvec![
+        NlrBoundary::Repl {
+            trace_source: Some(source),
+        } => docvec![
+            "{[{",
+            leaf::binary_lit(source),
+            ", ",
+            leaf::var(val_var.to_string()),
+            "}], ",
+            leaf::var(state_var.to_string()),
+            "}",
+        ],
+        NlrBoundary::ValueType | NlrBoundary::Repl { trace_source: None } => docvec![
             "{",
             leaf::var(val_var.to_string()),
             ", ",
@@ -126,7 +143,7 @@ impl NlrCatchVars {
     ///     <Other> when 'true' -> primop 'raw_raise'(Cls, Err, Stk)
     ///   end
     /// ```
-    pub fn format_catch_suffix(&self, boundary: NlrBoundary) -> Document<'static> {
+    pub fn format_catch_suffix(&self, boundary: &NlrBoundary) -> Document<'static> {
         docvec![
             nest(INDENT, line()),
             "of ",
@@ -210,7 +227,7 @@ impl CoreErlangGenerator {
         &mut self,
         body_doc: Document<'static>,
         token_var: &str,
-        boundary: NlrBoundary,
+        boundary: &NlrBoundary,
     ) -> Document<'static> {
         // ADR 0111 Phase D: this is the true call site
         // `ThreadedStmt::NlrCatch` faithfully models (module docs on
@@ -235,7 +252,7 @@ impl CoreErlangGenerator {
     /// Value type NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}`
     /// and catches it to return `{Value, State}`. Returns the allocated
     /// [`NlrCatchVars`] so the caller can emit `format_try_prefix()`, the
-    /// body, and `format_catch_suffix(NlrBoundary::ValueType)` around its own
+    /// body, and `format_catch_suffix(&NlrBoundary::ValueType)` around its own
     /// surrounding `fun` scaffolding.
     pub(in crate::core_erlang) fn wrap_value_type_body_with_nlr_catch(
         &mut self,
@@ -263,19 +280,38 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_actor_reply_yields_reply_tuple() {
-        let doc = nlr_arm_result("Val", "St", NlrBoundary::ActorReply);
+        let doc = nlr_arm_result("Val", "St", &NlrBoundary::ActorReply);
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
     }
 
     #[test]
     fn nlr_arm_result_class_method_yields_bare_value() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ClassMethod);
+        let doc = nlr_arm_result("V", "S", &NlrBoundary::ClassMethod);
         assert_eq!(doc.to_pretty_string(), "V");
     }
 
     #[test]
+    fn nlr_arm_result_repl_yields_value_bindings_tuple() {
+        let doc = nlr_arm_result("V", "S", &NlrBoundary::Repl { trace_source: None });
+        assert_eq!(doc.to_pretty_string(), "{V, S}");
+    }
+
+    #[test]
+    fn nlr_arm_result_repl_trace_yields_one_step() {
+        let doc = nlr_arm_result(
+            "V",
+            "S",
+            &NlrBoundary::Repl {
+                trace_source: Some("x".to_string()),
+            },
+        );
+        let expected = docvec!["{[{", leaf::binary_lit("x"), ", V}], S}"].to_pretty_string();
+        assert_eq!(doc.to_pretty_string(), expected);
+    }
+
+    #[test]
     fn nlr_arm_result_value_type_yields_value_state_tuple() {
-        let doc = nlr_arm_result("V", "S", NlrBoundary::ValueType);
+        let doc = nlr_arm_result("V", "S", &NlrBoundary::ValueType);
         assert_eq!(doc.to_pretty_string(), "{V, S}");
     }
 
@@ -313,7 +349,7 @@ mod tests {
     #[test]
     fn format_catch_suffix_passthrough_arm_uses_result_var() {
         let doc = make_test_vars()
-            .format_catch_suffix(NlrBoundary::ValueType)
+            .format_catch_suffix(&NlrBoundary::ValueType)
             .to_pretty_string();
         // The `of` arm passes through non-throw results unchanged: `of Res0 -> Res0`.
         assert!(
@@ -325,7 +361,7 @@ mod tests {
     #[test]
     fn format_catch_suffix_nlr_arm_yields_value_state_pair() {
         let doc = make_test_vars()
-            .format_catch_suffix(NlrBoundary::ValueType)
+            .format_catch_suffix(&NlrBoundary::ValueType)
             .to_pretty_string();
         // Matching NLR throw: pattern must name the '$bt_nlr' tag.
         assert!(
@@ -347,7 +383,7 @@ mod tests {
     #[test]
     fn format_catch_suffix_reraises_non_nlr_exceptions() {
         let doc = make_test_vars()
-            .format_catch_suffix(NlrBoundary::ValueType)
+            .format_catch_suffix(&NlrBoundary::ValueType)
             .to_pretty_string();
         // Non-NLR exceptions fall through to the wildcard arm and are re-raised.
         assert!(

@@ -144,6 +144,7 @@ mod options;
 mod patterns;
 pub mod primitive_bindings;
 mod primitives;
+pub mod repl_nlr;
 mod routing;
 pub mod selector_mangler;
 mod sequencing;
@@ -304,7 +305,13 @@ impl CoreErlangGenerator {
                 // If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
-                if let Some(nlr_token) = self.current_nlr_token().cloned() {
+                // BT-4288: a REPL `^` in a loop or fold body throws to the
+                // eval's boundary (`repl_nlr`); every other REPL `^` has none.
+                let nlr_token = match self.current_nlr_token().cloned() {
+                    Some(token) => Some(token),
+                    None => self.repl_loop_return_token(*span),
+                };
+                if let Some(nlr_token) = nlr_token {
                     // Emit diagnostic for NLR throw/catch generation.
                     self.emit_codegen_diagnostic(
                         {
@@ -407,6 +414,11 @@ impl CoreErlangGenerator {
                         ]
                     } else if self.in_class_method() {
                         leaf::atom("nil")
+                    } else if self.is_repl_mode() {
+                        // BT-4288: a REPL throw carries the workspace bindings
+                        // map at the `^` (a loop body's `StateAcc`), which the
+                        // eval's catch answers as its bindings.
+                        leaf::var(self.current_state_var())
                     } else if self.in_cell_closure() {
                         // ADR 0137 §3: an actor closure holds no threaded
                         // `State`; the throw carries the actor's current one,

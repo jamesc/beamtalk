@@ -908,6 +908,25 @@ reports the same message at the same span. No operation is surface-specific.
 - The REPL sees only the current input, but a block that assigns a captured
   binding is rejected where it is stored (ADR 0133, BT-3902), so no input can
   hand a later one a writing block to send `value`.
+- **A `^` in a REPL loop or fold body ends the input (BT-4288).** At the REPL,
+  a `^` in the body of a loop or collection operation run in place
+  (`block_facts::loop_body_returns`: `do:`, `collect:`, `inject:into:`,
+  `to:do:`, `timesRepeat:`, `whileTrue:`, ..., through conditional arms,
+  evaluated and protected blocks and nested loops) ends the input with its
+  value, as in a method: the eval establishes a non-local-return boundary
+  (`repl_nlr.rs`) and the bindings written before the `^` keep their values.
+  `#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]` answers 3 and
+  leaves `w` at 3; `3 timesRepeat: [^8]. w := 99` answers 8 and does not run
+  `w := 99`. In trace mode (`eval` with `trace: true`) such an input answers
+  one step, the whole input with the `^`'s value. REPL-visible, error to value
+  only: these inputs were the BT-4003 `UnmigratedLocalThreading` error "the
+  loop would ignore it and run on". Still an error, with a new message: such a
+  `^` inside the value of a top-level assignment (`r := xs do: [:x | ^x]`),
+  which the workspace would bind to the input's value although a method
+  never assigns it. A `^` at the root, in a conditional arm, an evaluated or
+  protected block outside a loop, or a stored closure is unchanged: it
+  answers its value where it stands. The verdict is the analyser's, so
+  CLI/LSP/MCP diagnostics for the same top-level expressions change together.
 
 ### `internal:` ThreadedIr verifier warning (ADR 0111 Addendum 17, BT-3724)
 

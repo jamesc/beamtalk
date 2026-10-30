@@ -3190,7 +3190,16 @@ An actor's fields and class variables are not affected: an `ensure:` cleanup rea
 
 **A `^` in a stored closure answers what the closure captured.** A block that is not run where it is written (stored in a local, passed to a method, ...) captures the values of the locals it reads when it is created. A `^` in such a block that reads a local the method assigns after the block is created, or inside the body of a loop or fold that creates it, may answer the old value, so it is rejected conservatively as a compile error ([BT-4003](https://linear.app/beamtalk/issue/BT-4003)); at the REPL, so is one that reads any workspace binding (a later input may assign it). The rule treats every such block as escaping (as ADR 0133 does for a block passed to a user method), so it also rejects a block that is in fact run before the assignment and would answer right: `t := 0. self withFallback: [^t]. t := 5` is an error even if `withFallback:` runs the block at once. Pass the current value in as an argument (`[:v | ^v] value: t`) or write the block where it is run.
 
-**A `^` in a REPL loop body.** At the REPL, a `^` in the body of a loop or collection operation (`#(1, 2) do: [:x | ^x]`, `[n < 3] whileTrue: [^10]`) is a compile error: the loop would ignore it. Use `detect:ifNone:` or `inject:into:` to answer a value, or move the loop into a method. A `^` at the root of an input, in a conditional arm, an evaluated block, a protected block or a stored closure works.
+**A `^` in a REPL loop body.** At the REPL, a `^` in the body of a loop or collection operation (`#(1, 2) do: [:x | ^x]`, `[n < 3] whileTrue: [^10]`, also through a conditional arm, an evaluated or protected block or a nested loop in the body) ends the input with its value, as it ends a method ([BT-4288](https://linear.app/beamtalk/issue/BT-4288)). The bindings written before the `^` keep their values, and the rest of the input does not run:
+
+```beamtalk
+w := 0
+#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]   // => 3
+w                                                        // => 3
+3 timesRepeat: [^8]. w := 99                             // => 8 (w is still 3)
+```
+
+Such a `^` inside the value of a top-level assignment (`r := #(1, 2) do: [:x | ^x]`) is a compile error: a method never assigns `r`, but the workspace would bind it to the input's value. Answer the value with `detect:ifNone:` or `inject:into:` and assign that, or leave the assignment out. A `^` at the root of an input, in a conditional arm, an evaluated or protected block outside a loop, or a stored closure answers its value where it stands.
 
 ### Actor Blocks See Live State
 
