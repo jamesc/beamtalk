@@ -7,7 +7,7 @@ Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 >
 > - **Rule 2 is chain-wide (deviation from §1).** A class keeps its class process when it *or any class in its superclass chain* declares class variables, not only when the resolved method's defining class does. A subclass that declares none of its own holds its ancestors' class variables in its own process, and a method it defines itself reaches them through a class-side `self` send, which would raise `class_state_unreachable` in the caller. The runtime rule is `beamtalk_class_metadata:chain_has_class_variables/1`, the compile-time rule `ClassHierarchy::runs_class_method_in_caller` (Rust), and the derived `direct_call_ok/2` flag folds the class-variable facts over the whole chain (BT-4300, BT-4301).
 > - **The guarded static call** also checks `erlang:function_exported/3`, so a method removed by `removeSelector:` or a reload takes the `class_send` fallback instead of raising `undef`, and gets the class pid by `erlang:whereis/1` of the compile-time registered name. The direct call stays in tail position. Class-side `self foo` and explicit own-class sends go through `class_self_direct_ok/4`, sealed or not; no unguarded class-side direct call remains. The `class_var_abi` is 3 (the class-method calling convention changed); modules compiled for 2 are refused at load.
-> - **Flag erasure** is as amended in §2 below: a class's own flag before its change is visible, its descendants' flags just after.
+> - **Flag erasure** is as amended in §2 below: a class's own derived inputs are raised before its change is visible, its descendants' flags are erased just after.
 > - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 is the follow-up to bring it back.
 > - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
 > - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
@@ -194,9 +194,16 @@ end
   - This ADR adds erasure on every other metadata write for `C`: reload,
     a change to class variables, `removeSelector:`, and `put_class_method`.
 
-  A class's own flag is erased under the existing per-tag lock, *before*
-  its change becomes visible. Until the flag is re-derived, call sites take
-  the slow path.
+  **Amended (BT-4299, BT-4301, 2026-10-30).** For a fact the flag is
+  derived from (an extension, a runtime fun, the class's own class
+  variables), the raw input is raised and the class's own flag erased under
+  the per-tag lock *before* the change becomes visible, so no send sees the
+  old `true`. The other metadata writes (reload, `removeSelector:`,
+  `put_class_method`) only erase the derived flag: that forces the next send
+  to re-derive it from the raw inputs, but does not hold the fast path off
+  during the write. A method those writes remove is caught by the guarded
+  call's `function_exported/3` check, and the in-caller owner memo is kept
+  consistent by the derived cache's generation counter, not by the erase.
 - **Amended (BT-4301, 2026-10-30): descendants' flags.** Because the flag
   folds the class-variable facts of the whole chain, a change to a class
   (gaining or losing class variables, a reload that re-parents it) also
