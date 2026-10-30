@@ -671,6 +671,7 @@ const UNSEQUENCED_POSITIONS: &[&str] = &[
     "self wrap: 1; wrap: {c} size",
     "self fieldAt: #hits put: {c} size",
     "self fieldAt: #hits put: {c}",
+    "self fieldAt: #hits put: ({c} isNil ifTrue: [self.hits := 1. 1] ifFalse: [0])",
     "self clearField: ({c} isNil ifTrue: [#hits] ifFalse: [#hits])",
     "(xs at: 1) value: {c}",
     "\"v{{c}}\" size",

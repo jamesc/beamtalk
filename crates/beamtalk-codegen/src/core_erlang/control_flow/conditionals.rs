@@ -3095,7 +3095,11 @@ impl CoreErlangGenerator {
                 BodyExprKind::SelfFieldAtPut => {
                     if let Expression::MessageSend { arguments, .. } = expr {
                         // BT-4310: the name and value are sequenced ahead of
-                        // the put, so the put builds on their `State`.
+                        // the put, so the `State` read below is the one after
+                        // the value: a value's own change (a self-send, a
+                        // nested field write, a State-only fold) survives the
+                        // put, which before BT-4310 built on the state from
+                        // before the value and dropped it.
                         let scope = self.thread_send_arguments(expr, frame, &mut stmts)?;
                         let name_var = self.fresh_var("Name");
                         let val_var = self.fresh_temp_var("Val");

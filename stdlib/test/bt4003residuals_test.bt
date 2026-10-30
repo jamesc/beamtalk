@@ -282,3 +282,14 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4310UnsequencedActor spawn fieldAtPutBareRoot equals: #(3, 2)
     self assert: Bt4310UnsequencedActor spawn fieldAtPutInDo equals: #(3, 2)
     self assert: Bt4310UnsequencedActor spawn fieldAtPutInArm equals: #(3, 2)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutMixedArm equals: #(1, 102)
+    self assert: Bt4310UnsequencedActor spawn clearFieldRoot equals: 2
+
+  // BT-4310: a `self fieldAt:put:` whose value changes the actor's state puts
+  // onto the state after the value (main dropped a `self bump` value's write
+  // at the method root and in an arm).
+  testFieldAtPutKeepsTheValuesStateChange =>
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutSelfSendRoot equals: #(1, 1)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutSelfSendInArm equals: #(1, 1)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutFieldWriteRoot equals: #(5, 5)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutFieldWriteInArm equals: #(5, 5)

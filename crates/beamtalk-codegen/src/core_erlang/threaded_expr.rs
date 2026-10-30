@@ -1804,9 +1804,11 @@ impl CoreErlangGenerator {
     ///
     /// The sequencing rule's site lists (`sequenced_operand_sites`,
     /// `loop_body_producer_sites`) stop at the operands another lowering
-    /// compiles itself: a conditional's receiver, a lookup's key, a cascade
-    /// message's argument, the arguments of a `super`, `error:`,
-    /// block-invocation, cast or block-taking send. They stop there for a
+    /// compiles itself: every kind `beamtalk_core`'s `UnsequencedOperand`
+    /// names (a conditional's receiver, a lookup's key, a cascade message's
+    /// argument, the arguments of a `super`, `error:`, `fieldAt:put:`,
+    /// `clearField:`, block-invocation, cast or block-taking send, ...),
+    /// which `unsequenced_operand_holder` decides. They stop there for a
     /// producer that rebinds *outer locals*, which the analysis still
     /// rejects at those operands. A construct that rebinds none but threads
     /// `State` compiles to a `{Value, State}` carrier all the same, and every

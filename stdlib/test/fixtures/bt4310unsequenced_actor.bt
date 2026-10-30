@@ -84,6 +84,45 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
       ]
     #(self.items, self.n)
 
+  // The value's own state change survives the put: on main the put was built
+  // on the state from before the value (a `self bump` value dropped its write;
+  // a nested field write was a verifier error).
+  fieldAtPutSelfSendRoot =>
+    self fieldAt: #items put: self bump
+    #(self.items, self.n)
+
+  fieldAtPutSelfSendInArm =>
+    (self.n == 0) ifTrue: [self fieldAt: #items put: self bump]
+    #(self.items, self.n)
+
+  fieldAtPutFieldWriteRoot =>
+    self fieldAt: #items put: (self.n := 5)
+    #(self.items, self.n)
+
+  fieldAtPutFieldWriteInArm =>
+    (self.n == 0) ifTrue: [self fieldAt: #items put: (self.n := 5)]
+    #(self.items, self.n)
+
+  // A mutating conditional arm and the fold in one value.
+  fieldAtPutMixedArm =>
+    self
+      fieldAt: #items
+      put: ((self.items inject: 0 into: [:b :y | b + self bump]) notNil
+        ifTrue: [
+          self.n := self.n + 100
+          1
+        ]
+        ifFalse: [0])
+    #(self.items, self.n)
+
+  // The fold in `clearField:`'s argument.
+  clearFieldRoot =>
+    self
+      clearField: ((self.items inject: 0 into: [:b :y |
+        b + self bump
+      ]) > 2 ifTrue: [#items] ifFalse: [#items])
+    self.n
+
   // At the method root.
   condRoot =>
     r := ((self.items inject: 0 into: [:b :y |
