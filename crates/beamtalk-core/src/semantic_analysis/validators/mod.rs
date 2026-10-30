@@ -8,7 +8,9 @@
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
 //! - `class_process_ffi_validators` — class-side methods that run
-//!   process-sensitive FFI in the class process (BT-4031)
+//!   process-sensitive FFI in the class process (`class-process-ffi`,
+//!   BT-4031), or create process-owned resources in the caller
+//!   (`class-method-process-resource`, ADR 0142, BT-4302)
 //! - `class_state_abroad` — blocks that touch their home class's variables
 //!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
 //! - `class_validators` — class-hierarchy-dependent checks
@@ -46,7 +48,7 @@ mod unguarded_late_read_validators;
 mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
-pub(crate) use class_process_ffi_validators::check_class_process_ffi;
+pub(crate) use class_process_ffi_validators::check_class_method_ffi;
 pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{

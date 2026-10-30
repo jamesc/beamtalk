@@ -7,7 +7,7 @@
 Object subclass: LocalCallHelper
 
   class callerPid =>
-    @expect class_process_ffi "deliberately open: the test observes the class process vs the caller"
+    @expect class_method_process_resource "the test observes which process runs the class method"
     Erlang erlang self
 
   class echo: value => value

@@ -63,6 +63,11 @@ pub enum ExpectCategory {
     /// its class's process and directly calls a process-sensitive Erlang
     /// function (BT-4031).
     ClassProcessFfi,
+    /// Suppress class-method-process-resource warnings — a class-side method
+    /// of a class without class variables, which runs in the caller (ADR
+    /// 0142), directly creates a process-owned resource or relies on the
+    /// calling process's identity (BT-4302).
+    ClassMethodProcessResource,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
     /// (ADR 0137).
@@ -104,6 +109,7 @@ impl ExpectCategory {
             "match_arm_block" => Some(Self::MatchArmBlock),
             "class_state_abroad" => Some(Self::ClassStateAbroad),
             "class_process_ffi" => Some(Self::ClassProcessFfi),
+            "class_method_process_resource" => Some(Self::ClassMethodProcessResource),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "ffi_nested_string" => Some(Self::FfiNestedString),
             "stored_closure" => Some(Self::StoredClosure),
@@ -134,6 +140,7 @@ impl ExpectCategory {
             Self::MatchArmBlock => "match_arm_block",
             Self::ClassStateAbroad => "class_state_abroad",
             Self::ClassProcessFfi => "class_process_ffi",
+            Self::ClassMethodProcessResource => "class_method_process_resource",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::FfiNestedString => "ffi_nested_string",
             Self::StoredClosure => "stored_closure",
@@ -164,6 +171,7 @@ impl ExpectCategory {
             "match_arm_block",
             "class_state_abroad",
             "class_process_ffi",
+            "class_method_process_resource",
             "actor_state_abroad",
             "ffi_nested_string",
             "all",

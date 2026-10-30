@@ -154,6 +154,10 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("match-arm-block", DiagnosticCategory::MatchArmBlock),
     ("class-state-abroad", DiagnosticCategory::ClassStateAbroad),
     ("class-process-ffi", DiagnosticCategory::ClassProcessFfi),
+    (
+        "class-method-process-resource",
+        DiagnosticCategory::ClassMethodProcessResource,
+    ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
     (
@@ -599,6 +603,7 @@ fn expect_category_unchecked(
         | ExpectCategory::MatchArmBlock
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
+        | ExpectCategory::ClassMethodProcessResource
         | ExpectCategory::FfiNestedString
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
@@ -914,6 +919,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassProcessFfi)
                 )
                 | (
+                    ExpectCategory::ClassMethodProcessResource,
+                    Some(DiagnosticCategory::ClassMethodProcessResource)
+                )
+                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1109,6 +1118,7 @@ unguarded-late-read = "error"
 match-arm-block = "off"
 class-state-abroad = "off"
 class-process-ffi = "off"
+class-method-process-resource = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 handleinfo-no-catch-all = "error"

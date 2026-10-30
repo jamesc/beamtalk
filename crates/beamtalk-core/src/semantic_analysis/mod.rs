@@ -1161,7 +1161,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // where it runs outside an invocation of that class.
     validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-4031: process-sensitive FFI in a class method that runs in the class process.
-    validators::check_class_process_ffi(module, &result.class_hierarchy, &mut result.diagnostics);
+    validators::check_class_method_ffi(module, &result.class_hierarchy, &mut result.diagnostics);
     // ADR 0131 §6 and Phase 0 (BT-3745): outer-local writes that no
     // construct threads back are compile errors, not silent wrong answers.
     validators::check_local_threading(

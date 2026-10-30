@@ -458,16 +458,35 @@ impl ClassInfo {
     #[must_use]
     pub fn is_direct_call_eligible(&self, method: &MethodInfo) -> bool {
         self.is_sealed
-            && self.class_variables.is_empty()
+            && !self.has_class_variables()
             && !Self::is_direct_call_excluded_selector(&method.selector)
             && method.is_sealed
     }
 
+    /// Whether this class declares class variables (`classState:`) of its
+    /// own — class variables are per class, never inherited (BT-3762). The
+    /// one Rust-side answer to "does this class need its process?" (ADR 0142
+    /// §1 rule 1): [`Self::is_direct_call_eligible`] and the class-method FFI
+    /// lints (`class-process-ffi`, `class-method-process-resource`) all read
+    /// it, so they cannot disagree about which classes run their class
+    /// methods in the class process.
+    #[must_use]
+    pub fn has_class_variables(&self) -> bool {
+        !self.class_variables.is_empty()
+    }
+
+    /// Whether `selector` is one of the process-bound class-side selectors
+    /// (ADR 0142 §1 rule 3, [`PROCESS_BOUND_CLASS_SELECTORS`]) that keep their
+    /// class-process or dedicated routing whatever the class declares.
+    #[must_use]
+    pub fn is_process_bound_class_selector(selector: &str) -> bool {
+        PROCESS_BOUND_CLASS_SELECTORS.contains(&selector)
+    }
+
     /// Whether `selector` is a process-state constructor (`new`, `new:`,
     /// `startLink`, `startLink:`) that is never direct-called, whatever the
-    /// class declares. The single copy of the exclusion list: the
-    /// `class-process-ffi` lint asks it too, so it never suggests sealing a
-    /// method that sealing cannot help.
+    /// class declares (the constructor prefix of
+    /// [`PROCESS_BOUND_CLASS_SELECTORS`]).
     #[must_use]
     pub fn is_direct_call_excluded_selector(selector: &str) -> bool {
         DIRECT_CALL_EXCLUDED_SELECTORS.contains(&selector)
