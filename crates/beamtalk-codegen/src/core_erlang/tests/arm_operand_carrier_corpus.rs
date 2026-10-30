@@ -638,7 +638,7 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
 // lowers its construct as a producer of the frame (or, in a real closure, compiles no carrier
 // at all: it runs against the actor-state cell, ADR 0137); and with the registration withheld
 // (`UnsequencedOperandInPlace`) every cell whose construct was a producer reports
-// `ConstructCarrierInPlace`, except in an `on:do:`/`ensure:` frame, which checks no site. The
+// `ConstructCarrierInPlace`, in every frame kind (an `on:do:`/`ensure:` arm included). The
 // right answers are run on a BEAM in `stdlib/test/bt4003residuals_test.bt`. (A cast is a
 // statement only, so it cannot be a fold body's value; its cells are in `bt4310_*` in
 // `semantic_analysis/tests` and on the BEAM. A `match:` guard allows only comparisons and
@@ -695,18 +695,11 @@ struct UnsequencedCell {
     outer: Option<usize>,
     src: String,
     construct: std::ops::Range<usize>,
+    /// The index of the cell's position in [`UNSEQUENCED_POSITIONS`].
+    position: usize,
 }
 
 impl UnsequencedCell {
-    /// Whether the cell's frame is an `on:do:`/`ensure:` body or handler, which checks no
-    /// producer site (`verify_producer_sites_threaded` is not run there).
-    fn in_exception_frame(&self) -> bool {
-        self.outer.is_some_and(|o| {
-            let outer = FOLD_BODY_OUTERS[o].0;
-            outer.contains(" on: Error do: ") || outer.contains(" ensure: ")
-        })
-    }
-
     /// Whether the cell's statement is in a real closure (a block that is stored, or the
     /// handler of a lookup that is not inlined), which compiles no carrier.
     fn in_real_closure(&self) -> bool {
@@ -736,7 +729,7 @@ fn unsequenced_cells() -> Vec<UnsequencedCell> {
     outers.push((None, "{s}"));
     let mut out = Vec::new();
     for (outer_index, outer) in outers {
-        for position in UNSEQUENCED_POSITIONS {
+        for (position_index, position) in UNSEQUENCED_POSITIONS.iter().enumerate() {
             // A `match:` arm holds an expression, not a cascade.
             if outer.contains("->") && position.contains(';') {
                 continue;
@@ -751,6 +744,7 @@ fn unsequenced_cells() -> Vec<UnsequencedCell> {
                     .expect("the construct is in the program");
                 out.push(UnsequencedCell {
                     outer: outer_index,
+                    position: position_index,
                     src,
                     construct: start..start + construct.len(),
                 });
@@ -759,20 +753,34 @@ fn unsequenced_cells() -> Vec<UnsequencedCell> {
     }
     // The statement itself at the method root, not an assignment's value: each statement
     // kind's own lowering (a `super` or `error:` send, a cascade, a conditional) holds it.
-    for position in UNSEQUENCED_POSITIONS {
+    // Each shape three ways: a statement followed by another, the method's last statement
+    // (its value is the reply), and the value of a `^` (a cascade parenthesised there).
+    for (position_index, position) in UNSEQUENCED_POSITIONS.iter().enumerate() {
         for construct in FOLD_BODY_CONSTRUCTS {
             let stmt = position.replace("{c}", construct);
-            let src = format!(
-                "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n    {stmt}\n    #[0, t]\n"
-            );
-            let start = src
-                .find(construct)
-                .expect("the construct is in the program");
-            out.push(UnsequencedCell {
-                outer: None,
-                src,
-                construct: start..start + construct.len(),
-            });
+            let returned = if stmt.contains(';') {
+                format!("^({stmt})")
+            } else {
+                format!("^{stmt}")
+            };
+            for tail in [
+                format!("    {stmt}\n    #[0, t]\n"),
+                format!("    {stmt}\n"),
+                format!("    {returned}\n"),
+            ] {
+                let src = format!(
+                    "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n{tail}"
+                );
+                let start = src
+                    .find(construct)
+                    .expect("the construct is in the program");
+                out.push(UnsequencedCell {
+                    outer: None,
+                    position: position_index,
+                    src,
+                    construct: start..start + construct.len(),
+                });
+            }
         }
     }
     out
@@ -784,9 +792,10 @@ const UNSEQUENCED_PARTITIONS: usize = 6;
 
 impl UnsequencedCell {
     /// The part of the corpus the cell is checked in: every cell of one outer body in the
-    /// same part, so each part compiles its outer bodies' classes through `erlc` whole.
+    /// same part, and the method-root cells (the most numerous) spread over the parts by
+    /// position.
     fn partition(&self) -> usize {
-        self.outer.map_or(0, |o| o + 1) % UNSEQUENCED_PARTITIONS
+        self.outer.map_or(self.position, |o| o + 1) % UNSEQUENCED_PARTITIONS
     }
 }
 
@@ -894,7 +903,7 @@ fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_5() {
 }
 
 /// With the BT-4310 sites withheld, every cell whose construct the unbroken compile lowers
-/// as a producer reports `ConstructCarrierInPlace` (outside an exception frame), and no cell
+/// as a producer reports `ConstructCarrierInPlace`, and no cell
 /// reports anything else.
 #[test]
 fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus() {
@@ -902,7 +911,7 @@ fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus() {
     let mut missed = Vec::new();
     for cell in unsequenced_cells() {
         let (_, records) = recording_producers(|| codegen(&cell.src));
-        let must_report = cell.construct_is_producer(&records) && !cell.in_exception_frame();
+        let must_report = cell.construct_is_producer(&records);
         match outcome(&cell.src, Some(LocalRebindFault::UnsequencedOperandInPlace)) {
             Outcome::Finding(report) => {
                 assert!(

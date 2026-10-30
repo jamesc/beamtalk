@@ -20,6 +20,38 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
 
   apply: v with: blk => blk value: v
 
+  n => self.n
+
+  // The method's last statement (its value is the reply) and a `^` value.
+  condLast =>
+    ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+
+  condReturn =>
+    ^((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) > 2) ifTrue: [1] ifFalse: [0]
+
+  keyReturn =>
+    ^#{
+      3 => 30
+    } at: (self.items inject: 0 into: [:b :y | b + self bump]) ifAbsent: [0]
+
+  superLast => super wrap: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  superReturn =>
+    ^super wrap: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  blockArgLast =>
+    [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  cascadeLast =>
+    0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
+
+  cascadeReturn =>
+    ^(0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump]))
+
   // At the method root.
   condRoot =>
     r := ((self.items inject: 0 into: [:b :y |

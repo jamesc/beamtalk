@@ -247,3 +247,31 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4310UnsequencedActor spawn condInProtectedBody equals: #(1, 2)
     self assert: Bt4310UnsequencedActor spawn superInStoredClosure equals: #(30, 2)
     self assert: Bt4310UnsequencedActor spawn blockArgInLookupHandler equals: #(4, 2)
+
+  // BT-4310: the fold in the method's last statement (the reply) and in a `^`
+  // value; `n` read back by a later message.
+  testStateFoldAtAnUnsequencedOperandInTheReply =>
+    a := Bt4310UnsequencedActor spawn
+    self assert: a condLast equals: 1
+    self assert: a n equals: 2
+    b := Bt4310UnsequencedActor spawn
+    self assert: b condReturn equals: 1
+    self assert: b n equals: 2
+    c := Bt4310UnsequencedActor spawn
+    self assert: c keyReturn equals: 30
+    self assert: c n equals: 2
+    d := Bt4310UnsequencedActor spawn
+    self assert: d superLast equals: 30
+    self assert: d n equals: 2
+    e := Bt4310UnsequencedActor spawn
+    self assert: e superReturn equals: 30
+    self assert: e n equals: 2
+    f := Bt4310UnsequencedActor spawn
+    self assert: f blockArgLast equals: 4
+    self assert: f n equals: 2
+    g := Bt4310UnsequencedActor spawn
+    self assert: g cascadeLast equals: 3
+    self assert: g n equals: 2
+    h := Bt4310UnsequencedActor spawn
+    self assert: h cascadeReturn equals: 3
+    self assert: h n equals: 2

@@ -697,19 +697,14 @@ impl CoreErlangGenerator {
             // `ConstructTuple` is a statement of the method body, never a
             // carrier compiled in place inside an operand
             // (`ConstructCarrierInPlace`), as every frame body checks its own.
-            let sites: Vec<(Span, Vec<String>)> = body
-                .iter()
-                .flat_map(|stmt| self.family_only_operand_site_exprs(stmt))
-                .map(|site| (site.span(), Vec::new()))
-                .collect();
+            let sites = self.family_only_operand_sites_of(body);
             let stmts = self.with_local_producer_sites(body, |this| {
                 this.lower_body_exprs_with_reply_in_sites(body, supports_early_return)
             })?;
-            let errors = threaded_ir::verify_producer_sites_threaded(&stmts, &sites);
-            self.report_threaded_ir_verify_errors(
-                &errors,
-                "actor method-root loop or fold threading only `State` at an operand, \
-                 compiled in place instead of as a producer of the method body",
+            self.check_family_only_operand_sites(
+                &stmts,
+                &sites,
+                "actor method root",
                 body.first().map_or_else(Span::default, |e| e.span()),
             );
             Ok(stmts)

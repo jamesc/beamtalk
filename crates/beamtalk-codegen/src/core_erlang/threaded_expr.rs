@@ -1834,6 +1834,46 @@ impl CoreErlangGenerator {
             .collect()
     }
 
+    /// The BT-4310 sites of the statements `body` of one frame
+    /// ([`Self::family_only_operand_site_exprs`]), as `(span, no locals)` for
+    /// [`Self::check_family_only_operand_sites`]. Read before the statements
+    /// are lowered, by the rule their registration reads.
+    pub(super) fn family_only_operand_sites_of(
+        &self,
+        body: &[&Expression],
+    ) -> Vec<(Span, Vec<String>)> {
+        body.iter()
+            .flat_map(|stmt| self.family_only_operand_site_exprs(stmt))
+            .map(|site| (site.span(), Vec::new()))
+            .collect()
+    }
+
+    /// BT-4310: reports each of `sites` ([`Self::family_only_operand_sites_of`])
+    /// with no `ConstructTuple` at the top level of the lowered frame body
+    /// `stmts` (`ConstructCarrierInPlace`): a loop or fold threading only
+    /// `State` at an operand another lowering compiles, left in place as a
+    /// carrier instead of lowered as a producer of the frame. The one check the
+    /// frames that do not read [`Self::frame_producer_sites`] run (the actor
+    /// method root, a `whileTrue:` condition, an `on:do:`/`ensure:` arm); the
+    /// others check these sites among their own.
+    pub(super) fn check_family_only_operand_sites(
+        &mut self,
+        stmts: &[ThreadedStmt],
+        sites: &[(Span, Vec<String>)],
+        frame_kind: &str,
+        span: Span,
+    ) {
+        let errors = threaded_ir::verify_producer_sites_threaded(stmts, sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            &format!(
+                "{frame_kind}'s loop or fold threading only `State` at an operand, compiled in \
+                 place instead of as a producer of the frame"
+            ),
+            span,
+        );
+    }
+
     /// [`Self::family_only_operand_site_exprs`] as the method root registers
     /// them: none under the test-only fault `UnsequencedOperandInPlace`, while
     /// the method root's check still reads them.
@@ -1878,9 +1918,10 @@ impl CoreErlangGenerator {
     /// evaluated, applied and stored blocks, and the method root. A block that
     /// is a real closure (a stored block, a lookup handler that is not
     /// inlined) compiles no carrier at all (its self-sends go through the
-    /// actor-state cell, ADR 0137). The method root, the fold, letrec, arm,
-    /// closure and `whileTrue:` condition frames also check their sites with
-    /// `verify_producer_sites_threaded`; an exception arm does not. The REPL
+    /// actor-state cell, ADR 0137). The fold, letrec, arm and closure frames
+    /// check their sites with `verify_producer_sites_threaded`; the method
+    /// root, a `whileTrue:` condition and an `on:do:`/`ensure:` arm check the
+    /// BT-4310 ones (`check_family_only_operand_sites`). The REPL
     /// has its own rule (its producers adopt the bindings map), and class and
     /// value-type methods thread no `State`.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
