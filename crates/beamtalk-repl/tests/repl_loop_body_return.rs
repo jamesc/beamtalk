@@ -9,7 +9,8 @@
 //! (`beamtalk-core`'s `block_facts::loop_body_returns`), crossed with the
 //! position of the `^` in the body (a statement, a conditional arm, an
 //! evaluated block, a nested loop, a protected block, a `match:` arm, before a
-//! binding write, an assigned value, and one that never fires), and the
+//! binding write, an assigned value, a body that writes no binding, and one
+//! that never fires), and the
 //! position of the loop in the input (after a binding write, alone, before
 //! another statement, as an operand, in a conditional arm). Every row is
 //! interpreted by [`expected`], the reference semantics of a method, and:
@@ -43,6 +44,8 @@ enum Iteration {
 }
 
 /// The loop kinds: the loop with `{S}` for its body, and how `x` is bound.
+/// The unary `[...] whileTrue`/`whileFalse` are left out: at the REPL they
+/// raise `does_not_understand` whatever their body (BT-4313).
 const LOOPS: &[(&str, Iteration)] = &[
     ("#(1, 2, 3) do: [:x | {S}]", Iteration::Param),
     ("#(1, 2, 3) collect: [:x | {S}. x]", Iteration::Param),
@@ -134,6 +137,11 @@ const POSITIONS: &[(&str, &str, Step)] = &[
             }
         },
     ),
+    // A body that writes no binding: the throw carries the bindings the
+    // loop was entered with.
+    ("no write", "x == 2 ifTrue: [^x * 7]", |x, w| {
+        (w, (x == 2).then_some(14))
+    }),
     ("never fires", "w := w + x. x == 5 ifTrue: [^w]", |x, w| {
         (w + x, (x == 5).then_some(w + x))
     }),
