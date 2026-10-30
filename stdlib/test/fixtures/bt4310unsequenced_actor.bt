@@ -52,6 +52,38 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
   cascadeReturn =>
     ^(0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump]))
 
+  // The value of `self fieldAt:put:`, at the root, in a `do:` body and in an
+  // arm: the put builds on the fold's writes.
+  fieldAtPutRoot =>
+    self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+      b + self bump
+    ]) max: 1)
+    #(self.items, self.n)
+
+  fieldAtPutBareRoot =>
+    self fieldAt: #items put: (self.items inject: 0 into: [:b :y |
+      b + self bump
+    ])
+    #(self.items, self.n)
+
+  fieldAtPutInDo =>
+    #(1)
+      do: [:w |
+        self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) max: 1)
+      ]
+    #(self.items, self.n)
+
+  fieldAtPutInArm =>
+    (self.n == 0)
+      ifTrue: [
+        self fieldAt: #items put: ((self.items inject: 0 into: [:b :y |
+          b + self bump
+        ]) max: 1)
+      ]
+    #(self.items, self.n)
+
   // At the method root.
   condRoot =>
     r := ((self.items inject: 0 into: [:b :y |

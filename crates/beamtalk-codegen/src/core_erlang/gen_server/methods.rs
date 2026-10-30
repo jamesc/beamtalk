@@ -430,19 +430,23 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
-    /// BT-3814 / BT-3819: the one lowering of the arguments of a `super` send
-    /// (`super take: (self bump)`, `^super take: (c ifTrue: [self.n := 1
-    /// ...])`) or, BT-4310, of a `self error:` send in a method-body
-    /// statement. Their state-effecting sub-expressions thread ahead of the
-    /// send into `stmts` (the sequencing rule), so the send reads the
-    /// post-operand `State` and an operand's rebind is not scoped away inside
-    /// its closed argument list; a loop or fold threading only `State` there
+    /// BT-3814 / BT-3819: the one lowering of the arguments of a send whose
+    /// statement lowering compiles them itself: a `super` send (`super take:
+    /// (self bump)`, `^super take: (c ifTrue: [self.n := 1 ...])`) and,
+    /// BT-4310, a `self error:`, `self fieldAt:put:` or `self clearField:`
+    /// statement, at the method root (`frame` is `ROOT`) or in an arm frame.
+    /// Their state-effecting sub-expressions thread ahead of the send into
+    /// `stmts` (the sequencing rule), so the send reads the post-operand
+    /// `State` and an operand's rebind is not scoped away inside its closed
+    /// argument list; a loop or fold threading only `State` there
     /// (`family_only_operand_site_exprs`) is a producer whose carrier is
-    /// unpacked ahead of the send. The returned scope goes back to
+    /// unpacked ahead of the send. With no operand that needs a prelude this
+    /// compiles nothing. The returned scope goes back to
     /// [`Self::finish_precompiled_scope`] once the send itself is compiled.
-    fn thread_send_arguments(
+    pub(in crate::core_erlang) fn thread_send_arguments(
         &mut self,
         send: &Expression,
+        frame: threaded_ir::FrameId,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<PrecompiledScope> {
         let operands: Vec<&Expression> = if let Expression::MessageSend { arguments, .. } = send {
@@ -450,8 +454,7 @@ impl CoreErlangGenerator {
         } else {
             Vec::new()
         };
-        let (operand_prelude, scope) =
-            self.sequence_children(&operands, threaded_ir::FrameId::ROOT)?;
+        let (operand_prelude, scope) = self.sequence_children(&operands, frame)?;
         stmts.extend(operand_prelude);
         Ok(scope)
     }
@@ -469,7 +472,14 @@ impl CoreErlangGenerator {
         // self fieldAt: name put: val — sub-classify by RHS for control flow with mutations
         if self.is_self_field_at_put(expr) {
             if let Expression::MessageSend { arguments, .. } = expr {
-                if arguments.len() >= 2 && self.control_flow_has_mutations(&arguments[1]) {
+                // BT-4310: a value holding a loop or fold that threads only
+                // `State` at an operand is sequenced ahead of the put
+                // (`thread_send_arguments`) by the `SelfFieldAtPut` lowering;
+                // the control-flow one would read it as a raw tuple.
+                if arguments.len() >= 2
+                    && self.control_flow_has_mutations(&arguments[1])
+                    && self.family_only_operand_site_exprs(expr).is_empty()
+                {
                     return BodyExprKind::SelfFieldAtPutControlFlow;
                 }
             }
@@ -807,7 +817,11 @@ impl CoreErlangGenerator {
                         BodyExprKind::SuperSend => {
                             // BT-3819: `^super take: (c ifTrue: [self.n := 1. ...])`
                             // sequences its operands like the statement form.
-                            let super_scope = self.thread_send_arguments(value, &mut stmts)?;
+                            let super_scope = self.thread_send_arguments(
+                                value,
+                                threaded_ir::FrameId::ROOT,
+                                &mut stmts,
+                            )?;
                             let expr_str = self.expression_doc(value)?;
                             self.finish_precompiled_scope(super_scope)?;
                             stmts.push(ThreadedStmt::Statement(
@@ -926,7 +940,11 @@ impl CoreErlangGenerator {
                 // step it performs is accounted for by
                 // `verify_body_with_opaque_version_gaps`'s backfill.
                 BodyExprKind::SelfFieldAtPut => {
+                    // BT-4310: the name and value are sequenced ahead of the put.
+                    let scope =
+                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
                     let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
+                    self.finish_precompiled_scope(scope)?;
                     stmts.push(ThreadedStmt::Statement(doc, span));
                     if is_last {
                         let final_state = self.current_state_var();
@@ -946,7 +964,10 @@ impl CoreErlangGenerator {
                 // Statement + is_last reply shape, mirroring
                 // `generate_self_clear_field_open` (ADR 0124 §1/B4).
                 BodyExprKind::SelfClearField => {
+                    let scope =
+                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
                     let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
+                    self.finish_precompiled_scope(scope)?;
                     stmts.push(ThreadedStmt::Statement(doc, span));
                     if is_last {
                         let final_state = self.current_state_var();
@@ -1632,7 +1653,8 @@ impl CoreErlangGenerator {
                     // statement shape here), so the dispatch reads the
                     // post-operand `State` and the operand's rebind is not
                     // scoped away inside the dispatch's argument list.
-                    let super_scope = self.thread_send_arguments(expr, &mut stmts)?;
+                    let super_scope =
+                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
                     if is_last {
                         let expr_str = self.expression_doc(expr)?;
                         stmts.push(ThreadedStmt::Statement(
@@ -1656,7 +1678,8 @@ impl CoreErlangGenerator {
                     // BT-4310: `self error: (xs inject: ...) printString` — the
                     // argument is sequenced ahead of the send, like a `super`
                     // send's.
-                    let error_scope = self.thread_send_arguments(expr, &mut stmts)?;
+                    let error_scope =
+                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
                     if is_last {
                         // Error send never returns — no reply tuple needed.
                         let expr_str = self.expression_doc(expr)?;

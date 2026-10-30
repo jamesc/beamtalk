@@ -4732,6 +4732,7 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_accepted() {
         "[:z | z + 1] value: {f}",
         "self apply: {f} with: [:z | z]",
         "0 max: 1; max: {f}",
+        "self fieldAt: #n put: ({f} max: 1)",
     ];
     for position in positions {
         let value = position.replace("{f}", fold);

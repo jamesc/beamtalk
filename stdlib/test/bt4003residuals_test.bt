@@ -275,3 +275,10 @@ TestCase subclass: Bt4003ResidualsTest
     h := Bt4310UnsequencedActor spawn
     self assert: h cascadeReturn equals: 3
     self assert: h n equals: 2
+
+  // BT-4310: the fold in the value of `self fieldAt:put:`.
+  testStateFoldInAFieldAtPutValue =>
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutRoot equals: #(3, 2)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutBareRoot equals: #(3, 2)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutInDo equals: #(3, 2)
+    self assert: Bt4310UnsequencedActor spawn fieldAtPutInArm equals: #(3, 2)

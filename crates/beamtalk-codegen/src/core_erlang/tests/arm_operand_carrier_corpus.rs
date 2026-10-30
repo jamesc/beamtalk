@@ -628,7 +628,9 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
 //
 // The site walk (`operand_sites_of_statement`) stops at operands another lowering compiles
 // itself: a conditional's receiver, a lookup key, a cascade message's argument, the arguments
-// of a `super`, `error:`, block-invocation or block-taking send. A carrier construct there was
+// of a `super`, `error:`, `fieldAt:put:`, `clearField:`, block-invocation or block-taking send
+// (every `UnsequencedOperand` kind; `the_unsequenced_positions_cover_every_unsequenced_operand_kind`
+// checks the positions against the classifier the site walk reads). A carrier construct there was
 // compiled in place (measured on a BEAM at the method root and in a fold body: a crash, the
 // raw carrier or dropped writes), and the analysis rejected it (`StateFoldUnsequencedOperand`).
 // BT-4310 registers it as a producer site of the frame that lowers its statement, the method
@@ -639,12 +641,15 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
 // at all: it runs against the actor-state cell, ADR 0137); and with the registration withheld
 // (`UnsequencedOperandInPlace`) every cell whose construct was a producer reports
 // `ConstructCarrierInPlace`, in every frame kind (an `on:do:`/`ensure:` arm included). The
-// right answers are run on a BEAM in `stdlib/test/bt4003residuals_test.bt`. (A cast is a
-// statement only, so it cannot be a fold body's value; its cells are in `bt4310_*` in
-// `semantic_analysis/tests` and on the BEAM. A `match:` guard allows only comparisons and
-// arithmetic, so it cannot hold one at all.)
+// right answers are run on a BEAM in `stdlib/test/bt4003residuals_test.bt`. (A cast, a
+// destructuring and a loop statement's receiver are statements only:
+// `STATEMENT_ONLY_POSITIONS`, at the method root. A `match:` guard allows only comparisons
+// and arithmetic, so it cannot hold one at all.)
 
 use crate::core_erlang::threaded_expr::fault::recording_producers;
+use beamtalk_core::semantic_analysis::block_facts::{
+    UnsequencedOperand, operand_loop_constructs_with_holders,
+};
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 
 /// The statement holding the construct `{c}` at an operand the sequencing rule leaves to
@@ -664,7 +669,72 @@ const UNSEQUENCED_POSITIONS: &[&str] = &[
     "self apply: {c} with: [:z | z]",
     "xs size; max: {c} size",
     "self wrap: 1; wrap: {c} size",
+    "self fieldAt: #hits put: {c} size",
+    "self fieldAt: #hits put: {c}",
+    "self clearField: ({c} isNil ifTrue: [#hits] ifFalse: [#hits])",
+    "(xs at: 1) value: {c}",
+    "\"v{{c}}\" size",
+    "(q := {c}) isNil",
+    "{c} match: [_ -> 0]",
 ];
+
+/// Operands only a statement holds: a cast's (a cast answers no value), a destructuring's
+/// value, and the receiver of a method-body statement that is itself a loop. Checked as a
+/// method-root statement followed by another.
+const STATEMENT_ONLY_POSITIONS: &[&str] = &[
+    "xs add: {c} size!",
+    "{dq, dr} := {{c}, 1}",
+    "{c} do: [:z | z]",
+];
+
+/// The unsequenced operand kinds the core walk reports between each cell's statement and
+/// its construct (`operand_loop_constructs_with_holders`), over the method-root statement
+/// cells of every position.
+fn covered_unsequenced_kinds() -> std::collections::BTreeSet<UnsequencedOperand> {
+    let mut kinds = std::collections::BTreeSet::new();
+    for position in UNSEQUENCED_POSITIONS.iter().chain(STATEMENT_ONLY_POSITIONS) {
+        for construct in FOLD_BODY_CONSTRUCTS {
+            let stmt_src = position.replace("{c}", construct);
+            let src = format!(
+                "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n    {stmt_src}\n    #[0, t]\n"
+            );
+            let (module, diags) = super::parse_normalised(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+            let method = module.classes[0]
+                .methods
+                .iter()
+                .find(|m| m.selector.name() == "go:")
+                .expect("the go: method");
+            let stmt = &method.body[2].expression;
+            let start = u32::try_from(src.find(construct).expect("the construct"))
+                .expect("a small program");
+            let found = operand_loop_constructs_with_holders(stmt);
+            let (_, holders) = found
+                .iter()
+                .find(|(c, _)| c.span().start() >= start && c.span().start() <= start + 1)
+                .unwrap_or_else(|| panic!("the construct is an operand loop construct:\n{src}"));
+            assert!(
+                !holders.is_empty(),
+                "the construct should sit behind an unsequenced operand:\n{src}"
+            );
+            kinds.extend(holders.iter().copied());
+        }
+    }
+    kinds
+}
+
+/// Every kind of operand the sequencing rule leaves to another lowering
+/// (`UnsequencedOperand::ALL`, the classifier the site walk itself reads) has a position in
+/// the corpus, so no registered operand family can be missing from it.
+#[test]
+fn the_unsequenced_positions_cover_every_unsequenced_operand_kind() {
+    let covered = covered_unsequenced_kinds();
+    let missing: Vec<_> = UnsequencedOperand::ALL
+        .iter()
+        .filter(|k| !covered.contains(k))
+        .collect();
+    assert!(missing.is_empty(), "no corpus position for {missing:?}");
+}
 
 /// The outer bodies of [`FOLD_BODY_OUTERS`] whose statement is in a real closure: a lookup
 /// handler that writes no outer local (the lookup is not inlined; `x` is the handler's own
@@ -781,6 +851,23 @@ fn unsequenced_cells() -> Vec<UnsequencedCell> {
                     construct: start..start + construct.len(),
                 });
             }
+        }
+    }
+    for (index, position) in STATEMENT_ONLY_POSITIONS.iter().enumerate() {
+        for construct in FOLD_BODY_CONSTRUCTS {
+            let stmt = position.replace("{c}", construct);
+            let src = format!(
+                "{FOLD_BODY_HEADER}  go: flag =>\n    t := 0\n    xs := #(1, 2) asList\n    {stmt}\n    #[0, t]\n"
+            );
+            let start = src
+                .find(construct)
+                .expect("the construct is in the program");
+            out.push(UnsequencedCell {
+                outer: None,
+                position: UNSEQUENCED_POSITIONS.len() + index,
+                src,
+                construct: start..start + construct.len(),
+            });
         }
     }
     out
@@ -902,14 +989,16 @@ fn every_unsequenced_operand_cell_is_lowered_as_a_producer_part_5() {
     assert!(check_unsequenced_partition(5) >= 400);
 }
 
-/// With the BT-4310 sites withheld, every cell whose construct the unbroken compile lowers
-/// as a producer reports `ConstructCarrierInPlace`, and no cell
-/// reports anything else.
-#[test]
-fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus() {
+/// With the BT-4310 sites withheld, every cell of the parts `parts` whose construct the
+/// unbroken compile lowers as a producer reports `ConstructCarrierInPlace`, and no cell
+/// reports anything else. Answers how many reported.
+fn check_withholding_unsequenced_sites(parts: &[usize]) -> usize {
     let mut reported = 0;
     let mut missed = Vec::new();
-    for cell in unsequenced_cells() {
+    for cell in unsequenced_cells()
+        .into_iter()
+        .filter(|c| parts.contains(&c.partition()))
+    {
         let (_, records) = recording_producers(|| codegen(&cell.src));
         let must_report = cell.construct_is_producer(&records);
         match outcome(&cell.src, Some(LocalRebindFault::UnsequencedOperandInPlace)) {
@@ -931,8 +1020,23 @@ fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus() {
         missed.len(),
         missed.join("\n")
     );
+    reported
+}
+
+#[test]
+fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus_part_a() {
+    let reported = check_withholding_unsequenced_sites(&[0, 1, 2]);
     assert!(
-        reported >= 2000,
+        reported >= 1500,
+        "only {reported} programs reported the fault"
+    );
+}
+
+#[test]
+fn withholding_the_unsequenced_operand_sites_is_reported_over_the_corpus_part_b() {
+    let reported = check_withholding_unsequenced_sites(&[3, 4, 5]);
+    assert!(
+        reported >= 1500,
         "only {reported} programs reported the fault"
     );
 }
