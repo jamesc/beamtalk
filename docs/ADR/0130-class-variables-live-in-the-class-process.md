@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-10-06); accepted 2026-10-02.
 
+> **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), §5's "direct-called (`class sealed`, stateless)" wording.** A block passed to a class method of another class runs at home when that class's chain declares no class variables, whatever its sealing: such a method runs in the caller, not only a `class sealed` method of a sealed class. The in-caller path installs no class-variable home (the chain has none), so §1's no-nesting rule is untouched: a stateless method called from inside a stateful invocation runs in that class process, and the caller's writes after it land. A class keeps its process when it *or any ancestor* declares class variables, because a subclass holds its ancestors' class variables in its own process and reaches them through `self` sends. `class-state-abroad` now reads `ClassHierarchy::runs_class_method_in_caller` instead of the sealing rule. Not inherited, per-class ownership, the boundaries of §4 and the captured-value rule are unchanged.
+
 Supersedes ADR 0110 (Class-Variable Shadow Write-Through for Foreign NLR Relay). Amends ADR 0013 §1 (class-variable storage), ADR 0066 (class-side extension fun shape), ADR 0084 (ClassBuilder class-method fun arity), ADR 0109 (what a block running elsewhere may do with class variables), ADR 0111 and ADR 0122 (removes the `ClassVars` threading family and slot family).
 
 ## Context

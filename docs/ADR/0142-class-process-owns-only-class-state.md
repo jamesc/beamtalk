@@ -1,7 +1,17 @@
 # ADR 0142: The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller
 
 ## Status
-Accepted (2026-10-29)
+Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
+
+> **Implemented note (2026-10-30).** What shipped differs from the text below in these ways:
+>
+> - **Rule 2 is chain-wide (deviation from §1).** A class keeps its class process when it *or any class in its superclass chain* declares class variables, not only when the resolved method's defining class does. A subclass that declares none of its own holds its ancestors' class variables in its own process, and a method it defines itself reaches them through a class-side `self` send, which would raise `class_state_unreachable` in the caller. The runtime rule is `beamtalk_class_metadata:chain_has_class_variables/1`, the compile-time rule `ClassHierarchy::runs_class_method_in_caller` (Rust), and the derived `direct_call_ok/2` flag folds the class-variable facts over the whole chain (BT-4300, BT-4301).
+> - **The guarded static call** also checks `erlang:function_exported/3`, so a method removed by `removeSelector:` or a reload takes the `class_send` fallback instead of raising `undef`, and gets the class pid by `erlang:whereis/1` of the compile-time registered name. The direct call stays in tail position. Class-side `self foo` and explicit own-class sends go through `class_self_direct_ok/4`, sealed or not; no unguarded class-side direct call remains. The `class_var_abi` is 3 (the class-method calling convention changed); modules compiled for 2 are refused at load.
+> - **Flag erasure** is as amended in §2 below: a class's own flag before its change is visible, its descendants' flags just after.
+> - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 is the follow-up to bring it back.
+> - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
+> - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
+> - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307); and an explicit own-class send `Base foo` inside an inherited class method runs with the subclass as `self` (BT-4317).
 
 ## Context
 
@@ -111,6 +121,8 @@ A class method runs **in the caller** when all of these hold:
    - no class-side extension shadows a compiled method of `C`;
    - the class has finished bootstrap (`mark_ready`).
 2. **The class defining the resolved method also has no class variables.**
+   *(As implemented, this is taken over the receiving class's whole superclass
+   chain; see the Implemented note under Status.)*
    - A class method touches only its own class's variables, through the
      receiver's class-process home (ADR 0130).
    - Take a method defined on a stateful `Base` and sent to a stateless `Sub`.
@@ -182,9 +194,20 @@ end
   - This ADR adds erasure on every other metadata write for `C`: reload,
     a change to class variables, `removeSelector:`, and `put_class_method`.
 
-  Every erasure happens under the existing per-tag lock, *before* the change
-  becomes visible. Until the flag is re-derived, call sites take the slow
-  path.
+  A class's own flag is erased under the existing per-tag lock, *before*
+  its change becomes visible. Until the flag is re-derived, call sites take
+  the slow path.
+- **Amended (BT-4301, 2026-10-30): descendants' flags.** Because the flag
+  folds the class-variable facts of the whole chain, a change to a class
+  (gaining or losing class variables, a reload that re-parents it) also
+  erases every descendant's flag. That erasure happens *after* the
+  ancestor's row write, under each descendant's tag lock, which is always
+  taken, so it also removes a value an in-flight install derived from the
+  old row. Between the write and the erase a descendant's static send can
+  still see its old `true` and run in the caller: the same short window a
+  reload has for its own new code. The window is accepted; no stale value
+  outlives the erase. See the `beamtalk_class_shadow_flags` moduledoc and
+  `beamtalk_class_metadata:put_class_variables/2`.
 - This guard **replaces** the unguarded ADR 0129 static calls, which closes
   BT-4126, BT-4133 and BT-4134 for class methods.
 
@@ -446,7 +469,7 @@ open-class class method.
 - Phase 2b: BT-4302, the `class-method-process-resource` lint.
 - Phase 3: BT-4303, REPL-protocol e2e test, docs, ADR amendments, CLAUDE.md and CHANGELOG.
 
-**Status:** Planned
+**Status:** Done (2026-10-30). Follow-ups: BT-4316 (row 3a), BT-4317, BT-4307.
 
 ## Migration Path
 
