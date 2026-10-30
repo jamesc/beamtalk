@@ -1255,6 +1255,37 @@ fn sibling_reads_ignore_earlier_rebinds_other_locals_and_nested_frames() {
     }
 }
 
+// ── RebindNotVisible (BT-4263) ───────────────────────────────────────────
+
+#[test]
+fn a_rebind_the_frame_does_not_read_back_fails_and_one_it_does_passes() {
+    use crate::core_erlang::threaded_ir::verify::verify_rebinds_visible;
+    let prelude = on_do_rebinding_t();
+    let rebound = "_T1".to_string();
+    let stale = "T".to_string();
+    // The frame reads `t` from the rebind's `value_var`: visible.
+    assert_eq!(
+        verify_rebinds_visible(&prelude, |name| (name == "t").then_some(&rebound)),
+        Vec::new()
+    );
+    // BT-4263's repro: the rebind was bound in a popped scope, so the frame
+    // still reads the pre-construct variable (or none at all).
+    for bound in [Some(&stale), None] {
+        assert_eq!(
+            verify_rebinds_visible(&prelude, |_| bound),
+            vec![VerifyError::RebindNotVisible {
+                local: "t".to_string(),
+                value_var: "_T1".to_string(),
+                bound: bound.cloned(),
+                at: span(),
+            }]
+        );
+    }
+    // A rebind nested in an inner frame node is that frame's, not this one's.
+    let nested = vec![build_branch_arm(FrameId::new(2), threads(&["t"]), prelude)];
+    assert_eq!(verify_rebinds_visible(&nested, |_| None), Vec::new());
+}
+
 // ── BT-3835: the identity `Put` of a rebind read through the frame's map ──
 
 /// A `StateAcc` loop node threading `names`.

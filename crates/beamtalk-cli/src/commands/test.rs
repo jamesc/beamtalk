@@ -1303,30 +1303,12 @@ fn compute_native_type_registry(
         };
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
-        let dependency_stubs = super::build::load_dependency_stub_registries(
-            &resolved_deps,
-            super::build::distribution_stubs_dir().as_deref(),
-            auto_extract.as_ref(),
-            super::OutputFormat::Text,
-        );
-        let project_stubs = super::build::load_project_stub_registry(
+        let (pkg_registry, _stub_diags) = super::build::resolve_package_type_registry(
             pkg_root,
-            auto_extract.as_ref(),
-            super::OutputFormat::Text,
+            auto_extract,
+            &resolved_deps,
+            Some(super::OutputFormat::Text),
         );
-
-        let pkg_registry = if dependency_stubs.is_none() && project_stubs.is_none() {
-            auto_extract
-        } else {
-            let mut pkg_merged = auto_extract.unwrap_or_default();
-            if let Some((dep_registry, _diags)) = dependency_stubs {
-                pkg_merged.apply_overrides(dep_registry);
-            }
-            if let Some((stub_registry, _diags)) = project_stubs {
-                pkg_merged.apply_overrides(stub_registry);
-            }
-            Some(pkg_merged)
-        };
 
         if let Some(reg) = pkg_registry {
             merged.apply_overrides(reg);

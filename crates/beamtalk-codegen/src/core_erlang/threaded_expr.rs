@@ -199,6 +199,12 @@ pub(super) mod fault {
         /// `{Value, State}` carrier becomes the operand
         /// (`ConstructCarrierInPlace`).
         FoldOperandFamilyOnlyInPlace,
+        /// BT-4263: an evaluated block with arguments that is a
+        /// local-threading producer leaves its `LocalRebind`s bound only in
+        /// the parameter scope it pops (`generate_evaluated_block_producer`
+        /// skips binding them again), so the frame reads the pre-construct
+        /// local (`RebindNotVisible`).
+        EvaluatedBlockRebindsScoped,
     }
 
     thread_local! {
@@ -976,10 +982,11 @@ impl CoreErlangGenerator {
         }) {
             return None;
         }
-        // BT-3841: an evaluated literal block (`[...] value`) packs its one arm
-        // like a conditional does. `threaded_locals_of` leaves the construct's
-        // `lowered` set empty (the legacy inline-block path unpacks its own
-        // tuple), so the producer reads the set off the arm directly.
+        // BT-3841: an evaluated literal block (`[...] value`, and since
+        // BT-4263 `[:y | ...] value: x`) packs its one arm like a conditional
+        // does. `threaded_locals_of` leaves the construct's `lowered` set
+        // empty (the legacy inline-block path unpacks its own tuple), so the
+        // producer reads the set off the arm directly.
         let set = if literal_block_value_arm(expr).is_some() {
             self.block_value_threaded_locals(&arms)?
         } else {
@@ -989,7 +996,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3841: whether `expr` (paren-unwrapped) is an evaluated literal block
-    /// (`[...] value`, [`literal_block_value_arm`]) that
+    /// (`[...] value`, `[:y | ...] value: x`, [`literal_block_value_arm`]) that
     /// [`Self::threaded_expression`] lowers as a local-threading producer in the
     /// frame being lowered ([`Self::is_producer_frame_for`]: a method root, a
     /// registered `BranchArm` frame, or a producer site of a loop or fold body),
@@ -1217,6 +1224,7 @@ impl CoreErlangGenerator {
         };
         let (prelude, value) =
             self.lower_local_threading_construct(inner, &locals, ProducerTail::Rebind, frame)?;
+        self.report_rebinds_visible(&prelude, inner.span());
         Ok(Some(ThreadedValue { prelude, value }))
     }
 
@@ -1300,6 +1308,7 @@ impl CoreErlangGenerator {
             return Ok(None);
         };
         let (prelude, value) = self.lower_exception_producer(inner, &locals, tail, frame)?;
+        self.report_rebinds_visible(&prelude, inner.span());
         Ok(Some(ThreadedValue { prelude, value }))
     }
 

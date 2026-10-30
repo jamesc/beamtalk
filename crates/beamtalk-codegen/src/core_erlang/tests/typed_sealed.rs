@@ -149,6 +149,43 @@ fn sealed_value_typed_param_sends_direct_actor_side() {
 }
 
 #[test]
+fn sealed_value_field_send_as_server_match_scrutinee_is_bracketed() {
+    // BT-4136: catalina's `Handler>>handleContinuation:` — a field write, then
+    // a sealed typed Value's field getter as a `match:` scrutinee whose arms
+    // send to `self`. The guarded direct call still has a dynamic-send
+    // fallback, so it is bracketed like any other call, never an
+    // `UnbracketedUserCodeSend`: debug assertions are on, so a verifier
+    // finding panics here rather than passing.
+    let code = codegen(concat!(
+        "Server subclass: Handler\n",
+        "  state: userState :: Object = nil\n\n",
+        "  handleContinuation: result :: HandlerResult -> Nil =>\n",
+        "    self.userState := result state\n",
+        "    result kind match: [\n",
+        "      #continue -> self continueReading: result;\n",
+        "      #close -> self closeLocally;\n",
+        "      _ -> self failWith: result reason\n",
+        "    ]\n",
+        "    nil\n\n",
+        "  continueReading: result :: HandlerResult -> Nil =>\n",
+        "    self.userState := result timeout\n",
+        "    nil\n\n",
+        "  closeLocally -> Nil => nil\n\n",
+        "  failWith: reason -> Nil => nil\n\n",
+        "sealed typed Value subclass: HandlerResult\n",
+        "  field: kind :: Symbol = #continue\n",
+        "  field: state :: Object = nil\n",
+        "  field: timeout :: Integer = 0\n",
+        "  field: reason :: Object = nil\n",
+    ));
+    assert!(
+        code.contains("call 'bt@handler_result':'dispatch'('kind'"),
+        "the scrutinee should take the sealed direct path. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
 fn open_value_typed_param_stays_dynamic() {
     let code = codegen(concat!(
         "Object subclass: Caller\n",

@@ -1093,6 +1093,7 @@ init({ClassName, ClassInfo}) ->
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_class_methods(ClassName, Meta),
     sync_direct_constructors(ClassName, Meta),
+    sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
     %% Clear any runtime class-method funs left behind by a *hard*
     %% crash of the previous incarnation of this class process — a hard crash
@@ -1488,6 +1489,18 @@ handle_call(
             beamtalk_class_metadata:put_direct_constructors(
                 NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
             ),
+            %% BT-4299: the class-variable fact and process-bound list move too.
+            beamtalk_class_metadata:put_class_variables(
+                NewName,
+                beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false
+            ),
+            beamtalk_class_metadata:put_process_bound_selectors(
+                NewName,
+                case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
+                    {ok, ProcessBound} -> ProcessBound;
+                    unknown -> undefined
+                end
+            ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
             beamtalk_class_metadata:delete(OldName),
@@ -1602,6 +1615,10 @@ handle_call(
     _From,
     #class_state{name = ClassName} = State
 ) ->
+    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag before the
+    %% patched method becomes visible (the runtime-fun raise below erases it
+    %% only on the class's first runtime fun).
+    beamtalk_class_shadow_flags:invalidate(ClassName),
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
     NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
@@ -2610,6 +2627,35 @@ sync_direct_constructors(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
+Publish the class-variable fact and the process-bound selector list (ADR 0142
+§1, BT-4299) into the unified metadata row.
+
+Whether the class declares class variables is read from the compiled
+`__beamtalk_meta/0`'s `class_field_kinds` (every declared `classState:`,
+`late` ones included); a class without it (a ClassBuilder class, an older
+module) falls back to the keys of its `classState` defaults. Never re-derived
+from source. `beamtalk_class_metadata:put_class_variables/2` erases the
+derived direct-call flag before a changed fact becomes visible.
+
+`process_bound_class_selectors` is the generated list Rust owns; a module
+without the key stores `undefined` (unknown), never a runtime copy.
+""".
+-spec sync_class_process_facts(class_name(), map(), map()) -> ok.
+sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
+    HasClassVars =
+        case maps:get(class_field_kinds, Meta, undefined) of
+            Kinds when is_map(Kinds) -> map_size(Kinds) > 0;
+            _ -> map_size(ClassVarDefaults) > 0
+        end,
+    beamtalk_class_metadata:put_class_variables(ClassName, HasClassVars),
+    ProcessBound =
+        case maps:get(process_bound_class_selectors, Meta, undefined) of
+            L when is_list(L) -> [S || S <- L, is_atom(S)];
+            _ -> undefined
+        end,
+    beamtalk_class_metadata:put_process_bound_selectors(ClassName, ProcessBound).
+
+-doc """
 Warn when a reload leaves direct-dispatch verdicts baked outside this class's
 own row stale (BT-4126).
 
@@ -2836,6 +2882,10 @@ ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 """.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
+    %% ADR 0142 §2 (BT-4299): a reload is a class-metadata write, so the
+    %% derived direct-call flag is erased (under its per-tag lock) before any
+    %% of the writes below lands; the next send re-derives it.
+    beamtalk_class_shadow_flags:invalidate(State#class_state.name),
     %% NewModule/NewIsAbstract/NewSuperclass are written to the process
     %% dictionary together with the ETS metadata row, in one place, by
     %% sync_identity/6 below — not here.
@@ -2947,6 +2997,12 @@ apply_class_info(State, ClassInfo) ->
     %% same for the direct-construction verdicts (e.g. a reload
     %% adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
+    %% BT-4299: a reload can add or drop `classState:` declarations.
+    sync_class_process_facts(
+        State#class_state.name,
+        Meta,
+        maps:get(class_state, ClassInfo, State#class_state.class_state)
+    ),
     %% BT-4126: the two syncs above re-bake only this class's own row; say so
     %% when the reload leaves verdicts baked elsewhere stale.
     warn_stale_direct_verdicts(

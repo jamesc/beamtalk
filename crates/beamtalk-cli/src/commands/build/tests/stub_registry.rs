@@ -12,7 +12,7 @@ fn load_project_stub_registry_none_when_no_stubs_dir() {
     let temp = TempDir::new().unwrap();
     let project_path = create_test_project(&temp);
 
-    assert!(load_project_stub_registry(&project_path, None, OutputFormat::Text).is_none());
+    assert!(load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).is_none());
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn load_project_stub_registry_none_when_stubs_dir_has_no_bt_files() {
     fs::create_dir_all(&stubs_path).unwrap();
     write_test_file(&stubs_path.join("README.md"), "not a stub");
 
-    assert!(load_project_stub_registry(&project_path, None, OutputFormat::Text).is_none());
+    assert!(load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).is_none());
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn load_project_stub_registry_populates_registry_from_stub_file() {
     );
 
     let (registry, diags) =
-        load_project_stub_registry(&project_path, None, OutputFormat::Text).unwrap();
+        load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).unwrap();
 
     assert!(diags.is_empty());
     let sig = registry.lookup("lists", "reverse", 1).unwrap();
@@ -64,7 +64,7 @@ fn load_project_stub_registry_combines_multiple_files_for_same_module() {
     );
 
     let (registry, _diags) =
-        load_project_stub_registry(&project_path, None, OutputFormat::Text).unwrap();
+        load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).unwrap();
 
     assert_eq!(registry.module_functions("lists").unwrap().len(), 2);
     assert!(registry.lookup("lists", "reverse", 1).is_some());
@@ -102,7 +102,8 @@ fn load_project_stub_registry_flags_version_drift_against_auto_extract() {
     );
 
     let (registry, diags) =
-        load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text).unwrap();
+        load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
+            .unwrap();
 
     // `bogus/1` isn't a real `lists` export — one drift warning.
     assert_eq!(diags.len(), 1);
@@ -127,7 +128,8 @@ fn load_project_stub_registry_no_drift_for_module_unknown_to_auto_extract() {
     let auto_extract = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
 
     let (_registry, diags) =
-        load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text).unwrap();
+        load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
+            .unwrap();
 
     assert!(diags.is_empty());
 }
@@ -258,7 +260,7 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
         &[],
         Some(dist_dir.as_path()),
         Some(&auto_extract),
-        OutputFormat::Text,
+        Some(OutputFormat::Text),
     )
     .unwrap();
     let mut merged = auto_extract.clone();
@@ -270,7 +272,7 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
         &resolved_deps,
         Some(dist_dir.as_path()),
         Some(&auto_extract),
-        OutputFormat::Text,
+        Some(OutputFormat::Text),
     )
     .unwrap();
     let mut merged = auto_extract.clone();
@@ -279,7 +281,8 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
 
     // Project-local beats everything, including package-bundled.
     let (project_layer, _) =
-        load_project_stub_registry(&project_path, Some(&auto_extract), OutputFormat::Text).unwrap();
+        load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
+            .unwrap();
     merged.apply_overrides(project_layer);
     assert_eq!(marker(&merged), "ProjectMarker");
 }
@@ -341,7 +344,8 @@ fn load_dependency_stub_registries_flags_collision_between_sibling_package_stubs
     ];
 
     let (_registry, diags) =
-        load_dependency_stub_registries(&resolved_deps, None, None, OutputFormat::Text).unwrap();
+        load_dependency_stub_registries(&resolved_deps, None, None, Some(OutputFormat::Text))
+            .unwrap();
 
     assert_eq!(
         diags.len(),
@@ -411,7 +415,8 @@ fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
     ];
 
     let (registry, diags) =
-        load_dependency_stub_registries(&resolved_deps, None, None, OutputFormat::Text).unwrap();
+        load_dependency_stub_registries(&resolved_deps, None, None, Some(OutputFormat::Text))
+            .unwrap();
 
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     assert!(registry.lookup("shared_mod", "a_thing", 1).is_some());

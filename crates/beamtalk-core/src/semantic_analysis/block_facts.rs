@@ -730,6 +730,8 @@ fn analyze_expression(
                 // that always runs, [`literal_block_value_arm`]), so its writes
                 // are the enclosing block's writes: a `do:` body whose only
                 // outer write is inside a nested `[...] value` threads it.
+                // BT-4263: so is `[:y | ...] value: x`, whose arguments are
+                // analysed below as operands of the enclosing block.
                 propagate_inline_block_writes(block, analysis, ctx);
             } else {
                 analyze_expression(receiver, analysis, ctx);
@@ -1927,9 +1929,10 @@ fn packed_writes_agree(
     (!all.is_empty() && names(&all) == names(&today)).then_some(all)
 }
 
-/// ADR 0131 (BT-3841): the block of an *evaluated literal block*, the unary
-/// `value` sent to a block literal with no parameters (`[t := t + 1. t] value`),
-/// or `None` for any other expression.
+/// ADR 0131 (BT-3841, BT-4263): the block of an *evaluated literal block*, a
+/// positional `value`-family send to a block literal of the send's arity
+/// (`[t := t + 1. t] value`, `[:y | t := y] value: 5`,
+/// [`literal_block_value_send`]), or `None` for any other expression.
 ///
 /// The **receiver rule** of this family: the receiver is a `[...]` literal
 /// (parentheses not peeled: `([...]) value` is a block value, ADR 0131 §6), so
@@ -1937,18 +1940,23 @@ fn packed_writes_agree(
 /// send is never dispatched, the block body is inlined where the send sits. A
 /// stored or computed block (`b value`, `(f at: 1) value`) is not a literal and
 /// keeps the Tier 2 protocol (`prescan_tier2_local_vars`) or the §6 error.
-/// `value:`, `value:value:` and `valueWithArguments:` are not recognized here:
-/// their arguments are evaluated outside the block and bound to its parameters,
-/// which the arm frame does not model, so they keep their own lowering.
+/// `valueWithArguments:` is not recognized here: its arguments are one runtime
+/// list, not one per parameter.
+///
+/// BT-4263: the arguments of `value:`, `value:value:` … are operands of the
+/// enclosing frame, evaluated in order **before** the block runs and bound to
+/// its parameters (codegen's `generate_evaluated_block_producer`); the block
+/// itself is the same arm that always runs, so the family is one construct
+/// whatever its arity. A write to a parameter of the block is the parameter's
+/// own (shadowed) binding, never an outer local's
+/// ([`construct_outer_local_writes`]).
 ///
 /// The one site rule for the family: read by [`conditional_arm_blocks`] (and so
 /// by the Phase 0 check, the producer rule and the site rules) and by codegen's
 /// producer, which lowers the block as a `BranchArm` frame that always runs.
 #[must_use]
 pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
-    literal_block_value_send(expr)
-        .filter(|(_, arguments)| arguments.is_empty())
-        .map(|(block, _)| block)
+    literal_block_value_send(expr).map(|(block, _)| block)
 }
 
 /// BT-3982: the block and arguments of an *evaluated literal block* of the
@@ -1960,7 +1968,8 @@ pub fn literal_block_value_arm(expr: &Expression) -> Option<&Block> {
 /// arguments are one runtime list, not one per parameter.
 ///
 /// The one recognizer codegen's evaluated-block producers read (actor
-/// `State`, value-type `Self`) and [`literal_block_value_arm`] narrows.
+/// `State`, value-type `Self`, local-threading) and [`literal_block_value_arm`]
+/// projects to its block.
 #[must_use]
 pub fn literal_block_value_send(expr: &Expression) -> Option<(&Block, &[Expression])> {
     let Expression::MessageSend {
@@ -1996,11 +2005,12 @@ pub fn literal_block_value_send(expr: &Expression) -> Option<(&Block, &[Expressi
 ///
 /// [`dictionary_inline`]: crate::state_threading_selectors::LookupShape::dictionary_inline
 ///
-/// ADR 0131 (BT-3841): an evaluated literal block (`[...] value`, see
-/// [`literal_block_value_arm`]) is the degenerate conditional: one arm that
-/// always runs. Its block is the single arm, so every rule that reads this
-/// function (the conditional producer rule, the site rules, the Phase 0 check
-/// and codegen's producer) treats it as an inline arm-like frame.
+/// ADR 0131 (BT-3841, BT-4263): an evaluated literal block (`[...] value`,
+/// `[:y | ...] value: x`, see [`literal_block_value_arm`]) is the degenerate
+/// conditional: one arm that always runs. Its block is the single arm, so
+/// every rule that reads this function (the conditional producer rule, the
+/// site rules, the Phase 0 check and codegen's producer) treats it as an
+/// inline arm-like frame.
 #[must_use]
 pub fn conditional_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     let construct = local_threading_construct(expr)?;

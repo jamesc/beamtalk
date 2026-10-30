@@ -10,6 +10,11 @@
 // block literal, so no other class's `value` can run. The columns are
 // adr0131eval_block_{class,value,actor}.bt; the expected answers are in
 // stdlib/test/adr0131eval_block_test.bt.
+//
+// BT-4263: the `arg*` methods are the same producer for the `value:` family
+// (`[:y | t := y] value: 5`, `value:value:`, `value:value:value:`): its
+// arguments are evaluated first, in order, in the enclosing frame, then the
+// block is the same arm (`{[:y | t := y] value: 5, t}` answers `{5, 5}`).
 
 Value subclass: Adr0131EvalBlockValue
 
@@ -210,3 +215,331 @@ Value subclass: Adr0131EvalBlockValue
         true
       ]
     #[r, t]
+
+  take: v => v
+
+  argStA =>
+    t := 0
+    [:k | t := t + k] value: 1
+    t
+
+  argStSeq =>
+    t := 0
+    [:k | t := t + k] value: 1
+    [:k | t := t + k] value: 10
+    t
+
+  argLast =>
+    t := 0
+    [:k |
+      t := t + k
+      t
+    ] value: 1
+
+  argAssign =>
+    t := 0
+    r := [:k |
+      t := t + k
+      7
+    ] value: 5
+    #[r, t]
+
+  argOperand =>
+    t := 0
+    r := t + ([:k |
+      t := t + k
+      5
+    ] value: 1)
+    #[r, t]
+
+  argTuple =>
+    t := 0
+    {[:y | t := y] value: 5, t}
+
+  argList =>
+    t := 0
+    #[[:y | t := y] value: 5, t]
+
+  argKeyword =>
+    t := 0
+    self take: ([:y | t := y] value: 5)
+    t
+
+  argKeywordValue =>
+    t := 0
+    {self take: ([:y | t := y] value: 5), t}
+
+  argTwo =>
+    t := 0
+    {[:a :b | t := a + b] value: 2 value: 3, t}
+
+  argThree =>
+    t := 0
+    {[:a :b :c | t := a + b + c]
+      value: 1
+      value: 2
+      value: 3, t}
+
+  argWritesArgument =>
+    t := 0
+    {[:y | t := t + y] value: (t := 5), t}
+
+  argReadsOuter =>
+    t := 1
+    r := [:y | t := t * 10 + y] value: t + 1
+    #[r, t]
+
+  argOrder =>
+    t := 0
+    {[:a :b | t := a * 10 + b] value: (t := t + 1) value: (t := t + 1), t}
+
+  argArm =>
+    t := 0
+    4 > 3 ifTrue: [[:k | t := t + k] value: 1]
+    t
+
+  argArmNotTaken =>
+    t := 0
+    4 < 3 ifTrue: [[:k | t := t + k] value: 1]
+    t
+
+  argArmValue =>
+    t := 0
+    r := 4 > 3 ifTrue: [{[:y | t := y] value: 5, t}] ifFalse: [0]
+    #[r, t]
+
+  argNested =>
+    t := 0
+    [:a |
+      [:k | t := t + k] value: a
+      [:k | t := t + k] value: a * 10
+    ] value: 1
+    t
+
+  argInUnary =>
+    t := 0
+    [[:k | t := t + k] value: 3] value
+    t
+
+  argInDo =>
+    t := 0
+    #(1, 2, 3) do: [:e | [:k | t := t + k] value: e]
+    t
+
+  argInDoArm =>
+    t := 0
+    #(1, 2, 3) do: [:e | e > 1 ifTrue: [[:k | t := t + k] value: e]]
+    t
+
+  argInToDo =>
+    t := 0
+    1 to: 3 do: [:i | [:k | t := t + k] value: i]
+    t
+
+  argInWhile =>
+    t := 0
+    i := 0
+    [i < 3]
+      whileTrue: [
+        i := i + 1
+        [:k | t := t + k] value: i
+      ]
+    t
+
+  argInTimes =>
+    t := 0
+    3 timesRepeat: [[:k | t := t + k] value: 1]
+    t
+
+  argInCollect =>
+    t := 0
+    r := #(1, 2)
+      collect: [:e |
+        [:k | t := t + k] value: e
+        e * 2
+      ]
+    t * 100 + (r inject: 0 into: [:a :x | a + x])
+
+  argInHandler =>
+    t := 0
+    [Error signal: "x"] on: Error do: [:e | [:k | t := t + k] value: 100]
+    t
+
+  argInProtected =>
+    t := 0
+    [[:k | t := t + k] value: 1] on: Error do: [:e | 0]
+    t
+
+  argInProtectedRaise =>
+    t := 0
+    [
+      [:k | t := t + k] value: 1
+      Error signal: "x"
+    ] on: Error do: [:e | nil]
+    t
+
+  argInEnsure =>
+    t := 0
+    [[:k | t := t + k] value: 1] ensure: [[:k | t := t + k] value: 10]
+    t
+
+  argEarlyReturn =>
+    t := 0
+    [:k |
+      t := t + k
+      ^t
+    ] value: 1
+    99
+
+  argLoopInBlock =>
+    t := 0
+    [:xs | xs do: [:e | t := t + e]] value: #(1, 2, 3)
+    t
+
+  argCondInBlock =>
+    t := 0
+    [:c | c ifTrue: [t := t + 1]] value: 4 > 3
+    t
+
+  argFoldLoopInBlock =>
+    t := 0
+    r := 0
+    #(1, 2)
+      do: [:k |
+        [:z |
+          1
+            to: 2
+            do: [:i |
+              r := #(1, 2)
+                inject: 0
+                into: [:a :x |
+                  t := t + x
+                  a + x
+                ]
+            ]
+        ] value: k
+      ]
+    #[t, r]
+
+  argAssignedInDo =>
+    t := 0
+    r := 0
+    #(1, 2) do: [:x | r := [:v | t := t + v] value: x]
+    #[r, t]
+
+  argLookupInDo =>
+    t := 0
+    d := #{#a => 1}
+    #(1, 2)
+      do: [:x |
+        [:z |
+          d
+            at: z
+            ifAbsent: [
+              t := t + 1
+              0
+            ]
+        ] value: x
+      ]
+    t
+
+  argBlockLocalInToDo =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        [:z |
+          w := z
+          t := t + w
+        ] value: i
+      ]
+    t
+
+  argBlockLocalOperandInToDo =>
+    t := 0
+    1
+      to: 3
+      do: [:i |
+        t := t + ([:z |
+          w := z
+          t := t + w
+          w
+        ] value: i)
+      ]
+    t
+
+  argWhileInToDo =>
+    s := 0
+    1 to: 3 do: [:i | [:k | [s < i] whileTrue: [s := s + 1]] value: 1]
+    s
+
+  argKeyedInDo =>
+    t := 0
+    #(1) do: [:z |
+      [:y | #{#a => 1} keysAndValuesDo: [:k :v | t := t + v]] value: z
+    ]
+    t
+
+  argKeyedReturnInDo =>
+    t := 0
+    #(1, 2) do: [:z |
+      [:y | ^#{#a => 1} keysAndValuesDo: [:k :v | t := t + v]] value: z
+    ]
+    t
+
+  argDeep3 =>
+    t := 0
+    #(1, 2) do: [:z |
+      [4 > 3 ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]
+    ]
+    t
+
+  argDeep4 =>
+    t := 0
+    #(1, 2)
+      do: [:y |
+        #(1, 2) do: [:z |
+          [4 > 3 ifTrue: [[:v | t := t + v] value: 1]] on: Error do: [:e | 0]
+        ]
+      ]
+    t
+
+  argThreeDeepTwoFolds =>
+    t := 0
+    #(1, 2) do: [:z | 4 > 3 ifTrue: [[:v | t := t + v] value: 1]]
+    #(1, 2)
+      do: [:z |
+        [
+          #(1, 2) do: [:y | 4 > 3 ifTrue: [[:v | t := t + v] value: 1]]
+        ] on: Error do: [:e | 0]
+      ]
+    t
+
+  argThreeDeepArm =>
+    t := 0
+    4 > 3 ifTrue: [
+      #(1, 2) do: [:z | 4 > 3 ifTrue: [[:v | t := t + v] value: 1]]
+    ]
+    t
+
+  argThreeDeepHandler =>
+    t := 0
+    #(1, 2)
+      do: [:z |
+        [
+          Error signal: "x"
+        ] on: Error do: [:e | 4 > 3 ifTrue: [[:v | t := t + v] value: 1]]
+      ]
+    t
+
+  argParamShadows =>
+    t := 0
+    u := 0
+    // The parameter shadows `t` on purpose (BT-4263): it is the block's own
+    // binding, never the outer local the producer rebinds.
+    @expect all
+    [:t |
+      t := 9
+      u := t
+    ] value: 1
+    #[t, u]

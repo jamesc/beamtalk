@@ -517,7 +517,10 @@ compiled method that the walk honours: a class-side extension on the class
 Costs one `persistent_term` read for the defining-class receiver (BT-3700: a
 derived per-class flag in `beamtalk_class_shadow_flags` folds the extension flag,
 the runtime-fun flag and readiness; BT-3669/BT-3676 had three reads); a
-subclass receiver short-circuits on the first clause.
+subclass receiver short-circuits on the first clause. It asks
+`shadow_free/2`, not `direct_call_ok/2`: this call already runs in the class
+process, so the class's own class variables (BT-4299's extra input to
+`direct_call_ok/2`) do not bar it.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
@@ -528,7 +531,7 @@ class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
             %% Extension registry not initialised yet (early bootstrap), or a
             %% shadow present, declines: the walk is always a correct answer.
             %% One persistent_term read of the derived flag (BT-3700).
-            beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName)
+            beamtalk_class_shadow_flags:shadow_free(Tag, ClassName)
     end;
 class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.

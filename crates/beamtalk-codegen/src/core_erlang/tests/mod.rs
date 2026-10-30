@@ -291,6 +291,7 @@ mod closure_self_send_state_guard_corpus;
 mod control_flow;
 mod dispatch;
 mod dynamic_site_report;
+mod evaluated_block_arg_local_producer;
 mod evaluated_block_grid_corpus;
 mod evaluated_block_producer;
 mod expect_directive_statement;

@@ -25,7 +25,7 @@ use beamtalk_core::ast::{
     ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, SlotKind, StateDeclaration,
     TypeParamDecl, declared_shape_migrations,
 };
-use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
@@ -413,6 +413,7 @@ impl CoreErlangGenerator {
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
+            Self::meta_process_bound_class_selectors_entry(),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
             if provenance.overrides_collection_selector {
@@ -475,6 +476,23 @@ impl CoreErlangGenerator {
         }
         parts.push(Document::Str("}~"));
         docvec![",\n      'direct_class_methods' => ", Document::Vec(parts)]
+    }
+
+    /// ADR 0142 §1 rule 3 (BT-4299): `'process_bound_class_selectors' =>
+    /// ['new', ...]`, including its leading separator — the class-side
+    /// selectors that keep their class-process routing, from the one Rust
+    /// list ([`ClassInfo::process_bound_class_selectors`]). Always emitted,
+    /// so the runtime never keeps its own copy and can tell an older module
+    /// (key absent) from a current one.
+    fn meta_process_bound_class_selectors_entry() -> Document<'static> {
+        let selectors: Vec<String> = ClassInfo::process_bound_class_selectors()
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        docvec![
+            ",\n      'process_bound_class_selectors' => ",
+            Self::meta_atom_list(&selectors)
+        ]
     }
 
     /// BT-3916: emit `'stdlib_trait_methods' => [Selector, ...]`, the
