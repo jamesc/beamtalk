@@ -7,5 +7,5 @@ CvsOverrideBase subclass: CvsOverrideSub
 
   class bump => self writeN
 
-  // Defined on the subclass itself: performLocally: does not walk the superclass chain.
+  // Defined on the subclass itself, for the performLocally: snapshot row.
   class snapshotN => self n

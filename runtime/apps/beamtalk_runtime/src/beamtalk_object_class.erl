@@ -69,6 +69,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_instance_methods/1,
     dispatch_caller_pid/0,
     is_class_var_reflection_send/2,
+    is_class_var_reflection_selector/1,
     %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
@@ -725,9 +726,11 @@ class_send(ClassPid, Selector, Args) ->
 -doc """
 Execute a class method in the caller's process.
 
-Resolves the target module from the class object, then calls
-Module:class_<Selector>(Receiver, Args...) directly — bypassing the class
-object's gen_server. The receiver class object is passed as `ClassSelf` and the
+Resolves `Selector` through the class-method chain starting at the receiving
+class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
+class process uses), so a subclass override wins and an inherited method is
+found (BT-4300), then calls DefiningModule:class_<Selector>(Receiver, Args...)
+directly — bypassing the class object's gen_server. The receiver class object is passed as `ClassSelf` and the
 call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
 class-variable reads see the snapshot (the ETS mirror as of the last completed
 invocation), writes raise `class_state_read_only`, and when called from inside
@@ -737,19 +740,18 @@ Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
 """.
 -spec local_call(term(), atom(), list()) -> term().
-local_call(Receiver = #beamtalk_object{class_mod = Module}, Selector, Args) when
+local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
     is_atom(Selector), is_list(Args)
 ->
     case beamtalk_class_registry:is_class_object(Receiver) of
         true ->
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
-            code:ensure_loaded(Module),
-            case erlang:function_exported(Module, FunName, length(Args) + 1) of
-                true ->
+            case local_call_module(Tag, Selector, FunName, length(Args) + 1) of
+                {ok, Module} ->
                     beamtalk_class_vars:with_snapshot(Receiver, fun() ->
                         erlang:apply(Module, FunName, [Receiver | Args])
                     end);
-                false ->
+                not_found ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
                         does_not_understand,
@@ -782,6 +784,29 @@ local_call(Receiver, _Selector, _Args) ->
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).
+
+%% The module whose compiled `FunName/Arity` answers a class-side `Selector`
+%% sent to the class tagged `Tag`: the defining class the class-method chain
+%% walk reaches from the receiving class (BT-4300), or `not_found` when no
+%% class in the chain defines it or its definition has no compiled export
+%% (an ADR 0084 runtime fun, which `performLocally:` has never applied).
+-spec local_call_module(atom(), atom(), atom(), arity()) -> {ok, module()} | not_found.
+local_call_module(Tag, Selector, FunName, Arity) ->
+    case beamtalk_primitive:class_name_from_tag(Tag) of
+        undefined ->
+            not_found;
+        ClassName ->
+            case beamtalk_class_dispatch:find_class_method_from_class(Selector, ClassName) of
+                {ok, _DefiningClass, Module} ->
+                    _ = code:ensure_loaded(Module),
+                    case erlang:function_exported(Module, FunName, Arity) of
+                        true -> {ok, Module};
+                        false -> not_found
+                    end;
+                not_found ->
+                    not_found
+            end
+    end.
 
 -doc """
 Get a compiled method object.
@@ -1615,9 +1640,11 @@ handle_call(
     _From,
     #class_state{name = ClassName} = State
 ) ->
-    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag before the
-    %% patched method becomes visible (the runtime-fun raise below erases it
-    %% only on the class's first runtime fun).
+    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag, so the next
+    %% send re-derives it. The erase alone does not keep the fast path off: a
+    %% concurrent send re-derives from the raw flags at once. What bars it is
+    %% the raw `runtime_fun` flag, which `set_runtime_class_methods/2` below
+    %% raises before the patched method becomes visible.
     beamtalk_class_shadow_flags:invalidate(ClassName),
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
@@ -2119,6 +2146,16 @@ sends read or write class variables, which only the class process holds.
 -spec is_class_var_reflection_send(atom(), list()) -> boolean().
 is_class_var_reflection_send(Selector, Args) ->
     class_var_reflection_op(Selector, Args) =/= none.
+
+-doc """
+Can a send of `Selector` be a class-variable reflection send, whatever its
+argument (`is_class_var_reflection_send/2` with a Symbol argument)? The
+in-caller owner memo (`beamtalk_class_dispatch`, ADR 0142) is keyed by
+selector alone, so it declines these selectors outright.
+""".
+-spec is_class_var_reflection_selector(atom()) -> boolean().
+is_class_var_reflection_selector(Selector) ->
+    class_var_reflection_op(Selector, [Selector]) =/= none.
 
 -spec dispatch_class_method_lookup(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -2883,8 +2920,13 @@ ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
     %% ADR 0142 §2 (BT-4299): a reload is a class-metadata write, so the
-    %% derived direct-call flag is erased (under its per-tag lock) before any
-    %% of the writes below lands; the next send re-derives it.
+    %% derived direct-call flag is erased (under its per-tag lock); the next
+    %% send re-derives it. The erase does not keep the in-caller fast path off
+    %% during the writes below: a concurrent send re-derives from the raw
+    %% flags at once. The raw inputs that bar it are raised before the writes
+    %% (`class_vars` just below, `runtime_fun` by `seed_runtime_class_methods/2`
+    %% before its funs are visible); the class-method owner memo (BT-4300) is
+    %% kept consistent by the derived-fact cache's generation counter.
     beamtalk_class_shadow_flags:invalidate(State#class_state.name),
     %% NewModule/NewIsAbstract/NewSuperclass are written to the process
     %% dictionary together with the ETS metadata row, in one place, by
@@ -2899,6 +2941,15 @@ apply_class_info(State, ClassInfo) ->
             undefined -> read_meta(NewModule);
             M when is_map(M) -> M
         end,
+    %% BT-4299: a reload can add or drop `classState:` declarations. Published
+    %% before every other write below (BT-4300): raising `class_vars` is what
+    %% bars the in-caller fast path (ADR 0142 §1 rule 1) for a class that gains
+    %% class variables, so it must land before the reloaded methods' metadata.
+    sync_class_process_facts(
+        State#class_state.name,
+        Meta,
+        maps:get(class_state, ClassInfo, State#class_state.class_state)
+    ),
     NewIsAbstract = maps:get(
         is_abstract,
         Meta,
@@ -2997,12 +3048,6 @@ apply_class_info(State, ClassInfo) ->
     %% same for the direct-construction verdicts (e.g. a reload
     %% adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
-    %% BT-4299: a reload can add or drop `classState:` declarations.
-    sync_class_process_facts(
-        State#class_state.name,
-        Meta,
-        maps:get(class_state, ClassInfo, State#class_state.class_state)
-    ),
     %% BT-4126: the two syncs above re-bake only this class's own row; say so
     %% when the reload leaves verdicts baked elsewhere stale.
     warn_stale_direct_verdicts(

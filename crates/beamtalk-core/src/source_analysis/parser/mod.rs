@@ -664,14 +664,21 @@ pub enum DiagnosticCategory {
     /// carried into another class's class-side method raises
     /// `class_state_unreachable`. A lint, not a guarantee.
     ClassStateAbroad,
-    /// A class-side method that runs in its class's `gen_server` process (the
-    /// class or the method is not sealed) and directly calls a
-    /// process-sensitive Erlang function — one that blocks, or depends on the
-    /// identity or ownership of the calling process (BT-4031, ADR 0129).
-    /// Sealing the class and the method direct-calls it in the caller.
-    /// Suppressible with `@expect class_process_ffi` for deliberate
-    /// serialisation.
+    /// A class-side method that runs in its class's `gen_server` process (it
+    /// is not direct-called) and directly calls a process-sensitive Erlang
+    /// function — one that blocks, or depends on the identity or ownership of
+    /// the calling process (BT-4031, ADR 0129). Suppressible with
+    /// `@expect class_process_ffi` for deliberate serialisation.
     ClassProcessFfi,
+    /// A class-side method that is direct-called in the caller's process
+    /// (today: `class sealed` in a `sealed` class without class variables;
+    /// after ADR 0142, every class method of a class without class variables)
+    /// directly calls an Erlang function that creates a resource tied to the
+    /// calling process (ETS table, port, linked process, link, monitor,
+    /// registered name, timer) or acts on the calling process itself
+    /// (`self()`, the process dictionary, process flags) (BT-4302).
+    /// Suppressible with `@expect class_method_process_resource`.
+    ClassMethodProcessResource,
     /// A block literal that reads or writes a `state:` field of its actor,
     /// probes with `hasField:`, or makes a synchronous `self` send, and is
     /// passed to `Timer`, to a send whose receiver is statically another

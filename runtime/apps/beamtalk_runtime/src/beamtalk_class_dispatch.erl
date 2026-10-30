@@ -50,6 +50,15 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -type selector() :: atom().
 -type class_name() :: atom().
 
+%% ADR 0142 (BT-4300): the in-caller class-send path is one call into the
+%% compiled method, plus the guard and memo reads; its helpers are inlined so
+%% the hop costs no extra reductions.
+-compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7]}).
+%% ADR 0142 §2 (BT-4300): a class method the caller may run itself: the
+%% receiving class, its metaclass tag and module, the defining class and
+%% module, and the compiled function name (`class_method_owner/2`).
+-type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
+
 -doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
 
@@ -176,6 +185,24 @@ class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
 class_send_plain(ClassPid, Selector, Args) ->
+    %% ADR 0142 §2 (BT-4300): a class method of a class that needs no process
+    %% (no class variables anywhere in its chain, not shadowed, a selector
+    %% that is not process-bound) runs in the caller. Checked
+    %% before the self-call guard: an in-caller call has no gen_server to
+    %% deadlock on, so a block re-entering its class answers.
+    case in_caller_owner(ClassPid, Selector) of
+        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
+            ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
+            run_in_caller(
+                ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
+            );
+        decline ->
+            class_send_via_process(ClassPid, Selector, Args)
+    end.
+
+%% Today's routing for a send the caller may not run itself (ADR 0142 §2).
+-spec class_send_via_process(pid(), selector(), list()) -> term().
+class_send_via_process(ClassPid, Selector, Args) ->
     %% ADR 0129 Phase 0b: sealed, stateless classes' eligible class methods run
     %% in the caller, exactly like the static direct call. The eligibility set
     %% is generated metadata (Rust's `compute_direct_call_eligible`), never
@@ -190,6 +217,185 @@ class_send_plain(ClassPid, Selector, Args) ->
             class_send_with_recovery(ClassPid, Selector, fun(P) ->
                 class_send_dispatch(P, Selector, Args)
             end)
+    end.
+
+-doc """
+ADR 0142 §1-§2 (BT-4300): may the caller run `Selector` sent to the class at
+`ClassPid` itself? `{owner, ClassName, Tag, Module, DefiningClass,
+DefiningModule, FunName}` when all of these hold, else `decline` (take
+`class_send_via_process/3`):
+
+- the class is local and alive;
+- `class_method_owner/2` (memoised) resolves the defining class: the
+  selector is not process-bound, the class-process lookup would answer it
+  with a class method, and neither the receiving class nor any ancestor
+  declares class variables (rule 2,
+  `beamtalk_class_metadata:chain_has_class_variables/1`, so an
+  inherited method touching a stateful parent's variables keeps its error);
+- `beamtalk_class_shadow_flags:direct_call_ok/2` holds for the receiving
+  class (rule 1: no class variables, no class-side extension, no ADR 0084
+  runtime fun, bootstrap finished). One `persistent_term` read of raw-flag
+  inputs that their writers raise before the change becomes visible.
+
+The memo stays consistent with class-metadata writes through the derived-fact
+cache's generation counter (`beamtalk_class_derived_cache`): an answer derived
+before a write is never served after the write's invalidation. Nothing here
+relies on a derived flag having been erased. As for every metadata-driven path,
+a hot reload's new code is current a moment before its class process publishes
+the new metadata; the raw `class_vars` input is published first
+(`beamtalk_object_class:apply_class_info/2`) to keep that window short.
+""".
+-spec in_caller_owner(pid(), selector()) -> owner() | decline.
+in_caller_owner(ClassPid, Selector) when node(ClassPid) =:= node() ->
+    %% Alive before the memo is consulted: a send to a dead incarnation takes
+    %% the crash recovery path and never derives a memo from a class mid-init.
+    case is_process_alive(ClassPid) andalso class_method_owner(ClassPid, Selector) of
+        {owner, ClassName, Tag, _Module, _DefiningClass, _DefiningModule, _FunName} = Owner ->
+            case beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName) of
+                true -> Owner;
+                false -> decline
+            end;
+        _ ->
+            decline
+    end;
+in_caller_owner(_ClassPid, _Selector) ->
+    decline.
+
+-doc """
+The class-method owner memo, `{class_method_owner, ClassPid, Selector}` in
+`beamtalk_class_derived_cache` (ADR 0142 §2, the BT-4109 `resolve_owner`
+pattern of `beamtalk_dispatch`). Keyed by the class object's pid, which names
+one class for its whole life, so a hit needs no pid-to-name lookup; a restarted
+class has a new pid (and its `init/1` flushes the cache anyway).
+
+Derived by walking the chain exactly as the class process does
+(`handle_class_method_call/6`): the receiving class's own class-side
+extensions are not consulted here, because any extension on it already makes
+`direct_call_ok/2` false; then its local class methods and its ancestors',
+from the published selector lists, which include ADR 0084 runtime funs, so a
+runtime fun at an ancestor counts as that ancestor's method (and is applied
+from the fun store by `apply_class_method_body/7`). An ancestor's class-side
+extension is not reached, as on the class-process path (BT-4307).
+
+`decline` is memoised too (process-bound selector, class-variable reflection
+send, no class method in the chain, class variables declared in the chain or a
+fact unpublished): the next metadata write flushes it. A pid with no
+registered class, or a class with no metadata row, is never memoised. Every
+input is a class-metadata row field whose writers invalidate the cache after
+the write lands: `insert/5`, `merge_identity/5`, `set_runtime_class_methods/2`
+(selectors, superclass, module), `put_class_variables/2` (the chain's class
+variable facts) and `put_process_bound_selectors/2`.
+""".
+-spec class_method_owner(pid(), selector()) -> owner() | decline.
+class_method_owner(ClassPid, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {class_method_owner, ClassPid, Selector},
+        fun() -> compute_class_method_owner(ClassPid, Selector) end
+    ).
+
+-spec compute_class_method_owner(pid(), selector()) -> {cache | nocache, owner() | decline}.
+compute_class_method_owner(ClassPid, Selector) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} -> compute_class_method_owner_of(ClassName, Selector);
+        not_found -> {nocache, decline}
+    end.
+
+-spec compute_class_method_owner_of(class_name(), selector()) ->
+    {cache | nocache, owner() | decline}.
+compute_class_method_owner_of(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_process_bound_selectors(ClassName) of
+        {ok, ProcessBound} ->
+            {cache, derive_class_method_owner(ClassName, Selector, ProcessBound)};
+        unknown ->
+            %% No generated list: every selector is process-bound (ADR 0142
+            %% §1 rule 3). Cached only while the class has a row, whose later
+            %% publication of the list flushes it.
+            case beamtalk_class_metadata:lookup_methods(ClassName) of
+                {ok, _, _} -> {cache, decline};
+                not_found -> {nocache, decline}
+            end
+    end.
+
+-spec derive_class_method_owner(class_name(), selector(), [selector()]) ->
+    owner() | decline.
+derive_class_method_owner(ClassName, Selector, ProcessBound) ->
+    case
+        lists:member(Selector, ProcessBound) orelse
+            beamtalk_object_class:is_class_var_reflection_selector(Selector)
+    of
+        true ->
+            decline;
+        false ->
+            case find_class_method_from_class(Selector, ClassName) of
+                {ok, DefiningClass, DefiningModule} ->
+                    %% Rule 2, over the whole chain (see
+                    %% `beamtalk_class_metadata:chain_has_class_variables/1`).
+                    case beamtalk_class_metadata:chain_has_class_variables(ClassName) of
+                        false ->
+                            owner_of(ClassName, DefiningClass, DefiningModule, Selector);
+                        true ->
+                            decline
+                    end;
+                not_found ->
+                    %% Only the `Class` chain answers: the BT-4073 skip in
+                    %% `class_send_dispatch/3` already runs it in the caller.
+                    decline
+            end
+    end.
+
+-spec owner_of(class_name(), class_name(), module(), selector()) -> owner() | decline.
+owner_of(ClassName, DefiningClass, DefiningModule, Selector) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, Module} ->
+            {owner, ClassName, receiver_tag(ClassName), Module, DefiningClass, DefiningModule,
+                class_method_fun_name(Selector)};
+        not_found ->
+            decline
+    end.
+
+-doc """
+Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
+reference of the receiving class, the value its class literal evaluates to
+(its metaclass tag, its own module and its registered pid), even for an
+inherited method, as every class-side path now builds it
+(`receiver_class_self/3`, `invoke_class_method/7`). `performLocally:`
+(`beamtalk_object_class:local_call/3`) used to apply its selector from
+`class_mod` alone; it now walks the class-method chain from the receiving
+class, so an inherited selector is found and a subclass override wins
+(BT-4300). No class-variable
+home is installed: the chain has no class variables, and ADR 0130 §1's
+no-nesting rule concerns only homes. The class-process services (session
+context seeding, the mirrored caller pid, the entry group leader, the call
+timeouts) are not recreated: the caller is the context they stand in for.
+
+The outcome is adapted exactly as the class-process path adapts the same
+outcome (`run_with_class_vars/3`'s reply, then `class_method_call/3`), so
+every error is raised with the value it has today.
+""".
+-spec run_in_caller(
+    #beamtalk_object{}, selector(), list(), class_name(), class_name(), module(), atom()
+) -> term().
+run_in_caller(ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName) ->
+    Outcome =
+        case DefiningClass =:= ClassName of
+            %% `direct_call_ok/2` held, so the receiving class has no runtime
+            %% class-method fun: its compiled export is the method.
+            true ->
+                apply_compiled_class_method(
+                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+                );
+            false ->
+                apply_class_method_body(
+                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+                )
+        end,
+    case Outcome of
+        {ok, Result} ->
+            Result;
+        _ ->
+            class_method_result(
+                ClassSelf#beamtalk_object.pid, Selector, Args, outcome_reply(Outcome)
+            )
     end.
 
 -doc """
@@ -467,8 +673,8 @@ metaclass tag; extensions are never inherited, so only that tag is checked),
 mirroring `handle_class_method_call/6`'s extension-before-method order, then
 walks the class-method hierarchy starting at `ClassName` itself and applies
 the found `DefiningModule:class_<Selector>` (or runtime class-method fun) in
-the caller's process via `apply_class_method_in_context/6`, with
-`ClassSelf#beamtalk_object.class_mod` set to the defining module.
+the caller's process via `apply_class_method_in_context/6`, with `ClassSelf`
+the receiving class's real reference (`receiver_class_self/3`).
 
 `ClassName` is the *receiving* class — the class named by `ClassSelf`, which
 for an inherited class method is a subclass of the class whose code is
@@ -569,7 +775,12 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
                 ClassName,
                 Selector,
                 apply_class_method_in_context(
-                    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
+                    Selector,
+                    Args,
+                    ClassName,
+                    receiver_class_self(ReceiverTag, ClassName, Selector),
+                    DefiningClass,
+                    DefiningModule
                 )
             );
         not_found ->
@@ -612,20 +823,10 @@ own). Raises the structured
 -spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
     term() | no_return().
 class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
-    ReceiverName =
-        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
-            undefined -> ClassName;
-            Name -> Name
-        end,
-    case beamtalk_class_registry:whereis_class(ReceiverName) of
+    case receiver_class_object(ReceiverTag, ClassName) of
         undefined ->
             raise_class_self_dnu(ClassName, Selector);
-        ReceiverPid ->
-            ClassSelf = #beamtalk_object{
-                class = ReceiverTag,
-                class_mod = self_dispatch_module(ReceiverName),
-                pid = ReceiverPid
-            },
+        #beamtalk_object{pid = ReceiverPid} = ClassSelf ->
             try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
                 not_found -> raise_class_self_dnu(ClassName, Selector)
@@ -707,7 +908,12 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                         ClassName,
                         Selector,
                         apply_class_method_in_context(
-                            Selector, Args, ClassName, ReceiverTag, ClassName, DefiningModule
+                            Selector,
+                            Args,
+                            ClassName,
+                            receiver_class_self(ReceiverTag, ClassName, Selector),
+                            ClassName,
+                            DefiningModule
                         )
                     );
                 error ->
@@ -749,8 +955,7 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
     %% passes them separately.
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
-            Module = self_dispatch_module(ClassName),
-            ClassSelf = #beamtalk_object{class = ReceiverTag, class_mod = Module, pid = self()},
+            ClassSelf = receiver_class_self(ReceiverTag, ClassName, Selector),
             {ok,
                 unwrap_self_dispatch_outcome(
                     ClassName,
@@ -759,6 +964,41 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                 )};
         not_found ->
             not_found
+    end.
+
+-doc """
+The real reference of the receiving class named by `ReceiverTag` (falling back
+to `ClassName` when the tag names no class), as its class literal evaluates
+to: its tag, its own module and its registered pid. `undefined` when no such
+class is registered. BT-4300: a class-side `self`/`super` send can run in any
+process (a class method runs in the caller under ADR 0142), so the pid comes
+from the registry, never from `self()`.
+""".
+-spec receiver_class_object(atom(), class_name()) -> #beamtalk_object{} | undefined.
+receiver_class_object(ReceiverTag, ClassName) ->
+    ReceiverName =
+        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
+            undefined -> ClassName;
+            Name -> Name
+        end,
+    case beamtalk_class_registry:whereis_class(ReceiverName) of
+        undefined ->
+            undefined;
+        ReceiverPid ->
+            #beamtalk_object{
+                class = ReceiverTag,
+                class_mod = self_dispatch_module(ReceiverName),
+                pid = ReceiverPid
+            }
+    end.
+
+%% `receiver_class_object/2` for a method about to run: a receiver that is no
+%% longer registered raises a structured `class_not_found`.
+-spec receiver_class_self(atom(), class_name(), selector()) -> #beamtalk_object{} | no_return().
+receiver_class_self(ReceiverTag, ClassName, Selector) ->
+    case receiver_class_object(ReceiverTag, ClassName) of
+        undefined -> beamtalk_error:raise(beamtalk_error:new(class_not_found, ClassName, Selector));
+        ClassSelf -> ClassSelf
     end.
 
 -doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
@@ -948,11 +1188,22 @@ class_method_call(ClassPid, Selector, Args) ->
     %% message instead of having the class gen_server copy our whole process
     %% dictionary via `process_info/2`. We read our own two keys cheaply with
     %% `get/1` here and the receiving clause seeds from the tuple.
-    case
+    class_method_result(
+        ClassPid,
+        Selector,
+        Args,
         gen_server:call(
             ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
         )
-    of
+    ).
+
+-doc """
+Interpret a class method's reply (`{ok, Result}`, `{error, _}`), from the
+class process or from `run_in_caller/7` (ADR 0142), as the send's result.
+""".
+-spec class_method_result(pid(), selector(), list(), term()) -> term().
+class_method_result(ClassPid, Selector, Args, Reply) ->
+    case Reply of
         {ok, Result} ->
             %% ADR 0135 §1: no supervisor post-dispatch hook here any more.
             %% `supervise` and the spawn family start in the caller
@@ -1299,13 +1550,18 @@ invocation fails loudly with the outer map intact instead of overwriting it.
     map()
 ) ->
     {reply, term(), map()} | test_spawn.
-invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
+invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars) ->
     %% The metaclass tag is derived once: it keys the class-variable home and
     %% is the `ClassSelf` tag the method receives.
     ClassTag = receiver_tag(ClassName),
+    %% BT-4300: `self()` is the receiving class's own gen_server here
+    %% (`handle_class_method_call/6` runs only inside it), so this is the
+    %% class's real reference; no path that may run elsewhere builds one from
+    %% `self()`.
+    ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
     run_with_class_vars(ClassTag, ClassVars, fun() ->
         apply_class_method_in_context(
-            Selector, Args, ClassName, ClassTag, DefiningClass, DefiningModule
+            Selector, Args, ClassName, ClassSelf, DefiningClass, DefiningModule
         )
     end).
 
@@ -1323,23 +1579,36 @@ run_with_class_vars(ClassTag, ClassVars, Thunk) ->
     try Thunk() of
         test_spawn ->
             test_spawn;
-        {ok, Result} ->
-            {reply, {ok, Result}, erlang:get(Key)};
-        {nlr_relay, Nlr, _ST} ->
+        {ok, _} = Outcome ->
+            {reply, outcome_reply(Outcome), erlang:get(Key)};
+        {nlr_relay, _, _} = Outcome ->
             %% ADR 0110/0130: a foreign `^` is control flow, not a failure;
-            %% writes made before the unwind are kept. The reply shape is
-            %% unchanged so the ?IS_NLR re-throw clauses in
-            %% class_send_dispatch/3 and metaclass_send_dispatch/4 need no change.
-            {reply, {error, Nlr}, erlang:get(Key)};
-        {error, #beamtalk_error{} = Error} ->
-            {reply, {error, Error}, ClassVars};
-        {error, undef_in_body} ->
-            {reply, {error, undef}, ClassVars};
-        {error, {raised, _ErrClass, Error, _ST}} ->
-            {reply, {error, Error}, ClassVars}
+            %% writes made before the unwind are kept.
+            {reply, outcome_reply(Outcome), erlang:get(Key)};
+        {error, _} = Outcome ->
+            {reply, outcome_reply(Outcome), ClassVars}
     after
         beamtalk_class_vars:uninstall(Key)
     end.
+
+-doc """
+The reply a class method's outcome becomes (`{ok, Result}` or `{error, _}`),
+whatever process ran it: the class process's `run_with_class_vars/3` and the
+in-caller `run_in_caller/7` (ADR 0142) share it, and `class_method_result/4`
+interprets it, so a method raises the same value on either path. A foreign `^`
+keeps its `{error, Nlr}` shape so the `?IS_NLR` re-throw in
+`class_method_result/4` and `metaclass_send_dispatch/4` sees it.
+""".
+-spec outcome_reply(
+    {ok, term()}
+    | {nlr_relay, term(), list()}
+    | {error, #beamtalk_error{} | undef_in_body | {raised, atom(), term(), list()}}
+) -> {ok, term()} | {error, term()}.
+outcome_reply({ok, _} = Reply) -> Reply;
+outcome_reply({nlr_relay, Nlr, _ST}) -> {error, Nlr};
+outcome_reply({error, #beamtalk_error{}} = Reply) -> Reply;
+outcome_reply({error, undef_in_body}) -> {error, undef};
+outcome_reply({error, {raised, _ErrClass, Error, _ST}}) -> {error, Error}.
 
 %% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its
@@ -1357,8 +1626,9 @@ run_with_class_vars(ClassTag, ClassVars, Thunk) ->
 -doc """
 Shared core of class-method dispatch.
 
-Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
-`class_mod = DefiningModule`, applies the method, and classifies any
+Handles the TestCase `test_spawn` guard, applies the method to `ClassSelf`
+(the receiving class's real reference, built by the caller: never from
+`self()` unless the caller is the class's own gen_server), and classifies any
 errors into the structured variants in `class_method_outcome()`. Both
 `invoke_class_method/7` (gen_server path) and `class_self_dispatch_chain/5`
 (self-send path) adapt the outcome to their own caller shapes.
@@ -1368,10 +1638,10 @@ Stacktraces are preserved in the `{raised, ...}` variant so callers
 that need to re-raise (e.g. self-dispatch) get the original trace.
 """.
 -spec apply_class_method_in_context(
-    selector(), list(), class_name(), atom(), class_name(), atom()
+    selector(), list(), class_name(), #beamtalk_object{}, class_name(), atom()
 ) -> class_method_outcome().
 apply_class_method_in_context(
-    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
+    Selector, Args, ClassName, ClassSelf, DefiningClass, DefiningModule
 ) ->
     %% For test execution (runAll, run:) inherited from TestCase,
     %% return a spawn request so the caller (gen_server) can handle noreply.
@@ -1380,29 +1650,41 @@ apply_class_method_in_context(
         true ->
             test_spawn;
         false ->
-            ClassSelf = #beamtalk_object{
-                class = ReceiverTag,
-                class_mod = DefiningModule,
-                pid = self()
-            },
-            %% ADR 0084: a runtime-installed class-method fun shadows
-            %% the compiled export. The retrieval store is keyed by the resolved
-            %% DefiningClass, so this works identically for own and inherited
-            %% methods, and is gated so compile-time-only classes pay no extra
-            %% read on the dispatch hot path.
-            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
-                {ok, #{block := Fun}} ->
-                    apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector);
-                error ->
-                    apply_compiled_class_method(
-                        ClassSelf,
-                        Args,
-                        ClassName,
-                        DefiningClass,
-                        DefiningModule,
-                        Selector
-                    )
-            end
+            apply_class_method_body(
+                ClassSelf,
+                Args,
+                ClassName,
+                DefiningClass,
+                DefiningModule,
+                Selector,
+                class_method_fun_name(Selector)
+            )
+    end.
+
+-doc """
+Apply the method `DefiningClass` defines for `Selector` to `ClassSelf`: its
+ADR 0084 runtime fun when one is installed, else the compiled `FunName`
+export. Shared by `apply_class_method_in_context/6` and the in-caller path
+(`run_in_caller/7`, ADR 0142).
+""".
+-spec apply_class_method_body(
+    #beamtalk_object{}, list(), class_name(), class_name(), atom(), selector(), atom()
+) -> class_method_outcome().
+apply_class_method_body(
+    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+) ->
+    %% ADR 0084: a runtime-installed class-method fun shadows
+    %% the compiled export. The retrieval store is keyed by the resolved
+    %% DefiningClass, so this works identically for own and inherited
+    %% methods, and is gated so compile-time-only classes pay no extra
+    %% read on the dispatch hot path.
+    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+        {ok, #{block := Fun}} ->
+            apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector);
+        error ->
+            apply_compiled_class_method(
+                ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+            )
     end.
 
 -doc """
@@ -1454,14 +1736,16 @@ apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector) ->
             {error, {raised, ErrClass, Error, ErrST}}
     end.
 
--doc "Apply a compiled `class_<Selector>` export (the historical dispatch path).".
+-doc """
+Apply a compiled `class_<Selector>` export, `FunName`
+(`class_method_fun_name/1` of `Selector`).
+""".
 -spec apply_compiled_class_method(
-    #beamtalk_object{}, list(), class_name(), class_name(), atom(), selector()
+    #beamtalk_object{}, list(), class_name(), class_name(), atom(), selector(), atom()
 ) -> class_method_outcome().
 apply_compiled_class_method(
-    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector
+    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
 ) ->
-    FunName = class_method_fun_name(Selector),
     %% ADR 0130 §3: `class_<sel>(ClassSelf, Args...)`; class variables live in
     %% the process dictionary home installed by the invocation entry point.
     %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised by the self-send path or

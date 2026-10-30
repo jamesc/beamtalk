@@ -6,6 +6,10 @@
 // process, so it cannot run in place.
 
 Value subclass: ClassSideSelfCollectionProbe
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, the case BT-3935 covers; a stateless class's `self do:` runs in
+  // the caller and answers.
+  classState: pinned = 0
 
   class do: aBlock => #(1, 2, 3) do: aBlock
 

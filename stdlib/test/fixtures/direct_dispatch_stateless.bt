@@ -7,7 +7,9 @@
 
 sealed Object subclass: DirectDispatchStateless
 
-  class sealed callerPid => Erlang erlang self
+  class sealed callerPid =>
+    @expect class_method_process_resource "the test observes that the method runs in the caller"
+    Erlang erlang self
 
   class sealed double: n :: Integer -> Integer => n * 2
 

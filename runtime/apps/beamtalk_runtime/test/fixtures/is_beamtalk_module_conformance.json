@@ -1,0 +1,19 @@
+[
+  {"module": "beamtalk_actor",   "is_beamtalk": true},
+  {"module": "beamtalk_stream",  "is_beamtalk": true},
+  {"module": "beamtalk_",        "is_beamtalk": true},
+  {"module": "bt@stdlib@list",   "is_beamtalk": true},
+  {"module": "bt@test@foo",      "is_beamtalk": true},
+  {"module": "bt@",              "is_beamtalk": true},
+  {"module": "lists",            "is_beamtalk": false},
+  {"module": "erlang",           "is_beamtalk": false},
+  {"module": "maps",             "is_beamtalk": false},
+  {"module": "vs_bench",         "is_beamtalk": false},
+  {"module": "beamtalk",         "is_beamtalk": false},
+  {"module": "beamtalkx",        "is_beamtalk": false},
+  {"module": "bt",               "is_beamtalk": false},
+  {"module": "btx@foo",          "is_beamtalk": false},
+  {"module": "my_beamtalk_mod",  "is_beamtalk": false},
+  {"module": "BEAMTALK_FOO",     "is_beamtalk": false},
+  {"module": "",                 "is_beamtalk": false}
+]

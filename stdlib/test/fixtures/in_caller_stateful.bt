@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4300 (ADR 0142): a class with class variables keeps its class process.
+// Fixture for class_method_in_caller_test.bt.
+
+Object subclass: InCallerStateful
+  classState: count = 0
+
+  class reset => self.count := 0
+
+  class count -> Integer => self.count
+
+  class call: aBlock => aBlock value
+
+  // Calls a stateless class's method from inside this class's own stateful
+  // invocation (ADR 0130 §1: the callee installs no class-variable home, so
+  // nothing nests), then writes this class's variable.
+  class addDoubleVia: driver => self.count := self.count + (driver double: 2)
