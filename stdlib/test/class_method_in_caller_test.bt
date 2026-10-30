@@ -1,0 +1,84 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4300 (ADR 0142 §1-§3): a class-side send to a class whose chain declares
+// no class variables, and that nothing shadows, runs the class method in the
+// caller. A class with class variables, or one that inherits from such a class,
+// keeps its class process. Each row checks where a block passed into the class
+// method runs, through a literal receiver, a class held in a variable, and
+// `perform:`.
+//
+// Fixtures: fixtures/in_caller_probe.bt, fixtures/in_caller_probe_sub.bt,
+// fixtures/in_caller_stateful.bt, fixtures/in_caller_stateful_sub.bt.
+
+TestCase subclass: ClassMethodInCallerTest
+
+  // The pid a block passed to `cls call:` sees.
+  pidThrough: cls -> Dynamic => cls call: [Erlang erlang self]
+
+  // === Stateless classes run in the caller ===
+  testStatelessClassMethodRunsInCaller =>
+    me := Erlang erlang self
+    self assert: (InCallerProbe call: [Erlang erlang self]) equals: me
+    self assert: (self pidThrough: InCallerProbe) equals: me
+    self assert: (InCallerProbe perform: #call: withArguments: #([
+      Erlang erlang self
+    ])) equals: me
+
+  // ADR 0142 §1 rule 3: a process-bound selector keeps the class process,
+  // even on a stateless class.
+  testProcessBoundSelectorRunsInTheClassProcess =>
+    self deny: (InCallerProbe run: [Erlang erlang self]) == Erlang erlang self
+
+  testInheritedStatelessClassMethodRunsInCaller =>
+    self assert: (self pidThrough: InCallerProbeSub) equals: Erlang erlang self
+
+  // The block re-enters the class it was passed to (it used to raise
+  // `dispatch_error`, from the class process calling itself).
+  testReentrantBlockAnswers =>
+    self assert: (InCallerProbe each: #(1, 2) do: [:x |
+      InCallerProbe double: x
+    ]) equals: #(2, 4)
+    cls := InCallerProbeSub
+    self assert: (cls each: #(1, 2) do: [:x | cls double: x]) equals: #(3, 6)
+
+  // The method receives the real class reference as `self`, for a dynamic
+  // send and for an inherited method sent to a subclass.
+  testClassSelfIsTheReceivingClass =>
+    cls := InCallerProbe
+    self assert: cls me equals: InCallerProbe
+    self assert: cls myName equals: #InCallerProbe
+    sub := InCallerProbeSub
+    self assert: sub me equals: InCallerProbeSub
+    self assert: sub myName equals: #InCallerProbeSub
+
+  // Errors keep the value they had through the class process.
+  testErrorsAreUnchanged =>
+    cls := InCallerProbe
+    self should: [cls boom] raise: #user_error
+    self assert: ([
+      cls boom
+    ] on: Error do: [:e | e message]) equals: "in-caller boom"
+
+  // === Classes with class variables keep their process ===
+  testStatefulClassMethodRunsInItsClassProcess =>
+    self deny: (self pidThrough: InCallerStateful) == Erlang erlang self
+
+  // A subclass that declares no class variables of its own, but whose
+  // superclass does, keeps its process for its own methods too.
+  testSubclassOfStatefulClassRunsInItsClassProcess =>
+    self deny: (self pidThrough: InCallerStatefulSub) == Erlang erlang self
+    self deny: (InCallerStatefulSub runOwn: [
+      Erlang erlang self
+    ]) == Erlang erlang self
+
+  // A stateless class method called from inside another class's stateful
+  // invocation runs there, in that class process, and installs no
+  // class-variable home of its own (ADR 0130 §1: nothing nests), so the
+  // caller's write after it lands.
+  testStatelessCallFromStatefulInvocation =>
+    InCallerStateful reset
+    InCallerStateful addDoubleVia: InCallerProbe
+    self assert: InCallerStateful count equals: 4
+    InCallerStateful addDoubleVia: InCallerProbeSub
+    self assert: InCallerStateful count equals: 10

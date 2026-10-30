@@ -131,6 +131,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% process-bound class-side selector list.
     put_class_variables/2,
     lookup_has_class_variables/1,
+    chain_has_class_variables/1,
     put_process_bound_selectors/2,
     lookup_process_bound_selectors/1,
     %% direct-construction eligibility set for dynamic `new`/`new:`.
@@ -1252,19 +1253,58 @@ lookup_has_class_variables(Name) ->
     end.
 
 -doc """
+Does `Name` or any ancestor declare class variables, or has one of them not
+published the fact (`lookup_has_class_variables/1` is `unknown`)? ADR 0142 §1
+rule 2 taken over the whole chain (BT-4300). A stateless subclass of a
+stateful class holds, in its own class process, the inherited variables its
+ancestor's methods write (`CvsOverrideSub` in
+`class_var_semantics_override_test.bt`), and a class method it defines itself
+reaches them through a class-side `self` send. Such a class keeps its process
+for every class method; only a chain with no class variables at all runs in
+the caller, and only there is "no class-variable home" the same as an empty
+one (`beamtalk_class_vars`). A hierarchy cycle answers `true`, like any other
+doubt.
+""".
+-spec chain_has_class_variables(class_name()) -> boolean().
+chain_has_class_variables(Name) ->
+    StepFun = fun(Class, _Depth) ->
+        case lookup_has_class_variables(Class) of
+            false ->
+                case lookup_superclass(Class) of
+                    {ok, Super} -> {next, Super};
+                    not_found -> not_found
+                end;
+            _ ->
+                {found, true}
+        end
+    end,
+    %% `not_found`: every fact up to the root is `false`.
+    beamtalk_hierarchy:walk_ancestors(Name, StepFun, ?MAX_HIERARCHY_DEPTH) =/= not_found.
+
+-doc """
 Store a class's process-bound class-side selector list (ADR 0142 §1 rule 3,
 BT-4299): the `process_bound_class_selectors` value of its `__beamtalk_meta/0`,
 or `undefined` when the module carries none (dynamic class, older module).
-Updates the existing row in place; a no-op when no row exists.
+Updates the existing row in place; a no-op when no row exists. A change drops
+the derived-fact cache after the write lands: the in-caller class-method owner
+memo (`beamtalk_class_dispatch`, ADR 0142 §2) reads the list.
 """.
 -spec put_process_bound_selectors(class_name(), [selector()] | undefined) -> ok.
 put_process_bound_selectors(Name, Selectors) when is_list(Selectors); Selectors =:= undefined ->
     new(),
-    try
-        _ = ets:update_element(?TABLE, Name, {#class_metadata.process_bound_selectors, Selectors}),
-        ok
-    catch
-        error:badarg -> ok
+    case field(Name, #class_metadata.process_bound_selectors) of
+        Selectors ->
+            ok;
+        _ ->
+            try
+                _ = ets:update_element(
+                    ?TABLE, Name, {#class_metadata.process_bound_selectors, Selectors}
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            beamtalk_class_derived_cache:invalidate()
     end.
 
 -doc """

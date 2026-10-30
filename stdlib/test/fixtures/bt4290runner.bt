@@ -4,5 +4,9 @@
 // BT-4290: runs a block in this class's own class process.
 
 Object subclass: Bt4290Runner
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, which is what these rows exercise; a stateless class's methods
+  // run in the caller.
+  classState: pinned = 0
 
   class run: blk => blk value

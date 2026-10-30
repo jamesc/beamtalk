@@ -55,6 +55,35 @@ _entry at: 2
 // => false
 
 // ===========================================================================
+// A DYNAMIC SEND HAS THE SAME OWNER (BT-4300)
+// ===========================================================================
+
+// ADR 0142: `File` is stateless, so a dynamic `open:mode:` (the class held
+// in a variable) runs in the caller, with no mirrored caller pid. Ownership
+// resolves the same way as for the static send above: to the REPL session.
+
+_file := File
+// => _
+
+_dynPath := _path ++ ".dyn"
+// => _
+
+hd := (_file open: _dynPath mode: #write) unwrap
+// => _
+
+_dynEntry := (File openHandles detect: [:e | (e at: 1) =:= _dynPath])
+// => _
+
+(_dynEntry at: 3) =:= (_entry at: 3)
+// => true
+
+hd close
+// => Result ok: nil
+
+(Erlang file) delete: _dynPath
+// => _
+
+// ===========================================================================
 // close REMOVES IT FROM THE REGISTRY IMMEDIATELY
 // ===========================================================================
 

@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4300 (ADR 0142): an open class with no class variables. Its class
+// methods run in the caller, so a block passed to one runs there too.
+// Fixture for class_method_in_caller_test.bt.
+
+Object subclass: InCallerProbe
+
+  class me => self
+
+  class myName -> Symbol => self name
+
+  class double: n :: Integer -> Integer => n * 2
+
+  class call: aBlock => aBlock value
+
+  // `run:` is a process-bound selector (a TestCase run selector, ADR 0142 §1
+  // rule 3), whatever class defines it: it keeps the class process.
+  class run: aBlock => aBlock value
+
+  class each: items :: List do: aBlock :: Block -> List =>
+    items collect: [:x | aBlock value: x]
+
+  class boom -> Integer => self error: "in-caller boom"

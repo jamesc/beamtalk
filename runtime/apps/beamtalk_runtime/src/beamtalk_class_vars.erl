@@ -61,6 +61,10 @@ tag fully (once per block-literal creation or region, not a hot path).
 - **Key presence is the "at home" test.** A read with no key and no marker
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
+  The exception is a class whose chain declares no class variables
+  (`beamtalk_class_metadata:chain_has_class_variables/1`): its class methods
+  run in the caller with no home (ADR 0142 §3), and its state reads as the
+  empty map.
 - `has/2` is key presence in the map and never raises on the name (as
   `hasField:` is today: reads raise, `hasField:` does not); `clear/2` removes
   the key (as `clearField:` is today). `get/2` on a name absent from the map
@@ -409,7 +413,22 @@ current_map(Tag, Name) ->
     case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
         ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
-        undefined -> beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, read)
+        undefined -> no_home_map(Tag, Name)
+    end.
+
+%% No home and no capture. ADR 0142 §3 (BT-4300): a class whose chain declares
+%% no class variables runs its class methods in the caller, which installs no
+%% home; its class state is empty wherever it is read, so the read answers as
+%% it would in the class process against the empty map (`hasField:` false, an
+%% undeclared name per the declared-set rule). Any other class has state only
+%% its class process holds: unreachable. Off the hot path (a read that found a
+%% home never gets here).
+-spec no_home_map(atom(), atom()) -> map().
+no_home_map(Tag, Name) ->
+    Class = tag_to_name(Tag),
+    case beamtalk_class_metadata:chain_has_class_variables(Class) of
+        false -> #{};
+        true -> beamtalk_class_var_errors:raise_unreachable(Class, Name, read)
     end.
 
 -spec map_or_captured(atom(), atom(), map() | none) -> map().
@@ -418,7 +437,7 @@ map_or_captured(Tag, Name, Captured) ->
         Map when is_map(Map) -> Map;
         ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
         undefined when is_map(Captured) -> Captured;
-        undefined -> beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, read)
+        undefined -> no_home_map(Tag, Name)
     end.
 
 %% Resolve the ETS mirror by class *name* on every read, so a restarted class

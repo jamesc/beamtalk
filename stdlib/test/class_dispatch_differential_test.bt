@@ -16,16 +16,18 @@
 // - `dynamic`: the class held in a variable, `[:cls | cls rootName]`, which
 //   compiles to a dynamic `class_send`.
 //
-// On main both go through the class process (or both through the ADR 0129
-// Phase 0b direct call, for `class sealed` methods of a sealed stateless
-// class). BT-4300 and BT-4301 must keep every row green.
+// Since BT-4300 both reach `class_send`, which runs a stateless class's
+// methods in the caller and a stateful one's in its class process (or both
+// take the ADR 0129 Phase 0b direct call, for `class sealed` methods of a
+// sealed stateless class). BT-4301 must keep every row green.
 //
 // Some rows also pin what the outcome is, where ADR 0142 says it must not
 // change: the inherited class-variable error (§1 rule 2), the ancestor's
 // method being reached (extension, runtime fun), and the process-bound
-// selectors (§1 rule 3). One row pins an outcome that WILL change: the
-// re-entrant block (`testReentrantBlock`) raises `dispatch_error` today and
-// must answer a value after BT-4300; that is the only expected change.
+// selectors (§1 rule 3). One row pins the outcome ADR 0142 changes: the
+// re-entrant block (`testReentrantBlock`) used to raise `dispatch_error` and
+// answers a value since BT-4300 runs stateless class methods in the caller;
+// that is the only expected change.
 //
 // To add a case, add a `classSend:` row to the test method for its kind.
 //
@@ -317,17 +319,30 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       on: SampleTestCase
     self assert: outcome equals: #(#returned, "2 tests, 2 passed")
 
-  // A class method runs a block that sends back to the same class. Today the
-  // block runs in the class process, which cannot call itself: the send
-  // raises `dispatch_error` on both paths.
+  // A class method runs a block that sends back to the same class.
   //
-  // THE ONE EXPECTED CHANGE (ADR 0142, BT-4300): once stateless class methods
-  // run in the caller, re-entry works. BT-4300 replaces the two `#raised` /
-  // `#dispatch_error` assertions below with
-  // `self assert: outcome equals: #(#returned, #(2, 4))`.
+  // THE ONE EXPECTED CHANGE (ADR 0142 §3, BT-4300): `GuardedDiffClassLeaf` is
+  // stateless and unshadowed, so its class methods run in the caller, and so
+  // does the block: re-entering the class answers. It used to run in the class
+  // process, which cannot call itself, and raise `dispatch_error` on both
+  // paths. (The literal send compiles to a `class_send` too, so both paths
+  // flip.)
   testReentrantBlock =>
     outcome := self
       classSend: #reentrantBlock
+      literal: [
+        GuardedDiffClassLeaf each: #(1, 2) do: [:x |
+          GuardedDiffClassLeaf double: x
+        ]
+      ]
+      dynamic: [:cls | cls each: #(1, 2) do: [:x | cls double: x]]
+      on: GuardedDiffClassLeaf
+    self assert: outcome equals: #(#returned, #(2, 4))
+    // `GuardedDiffClassRoot` carries this file's class-side extensions
+    // (bottom), so ADR 0142 §1 rule 1 keeps its class methods in its class
+    // process, and re-entry still raises `dispatch_error` on both paths.
+    outcome := self
+      classSend: #reentrantBlockShadowed
       literal: [
         GuardedDiffClassRoot each: #(1, 2) do: [:x |
           GuardedDiffClassRoot double: x

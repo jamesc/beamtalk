@@ -69,6 +69,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_instance_methods/1,
     dispatch_caller_pid/0,
     is_class_var_reflection_send/2,
+    is_class_var_reflection_selector/1,
     %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
@@ -1615,9 +1616,11 @@ handle_call(
     _From,
     #class_state{name = ClassName} = State
 ) ->
-    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag before the
-    %% patched method becomes visible (the runtime-fun raise below erases it
-    %% only on the class's first runtime fun).
+    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag, so the next
+    %% send re-derives it. The erase alone does not keep the fast path off: a
+    %% concurrent send re-derives from the raw flags at once. What bars it is
+    %% the raw `runtime_fun` flag, which `set_runtime_class_methods/2` below
+    %% raises before the patched method becomes visible.
     beamtalk_class_shadow_flags:invalidate(ClassName),
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
@@ -2119,6 +2122,16 @@ sends read or write class variables, which only the class process holds.
 -spec is_class_var_reflection_send(atom(), list()) -> boolean().
 is_class_var_reflection_send(Selector, Args) ->
     class_var_reflection_op(Selector, Args) =/= none.
+
+-doc """
+Can a send of `Selector` be a class-variable reflection send, whatever its
+argument (`is_class_var_reflection_send/2` with a Symbol argument)? The
+in-caller owner memo (`beamtalk_class_dispatch`, ADR 0142) is keyed by
+selector alone, so it declines these selectors outright.
+""".
+-spec is_class_var_reflection_selector(atom()) -> boolean().
+is_class_var_reflection_selector(Selector) ->
+    class_var_reflection_op(Selector, [Selector]) =/= none.
 
 -spec dispatch_class_method_lookup(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -2883,8 +2896,13 @@ ADR 0050 Phase 5: Static metadata read from __beamtalk_meta/0 on the new module.
 -spec apply_class_info(#class_state{}, map()) -> #class_state{}.
 apply_class_info(State, ClassInfo) ->
     %% ADR 0142 §2 (BT-4299): a reload is a class-metadata write, so the
-    %% derived direct-call flag is erased (under its per-tag lock) before any
-    %% of the writes below lands; the next send re-derives it.
+    %% derived direct-call flag is erased (under its per-tag lock); the next
+    %% send re-derives it. The erase does not keep the in-caller fast path off
+    %% during the writes below: a concurrent send re-derives from the raw
+    %% flags at once. The raw inputs that bar it are raised before the writes
+    %% (`class_vars` just below, `runtime_fun` by `seed_runtime_class_methods/2`
+    %% before its funs are visible); the class-method owner memo (BT-4300) is
+    %% kept consistent by the derived-fact cache's generation counter.
     beamtalk_class_shadow_flags:invalidate(State#class_state.name),
     %% NewModule/NewIsAbstract/NewSuperclass are written to the process
     %% dictionary together with the ETS metadata row, in one place, by
@@ -2899,6 +2917,15 @@ apply_class_info(State, ClassInfo) ->
             undefined -> read_meta(NewModule);
             M when is_map(M) -> M
         end,
+    %% BT-4299: a reload can add or drop `classState:` declarations. Published
+    %% before every other write below (BT-4300): raising `class_vars` is what
+    %% bars the in-caller fast path (ADR 0142 §1 rule 1) for a class that gains
+    %% class variables, so it must land before the reloaded methods' metadata.
+    sync_class_process_facts(
+        State#class_state.name,
+        Meta,
+        maps:get(class_state, ClassInfo, State#class_state.class_state)
+    ),
     NewIsAbstract = maps:get(
         is_abstract,
         Meta,
@@ -2997,12 +3024,6 @@ apply_class_info(State, ClassInfo) ->
     %% same for the direct-construction verdicts (e.g. a reload
     %% adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
-    %% BT-4299: a reload can add or drop `classState:` declarations.
-    sync_class_process_facts(
-        State#class_state.name,
-        Meta,
-        maps:get(class_state, ClassInfo, State#class_state.class_state)
-    ),
     %% BT-4126: the two syncs above re-bake only this class's own row; say so
     %% when the reload leaves verdicts baked elsewhere stale.
     warn_stale_direct_verdicts(
