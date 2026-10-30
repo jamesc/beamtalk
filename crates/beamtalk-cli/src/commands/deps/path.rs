@@ -335,9 +335,16 @@ pub(crate) fn compile_dependency_at(
     dep_name: &str,
     options: &beamtalk_core::CompilerOptions,
     prior_deps: &[ResolvedDependency],
+    otp_specs: &OtpTypeSpecs,
 ) -> Result<ResolvedDependency> {
-    let (ebin_path, class_module_index) =
-        compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
+    let (ebin_path, class_module_index) = compile_dependency_with_context(
+        project_root,
+        dep_root,
+        dep_name,
+        options,
+        prior_deps,
+        otp_specs,
+    )?;
 
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
         build_dep_class_index(dep_root, dep_name, prior_deps).unwrap_or_default();
@@ -373,7 +380,14 @@ fn compile_dependency(
     dep_name: &str,
     options: &beamtalk_core::CompilerOptions,
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
-    compile_dependency_with_context(project_root, dep_root, dep_name, options, &[])
+    compile_dependency_with_context(
+        project_root,
+        dep_root,
+        dep_name,
+        options,
+        &[],
+        &OtpTypeSpecs::default(),
+    )
 }
 
 /// Compile a dependency with context from already-compiled dependencies.
@@ -387,26 +401,10 @@ fn compile_dependency_with_context(
     dep_name: &str,
     options: &beamtalk_core::CompilerOptions,
     prior_deps: &[ResolvedDependency],
+    otp_specs: &OtpTypeSpecs,
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
     let ebin_path = BuildLayout::new(project_root).dep_ebin_dir(dep_name);
-    // Compile the dependency as its own package, not the root's (BT-3915):
-    // its classes, aliases and protocols are stamped `dep_name`, so its own
-    // `Comparable` is the current package's (shadowing the stdlib's for a bare
-    // `uses: Comparable`, as its exported `ClassInfo`s say) and its own
-    // `internal` classes/aliases are same-package for E0401/E0402.
-    //
-    // Its warnings stay its own (BT-4225), as cargo shows none for a
-    // dependency: the downstream package can't act on them, and they bury its
-    // own. Errors still fail the build and are shown, and so is an
-    // `InternalVerifier` warning (a compiler bug, never suppressed). The
-    // downstream `--warnings-as-errors` is capped the same way, like cargo's
-    // `--cap-lints`: a dependency's warnings never fail someone else's build.
-    let options = &beamtalk_core::CompilerOptions {
-        current_package: Some(dep_name.to_owned()),
-        suppress_warnings: true,
-        warnings_as_errors: false,
-        ..options.clone()
-    };
+    let options = &dependency_compile_options(options, dep_name);
 
     // Create the ebin directory
     std::fs::create_dir_all(&ebin_path)
@@ -504,7 +502,12 @@ fn compile_dependency_with_context(
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
-        native_type_registry: dependency_type_registry(project_root, dep_root, prior_deps),
+        native_type_registry: dependency_type_registry(
+            project_root,
+            dep_root,
+            prior_deps,
+            otp_specs,
+        ),
         // ADR 0100 Rule 3: neither the root package's nor the
         // dependency's own `[diagnostics]` table is applied here — this path
         // doesn't load either manifest's `[diagnostics]` section, so
@@ -561,20 +564,78 @@ fn compile_dependency_with_context(
     Ok((ebin_path, own_class_module_index))
 }
 
+/// The options a dependency compiles with, from the downstream build's.
+///
+/// It compiles as its own package, not the root's (BT-3915): its classes,
+/// aliases and protocols are stamped `dep_name`, so its own `Comparable` is
+/// the current package's (shadowing the stdlib's for a bare `uses:
+/// Comparable`, as its exported `ClassInfo`s say) and its own `internal`
+/// classes/aliases are same-package for E0401/E0402.
+///
+/// Its warnings stay its own (BT-4225), as cargo shows none for a
+/// dependency: the downstream package can't act on them, and they bury its
+/// own. Errors still fail the build and are shown, and so is an
+/// `InternalVerifier` warning (a compiler bug, never suppressed). The
+/// downstream `--warnings-as-errors` is capped the same way, like cargo's
+/// `--cap-lints`: a dependency's warnings never fail someone else's build.
+fn dependency_compile_options(
+    options: &beamtalk_core::CompilerOptions,
+    dep_name: &str,
+) -> beamtalk_core::CompilerOptions {
+    beamtalk_core::CompilerOptions {
+        current_package: Some(dep_name.to_owned()),
+        suppress_warnings: true,
+        warnings_as_errors: false,
+        ..options.clone()
+    }
+}
+
+/// The OTP FFI type specs, extracted once per dependency resolution and
+/// shared by every dependency it compiles (BT-4311), lazily, so a resolution
+/// that compiles nothing extracts nothing.
+#[derive(Default)]
+pub(crate) struct OtpTypeSpecs(
+    std::cell::OnceCell<Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
+);
+
+impl OtpTypeSpecs {
+    fn get(
+        &self,
+        layout: &BuildLayout,
+    ) -> Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
+        self.0
+            .get_or_init(|| {
+                beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &[])
+            })
+            .as_ref()
+    }
+}
+
 /// The FFI type registry a dependency compiles against (BT-4225): the
 /// resolution chain of its standalone build
 /// ([`crate::commands::build::resolve_package_type_registry`] over its own
-/// `stubs/`), over the OTP and dependency specs extracted into the
-/// downstream package's type cache. The package-bundled tier comes from
-/// every dependency compiled before it, a superset of its own dependencies. Without it every OTP FFI call in the
-/// dependency inferred as `Dynamic`, which its standalone build never does.
+/// `stubs/`), over the OTP specs and those of the dependencies compiled
+/// before it, cached in the downstream package's type cache. The
+/// package-bundled stub tier comes from those same dependencies, a superset
+/// of its own. Without it every OTP FFI call in the dependency inferred as
+/// `Dynamic`, which its standalone build never does.
+///
+/// Only those `.beam` files, never the rest of `_build/` (BT-4311): a native
+/// module left there by an earlier build would type a call the clean build
+/// leaves `Dynamic`, so the same source would compile differently.
 fn dependency_type_registry(
     project_root: &Utf8Path,
     dep_root: &Utf8Path,
     prior_deps: &[ResolvedDependency],
+    otp_specs: &OtpTypeSpecs,
 ) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
-    let auto_extract =
-        crate::commands::build::extract_type_specs(&BuildLayout::new(project_root), true, false);
+    let layout = BuildLayout::new(project_root);
+    let prior_ebins: Vec<Utf8PathBuf> = prior_deps.iter().map(|d| d.ebin_path.clone()).collect();
+    let auto_extract = beamtalk_core::ffi_type_specs::extend_with_ebin_type_specs(
+        otp_specs.get(&layout),
+        &prior_ebins,
+        &layout.type_cache_dir(),
+    );
     crate::commands::build::resolve_package_type_registry(dep_root, auto_extract, prior_deps, None)
         .0
         .map(std::sync::Arc::new)
@@ -1497,8 +1558,9 @@ dep_utils = { path = "dep_utils" }"#,
         )
         .unwrap();
 
-        let registry = dependency_type_registry(&project_root, &dep_root, &[])
-            .expect("the dependency's own stubs/ tier must seed its registry");
+        let registry =
+            dependency_type_registry(&project_root, &dep_root, &[], &OtpTypeSpecs::default())
+                .expect("the dependency's own stubs/ tier must seed its registry");
         assert!(
             registry.lookup("dep_nif", "echo", 1).is_some(),
             "dep's stubs/ declaration must be loaded"
@@ -1511,5 +1573,81 @@ dep_utils = { path = "dep_utils" }"#,
                 "OTP specs must reach the dependency's compile"
             );
         }
+    }
+
+    /// Compiles `-module(Module). ping() -> pong.` with a spec into `ebin`,
+    /// or answers `false` when `erlc` is not on the path.
+    fn compile_spec_beam(ebin: &Utf8Path, module: &str) -> bool {
+        fs::create_dir_all(ebin).unwrap();
+        let src = ebin.join(format!("{module}.erl"));
+        fs::write(
+            &src,
+            format!(
+                "-module({module}).\n-export([ping/0]).\n-spec ping() -> pong.\nping() -> pong.\n"
+            ),
+        )
+        .unwrap();
+        let compiled = std::process::Command::new("erlc")
+            .arg("+debug_info")
+            .arg("-o")
+            .arg(ebin.as_str())
+            .arg(src.as_str())
+            .status()
+            .is_ok_and(|status| status.success());
+        fs::remove_file(&src).unwrap();
+        compiled
+    }
+
+    /// BT-4311: a dependency's registry holds the specs of the dependencies
+    /// compiled before it and nothing else from `_build/` — a native module
+    /// an earlier build left there must not type its calls, or a clean build
+    /// and a rebuild would compile the same source differently.
+    #[test]
+    fn dependency_type_registry_ignores_stale_build_contents() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().join("app")).unwrap();
+        let dep_root = Utf8PathBuf::from_path_buf(temp.path().join("dep")).unwrap();
+        let prior_root = Utf8PathBuf::from_path_buf(temp.path().join("prior")).unwrap();
+        fs::create_dir_all(&dep_root).unwrap();
+        let stale_ebin = project_root.join("_build/dev/native/ebin");
+        let prior_ebin = BuildLayout::new(&project_root).dep_ebin_dir("prior");
+        if !compile_spec_beam(&stale_ebin, "bt4311_stale_nif")
+            || !compile_spec_beam(&prior_ebin, "bt4311_prior_nif")
+        {
+            eprintln!("skipping: erlc is not available");
+            return;
+        }
+        let prior = ResolvedDependency {
+            name: "prior".to_string(),
+            root: prior_root,
+            ebin_path: prior_ebin,
+            class_module_index: HashMap::new(),
+            class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            protocol_defs: Vec::new(),
+            protocol_sources: HashMap::default(),
+            alias_infos: Vec::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+            stubs_dir: None,
+        };
+
+        let Some(registry) = dependency_type_registry(
+            &project_root,
+            &dep_root,
+            std::slice::from_ref(&prior),
+            &OtpTypeSpecs::default(),
+        ) else {
+            eprintln!("skipping: no build worker to extract specs in this environment");
+            return;
+        };
+        if registry.lookup("bt4311_prior_nif", "ping", 0).is_none() {
+            eprintln!("skipping: spec extraction unavailable in this environment");
+            return;
+        }
+        assert!(
+            registry.lookup("bt4311_stale_nif", "ping", 0).is_none(),
+            "a native module left in _build/ must not reach the dependency's registry"
+        );
     }
 }

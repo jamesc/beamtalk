@@ -6,6 +6,10 @@
 // this class's process waits on the runner, so the change cannot reach it.
 
 Actor subclass: Bt4290Target
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, which is what these rows exercise; a stateless class's methods
+  // run in the caller.
+  classState: pinned = 0
 
   class removeViaRunner =>
     Bt4290Runner run: [(Beamtalk classNamed: #Bt4290Target) removeFromSystem]

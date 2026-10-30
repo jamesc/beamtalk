@@ -127,6 +127,38 @@ fn run_script_mode_dispatches_subdirectory_class_by_name() {
         .stdout(contains("hello-from-subdir"));
 }
 
+/// BT-4300 (ADR 0142 §3): in run mode a dynamic `File open:mode:` (the class
+/// held in a variable) runs in the caller, which has no session and no
+/// mirrored caller pid, so the handle's owner resolves to `self()`: the process
+/// running the entry. The entry's own class is stateless, so it runs there too.
+#[test]
+fn run_script_mode_dynamic_file_open_is_caller_owned() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Owner.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Owner\n\
+         \n\
+         \x20\x20class run =>\n\
+         \x20\x20\x20\x20file := File\n\
+         \x20\x20\x20\x20handle := (file open: \"bt4300_owner.txt\" mode: #write) unwrap\n\
+         \x20\x20\x20\x20entry := File openHandles detect: [:e | (e at: 1) =:= \"bt4300_owner.txt\"]\n\
+         \x20\x20\x20\x20owned := (entry at: 3) =:= Erlang erlang self\n\
+         \x20\x20\x20\x20handle close\n\
+         \x20\x20\x20\x20Console printLine: (owned ifTrue: [\"owner-is-caller\"] ifFalse: [\"owner-is-other\"])\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["run", "Owner", "run"])
+        .assert()
+        .success()
+        .stdout(contains("owner-is-caller"));
+}
+
 #[test]
 fn run_without_manifest_errors() {
     // `run` requires a beamtalk.toml in the cwd.

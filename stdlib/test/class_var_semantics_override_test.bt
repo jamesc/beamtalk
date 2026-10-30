@@ -11,18 +11,15 @@ ClassVarSemanticsMatrixTest subclass: ClassVarSemanticsOverrideTest
 
   initSubject => CvsInitOverrideSub
 
-  // performLocally: does not walk the superclass chain, so the snapshot row
-  // uses a reader CvsOverrideSub defines itself.
+  // The snapshot row uses a reader CvsOverrideSub defines itself (BT-4300:
+  // an inherited one is found too, see below).
   snapshotSelector => #snapshotN
 
-  // ADR 0130 §5 runtime-owned snapshot, override only: performLocally: does not
-  // walk the superclass chain (documented limit), so an inherited selector is
-  // not found.
-  testPerformLocallyInheritedSelectorNotFound =>
+  // ADR 0130 §5 runtime-owned snapshot, override only. BT-4300:
+  // performLocally: walks the receiving class's class-method chain, so an
+  // inherited selector is found and reads the subclass's own snapshot (it used
+  // to raise does_not_understand).
+  testPerformLocallyFindsInheritedSelector =>
     CvsOverrideSub reset
     CvsOverrideSub bump
-    self
-      assert: ([
-        CvsOverrideSub performLocally: #n withArguments: #()
-      ] on: Error do: [:e | e kind])
-      equals: #does_not_understand
+    self assert: (CvsOverrideSub performLocally: #n withArguments: #()) equals: 1

@@ -5,6 +5,10 @@
 // refused before any side effect, by `self` and by name.
 
 Actor subclass: Bt4262RemoveGuard
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, which is what these rows exercise; a stateless class's methods
+  // run in the caller.
+  classState: pinned = 0
 
   class removeSelf => self removeFromSystem
 

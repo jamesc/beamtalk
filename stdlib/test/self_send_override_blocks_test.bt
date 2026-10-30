@@ -65,14 +65,18 @@ TestCase subclass: SelfSendOverrideBlocksTest
     SsoBlocksSub ensureMatch: 1
     self assert: SsoBlocksSub subHits equals: 1
 
-  // A block passed to another class's method runs in that class's process,
-  // away from its home: a write there raises class_state_unreachable (ADR 0130
-  // §5, Migration Path) and leaves no stale state for the next external call.
-  testForeignProcessBlockDoesNotLeak =>
-    self should: [SsoBlocksSub viaForeign] raise: #class_state_unreachable
-    self assert: SsoBlocksSub subHits equals: 0
-    self should: [SsoBlocksSub viaForeign] raise: #class_state_unreachable
-    self assert: SsoBlocksSub subHits equals: 0
+  // ADR 0142 §3 (BT-4300): a block passed to a stateless class's method runs
+  // where that method runs, the caller: here SsoBlocksSub's own class process,
+  // in the middle of its stateful invocation, so the block is at home and its
+  // write lands. (It used to run in the driver's class process, away from
+  // home, and raise class_state_unreachable.) The driver installs no
+  // class-variable home of its own, so ADR 0130 §1's no-nesting rule holds and
+  // each call's write is kept exactly once.
+  testForeignClassBlockRunsAtHome =>
+    self assert: SsoBlocksSub viaForeign equals: 1
+    self assert: SsoBlocksSub subHits equals: 1
+    self assert: SsoBlocksSub viaForeign equals: 2
+    self assert: SsoBlocksSub subHits equals: 2
 
   testOwnClassWrapperInBlock =>
     SsoBlocksSub viaOwnClassBlock

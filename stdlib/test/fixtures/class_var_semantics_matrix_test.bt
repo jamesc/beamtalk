@@ -25,8 +25,7 @@ abstract TestCase subclass: ClassVarSemanticsMatrixTest
   initSubject => self subclassResponsibility
 
   // A selector the subject defines itself that answers `n`, for the
-  // `performLocally:` snapshot row (performLocally: does not walk the
-  // superclass chain).
+  // `performLocally:` snapshot row.
   snapshotSelector => #n
 
   // ADR 0130 §4

@@ -473,12 +473,12 @@ compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
 compiles_to("3a") -> "direct call Mod:'class_double:'(nil, 21)";
-compiles_to("3b") -> "whereis_class + class_send: not `class sealed`, so gen_server:call into the class process";
-compiles_to("3c") -> "whereis_class + class_send: gen_server:call into the class process";
+compiles_to("3b") -> "whereis_class + class_send: not `class sealed`, runs in the caller (ADR 0142, BT-4300)";
+compiles_to("3c") -> "whereis_class + class_send: runs in the caller (ADR 0142, BT-4300)";
 compiles_to("3d") ->
-    "send(C, 'double:', [21]) -> class_send: gen_server:call into the class process (BT-4300: in the caller)";
+    "send(C, 'double:', [21]) -> class_send: runs in the caller (ADR 0142, BT-4300)";
 compiles_to("3e") ->
-    "whereis_class + class_send: gen_server:call into the subclass's process, inherited lookup there";
+    "whereis_class + class_send: inherited method resolved by the owner memo, runs in the caller (BT-4300)";
 compiles_to("3f") ->
     "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";

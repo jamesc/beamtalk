@@ -6,15 +6,15 @@
 TestCase subclass: PerformLocallyTest
 
   testRunsInCallerProcess =>
-    // Normal class method dispatch runs in the class object's gen_server process
-    classGenServerPid := LocalCallHelper callerPid
+    // ADR 0142 §3 (BT-4300): LocalCallHelper has no class variables, so a
+    // normal class-method send runs in the caller too (it used to run in the
+    // class object's gen_server process).
+    sentPid := LocalCallHelper callerPid
     // performLocally: runs in the caller's (test) process
     callerPid := LocalCallHelper performLocally: #callerPid withArguments: #()
     testProcessPid := Erlang erlang self
-    // The locally-dispatched call should return the test process's PID
     self assert: callerPid equals: testProcessPid
-    // The normal dispatch should return a different PID (the class gen_server)
-    self deny: (classGenServerPid == testProcessPid)
+    self assert: sentPid equals: testProcessPid
 
   testUnaryClassMethod =>
     // performLocally: works with zero-argument class methods

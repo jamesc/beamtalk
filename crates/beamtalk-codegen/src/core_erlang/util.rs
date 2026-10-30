@@ -1824,12 +1824,12 @@ pub fn to_module_name(class_name: &str) -> String {
 /// `stock`/`beamtalk` coercion mode, so the runtime skips its per-call
 /// module-name scan.
 ///
-/// Keep in sync with the Erlang side: `test_is_beamtalk_module` below and
-/// `is_beamtalk_module_conformance_test` in
+/// The conformance pair `test_is_beamtalk_module_conformance` (below) and
+/// `is_beamtalk_module_conformance_test_` in
 /// `runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl`
-/// assert the same table. A rule change applied to only one side (impl plus
-/// its own test) stays green on both sides while codegen and runtime
-/// diverge — so update both tables together, never one alone.
+/// both read from the shared JSON fixture at
+/// `runtime/apps/beamtalk_runtime/test/fixtures/is_beamtalk_module_conformance.json`
+/// — adding or changing a case means editing the JSON only.
 pub(super) fn is_beamtalk_module(module_name: &str) -> bool {
     beamtalk_core::ast::is_beamtalk_erlang_module(module_name)
 }
@@ -1921,37 +1921,29 @@ mod tests {
     }
 
     #[test]
-    fn test_is_beamtalk_module() {
-        // BT-4153: same table as `is_beamtalk_module_conformance_test` in
-        // runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl —
-        // update both together so the pair cannot drift silently.
-        for name in [
-            "beamtalk_actor",
-            "beamtalk_stream",
-            "beamtalk_",
-            "bt@stdlib@list",
-            "bt@test@foo",
-            "bt@",
-        ] {
-            assert!(
-                is_beamtalk_module(name),
-                "{name} should be a Beamtalk module"
+    fn test_is_beamtalk_module_conformance() {
+        // Single source of truth: shared JSON corpus also used by
+        // `is_beamtalk_module_conformance_test_` in
+        // runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl.
+        // To add or change a case, edit the JSON only — both sides pick it up.
+        let path = crate::core_erlang::tests::repo_root().join(
+            "runtime/apps/beamtalk_runtime/test/fixtures/is_beamtalk_module_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> = serde_json::from_str(&raw)
+            .expect("is_beamtalk_module_conformance.json is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let module = case["module"].as_str().expect("case.module is a string");
+            let is_beamtalk = case["is_beamtalk"]
+                .as_bool()
+                .expect("case.is_beamtalk is a bool");
+            assert_eq!(
+                is_beamtalk_module(module),
+                is_beamtalk,
+                "is_beamtalk_module({module:?}) mismatch"
             );
-        }
-        for name in [
-            "lists",
-            "erlang",
-            "maps",
-            "vs_bench",
-            "beamtalk",
-            "beamtalkx",
-            "bt",
-            "btx@foo",
-            "my_beamtalk_mod",
-            "BEAMTALK_FOO",
-            "",
-        ] {
-            assert!(!is_beamtalk_module(name), "{name} should be a stock module");
         }
     }
 }

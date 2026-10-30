@@ -2608,10 +2608,26 @@ class_self_dispatch_extension_test_() ->
 setup_class_self_extension() ->
     setup_minimal(),
     beamtalk_extensions:init(),
-    [].
+    %% BT-4300: a class-side self-send builds `ClassSelf` from the receiving
+    %% class's registered pid (it may run in any process), so each class this
+    %% group sends to is registered.
+    [
+        begin
+            {ok, Pid} = beamtalk_object_class:start_link(Name, #{
+                superclass => none,
+                module => beamtalk_class_dispatch_test_helper,
+                class_methods => #{},
+                class_state => #{}
+            }),
+            unlink(Pid),
+            Pid
+        end
+     || Name <- ['Bt3198SelfExtFound', 'Bt3198SelfExtVars', 'Bt3198SelfExtCrash']
+    ].
 
 %% Best-effort: drop every extension key this group might have registered.
-teardown_class_self_extension(_) ->
+teardown_class_self_extension(Pids) ->
+    teardown_pids(Pids),
     lists:foreach(
         fun({ClassName, Selector}) -> beamtalk_extensions:unregister(ClassName, Selector, true) end,
         [
@@ -2622,10 +2638,9 @@ teardown_class_self_extension(_) ->
     ),
     ok.
 
-%% class_self_send/3 needs no running class gen_server — the extension
-%% probe only reads the beamtalk_extensions ETS table and (for the module,
-%% falling back to ClassName) beamtalk_class_metadata, both safe on an
-%% unregistered class name.
+%% class_self_send/3 runs in the caller (here the test process), not in the
+%% class gen_server; the extension probe reads the beamtalk_extensions ETS
+%% table, and `ClassSelf` is the registered class's real reference.
 test_class_self_dispatch_extension_found() ->
     ClassName = 'Bt3198SelfExtFound',
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),

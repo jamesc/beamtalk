@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4300 (ADR 0142): a stateless subclass of a stateless class. Its
+// inherited class methods run in the caller too, with the subclass as `self`.
+// Fixture for class_method_in_caller_test.bt.
+
+InCallerProbe subclass: InCallerProbeSub
+
+  class double: n :: Integer -> Integer => n * 3
+
+  // A class-side `super` send that answers `self`.
+  class superMe => super me
+
+  class overridden -> Symbol => #sub

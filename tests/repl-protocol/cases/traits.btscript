@@ -114,20 +114,20 @@ File writeAll: _bt3594GreetableProtoPath contents: "Protocol define: Bt3594Greet
 // => Result ok: nil
 
 Workspace load: _bt3594GreetableProtoPath
-// => _
+// => ["Bt3594Greetable"]
 
 File writeAll: _bt3594GreeterValuePath contents: "Value subclass: Bt3594GreeterValue uses: Bt3594Greetable field: greeting :: Integer = 10"
 // => Result ok: nil
 
 Workspace load: _bt3594GreeterValuePath
-// => _
+// => ["Bt3594GreeterValue"]
 
 File writeAll: _bt3594GreeterActorPath contents: "Actor subclass: Bt3594GreeterActor uses: Bt3594Greetable state: greeting :: Integer = 20
   greeting -> Integer => self.greeting"
 // => Result ok: nil
 
 Workspace load: _bt3594GreeterActorPath
-// => _
+// => ["Bt3594GreeterActor"]
 
 _bt3594Gv := Bt3594GreeterValue new
 // => _
@@ -173,13 +173,13 @@ File writeAll: _bt3594ConflictAPath contents: "Protocol define: Bt3594ConflictA 
 // => Result ok: nil
 
 Workspace load: _bt3594ConflictAPath
-// => _
+// => ["Bt3594ConflictA"]
 
 File writeAll: _bt3594ConflictBPath contents: "Protocol define: Bt3594ConflictB tag -> Integer => 2"
 // => Result ok: nil
 
 Workspace load: _bt3594ConflictBPath
-// => _
+// => ["Bt3594ConflictB"]
 
 File writeAll: _bt3594ConflictUserPath contents: "Value subclass: Bt3594ConflictUser uses: Bt3594ConflictA uses: Bt3594ConflictB"
 // => Result ok: nil
@@ -192,7 +192,7 @@ File writeAll: _bt3594ConflictResolvedPath contents: "Value subclass: Bt3594Conf
 // => Result ok: nil
 
 Workspace load: _bt3594ConflictResolvedPath
-// => _
+// => ["Bt3594ConflictResolved"]
 
 Bt3594ConflictResolved new tag
 // => 1
@@ -218,13 +218,13 @@ File writeAll: _bt3594OverrideBasePath contents: "Value subclass: Bt3594Override
 // => Result ok: nil
 
 Workspace load: _bt3594OverrideBasePath
-// => _
+// => ["Bt3594OverrideBase"]
 
 File writeAll: _bt3594LabeledProtoPath contents: "Protocol define: Bt3594Labeled label -> Integer => 2"
 // => Result ok: nil
 
 Workspace load: _bt3594LabeledProtoPath
-// => _
+// => ["Bt3594Labeled"]
 
 File writeAll: _bt3594OverrideChildPath contents: "Bt3594OverrideBase subclass: Bt3594OverrideChild uses: Bt3594Labeled"
 // => Result ok: nil
@@ -237,7 +237,7 @@ File writeAll: _bt3594OverrideChildOkPath contents: "Bt3594OverrideBase subclass
 // => Result ok: nil
 
 Workspace load: _bt3594OverrideChildOkPath
-// => _
+// => ["Bt3594OverrideChildOk"]
 
 Bt3594OverrideChildOk new label
 // => 2
