@@ -75,15 +75,20 @@ reader's view.
   (`beamtalk_extensions:register/5` raises the flag before its row insert;
   `beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens;
   `beamtalk_class_metadata:put_class_variables/2` before the row field), so a
-  send that can see a shadow or a class variable cannot see a derived `true`.
+  send that can see a shadow, or a class variable the class itself declares,
+  cannot see the class's derived `true`.
 - A class's derived key also reads its chain's published class-variable facts
   and superclass links, through `beamtalk_class_metadata:chain_has_class_variables/1`
   (the runtime's one answer, failing closed), so `invalidate/1` erases the
-  class's descendants' keys too (each under its own tag lock, after the
-  class's own). `beamtalk_class_metadata:put_class_variables/2` calls it once
-  the row field is written, and a reload that re-parents a class calls it
-  again once the new superclass is published
-  (`beamtalk_object_class:apply_class_info/2`) (BT-4301).
+  class's descendants' keys too (each under its own tag lock, always taken,
+  after the class's own). `beamtalk_class_metadata:put_class_variables/2` calls
+  it once the row field is written, and a reload that re-parents a class calls
+  it again once the new superclass is published
+  (`beamtalk_object_class:apply_class_info/2`) (BT-4301). For a descendant this
+  is erase-after-write, not raise-before-visible: between an ancestor's row
+  write and the erase, a descendant's static send may still see its old
+  `true` and run in the caller, the same window a reload has for its own new
+  code. No stale value outlives the erase.
 - Erasure on every other class-metadata write (`invalidate/1`, ADR 0142 §2,
   BT-4299): under the lock, erase the derived key. Called on reload
   (`beamtalk_object_class:apply_class_info/2`), a class-side `removeSelector:`,
@@ -182,35 +187,40 @@ erase_direct_flag(Tag) ->
     end.
 
 -doc """
-Erase `ClassName`'s derived direct-call flag under the per-tag lock (ADR 0142
-§2, BT-4299), so the next send re-derives it from the raw flags. Called on a
-class-metadata write for the class: reload, a class-side `removeSelector:`, a
-runtime `put_class_method`, row removal. It does not keep the fast path off
-while the write lands: a concurrent miss re-derives from the raw flags at once
-(see the moduledoc), so anything that must bar the fast path is a raw flag,
-raised before the write. Skips the lock when no derived flag is installed, like
-`set/2`: an install racing this is one that read the raw flags, which this does
-not change. Must never be called from inside `with_tag_lock/2`.
+Erase `ClassName`'s derived direct-call flag, and its descendants', each under
+its per-tag lock (ADR 0142 §2, BT-4299, BT-4301), so the next send re-derives
+it. Called on a class-metadata write for the class, after the write: reload
+(twice, the second time once a re-parent is published), a change to its
+class variables, a class-side `removeSelector:`, a runtime `put_class_method`,
+row removal. It does not keep the fast path off while the write lands (see the
+moduledoc).
+
+The lock is taken even when no derived flag is installed (BT-4301): the
+derivation reads published metadata (`chain_has_class_variables/1`), not only
+raw flags raised under the same lock, so an install in flight may have derived
+`true` from the row as it was before the write and not have put it yet. Taking
+the lock waits for that install, and the erase that follows removes its
+stale value; skipping the lock on "absent" would let it land after the erase
+and stay. Runs only on metadata writes, never on the send path. Must never be
+called from inside `with_tag_lock/2`.
 """.
 -spec invalidate(atom()) -> ok.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
 
-%% Erase one class's derived key under its tag lock, skipping the lock when
-%% none is installed (see `invalidate/1`).
+%% Erase one class's derived key under its tag lock, always taking the lock
+%% (see `invalidate/1`: an in-flight install may still put a stale value).
 -spec erase_class_flag(atom()) -> ok.
 erase_class_flag(ClassName) ->
     Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    case persistent_term:get(Tag, false) of
-        false -> ok;
-        _ -> with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end)
-    end.
+    with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end).
 
 %% BT-4301: a descendant's derived key folds in this class's published
 %% class-variable fact and superclass link (`chain_class_vars/1`), so it is
-%% erased with this class's. Runs only on metadata writes (never on the send path); the walk is
-%% ETS-only, so it is safe from inside a class process.
+%% erased with this class's, each under its own tag lock. Runs only on
+%% metadata writes (never on the send path); the walk is ETS-only, so it is
+%% safe from inside a class process.
 -spec erase_descendant_flags(atom()) -> ok.
 erase_descendant_flags(ClassName) ->
     lists:foreach(fun erase_class_flag/1, beamtalk_class_registry:all_subclasses(ClassName)).

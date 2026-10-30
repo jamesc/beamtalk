@@ -1152,11 +1152,19 @@ The one writer of the fact `beamtalk_class_shadow_flags:direct_call_ok/2` reads
 as its `class_vars` input; called from the class's own gen_server on `init/1`,
 reload and rename, with the value `beamtalk_object_class` reads from the
 compiled `__beamtalk_meta/0` (or the builder's `classState`). On a change it
-erases the derived direct-call flag under the per-tag lock *before* the row
-field becomes visible (raising: `set_class_vars/2` first; dropping: the row
-first, since a stale "has class variables" only costs the slow path), and
-drops the derived-fact cache. A no-op when unchanged; the row field is a
-no-op when the row is absent.
+erases the class's own derived direct-call flag under the per-tag lock
+*before* the row field becomes visible (raising: `set_class_vars/2` first;
+dropping: the row first, since a stale "has class variables" only costs the
+slow path), and drops the derived-fact cache.
+
+Descendants' derived flags read this row field through
+`chain_has_class_variables/1`, so they are erased *after* it is written
+(`beamtalk_class_shadow_flags:invalidate/1`, which always takes each tag lock
+and so also removes a value an in-flight install derived from the old row,
+BT-4301). Between the write and that erase, a descendant's static send may
+still see its old `true` and run in the caller: the same window a reload has
+for its own new code; no stale value outlives the erase. A no-op when
+unchanged; the row field is a no-op when the row is absent.
 """.
 -spec put_class_variables(class_name(), boolean()) -> ok.
 put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->

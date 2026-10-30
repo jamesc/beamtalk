@@ -372,30 +372,69 @@ static_guard_test_() ->
 
 invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"invalidate/1 takes no lock when no derived flag is installed", fun() ->
-            Name = 'Bt4300NoLock',
-            Tag = tag(Name),
-            _ = persistent_term:erase(Tag),
-            Self = self(),
-            Holder = spawn(fun() ->
-                beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
-                    Self ! locked,
+        {"an install in flight when an ancestor gains class variables leaves no stale flag",
+            fun() ->
+                %% BT-4301: the derived flag reads published metadata, so an
+                %% install holding `Leaf`'s tag lock may already have derived
+                %% `true` from the ancestor's old row. The ancestor's write must
+                %% wait for it (the erase always takes the lock, even with no
+                %% flag installed yet) and then remove what it put.
+                Base = 'Bt4301RaceBase',
+                Leaf = 'Bt4301RaceLeaf',
+                LeafTag = tag(Leaf),
+                beamtalk_class_metadata:new(),
+                ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
+                ok = beamtalk_class_metadata:put_class_variables(Base, false),
+                ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
+                ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+                _ = persistent_term:erase(LeafTag),
+                Self = self(),
+                %% The install: under Leaf's lock, having derived `true` from
+                %% the old rows, it puts that value only once released.
+                Installer = spawn(fun() ->
+                    beamtalk_class_shadow_flags:with_tag_lock(LeafTag, fun() ->
+                        Self ! derived,
+                        receive
+                            release -> persistent_term:put(LeafTag, true)
+                        end
+                    end),
+                    Self ! installed
+                end),
+                receive
+                    derived -> ok
+                after 5000 -> error(lock_not_taken)
+                end,
+                %% The writer: publishes Base's class variables, then erases
+                %% the descendants' flags.
+                Writer = spawn(fun() ->
+                    ok = beamtalk_class_metadata:put_class_variables(Base, true),
+                    Self ! written
+                end),
+                try
+                    %% With no flag installed, the erase still waits for the lock.
                     receive
-                        release -> ok
-                    end
-                end)
-            end),
-            receive
-                locked -> ok
-            after 5000 -> error(lock_not_taken)
-            end,
-            try
-                {Time, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(Name) end),
-                ?assert(Time < 1000000)
-            after
-                Holder ! release
-            end
-        end},
+                        written -> error(erase_skipped_the_lock)
+                    after 300 -> ok
+                    end,
+                    Installer ! release,
+                    receive
+                        installed -> ok
+                    after 5000 -> error(install_stuck)
+                    end,
+                    receive
+                        written -> ok
+                    after 5000 -> error(write_stuck)
+                    end,
+                    ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                    ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
+                after
+                    exit(Installer, kill),
+                    exit(Writer, kill),
+                    beamtalk_class_metadata:delete(Leaf),
+                    beamtalk_class_metadata:delete(Base),
+                    persistent_term:erase(LeafTag)
+                end
+            end},
         {"put_process_bound_selectors drops derived facts only on a change", fun() ->
             with_class('Bt4300Bound2', none, #{}, fun(Pid) ->
                 Key = {class_method_owner, Pid, testSelf},
