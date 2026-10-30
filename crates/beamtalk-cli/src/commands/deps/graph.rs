@@ -128,6 +128,7 @@ pub fn resolve_dependency_graph(
 
     // Phase 3: Compile each dependency in topological order
     let mut resolved = Vec::new();
+    let otp_specs = super::path::OtpTypeSpecs::default();
     for dep_name in &compilation_order {
         let node = &graph[dep_name];
         let mut compiled = super::path::compile_dependency_at(
@@ -136,6 +137,7 @@ pub fn resolve_dependency_graph(
             dep_name,
             options,
             &resolved,
+            &otp_specs,
         )?;
 
         // Set transitivity metadata
