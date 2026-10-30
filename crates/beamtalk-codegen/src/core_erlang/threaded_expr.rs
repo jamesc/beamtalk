@@ -1723,6 +1723,8 @@ impl CoreErlangGenerator {
     ) -> Vec<&'a Expression> {
         #[cfg(test)]
         match fault::active() {
+            // (The BT-4310 sites hold the BT-4287 operand sites' constructs
+            // too, so the BT-4287 fault withholds both, as before BT-4287.)
             Some(fault::LocalRebindFault::FoldOperandFamilyOnlyInPlace) => {
                 return self.body_producer_site_exprs_with(
                     stmt,
@@ -1730,7 +1732,7 @@ impl CoreErlangGenerator {
                     arm,
                     FamilyOnlySites {
                         value_sites: false,
-                        unsequenced_operands: true,
+                        unsequenced_operands: false,
                     },
                 );
             }
