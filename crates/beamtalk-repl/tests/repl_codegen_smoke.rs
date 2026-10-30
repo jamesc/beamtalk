@@ -1676,22 +1676,23 @@ fn repl_sealed_stateless_class_method_emits_direct_call() {
         code.contains("call 'bt@facade':"),
         "Expected a direct call into the class module in: {code}"
     );
+    // BT-4301 (ADR 0142 §2): guarded, with `class_send` as the fallback.
     assert!(
-        !code.contains("'class_send'"),
-        "Eligible send must not go through class_send in: {code}"
+        code.contains("'direct_call_ok'('Facade class', 'Facade')"),
+        "Eligible send must be guarded in: {code}"
     );
 }
 
+/// BT-4301 (ADR 0142 §1): sealing plays no part; REPL codegen shares module
+/// codegen's rule, so a method that is not `class sealed` is the same guarded
+/// direct call.
 #[test]
-fn repl_non_sealed_class_method_still_emits_class_send() {
+fn repl_non_sealed_class_method_emits_guarded_direct_call() {
     let code = repl_code_with_facade_hierarchy("Facade plain");
     assert!(
-        code.contains("'class_send'"),
-        "Non-sealed class method must keep class_send in: {code}"
-    );
-    assert!(
-        !code.contains("call 'bt@facade':"),
-        "Non-sealed class method must not be called directly in: {code}"
+        code.contains("call 'bt@facade':'class_plain'(")
+            && code.contains("'direct_call_ok'('Facade class', 'Facade')"),
+        "A class method of a stateless class is a guarded direct call in: {code}"
     );
 }
 
@@ -1755,8 +1756,8 @@ fn repl_beamtalk_class_named_emits_direct_call() {
         "Expected a direct call into bt@stdlib@beamtalk in: {code}"
     );
     assert!(
-        !code.contains("'class_send'"),
-        "Beamtalk classNamed: must not go through class_send in: {code}"
+        code.contains("'direct_call_ok'('Beamtalk class', 'Beamtalk')"),
+        "Beamtalk classNamed: must be guarded in: {code}"
     );
 }
 

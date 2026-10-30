@@ -70,7 +70,7 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
     1
 
 'class_bar'/1 = fun (ClassSelf) ->
-    let _Effect@1 = call 'self_send_explicit_class_reference':'class_foo'(ClassSelf) in _Effect@1
+    let _Effect@1 = case call 'beamtalk_class_dispatch':'class_self_direct_ok'('ExplicitRefOpenClass class', 'ExplicitRefOpenClass class', 'ExplicitRefOpenClass', 'foo') of <'true'> when 'true' -> call 'self_send_explicit_class_reference':'class_foo'(ClassSelf) <_> when 'true' -> call 'beamtalk_class_dispatch':'class_self_dispatch_local'('ExplicitRefOpenClass', 'foo', [], ClassSelf) end in _Effect@1
 
 'register_class'/0 = fun () ->
     try
@@ -110,7 +110,6 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
         }~
@@ -148,7 +147,6 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 

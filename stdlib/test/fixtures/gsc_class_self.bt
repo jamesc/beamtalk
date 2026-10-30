@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301: class methods that answer their own class-side `self`. See
+// guarded_static_call_test.bt.
+
+sealed Object subclass: GscClassSelf
+
+  class sealed me => self
+
+  class sealed viaSibling => self me

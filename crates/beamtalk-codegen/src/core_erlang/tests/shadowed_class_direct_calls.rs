@@ -5,12 +5,11 @@
 //! when the name is shadowed (declared by two or more packages in scope,
 //! BT-4151's `shadowed_class_names`). Such a name is one last-wins runtime
 //! class, so the compile-time package's module is not necessarily the one a
-//! dynamic send reaches. Covered here: `class sealed` class-method direct
-//! calls (ADR 0129 Phase 0b), keyword constructors and nullary `new`
+//! dynamic send reaches. Covered here: guarded class-method direct calls
+//! (ADR 0142 §2), keyword constructors and nullary `new`
 //! (BT-4099). Each negative has an unshadowed positive control so it cannot
 //! pass vacuously.
 
-use super::super::method_frame::DIRECT_CLASS_SELF_PARAM;
 use super::super::{CodegenOptions, CoreErlangGenerator, DirectCallClassInfo, generate_module};
 use beamtalk_core::ast::{
     Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodKind,
@@ -18,9 +17,8 @@ use beamtalk_core::ast::{
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::source_analysis::Span;
 
-/// A sealed, stateless `Parser` declared by `package` with one
-/// `class sealed parse:` class method: what `compute_direct_call_eligible`
-/// makes direct-call eligible.
+/// A stateless `Parser` declared by `package` with one `parse:` class method:
+/// what `compute_direct_call_eligible` makes direct-call eligible.
 fn sealed_parser(package: Option<&str>) -> ClassInfo {
     ClassInfo {
         name: "Parser".into(),
@@ -229,12 +227,10 @@ fn qualified_reference_to_a_shadowed_class_stays_a_class_send() {
 
 #[test]
 fn own_class_sibling_call_is_unaffected_by_shadowing() {
-    // A self-send between two direct-called class methods of the class's own
-    // module forwards the raw incoming class-self (`DIRECT_CLASS_SELF_PARAM`,
-    // possibly `nil`; BT-4029), shadowed or not: it describes how this
-    // module's own functions are entered, which shadowing does not change.
-    // Forwarding the gated `ClassSelf` instead would read a variable the
-    // direct-called method never bound.
+    // A class-side self-send to a class method of the class's own module
+    // passes the method's own `ClassSelf` behind the `class_self_direct_ok/4`
+    // guard (BT-4301), shadowed or not: it describes how this module's own
+    // functions are entered, which shadowing does not change.
     //
     // `probe` is an instance method, so its `Parser helper: 1` is a class
     // *reference* send that goes through the shadow gate: it proves `Parser`
@@ -254,8 +250,9 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
         )
         .expect("codegen should succeed")
     };
-    let forwarded = format!("'class_helper:'({DIRECT_CLASS_SELF_PARAM}, ");
-    let probe_direct = "call 'bt@parser':'class_helper:'('nil', 1)";
+    let forwarded = "'class_helper:'(ClassSelf, ";
+    let probe_direct =
+        "call 'bt@parser':'class_helper:'({'beamtalk_object', 'Parser class', 'bt@parser', ";
 
     // Control: no rival, so the class-reference send in `probe` direct-calls.
     let control = compile(vec![]);
@@ -264,8 +261,8 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
         "control: an unshadowed class-reference send should direct-call. Got:\n{control}"
     );
     assert!(
-        control.contains(&forwarded),
-        "control: the sibling call should forward `{DIRECT_CLASS_SELF_PARAM}`. Got:\n{control}"
+        control.contains(forwarded),
+        "control: the sibling call should pass `ClassSelf`. Got:\n{control}"
     );
 
     // Rival: a dependency also declares `Parser`.
@@ -276,8 +273,7 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
          stays a class send. Got:\n{code}"
     );
     assert!(
-        code.contains(&forwarded),
-        "the own-class sibling call must still forward `{DIRECT_CLASS_SELF_PARAM}` under \
-         shadowing. Got:\n{code}"
+        code.contains(forwarded),
+        "the own-class sibling call must still pass `ClassSelf` under shadowing. Got:\n{code}"
     );
 }

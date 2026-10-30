@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3639 / ADR 0129 Phase 0b: a class WITH `classState:` is never
-// direct-call eligible, so its class methods keep running in the class
-// gen_server process however they are reached.
+// BT-3639 / ADR 0142: a class WITH `classState:` is never direct-call
+// eligible, so its class methods keep running in the class gen_server
+// process however they are reached.
 
 sealed Object subclass: DirectDispatchStateful
   classState: hits = 0

@@ -374,9 +374,13 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
         code.contains("call 'bt@stdlib@beamtalk':"),
         "expected a direct call into bt@stdlib@beamtalk; got:\n{code}"
     );
+    // ADR 0142 §2 (BT-4301): the direct call is guarded, with `class_send`
+    // as its fallback only.
     assert!(
-        !code.contains("'class_send'"),
-        "Beamtalk classNamed: must not go through class_send; got:\n{code}"
+        code.contains(
+            "call 'beamtalk_class_shadow_flags':'direct_call_ok'('Beamtalk class', 'Beamtalk')"
+        ),
+        "the direct call must be guarded; got:\n{code}"
     );
 }
 

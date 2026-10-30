@@ -8,9 +8,7 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
-use super::super::method_frame::{
-    CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM, MethodBoundary, MethodFrame,
-};
+use super::super::method_frame::{CLASS_SELF_VAR, MethodBoundary, MethodFrame};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::sequencing::PrecompiledScope;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, threaded_ir};
@@ -2081,13 +2079,6 @@ impl CoreErlangGenerator {
             .map(|m| m.selector.name().to_string())
             .collect();
 
-        *self.sealed_class_method_selectors_mut() = class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary && m.is_sealed)
-            .map(|m| m.selector.name().to_string())
-            .collect();
-
         // Populate auto-generated keyword constructor selector for Value subclass: classes.
         // This allows `ClassName slot: value` inside a class method to route to the correct
         // class-side constructor instead of falling through to the instance-side getter.
@@ -2153,49 +2144,20 @@ impl CoreErlangGenerator {
                 frame.class_method_body_doc(method, nlr_token_var.as_deref())?
             };
 
-            // BT-4029: a direct-called method (ADR 0129 Phase 0b) can be
-            // entered with `ClassSelf = nil` (a static `Cls sel` from another
-            // class, or the runtime's dynamic `lookup_direct_call`), so when
-            // its body reads `ClassSelf` at all (`self`, `self new`, `spawn`,
-            // a class-side self-send, `self error:`, ...) the parameter is
-            // renamed and `ClassSelf` rebound to the real class object first.
-            // A direct-called method always names its parameter
-            // `_DirectClassSelf`, which is what it forwards to direct-called
-            // siblings (`sibling_class_self_arg`).
-            // `class_self_unbound`: the function has no `ClassSelf` binding at
-            // all, so the finished function must not mention it.
-            let (class_self_param, body_doc, class_self_unbound) =
-                if !frame.current_class_method_is_direct_called() {
-                    (CLASS_SELF_VAR, body_doc, false)
-                } else if Self::doc_mentions_var(&body_doc, CLASS_SELF_VAR) {
-                    let prologue = frame.direct_class_self_prologue_doc();
-                    (DIRECT_CLASS_SELF_PARAM, docvec![prologue, body_doc], false)
-                } else {
-                    (DIRECT_CLASS_SELF_PARAM, body_doc, true)
-                };
-
-            // Build function header with params (Document pieces, not format! —
-            // Core Erlang fragments must use the Document API, ADR 0089).
+            // BT-4301: every caller passes the real class object as
+            // `ClassSelf` (static guarded direct calls, the in-caller dynamic
+            // path, the class process), so the parameter is `ClassSelf` itself
+            // and nothing resolves a `nil` (the BT-4029 prologue is gone).
             let doc = docvec![
                 "\n",
                 fname(safe_class_method_fn_name(&selector_name), arity),
                 " = fun (",
-                leaf::var(class_self_param),
+                leaf::var(CLASS_SELF_VAR),
                 Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",
                 nest(INDENT, docvec![line(), body_doc,]),
                 "\n",
             ];
-            // The prologue decision scans the body only; this re-checks the
-            // finished function, so a `ClassSelf` reference added around the
-            // body later fails the compile here instead of raising
-            // `element(2, nil)` badarg at runtime.
-            if class_self_unbound && Self::doc_mentions_var(&doc, CLASS_SELF_VAR) {
-                return Err(CodeGenError::Internal(format!(
-                    "direct-called class method `{selector_name}` reads `ClassSelf` outside \
-                     the body scanned for its class-self prologue (BT-4029)"
-                )));
-            }
             docs.push(doc);
 
             // `frame` drops here, popping the scope, clearing
@@ -2203,7 +2165,6 @@ impl CoreErlangGenerator {
         }
         self.class_var_names_mut().clear();
         self.class_method_selectors_mut().clear();
-        self.sealed_class_method_selectors_mut().clear();
         self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
     }
@@ -2518,74 +2479,6 @@ impl CoreErlangGenerator {
             }
             Ok(this.verify_and_render_body_stmts(&body_stmts, method.span))
         })
-    }
-
-    /// BT-4029: the prologue of a direct-called class method whose body reads
-    /// `ClassSelf`. The method was entered with [`DIRECT_CLASS_SELF_PARAM`],
-    /// which is `nil` on the direct path and the real class object when a
-    /// non-direct sibling class method forwards its own; either way
-    /// `ClassSelf` becomes the class object.
-    ///
-    /// The class is sealed, so the receiver is statically this class: the
-    /// metaclass tag and the module are compile-time constants (the same
-    /// `{'beamtalk_object', Tag, Module, Pid}` shape a class reference builds,
-    /// `class_object_from_registry_clause`), and only the pid is looked up,
-    /// with the `whereis_class/1` a class reference uses (no call into the
-    /// class process, so it is safe from inside it). A class that is not
-    /// registered raises the usual `class_not_found`.
-    ///
-    /// ```erlang
-    /// let ClassSelf = case _DirectClassSelf of
-    ///   <'nil'> when 'true' ->
-    ///     case call 'beamtalk_class_registry':'whereis_class'('Pt') of
-    ///       <'undefined'> when 'true' -> %% class_not_found
-    ///       <Pid> when 'true' -> {'beamtalk_object', 'Pt class', 'bt@pt', Pid}
-    ///     end
-    ///   <Given> when 'true' -> Given
-    /// end in
-    /// ```
-    pub(in crate::core_erlang) fn direct_class_self_prologue_doc(&mut self) -> Document<'static> {
-        let class_name = self.class_name();
-        let module = self.module_name.clone();
-        let pid_var = self.fresh_temp_var("ClassPid");
-        let given_var = self.fresh_temp_var("GivenClassSelf");
-        let not_found = self.class_not_found_error_doc(&class_name);
-        docvec![
-            "let ",
-            leaf::var(CLASS_SELF_VAR),
-            " = case ",
-            leaf::var(DIRECT_CLASS_SELF_PARAM),
-            " of <'nil'> when 'true' -> ",
-            "case call 'beamtalk_class_registry':'whereis_class'(",
-            leaf::atom(class_name.clone()),
-            ") of ",
-            not_found,
-            "<",
-            leaf::var(pid_var.clone()),
-            "> when 'true' -> {'beamtalk_object', ",
-            leaf::atom(super::super::util::metaclass_tag(&class_name)),
-            ", ",
-            leaf::atom(module),
-            ", ",
-            leaf::var(pid_var),
-            "} end <",
-            leaf::var(given_var.clone()),
-            "> when 'true' -> ",
-            leaf::var(given_var),
-            " end in",
-            line(),
-        ]
-    }
-
-    /// Whether the rendered `doc` references Core Erlang variable `var` as a
-    /// whole token (not as a prefix or suffix of a longer name). A match
-    /// inside a string or atom literal, or a nested `ClassBuilder` fun's own
-    /// `ClassSelf` parameter, is a false positive: it costs an unneeded
-    /// `whereis_class` per call but is never wrong. A miss would be (the
-    /// `element(2, nil)` badarg), so anything that references `ClassSelf` must
-    /// be part of the body document scanned here, never added around it later.
-    fn doc_mentions_var(doc: &Document<'static>, var: &str) -> bool {
-        super::super::variable_context::text_mentions_var(&doc.to_pretty_string(), var)
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces

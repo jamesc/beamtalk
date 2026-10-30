@@ -3290,8 +3290,9 @@ impl<'d> Walker<'d> {
 
     /// How a block argument of an ordinary send of `selector` to `receiver`
     /// escapes: to a class method that runs in the class's process (a class
-    /// reference receiver, or `self` in a class method, unless the method is
-    /// direct-called in the caller, ADR 0129 Phase 0b), or to any other method.
+    /// reference receiver, or `self` in a class method, unless the method runs
+    /// in the caller, `ClassHierarchy::runs_class_method_in_caller`, ADR 0142),
+    /// or to any other method.
     fn passed_escape(&self, receiver: &Expression, selector: &EcoString) -> Escape {
         let receivers = self.receivers.as_ref();
         let class = match receiver {
@@ -3304,7 +3305,7 @@ impl<'d> Walker<'d> {
         match class {
             Some(class)
                 if !receivers
-                    .is_some_and(|r| r.hierarchy.is_direct_call_eligible(&class, selector)) =>
+                    .is_some_and(|r| r.hierarchy.runs_class_method_in_caller(&class, selector)) =>
             {
                 Escape::ClassMethod(selector.clone())
             }

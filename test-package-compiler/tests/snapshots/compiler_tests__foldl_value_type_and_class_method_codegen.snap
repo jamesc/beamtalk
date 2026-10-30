@@ -137,7 +137,6 @@ let _temp@19 = _coll@18 in let _temp@20 = case call 'erlang':'is_list'(_temp@19)
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
         }~
@@ -186,7 +185,6 @@ let _temp@19 = _coll@18 in let _temp@20 = case call 'erlang':'is_list'(_temp@19)
       'method_info' => ~{}~,
       'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
                 }~
@@ -225,7 +223,6 @@ let _temp@19 = _coll@18 in let _temp@20 = case call 'erlang':'is_list'(_temp@19)
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 

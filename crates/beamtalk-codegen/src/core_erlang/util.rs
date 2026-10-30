@@ -96,6 +96,21 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
     s
 }
 
+/// The name a class's process is registered under,
+/// `"beamtalk_class_{class_name}"` (`beamtalk_class_registry:registry_name/1`).
+/// Built at compile time so a static call site looks the class's pid up with
+/// one `erlang:whereis/1` instead of `whereis_class/1`'s per-call
+/// `binary_to_atom` (BT-4301). Pinned to the Erlang rule, and
+/// [`metaclass_tag`] to `class_object_tag/1`, by the shared fixture
+/// `class_registered_name_conformance.json`.
+pub(super) fn class_registered_name(class_name: &str) -> String {
+    const PREFIX: &str = "beamtalk_class_";
+    let mut s = String::with_capacity(PREFIX.len() + class_name.len());
+    s.push_str(PREFIX);
+    s.push_str(class_name);
+    s
+}
+
 /// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
 ///
 /// Using the per-module loop index keeps snapshot values stable across unrelated
@@ -1847,6 +1862,33 @@ pub(super) fn ffi_coercion_mode(module_name: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    /// BT-4301: [`super::class_registered_name`] and [`super::metaclass_tag`]
+    /// agree with `beamtalk_class_registry:registry_name/1` and
+    /// `class_object_tag/1`; the Erlang side asserts the identical cases in
+    /// `beamtalk_class_registry_tests:class_registered_name_matches_shared_fixture_test/0`.
+    #[test]
+    fn class_registered_name_matches_shared_fixture() {
+        let path = crate::core_erlang::tests::repo_root().join(
+            "runtime/apps/beamtalk_runtime/test/fixtures/class_registered_name_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("fixture is a JSON array");
+        assert!(!cases.is_empty(), "fixture must have cases");
+        for case in &cases {
+            let class = case["class"].as_str().expect("case.class");
+            assert_eq!(
+                super::class_registered_name(class),
+                case["registered"].as_str().expect("case.registered")
+            );
+            assert_eq!(
+                super::metaclass_tag(class),
+                case["tag"].as_str().expect("case.tag")
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

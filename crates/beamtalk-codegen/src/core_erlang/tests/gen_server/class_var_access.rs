@@ -221,13 +221,15 @@ fn class_side_self_sends_pass_and_rebind_nothing() {
     );
     let direct = function_text(&code, "'class_direct'/1 = fun");
     assert!(
-        direct.contains("call 'test':'class_pinned'(ClassSelf)"),
-        "a `class sealed` selector keeps the direct call. Got:\n{direct}"
+        direct.contains("class_self_direct_ok")
+            && direct.contains("<'true'> when 'true' -> call 'test':'class_pinned'(ClassSelf)"),
+        "a `class sealed` selector is a guarded direct call too (BT-4301). Got:\n{direct}"
     );
     let named = function_text(&code, "'class_named'/1 = fun");
     assert!(
-        named.contains("call 'test':'class_foo'(ClassSelf)"),
-        "an own-class reference binds statically. Got:\n{named}"
+        named.contains("call 'test':'class_foo'(ClassSelf)")
+            && named.contains("'class_self_dispatch_local'('Base', 'foo', [], ClassSelf)"),
+        "an own-class reference binds statically, behind the guard. Got:\n{named}"
     );
     let inherited = function_text(&code, "'class_inherited'/1 = fun");
     assert!(

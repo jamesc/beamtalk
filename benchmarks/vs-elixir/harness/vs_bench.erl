@@ -5,7 +5,9 @@
 %%
 %% The Beamtalk rows are class methods of the sealed, stateless `VbBench`
 %% (../beamtalk/src/vb_bench.bt), called directly as
-%% `'class_<selector>'(nil, N, Ctx)`, so they run in the calling process.
+%% `'class_<selector>'(VbBench, N, Ctx)` with the real class reference as
+%% `ClassSelf` (BT-4301 retired the `nil` convention), so they run in the
+%% calling process.
 %% The Elixir rows are `VeBench.<row>(N, Ctx)` (../elixir/lib/ve_bench.ex).
 %% Both sides run the operation N times in the same loop shape.
 %%
@@ -177,7 +179,8 @@ rows() ->
 %%====================================================================
 
 fixtures() ->
-    Bt = fun(Sel) -> ?BT:(class_fn(Sel))(nil) end,
+    Self = bt_self(),
+    Bt = fun(Sel) -> ?BT:(class_fn(Sel))(Self) end,
     #{
         none => 0,
         int => 5,
@@ -200,6 +203,14 @@ fixtures() ->
 
 class_fn(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
 
+%% `VbBench`'s class reference, the `ClassSelf` every class method is called
+%% with (BT-4301).
+bt_self() ->
+    case beamtalk_class_registry:resolve_class_object('VbBench') of
+        undefined -> error(vb_bench_class_not_registered);
+        ClassSelf -> ClassSelf
+    end.
+
 ctx(bt, Name, Fx) ->
     case maps:get(Name, Fx) of
         {B, _} -> B;
@@ -214,9 +225,10 @@ ctx(ex, Name, Fx) ->
 %% The callable for one side of one row: fun(N) -> term().
 bt_fun(Sel, Ctx) ->
     F = class_fn(Sel),
+    Self = bt_self(),
     case arity_of(Sel) of
-        1 -> fun(N) -> ?BT:F(nil, N) end;
-        2 -> fun(N) -> ?BT:F(nil, N, Ctx) end
+        1 -> fun(N) -> ?BT:F(Self, N) end;
+        2 -> fun(N) -> ?BT:F(Self, N, Ctx) end
     end.
 
 ex_fun(Fun, Ctx) -> fun(N) -> ?EX:Fun(N, Ctx) end.
@@ -472,9 +484,11 @@ compiles_to("1b") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS +
 compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
-compiles_to("3a") -> "direct call Mod:'class_double:'(nil, 21)";
-compiles_to("3b") -> "whereis_class + class_send: not `class sealed`, runs in the caller (ADR 0142, BT-4300)";
-compiles_to("3c") -> "whereis_class + class_send: runs in the caller (ADR 0142, BT-4300)";
+compiles_to("3a") ->
+    "guarded direct call: erlang:whereis(registered name) + direct_call_ok/2, Mod:'class_double:'(ClassRef, 21) (BT-4301)";
+compiles_to("3b") ->
+    "guarded direct call, as 3a: `class sealed` plays no part (ADR 0142, BT-4301)";
+compiles_to("3c") -> "guarded direct call, as 3a: open class (ADR 0142, BT-4301)";
 compiles_to("3d") ->
     "send(C, 'double:', [21]) -> class_send: runs in the caller (ADR 0142, BT-4300)";
 compiles_to("3e") ->

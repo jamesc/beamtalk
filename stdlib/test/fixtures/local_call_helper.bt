@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-1664: Test fixture for performLocally:withArguments:
-// Non-sealed class with a class method that returns the caller's Erlang PID.
+// Open, stateless class with a class method that returns the caller's Erlang
+// PID: it runs in the caller (ADR 0142).
 
 Object subclass: LocalCallHelper
 
   class callerPid =>
-    @expect class_process_ffi "deliberately open: the test observes the class process vs the caller"
+    @expect class_method_process_resource "the test observes that the method runs in the caller"
     Erlang erlang self
 
   class echo: value => value

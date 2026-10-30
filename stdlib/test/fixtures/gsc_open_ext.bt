@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301: an open class whose class method a literal-receiver send and a
+// class-side self-send reach through guarded direct calls. See
+// guarded_static_call_test.bt.
+
+Object subclass: GscOpenExt
+
+  class shadowMe -> Symbol => #compiled
+
+  class viaSelf -> Symbol => self shadowMe

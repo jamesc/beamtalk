@@ -83,16 +83,23 @@ fn in_object(body: &str) -> String {
 // §6: a Tier 2 block value with no return channel
 // ---------------------------------------------------------------------------
 
+/// A class with class variables: its class methods run in its class process
+/// (ADR 0142 §1), so a block passed to one runs in another process.
+const STATEFUL: &str = "Object subclass: CvS\n  classState: k = 0\n  class ap: b => b value\n\n";
+
 #[test]
 fn section6_literal_block_to_user_hom_in_class_method_is_an_error() {
-    let src = in_class("r := CvA ap: [t := t + 1. 1]\n#[r, t]");
+    let src = format!(
+        "{STATEFUL}{}",
+        in_class("r := CvS ap: [t := t + 1. 1]\n#[r, t]")
+    );
     let diags = adr0131_diagnostics(&src);
     let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
     assert_eq!(s6.len(), 1, "{diags:?}");
     let d = s6[0];
     assert_eq!(d.severity, Severity::Error);
-    // ADR 0133: `CvA ap:` is not `class sealed`, so it runs in the class's
-    // process.
+    // ADR 0133 / ADR 0142: `CvS` declares class variables, so `ap:` runs in
+    // the class's process.
     assert_eq!(
         d.message.as_str(),
         "`t` is assigned in a block passed to a class method (`ap:`); it would run in another \
@@ -142,9 +149,19 @@ fn escaping_block_messages_name_the_shape() {
              compiler threads it through",
         ),
         (
-            in_value("CvA onEvent: [:e | t := t + 1]\nt"),
+            format!(
+                "{STATEFUL}{}",
+                in_value("CvS onEvent: [:e | t := t + 1]\nt")
+            ),
             "`t` is assigned in a block passed to a class method (`onEvent:`); it would run in \
              another process",
+        ),
+        (
+            // ADR 0142 §1: `CvA` has no class variables, so its class methods
+            // run in the caller, `class sealed` or not.
+            in_value("CvA onEvent: [:e | t := t + 1]\nt"),
+            "`t` is assigned in a block passed to `onEvent:`, which is not a construct the \
+             compiler threads it through",
         ),
         (
             format!("{sealed}{}", in_class("Twice twice: [t := t + 1]\nt")),

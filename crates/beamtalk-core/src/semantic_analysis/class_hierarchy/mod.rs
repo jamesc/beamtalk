@@ -398,18 +398,84 @@ impl ClassHierarchy {
             }
         }
     }
-    /// Whether a send of the class-side `selector` to `class_name` is
-    /// direct-called in the caller's process (see
-    /// [`ClassInfo::is_direct_call_eligible`]). A method inherited from an
-    /// ancestor is not in the class's own table, so it is not eligible.
+    /// Whether a send of the class-side `selector` to `class_name` runs in the
+    /// caller's process instead of the class's `gen_server`, however it is
+    /// reached (ADR 0142 §1). THE one rule, the static form of the runtime's
+    /// (`beamtalk_class_dispatch`'s in-caller owner memo); nothing keeps a
+    /// second copy. It holds when:
+    ///
+    /// 1. no class in `class_name`'s chain declares class variables
+    ///    ([`Self::chain_has_class_variables`]): rules 1-2 taken over the whole
+    ///    chain, as the runtime takes them
+    ///    (`beamtalk_class_metadata:chain_has_class_variables/1`), because a
+    ///    subclass holds its ancestors' class variables in its own process;
+    /// 2. the selector is not process-bound
+    ///    ([`ClassInfo::is_process_bound_class_selector`], rule 3) and not a
+    ///    class-variable reflection send
+    ///    ([`ClassInfo::is_class_var_reflection_selector`]), which the class
+    ///    process answers from its own state.
+    ///
+    /// `sealed` and `class sealed` play no part. The method may be inherited:
+    /// a dynamic send runs an inherited stateless method in the caller too
+    /// (BT-4300). The lints that ask where a class method runs
+    /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
+    /// `class-method-process-resource`) and the local-threading escape
+    /// analysis read this; codegen reads [`Self::is_direct_call_eligible`],
+    /// which adds only the own-method condition. Like every compile-time
+    /// verdict it describes the classes as compiled: a class-side extension or
+    /// ADR 0084 runtime fun sends the method back to the class process at run
+    /// time, which the guard of every static direct call re-checks.
+    #[must_use]
+    pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
+        !ClassInfo::is_process_bound_class_selector(selector)
+            && !ClassInfo::is_class_var_reflection_selector(selector)
+            && !self.chain_has_class_variables(class_name)
+    }
+
+    /// Whether a static send of the class-side `selector` to the literal class
+    /// `class_name` compiles to the guarded direct call (ADR 0142 §2): the
+    /// method runs in the caller ([`Self::runs_class_method_in_caller`]) and
+    /// `class_name` itself defines it. An inherited method is not in the
+    /// class's own table: a literal send of it takes the dynamic path, which
+    /// runs it in the caller too, so no call site names a superclass module.
+    /// Module codegen's direct-call table (`compute_direct_call_eligible`) and
+    /// REPL codegen (which reuses it) read this.
+    ///
+    /// A compile-time verdict only: every call site it enables is guarded at
+    /// run time by `beamtalk_class_shadow_flags:direct_call_ok/2`, which
+    /// re-checks shadows and the chain's class variables against the live
+    /// classes.
     #[must_use]
     pub fn is_direct_call_eligible(&self, class_name: &str, selector: &str) -> bool {
-        self.get_class(class_name).is_some_and(|class| {
-            class
-                .class_methods
-                .iter()
-                .any(|m| m.selector == selector && class.is_direct_call_eligible(m))
-        })
+        self.get_class(class_name)
+            .is_some_and(|class| class.class_methods.iter().any(|m| m.selector == selector))
+            && self.runs_class_method_in_caller(class_name, selector)
+    }
+
+    /// Whether `class_name` or any of its ancestors declares class variables
+    /// ([`ClassInfo::has_class_variables`]), or the chain cannot be followed to
+    /// its root (an unknown class or superclass, a cycle): any doubt answers
+    /// `true`, as the runtime's `beamtalk_class_metadata:
+    /// chain_has_class_variables/1` answers for an unpublished fact.
+    #[must_use]
+    pub fn chain_has_class_variables(&self, class_name: &str) -> bool {
+        let mut current = class_name;
+        let mut seen = HashSet::new();
+        loop {
+            if !seen.insert(current) {
+                return true;
+            }
+            let Some(class) = self.get_class(current) else {
+                return true;
+            };
+            if class.has_class_variables() {
+                return true;
+            }
+            match class.superclass.as_deref() {
+                Some(superclass) => current = superclass,
+                None => return false,
+            }
+        }
     }
 
     /// Look up a class by name.

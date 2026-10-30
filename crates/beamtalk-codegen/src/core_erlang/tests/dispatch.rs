@@ -3402,10 +3402,12 @@ fn test_class_method_self_send_fast_path_does_not_duplicate_block_args() {
     );
 }
 
-/// BT-3666: neither an explicit own-class reference, a `class sealed` selector
-/// nor a sealed class gets the guard (they are statically bound).
+/// BT-4301 (ADR 0142 §2): no class-side direct call is unguarded. A sealed
+/// class's self-send, a `class sealed` selector's and an explicit own-class
+/// reference all carry the `class_self_direct_ok/4` guard, so a class-side
+/// extension or runtime fun shadowing the method is honoured (BT-4133).
 #[test]
-fn test_static_class_self_sends_have_no_fast_path_guard() {
+fn test_every_class_side_self_send_carries_the_guard() {
     for src in [
         "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n",
         "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n",
@@ -3413,57 +3415,53 @@ fn test_static_class_self_sends_have_no_fast_path_guard() {
     ] {
         let code = codegen_source(src);
         assert!(
-            !code.contains("class_self_direct_ok"),
-            "statically bound send must not carry the guard. Got:\n{code}"
+            code.contains("'class_self_direct_ok'"),
+            "a class-side direct call must carry the guard. Got:\n{code}"
+        );
+        assert!(
+            code.contains("'class_self_send'(") || code.contains("'class_self_dispatch_local'("),
+            "the guard's fallback is a runtime lookup. Got:\n{code}"
         );
     }
 }
 
-/// BT-3666: a sealed class cannot be subclassed, so its class-side self-send
-/// keeps the direct call (no runtime walk).
+/// BT-4301: a sealed class's self-send passes its own `ClassSelf` to the
+/// guarded direct call and to the walk alike.
 #[test]
-fn test_class_method_self_send_in_sealed_class_stays_static() {
+fn test_class_method_self_send_in_sealed_class_is_guarded() {
     let src = "sealed Object subclass: SealedCls\n  class foo => 1\n\n  class bar => self foo\n";
     let code = codegen_source(src);
     assert!(
         code.contains("call 'test':'class_foo'(ClassSelf"),
-        "sealed class self-send must stay a direct class_foo call. Got:\n{code}"
+        "the guarded arm calls class_foo with ClassSelf. Got:\n{code}"
     );
     assert!(
-        !code.contains("'class_self_send'"),
-        "sealed class self-send must not use the runtime walk. Got:\n{code}"
+        code.contains("call 'beamtalk_class_dispatch':'class_self_send'(ClassSelf, 'foo', [])"),
+        "the walk starts from ClassSelf itself. Got:\n{code}"
     );
 }
 
-/// BT-3666: a `class sealed` selector in an open class cannot be overridden,
-/// so its class-side self-send keeps the direct call.
+/// BT-4301: an explicit own-class reference (`OpenCls foo`) binds the method
+/// to the named class, never late-bound on the receiver, which stays
+/// `ClassSelf`: the guard checks only shadows on the named class, and its
+/// fallback resolves `foo` from the named class.
 #[test]
-fn test_class_method_self_send_to_class_sealed_selector_stays_static() {
-    let src = "Object subclass: OpenCls\n  class sealed foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    assert!(
-        code.contains("call 'test':'class_foo'(ClassSelf"),
-        "class sealed selector self-send must stay a direct call. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'class_self_send'"),
-        "class sealed selector self-send must not use the runtime walk. Got:\n{code}"
-    );
-}
-
-/// BT-3666: an explicit own-class reference (`Base foo`) is bound statically,
-/// never late-bound on the receiver.
-#[test]
-fn test_class_method_explicit_class_reference_stays_static() {
+fn test_class_method_explicit_class_reference_binds_the_named_class() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
     let code = codegen_source(src);
     assert!(
-        code.contains("call 'test':'class_foo'(ClassSelf"),
-        "explicit own-class reference must stay a direct class_foo call. Got:\n{code}"
+        code.contains("'class_self_direct_ok'('OpenCls class', 'OpenCls class', 'OpenCls', 'foo')"),
+        "the guard does not depend on the receiver. Got:\n{code}"
     );
     assert!(
-        !code.contains("'class_self_send'"),
-        "explicit own-class reference must not late-bind. Got:\n{code}"
+        code.contains("call 'test':'class_foo'(ClassSelf)"),
+        "the guarded arm passes the receiver. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('OpenCls', 'foo', [], ClassSelf)"
+        ),
+        "the fallback resolves from the named class. Got:\n{code}"
     );
 }
 
@@ -3787,11 +3785,12 @@ fn test_builder_class_var_mutation_is_an_in_place_put() {
     );
 }
 
-/// ADR 0130 §3: a `ClassBuilder` `super` / self-send passes the LIVE receiver tag
-/// (`element(2, ClassSelf)`), so a subclass receiver runs the superclass method
-/// under its own class-variable key instead of the static builder class's.
+/// ADR 0130 §3 / BT-4301: a `ClassBuilder` `super` / self-send passes the LIVE
+/// receiver (`ClassSelf` itself), so a subclass receiver runs the superclass
+/// method under its own class-variable key instead of the static builder
+/// class's, and the runtime rebuilds nothing from a tag.
 #[test]
-fn test_builder_super_and_self_send_pass_live_receiver_tag() {
+fn test_builder_super_and_self_send_pass_live_receiver() {
     let src = "Object classBuilder name: #BT3709Sup; superclass: Object; \
                classMethods: #{ #bump => [:self | super bump], #twice => [:self | self bump] }; \
                register";
@@ -3799,16 +3798,16 @@ fn test_builder_super_and_self_send_pass_live_receiver_tag() {
     assert!(
         code.contains(
             "call 'beamtalk_class_dispatch':'class_super_dispatch'('BT3709Sup', 'bump', [], \
-             call 'erlang':'element'(2, ClassSelf))"
+             ClassSelf)"
         ),
-        "builder `super` must pass the live receiver tag. Got:\n{code}"
+        "builder `super` must pass the live receiver. Got:\n{code}"
     );
     assert!(
         code.contains(
             "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('BT3709Sup', 'bump', [], \
-             call 'erlang':'element'(2, ClassSelf))"
+             ClassSelf)"
         ),
-        "builder self-send must pass the live receiver tag. Got:\n{code}"
+        "builder self-send must pass the live receiver. Got:\n{code}"
     );
 }
 
@@ -3841,7 +3840,7 @@ fn test_class_method_super_uses_class_super_dispatch() {
             assert!(
                 code.contains(
                     "call 'beamtalk_class_dispatch':'class_super_dispatch'('C', 'peek:', ["
-                ) && code.contains("], call 'erlang':'element'(2, ClassSelf))"),
+                ) && code.contains("], ClassSelf)"),
                 "class-side `super` must route through class_super_dispatch/4:\n{src}\n{code}"
             );
             assert!(
@@ -3993,8 +3992,9 @@ fn test_class_method_self_send_in_open_class_with_class_vars_has_no_unwrap() {
     );
 }
 
-/// ADR 0130 §3: a static call (explicit own-class reference or a `class
-/// sealed` selector) in an open class is a plain direct call too.
+/// ADR 0130 §3: an explicit own-class reference or a `class sealed` selector
+/// in an open class is a guarded direct call (BT-4301) that passes and
+/// rebinds nothing either.
 #[test]
 fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
     for body in [
@@ -4010,7 +4010,7 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
         let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
         let baz = &rest[..end];
         assert!(
-            baz.contains("call 'test':'class_bar'(ClassSelf)")
+            baz.contains("call 'test':'class_bar'(")
                 && !baz.contains("ClassVars")
                 && !baz.contains("class_var_result"),
             "static open-class call is a plain direct call. Got:\n{baz}"
@@ -4178,8 +4178,9 @@ fn test_new_without_eligible_entry_falls_back_to_class_send() {
 
 #[test]
 fn test_direct_keyword_constructor_emits_class_fn_call() {
-    // `Pt x: 1 y: 2` on an eligible Value uses the generic
-    // direct-call shape (`class_x:y:/3` ignores its `ClassSelf` arg).
+    // `Pt x: 1 y: 2` on an eligible Value uses the generic guarded
+    // direct-call shape (`class_x:y:/3` ignores its `ClassSelf` arg, but
+    // gets the class reference like every class method, BT-4301).
     let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), true, true);
     let receiver = unqualified_class_reference("Pt");
     let selector = MessageSelector::Keyword(vec![
@@ -4197,12 +4198,29 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'bt@test@pt':'class_x:y:'('nil', 1, 2)"),
-        "eligible keyword ctor must call class_x:y:/3 directly with nil ClassSelf. Got:\n{output}"
+        output.contains("call 'beamtalk_class_shadow_flags':'direct_call_ok'('Pt class', 'Pt')"),
+        "eligible keyword ctor must be guarded. Got:\n{output}"
     );
     assert!(
-        !output.contains("whereis_class") && !output.contains("class_send"),
-        "direct keyword ctor must not touch the registry or gen_server dispatch. Got:\n{output}"
+        output.contains(
+            "call 'bt@test@pt':'class_x:y:'({'beamtalk_object', 'Pt class', 'bt@test@pt', "
+        ),
+        "eligible keyword ctor must call class_x:y:/3 with the class reference. Got:\n{output}"
+    );
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'("),
+        "the guard falls back to class_send. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("'nil'"),
+        "no `nil` class self (BT-4037). Got:\n{output}"
+    );
+    // A removed method (`removeSelector:`, a reload) answers what the dynamic
+    // send answers instead of `undef`: only an `undef` for the call's own
+    // function, now unexported, takes the `class_send` fallback.
+    assert!(
+        output.contains("<{'error', 'undef'}> when 'true' -> case call 'erlang':'function_exported'('bt@test@pt', 'class_x:y:', 3)"),
+        "an undef of the removed method falls back to class_send. Got:\n{output}"
     );
 }
 
@@ -4236,8 +4254,8 @@ fn test_value_meta_bakes_direct_constructors() {
     // end to end: a stateless Value subclass bakes its
     // constructor verdicts into `__beamtalk_meta` — `new` (and `new:`,
     // whose chain here is just the builtin-Value router) under
-    // `direct_constructors`, the keyword ctor under
-    // `direct_class_methods`.
+    // `direct_constructors`. The keyword ctor is an ordinary class method
+    // (BT-4301: no `direct_class_methods` table is baked any more).
     let src = "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n";
     let code = codegen_source(src);
     assert!(
@@ -4245,8 +4263,8 @@ fn test_value_meta_bakes_direct_constructors() {
         "stateless Value must bake new/new: verdicts. Got:\n{code}"
     );
     assert!(
-        code.contains("'x:y:' => 'class_x:y:'"),
-        "keyword ctor must join the baked direct class methods. Got:\n{code}"
+        !code.contains("direct_class_methods"),
+        "no direct_class_methods table is baked (BT-4301). Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -4254,16 +4272,12 @@ fn test_value_meta_bakes_direct_constructors() {
 #[test]
 fn test_value_with_custom_new_omits_it_from_baked_constructors() {
     // fail-closed: a user-defined class-side `new` removes only
-    // `new` from the baked verdicts; the keyword ctor stays direct.
+    // `new` from the baked verdicts.
     let src = "Value subclass: Custom\n  field: x = 0\n\n  class new => self x: 41\n";
     let code = codegen_source(src);
     assert!(
         !code.contains("'direct_constructors' => ['new'"),
         "custom `new` must not bake a direct `new` verdict. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'x:' => 'class_x:'"),
-        "custom `new` must not disturb the keyword ctor verdict. Got:\n{code}"
     );
 }
 
@@ -4282,7 +4296,7 @@ fn test_actor_meta_omits_direct_constructors() {
 #[test]
 fn test_long_keyword_ctor_bakes_hashed_meta_key() {
     // a keyword ctor over many fields exceeds Erlang's 255-char
-    // atom limit; the baked `direct_class_methods` key must be the hashed
+    // atom limit; its `class_method_info` key must be the hashed
     // `kw_<hash>` form (like send sites and `class_method_info` keys), or
     // the module's own `.core` fails to scan (`core_scan_error` — this
     // broke BUnit fixtures such as `value_many_fields.bt`).

@@ -1116,7 +1116,6 @@ init({ClassName, ClassInfo}) ->
     %% instantiation intrinsics can look it up by class name too, without a
     %% gen_server hop.
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
-    sync_direct_class_methods(ClassName, Meta),
     sync_direct_constructors(ClassName, Meta),
     sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
@@ -1508,9 +1507,6 @@ handle_call(
             ),
             seed_runtime_class_methods(NewName, ClassMethods),
             ok = publish_reflection(State#class_state{name = NewName}),
-            beamtalk_class_metadata:put_direct_class_methods(
-                NewName, beamtalk_class_metadata:lookup_direct_class_methods(OldName)
-            ),
             beamtalk_class_metadata:put_direct_constructors(
                 NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
             ),
@@ -1665,17 +1661,13 @@ handle_call(
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
     %% BT-4126: the gate flag above turns this class's own direct paths off,
-    %% but verdicts baked elsewhere still route around the patched fun: a
-    %% gained `new:` strands subclasses' `direct_constructors`, and static
-    %% callers of a `direct_class_methods` entry keep calling the compiled
-    %% SafeFn.
+    %% but a gained `new:` strands subclasses' baked `direct_constructors`.
+    %% Static class-method call sites need no warning: each is guarded by
+    %% `direct_call_ok/2`, which the raised `runtime_fun` flag turns off
+    %% (ADR 0142 §2, BT-4301).
     warn_stale_subclass_constructors(
         ClassName, State#class_state.class_methods, NewClassMethods
     ),
-    case maps:is_key(Selector, beamtalk_class_metadata:lookup_direct_class_methods(ClassName)) of
-        true -> warn_stale_static_class_methods(ClassName, [Selector]);
-        false -> ok
-    end,
     %% ADR 0087 Phase 4: re-index the patched class-side method
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
@@ -2629,23 +2621,6 @@ sync_identity(ClassName, Module, Superclass, IsAbstract, Selectors, Mode) ->
     end.
 
 -doc """
-Publish the compiled `direct_class_methods` eligibility set (ADR 0129 Phase 0b).
-
-Copies `direct_class_methods` from `Meta` into the unified metadata row, where
-`beamtalk_class_dispatch:class_send/3` reads it without a gen_server hop. Meta
-without the key (dynamic classes, older modules) clears the set, so a reload
-that makes a class ineligible takes effect immediately.
-""".
--spec sync_direct_class_methods(class_name(), map()) -> ok.
-sync_direct_class_methods(ClassName, Meta) ->
-    Direct =
-        case maps:get(direct_class_methods, Meta, #{}) of
-            M when is_map(M) -> M;
-            _ -> #{}
-        end,
-    beamtalk_class_metadata:put_direct_class_methods(ClassName, Direct).
-
--doc """
 Publish the compiled `direct_constructors` eligibility set.
 
 Copies `direct_constructors` from `Meta` into the unified metadata row, where
@@ -2691,51 +2666,6 @@ sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
             _ -> undefined
         end,
     beamtalk_class_metadata:put_process_bound_selectors(ClassName, ProcessBound).
-
--doc """
-Warn when a reload leaves direct-dispatch verdicts baked outside this class's
-own row stale (BT-4126).
-
-Direct-dispatch verdicts are generated metadata that the runtime trusts without
-re-deriving them. A reload re-syncs the reloaded class's own row
-(`sync_direct_class_methods/2`, `sync_direct_constructors/2`), but nothing
-re-bakes anything else, so a surgical hot-patch (as opposed to a release
-upgrade, which recompiles the world) can leave two kinds of verdict behind:
-
-* **Descendants' `direct_constructors`.** See
-  `warn_stale_subclass_constructors/3`.
-* **Static callers of this class's `direct_class_methods`.** Eligibility is own-class
-  only and requires a sealed class, so no descendant can hold a stale entry,
-  but call sites compiled against the old verdict call `SafeFn(nil, ...)`
-  directly. When an entry is dropped while the method still exists (it lost
-  `class sealed`, the class gained `classState:`, a keyword constructor
-  became user-defined), those callers keep running it with a `nil` class
-  self: a silent wrong result, so it warns. When the method is gone
-  altogether, the stale call fails loudly with `undef` and no warning is
-  needed.
-
-The runtime-fun hot-patch (`{put_class_method, ...}`) can strand the same two
-verdicts and calls the same two helpers.
-
-Runs only on reload (zero hot-path cost).
-""".
--spec warn_stale_direct_verdicts(
-    class_name(),
-    {OldClassMethods :: map(), NewClassMethods :: map()},
-    OldDirect :: #{selector() => atom()},
-    NewDirect :: #{selector() => atom()}
-) -> ok.
-warn_stale_direct_verdicts(ClassName, {OldClassMethods, NewClassMethods}, OldDirect, NewDirect) ->
-    warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods),
-    warn_stale_static_class_methods(
-        ClassName,
-        [
-            Sel
-         || Sel <- maps:keys(OldDirect),
-            not maps:is_key(Sel, NewDirect),
-            maps:is_key(Sel, NewClassMethods)
-        ]
-    ).
 
 -doc """
 Warn when `ClassName` has just gained a class-side `new:` that its subclasses'
@@ -2787,32 +2717,6 @@ warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
                 }
             )
     end.
-
--doc """
-Warn that call sites compiled against `ClassName`'s old `direct_class_methods`
-verdict still call `Selectors` directly (BT-4126).
-
-Static callers emit `SafeFn(nil, ...)` against the compiled module, so after
-a change that makes a still-existing method ineligible (a reload) or replaces
-it with a runtime fun (`put_class_method`), they keep running the old compiled
-code. The callers cannot be named, as there is no caller reverse index.
-""".
--spec warn_stale_static_class_methods(class_name(), [selector()]) -> ok.
-warn_stale_static_class_methods(_ClassName, []) ->
-    ok;
-warn_stale_static_class_methods(ClassName, Selectors) ->
-    Sorted = lists:sort(Selectors),
-    ?LOG_WARNING(
-        "Class ~p changed class methods ~p so they can no longer be called directly, "
-        "but code compiled before the change still calls the compiled versions "
-        "directly. Recompile the code that sends them.",
-        [ClassName, Sorted],
-        #{
-            class => ClassName,
-            stale_direct_class_methods => Sorted,
-            domain => [beamtalk, runtime]
-        }
-    ).
 
 -doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
@@ -3030,6 +2934,12 @@ apply_class_info(State, ClassInfo) ->
         maps:keys(NewClassMethods),
         merge
     ),
+    %% BT-4301: the derived direct-call flag of this class and of every
+    %% descendant folds in the published superclass links (ADR 0142 §1 rule 2
+    %% over the chain), so erase them again now that a re-parent is visible: an
+    %% install that read the old superclass between the first erase and
+    %% `sync_identity/6` does not survive.
+    beamtalk_class_shadow_flags:invalidate(State#class_state.name),
     %% Reconcile the backing-module reverse index on reload too — a
     %% recompile can add, change, or drop a class's `native:` backing module
     %% (ADR 0056), and `record_backing_module_entry/3` unconditionally clears
@@ -3037,24 +2947,15 @@ apply_class_info(State, ClassInfo) ->
     %% none). Mirrors sync_identity/6 immediately above.
     beamtalk_class_registry:record_backing_module_entry(State#class_state.name, Meta, self()),
     seed_runtime_class_methods(State#class_state.name, NewClassMethods),
-    %% Snapshot the outgoing direct-dispatch verdict before it is overwritten,
-    %% so warn_stale_direct_verdicts/4 below can compare old against new.
-    OldDirectClassMethods =
-        beamtalk_class_metadata:lookup_direct_class_methods(State#class_state.name),
-    %% ADR 0129 Phase 0b: refresh the direct-dispatch eligibility set from the
-    %% fresh meta — a reload can add or drop eligible selectors (or make the
-    %% class ineligible entirely, e.g. by adding `classState:`).
-    sync_direct_class_methods(State#class_state.name, Meta),
-    %% same for the direct-construction verdicts (e.g. a reload
-    %% adding a custom `new` drops it from the baked set immediately).
+    %% Refresh the direct-construction verdicts from the fresh meta (e.g. a
+    %% reload adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
-    %% BT-4126: the two syncs above re-bake only this class's own row; say so
-    %% when the reload leaves verdicts baked elsewhere stale.
-    warn_stale_direct_verdicts(
-        State#class_state.name,
-        {State#class_state.class_methods, NewClassMethods},
-        OldDirectClassMethods,
-        beamtalk_class_metadata:lookup_direct_class_methods(State#class_state.name)
+    %% BT-4126: the sync above re-bakes only this class's own row; say so when
+    %% the reload strands descendants' `direct_constructors`. Static
+    %% class-method call sites are guarded by `direct_call_ok/2` (ADR 0142 §2,
+    %% BT-4301), so they cannot go stale and need no warning.
+    warn_stale_subclass_constructors(
+        State#class_state.name, State#class_state.class_methods, NewClassMethods
     ),
 
     State#class_state{

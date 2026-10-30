@@ -543,7 +543,6 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'method_info' => ~{'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'deposit:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tryGet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'union', ['Integer', 'Nil']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 
@@ -585,7 +584,6 @@ module 'typed_methods' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'method_info' => ~{'getValue' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'deposit:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tryGet' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'union', ['Integer', 'Nil']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'increment' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~,
             'isConstructible' => 'false'

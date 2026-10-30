@@ -241,6 +241,109 @@ outcome_with(Pid, Selector, Args) ->
         Class:Reason -> {Class, Reason}
     end.
 
+%% ADR 0142 §2 (BT-4301): the guard of every static class-side direct call,
+%% `beamtalk_class_shadow_flags:direct_call_ok/2`, agrees with the dynamic
+%% path's chain-wide rule 2 (`chain_has_class_variables/1`).
+static_guard_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"the guard holds for a stateless chain and not under a stateful ancestor", fun() ->
+            with_class('Bt4301Root', none, #{}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301Leaf', 'Bt4301Root', #{}, #{}),
+                try
+                    ?assert(
+                        beamtalk_class_shadow_flags:direct_call_ok(tag('Bt4301Leaf'), 'Bt4301Leaf')
+                    )
+                after
+                    stop_class(Leaf)
+                end
+            end),
+            with_class('Bt4301StatefulRoot', none, #{count => 0}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301StatefulLeaf', 'Bt4301StatefulRoot', #{}, #{}),
+                try
+                    ?assertNot(
+                        beamtalk_class_shadow_flags:direct_call_ok(
+                            tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
+                        )
+                    ),
+                    %% The class-side self-send guard only asks about shadows.
+                    ?assert(
+                        beamtalk_class_shadow_flags:shadow_free(
+                            tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
+                        )
+                    )
+                after
+                    stop_class(Leaf)
+                end
+            end)
+        end},
+        {"an ancestor gaining class variables turns a descendant's installed guard off", fun() ->
+            with_class('Bt4301GainRoot', none, #{}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301GainLeaf', 'Bt4301GainRoot', #{}, #{}),
+                LeafTag = tag('Bt4301GainLeaf'),
+                try
+                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')),
+                    ?assertEqual(true, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                    ok = beamtalk_class_shadow_flags:set_class_vars('Bt4301GainRoot', true),
+                    ?assertNot(
+                        beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')
+                    ),
+                    ok = beamtalk_class_shadow_flags:set_class_vars('Bt4301GainRoot', false),
+                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf'))
+                after
+                    stop_class(Leaf)
+                end
+            end)
+        end},
+        {"re-parenting under a class with class variables turns the guard off (BT-4134)", fun() ->
+            with_class('Bt4301ReparentPlain', none, #{}, fun(_PlainPid) ->
+                with_class('Bt4301ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
+                    Leaf = start_class('Bt4301ReparentLeaf', 'Bt4301ReparentPlain', #{}, #{}),
+                    LeafTag = tag('Bt4301ReparentLeaf'),
+                    try
+                        ?assert(
+                            beamtalk_class_shadow_flags:direct_call_ok(
+                                LeafTag, 'Bt4301ReparentLeaf'
+                            )
+                        ),
+                        {ok, _} = beamtalk_object_class:update_class('Bt4301ReparentLeaf', #{
+                            module => ?HELPER,
+                            meta => maps:put(superclass, 'Bt4301ReparentStateful', ?META)
+                        }),
+                        ?assertNot(
+                            beamtalk_class_shadow_flags:direct_call_ok(
+                                LeafTag, 'Bt4301ReparentLeaf'
+                            )
+                        ),
+                        ?assertEqual(Leaf, send(Leaf, testSelf, []))
+                    after
+                        stop_class(Leaf)
+                    end
+                end)
+            end)
+        end},
+        {"a legacy direct_class_methods meta key is never read", fun() ->
+            %% Before BT-4301 a dynamic send consulted the baked
+            %% `direct_class_methods` table and called the method in the
+            %% caller with a `nil` class self, bypassing any shadow. A class
+            %% the in-caller path declines (no process-bound list here) now
+            %% goes through the class process, whatever the meta carries.
+            ClassInfo = #{
+                superclass => none,
+                module => ?HELPER,
+                class_methods => ?METHODS,
+                class_state => #{},
+                meta => #{direct_class_methods => #{testSelf => class_testSelf}}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Bt4301Legacy', ClassInfo),
+            unlink(Pid),
+            try
+                ?assertEqual(Pid, send(Pid, testSelf, []))
+            after
+                stop_class(Pid)
+            end
+        end}
+    ]}.
+
 invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"invalidate/1 takes no lock when no derived flag is installed", fun() ->

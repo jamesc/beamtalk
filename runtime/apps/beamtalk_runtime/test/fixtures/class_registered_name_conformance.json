@@ -1,0 +1,7 @@
+[
+  {"class": "Point", "registered": "beamtalk_class_Point", "tag": "Point class"},
+  {"class": "Result", "registered": "beamtalk_class_Result", "tag": "Result class"},
+  {"class": "HTTPRouter", "registered": "beamtalk_class_HTTPRouter", "tag": "HTTPRouter class"},
+  {"class": "json@Parser", "registered": "beamtalk_class_json@Parser", "tag": "json@Parser class"},
+  {"class": "Café", "registered": "beamtalk_class_Café", "tag": "Café class"}
+]

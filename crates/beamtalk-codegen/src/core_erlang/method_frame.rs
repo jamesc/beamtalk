@@ -39,12 +39,6 @@ use beamtalk_core::ast::MethodDefinition;
 /// The class-object variable every class-method body reads as `self`.
 pub(in crate::core_erlang) const CLASS_SELF_VAR: &str = "ClassSelf";
 
-/// BT-4029: the first parameter of a direct-called class method (`nil` on
-/// the direct path, or the class object a sibling class method forwards).
-/// When the body reads `ClassSelf`, its prologue rebinds `ClassSelf` from it
-/// (`direct_class_self_prologue_doc` in `gen_server::methods`).
-pub(in crate::core_erlang) const DIRECT_CLASS_SELF_PARAM: &str = "_DirectClassSelf";
-
 /// Which version counter [`MethodFrame::enter`] resets on entry — the one
 /// axis that varies across the method-codegen call sites this guard
 /// replaces. Grows one variant per call site as each is converted and

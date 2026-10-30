@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301: a class whose class method a test hot-patches with a runtime fun.
+// See guarded_static_call_test.bt.
+
+Object subclass: GscPatched
+
+  class patchMe -> Symbol => #compiled
