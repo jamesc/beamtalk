@@ -17,7 +17,10 @@
 //!
 //! Every other REPL `^` (at the root, in a conditional arm, an evaluated or
 //! protected block outside a loop, a stored closure) keeps its lowering: it
-//! answers its value where it stands. A REPL loop-body `^` that finds no
+//! answers its value where it stands. A loop-body `^` whose loop is held in a
+//! closure is never one of the eval's: the closure may run in a later input,
+//! after this eval has ended, where no catch is left (the REPL check rejects
+//! it, `LoopBodyReturns::in_closure`). A REPL loop-body `^` that finds no
 //! boundary is [`VerifyError::LoopReturnWithoutBoundary`], never silent.
 
 use super::NlrBoundary;

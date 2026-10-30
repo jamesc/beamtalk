@@ -3203,7 +3203,7 @@ w                                                        // => 3
 3 timesRepeat: [^8]. w := 99                             // => 8 (w is still 3)
 ```
 
-Such a `^` inside the value of a top-level assignment (`r := #(1, 2) do: [:x | ^x]`) is a compile error: a method never assigns `r`, but the workspace would bind it to the input's value. Answer the value with `detect:ifNone:` or `inject:into:` and assign that, or leave the assignment out. A `^` at the root of an input, in a conditional arm, an evaluated or protected block outside a loop, or a stored closure answers its value where it stands.
+Such a `^` inside the value of a top-level assignment (`r := #(1, 2) do: [:x | ^x]`) is a compile error: a method never assigns `r`, but the workspace would bind it to the input's value. So is a loop with a `^` in its body held in a block that is not run where it is written (`b := [#(1, 2) do: [:x | ^x]]`, or such a block passed to a method): the block may run in a later input, after the one that created it has ended, so nothing could catch the `^`. Answer the value with `detect:ifNone:` or `inject:into:` and assign that, or leave the assignment out. A `^` at the root of an input, in a conditional arm, an evaluated or protected block outside a loop, or a stored closure answers its value where it stands.
 
 ### Actor Blocks See Live State
 

@@ -923,7 +923,10 @@ reports the same message at the same span. No operation is surface-specific.
   loop would ignore it and run on". Still an error, with a new message: such a
   `^` inside the value of a top-level assignment (`r := xs do: [:x | ^x]`),
   which the workspace would bind to the input's value although a method
-  never assigns it. A `^` at the root, in a conditional arm, an evaluated or
+  never assigns it; and, as before, such a `^` whose loop is held in a block
+  that is not run where it is written (`b := [#(1, 2) do: [:x | ^x]]`): the
+  block may run in a later input, where nothing catches the `^`
+  (`LoopBodyReturns::in_closure`). A `^` at the root, in a conditional arm, an evaluated or
   protected block outside a loop, or a stored closure is unchanged: it
   answers its value where it stands. The verdict is the analyser's, so
   CLI/LSP/MCP diagnostics for the same top-level expressions change together.

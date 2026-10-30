@@ -70,6 +70,23 @@ b2 := [:x | ^x]
 b2 value: 6
 // => 6
 
+// A closure created in a loop body keeps its own `^`: called from a later
+// input, after the eval that created it has ended, it answers its value
+// (a throw to the creating eval would reach no catch).
+#(1, 2) do: [:z | b5 := [:y | ^y * z]]
+// => _
+
+b5 value: 4
+// => 8
+
+// A loop held in a closure may run in a later input, where no boundary
+// catches its `^`: rejected, as before BT-4288.
+b6 := [#(1, 2) do: [:x | ^x]]
+// => ERROR: a non-local return (`^`) in the body of a loop or collection operation inside a block
+
+true ifTrue: [b6 := [#(1, 2) do: [:x | ^x]]]
+// => ERROR: a non-local return (`^`) in the body of a loop or collection operation inside a block
+
 // ===========================================================================
 // A `^` closure keeps the bindings it read when it was created, so a later
 // assignment was not seen (`b value` answered 0): a compile error.

@@ -4733,9 +4733,11 @@ fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_clos
 /// used to be ignored, and was a compile error until codegen established the
 /// REPL eval's non-local-return boundary). So is a `^` at the root, in a
 /// conditional arm, an evaluated block, a protected block and a stored
-/// closure. The one shape still rejected is such a `^` inside the value of a
-/// top-level assignment: the workspace would bind the variable to the input's
-/// value, which a method never assigns.
+/// closure. Two shapes stay rejected: such a `^` inside the value of a
+/// top-level assignment (the workspace would bind the variable to the input's
+/// value, which a method never assigns), and, as on main (BT-4003), a loop
+/// body `^` whose loop is held in a closure: the closure may run in a later
+/// input, where no boundary catches the throw.
 #[test]
 fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
     for input in [
@@ -4766,6 +4768,21 @@ fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
             errors
                 .iter()
                 .any(|e| e.message.contains("never completes") && e.message.contains("BT-4288")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+    for input in [
+        "b := [#(1, 2) do: [:x | ^x]]\n",
+        "Holder keep: [#(1, 2) do: [:x | ^x]]\n",
+        "true ifTrue: [b := [#(1, 2) do: [:x | ^x]]]\n",
+        "#(1, 2) do: [:x | b := [#(3) do: [:y | ^y]]]\n",
+        "b := [:k | 1 to: k do: [:i | i == 2 ifTrue: [^i]]]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("loop would ignore it")),
             "REPL {input}: {errors:?}"
         );
     }

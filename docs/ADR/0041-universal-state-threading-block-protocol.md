@@ -98,7 +98,10 @@ before the `^` keep their values and the rest of the input does not run. Every
 other REPL `^` (at the root, in an arm, an evaluated or protected block outside
 a loop, a stored closure) keeps answering its value where it stands. A loop-body
 `^` lowered with no boundary is `VerifyError::LoopReturnWithoutBoundary`, in
-every scope.
+every scope. A loop-body `^` whose loop is held in a closure is not one of
+them: the closure may run in a later REPL input, after the eval that created
+it has ended, so the REPL rejects it (`LoopBodyReturns::in_closure`); in a
+method it throws to the method's boundary as before.
 
 ## Decision
 

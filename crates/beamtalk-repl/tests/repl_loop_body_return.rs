@@ -27,7 +27,10 @@ use beamtalk_codegen::core_erlang::repl_nlr::boundary_fault::without_boundary;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use beamtalk_repl::codegen::{generate_repl_expressions, generate_repl_expressions_traced};
+use beamtalk_repl::codegen::{
+    generate_repl_expressions, generate_repl_expressions_surfacing_verifier,
+    generate_repl_expressions_traced,
+};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -298,6 +301,33 @@ fn generate(src: &str, module: &str, trace: bool) -> Result<String, String> {
     }
 }
 
+/// The `ThreadedIr` verifier's findings on `src`, in a debug build (where a
+/// finding fails generation with a panic) and a release build (where it is
+/// an `internal:` warning beside the generated code) alike.
+fn verifier_report(src: &str) -> String {
+    let expressions = match parse_input(src) {
+        Ok(expressions) => expressions,
+        Err(e) => return format!("rejected: {e}"),
+    };
+    match catch_unwind(AssertUnwindSafe(|| {
+        generate_repl_expressions_surfacing_verifier(
+            &expressions,
+            "bt4288_off",
+            HashMap::new(),
+            None,
+            false,
+        )
+    })) {
+        Ok(Ok((_, diagnostics))) => diagnostics
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Ok(Err(e)) => format!("codegen: {e:?}"),
+        Err(payload) => format!("panic: {}", panic_message(payload.as_ref())),
+    }
+}
+
 fn erlang_available() -> bool {
     Command::new("erlc").arg("-help").output().is_ok()
         && Command::new("erl").arg("-version").output().is_ok()
@@ -441,13 +471,12 @@ fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
                 Err(e) => failures.push(format!("{} (trace: {trace}): {e}", row.name)),
             }
         }
-        let unchecked = without_boundary(|| generate(&row.source, "bt4288_off", false));
-        match unchecked {
-            Err(e) if e.contains("LoopReturnWithoutBoundary") => {}
-            other => failures.push(format!(
-                "{}: without the boundary, expected LoopReturnWithoutBoundary, got {other:?}",
+        let report = without_boundary(|| verifier_report(&row.source));
+        if !report.contains("LoopReturnWithoutBoundary") {
+            failures.push(format!(
+                "{}: without the boundary, expected LoopReturnWithoutBoundary, got {report}",
                 row.name
-            )),
+            ));
         }
     }
     if erlang_available() {
@@ -522,4 +551,37 @@ fn repl_loop_body_returns_answer_like_a_method() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// A `^` whose loop is held in a closure never throws to the REPL eval's
+/// boundary: the closure may run in a later input, after the eval that created
+/// it has ended, where nothing catches the throw. As on main, such a loop is
+/// rejected (BT-4003); a closure created in a loop body and holding a `^` of
+/// its own is accepted and answers its value where it stands, so its code
+/// holds no non-local-return throw at all. The repl-protocol case
+/// `bt4003_repl_returns.btscript` calls such a closure from a later input.
+#[test]
+fn a_return_in_a_loop_held_by_a_closure_never_throws_to_the_eval() {
+    for src in [
+        "b := [#(1, 2) do: [:x | ^x]]",
+        "Holder keep: [#(1, 2) do: [:x | ^x]]",
+        "true ifTrue: [b := [#(1, 2) do: [:x | ^x]]]",
+        "#(1, 2) do: [:x | b := [#(3) do: [:y | ^y]]]",
+    ] {
+        match parse_input(src) {
+            Err(e) if e.contains("loop would ignore it") => {}
+            other => panic!("{src}: expected the BT-4003 rejection, got {other:?}"),
+        }
+    }
+    for src in [
+        "#(1, 2) do: [:z | b := [:y | ^y * z]]",
+        "w := 0\n#(1, 2) do: [:x | w := w + x. b := [:y | ^y + 1]]",
+        "#(1, 2) collect: [:x | [:y | ^y]]",
+    ] {
+        let code = generate(src, "bt4288_closure", false).unwrap_or_else(|e| panic!("{src}: {e}"));
+        assert!(
+            !code.contains("'$bt_nlr'"),
+            "{src}: a closure's `^` compiled to a throw:\n{code}"
+        );
+    }
 }
