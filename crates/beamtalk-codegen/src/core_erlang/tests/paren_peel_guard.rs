@@ -127,8 +127,10 @@ const CEILINGS: &[(&str, usize)] = &[
     // `repl_*_sites`, `LoopBodyContext`), assignment and literal-element
     // escape operands, a field-write target's receiver, and `(super)`
     // (`is_self_or_super`, `receiver_statically_not_dictionary`), and a
-    // method body's last statement (`ends_with_self_field_write`, BT-4235).
-    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 36),
+    // method body's last statement (`ends_with_self_field_write`, BT-4235), and
+    // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
+    // value, and a cascade's shared receiver.
+    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 39),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (

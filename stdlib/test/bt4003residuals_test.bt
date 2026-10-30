@@ -3,21 +3,26 @@
 
 // BT-4003: the residuals found during BT-3912, measured on a
 // BEAM in class, value-type and actor methods (the REPL column is
-// tests/repl-protocol/cases/bt4003_repl_returns.btscript). The shapes that
-// answered wrong silently or crashed are compile errors now (their rejection
-// tests are the `bt4003_*` tests in
-// crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs); every
-// cell here is an accepted shape that answers right:
+// tests/repl-protocol/cases/bt4003_repl_returns.btscript). Every cell here is
+// an accepted shape that answers right:
 //
 // 1. an `ensure:` cleanup reading a local the protected block wrote, when no
 //    error can follow the write (a permanent rule, ADR 0133);
 // 2. a `^` closure that reads only its own locals, or locals written before it;
-// 3. an actor fold that sends to `self` or writes a field, at every position
-//    of a fold or loop body (BT-4287 lowered the operand positions that
-//    crashed, answered the raw `{Value, State}` pair or dropped writes; class
-//    and value-type methods answer right everywhere; a value-type self-send
-//    never changes the caller's `self`);
+// 3. an actor fold that sends to `self` or writes a field, as an operand
+//    inside a fold or loop body: BT-4287 lowered it as a producer of the frame
+//    that holds it, at every producer site of the statement (the
+//    `bt4287_*` acceptance test in
+//    crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs).
+//    At an operand that is not a producer site (a conditional's receiver, a
+//    lookup, the argument of a `super`, `error:`, block-invocation, cast or
+//    block-taking send) it is still a compile error (the `bt4310_*` pin
+//    test, until BT-4310). Class and value-type methods answer right
+//    everywhere; a value-type self-send never changes the caller's `self`;
 // 4. a `^` in a `do:` that threads a local and the actor's state.
+//
+// The shapes of items 1 and 2 that answered wrong are compile errors (the
+// `bt4003_*` tests in the same file).
 //
 // Fixtures: fixtures/bt4003residuals_actor.bt, fixtures/bt4003residuals_class.bt.
 
@@ -115,6 +120,8 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4003ResidualsActor spawn countedLoopReceiverInDo equals: 4
     self assert: Bt4003ResidualsActor spawn injectInCascadeInDo equals: 4
     self assert: Bt4003ResidualsActor spawn injectOperandInLocalThreadingDo equals: #(13, 4)
+    self assert: Bt4003ResidualsActor spawn andArgInCollect equals: #(#(false, true), 4)
+    self assert: Bt4003ResidualsActor spawn deeperOperandInCollect equals: #(#(5, 10), 4)
 
   testClassStateFoldAsAnOperandInAFoldBody =>
     self assert: Bt4003ResidualsClass injectOperandInDo equals: 4

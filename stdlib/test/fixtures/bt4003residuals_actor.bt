@@ -178,6 +178,20 @@ Actor subclass: Bt4003ResidualsActor
       ]
     self.n
 
+  // BT-4287 review: a fold inside a conditional's arm block (a statement of
+  // the arm's frame), and a fold two operands deep.
+  andArgInCollect =>
+    r := #(1, 2) collect: [:x |
+      (x > 0) and: [(self.items inject: 0 into: [:b :y | b + self bump]) > 3]
+    ]
+    #(r, self.n)
+
+  deeperOperandInCollect =>
+    r := #(1, 2) collect: [:x |
+      x + (1 + (self.items inject: 0 into: [:b :y | b + self bump]))
+    ]
+    #(r, self.n)
+
   // Item 4: `^` in a `do:` that threads a local and the state.
   tupleAccDoReturn =>
     t := 0

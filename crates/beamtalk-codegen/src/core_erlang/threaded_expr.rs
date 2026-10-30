@@ -1723,9 +1723,14 @@ impl CoreErlangGenerator {
     /// every frame body (a fold or letrec loop body, a producer's or a plain
     /// arm, an evaluated block, a Tier 2 block body) registers its
     /// `body_producer_site_exprs`, which this predicate completes under a fold
-    /// frame, and checks them with `verify_producer_sites_threaded`. The REPL
-    /// has its own rule (its producers adopt the bindings map), and class and
-    /// value-type methods thread no `State`.
+    /// frame, and checks them with `verify_producer_sites_threaded`. Such a
+    /// construct at an operand that is no site of its statement (a
+    /// conditional's receiver, a lookup key, an argument of a `super`,
+    /// `error:`, block-invocation, cast or block-taking send) never reaches
+    /// codegen: `beamtalk_core`'s `StateFoldUnsequencedOperand` row rejects it
+    /// (BT-4310), reading the same site lists over `operand_loop_constructs`.
+    /// The REPL has its own rule (its producers adopt the bindings map), and
+    /// class and value-type methods thread no `State`.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
         self.in_actor_instance_context()
             && !self.is_repl_mode()

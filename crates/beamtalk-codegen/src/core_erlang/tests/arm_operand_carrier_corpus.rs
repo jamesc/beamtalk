@@ -571,3 +571,83 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
         "only {reported} programs reported the fault"
     );
 }
+
+// ── Operands that are no producer site (BT-4287 review, BT-4310) ────────────────────────────
+//
+// The site walk (`operand_sites_of_statement`) stops at operands another lowering compiles
+// itself: a conditional's receiver, a lookup key, the arguments of a `super`, `error:`,
+// block-invocation, cast or block-taking send, a cascade message's arguments. A carrier
+// construct there is compiled in place (measured on a BEAM at the method root and in a fold
+// body: a crash, the raw carrier or dropped writes; BT-4310). So "accepted at every site" is
+// two halves, tested here over the same constructs and outer bodies: the analysis rejects
+// every one of these cells (`StateFoldUnsequencedOperand`), and it accepts every cell of the
+// corpus above, whose lowering is proved there. (A cast is a statement only, so it cannot be
+// a fold body's value; its cells are in `bt4310_*` in `semantic_analysis/tests`.)
+
+use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
+
+/// The statement holding the construct `{c}` at an operand that is no producer site.
+const UNSEQUENCED_POSITIONS: &[&str] = &[
+    "({c} isNil) ifTrue: [1] ifFalse: [0]",
+    "(0 < {c} size) ifTrue: [1]",
+    "{c} isNil and: [true]",
+    "{c} isNil or: [false]",
+    "{c} ifNil: [0] ifNotNil: [:v | v]",
+    "#{} at: {c} ifAbsent: [0]",
+    "super printString: {c}",
+    "self error: {c} printString",
+    "[:z | z] value: {c}",
+    "self apply: {c} with: [:z | z]",
+    "xs size; + {c} size",
+];
+
+/// The analysis's BT-4310 errors for `src`.
+fn unsequenced_errors(src: &str) -> usize {
+    let (module, parse_diags) = super::parse_normalised(src);
+    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+    analyse_full(&module, AnalysisContext::default())
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("BT-4310"))
+        .count()
+}
+
+#[test]
+fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
+    let mut outers: Vec<&str> = FOLD_BODY_OUTERS.iter().map(|(o, _)| *o).collect();
+    // The method root holds the statement itself.
+    outers.push("{s}");
+    let mut failures = Vec::new();
+    let mut rejected = 0;
+    for outer in &outers {
+        for position in UNSEQUENCED_POSITIONS {
+            for construct in FOLD_BODY_CONSTRUCTS {
+                let src = format!(
+                    "{FOLD_BODY_HEADER}{}",
+                    fold_body_method("go:", outer, position, construct)
+                );
+                if unsequenced_errors(&src) == 1 {
+                    rejected += 1;
+                } else {
+                    failures.push(format!("should be one BT-4310 error:\n{src}"));
+                }
+            }
+        }
+    }
+    for cell in fold_body_cells() {
+        let src = cell.program();
+        if unsequenced_errors(&src) != 0 {
+            failures.push(format!("should be accepted:\n{src}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    assert_eq!(
+        rejected,
+        outers.len() * UNSEQUENCED_POSITIONS.len() * FOLD_BODY_CONSTRUCTS.len()
+    );
+}
