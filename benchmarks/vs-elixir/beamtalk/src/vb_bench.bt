@@ -3,9 +3,9 @@
 
 // The Beamtalk half of benchmarks/vs-elixir. The harness
 // (`benchmarks/vs-elixir/harness/vs_bench.erl`) calls these class methods
-// directly (`'class_<selector>'(nil, ...)`): the class is sealed and
-// stateless, so each method runs in the caller's process, which is the
-// process the harness measures.
+// directly (`'class_<selector>'(VbBench, ...)`, with the class reference as
+// `ClassSelf`): the class is stateless, so each method runs in the caller's
+// process, which is the process the harness measures.
 //
 // Every row has the same shape:
 //

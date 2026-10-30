@@ -180,7 +180,7 @@ fn temps_and_user_names_are_disjoint() {
 /// `register_class`, spawn/`new`, protocol registration, `dispatch`/4
 /// fallbacks), in `@primitive` method bodies, which hold no user statements
 /// (`_H`, `_T`, `_Value`, `_Reason`), as parameters read only in the
-/// prologue before user code (`_ExtArgs`, `_DirectClassSelf`, `_ClassSelf`,
+/// prologue before user code (`_ExtArgs`, `_ClassSelf`,
 /// `_InitArgs`, `_Selector`), or as tail bindings whose body is generated
 /// code only (`_SuperTuple`, `_Result`, `_NewState`, `_ReturnValue`).
 ///
@@ -209,7 +209,6 @@ const HAND_WRITTEN: &[&str] = &[
     "_CtxOk",
     "_D4Stack",
     "_D4Type",
-    "_DirectClassSelf",
     "_DispS",
     "_DispatchResult",
     "_EReason",

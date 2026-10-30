@@ -129,8 +129,7 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
         }~
@@ -167,8 +166,7 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
       'initialize_assigns' => [],
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 

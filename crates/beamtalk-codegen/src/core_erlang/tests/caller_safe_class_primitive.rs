@@ -61,9 +61,14 @@ fn class_literal_signal_compiles_to_direct_handler_call() {
 #[test]
 fn overriding_subclass_keeps_class_send() {
     let out = codegen(CALLER);
+    // BT-4301: `LoudError` defines `class signal:` itself and has no class
+    // variables, so the send is the guarded direct call, whose fallback is
+    // the class send.
     assert!(
-        out.contains("'beamtalk_class_registry':'whereis_class'('LoudError')"),
-        "a subclass overriding `class signal:` must keep the class send. Got:\n{out}"
+        out.contains(
+            "'beamtalk_class_shadow_flags':'direct_call_ok'('LoudError class', 'LoudError')"
+        ) && out.contains("'beamtalk_object_class':'class_send'("),
+        "a subclass overriding `class signal:` must keep a class send. Got:\n{out}"
     );
     assert!(
         !has_handler_call(&out, "class_signal_message", ", 'LoudError')"),

@@ -29,6 +29,34 @@ registry_name_object_test() ->
         beamtalk_class_registry:registry_name('Object')
     ).
 
+%% BT-4301: codegen bakes a class's registered name and metaclass tag into the
+%% guarded direct call of a static class send (`util::class_registered_name` /
+%% `util::metaclass_tag` in beamtalk-codegen). The shared fixture is the single
+%% source both sides are pinned to; the Rust side asserts the identical cases
+%% in `util::tests::class_registered_name_matches_shared_fixture`.
+class_registered_name_matches_shared_fixture_test() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "class_registered_name_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"class">> := Class, <<"registered">> := Registered, <<"tag">> := Tag}) ->
+            Name = binary_to_atom(Class, utf8),
+            ?assertEqual(
+                binary_to_atom(Registered, utf8), beamtalk_class_registry:registry_name(Name)
+            ),
+            ?assertEqual(
+                binary_to_atom(Tag, utf8), beamtalk_class_registry:class_object_tag(Name)
+            )
+        end,
+        Cases
+    ).
+
 %%% ============================================================================
 %%% class_object_tag tests
 %%% ============================================================================

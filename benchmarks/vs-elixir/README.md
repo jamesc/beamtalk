@@ -55,7 +55,8 @@ figure below is net of its own side's row `0`. Both sides cost 1 reduction and
 0 words per iteration for the bare loop.
 
 **One harness, one node.** The Beamtalk rows are called as
-`'class_<selector>'(nil, N, Ctx)`: `VbBench` is sealed and stateless, so its
+`'class_<selector>'(VbBench, N, Ctx)`, with `VbBench`'s class reference as `ClassSelf`
+(BT-4301): `VbBench` is stateless, so its
 class methods run in the calling process. Each measurement runs in a fresh
 worker process. A controller process snapshots every process in the node,
 traces every process's garbage collections (an OTP 28 trace session) while

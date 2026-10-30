@@ -378,10 +378,6 @@ pub struct InitializeAssignsSummary {
     pub has_dynamic_writer: bool,
 }
 
-/// Number of leading [`PROCESS_BOUND_CLASS_SELECTORS`] entries that are the
-/// process-state constructors ([`DIRECT_CALL_EXCLUDED_SELECTORS`]).
-const PROCESS_STATE_CONSTRUCTOR_COUNT: usize = 4;
-
 /// The class-side selectors that keep their class-process (or dedicated)
 /// routing whatever the class declares (ADR 0142 §1 rule 3). The single copy
 /// of the list: codegen emits it into every class's `__beamtalk_meta/0` as
@@ -392,8 +388,7 @@ const PROCESS_STATE_CONSTRUCTOR_COUNT: usize = 4;
 ///
 /// - `new`, `new:`, `startLink`, `startLink:`: process-state constructors
 ///   (ADR 0129); `basicNew`/`basicNewWith` read `beamtalk_class_name` /
-///   `beamtalk_class_module` from the class process's dictionary. These come
-///   first: they are also [`DIRECT_CALL_EXCLUDED_SELECTORS`].
+///   `beamtalk_class_module` from the class process's dictionary.
 /// - `spawn`, `spawnWith:`: actor instantiation, with dedicated
 ///   `beamtalk_class_dispatch:class_send_plain/3` clauses.
 /// - `supervise`, `spawnAs:`, `spawnWith:as:` (with `spawn`, `spawnWith:`
@@ -417,15 +412,6 @@ const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
     "run:method:",
 ];
 
-/// Selectors that depend on `gen_server` process state and must NOT be called
-/// directly: supervisor constructors (`startLink` family) and the
-/// `basicNew`/`basicNewWith` constructors (`new`/`new:`), which read
-/// `beamtalk_class_name`/`beamtalk_class_module` from the process dictionary.
-/// The constructor prefix of [`PROCESS_BOUND_CLASS_SELECTORS`], not a copy.
-const DIRECT_CALL_EXCLUDED_SELECTORS: &[&str] = PROCESS_BOUND_CLASS_SELECTORS
-    .split_at(PROCESS_STATE_CONSTRUCTOR_COUNT)
-    .0;
-
 impl ClassInfo {
     /// Whether a class registered under `module` is module-less
     /// ([`Self::is_module_less`]): a live module-less class registers its own
@@ -444,30 +430,12 @@ impl ClassInfo {
         !self.is_sealed
     }
 
-    /// Whether a send of the class-side method `method` (one of this class's
-    /// own `class_methods`) is direct-called in the caller's process instead of
-    /// running in the class's `gen_server` (ADR 0129 Phase 0b). The one rule
-    /// codegen's direct-call table and the `class-state-abroad` lint share:
-    ///
-    /// 1. the class is `sealed` (every method is visible at compile time);
-    /// 2. the class has no class variables (no state to mutate);
-    /// 3. the selector is not a process-state constructor (`new`, `new:`,
-    ///    `startLink`, `startLink:`);
-    /// 4. the method is `class sealed`: a non-sealed class method may use
-    ///    `self` (the class object) for factory patterns or delegation.
-    #[must_use]
-    pub fn is_direct_call_eligible(&self, method: &MethodInfo) -> bool {
-        self.is_sealed
-            && !self.has_class_variables()
-            && !Self::is_direct_call_excluded_selector(&method.selector)
-            && method.is_sealed
-    }
-
     /// Whether this class declares class variables (`classState:`) of its
     /// own — class variables are per class, never inherited (BT-3762). The
-    /// one Rust-side answer to "does this class need its process?" (ADR 0142
-    /// §1 rule 1), read by [`Self::is_direct_call_eligible`] and by the
-    /// `class-process-ffi` lint's hint.
+    /// one Rust-side answer to "does this class declare class state?" (ADR
+    /// 0142 §1 rule 1). Whether a class *needs* its process is the chain-wide
+    /// [`ClassHierarchy::chain_has_class_variables`], which reads this per
+    /// class.
     #[must_use]
     pub fn has_class_variables(&self) -> bool {
         !self.class_variables.is_empty()
@@ -481,13 +449,19 @@ impl ClassInfo {
         PROCESS_BOUND_CLASS_SELECTORS.contains(&selector)
     }
 
-    /// Whether `selector` is a process-state constructor (`new`, `new:`,
-    /// `startLink`, `startLink:`) that is never direct-called, whatever the
-    /// class declares (the constructor prefix of
-    /// [`PROCESS_BOUND_CLASS_SELECTORS`]).
+    /// Whether `selector` is a class-variable reflection send (`hasField:`,
+    /// `clearField:`): the class process answers it from its own state ahead
+    /// of the class-method lookup (`beamtalk_object_class:
+    /// is_class_var_reflection_selector/1`), so a class method of that name is
+    /// never what a send reaches and is never direct-call eligible.
     #[must_use]
-    pub fn is_direct_call_excluded_selector(selector: &str) -> bool {
-        DIRECT_CALL_EXCLUDED_SELECTORS.contains(&selector)
+    pub fn is_class_var_reflection_selector(selector: &str) -> bool {
+        matches!(
+            crate::ast::WellKnownSelector::from_name(selector),
+            Some(
+                crate::ast::WellKnownSelector::HasField | crate::ast::WellKnownSelector::ClearField
+            )
+        )
     }
 
     /// The process-bound class-side selectors (ADR 0142 §1 rule 3), in a fixed

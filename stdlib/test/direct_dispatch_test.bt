@@ -1,10 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3639 / ADR 0129 Phase 0b: dynamic class-side sends to sealed, stateless
-// classes call the module function directly in the caller, so they behave
-// identically to the static form. Eligibility is generated metadata
-// (`direct_class_methods`), computed by `compute_direct_call_eligible`.
+// BT-3639 / ADR 0142: class-side sends to stateless classes run the class
+// method in the caller, whether static (the guarded direct call, BT-4301) or
+// dynamic (the in-caller owner memo, BT-4300), so the two forms behave
+// identically.
 //
 // Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/has_field_probe_base.bt,
 // fixtures/has_field_probe_child.bt,
@@ -80,16 +80,13 @@ TestCase subclass: DirectDispatchTest
   testInheritedHasFieldOnStatelessParentIsFalse =>
     self assert: HasFieldProbeBase probe equals: false
 
-  // --- BT-4065: Result's constructors are `class sealed`, so direct ---------
+  // --- BT-4065: Result's constructors run in the caller ---------------------
   // Every `Result ok:` in the node used to be a call into the one Result
-  // class process. Result is sealed and has no class variables, so its
-  // `class sealed` constructors are in the generated direct-call set.
+  // class process. Result has no class variables, so the guard of its static
+  // direct calls (`direct_call_ok/2`, ADR 0142 §2) holds.
   testResultConstructorsAreDirectCallEligible =>
-    direct := (Erlang beamtalk_class_metadata) lookup_direct_class_methods: #Result
-    self assert: (direct includesKey: #ok:)
-    self assert: (direct includesKey: #error:)
-    self assert: (direct includesKey: #fromTuple:)
-    self assert: (direct includesKey: #tryDo:)
+    self assert: ((Erlang beamtalk_class_shadow_flags) direct_call_ok: #'Result class' with: #Result)
+    self assert: (Result ok: Erlang erlang self) value equals: Erlang erlang self
 
   testDynamicResultConstructorsMatchStatic =>
     cls := Result

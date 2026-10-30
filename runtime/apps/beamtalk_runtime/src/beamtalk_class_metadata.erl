@@ -123,9 +123,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     set_runtime_class_methods/2,
     reset_runtime_class_methods/1,
     %% ADR 0129 Phase 0b: direct-dispatch eligibility set for dynamic class-side sends.
-    put_direct_class_methods/2,
-    lookup_direct_class_methods/1,
-    lookup_direct_class_method/2,
     %% ADR 0142 §1 (BT-4299): the class-variable fact behind
     %% `beamtalk_class_shadow_flags:direct_call_ok/2`, and the generated
     %% process-bound class-side selector list.
@@ -199,12 +196,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% because a class-existence guard must not silently default toward
     %% *permitting* instantiation on a lookup miss.
     is_abstract :: boolean() | undefined,
-    %% ADR 0129 Phase 0b: `direct_class_methods` from the compiled module's
-    %% `__beamtalk_meta/0` — selector => safe class-method function name, for
-    %% the class methods `compute_direct_call_eligible` (Rust) deemed callable
-    %% without the class gen_server. Empty for dynamic classes, classes with
-    %% class state, and modules compiled before the key existed.
-    direct_class_methods = #{} :: #{selector() => atom()},
     %% BT-3826: the class process's reflection state, mirrored here so another
     %% class process (or anything else) can read it without a blocking
     %% `gen_server:call` into the owning class. Written only by
@@ -463,9 +454,9 @@ delete(Name) ->
     delete_method_records(Name),
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     %% BT-4299: a removed class keeps no class-variable input and no derived
-    %% direct-call flag (a later class of the same name re-derives both).
+    %% direct-call flag (a later class of the same name re-derives both). The
+    %% flags are erased below, once the row is gone.
     beamtalk_class_shadow_flags:set_class_vars(Name, false),
-    beamtalk_class_shadow_flags:invalidate(Name),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
     %% otherwise Name would linger forever as a phantom subclass of its old
@@ -480,6 +471,15 @@ delete(Name) ->
     catch
         error:badarg -> ok
     end,
+    %% BT-4299 / BT-4301: erase the class's derived flag and its descendants'
+    %% only now that the row is gone. Their derived values read this row
+    %% (`chain_has_class_variables/1`), so an erase before the removal could
+    %% be followed by an install from the row still present; after it, the
+    %% chain is unresolvable and re-derives fail closed. The edges keyed on
+    %% Name (its children) survive the row, so the descendants are still
+    %% found; each erase takes its tag lock, so an install in flight that read
+    %% the old row is waited for and its value removed.
+    beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: a removed class must not keep resolving through the cache.
     beamtalk_class_derived_cache:invalidate().
 
@@ -527,7 +527,7 @@ owning class mirrors them here after every change to its own state
 
 Per-field `ets:update_element/3` on an existing row; never touches the identity
 fields or `has_runtime_class_methods`. A missing row (class torn down) or table
-is a no-op, like `put_direct_class_methods/2`.
+is a no-op, like `put_direct_constructors/2`.
 """.
 -spec put_reflection(class_name(), #{
     instance_methods := [selector()],
@@ -1155,64 +1155,25 @@ put_class_method_fun(Name, Selector, Info) ->
     end.
 
 -doc """
-Store a class's direct-dispatch eligibility set (ADR 0129 Phase 0b).
-
-`Map` is the `direct_class_methods` value from the class's `__beamtalk_meta/0`
-(`#{Selector => SafeFn}`); pass `#{}` to clear it. Updates the existing row in
-place; a no-op when no row exists (the class registers its row first, so this
-only happens on a class that is being torn down).
-""".
--spec put_direct_class_methods(class_name(), #{selector() => atom()}) -> ok.
-put_direct_class_methods(Name, Map) when is_map(Map) ->
-    new(),
-    try
-        ets:update_element(?TABLE, Name, {#class_metadata.direct_class_methods, Map}),
-        ok
-    catch
-        error:badarg -> ok
-    end.
-
--doc "Read a class's whole direct-dispatch eligibility set (`#{}` when none or unknown).".
--spec lookup_direct_class_methods(class_name()) -> #{selector() => atom()}.
-lookup_direct_class_methods(Name) ->
-    case field(Name, #class_metadata.direct_class_methods) of
-        Map when is_map(Map) -> Map;
-        _ -> #{}
-    end.
-
--doc """
-Resolve a selector to a direct-callable `{Module, SafeFn}` for a class (ADR 0129
-Phase 0b), or `error` when the send must go through the class gen_server.
-
-A class with runtime-installed class-method funs (ADR 0084) is never direct:
-those funs can shadow a compiled method, and only the gen_server path consults
-them.
-""".
--spec lookup_direct_class_method(class_name(), selector()) -> {ok, module(), atom()} | error.
-lookup_direct_class_method(Name, Selector) ->
-    case row(Name) of
-        {ok, #class_metadata{
-            module = Module,
-            has_runtime_class_methods = false,
-            direct_class_methods = #{Selector := SafeFn}
-        }} when Module =/= undefined ->
-            {ok, Module, SafeFn};
-        _ ->
-            error
-    end.
-
--doc """
 Publish whether a class declares class variables (ADR 0142 §1 rule 1, BT-4299).
 
 The one writer of the fact `beamtalk_class_shadow_flags:direct_call_ok/2` reads
 as its `class_vars` input; called from the class's own gen_server on `init/1`,
 reload and rename, with the value `beamtalk_object_class` reads from the
 compiled `__beamtalk_meta/0` (or the builder's `classState`). On a change it
-erases the derived direct-call flag under the per-tag lock *before* the row
-field becomes visible (raising: `set_class_vars/2` first; dropping: the row
-first, since a stale "has class variables" only costs the slow path), and
-drops the derived-fact cache. A no-op when unchanged; the row field is a
-no-op when the row is absent.
+erases the class's own derived direct-call flag under the per-tag lock
+*before* the row field becomes visible (raising: `set_class_vars/2` first;
+dropping: the row first, since a stale "has class variables" only costs the
+slow path), and drops the derived-fact cache.
+
+Descendants' derived flags read this row field through
+`chain_has_class_variables/1`, so they are erased *after* it is written
+(`beamtalk_class_shadow_flags:invalidate/1`, which always takes each tag lock
+and so also removes a value an in-flight install derived from the old row,
+BT-4301). Between the write and that erase, a descendant's static send may
+still see its old `true` and run in the caller: the same window a reload has
+for its own new code; no stale value outlives the erase. A no-op when
+unchanged; the row field is a no-op when the row is absent.
 """.
 -spec put_class_variables(class_name(), boolean()) -> ok.
 put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
@@ -1225,10 +1186,14 @@ put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
         _ when HasClassVars ->
             beamtalk_class_shadow_flags:set_class_vars(Name, true),
             update_has_class_variables(Name, true),
+            %% BT-4301: descendants' derived flags read this row field
+            %% (`chain_has_class_variables/1`); erase them once it is written.
+            beamtalk_class_shadow_flags:invalidate(Name),
             beamtalk_class_derived_cache:invalidate();
         _ ->
             update_has_class_variables(Name, false),
             beamtalk_class_shadow_flags:set_class_vars(Name, false),
+            beamtalk_class_shadow_flags:invalidate(Name),
             beamtalk_class_derived_cache:invalidate()
     end.
 
@@ -1349,11 +1314,10 @@ lookup_direct_constructors(Name) ->
 Resolve a constructor to a direct-callable module for a class,
 or `error` when the send must go through the class gen_server.
 
-Same gates as `lookup_direct_class_method/2`: the row must name a module,
-the class must have no runtime-installed class-method funs (ADR 0084),
-and the baked verdict must list the selector. The target is always `new`
-itself (`new/0` for `new`, `new/1` for `new:`) — the caller checks the
-export at the right arity, mirroring `lookup_direct_call/3`.
+The row must name a module, the class must have no runtime-installed
+class-method funs (ADR 0084), and the baked verdict must list the selector.
+The target is always `new` itself (`new/0` for `new`, `new/1` for `new:`) —
+the caller checks the export at the right arity.
 """.
 -spec lookup_direct_constructor(class_name(), selector()) -> {ok, module()} | error.
 lookup_direct_constructor(Name, Selector) ->

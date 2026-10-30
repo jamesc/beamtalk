@@ -234,6 +234,16 @@ errors_match() ->
         end
     end).
 
+%% Polls until `Base`'s metadata row is gone (a stand-in install's wait).
+wait_until_row_gone(Base) ->
+    case beamtalk_class_metadata:lookup_superclass(Base) of
+        {ok, _} ->
+            timer:sleep(5),
+            wait_until_row_gone(Base);
+        not_found ->
+            ok
+    end.
+
 outcome_with(Pid, Selector, Args) ->
     try send(Pid, Selector, Args) of
         V -> {returned, V}
@@ -241,30 +251,251 @@ outcome_with(Pid, Selector, Args) ->
         Class:Reason -> {Class, Reason}
     end.
 
-invalidation_test_() ->
+%% ADR 0142 §2 (BT-4301): the guard of every static class-side direct call,
+%% `beamtalk_class_shadow_flags:direct_call_ok/2`, agrees with the dynamic
+%% path's chain-wide rule 2 (`chain_has_class_variables/1`).
+static_guard_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"invalidate/1 takes no lock when no derived flag is installed", fun() ->
-            Name = 'Bt4300NoLock',
-            Tag = tag(Name),
-            _ = persistent_term:erase(Tag),
-            Self = self(),
-            Holder = spawn(fun() ->
-                beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
-                    Self ! locked,
-                    receive
-                        release -> ok
+        {"the guard holds for a stateless chain and not under a stateful ancestor", fun() ->
+            with_class('Bt4301Root', none, #{}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301Leaf', 'Bt4301Root', #{}, #{}),
+                try
+                    ?assert(
+                        beamtalk_class_shadow_flags:direct_call_ok(tag('Bt4301Leaf'), 'Bt4301Leaf')
+                    )
+                after
+                    stop_class(Leaf)
+                end
+            end),
+            with_class('Bt4301StatefulRoot', none, #{count => 0}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301StatefulLeaf', 'Bt4301StatefulRoot', #{}, #{}),
+                try
+                    ?assertNot(
+                        beamtalk_class_shadow_flags:direct_call_ok(
+                            tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
+                        )
+                    ),
+                    %% The class-side self-send guard only asks about shadows.
+                    ?assert(
+                        beamtalk_class_shadow_flags:shadow_free(
+                            tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
+                        )
+                    )
+                after
+                    stop_class(Leaf)
+                end
+            end)
+        end},
+        {"an ancestor gaining class variables turns a descendant's installed guard off", fun() ->
+            with_class('Bt4301GainRoot', none, #{}, fun(_RootPid) ->
+                Leaf = start_class('Bt4301GainLeaf', 'Bt4301GainRoot', #{}, #{}),
+                LeafTag = tag('Bt4301GainLeaf'),
+                try
+                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')),
+                    ?assertEqual(true, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', true),
+                    ?assertNot(
+                        beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')
+                    ),
+                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', false),
+                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf'))
+                after
+                    stop_class(Leaf)
+                end
+            end)
+        end},
+        {"re-parenting under a class with class variables turns the guard off (BT-4134)", fun() ->
+            with_class('Bt4301ReparentPlain', none, #{}, fun(_PlainPid) ->
+                with_class('Bt4301ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
+                    Leaf = start_class('Bt4301ReparentLeaf', 'Bt4301ReparentPlain', #{}, #{}),
+                    LeafTag = tag('Bt4301ReparentLeaf'),
+                    try
+                        ?assert(
+                            beamtalk_class_shadow_flags:direct_call_ok(
+                                LeafTag, 'Bt4301ReparentLeaf'
+                            )
+                        ),
+                        {ok, _} = beamtalk_object_class:update_class('Bt4301ReparentLeaf', #{
+                            module => ?HELPER,
+                            meta => maps:put(superclass, 'Bt4301ReparentStateful', ?META)
+                        }),
+                        ?assertNot(
+                            beamtalk_class_shadow_flags:direct_call_ok(
+                                LeafTag, 'Bt4301ReparentLeaf'
+                            )
+                        ),
+                        ?assertEqual(Leaf, send(Leaf, testSelf, []))
+                    after
+                        stop_class(Leaf)
                     end
                 end)
+            end)
+        end},
+        {"an ancestor whose class-variable fact is unpublished keeps the guard off", fun() ->
+            %% The guard reads `chain_has_class_variables/1`, the dynamic path's
+            %% own answer, and fails closed with it: an ancestor row with no
+            %% published fact (or no row at all) is a doubt, never "stateless".
+            Parent = 'Bt4301UnpubParent',
+            Leaf = 'Bt4301UnpubLeaf',
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Parent, undefined, [], 'Object', false),
+            ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Parent, false),
+            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+            try
+                ?assert(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
+                ?assert(beamtalk_class_shadow_flags:shadow_free(tag(Leaf), Leaf)),
+                %% Publishing the parent's fact erases the leaf's derived flag.
+                ok = beamtalk_class_metadata:put_class_variables(Parent, false),
+                ?assertNot(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
+                %% A missing ancestor row is the same doubt.
+                ok = beamtalk_class_metadata:delete(Parent),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf))
+            after
+                beamtalk_class_metadata:delete(Leaf),
+                beamtalk_class_metadata:delete(Parent)
+            end
+        end},
+        {"a legacy direct_class_methods meta key is never read", fun() ->
+            %% Before BT-4301 a dynamic send consulted the baked
+            %% `direct_class_methods` table and called the method in the
+            %% caller with a `nil` class self, bypassing any shadow. A class
+            %% the in-caller path declines (no process-bound list here) now
+            %% goes through the class process, whatever the meta carries.
+            ClassInfo = #{
+                superclass => none,
+                module => ?HELPER,
+                class_methods => ?METHODS,
+                class_state => #{},
+                meta => #{direct_class_methods => #{testSelf => class_testSelf}}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Bt4301Legacy', ClassInfo),
+            unlink(Pid),
+            try
+                ?assertEqual(Pid, send(Pid, testSelf, []))
+            after
+                stop_class(Pid)
+            end
+        end}
+    ]}.
+
+invalidation_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"an install in flight when an ancestor gains class variables leaves no stale flag",
+            fun() ->
+                %% BT-4301: the derived flag reads published metadata, so an
+                %% install holding `Leaf`'s tag lock may already have derived
+                %% `true` from the ancestor's old row. The ancestor's write must
+                %% wait for it (the erase always takes the lock, even with no
+                %% flag installed yet) and then remove what it put.
+                Base = 'Bt4301RaceBase',
+                Leaf = 'Bt4301RaceLeaf',
+                LeafTag = tag(Leaf),
+                beamtalk_class_metadata:new(),
+                ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
+                ok = beamtalk_class_metadata:put_class_variables(Base, false),
+                ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
+                ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+                _ = persistent_term:erase(LeafTag),
+                Self = self(),
+                %% The install: under Leaf's lock, having derived `true` from
+                %% the old rows, it puts that value only once released.
+                Installer = spawn(fun() ->
+                    beamtalk_class_shadow_flags:with_tag_lock(LeafTag, fun() ->
+                        Self ! derived,
+                        receive
+                            release -> persistent_term:put(LeafTag, true)
+                        end
+                    end),
+                    Self ! installed
+                end),
+                receive
+                    derived -> ok
+                after 5000 -> error(lock_not_taken)
+                end,
+                %% The writer: publishes Base's class variables, then erases
+                %% the descendants' flags.
+                Writer = spawn(fun() ->
+                    ok = beamtalk_class_metadata:put_class_variables(Base, true),
+                    Self ! written
+                end),
+                try
+                    %% With no flag installed, the erase still waits for the lock.
+                    receive
+                        written -> error(erase_skipped_the_lock)
+                    after 300 -> ok
+                    end,
+                    Installer ! release,
+                    receive
+                        installed -> ok
+                    after 5000 -> error(install_stuck)
+                    end,
+                    receive
+                        written -> ok
+                    after 5000 -> error(write_stuck)
+                    end,
+                    ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                    ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
+                after
+                    exit(Installer, kill),
+                    exit(Writer, kill),
+                    beamtalk_class_metadata:delete(Leaf),
+                    beamtalk_class_metadata:delete(Base),
+                    persistent_term:erase(LeafTag)
+                end
+            end},
+        {"deleting an ancestor's row leaves no descendant flag derived from it", fun() ->
+            %% BT-4301: an install of `Leaf`'s flag that read `Base`'s row
+            %% before `delete(Base)` removed it derives `true`. Here it holds
+            %% `Leaf`'s tag lock from before the delete until the row is gone,
+            %% then puts that stale value. `delete/1` must erase the
+            %% descendants' flags after the row is gone, waiting for the lock,
+            %% so the stale value is removed. (Erasing before the removal
+            %% would wait on the install, which waits on the removal: the
+            %% delete never returns.)
+            Base = 'Bt4301DelBase',
+            Leaf = 'Bt4301DelLeaf',
+            LeafTag = tag(Leaf),
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
+            ok = beamtalk_class_metadata:put_class_variables(Base, false),
+            ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
+            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+            _ = persistent_term:erase(LeafTag),
+            Self = self(),
+            Installer = spawn(fun() ->
+                beamtalk_class_shadow_flags:with_tag_lock(LeafTag, fun() ->
+                    Self ! derived,
+                    wait_until_row_gone(Base),
+                    persistent_term:put(LeafTag, true)
+                end),
+                Self ! {installed, self()}
             end),
             receive
-                locked -> ok
+                derived -> ok
             after 5000 -> error(lock_not_taken)
             end,
+            Writer = spawn(fun() ->
+                ok = beamtalk_class_metadata:delete(Base),
+                Self ! {deleted, self()}
+            end),
             try
-                {Time, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(Name) end),
-                ?assert(Time < 1000000)
+                receive
+                    {deleted, Writer} -> ok
+                after 5000 -> error(delete_stuck)
+                end,
+                receive
+                    {installed, Installer} -> ok
+                after 5000 -> error(install_stuck)
+                end,
+                ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
             after
-                Holder ! release
+                exit(Installer, kill),
+                exit(Writer, kill),
+                beamtalk_class_metadata:delete(Leaf),
+                persistent_term:erase(LeafTag)
             end
         end},
         {"put_process_bound_selectors drops derived facts only on a change", fun() ->

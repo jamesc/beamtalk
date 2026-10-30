@@ -137,8 +137,7 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'native' => 'true',
       'backing_module' => 'some_worker_module'
@@ -179,8 +178,7 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'native' => 'true',
       'backing_module' => 'some_worker_module'

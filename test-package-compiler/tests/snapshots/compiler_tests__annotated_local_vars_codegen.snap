@@ -140,8 +140,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{'eventId:' => 'class_eventId:'}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~
@@ -190,8 +189,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'simpleAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'parametricAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => {'generic', 'Result', ['Integer', 'Error']}, 'is_sealed' => 'false', 'visibility' => 'public'}~, 'unionAnnotation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{'eventId:' => 'class_eventId:'}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~
@@ -230,8 +228,7 @@ call 'maps':'get'('eventId', Self)
       'initialize_assigns' => [],
       'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
-      'direct_class_methods' => ~{'eventId:' => 'class_eventId:'}~,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~

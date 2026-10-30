@@ -405,13 +405,10 @@ fn has_field_as_a_cascade_message_lowers_through_dispatch_and_binds_no_capture()
     assert_compiles_through_erlc("test", &code);
 }
 
-/// `self hasField:` is the constant `false` only where `ClassSelf` is `nil`: a
-/// direct-called method (sealed class, no class variables, `class sealed`). A
-/// `ClassBuilder` class-method fun declared *inside* such a method is never
-/// direct-called: it runs with the built class as a real `ClassSelf` that
-/// declares `classVars:`, so its `hasField:` asks `beamtalk_class_vars:has`
-/// even though `current_method_selector` and `class_name()` still describe the
-/// enclosing direct-called method.
+/// `self hasField:` asks `beamtalk_class_vars:has` in every class method
+/// (BT-4301 retired the `nil` `ClassSelf` that made it a constant `false` in a
+/// direct-called one), and so does a `ClassBuilder` class-method fun declared
+/// inside one, which runs with the built class as its `ClassSelf`.
 #[test]
 fn has_field_in_a_builder_fun_inside_a_direct_called_method_still_asks_the_runtime() {
     let src = concat!(
@@ -425,8 +422,8 @@ fn has_field_in_a_builder_fun_inside_a_direct_called_method_still_asks_the_runti
     let code = codegen(src);
     let plain = function_text(&code, "'class_plain'/1 = fun");
     assert!(
-        !plain.contains("'beamtalk_class_vars':'has'("),
-        "a direct-called `self hasField:` has no ClassSelf to ask: {plain}"
+        plain.contains("'beamtalk_class_vars':'has'(ClassSelf, "),
+        "every class method has a real ClassSelf to ask: {plain}"
     );
     let build = function_text(&code, "'class_build'/1 = fun");
     assert!(

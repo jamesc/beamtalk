@@ -30,12 +30,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -export([
     class_send/3,
     handle_class_self_call/1,
-    lookup_direct_call/3,
     lookup_direct_constructor/3,
     class_super_dispatch/4,
     class_self_send/3,
     class_self_direct_ok/4,
-    class_self_dispatch_local/3,
     class_self_dispatch_local/4,
     metaclass_send/4,
     unwrap_class_call/1,
@@ -202,22 +200,16 @@ class_send_plain(ClassPid, Selector, Args) ->
 
 %% Today's routing for a send the caller may not run itself (ADR 0142 §2).
 -spec class_send_via_process(pid(), selector(), list()) -> term().
+%% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
+%% already ran every class method the caller may run, so anything left is a
+%% shadowed method (a class-side extension or ADR 0084 runtime fun the class
+%% process honours), a chain with class variables, or a process-bound selector.
+class_send_via_process(ClassPid, Selector, Args) when ClassPid =:= self() ->
+    class_send_from_own_process(Selector, Args);
 class_send_via_process(ClassPid, Selector, Args) ->
-    %% ADR 0129 Phase 0b: sealed, stateless classes' eligible class methods run
-    %% in the caller, exactly like the static direct call. The eligibility set
-    %% is generated metadata (Rust's `compute_direct_call_eligible`), never
-    %% re-derived here. Checked before the self-call guard: a direct call has no
-    %% gen_server to deadlock on.
-    case lookup_direct_call(ClassPid, Selector, Args) of
-        {ok, Module, SafeFn} ->
-            erlang:apply(Module, SafeFn, [nil | Args]);
-        error when ClassPid =:= self() ->
-            class_send_from_own_process(Selector, Args);
-        error ->
-            class_send_with_recovery(ClassPid, Selector, fun(P) ->
-                class_send_dispatch(P, Selector, Args)
-            end)
-    end.
+    class_send_with_recovery(ClassPid, Selector, fun(P) ->
+        class_send_dispatch(P, Selector, Args)
+    end).
 
 -doc """
 ADR 0142 §1-§2 (BT-4300): may the caller run `Selector` sent to the class at
@@ -358,7 +350,7 @@ Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
 reference of the receiving class, the value its class literal evaluates to
 (its metaclass tag, its own module and its registered pid), even for an
 inherited method, as every class-side path now builds it
-(`receiver_class_self/3`, `invoke_class_method/7`). `performLocally:`
+(the caller's own `ClassSelf`, `invoke_class_method/7`). `performLocally:`
 (`beamtalk_object_class:local_call/3`) used to apply its selector from
 `class_mod` alone; it now walks the class-method chain from the receiving
 class, so an inherited selector is found and a subclass override wins
@@ -399,33 +391,6 @@ run_in_caller(ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModul
     end.
 
 -doc """
-Resolve a dynamic class-side send to a direct module call, if eligible.
-
-Eligible when the class's `direct_class_methods` lists the selector and the
-compiled function exists at the right arity (`nil` plus the arguments);
-an arity mismatch falls through to the gen_server path so the usual structured
-error is raised.
-""".
--spec lookup_direct_call(pid(), selector(), list()) -> {ok, module(), atom()} | error.
-lookup_direct_call(ClassPid, Selector, Args) when is_pid(ClassPid), is_list(Args) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_direct_class_method(ClassName, Selector) of
-                {ok, Module, SafeFn} = Found ->
-                    case erlang:function_exported(Module, SafeFn, length(Args) + 1) of
-                        true -> Found;
-                        false -> error
-                    end;
-                error ->
-                    error
-            end;
-        not_found ->
-            error
-    end;
-lookup_direct_call(_ClassPid, _Selector, _Args) ->
-    error.
-
--doc """
 Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
 
 Eligible when the class's baked `direct_constructors` lists the selector, the
@@ -441,8 +406,8 @@ re-derived here. `new` needs no chain check because `new/0` is itself the
 override slot (a custom `new` compiles to, or delegates from, it), so the
 direct call and the gen_server path reach the same function either way.
 `new:` shares the direct-call trust model: reloading a class re-syncs its own
-verdicts, while an ancestor reload does not re-bake descendants. Like
-`lookup_direct_call/3`, the export check only sees loaded code, so a class
+verdicts, while an ancestor reload does not re-bake descendants. The
+export check only sees loaded code, so a class
 whose module nobody has touched yet takes one gen_server fallback (which
 loads it) before going direct.
 """.
@@ -501,10 +466,12 @@ class_send_from_own_process(Selector, Args) ->
     %% the class process answers from its own state, stay on the
     %% `dispatch_error` path.
     case class_chain_only_send(self(), Selector, Args) of
-        {ok, ClassName, _Module} ->
-            class_self_protocol_fallthrough(
-                ClassName, Selector, Args, receiver_tag(ClassName)
-            );
+        {ok, ClassName, Module} ->
+            %% This is the class's own process, so `self()` is its pid.
+            ClassSelf = #beamtalk_object{
+                class = receiver_tag(ClassName), class_mod = Module, pid = self()
+            },
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf);
         error ->
             handle_class_self_call(Selector)
     end.
@@ -569,21 +536,22 @@ methods (the same extension-before-method order a send to that class uses),
 so `super` finds a superclass method whether its body or an extension
 defined it.
 
-`ReceiverTag` is the live receiver's metaclass tag (`element(2, ClassSelf)`),
-so the found method runs under the receiver's class-variable key. Returns the
+`ClassSelf` is the live receiver (the calling method's own `ClassSelf`), so
+the found method runs under the receiver's class-variable key with the
+receiver's real reference, and nothing is looked up to rebuild it (BT-4301).
+Returns the
 plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
 class-object protocol answers (`class_self_protocol_fallthrough/4`, BT-4252),
 else a structured `does_not_understand` is raised.
 """.
--spec class_super_dispatch(class_name(), selector(), list(), atom()) -> term() | no_return().
-class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
-    is_list(Args), is_atom(ReceiverTag)
+-spec class_super_dispatch(class_name(), selector(), list(), #beamtalk_object{}) ->
+    term() | no_return().
+class_super_dispatch(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) when
+    is_list(Args)
 ->
     case find_class_super_method(Selector, ClassName) of
         {extension, AncestorName, AncestorTag} ->
-            case
-                check_class_self_extension(AncestorName, AncestorTag, Selector, Args, ReceiverTag)
-            of
+            case check_class_self_extension(AncestorName, AncestorTag, Selector, Args, ClassSelf) of
                 {ok, Outcome} ->
                     Outcome;
                 %% Unregistered between the probe and the call: the ancestor's
@@ -602,17 +570,17 @@ class_super_dispatch(ClassName, Selector, Args, ReceiverTag) when
                         Selector,
                         Args,
                         find_class_method_from_class(Selector, AncestorName),
-                        ReceiverTag
+                        ClassSelf
                     )
             end;
         {method, AncestorName, AncestorModule} ->
             class_self_dispatch_chain(
-                ClassName, Selector, Args, {ok, AncestorName, AncestorModule}, ReceiverTag
+                ClassName, Selector, Args, {ok, AncestorName, AncestorModule}, ClassSelf
             );
         not_found ->
             %% No ancestor class method or extension: the class-object
             %% protocol answers (`super name`, `super superclass`, BT-4252).
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag)
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf)
     end.
 
 -doc """
@@ -668,33 +636,37 @@ receiver_tag(ClassName) ->
 Virtual class-side self-send (BT-3666): `self Selector` from inside a class
 method, when the selector is not bound statically to a direct call.
 
-Checks `ClassName`'s own class-side extensions first (keyed under its
+`ClassSelf` is the calling method's own `ClassSelf`: the receiving class's real
+reference (its metaclass tag, its own module and its registered pid), passed
+as is, so no registry read rebuilds it per send (BT-4301; BT-4300 had looked
+it up with `whereis_class` + `lookup_module` to fix the caller-pid bug).
+
+Checks the receiving class's own class-side extensions first (keyed under its
 metaclass tag; extensions are never inherited, so only that tag is checked),
 mirroring `handle_class_method_call/6`'s extension-before-method order, then
-walks the class-method hierarchy starting at `ClassName` itself and applies
-the found `DefiningModule:class_<Selector>` (or runtime class-method fun) in
-the caller's process via `apply_class_method_in_context/6`, with `ClassSelf`
-the receiving class's real reference (`receiver_class_self/3`).
+walks the class-method hierarchy starting at the receiving class itself and
+applies the found `DefiningModule:class_<Selector>` (or runtime class-method
+fun) in the caller's process via `apply_class_method_in_context/6`.
 
-`ClassName` is the *receiving* class — the class named by `ClassSelf`, which
-for an inherited class method is a subclass of the class whose code is
-running. Starting at that class means an override of `Selector` (or a
-subclass-only implementation of a template-method hook) is found before the
-inherited definition, exactly as an instance-side self-send resolves.
-A class-side `super`, builder or compiled, uses `class_super_dispatch/4`
-instead, which never consults `ClassName` itself.
+The receiving class is the class named by `ClassSelf`, which for an inherited
+class method is a subclass of the class whose code is running. Starting at
+that class means an override of `Selector` (or a subclass-only implementation
+of a template-method hook) is found before the inherited definition, exactly
+as an instance-side self-send resolves. A class-side `super`, builder or
+compiled, uses `class_super_dispatch/4` instead, which never consults the
+receiving class itself.
 
 Returns the plain result (ADR 0130 §3). When neither an extension nor any
 class in the chain defines `Selector`, the class-object protocol answers
 (`self name`, `self superclass`: `class_self_protocol_fallthrough/4`,
 BT-4252), else a structured `does_not_understand` is raised.
 """.
--spec class_self_send(class_name(), selector(), list()) -> term() | no_return().
-class_self_send(ClassName, Selector, Args) ->
-    %% The receiving class is `ClassName`: its tag is both the extension key and
-    %% the receiver's tag, derived once per send (BT-3766).
-    Tag = receiver_tag(ClassName),
-    case check_class_self_extension(ClassName, Tag, Selector, Args, Tag) of
+-spec class_self_send(#beamtalk_object{}, selector(), list()) -> term() | no_return().
+class_self_send(#beamtalk_object{class = Tag} = ClassSelf, Selector, Args) ->
+    %% The receiving class's tag is both the extension key and the receiver's
+    %% tag (BT-3766).
+    ClassName = beamtalk_primitive:class_name_from_tag(Tag),
+    case check_class_self_extension(ClassName, Tag, Selector, Args, ClassSelf) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -703,20 +675,21 @@ class_self_send(ClassName, Selector, Args) ->
                 Selector,
                 Args,
                 find_class_method_from_class(Selector, ClassName),
-                Tag
+                ClassSelf
             )
     end.
 
 -doc """
 Guard for the compiled class-side self-send fast path (BT-3666).
 
-An open class's `self foo` (where the class itself defines `foo`) compiles to
+A class-side `self foo` (where the class itself defines `foo`, sealed or not:
+BT-4301 retired the unguarded sealed form) compiles to
 `case class_self_direct_ok(element(2, ClassSelf), 'Cls class', 'Cls', foo) of
-true -> class_foo(...) ; false -> class_self_send/3 walk end`. The direct call
-is only equivalent to the walk when the receiving class is exactly the
-compiling class (`ReceiverTag =:= ClassTag`) AND nothing would shadow the
-compiled method that the walk honours: a class-side extension on the class
-(`check_class_self_extension/5`) or a runtime-installed class-method fun
+true -> class_foo(ClassSelf, ...) ; false -> class_self_send(ClassSelf, ...)
+end`. The direct call is only equivalent to the walk when the receiving class
+is exactly the compiling class (`ReceiverTag =:= ClassTag`) AND nothing would
+shadow the compiled method that the walk honours: a class-side extension on the
+class (`check_class_self_extension/5`) or a runtime-installed class-method fun
 (ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
@@ -724,9 +697,9 @@ Costs one `persistent_term` read for the defining-class receiver (BT-3700: a
 derived per-class flag in `beamtalk_class_shadow_flags` folds the extension flag,
 the runtime-fun flag and readiness; BT-3669/BT-3676 had three reads); a
 subclass receiver short-circuits on the first clause. It asks
-`shadow_free/2`, not `direct_call_ok/2`: this call already runs in the class
-process, so the class's own class variables (BT-4299's extra input to
-`direct_call_ok/2`) do not bar it.
+`shadow_free/2`, not `direct_call_ok/2`: a self-send runs wherever its calling
+method already runs (the class process for a class with class variables, the
+caller otherwise, ADR 0142), so the class's class variables do not bar it.
 """.
 -spec class_self_direct_ok(atom(), atom(), class_name(), selector()) -> boolean().
 class_self_direct_ok(Tag, Tag, ClassName, Selector) ->
@@ -743,27 +716,19 @@ class_self_direct_ok(_ReceiverTag, _ClassTag, _ClassName, _Selector) ->
     false.
 
 -doc """
-The superclass-chain walk shared by `class_self_dispatch_local/3`,
+The class-method chain step shared by `class_self_dispatch_local/4`,
 `class_self_send/3` and `class_super_dispatch/4`: each does its own single
-extension check first, then falls through here. The `/4` form walks from
-`ClassName`'s superclass; the `/5` form applies a lookup result the caller
-already has.
+extension check and its own chain lookup first, then applies the lookup
+result here, or falls through to the class-object protocol.
 """.
--spec class_self_dispatch_chain(class_name(), selector(), list(), atom()) ->
-    term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag) ->
-    class_self_dispatch_chain(
-        ClassName,
-        Selector,
-        Args,
-        find_class_method_in_chain(Selector, ClassName),
-        ReceiverTag
-    ).
-
 -spec class_self_dispatch_chain(
-    class_name(), selector(), list(), {ok, class_name(), atom()} | not_found, atom()
+    class_name(),
+    selector(),
+    list(),
+    {ok, class_name(), atom()} | not_found,
+    #beamtalk_object{}
 ) -> term() | no_return().
-class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
+class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
     case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
@@ -778,13 +743,13 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
                     Selector,
                     Args,
                     ClassName,
-                    receiver_class_self(ReceiverTag, ClassName, Selector),
+                    ClassSelf,
                     DefiningClass,
                     DefiningModule
                 )
             );
         not_found ->
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag)
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf)
     end.
 
 -doc """
@@ -800,12 +765,11 @@ object does after its class-method lookup misses
 (which resolves an unknown class-side selector against `Class`) agrees with
 the runtime by construction — one lookup, no selector list.
 
-The receiver is rebuilt from `ReceiverTag` (`element(2, ClassSelf)` at the
-call site), so a subclass receiver answers for itself: `super name` from a
-`Base` class method inherited by `C` answers `#C`. Its pid is the
-receiving class's registered pid, never `self()`-derived, so the same
-`ClassSelf` results whether the class method runs in the class's own
-process or (a direct-called sealed method, ADR 0129) in the caller. The
+The receiver is the calling method's own `ClassSelf`, so a subclass receiver
+answers for itself: `super name` from a `Base` class method inherited by `C`
+answers `#C`. Its pid is the receiving class's registered pid, never
+`self()`-derived, so the same `ClassSelf` results whether the class method
+runs in the class's own process or in the caller (ADR 0142). The
 `Behaviour` primitives reach class state through the message-free
 `beamtalk_object_class:*_safe/1` readers, so running in the class's own
 process does not self-call its gen_server. `doc` reads the class doc's
@@ -820,13 +784,13 @@ Beamtalk-bodied protocol method can reach it through an Erlang call of its
 own). Raises the structured
 `does_not_understand` when `Class` does not understand `Selector` either.
 """.
--spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
+-spec class_self_protocol_fallthrough(class_name(), selector(), list(), #beamtalk_object{}) ->
     term() | no_return().
-class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
-    case receiver_class_object(ReceiverTag, ClassName) of
-        undefined ->
+class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf) ->
+    case ClassSelf of
+        #beamtalk_object{pid = ReceiverPid} when not is_pid(ReceiverPid) ->
             raise_class_self_dnu(ClassName, Selector);
-        #beamtalk_object{pid = ReceiverPid} = ClassSelf ->
+        #beamtalk_object{pid = ReceiverPid} ->
             try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
                 not_found -> raise_class_self_dnu(ClassName, Selector)
@@ -862,40 +826,37 @@ fun cannot use the compiled direct-call path. It routes here instead.
 
 Checks the extension registry first (same tag/priority rule as
 `class_self_send/3` above — extension before local method), then the
-class's own runtime class-method fun (the retrieval store), and only falls
-back to `class_self_dispatch_chain/4` (super + inherited, walked from the
-superclass) when the selector is neither.
+class's own runtime class-method fun (the retrieval store), and only then
+walks the class-method chain from `ClassName` itself (its own compiled method,
+then inherited ones). Compiled code also reaches it as the fallback of an
+explicit own-class reference's guarded direct call (`Base foo` in a `Base`
+class method, BT-4301), which binds `foo` to `Base` whatever the receiver.
 
 Returns the raw result; when no definition is found the class-object
 protocol answers (`class_self_protocol_fallthrough/4`, BT-4252), else a
 structured `does_not_understand` is raised. No `gen_server` hop: the local lookup is the same
 ETS read the dispatch hot path already uses.
-""".
--spec class_self_dispatch_local(class_name(), selector(), list()) -> term() | no_return().
-class_self_dispatch_local(ClassName, Selector, Args) ->
-    Tag = receiver_tag(ClassName),
-    class_self_dispatch_local(ClassName, Tag, Selector, Args, Tag).
 
--doc """
-`class_self_dispatch_local/3` with the live receiver's metaclass tag
-(`element(2, ClassSelf)`), so a subclass receiver runs the found method under
-its own class-variable key rather than under a `ClassSelf` rebuilt from
-`ClassName`. Like `/3` it checks `ClassName`'s own class-side extensions
-first, so it is not `super`: a class-side `super` uses
+`ClassSelf` is the calling fun's own `ClassSelf`: the live receiver, which can
+be a subclass of `ClassName`, so the found method runs under the receiver's
+class-variable key with its real reference (BT-4301: passed in, not rebuilt
+from a tag). Like `class_self_send/3` it checks `ClassName`'s own class-side
+extensions first, so it is not `super`: a class-side `super` uses
 `class_super_dispatch/4`.
 """.
--spec class_self_dispatch_local(class_name(), selector(), list(), atom()) ->
+-spec class_self_dispatch_local(class_name(), selector(), list(), #beamtalk_object{}) ->
     term() | no_return().
-class_self_dispatch_local(ClassName, Selector, Args, ReceiverTag) when
-    is_list(Args), is_atom(ReceiverTag)
+class_self_dispatch_local(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) when
+    is_list(Args)
 ->
-    %% `ReceiverTag` can differ from `ClassName`'s own tag (a subclass receiver).
-    class_self_dispatch_local(ClassName, receiver_tag(ClassName), Selector, Args, ReceiverTag).
+    class_self_dispatch_local(ClassName, receiver_tag(ClassName), Selector, Args, ClassSelf).
 
--spec class_self_dispatch_local(class_name(), atom(), selector(), list(), atom()) ->
+-spec class_self_dispatch_local(
+    class_name(), atom(), selector(), list(), #beamtalk_object{}
+) ->
     term() | no_return().
-class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
-    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) of
+class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
+    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ClassSelf) of
         {ok, Outcome} ->
             Outcome;
         not_found ->
@@ -911,21 +872,29 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                             Selector,
                             Args,
                             ClassName,
-                            receiver_class_self(ReceiverTag, ClassName, Selector),
+                            ClassSelf,
                             ClassName,
                             DefiningModule
                         )
                     );
                 error ->
-                    %% Not a local runtime method — walk the chain (super + inherited),
-                    %% which also resolves inherited runtime funs and compiled methods.
-                    class_self_dispatch_chain(ClassName, Selector, Args, ReceiverTag)
+                    %% Not a local runtime method — walk the chain from the
+                    %% class itself: its own compiled method (an own-class
+                    %% reference's fallback, BT-4301), then inherited ones,
+                    %% which also resolves inherited runtime funs.
+                    class_self_dispatch_chain(
+                        ClassName,
+                        Selector,
+                        Args,
+                        find_class_method_from_class(Selector, ClassName),
+                        ClassSelf
+                    )
             end
     end.
 
 -doc """
 Shared extension-registry probe for `class_self_send/3`,
-`class_self_dispatch_local/3` and `class_super_dispatch/4` — checking whether
+`class_self_dispatch_local/4` and `class_super_dispatch/4` — checking whether
 `ClassName`'s metaclass tag has a matching class-side extension
 (`beamtalk_extensions`, ADR 0066) before the caller falls through to its
 local/inherited-method lookups. Mirrors
@@ -943,19 +912,19 @@ Returns `{ok, Outcome}` when an extension matched (`Outcome` already
 unwrapped and ready to return to the codegen call site), or `not_found` so
 the caller proceeds to its own next lookup.
 """.
--spec check_class_self_extension(class_name(), atom(), selector(), list(), atom()) ->
+-spec check_class_self_extension(
+    class_name(), atom(), selector(), list(), #beamtalk_object{}
+) ->
     {ok, term()} | not_found | no_return().
-check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
+check_class_self_extension(ClassName, ClassTag, Selector, Args, ClassSelf) ->
     %% `ClassTag` (`ClassName`'s own metaclass tag, derived once by the caller)
-    %% picks the extension; `ReceiverTag` is the live receiver's metaclass tag,
-    %% so the extension body reads the receiver's class-variable key. The two
-    %% are the same atom except for a subclass receiver
-    %% (`class_self_dispatch_local/4`) or a `super` send that found the
-    %% extension on an ancestor (`class_super_dispatch/4`), where the caller
-    %% passes them separately.
+    %% picks the extension; `ClassSelf` is the live receiver, so the extension
+    %% body reads the receiver's class-variable key. Its tag is `ClassTag`
+    %% except for a subclass receiver (`class_self_dispatch_local/4`) or a
+    %% `super` send that found the extension on an ancestor
+    %% (`class_super_dispatch/4`).
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
-            ClassSelf = receiver_class_self(ReceiverTag, ClassName, Selector),
             {ok,
                 unwrap_self_dispatch_outcome(
                     ClassName,
@@ -964,41 +933,6 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                 )};
         not_found ->
             not_found
-    end.
-
--doc """
-The real reference of the receiving class named by `ReceiverTag` (falling back
-to `ClassName` when the tag names no class), as its class literal evaluates
-to: its tag, its own module and its registered pid. `undefined` when no such
-class is registered. BT-4300: a class-side `self`/`super` send can run in any
-process (a class method runs in the caller under ADR 0142), so the pid comes
-from the registry, never from `self()`.
-""".
--spec receiver_class_object(atom(), class_name()) -> #beamtalk_object{} | undefined.
-receiver_class_object(ReceiverTag, ClassName) ->
-    ReceiverName =
-        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
-            undefined -> ClassName;
-            Name -> Name
-        end,
-    case beamtalk_class_registry:whereis_class(ReceiverName) of
-        undefined ->
-            undefined;
-        ReceiverPid ->
-            #beamtalk_object{
-                class = ReceiverTag,
-                class_mod = self_dispatch_module(ReceiverName),
-                pid = ReceiverPid
-            }
-    end.
-
-%% `receiver_class_object/2` for a method about to run: a receiver that is no
-%% longer registered raises a structured `class_not_found`.
--spec receiver_class_self(atom(), class_name(), selector()) -> #beamtalk_object{} | no_return().
-receiver_class_self(ReceiverTag, ClassName, Selector) ->
-    case receiver_class_object(ReceiverTag, ClassName) of
-        undefined -> beamtalk_error:raise(beamtalk_error:new(class_not_found, ClassName, Selector));
-        ClassSelf -> ClassSelf
     end.
 
 -doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
@@ -1012,7 +946,7 @@ self_dispatch_module(ClassName) ->
 -doc """
 Adapt a `class_method_outcome()` from `apply_class_method_in_context/6` to the
 self-dispatch caller shape: raw value on success, structured raises on failure.
-Shared by `class_self_send/3`, `class_self_dispatch_local/3` and
+Shared by `class_self_send/3`, `class_self_dispatch_local/4` and
 `class_super_dispatch/4`.
 """.
 -spec unwrap_self_dispatch_outcome(class_name(), selector(), class_method_outcome()) ->
@@ -1405,7 +1339,7 @@ same function (`beamtalk_object_class:dispatch_class_method/5`).
 
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
-class — `class_self_send/3` / `class_self_dispatch_local/3`, above —
+class — `class_self_send/3` / `class_self_dispatch_local/4`, above —
 goes through `check_class_self_extension/5` instead, which checks the same
 registry under the same priority rule.
 
@@ -2005,7 +1939,7 @@ Does `ClassName` itself (not an ancestor) define `Selector` as a
 class method — either a compiled/static one (`lookup_methods/1`'s local
 selector list) or a runtime-installed one (ADR 0084,
 `lookup_class_method_fun/2`)? Mirrors the same two lookups
-`class_self_dispatch_local/3` already checks for a self-send, so
+`class_self_dispatch_local/4` already checks for a self-send, so
 `respondsTo:` agrees with what a `self sel` from inside another class
 method would actually resolve.
 """.

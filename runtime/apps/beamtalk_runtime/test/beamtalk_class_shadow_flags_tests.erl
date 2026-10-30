@@ -25,6 +25,15 @@ direct(Tag, Name, Sel) ->
 
 noop_fun() -> fun(_, _) -> ok end.
 
+%% A throwaway metadata row for a stateless class under `Object`: the derived
+%% flag reads the chain's published class-variable facts and fails closed on a
+%% class with no row (BT-4301), so a class whose `direct_call_ok/2` must hold
+%% needs one.
+stateless_row(Name) ->
+    beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+    ok = beamtalk_class_metadata:put_class_variables(Name, false).
+
 shadow_flag_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
         {"extension registry init raises the readiness flag the fast path reads", fun() ->
@@ -41,6 +50,7 @@ shadow_flag_test_() ->
         {"direct_call_ok/2 is the readiness flag and neither shadow flag (BT-3690)", fun() ->
             Tag = 'Bt3690Truth class',
             Name = 'Bt3690Truth',
+            ok = stateless_row(Name),
             ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
             try
                 ok = beamtalk_class_shadow_flags:set(extension, Tag),
@@ -66,6 +76,7 @@ shadow_flag_test_() ->
         {"derived flag is installed on first send and erased by a shadow raise (BT-3700)", fun() ->
             Tag = 'Bt3700Derived class',
             Name = 'Bt3700Derived',
+            ok = stateless_row(Name),
             _ = persistent_term:erase(Tag),
             ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(Tag)),
             ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),

@@ -138,9 +138,13 @@ fn inline_class_definition_trailing_send_to_sealed_facade_is_direct_call() {
         trailing.contains("call 'bt@facade':"),
         "Expected a direct call into the class module in: {trailing}"
     );
+    // BT-4301 (ADR 0142 §2): the direct call is guarded; `class_send` is
+    // only its fallback.
     assert!(
-        !trailing.contains("'class_send'"),
-        "Eligible trailing send must not go through class_send in: {trailing}"
+        trailing.contains(
+            "call 'beamtalk_class_shadow_flags':'direct_call_ok'('Facade class', 'Facade')"
+        ),
+        "Eligible trailing send must be guarded in: {trailing}"
     );
 }
 

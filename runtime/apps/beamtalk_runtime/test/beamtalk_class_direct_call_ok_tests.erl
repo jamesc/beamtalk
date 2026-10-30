@@ -54,6 +54,11 @@ direct_call_ok_test_() ->
         {"the class_vars raw input makes direct_call_ok false but keeps shadow_free", fun() ->
             Name = 'Bt4299Raw',
             Tag = tag(Name),
+            %% BT-4301: the derived flag fails closed on a class with no
+            %% published facts, so give it a stateless row under `Object`.
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+            ok = beamtalk_class_metadata:put_class_variables(Name, false),
             _ = persistent_term:erase(Tag),
             try
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),

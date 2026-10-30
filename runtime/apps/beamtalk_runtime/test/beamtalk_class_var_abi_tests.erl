@@ -161,6 +161,17 @@ registration_test_() ->
                 ?assertMatch({error, on_load_failure}, load(Mod, Bin)),
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('BT3713AbiOldZero'))
             end},
+            {"a module compiled for the nil-ClassSelf convention (abi 2) is refused at load",
+                fun() ->
+                    %% BT-4301 (ADR 0142): abi 3 retired the `nil` `ClassSelf` and
+                    %% changed the class-side self-send entry points; a module
+                    %% compiled for abi 2 still calls them the old way.
+                    ?assertEqual(3, beamtalk_class_var_abi:abi()),
+                    Mod = 'bt@bt4301_abi_two',
+                    Bin = old_binary(Mod, 'BT4301AbiTwo', ", class_var_abi => 2"),
+                    ?assertMatch({error, on_load_failure}, load(Mod, Bin)),
+                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class('BT4301AbiTwo'))
+                end},
             {"the refusal is parked for the REPL/CLI loaders as a structured abi_mismatch (BT-3722)",
                 fun() ->
                     Mod = 'bt@bt3722_abi_pending',
