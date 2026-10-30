@@ -131,7 +131,7 @@ module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/
       'initialize_assigns' => [],
       'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~
@@ -169,7 +169,7 @@ module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/
       'initialize_assigns' => [],
       'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:']
     }~

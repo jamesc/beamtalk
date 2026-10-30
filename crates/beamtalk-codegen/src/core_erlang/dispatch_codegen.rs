@@ -3180,37 +3180,42 @@ impl CoreErlangGenerator {
     /// ADR 0142 §2 (BT-4301): the guarded direct call of a static send of
     /// `raw_selector`, which `class_name` itself defines, to the literal class
     /// `class_name` compiled to `module_name`. `args_doc` must be variables or
-    /// literals: it is spliced into both arms.
+    /// literals: it is spliced into every arm.
     ///
     /// ```erlang
     /// let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
     /// case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Point class', 'Point') of
     ///   <'true'> when call 'erlang':'is_pid'(ClassPid) ->
-    ///     call 'bt@point':'class_origin'({'beamtalk_object', 'Point class', 'bt@point', ClassPid})
+    ///     case call 'erlang':'function_exported'('bt@point', 'class_origin', 1) of
+    ///       <'true'> when 'true' ->
+    ///         call 'bt@point':'class_origin'({'beamtalk_object', 'Point class', 'bt@point', ClassPid})
+    ///       <_> when 'true' -> call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
+    ///     end
     ///   <_> when 'true' ->
     ///     call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
     /// end
     /// ```
-    ///
-    /// (Plus, around the direct call, a `try` whose only effect is that an
-    /// `undef` because the compiled function no longer exists, after a
-    /// `removeSelector:` or a reload dropped the method, takes the same
-    /// `class_send` fallback, which answers what a dynamic send answers. Any
-    /// other exception is re-raised unchanged with its stack trace.)
     ///
     /// The guard is the contract (ADR 0025 amendment): `direct_call_ok/2`
     /// holds only while nothing shadows the compiled method (no class-side
     /// extension, no ADR 0084 runtime fun) and neither the class nor an
     /// ancestor declares class variables, exactly when the dynamic path would
     /// run the same compiled method in the caller; otherwise the fallback is
-    /// that dynamic `class_send`, byte for byte. The callee gets the real
-    /// class reference as `ClassSelf` (its tag, its own module and its
-    /// registered pid, the value a class literal evaluates to), never `nil`
-    /// (BT-4037); a class that is not registered takes the fallback, which
-    /// raises `class_not_found` as before. The pid is looked up by the
-    /// compile-time registered name ([`super::util::class_registered_name`],
-    /// the BT-4295 form), never baked: a restarted class process is found.
-    /// The module is the compile-time one the call names anyway.
+    /// that dynamic `class_send`, byte for byte. `function_exported/3` keeps a
+    /// method that no longer exists (`removeSelector:`, a reload that dropped
+    /// it, a module not loaded yet) on that fallback too, so it answers what a
+    /// dynamic send answers instead of `undef`. The direct call stays in tail
+    /// position: tail recursion through a literal class reference runs in
+    /// constant stack.
+    ///
+    /// The callee gets the real class reference as `ClassSelf` (its tag, its
+    /// own module and its registered pid, the value a class literal evaluates
+    /// to), never `nil` (BT-4037); a class that is not registered takes the
+    /// fallback, which raises `class_not_found` as before. The pid is looked
+    /// up by the compile-time registered name
+    /// ([`super::util::class_registered_name`], the BT-4295 form), never
+    /// baked: a restarted class process is found. The module is the
+    /// compile-time one the call names anyway.
     pub(super) fn guarded_class_direct_call_doc(
         &mut self,
         class_name: &str,
@@ -3221,23 +3226,10 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let tag = super::util::metaclass_tag(class_name);
         let class_pid_var = self.fresh_var("ClassPid");
-        let class_var = self.fresh_temp_var("DirectCls");
-        let reason_var = self.fresh_temp_var("DirectRsn");
-        let stack_var = self.fresh_temp_var("DirectStk");
-        let result_var = self.fresh_temp_var("DirectRes");
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let comma = if arg_count == 0 { "" } else { ", " };
         let fallback = Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
-        let reraise = docvec![
-            "primop 'raw_raise'(",
-            leaf::var(class_var.clone()),
-            ", ",
-            leaf::var(reason_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            ")"
-        ];
         docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
@@ -3249,45 +3241,27 @@ impl CoreErlangGenerator {
             leaf::atom(class_name.to_string()),
             ") of <'true'> when call 'erlang':'is_pid'(",
             leaf::var(class_pid_var.clone()),
-            ") -> try call ",
+            ") -> case call 'erlang':'function_exported'(",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::atom(safe_fn.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> call ",
             leaf::atom(module_name.clone()),
             ":",
-            leaf::atom(safe_fn.clone()),
+            leaf::atom(safe_fn),
             "({'beamtalk_object', ",
             leaf::atom(tag),
             ", ",
-            leaf::atom(module_name.clone()),
+            leaf::atom(module_name),
             ", ",
             leaf::var(class_pid_var.clone()),
             "}",
             comma,
             args_doc,
-            ") of <",
-            leaf::var(result_var.clone()),
-            "> -> ",
-            leaf::var(result_var),
-            " catch <",
-            leaf::var(class_var.clone()),
-            ", ",
-            leaf::var(reason_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> case {",
-            leaf::var(class_var),
-            ", ",
-            leaf::var(reason_var),
-            "} of <{'error', 'undef'}> when 'true' -> case call 'erlang':'function_exported'(",
-            leaf::atom(module_name),
-            ", ",
-            leaf::atom(safe_fn),
-            ", ",
-            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
-            ") of <'false'> when 'true' -> ",
+            ") <_> when 'true' -> ",
             fallback.clone(),
-            " <_> when 'true' -> ",
-            reraise.clone(),
-            " end <_> when 'true' -> ",
-            reraise,
             " end <_> when 'true' -> ",
             fallback,
             " end"
@@ -3352,9 +3326,10 @@ impl CoreErlangGenerator {
     }
 
     /// Shared `direct_call_eligible` gate — returns the target module name
-    /// when a send of `raw_selector` to the class reference `class_name` is
-    /// eligible for the sealed-class direct-call optimization (no class
-    /// variables, no `gen_server` round-trip needed, name not shadowed).
+    /// when a send of `raw_selector` to the class reference `class_name`
+    /// compiles to the guarded direct call (ADR 0142 §2: the class defines the
+    /// method, no class variables in its chain, not process-bound; name not
+    /// shadowed).
     /// Used by every class-reference direct-call gate check
     /// (`generate_repl_bound_class_send`, `generate_class_method_call`)
     /// instead of each repeating the same lookup.

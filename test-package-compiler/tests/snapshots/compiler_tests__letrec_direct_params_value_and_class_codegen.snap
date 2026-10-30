@@ -145,7 +145,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
         }~
@@ -193,7 +193,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'countDownFrom:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
                 }~
@@ -231,7 +231,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
       'initialize_assigns' => [],
       'method_info' => ~{'countUpTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'sumTo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 

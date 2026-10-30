@@ -231,7 +231,7 @@ fn check_method(
     // The one rule for where a class method runs (ADR 0142 §1: no class
     // variables in the chain, not process-bound, sealing irrelevant).
     let runs_in_caller = hierarchy.runs_class_method_in_caller(class_name, &selector);
-    let class_process_hint = class_process_hint(class);
+    let class_process_hint = class_process_hint(hierarchy, class, &selector);
 
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |expr| {
@@ -273,21 +273,44 @@ fn check_method(
 }
 
 /// The `class-process-ffi` hint for a class method that runs in the class
-/// process. Under ADR 0142 that happens only for a non-process-bound selector
-/// when the class or an ancestor declares class variables (BT-4301): the class
-/// keeps its process whatever is sealed, so the call has to move.
-fn class_process_hint(class: &ClassInfo) -> String {
+/// process: the reason [`ClassHierarchy::runs_class_method_in_caller`] gave,
+/// and only that one (BT-4301). For a non-process-bound selector it is one of:
+/// a class-variable reflection selector (`hasField:`/`clearField:`, which the
+/// class process answers itself); class variables declared by the class or by
+/// a named ancestor; or a superclass chain that could not be resolved, which
+/// the rule treats as a doubt.
+fn class_process_hint(hierarchy: &ClassHierarchy, class: &ClassInfo, selector: &str) -> String {
+    const MOVE: &str = "move the call into an instance method or an Actor";
     let class_name = class.name.as_str();
+    if ClassInfo::is_class_var_reflection_selector(selector) {
+        return format!(
+            "the class process itself answers `{selector}` sent to a class, so a class method \
+             of that name runs there: rename it, or {MOVE}"
+        );
+    }
     if class.has_class_variables() {
-        format!(
+        return format!(
             "`{class_name}` declares class variables, so its class methods run in the class \
-             process: move the call into an instance method or an Actor"
-        )
-    } else {
-        format!(
-            "an ancestor of `{class_name}` declares class variables, so its class methods run \
-             in the class process: move the call into an instance method or an Actor"
-        )
+             process: {MOVE}"
+        );
+    }
+    let stateful_ancestor = hierarchy
+        .superclass_chain(class_name)
+        .into_iter()
+        .find(|ancestor| {
+            hierarchy
+                .get_class(ancestor)
+                .is_some_and(ClassInfo::has_class_variables)
+        });
+    match stateful_ancestor {
+        Some(ancestor) => format!(
+            "`{class_name}` inherits from `{ancestor}`, which declares class variables, so its \
+             class methods run in the class process: {MOVE}"
+        ),
+        None => format!(
+            "the superclass chain of `{class_name}` could not be resolved, so its class methods \
+             are assumed to run in the class process: {MOVE}"
+        ),
     }
 }
 
@@ -686,10 +709,38 @@ Base subclass: Sub
         assert_eq!(diags.len(), 1, "{diags:?}");
         let h = hint(&diags[0]);
         assert!(
-            h.contains("an ancestor of `Sub` declares class variables"),
+            h.contains("`Sub` inherits from `Base`, which declares class variables"),
             "{h}"
         );
         assert!(in_caller(src).is_empty());
+    }
+
+    #[test]
+    fn unresolved_superclass_chain_hint_says_so() {
+        // `Missing` is not in the hierarchy: the rule treats the chain as a
+        // doubt, and the hint claims no class variables it never saw.
+        let src = "Missing subclass: Orphan\n  class me => Erlang erlang self\n";
+        let diags = in_class_process(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let h = hint(&diags[0]);
+        assert!(
+            h.contains("the superclass chain of `Orphan` could not be resolved"),
+            "{h}"
+        );
+        assert!(!h.contains("declares class variables"), "{h}");
+    }
+
+    #[test]
+    fn reflection_selector_hint_names_the_selector() {
+        let src = "Object subclass: Probe\n  class hasField: x => Erlang erlang self\n";
+        let diags = in_class_process(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let h = hint(&diags[0]);
+        assert!(
+            h.contains("the class process itself answers `hasField:`"),
+            "{h}"
+        );
+        assert!(!h.contains("declares class variables"), "{h}");
     }
 
     #[test]

@@ -76,12 +76,14 @@ reader's view.
   `beamtalk_class_metadata:set_runtime_class_methods/2` before the gate opens;
   `beamtalk_class_metadata:put_class_variables/2` before the row field), so a
   send that can see a shadow or a class variable cannot see a derived `true`.
-- A class's derived key reads its ancestors' `class_vars` flags and the
-  published superclass links, so every erasure for a class also erases its
-  descendants' keys (each under its own tag lock, after the class's own):
-  `set_class_vars/2` transitions and `invalidate/1` alike (BT-4301). A reload
-  that re-parents a class erases again once the new superclass is published
-  (`beamtalk_object_class:apply_class_info/2`).
+- A class's derived key also reads its chain's published class-variable facts
+  and superclass links, through `beamtalk_class_metadata:chain_has_class_variables/1`
+  (the runtime's one answer, failing closed), so `invalidate/1` erases the
+  class's descendants' keys too (each under its own tag lock, after the
+  class's own). `beamtalk_class_metadata:put_class_variables/2` calls it once
+  the row field is written, and a reload that re-parents a class calls it
+  again once the new superclass is published
+  (`beamtalk_object_class:apply_class_info/2`) (BT-4301).
 - Erasure on every other class-metadata write (`invalidate/1`, ADR 0142 §2,
   BT-4299): under the lock, erase the derived key. Called on reload
   (`beamtalk_object_class:apply_class_info/2`), a class-side `removeSelector:`,
@@ -205,9 +207,9 @@ erase_class_flag(ClassName) ->
         _ -> with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end)
     end.
 
-%% BT-4301: a descendant's derived key folds in this class's `class_vars` flag
-%% and superclass link (`chain_class_vars/1`), so it is erased with this
-%% class's. Runs only on metadata writes (never on the send path); the walk is
+%% BT-4301: a descendant's derived key folds in this class's published
+%% class-variable fact and superclass link (`chain_class_vars/1`), so it is
+%% erased with this class's. Runs only on metadata writes (never on the send path); the walk is
 %% ETS-only, so it is safe from inside a class process.
 -spec erase_descendant_flags(atom()) -> ok.
 erase_descendant_flags(ClassName) ->
@@ -223,15 +225,7 @@ false before the caller publishes it; dropping it lets the next send re-derive
 """.
 -spec set_class_vars(atom(), boolean()) -> ok.
 set_class_vars(ClassName, true) ->
-    case is_set(class_vars, ClassName) of
-        true ->
-            ok;
-        false ->
-            set(class_vars, ClassName),
-            %% Raised before the descendants' erasure: a descendant install
-            %% that runs after it reads the raised flag up its chain.
-            erase_descendant_flags(ClassName)
-    end;
+    set(class_vars, ClassName);
 set_class_vars(ClassName, false) ->
     Key = key(class_vars, ClassName),
     case persistent_term:get(Key, false) of
@@ -242,8 +236,7 @@ set_class_vars(ClassName, false) ->
             with_tag_lock(Tag, fun() ->
                 _ = persistent_term:erase(Key),
                 erase_direct_flag(Tag)
-            end),
-            erase_descendant_flags(ClassName)
+            end)
     end.
 
 -doc """
@@ -319,8 +312,8 @@ is_direct_flag_set(ClassTag) ->
 direct_flag_value(ClassTag) ->
     persistent_term:get(ClassTag, false).
 
-%% The derived value the raw flags imply; `false` (install nothing) while not
-%% ready, shadowed, or the chain cannot be followed.
+%% The derived value the raw flags and the chain's published facts imply;
+%% `false` (install nothing) while not ready or shadowed.
 -spec derive(atom(), atom()) -> derived() | false.
 derive(ClassTag, ClassName) ->
     case is_ready() andalso not is_shadowed(ClassTag, ClassName) of
@@ -328,32 +321,24 @@ derive(ClassTag, ClassName) ->
         true -> chain_class_vars(ClassName)
     end.
 
-%% ADR 0142 §1 rule 2 over the whole chain (BT-4301): `class_vars` when the
-%% class or an ancestor has its raw `class_vars` flag, `true` when the chain
-%% ends without one (its root, or a class with no published superclass link,
-%% which also covers a class with no metadata row, whose static call sites the
-%% `is_pid` check of the guarded direct call sends to `class_send` anyway),
-%% `false` (no answer) when the chain is too deep. Reads the raw flags, which
-%% their writers raise before the change is visible, and the published
-%% superclass links, whose writers erase the descendants' keys
+%% ADR 0142 §1 rules 1-2 over the whole chain (BT-4301): `class_vars` when the
+%% class's own raw `class_vars` flag is up (raised before the fact is visible,
+%% BT-4299) or when `beamtalk_class_metadata:chain_has_class_variables/1`, the
+%% one runtime answer the dynamic in-caller path also reads, says the class or
+%% an ancestor declares class variables or the chain cannot be followed (it
+%% fails closed: an unpublished fact or superclass link, a missing row, a
+%% cycle). Else `true`. An ancestor's change reaches a descendant's installed
+%% value through `put_class_variables/2` and `apply_class_info/2`, which erase
+%% the descendants' keys after the ancestor's row field is written
 %% (`invalidate/1`).
--spec chain_class_vars(atom()) -> derived() | false.
+-spec chain_class_vars(atom()) -> derived().
 chain_class_vars(ClassName) ->
-    StepFun = fun(Class, _Depth) ->
-        case is_set(class_vars, Class) of
-            true ->
-                {found, class_vars};
-            false ->
-                case beamtalk_class_metadata:lookup_superclass(Class) of
-                    {ok, Super} -> {next, Super};
-                    not_found -> not_found
-                end
-        end
-    end,
-    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Answer} -> Answer;
-        not_found -> true;
-        {max_depth_exceeded, _} -> false
+    case
+        is_set(class_vars, ClassName) orelse
+            beamtalk_class_metadata:chain_has_class_variables(ClassName)
+    of
+        true -> class_vars;
+        false -> true
     end.
 
 -spec install_direct_flag(atom(), atom()) -> derived() | false.

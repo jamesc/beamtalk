@@ -1169,10 +1169,14 @@ put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
         _ when HasClassVars ->
             beamtalk_class_shadow_flags:set_class_vars(Name, true),
             update_has_class_variables(Name, true),
+            %% BT-4301: descendants' derived flags read this row field
+            %% (`chain_has_class_variables/1`); erase them once it is written.
+            beamtalk_class_shadow_flags:invalidate(Name),
             beamtalk_class_derived_cache:invalidate();
         _ ->
             update_has_class_variables(Name, false),
             beamtalk_class_shadow_flags:set_class_vars(Name, false),
+            beamtalk_class_shadow_flags:invalidate(Name),
             beamtalk_class_derived_cache:invalidate()
     end.
 

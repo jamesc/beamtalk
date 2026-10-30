@@ -15,7 +15,8 @@
 // runtime test `beamtalk_class_in_caller_tests`.)
 //
 // Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,
-// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt.
+// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,
+// fixtures/gsc_pong.bt.
 
 TestCase subclass: GuardedStaticCallTest
 
@@ -63,6 +64,13 @@ TestCase subclass: GuardedStaticCallTest
       selector: #patchMe
       fun: [:classSelf | #fromRuntimeFun]
     self assert: GscPatched patchMe equals: #fromRuntimeFun
+
+  // The guarded direct call stays a tail call: a million-deep recursion
+  // through literal class references runs in the stack a shallow one uses.
+  testGuardedDirectCallIsATailCall =>
+    shallow := GscPing ping: 10
+    deep := GscPing ping: 1000000
+    self assert: deep - shallow < 50
 
   // BT-4037: the callee gets the real class reference, on the direct path and
   // on the fallback alike.

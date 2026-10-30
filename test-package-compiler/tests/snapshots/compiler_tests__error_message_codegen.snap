@@ -533,7 +533,7 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'initialize_assigns' => [],
       'method_info' => ~{'doError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'errorWithVariable' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 
@@ -574,7 +574,7 @@ module 'error_message' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
       'initialize_assigns' => [],
       'method_info' => ~{'doError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'errorWithVariable' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Never', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~,
             'isConstructible' => 'false'

@@ -647,8 +647,8 @@ impl CoreErlangGenerator {
                     selectors.insert(method.selector.to_string());
                 }
             }
-            // constructors. Keyword constructors share the direct
-            // `(nil, args...)` shape, so they join the selector set;
+            // constructors. Keyword constructors share the guarded direct
+            // `(ClassRef, args...)` shape, so they join the selector set;
             // `new`/`new:` need arity-specific emission/lookup and travel in
             // dedicated flags instead (never in `selectors`).
             let ctors = hierarchy.direct_constructors(class_name);

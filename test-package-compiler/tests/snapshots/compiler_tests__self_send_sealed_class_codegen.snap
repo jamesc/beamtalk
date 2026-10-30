@@ -109,7 +109,7 @@ module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, '
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
         }~
@@ -146,7 +146,7 @@ module 'self_send_sealed_class' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4, '
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'foo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bar' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 2,
+      'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
     }~
 

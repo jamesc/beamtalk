@@ -283,11 +283,11 @@ static_guard_test_() ->
                 try
                     ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')),
                     ?assertEqual(true, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
-                    ok = beamtalk_class_shadow_flags:set_class_vars('Bt4301GainRoot', true),
+                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', true),
                     ?assertNot(
                         beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')
                     ),
-                    ok = beamtalk_class_shadow_flags:set_class_vars('Bt4301GainRoot', false),
+                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', false),
                     ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf'))
                 after
                     stop_class(Leaf)
@@ -320,6 +320,32 @@ static_guard_test_() ->
                     end
                 end)
             end)
+        end},
+        {"an ancestor whose class-variable fact is unpublished keeps the guard off", fun() ->
+            %% The guard reads `chain_has_class_variables/1`, the dynamic path's
+            %% own answer, and fails closed with it: an ancestor row with no
+            %% published fact (or no row at all) is a doubt, never "stateless".
+            Parent = 'Bt4301UnpubParent',
+            Leaf = 'Bt4301UnpubLeaf',
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Parent, undefined, [], 'Object', false),
+            ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Parent, false),
+            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+            try
+                ?assert(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
+                ?assert(beamtalk_class_shadow_flags:shadow_free(tag(Leaf), Leaf)),
+                %% Publishing the parent's fact erases the leaf's derived flag.
+                ok = beamtalk_class_metadata:put_class_variables(Parent, false),
+                ?assertNot(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
+                %% A missing ancestor row is the same doubt.
+                ok = beamtalk_class_metadata:delete(Parent),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf))
+            after
+                beamtalk_class_metadata:delete(Leaf),
+                beamtalk_class_metadata:delete(Parent)
+            end
         end},
         {"a legacy direct_class_methods meta key is never read", fun() ->
             %% Before BT-4301 a dynamic send consulted the baked

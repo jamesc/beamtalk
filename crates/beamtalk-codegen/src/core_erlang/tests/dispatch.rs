@@ -4216,11 +4216,15 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         "no `nil` class self (BT-4037). Got:\n{output}"
     );
     // A removed method (`removeSelector:`, a reload) answers what the dynamic
-    // send answers instead of `undef`: only an `undef` for the call's own
-    // function, now unexported, takes the `class_send` fallback.
+    // send answers instead of `undef`: an unexported function takes the
+    // `class_send` fallback. No `try` wraps the call (it stays a tail call).
     assert!(
-        output.contains("<{'error', 'undef'}> when 'true' -> case call 'erlang':'function_exported'('bt@test@pt', 'class_x:y:', 3)"),
-        "an undef of the removed method falls back to class_send. Got:\n{output}"
+        output.contains("case call 'erlang':'function_exported'('bt@test@pt', 'class_x:y:', 3) of <'true'> when 'true' -> call 'bt@test@pt':'class_x:y:'("),
+        "the direct call is guarded by function_exported. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("try "),
+        "no try around the direct call. Got:\n{output}"
     );
 }
 
