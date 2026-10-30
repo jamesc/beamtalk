@@ -105,6 +105,33 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       literal: [GuardedDiffClassRoot describe]
       dynamic: [:cls | cls describe]
       on: GuardedDiffClassRoot
+    // BT-4300: class-variable reflection on a class with no class variables
+    // answers the same in the caller (the stateless Leaf) as in the class
+    // process (Root, kept there by its class-side extensions).
+    outcome := self
+      classSend: #clearFieldInCaller
+      literal: [GuardedDiffClassLeaf clearMissing == GuardedDiffClassLeaf]
+      dynamic: [:cls | cls clearMissing == cls]
+      on: GuardedDiffClassLeaf
+    self assert: outcome equals: #(#returned, true)
+    outcome := self
+      classSend: #clearFieldInClassProcess
+      literal: [GuardedDiffClassRoot clearMissing == GuardedDiffClassRoot]
+      dynamic: [:cls | cls clearMissing == cls]
+      on: GuardedDiffClassRoot
+    self assert: outcome equals: #(#returned, true)
+    outcome := self
+      classSend: #hasFieldInCaller
+      literal: [GuardedDiffClassLeaf hasMissing]
+      dynamic: [:cls | cls hasMissing]
+      on: GuardedDiffClassLeaf
+    self assert: outcome equals: #(#returned, false)
+    outcome := self
+      classSend: #hasFieldInClassProcess
+      literal: [GuardedDiffClassRoot hasMissing]
+      dynamic: [:cls | cls hasMissing]
+      on: GuardedDiffClassRoot
+    self assert: outcome equals: #(#returned, false)
     // An inherited method sees the receiving subclass as `self`.
     outcome := self
       classSend: #inheritedSelf

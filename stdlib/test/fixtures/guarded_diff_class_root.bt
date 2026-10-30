@@ -24,6 +24,12 @@ Object subclass: GuardedDiffClassRoot
 
   class boom -> Integer => self error: "class boom"
 
+  // Class-variable reflection on a class with no class variables (BT-4300):
+  // the same answer in the class process and in the caller.
+  class clearMissing => self clearField: #missing
+
+  class hasMissing => self hasField: #missing
+
   // Runs `aBlock` on each element in whichever process runs this method.
   // A block that sends back to this class re-enters it: on main that is the
   // class process calling itself, which raises `dispatch_error`.

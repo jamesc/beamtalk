@@ -178,7 +178,17 @@ in_caller_test_() ->
         end},
         {"a stateless class's state reads as empty in the caller", fun() ->
             with_class('Bt4300NoHome', none, #{}, fun(Pid) ->
-                ?assertEqual(false, send(Pid, testHasCount, []))
+                ?assertEqual(false, send(Pid, testHasCount, [])),
+                %% `clearField:` answers the class, as against the empty map in
+                %% the class process; a write still has nowhere to go.
+                ClassSelf = #beamtalk_object{
+                    class = tag('Bt4300NoHome'), class_mod = ?HELPER, pid = Pid
+                },
+                ?assertEqual(ClassSelf, beamtalk_class_vars:clear(ClassSelf, count)),
+                ?assertError(
+                    #{error := #beamtalk_error{kind = class_state_unreachable}},
+                    beamtalk_class_vars:put(ClassSelf, count, 1)
+                )
             end),
             with_class('Bt4300Home', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(true, send(Pid, testHasCount, [])),
@@ -188,6 +198,10 @@ in_caller_test_() ->
                 ?assertError(
                     #{error := #beamtalk_error{kind = class_state_unreachable}},
                     beamtalk_class_vars:has(ClassSelf, count)
+                ),
+                ?assertError(
+                    #{error := #beamtalk_error{kind = class_state_unreachable}},
+                    beamtalk_class_vars:clear(ClassSelf, count)
                 )
             end)
         end},

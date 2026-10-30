@@ -9,6 +9,16 @@ Object subclass: InCallerProbe
 
   class me => self
 
+  // A class-side self-send that answers `self`: inherited by
+  // InCallerProbeSub, it must answer the subclass's real reference.
+  class meVia => self me
+
+  // `clearField:` on a class with no class variables: its state is empty
+  // wherever the method runs (ADR 0142 §3).
+  class clearMissing => self clearField: #missing
+
+  class hasMissing => self hasField: #missing
+
   class myName -> Symbol => self name
 
   class double: n :: Integer -> Integer => n * 2

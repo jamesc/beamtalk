@@ -52,6 +52,26 @@ TestCase subclass: ClassMethodInCallerTest
     self assert: sub me equals: InCallerProbeSub
     self assert: sub myName equals: #InCallerProbeSub
 
+  // An inherited class-side self-send or `super` send that answers `self`
+  // answers the receiving class itself, which a further send reaches.
+  testSelfAndSuperSendsAnswerTheReceivingClass =>
+    sub := InCallerProbeSub
+    self assert: InCallerProbeSub meVia == InCallerProbeSub
+    self assert: (InCallerProbeSub meVia double: 2) equals: 6
+    self assert: sub meVia == InCallerProbeSub
+    self assert: (sub meVia double: 2) equals: 6
+    self assert: InCallerProbeSub superMe == InCallerProbeSub
+    self assert: (InCallerProbeSub superMe double: 2) equals: 6
+    self assert: InCallerProbe meVia == InCallerProbe
+    self assert: (InCallerProbe meVia double: 2) equals: 4
+
+  // `clearField:` and `hasField:` on a class with no class variables answer
+  // as they did in the class process.
+  testClassVariableReflectionOnAStatelessClass =>
+    self assert: InCallerProbe clearMissing == InCallerProbe
+    self assert: InCallerProbeSub clearMissing == InCallerProbeSub
+    self deny: InCallerProbe hasMissing
+
   // Errors keep the value they had through the class process.
   testErrorsAreUnchanged =>
     cls := InCallerProbe

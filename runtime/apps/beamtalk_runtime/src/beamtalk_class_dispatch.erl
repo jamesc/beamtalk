@@ -671,8 +671,8 @@ metaclass tag; extensions are never inherited, so only that tag is checked),
 mirroring `handle_class_method_call/6`'s extension-before-method order, then
 walks the class-method hierarchy starting at `ClassName` itself and applies
 the found `DefiningModule:class_<Selector>` (or runtime class-method fun) in
-the caller's process via `apply_class_method_in_context/6`, with
-`ClassSelf#beamtalk_object.class_mod` set to the defining module.
+the caller's process via `apply_class_method_in_context/6`, with `ClassSelf`
+the receiving class's real reference (`receiver_class_self/3`).
 
 `ClassName` is the *receiving* class — the class named by `ClassSelf`, which
 for an inherited class method is a subclass of the class whose code is
@@ -773,7 +773,12 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ReceiverTag) ->
                 ClassName,
                 Selector,
                 apply_class_method_in_context(
-                    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
+                    Selector,
+                    Args,
+                    ClassName,
+                    receiver_class_self(ReceiverTag, ClassName, Selector),
+                    DefiningClass,
+                    DefiningModule
                 )
             );
         not_found ->
@@ -816,20 +821,10 @@ own). Raises the structured
 -spec class_self_protocol_fallthrough(class_name(), selector(), list(), atom()) ->
     term() | no_return().
 class_self_protocol_fallthrough(ClassName, Selector, Args, ReceiverTag) ->
-    ReceiverName =
-        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
-            undefined -> ClassName;
-            Name -> Name
-        end,
-    case beamtalk_class_registry:whereis_class(ReceiverName) of
+    case receiver_class_object(ReceiverTag, ClassName) of
         undefined ->
             raise_class_self_dnu(ClassName, Selector);
-        ReceiverPid ->
-            ClassSelf = #beamtalk_object{
-                class = ReceiverTag,
-                class_mod = self_dispatch_module(ReceiverName),
-                pid = ReceiverPid
-            },
+        #beamtalk_object{pid = ReceiverPid} = ClassSelf ->
             try try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
                 not_found -> raise_class_self_dnu(ClassName, Selector)
@@ -911,7 +906,12 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                         ClassName,
                         Selector,
                         apply_class_method_in_context(
-                            Selector, Args, ClassName, ReceiverTag, ClassName, DefiningModule
+                            Selector,
+                            Args,
+                            ClassName,
+                            receiver_class_self(ReceiverTag, ClassName, Selector),
+                            ClassName,
+                            DefiningModule
                         )
                     );
                 error ->
@@ -953,8 +953,7 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
     %% passes them separately.
     case beamtalk_dispatch:check_extension(ClassTag, Selector) of
         {ok, Fun} ->
-            Module = self_dispatch_module(ClassName),
-            ClassSelf = #beamtalk_object{class = ReceiverTag, class_mod = Module, pid = self()},
+            ClassSelf = receiver_class_self(ReceiverTag, ClassName, Selector),
             {ok,
                 unwrap_self_dispatch_outcome(
                     ClassName,
@@ -963,6 +962,41 @@ check_class_self_extension(ClassName, ClassTag, Selector, Args, ReceiverTag) ->
                 )};
         not_found ->
             not_found
+    end.
+
+-doc """
+The real reference of the receiving class named by `ReceiverTag` (falling back
+to `ClassName` when the tag names no class), as its class literal evaluates
+to: its tag, its own module and its registered pid. `undefined` when no such
+class is registered. BT-4300: a class-side `self`/`super` send can run in any
+process (a class method runs in the caller under ADR 0142), so the pid comes
+from the registry, never from `self()`.
+""".
+-spec receiver_class_object(atom(), class_name()) -> #beamtalk_object{} | undefined.
+receiver_class_object(ReceiverTag, ClassName) ->
+    ReceiverName =
+        case beamtalk_primitive:class_name_from_tag(ReceiverTag) of
+            undefined -> ClassName;
+            Name -> Name
+        end,
+    case beamtalk_class_registry:whereis_class(ReceiverName) of
+        undefined ->
+            undefined;
+        ReceiverPid ->
+            #beamtalk_object{
+                class = ReceiverTag,
+                class_mod = self_dispatch_module(ReceiverName),
+                pid = ReceiverPid
+            }
+    end.
+
+%% `receiver_class_object/2` for a method about to run: a receiver that is no
+%% longer registered raises a structured `class_not_found`.
+-spec receiver_class_self(atom(), class_name(), selector()) -> #beamtalk_object{} | no_return().
+receiver_class_self(ReceiverTag, ClassName, Selector) ->
+    case receiver_class_object(ReceiverTag, ClassName) of
+        undefined -> beamtalk_error:raise(beamtalk_error:new(class_not_found, ClassName, Selector));
+        ClassSelf -> ClassSelf
     end.
 
 -doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
@@ -1514,13 +1548,18 @@ invocation fails loudly with the outer map intact instead of overwriting it.
     map()
 ) ->
     {reply, term(), map()} | test_spawn.
-invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
+invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningModule, ClassVars) ->
     %% The metaclass tag is derived once: it keys the class-variable home and
     %% is the `ClassSelf` tag the method receives.
     ClassTag = receiver_tag(ClassName),
+    %% BT-4300: `self()` is the receiving class's own gen_server here
+    %% (`handle_class_method_call/6` runs only inside it), so this is the
+    %% class's real reference; no path that may run elsewhere builds one from
+    %% `self()`.
+    ClassSelf = #beamtalk_object{class = ClassTag, class_mod = Module, pid = self()},
     run_with_class_vars(ClassTag, ClassVars, fun() ->
         apply_class_method_in_context(
-            Selector, Args, ClassName, ClassTag, DefiningClass, DefiningModule
+            Selector, Args, ClassName, ClassSelf, DefiningClass, DefiningModule
         )
     end).
 
@@ -1585,8 +1624,9 @@ outcome_reply({error, {raised, _ErrClass, Error, _ST}}) -> {error, Error}.
 -doc """
 Shared core of class-method dispatch.
 
-Handles the TestCase `test_spawn` guard, constructs `ClassSelf` with
-`class_mod = DefiningModule`, applies the method, and classifies any
+Handles the TestCase `test_spawn` guard, applies the method to `ClassSelf`
+(the receiving class's real reference, built by the caller: never from
+`self()` unless the caller is the class's own gen_server), and classifies any
 errors into the structured variants in `class_method_outcome()`. Both
 `invoke_class_method/7` (gen_server path) and `class_self_dispatch_chain/5`
 (self-send path) adapt the outcome to their own caller shapes.
@@ -1596,10 +1636,10 @@ Stacktraces are preserved in the `{raised, ...}` variant so callers
 that need to re-raise (e.g. self-dispatch) get the original trace.
 """.
 -spec apply_class_method_in_context(
-    selector(), list(), class_name(), atom(), class_name(), atom()
+    selector(), list(), class_name(), #beamtalk_object{}, class_name(), atom()
 ) -> class_method_outcome().
 apply_class_method_in_context(
-    Selector, Args, ClassName, ReceiverTag, DefiningClass, DefiningModule
+    Selector, Args, ClassName, ClassSelf, DefiningClass, DefiningModule
 ) ->
     %% For test execution (runAll, run:) inherited from TestCase,
     %% return a spawn request so the caller (gen_server) can handle noreply.
@@ -1608,11 +1648,6 @@ apply_class_method_in_context(
         true ->
             test_spawn;
         false ->
-            ClassSelf = #beamtalk_object{
-                class = ReceiverTag,
-                class_mod = DefiningModule,
-                pid = self()
-            },
             apply_class_method_body(
                 ClassSelf,
                 Args,

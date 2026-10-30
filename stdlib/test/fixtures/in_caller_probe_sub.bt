@@ -8,3 +8,6 @@
 InCallerProbe subclass: InCallerProbeSub
 
   class double: n :: Integer -> Integer => n * 3
+
+  // A class-side `super` send that answers `self`.
+  class superMe => super me
