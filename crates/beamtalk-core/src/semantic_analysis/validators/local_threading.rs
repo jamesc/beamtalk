@@ -976,6 +976,8 @@ pub(crate) enum Residual {
     /// Accepted (measured right, BT-4287): every producer site, which codegen
     /// registers in the frame that lowers the statement
     /// (`is_family_only_fold_value_site`), and a cascade's shared receiver.
+    /// A `match:` arm body is a statement of its plain arm frame; a guard is
+    /// evaluated in place, so nothing in it is a site.
     StateFoldUnsequencedOperand,
 }
 
@@ -1029,7 +1031,7 @@ const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
     ResidualDenied {
         shape: Residual::StateFoldUnsequencedOperand,
         contexts: &[Actor],
-        issue: "BT-4310",
+        issue: "BT-4287",
         fixed_by: "BT-4310",
     },
 ];
@@ -2409,25 +2411,49 @@ impl<'d> Walker<'d> {
     /// documentation for what was measured. `stmt` is a statement of the
     /// method body (depth 0) or of a block body.
     fn check_unsequenced_state_folds(&mut self, stmt: &Expression) {
-        let Some(row) = residual_denied(Residual::StateFoldUnsequencedOperand, self.context) else {
-            return;
-        };
-        let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(stmt);
-        if constructs.is_empty() {
-            return;
-        }
         // The sites codegen registers for this statement: the method root's
         // `with_local_producer_sites`, and every block frame's
         // `body_producer_site_exprs` (completed for these constructs by
         // `is_family_only_fold_value_site`).
-        let sites: HashSet<Span> = if self.depth == 0 {
+        let sites = if self.depth == 0 {
             sequenced_operand_sites(stmt)
         } else {
             loop_body_producer_sites(stmt)
+        };
+        let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(stmt);
+        self.report_unsequenced_state_folds(constructs, &sites);
+    }
+
+    /// [`Walker::check_unsequenced_state_folds`] for a `match:` that is not a
+    /// local-threading producer: each arm body is a statement of a plain arm
+    /// frame (codegen's `generate_plain_arm`, which registers the loop and fold
+    /// among its `body_producer_site_exprs`), and a guard is evaluated in
+    /// place, so nothing in it is a site, itself included.
+    fn check_unsequenced_state_folds_in_match_arm(&mut self, arm: &MatchArm) {
+        let sites = loop_body_producer_sites(&arm.body);
+        let constructs = crate::semantic_analysis::block_facts::operand_loop_constructs(&arm.body);
+        self.report_unsequenced_state_folds(constructs, &sites);
+        if let Some(guard) = &arm.guard {
+            let mut constructs =
+                crate::semantic_analysis::block_facts::operand_loop_constructs(guard);
+            if local_threading_construct(guard).is_some() {
+                constructs.push(guard);
+            }
+            self.report_unsequenced_state_folds(constructs, &[]);
         }
-        .into_iter()
-        .map(Expression::span)
-        .collect();
+    }
+
+    /// Reports each of `constructs` that threads only `State`
+    /// ([`Walker::is_state_only_loop`]) and is not one of `sites`.
+    fn report_unsequenced_state_folds(
+        &mut self,
+        constructs: Vec<&Expression>,
+        sites: &[&Expression],
+    ) {
+        let Some(row) = residual_denied(Residual::StateFoldUnsequencedOperand, self.context) else {
+            return;
+        };
+        let sites: HashSet<Span> = sites.iter().map(|site| site.span()).collect();
         for construct in constructs {
             if sites.contains(&construct.span()) || !self.is_state_only_loop(construct) {
                 continue;
@@ -2440,10 +2466,10 @@ impl<'d> Walker<'d> {
                     format!(
                         "a `{selector}` whose block sends to `self` or writes a field is used \
                          where its value is not sequenced (a conditional's receiver, a lookup, \
-                         or an argument of a `super`, `error:`, block-invocation, cast or \
-                         block-taking send), which is not supported yet in {context}: its \
-                         state changes would be lost or its value would be wrong ({issue}, \
-                         until {fixed_by})",
+                         a `match:` guard, or an argument of a `super`, `error:`, \
+                         block-invocation, cast or block-taking send), which is not supported \
+                         yet in {context}: its state changes would be lost or its value would \
+                         be wrong (found in {issue}, until {fixed_by})",
                         context = self.context,
                         issue = row.issue,
                         fixed_by = row.fixed_by,
@@ -2716,6 +2742,7 @@ impl<'d> Walker<'d> {
                     if let Some(row) = residual_denied(Residual::MatchArmWrite, self.context) {
                         self.report_match_arm_writes(arm, row);
                     }
+                    self.check_unsequenced_state_folds_in_match_arm(arm);
                     if let Some(guard) = &arm.guard {
                         self.operand(guard, Position::MatchArm);
                     }

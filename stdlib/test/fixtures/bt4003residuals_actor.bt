@@ -212,3 +212,132 @@ Actor subclass: Bt4003ResidualsActor
         x == 2 ifTrue: [^#(t, self.n)]
       ]
     -1
+
+  oProtectedInDo =>
+    #(1, 2)
+      do: [:x |
+        [
+          x + (self.items inject: 0 into: [:b :y | b + self bump])
+        ] on: Error do: [:e | 0]
+      ]
+    self.n
+
+  oHandlerInDo =>
+    #(1, 2)
+      do: [:x |
+        [
+          1 / 0
+        ] on: Error do: [:e |
+          x + (self.items inject: 0 into: [:b :y | b + self bump])
+        ]
+      ]
+    self.n
+
+  oEnsureBodyInDo =>
+    #(1, 2) do: [:x |
+      [x + (self.items inject: 0 into: [:b :y | b + self bump])] ensure: [0]
+    ]
+    self.n
+
+  oEnsureCleanupInDo =>
+    #(1, 2) do: [:x |
+      [0] ensure: [x + (self.items inject: 0 into: [:b :y | b + self bump])]
+    ]
+    self.n
+
+  oMatchArmInDo =>
+    #(1, 2)
+      do: [:x |
+        x match: [
+          1 -> x + (self.items inject: 0 into: [:b :y | b + self bump]);
+          _ -> 0
+        ]
+      ]
+    self.n
+
+  oIfAbsentInDo =>
+    #(1, 2)
+      do: [:x |
+        #{} at: x ifAbsent: [
+          x + (self.items inject: 0 into: [:b :y | b + self bump])
+        ]
+      ]
+    self.n
+
+  oIfNoneHandler =>
+    #(1, 2) detect: [:w |
+      w > 5
+    ] ifNone: [1 + (self.items inject: 0 into: [:b :y | b + self bump])]
+    self.n
+
+  oValueArgBlockInDo =>
+    #(1, 2) do: [:w |
+      [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])] value: w
+    ]
+    self.n
+
+  oWhileConditionInDo =>
+    #(1, 2)
+      do: [:w |
+        [
+          w + (self.items inject: 0 into: [:b :y | b + self bump])
+          false
+        ] whileTrue: [0]
+      ]
+    self.n
+
+  oRootProtected =>
+    [
+      1 + (self.items inject: 0 into: [:b :y | b + self bump])
+    ] on: Error do: [:e | 0]
+    self.n
+
+  oRootEnsureBody =>
+    [1 + (self.items inject: 0 into: [:b :y | b + self bump])] ensure: [0]
+    self.n
+
+  oRootMatchArm =>
+    1 match: [
+      1 -> [:x |
+        x + (self.items inject: 0 into: [:b :y | b + self bump])
+      ] value: 1;
+      _ -> 0
+    ]
+    self.n
+
+  oRootIfAbsent =>
+    #{} at: 1 ifAbsent: [
+      1 + (self.items inject: 0 into: [:b :y | b + self bump])
+    ]
+    self.n
+
+  oProducerArmInDo =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        x > 0
+          ifTrue: [
+            t := t + 1
+            x + (self.items inject: 0 into: [:b :y | b + self bump])
+          ]
+      ]
+    #(t, self.n)
+
+  oProducerProtectedInDo =>
+    t := 0
+    #(1, 2)
+      do: [:x |
+        [
+          t := t + 1
+          x + (self.items inject: 0 into: [:b :y | b + self bump])
+        ] on: Error do: [:e | 0]
+      ]
+    #(t, self.n)
+
+  oStoredClosureInDo =>
+    #(1, 2)
+      do: [:w |
+        blk := [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]
+        blk value: w
+      ]
+    self.n

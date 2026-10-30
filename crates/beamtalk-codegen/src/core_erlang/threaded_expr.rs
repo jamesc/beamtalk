@@ -1716,20 +1716,25 @@ impl CoreErlangGenerator {
     /// dropped (`ConstructCarrierInPlace`). `site` comes from
     /// `loop_body_producer_sites`, which answers each site without parentheses.
     ///
-    /// The invariant, for every scope kind of an actor instance method: a
-    /// construct that compiles to a `{Value, State}` carrier at a sequenced
-    /// operand site of a frame's statement is a registered producer site of
-    /// that frame. The method root registers its `sequenced_operand_sites`;
-    /// every frame body (a fold or letrec loop body, a producer's or a plain
-    /// arm, an evaluated block, a Tier 2 block body) registers its
-    /// `body_producer_site_exprs`, which this predicate completes under a fold
-    /// frame, and checks them with `verify_producer_sites_threaded`. Such a
-    /// construct at an operand that is no site of its statement (a
-    /// conditional's receiver, a lookup key, an argument of a `super`,
-    /// `error:`, block-invocation, cast or block-taking send) never reaches
-    /// codegen: `beamtalk_core`'s `StateFoldUnsequencedOperand` row rejects it
-    /// (BT-4310), reading the same site lists over `operand_loop_constructs`.
-    /// The REPL has its own rule (its producers adopt the bindings map), and
+    /// The invariant, for an actor instance method: such a construct at a
+    /// producer site of its statement is lowered as a producer of the frame
+    /// that holds the statement, its carrier bound and unpacked there; at any
+    /// other operand (a conditional's receiver, a lookup key, a `match:`
+    /// guard, an argument of a `super`, `error:`, block-invocation, cast or
+    /// block-taking send) the analysis rejects it (`beamtalk_core`'s
+    /// `StateFoldUnsequencedOperand` row, until BT-4310), reading the same
+    /// site lists (`sequenced_operand_sites` at the method root,
+    /// `loop_body_producer_sites` in a block) over `operand_loop_constructs`.
+    /// `arm_operand_carrier_corpus.rs` proves both halves over the frame
+    /// kinds it generates: fold, letrec and `whileTrue:` bodies and
+    /// conditions, plain and producer conditional arms, plain and producer
+    /// `on:do:`/`ensure:` bodies and handlers, `match:` arms, lookup and
+    /// `ifNone:` handlers, evaluated, applied and stored blocks, and the
+    /// method root. A lookup handler that is a real closure compiles no
+    /// carrier at all (its self-sends go through the actor-state cell, ADR
+    /// 0137). The fold, letrec, arm and closure frames also check their sites
+    /// with `verify_producer_sites_threaded`; an exception arm does not. The
+    /// REPL has its own rule (its producers adopt the bindings map), and
     /// class and value-type methods thread no `State`.
     fn is_family_only_fold_value_site(&self, site: &Expression) -> bool {
         self.in_actor_instance_context()

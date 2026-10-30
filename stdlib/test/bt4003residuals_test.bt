@@ -123,6 +123,43 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4003ResidualsActor spawn andArgInCollect equals: #(#(false, true), 4)
     self assert: Bt4003ResidualsActor spawn deeperOperandInCollect equals: #(#(5, 10), 4)
 
+  // BT-4287 review: the same fold as an operand in every other kind of frame
+  // (plain and producer exception bodies and handlers, `match:` arms, lookup
+  // and `ifNone:` handlers, applied and stored blocks, a `whileTrue:`
+  // condition), in a fold body and at the method root.
+  testStateFoldAsAnOperandInEveryFrameKind =>
+    self assert: Bt4003ResidualsActor spawn oProtectedInDo equals: 4
+    self assert: Bt4003ResidualsClass oProtectedInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oHandlerInDo equals: 4
+    self assert: Bt4003ResidualsClass oHandlerInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oEnsureBodyInDo equals: 4
+    self assert: Bt4003ResidualsClass oEnsureBodyInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oEnsureCleanupInDo equals: 4
+    self assert: Bt4003ResidualsClass oEnsureCleanupInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oMatchArmInDo equals: 2
+    self assert: Bt4003ResidualsClass oMatchArmInDo equals: 2
+    self assert: Bt4003ResidualsActor spawn oIfAbsentInDo equals: 4
+    self assert: Bt4003ResidualsClass oIfAbsentInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oIfNoneHandler equals: 2
+    self assert: Bt4003ResidualsClass oIfNoneHandler equals: 2
+    self assert: Bt4003ResidualsActor spawn oValueArgBlockInDo equals: 4
+    self assert: Bt4003ResidualsClass oValueArgBlockInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oWhileConditionInDo equals: 4
+    self assert: Bt4003ResidualsClass oWhileConditionInDo equals: 4
+    self assert: Bt4003ResidualsActor spawn oRootProtected equals: 2
+    self assert: Bt4003ResidualsClass oRootProtected equals: 2
+    self assert: Bt4003ResidualsActor spawn oRootEnsureBody equals: 2
+    self assert: Bt4003ResidualsClass oRootEnsureBody equals: 2
+    self assert: Bt4003ResidualsActor spawn oRootMatchArm equals: 2
+    self assert: Bt4003ResidualsClass oRootMatchArm equals: 2
+    self assert: Bt4003ResidualsActor spawn oRootIfAbsent equals: 2
+    self assert: Bt4003ResidualsClass oRootIfAbsent equals: 2
+    self assert: Bt4003ResidualsActor spawn oProducerArmInDo equals: #(2, 4)
+    self assert: Bt4003ResidualsClass oProducerArmInDo equals: #(2, 4)
+    self assert: Bt4003ResidualsActor spawn oProducerProtectedInDo equals: #(2, 4)
+    self assert: Bt4003ResidualsClass oProducerProtectedInDo equals: #(2, 4)
+    self assert: Bt4003ResidualsActor spawn oStoredClosureInDo equals: 4
+
   testClassStateFoldAsAnOperandInAFoldBody =>
     self assert: Bt4003ResidualsClass injectOperandInDo equals: 4
     self assert: Bt4003ResidualsClass doReceiverInDo equals: 4

@@ -423,6 +423,12 @@ enum Under {
     EnclosingFold,
     /// No fold frame encloses it: every site is a core site.
     NoFold,
+    /// A frame whose registration the BT-4287 review asked to prove rather than assume (an
+    /// exception body or handler, a `match:` arm, a lookup handler, an applied block, a
+    /// `whileTrue:` condition): whatever the analysis accepts there must lower as a producer
+    /// (`every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier`); the
+    /// fault is not asserted.
+    Other,
 }
 
 /// The outer body kinds holding the statement `{s}` (where `x` is bound).
@@ -445,6 +451,35 @@ const FOLD_BODY_OUTERS: &[(&str, Under)] = &[
     ("1 to: 2 do: [:x | {s}]", Under::NoFold),
     ("2 timesRepeat: [x := 1. {s}]", Under::NoFold),
     ("[self.hits > 100] whileTrue: [x := 1. {s}]", Under::NoFold),
+    ("xs do: [:x | [{s}] on: Error do: [:e | 0]]", Under::Other),
+    ("xs do: [:x | [0] on: Error do: [:e | {s}]]", Under::Other),
+    ("xs do: [:x | [{s}] ensure: [0]]", Under::Other),
+    ("xs do: [:x | [0] ensure: [{s}]]", Under::Other),
+    ("xs do: [:x | x match: [1 -> {s}; _ -> 0]]", Under::Other),
+    ("xs do: [:x | #{} at: x ifAbsent: [{s}]]", Under::Other),
+    (
+        "xs detect: [:w | w > 5] ifNone: [x := 1. {s}]",
+        Under::Other,
+    ),
+    ("xs do: [:w | [:x | {s}] value: w]", Under::Other),
+    (
+        "xs do: [:w | [x := w. {s}. false] whileTrue: [0]]",
+        Under::Other,
+    ),
+    ("[x := 1. {s}] on: Error do: [:e | 0]", Under::Other),
+    ("[x := 1. {s}] ensure: [0]", Under::Other),
+    ("1 match: [1 -> [:x | {s}] value: 1; _ -> 0]", Under::Other),
+    ("#{} at: 1 ifAbsent: [x := 1. {s}]", Under::Other),
+    // Producer arms (the construct writes the outer local `t`), a stored closure (Tier 2:
+    // it sends to `self`) and an applied block in a closure.
+    ("xs do: [:x | flag ifTrue: [t := t + 1. {s}]]", Under::Other),
+    (
+        "xs do: [:x | [t := t + 1. {s}] on: Error do: [:e | 0]]",
+        Under::Other,
+    ),
+    ("xs do: [:x | [0] ensure: [t := t + 1. {s}]]", Under::Other),
+    ("xs do: [:w | b := [:x | {s}]. b value: w]", Under::Other),
+    ("[:w | xs do: [:x | {s}]] value: 1", Under::Other),
 ];
 
 const FOLD_BODY_HEADER: &str = "Actor subclass: P\n  state: hits = 0\n  wrap: x => x * 10\n";
@@ -477,6 +512,10 @@ fn fold_body_cells() -> Vec<FoldBodyCell> {
     let mut out = Vec::new();
     for (outer_index, (outer, under)) in FOLD_BODY_OUTERS.iter().enumerate() {
         for position in FOLD_BODY_POSITIONS {
+            // A `match:` arm holds an expression, not statements or a cascade.
+            if outer.contains("->") && (position.contains(". ") || position.contains(';')) {
+                continue;
+            }
             for construct in FOLD_BODY_CONSTRUCTS {
                 // A cascade is not an operand site at all: its own lowering sequences its
                 // receiver (`cascade_operand_state_corpus`), so it is in the clean half only.
@@ -486,7 +525,7 @@ fn fold_body_cells() -> Vec<FoldBodyCell> {
                     && match under {
                         Under::Fold => true,
                         Under::EnclosingFold => !whole_value,
-                        Under::NoFold => false,
+                        Under::NoFold | Under::Other => false,
                     };
                 out.push(FoldBodyCell {
                     outer: outer_index,
@@ -507,8 +546,19 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
     let mut failures = Vec::new();
     let mut clean = 0;
     let mut per_outer: Vec<Vec<String>> = vec![Vec::new(); FOLD_BODY_OUTERS.len()];
+    let mut rejected = 0;
     for cell in fold_body_cells() {
         let src = cell.program();
+        // A cell the analysis rejects never reaches codegen (BT-4310's row): only an
+        // accepted one has to lower as a producer.
+        if analysis_rejects(&src) {
+            assert!(
+                matches!(FOLD_BODY_OUTERS[cell.outer].1, Under::Other),
+                "a site cell should be accepted:\n{src}"
+            );
+            rejected += 1;
+            continue;
+        }
         match outcome(&src, None) {
             Outcome::Clean => clean += 1,
             Outcome::Unsupported => continue,
@@ -517,7 +567,13 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
                 continue;
             }
         }
-        if !clause(&codegen(&src), "go:").contains("let _ThreadedResult") {
+        // Lowered as a producer (its carrier bound and unpacked), or not compiled to a
+        // carrier at all: a block that is a real closure (the `ifAbsent:` handler of a
+        // lookup that is not inlined) runs its self-sends against the actor-state cell
+        // (ADR 0137), so its fold threads no `StateAcc`.
+        let code = codegen(&src);
+        let go = clause(&code, "go:");
+        if !go.contains("let _ThreadedResult") && go.contains("StateAcc") {
             failures.push(format!(
                 "the carrier construct should be a producer:\n{src}"
             ));
@@ -534,7 +590,8 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
         failures.join("\n")
     );
     assert!(clean >= 1000, "only {clean} corpus programs compiled clean");
-    for methods in per_outer {
+    println!("{clean} lowered, {rejected} rejected by the analysis");
+    for methods in per_outer.into_iter().filter(|m| !m.is_empty()) {
         let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
         super::assert_compiles_through_erlc("test", &codegen(&src));
     }
@@ -601,6 +658,20 @@ const UNSEQUENCED_POSITIONS: &[&str] = &[
     "xs size; + {c} size",
 ];
 
+/// Whether the analysis rejects `src` with a local-threading error.
+fn analysis_rejects(src: &str) -> bool {
+    let (module, parse_diags) = super::parse_normalised(src);
+    assert!(parse_diags.is_empty(), "{src}: {parse_diags:?}");
+    analyse_full(&module, AnalysisContext::default())
+        .diagnostics
+        .iter()
+        .any(|d| {
+            d.severity == beamtalk_core::source_analysis::Severity::Error
+                && d.category
+                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnmigratedLocalThreading)
+        })
+}
+
 /// The analysis's BT-4310 errors for `src`.
 fn unsequenced_errors(src: &str) -> usize {
     let (module, parse_diags) = super::parse_normalised(src);
@@ -619,9 +690,14 @@ fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
     outers.push("{s}");
     let mut failures = Vec::new();
     let mut rejected = 0;
+    let mut cells = 0;
     for outer in &outers {
         for position in UNSEQUENCED_POSITIONS {
+            if outer.contains("->") && position.contains(';') {
+                continue;
+            }
             for construct in FOLD_BODY_CONSTRUCTS {
+                cells += 1;
                 let src = format!(
                     "{FOLD_BODY_HEADER}{}",
                     fold_body_method("go:", outer, position, construct)
@@ -634,7 +710,10 @@ fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
             }
         }
     }
-    for cell in fold_body_cells() {
+    for cell in fold_body_cells()
+        .into_iter()
+        .filter(|c| !matches!(FOLD_BODY_OUTERS[c.outer].1, Under::Other))
+    {
         let src = cell.program();
         if unsequenced_errors(&src) != 0 {
             failures.push(format!("should be accepted:\n{src}"));
@@ -646,8 +725,5 @@ fn every_unsequenced_operand_cell_is_rejected_and_every_site_cell_accepted() {
         failures.len(),
         failures.join("\n")
     );
-    assert_eq!(
-        rejected,
-        outers.len() * UNSEQUENCED_POSITIONS.len() * FOLD_BODY_CONSTRUCTS.len()
-    );
+    assert_eq!(rejected, cells);
 }

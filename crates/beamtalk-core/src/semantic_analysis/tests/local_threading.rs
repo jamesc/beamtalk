@@ -4716,19 +4716,26 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_rejected() {
             format!("r := {value}\nr"),
             format!("r := #(1, 2) collect: [:x | {value}]\nr"),
             format!("#(1, 2) do: [:x | 2 timesRepeat: [{value}]]\nself.n"),
+            // A plain `match:` arm is a statement of its own frame.
+            format!("#(1, 2) do: [:x | x match: [1 -> {value}; _ -> 0]]\nself.n"),
+            format!("r := 1 match: [1 -> {value}; _ -> 0]\nr"),
         ] {
             let src = in_items_actor(&body);
             let errors = analysis_errors(&src, &[]);
             assert_eq!(errors.len(), 1, "{src}: {errors:?}");
             assert!(
-                errors[0].message.contains("BT-4310, until BT-4310"),
+                errors[0]
+                    .message
+                    .contains("found in BT-4287, until BT-4310"),
                 "{}",
                 errors[0].message
             );
         }
     }
-    // A cast's argument (a cast is a statement only).
+    // A cast's argument (a cast is a statement only), and a `match:` guard,
+    // evaluated in place.
     for body in [
+        format!("r := 1 match: [y when: [{fold} > 3] -> y; _ -> 0]\nr"),
         format!("Transcript show: {fold} printString!\nself.n"),
         format!("#(1, 2) do: [:x | Transcript show: {fold} printString!]\nself.n"),
     ] {
