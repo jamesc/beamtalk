@@ -36,10 +36,10 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0007](0007-compilable-stdlib-with-primitive-injection.md) | Compilable Standard Library with Primitive Injection | Implemented | 2026-02-07 |
 | [0008](0008-doc-comments-and-api-documentation.md) | Doc Comments and API Documentation | Implemented | 2026-02-15 |
 | [0009](0009-otp-application-structure.md) | OTP Application Structure — Split Workspace from Runtime | Implemented | 2026-02-07 |
-| [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Implemented | 2026-02-15 |
+| [0010](0010-global-objects-and-singleton-dispatch.md) | Global Objects and Singleton Dispatch | Implemented (amended by 0142, 2026-10-30) | 2026-02-15 |
 | [0011](0011-robustness-testing-layered-fuzzing.md) | Robustness Testing — Layered Fuzzing and Error Quality | Implemented | 2026-02-15 |
 | [0012](0012-list-literal-syntax.md) | Collection Literal Syntax and the `#` Data Literal System | Implemented | 2026-02-15 |
-| [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Implemented | 2026-02-15 |
+| [0013](0013-class-variables-class-methods-instantiation.md) | Class Variables, Class-Side Methods, and Instantiation Protocol | Implemented (amended by 0142, 2026-10-30) | 2026-02-15 |
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Implemented | 2026-02-15 |
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Implemented | 2026-02-15 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
@@ -110,7 +110,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0081](0081-first-class-session-object.md) | First-Class Session Object — Walkable Binding Layers | Implemented | 2026-05-09 |
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Implemented | 2026-05-17 |
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
-| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Implemented | 2026-05-24 |
+| [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Implemented (amended by 0142, 2026-10-30) | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 | [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Implemented | 2026-05-26 |
@@ -135,7 +135,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0106](0106-opt-in-match-exhaustiveness-assertion.md) | Opt-In Asserted `match:` Exhaustiveness (`matchExhaustive:`) | Implemented | 2026-07-07 |
 | [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Implemented | 2026-07-12 |
 | [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Implemented | 2026-07-15 |
-| [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Implemented | 2026-07-28 |
+| [0109](0109-block-scoped-class-methods-run-blocks-in-the-caller.md) | Block-Scoped Class Methods Run Their Block in the Caller's Process | Implemented (amended by 0142, 2026-10-30) | 2026-07-28 |
 | [0110](0110-class-var-shadow-write-through-for-nlr-relay.md) | Class-Variable Shadow Write-Through for Foreign NLR Relay | Superseded by 0130 | 2026-10-06 |
 | [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Implemented | 2026-08-11 |
 | [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Implemented | 2026-08-15 |
@@ -155,20 +155,20 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0126](0126-distribution-location-transparent-actors.md) | Distribution and Location-Transparent Actors | Accepted | 2026-09-22 |
 | [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Accepted | 2026-09-23 |
 | [0128](0128-opaque-callable-fold-threading-for-collection-homs.md) | Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs | Superseded by 0133 | 2026-09-23 |
-| [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted | 2026-09-25 |
-| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented | 2026-10-06 |
+| [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted (amended by 0142, 2026-10-30) | 2026-09-25 |
+| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented (amended by 0142, 2026-10-30) | 2026-10-06 |
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Accepted | 2026-10-08 |
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Superseded by 0133 | 2026-10-17 |
 | [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Accepted | 2026-10-18 |
 | [0134](0134-errors-in-no-reply-handlers-crash-the-actor.md) | Errors in No-Reply Handlers Crash the Actor | Implemented | 2026-10-19 |
 | [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Accepted | 2026-10-20 |
 | [0136](0136-tuple-literal-expressions.md) | Tuple Literal Expressions | Implemented | 2026-10-20 |
-| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted | 2026-10-20 |
+| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted (amended by 0142, 2026-10-30) | 2026-10-20 |
 | [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Accepted | 2026-10-25 |
 | [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26: post-acceptance review fixes) | 2026-10-26 |
 | [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
 | [0141](0141-bitstring-sealed-class-for-unaligned-bitstrings.md) | Bitstring — a Sealed Class for Unaligned Bitstrings | Implemented | 2026-10-28 |
-| [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Accepted | 2026-10-29 |
+| [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

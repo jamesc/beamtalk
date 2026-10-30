@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0142 / BT-4303: a stateless class. Its class methods run in the caller,
+// except the process-bound selector `run:` (ADR 0142 §1 rule 3).
+
+Object subclass: CmicProbe
+
+  class callerPid => Erlang erlang self
+
+  class call: aBlock => aBlock value
+
+  class each: items do: aBlock => items collect: [:x | aBlock value: x]
+
+  class double: x => x * 2
+
+  class run: aBlock => aBlock value

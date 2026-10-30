@@ -668,9 +668,11 @@ Do **not** add license headers to `.md` files. The repo `LICENSE` file covers al
 
 ### Blocks Passed Into Class Methods
 
-A class method runs in its class object's gen_server process, so a block passed into one runs there, not where it was written. Values and non-local returns (`^`) cross that boundary fine; **process-local side effects do not** — a block that writes the process dictionary or reads `self()` affects the class process, and a block that messages the same class back raises `dispatch_error` rather than deadlocking (BT-3022).
+A class method runs in the caller's process, and so does a block passed into it, unless its class or any ancestor declares class variables (`classState:`) or the selector is process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, …). Sealing plays no part (ADR 0142). In the caller, `self()`, the process dictionary, links, monitors and any resource the method creates are the caller's, and calls are not serialised.
 
-Practical rule: a `Collection` subclass may implement `do:` via a class-side helper (the inherited protocol works), but that helper must not reach back into its own class. See [Passing Blocks Through Class Methods](../beamtalk-language-features.md#passing-blocks-through-class-methods).
+When the class process does run it, a block passed in runs there, not where it was written. Values and non-local returns (`^`) cross that boundary fine; **process-local side effects do not** — a block that writes the process dictionary or reads `self()` affects the class process, and a block that messages the same class back raises `dispatch_error` rather than deadlocking (BT-3022).
+
+Practical rule: a class-side helper of a class with class variables must not reach back into its own class from a block it was given. See [Passing Blocks Through Class Methods](../beamtalk-language-features.md#passing-blocks-through-class-methods).
 
 ### Code Generation — Document API Only
 

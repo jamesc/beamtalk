@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-15). Phase 1 gen_server deprecation in progress (BT-1093).
 
+> **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), class sends are no longer "zero overhead".** The "zero overhead on class method sends" claims below (Decision, Steelman counter, Consequences) describe the unguarded static calls of the time. A literal class send to a method the class itself defines now compiles to a *guarded* direct call: one `persistent_term` read (`beamtalk_class_shadow_flags:direct_call_ok/2`), an `erlang:function_exported/3` check and the class's pid for the real class reference, about 7 reductions (`benchmarks/vs-elixir/results/bench-bt4301.md`). Every other class send goes through `beamtalk_class_dispatch:class_send/3`, which runs the method in the caller when the class's chain has no class variables. The workspace-binding decision of this ADR is unaffected.
+
 ## Migration Status (BT-1093)
 
 The ADR describes Phases 1–4 of the singleton dispatch implementation. All four phases are complete. A follow-on migration (tracked under BT-1093) is deprecating the **legacy gen_server implementations** (`beamtalk_interface.erl`, `beamtalk_workspace_interface.erl`) in favour of the **compiled Beamtalk dispatch path** (`beamtalk_interface_primitives.erl`, `beamtalk_workspace_interface_primitives.erl`).
