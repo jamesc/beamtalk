@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0142 / BT-4303: declares no class variables of its own, but its
+// superclass does, so it keeps its class process too (the rule is chain-wide).
+
+CmicCounter subclass: CmicCounterSub
+
+  class tag => #sub

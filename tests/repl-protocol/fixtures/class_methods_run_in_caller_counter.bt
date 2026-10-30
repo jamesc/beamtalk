@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0142 / BT-4303: a class with class variables keeps its class process.
+
+Object subclass: CmicCounter
+  classState: count :: Integer = 0
+
+  class callerPid => Erlang erlang self
+
+  class call: aBlock => aBlock value
+
+  class bump -> Integer => self.count := self.count + 1
+
+  class current -> Integer => self.count

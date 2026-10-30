@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-07-28) — base decision (BT-3018) and the BT-3047 amendment shipped; BT-3020 (handle-ownership follow-up) partial
 
+> **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), the `open:do:` exception is now the general rule.** A class method of a class whose chain declares no class variables runs in the caller, so a block passed into it runs where it was written, whatever the class or selector. `File` has no class variables, so `File open:do:`, `open:mode:do:` and every other `File` class method run in the caller even without this ADR's call-site lowering, which stays as it is. The premise that "every other class method that takes a Block" runs in the target class's process now holds only for classes that keep their process: the class or an ancestor declares class variables, or the selector is process-bound. The handle-ownership rule (BT-3020) resolves to the caller's `self()` on the in-caller path (`beamtalk_file:resolve_owner/0`).
+
 > **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06), what a block running elsewhere may do with class variables.** A block that runs in a foreign class's process (this ADR's mechanism) can *read* its home class's variables, as the values they had when the block was created (or live, when the home process is the one running it), but cannot *write* them: the write raises `class_state_unreachable`. Writes need the block to run in its home class's process. Class self-identity capture (the BT-3047 amendment) is unchanged. Blocks passed to a `class sealed` stateless method of another class are direct-called in the caller and so run at home.
 
 ## Implementation Tracking

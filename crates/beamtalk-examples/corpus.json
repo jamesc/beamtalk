@@ -724,9 +724,13 @@
       "title": "Caller-Process Class Method Dispatch (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features"
+        "beamtalk-language-features",
+        "field",
+        "instance variable",
+        "member",
+        "property"
       ],
-      "source": "// Normal dispatch — runs in MyClass gen_server process\nMyClass computeReport\n\n// Local dispatch — runs in caller's process, doesn't block the class\nMyClass performLocally: #computeReport withArguments: #()\n\n// With arguments\nMyClass performLocally: #add:to: withArguments: #(3, 7)",
+      "source": "// Normal dispatch — runs in MyClass's class process when MyClass has classState:\nMyClass computeReport\n\n// Local dispatch — runs in caller's process, doesn't block the class\nMyClass performLocally: #computeReport withArguments: #()\n\n// With arguments\nMyClass performLocally: #add:to: withArguments: #(3, 7)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -735,22 +739,26 @@
       "category": "language-reference",
       "tags": [
         "Driver",
-        "Value",
+        "Object",
         "beamtalk-language-features",
         "extends",
+        "field",
         "for each",
         "for-each",
         "forEach",
         "inherit",
         "inheritance",
+        "instance variable",
         "iterate",
         "iteration",
         "loop",
+        "member",
+        "object",
+        "property",
         "run:over:",
-        "subclassing",
-        "value"
+        "subclassing"
       ],
-      "source": "Value subclass: Driver\n  class run: aBlock over: aList -> Nil =>\n    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process\n    nil",
+      "source": "Object subclass: Driver\n  classState: runs :: Integer = 0\n  class run: aBlock over: aList -> Nil =>\n    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process\n    nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -65570,6 +65578,85 @@
       ],
       "source": "// Fixture for class methods E2E tests\n\nObject subclass: Calculator\n\n  class defaultValue => 42\n\n  class add: a to: b => a + b",
       "explanation": "Fixture for class methods E2E tests"
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-class-methods-run-in-caller-counter",
+      "title": "CmicCounter",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "CmicCounter",
+        "Object",
+        "assign",
+        "assignment",
+        "bump",
+        "call:",
+        "callerPid",
+        "class_methods_run_in_caller_counter",
+        "current",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "// ADR 0142 / BT-4303: a class with class variables keeps its class process.\n\nObject subclass: CmicCounter\n  classState: count :: Integer = 0\n\n  class callerPid => Erlang erlang self\n\n  class call: aBlock => aBlock value\n\n  class bump -> Integer => self.count := self.count + 1\n\n  class current -> Integer => self.count",
+      "explanation": "ADR 0142 / BT-4303: a class with class variables keeps its class process."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-class-methods-run-in-caller-counter-sub",
+      "title": "CmicCounterSub",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "CmicCounter",
+        "CmicCounterSub",
+        "class_methods_run_in_caller_counter_sub",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing",
+        "tag"
+      ],
+      "source": "// ADR 0142 / BT-4303: declares no class variables of its own, but its\n// superclass does, so it keeps its class process too (the rule is chain-wide).\n\nCmicCounter subclass: CmicCounterSub\n\n  class tag => #sub",
+      "explanation": "ADR 0142 / BT-4303: declares no class variables of its own, but its superclass does, so it keeps its class process too (the rule is chain-wide)."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-class-methods-run-in-caller-probe",
+      "title": "CmicProbe",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "CmicProbe",
+        "Object",
+        "call:",
+        "callerPid",
+        "class_methods_run_in_caller_probe",
+        "double:",
+        "each:do:",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "object",
+        "run:",
+        "subclassing",
+        "transform"
+      ],
+      "source": "// ADR 0142 / BT-4303: a stateless class. Its class methods run in the caller,\n// except the process-bound selector `run:` (ADR 0142 §1 rule 3).\n\nObject subclass: CmicProbe\n\n  class callerPid => Erlang erlang self\n\n  class call: aBlock => aBlock value\n\n  class each: items do: aBlock => items collect: [:x | aBlock value: x]\n\n  class double: x => x * 2\n\n  class run: aBlock => aBlock value",
+      "explanation": "ADR 0142 / BT-4303: a stateless class. Its class methods run in the caller, except the process-bound selector `run:` (ADR 0142 §1 rule 3)."
     },
     {
       "id": "tests-repl-protocol-fixtures-class-var-nlr-shadow-driver",

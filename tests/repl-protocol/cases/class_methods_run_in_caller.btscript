@@ -1,0 +1,139 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E for ADR 0142 (epic BT-4297, BT-4303): the class process only owns class
+// state. A class method of a class whose superclass chain declares no class
+// variables runs in the caller, so `self()` is the caller's and a block passed
+// into it may send back to the same class. A class with `classState:`, or one
+// whose superclass has class variables, keeps its process and its errors. A
+// literal send, a class held in a variable and `perform:` all agree. BUnit
+// coverage: stdlib/test/class_method_in_caller_test.bt.
+//
+// Each eval may run in its own process, so every pid comparison is made
+// inside one expression. Class names are prefixed Cmic* to stay unique in the
+// shared workspace.
+
+// Fixtures: CmicProbe is stateless; CmicCounter declares `classState:`;
+// CmicCounterSub declares none of its own, but its superclass does.
+
+// @load tests/repl-protocol/fixtures/class_methods_run_in_caller_probe.bt
+// @load tests/repl-protocol/fixtures/class_methods_run_in_caller_counter.bt
+// @load tests/repl-protocol/fixtures/class_methods_run_in_caller_counter_sub.bt
+
+// ===========================================================================
+// A STATELESS CLASS METHOD ANSWERS IN THE CALLER
+// ===========================================================================
+
+CmicProbe callerPid == Erlang erlang self
+// => true
+
+(CmicProbe call: [Erlang erlang self]) == Erlang erlang self
+// => true
+
+// ===========================================================================
+// A BLOCK PASSED INTO A STATELESS CLASS METHOD MAY SEND BACK TO THE CLASS
+// (before ADR 0142: dispatch_error, from the class process calling itself)
+// ===========================================================================
+
+CmicProbe each: #(1, 2) do: [:x | CmicProbe double: x]
+// => [2,4]
+
+CmicProbe call: [CmicProbe double: 21]
+// => 42
+
+// ===========================================================================
+// A PROCESS-BOUND SELECTOR (`run:`) KEEPS THE CLASS PROCESS, EVEN ON A
+// STATELESS CLASS (ADR 0142 §1 rule 3)
+// ===========================================================================
+
+(CmicProbe run: [Erlang erlang self]) == Erlang erlang self
+// => false
+
+// ===========================================================================
+// A CLASS WITH classState: KEEPS ITS PROCESS, AND ITS WRITES PERSIST
+// ===========================================================================
+
+CmicCounter callerPid == Erlang erlang self
+// => false
+
+CmicCounter bump
+// => 1
+
+CmicCounter bump
+// => 2
+
+CmicCounter current
+// => 2
+
+// A block passed into it still runs in the class process, so sending back to
+// the same class still raises dispatch_error.
+[CmicCounter call: [CmicCounter current]] on: Error do: [:e | e kind]
+// => dispatch_error
+
+// ===========================================================================
+// THE RULE IS CHAIN-WIDE: A SUBCLASS OF A STATEFUL CLASS KEEPS ITS PROCESS,
+// AND AN INHERITED METHOD THAT TOUCHES THE PARENT'S CLASS VARIABLES KEEPS
+// TODAY'S ERROR (class variables are not inherited, ADR 0130)
+// ===========================================================================
+
+CmicCounterSub callerPid == Erlang erlang self
+// => false
+
+CmicCounterSub tag
+// => sub
+
+[CmicCounterSub bump] on: Error do: [:e | e kind]
+// => undeclared_class_variable
+
+// The parent's value is untouched.
+CmicCounter current
+// => 2
+
+// ===========================================================================
+// A CLASS HELD IN A VARIABLE AND perform: REACH THE SAME BEHAVIOUR
+// ===========================================================================
+
+probe := CmicProbe
+// => CmicProbe
+
+probe callerPid == Erlang erlang self
+// => true
+
+probe each: #(1, 2) do: [:x | probe double: x]
+// => [2,4]
+
+(CmicProbe perform: #callerPid) == Erlang erlang self
+// => true
+
+CmicProbe perform: #call: withArguments: #([CmicProbe double: 21])
+// => 42
+
+(probe perform: #run: withArguments: #([Erlang erlang self])) == Erlang erlang self
+// => false
+
+counter := CmicCounter
+// => CmicCounter
+
+counter callerPid == Erlang erlang self
+// => false
+
+(CmicCounter perform: #callerPid) == Erlang erlang self
+// => false
+
+counter bump
+// => 3
+
+CmicCounter perform: #current
+// => 3
+
+sub := CmicCounterSub
+// => CmicCounterSub
+
+[sub bump] on: Error do: [:e | e kind]
+// => undeclared_class_variable
+
+[CmicCounterSub perform: #bump] on: Error do: [:e | e kind]
+// => undeclared_class_variable
+
+(sub perform: #callerPid) == Erlang erlang self
+// => false

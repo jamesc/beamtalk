@@ -6,6 +6,8 @@ exception after Phase 0, BT-4007; snapshot away and simple `call_foreign/3`
 after review); Amended 2026-10-26 (stateless loops bracket the
 guarded-operator slow path, BT-4121)
 
+> **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), blocks in class methods.** A block passed to a class method is inside the actor whenever that method runs in the caller: every class method of a class whose chain declares no class variables, sealed or not, except the process-bound selectors (`new`, `spawn`, `startLink`, ...). Such a block sees and writes the actor's live state, and the `actor-state-abroad` lint no longer warns at it. A class method of a class that keeps its process (class variables in its chain, or a process-bound selector) still runs the block away. The lint reads `ClassHierarchy::runs_class_method_in_caller`, the rule codegen uses, instead of the retired `direct_class_methods` set.
+
 Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
 unchanged. ADR 0131, ADR 0118 and the locals half of ADR 0133 are unchanged.
