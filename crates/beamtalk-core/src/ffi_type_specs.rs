@@ -1488,6 +1488,36 @@ pub fn extract_type_specs(
         None
     }
 }
+/// `base` (typically [`extract_type_specs`] over OTP alone) extended with
+/// the specs of the `.beam` files in exactly `ebin_dirs`, cached in
+/// `cache_dir`; on a module collision `base` wins, as OTP does in
+/// [`extract_type_specs`].
+///
+/// For callers that must not depend on whatever else happens to be in
+/// `_build/` — a dependency compiled for a downstream package types its FFI
+/// calls against OTP and the dependencies compiled before it, the same set on
+/// a clean build and a rebuild (BT-4311) — where [`extract_type_specs`] with
+/// [`collect_project_dependency_ebin_dirs`] reads every ebin on disk.
+///
+/// Non-fatal like [`extract_type_specs`]: a failed extraction leaves `base`
+/// as it is. `None` when the result has no modules.
+#[must_use]
+pub fn extend_with_ebin_type_specs(
+    base: Option<&NativeTypeRegistry>,
+    ebin_dirs: &[Utf8PathBuf],
+    cache_dir: &Utf8Path,
+) -> Option<NativeTypeRegistry> {
+    let mut registry = base.cloned().unwrap_or_default();
+    let beams = discover_dependency_beam_files(ebin_dirs);
+    if !beams.is_empty() {
+        match extract_beam_specs(&beams, cache_dir) {
+            Ok(extracted) => registry.merge(extracted),
+            Err(e) => debug!("Dependency type spec extraction failed (non-fatal): {e}"),
+        }
+    }
+    (registry.module_count() > 0).then_some(registry)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
