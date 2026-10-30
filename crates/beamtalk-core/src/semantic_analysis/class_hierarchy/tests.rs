@@ -3875,3 +3875,33 @@ fn direct_constructors_incomplete_ancestor_fails_closed_for_new1() {
         "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
     );
 }
+
+#[test]
+fn process_bound_selectors_start_with_the_direct_call_exclusions() {
+    // ADR 0142 §1 rule 3 (BT-4299): the direct-call exclusion list is the
+    // constructor prefix of the process-bound list, not a second copy, and
+    // the other process-bound selectors leave ADR 0129 eligibility unchanged.
+    let bound = ClassInfo::process_bound_class_selectors();
+    for ctor in ["new", "new:", "startLink", "startLink:"] {
+        assert!(ClassInfo::is_direct_call_excluded_selector(ctor), "{ctor}");
+        assert!(bound.contains(&ctor), "{ctor}");
+    }
+    for routed in [
+        "spawn",
+        "spawnWith:",
+        "supervise",
+        "spawnAs:",
+        "spawnWith:as:",
+        "runAll",
+        "runAll:",
+        "run:",
+        "run:method:",
+    ] {
+        assert!(bound.contains(&routed), "{routed}");
+        assert!(
+            !ClassInfo::is_direct_call_excluded_selector(routed),
+            "{routed} must not change ADR 0129 direct-call eligibility"
+        );
+    }
+    assert_eq!(bound.len(), 13);
+}

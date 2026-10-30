@@ -351,6 +351,7 @@ call 'erlang':'++'(Self, [_item@79|[]])
       'class_method_info' => ~{}~,
       'class_var_abi' => 2,
       'direct_class_methods' => ~{}~,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'overrides_collection_selector' => 'true'
     }~
         }~
@@ -389,6 +390,7 @@ call 'erlang':'++'(Self, [_item@79|[]])
       'class_method_info' => ~{}~,
       'class_var_abi' => 2,
       'direct_class_methods' => ~{}~,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'overrides_collection_selector' => 'true'
     }~
 

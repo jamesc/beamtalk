@@ -886,6 +886,31 @@ fn test_meta_direct_class_methods_maps_selector_to_safe_fn() {
     );
 }
 
+#[test]
+fn test_meta_process_bound_class_selectors_emitted_from_the_rust_list() {
+    // ADR 0142 §1 rule 3 (BT-4299): every class carries the one Rust-owned
+    // list, so the runtime never keeps a copy (the Erlang clauses routing part
+    // of it are pinned by `beamtalk_process_bound_selectors_tests`).
+    let module = module_with(make_actor_class("Counter"));
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        module.classes.first().unwrap(),
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    )
+    .to_pretty_string();
+    assert!(
+        output.contains(
+            "'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', \
+             'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', \
+             'runAll:', 'run:', 'run:method:']"
+        ),
+        "meta map should carry the process-bound selector list. Got: {output}"
+    );
+}
+
 // ─── ADR 0133 Phase 2: no `tier2_methods` / `tier2_class_methods` ──────────
 
 #[test]

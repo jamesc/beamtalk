@@ -1514,6 +1514,12 @@ remove_protocol_selector(ClassName, Selector) ->
 -spec remove_class_selector(#beamtalk_object{}, atom(), instance | class, atom()) ->
     removed | absent.
 remove_class_selector(Self, ClassName, Side, Selector) ->
+    %% ADR 0142 §2 (BT-4299): a class-side removal is a class-metadata write;
+    %% erase the derived direct-call flag before it becomes visible.
+    case Side of
+        class -> beamtalk_class_shadow_flags:invalidate(ClassName);
+        instance -> ok
+    end,
     EtsClass = extension_ets_class(ClassName, Side),
     case beamtalk_extensions:has(EtsClass, Selector) of
         true ->

@@ -126,6 +126,13 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_direct_class_methods/2,
     lookup_direct_class_methods/1,
     lookup_direct_class_method/2,
+    %% ADR 0142 §1 (BT-4299): the class-variable fact behind
+    %% `beamtalk_class_shadow_flags:direct_call_ok/2`, and the generated
+    %% process-bound class-side selector list.
+    put_class_variables/2,
+    lookup_has_class_variables/1,
+    put_process_bound_selectors/2,
+    lookup_process_bound_selectors/1,
     %% direct-construction eligibility set for dynamic `new`/`new:`.
     put_direct_constructors/2,
     lookup_direct_constructors/1,
@@ -221,6 +228,19 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% dynamic classes, stateful classes, and modules compiled before the
     %% key existed.
     direct_constructors = [] :: [selector()],
+    %% ADR 0142 §1 rule 1 (BT-4299): whether the class declares class
+    %% variables (`classState:`), from the compiled `__beamtalk_meta/0`'s
+    %% `class_field_kinds` or the builder's `classState`. Written only by
+    %% `put_class_variables/2`, which mirrors it into the `class_vars` input of
+    %% `beamtalk_class_shadow_flags:direct_call_ok/2`. `undefined` until the
+    %% owning class publishes it.
+    has_class_variables :: boolean() | undefined,
+    %% ADR 0142 §1 rule 3 (BT-4299): `process_bound_class_selectors` from the
+    %% compiled module's `__beamtalk_meta/0`, the class-side selectors that
+    %% keep their class-process routing. Rust owns the list
+    %% (`ClassInfo::process_bound_class_selectors`); `undefined` for dynamic
+    %% classes and modules compiled before the key existed (unknown, not empty).
+    process_bound_selectors :: [selector()] | undefined,
     %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
     %% the reflection state above, so `doc` answers without a `gen_server:call`
     %% into the class (which cannot answer from inside its own process, or
@@ -441,6 +461,10 @@ delete(Name) ->
     delete_class_method_funs(Name),
     delete_method_records(Name),
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+    %% BT-4299: a removed class keeps no class-variable input and no derived
+    %% direct-call flag (a later class of the same name re-derives both).
+    beamtalk_class_shadow_flags:set_class_vars(Name, false),
+    beamtalk_class_shadow_flags:invalidate(Name),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
     %% otherwise Name would linger forever as a phantom subclass of its old
@@ -1177,6 +1201,85 @@ lookup_direct_class_method(Name, Selector) ->
     end.
 
 -doc """
+Publish whether a class declares class variables (ADR 0142 §1 rule 1, BT-4299).
+
+The one writer of the fact `beamtalk_class_shadow_flags:direct_call_ok/2` reads
+as its `class_vars` input; called from the class's own gen_server on `init/1`,
+reload and rename, with the value `beamtalk_object_class` reads from the
+compiled `__beamtalk_meta/0` (or the builder's `classState`). On a change it
+erases the derived direct-call flag under the per-tag lock *before* the row
+field becomes visible (raising: `set_class_vars/2` first; dropping: the row
+first, since a stale "has class variables" only costs the slow path), and
+drops the derived-fact cache. A no-op when unchanged; the row field is a
+no-op when the row is absent.
+""".
+-spec put_class_variables(class_name(), boolean()) -> ok.
+put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
+    new(),
+    case field(Name, #class_metadata.has_class_variables) of
+        HasClassVars ->
+            %% The raw flag may still lag a recreated row; re-mirror (a no-op
+            %% when it already agrees).
+            beamtalk_class_shadow_flags:set_class_vars(Name, HasClassVars);
+        _ when HasClassVars ->
+            beamtalk_class_shadow_flags:set_class_vars(Name, true),
+            update_has_class_variables(Name, true),
+            beamtalk_class_derived_cache:invalidate();
+        _ ->
+            update_has_class_variables(Name, false),
+            beamtalk_class_shadow_flags:set_class_vars(Name, false),
+            beamtalk_class_derived_cache:invalidate()
+    end.
+
+-spec update_has_class_variables(class_name(), boolean()) -> ok.
+update_has_class_variables(Name, HasClassVars) ->
+    try
+        _ = ets:update_element(?TABLE, Name, {#class_metadata.has_class_variables, HasClassVars}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Whether a class declares class variables: the fact `put_class_variables/2`
+published, or `unknown` when it never did (no row, or not yet published).
+""".
+-spec lookup_has_class_variables(class_name()) -> boolean() | unknown.
+lookup_has_class_variables(Name) ->
+    case field(Name, #class_metadata.has_class_variables) of
+        B when is_boolean(B) -> B;
+        _ -> unknown
+    end.
+
+-doc """
+Store a class's process-bound class-side selector list (ADR 0142 §1 rule 3,
+BT-4299): the `process_bound_class_selectors` value of its `__beamtalk_meta/0`,
+or `undefined` when the module carries none (dynamic class, older module).
+Updates the existing row in place; a no-op when no row exists.
+""".
+-spec put_process_bound_selectors(class_name(), [selector()] | undefined) -> ok.
+put_process_bound_selectors(Name, Selectors) when is_list(Selectors); Selectors =:= undefined ->
+    new(),
+    try
+        _ = ets:update_element(?TABLE, Name, {#class_metadata.process_bound_selectors, Selectors}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+A class's generated process-bound class-side selector list, or `unknown` when
+its module carried none (callers must then treat every selector as
+process-bound).
+""".
+-spec lookup_process_bound_selectors(class_name()) -> {ok, [selector()]} | unknown.
+lookup_process_bound_selectors(Name) ->
+    case field(Name, #class_metadata.process_bound_selectors) of
+        L when is_list(L) -> {ok, L};
+        _ -> unknown
+    end.
+
+-doc """
 Store a class's direct-construction eligibility set.
 
 `Ctors` is the `direct_constructors` value from the class's `__beamtalk_meta/0`
@@ -1301,11 +1404,16 @@ set_runtime_class_methods(Name, Selectors) ->
         ets:update_element(?TABLE, Name, [
             {#class_metadata.selectors, Selectors},
             {#class_metadata.has_runtime_class_methods, true}
-        ]),
-        ok
+        ])
     catch
         error:badarg -> ok
-    end.
+    end,
+    %% ADR 0142 §2 (BT-4299): a runtime fun at an ancestor changes what a
+    %% descendant's send resolves to without touching the descendant's own
+    %% flag, so derived facts (the class-method owner memo) must go, as
+    %% `beamtalk_extensions:register/remove` already do. Only after the row has
+    %% landed (see beamtalk_class_derived_cache).
+    beamtalk_class_derived_cache:invalidate().
 
 -doc """
 Explicitly clear the "has runtime class methods" gate, independent of any
