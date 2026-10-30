@@ -29,7 +29,6 @@ impl CoreErlangGenerator {
         class_meta::MetaProvenance {
             beamtalk_version: self.beamtalk_version.as_deref(),
             otp_release: self.otp_release.as_deref(),
-            direct_class_methods: &self.own_direct_class_methods,
             stdlib_trait_methods: &self.own_stdlib_trait_methods,
             direct_constructors: &self.own_direct_constructors,
             overrides_collection_selector: self.own_overrides_collection_selector,
@@ -184,24 +183,6 @@ impl CoreErlangGenerator {
         &mut self,
     ) -> &mut std::collections::HashSet<String> {
         &mut self.class_context_mut().class_method_selectors
-    }
-
-    /// Returns the selectors of `class sealed` class methods (cannot be overridden).
-    pub(in crate::core_erlang) fn sealed_class_method_selectors(
-        &self,
-    ) -> &std::collections::HashSet<String> {
-        static EMPTY: std::sync::LazyLock<std::collections::HashSet<String>> =
-            std::sync::LazyLock::new(std::collections::HashSet::new);
-        self.class_context
-            .as_ref()
-            .map_or(&*EMPTY, |ctx| &ctx.sealed_class_method_selectors)
-    }
-
-    /// Mutable access to the `class sealed` class-method selector set.
-    pub(in crate::core_erlang) fn sealed_class_method_selectors_mut(
-        &mut self,
-    ) -> &mut std::collections::HashSet<String> {
-        &mut self.class_context_mut().sealed_class_method_selectors
     }
 
     /// Derives this generation unit's own [`PackageId`] from `self.module_name`

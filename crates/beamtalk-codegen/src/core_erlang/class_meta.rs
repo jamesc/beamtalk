@@ -43,12 +43,6 @@ pub(crate) struct MetaProvenance<'a> {
     pub beamtalk_version: Option<&'a str>,
     /// The producing compound OTP version (`<release>-<erts>`).
     pub otp_release: Option<&'a str>,
-    /// ADR 0129 Phase 0b: this class's direct-call-eligible class methods as
-    /// `(raw selector, safe function name)` pairs, computed once by
-    /// `compute_direct_call_eligible` (the single source for the rule). Emitted
-    /// as `'direct_class_methods'` so the runtime never re-derives eligibility.
-    /// Empty for classes with none (and for native facades).
-    pub direct_class_methods: &'a [(String, String)],
     /// BT-3916: this class's instance-side methods that are provisions of a
     /// stdlib protocol (`uses: Enumerable`), emitted as `'stdlib_trait_methods'`
     /// (omitted when empty). The runtime's list-op receiver guard
@@ -412,7 +406,6 @@ impl CoreErlangGenerator {
             shape_migrations_doc,
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
-            Self::meta_direct_class_methods_entry(provenance.direct_class_methods),
             Self::meta_process_bound_class_selectors_entry(),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
@@ -457,25 +450,6 @@ impl CoreErlangGenerator {
         parts.push(Document::Str("}~"));
 
         docvec![",\n      'shape_migrations' => ", Document::Vec(parts)]
-    }
-
-    /// ADR 0129 Phase 0b: `'direct_class_methods' => ~{Selector => SafeFn}~`,
-    /// including its leading separator. Always emitted (`~{}~` when empty) so
-    /// the runtime can distinguish "no direct methods" from an older module.
-    fn meta_direct_class_methods_entry(entries: &[(String, String)]) -> Document<'static> {
-        let mut parts: Vec<Document<'static>> = vec![Document::Str("~{")];
-        for (i, (selector, safe_fn)) in entries.iter().enumerate() {
-            if i > 0 {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docvec![
-                leaf::atom(selector.clone()),
-                " => ",
-                leaf::atom(safe_fn.clone()),
-            ]);
-        }
-        parts.push(Document::Str("}~"));
-        docvec![",\n      'direct_class_methods' => ", Document::Vec(parts)]
     }
 
     /// ADR 0142 §1 rule 3 (BT-4299): `'process_bound_class_selectors' =>
@@ -803,25 +777,9 @@ impl CoreErlangGenerator {
     /// The serialized `is_sealed` bit is `m.is_sealed` alone — the same
     /// per-method flag `ClassInfo::from_class_definition` (`semantic_analysis/
     /// class_hierarchy/class_info.rs`) records for a fresh-AST compile, with no OR
-    /// against the class-level `sealed` flag. `is_sealed` here means two different
-    /// things to two different readers: `compute_direct_call_eligible`'s Gate 5
-    /// (`codegen/core_erlang/mod.rs`) treats it as "this method body never references
-    /// self/its own class for construction, so it's safe to call directly with a
-    /// literal `nil` `ClassSelf`" — true only for a method individually declared
-    /// `class sealed`, per that gate's own doc comment. A class being sealed only
-    /// means "cannot be subclassed" (`can_be_subclassed`/`check_sealed_superclass`);
-    /// it says nothing about whether an *individual* method's body is self-free.
-    /// OR'ing in `class_is_sealed` previously made this producer disagree with the
-    /// fresh-AST one — a class-side factory method of a sealed class (e.g. `class
-    /// ok: a details: b => Self checkName: a details: b`) that itself constructs a
-    /// new instance would round-trip through this BEAM-metadata path (the one the
-    /// REPL uses to see an already-loaded project class) as `is_sealed = true` even
-    /// though the method was never individually sealed, wrongly clearing Gate 5 for
-    /// it. The generated direct call then hard-codes `ClassSelf = 'nil'`
-    /// (`generate_direct_class_method_call`, `dispatch_codegen.rs`), and the method's
-    /// own `self`/class-name construction dereferences that `nil` as a tuple —
-    /// `erlang:element(2, 'nil')` — raising exactly the reported `badarg` ("invalid
-    /// argument").
+    /// against the class-level `sealed` flag, so the BEAM-metadata path (the one
+    /// the REPL uses to see an already-loaded project class) and the fresh-AST
+    /// path agree on which methods are individually `class sealed`.
     fn meta_method_entry(
         m: &MethodDefinition,
         class_type_params: &[TypeParamDecl],

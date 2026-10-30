@@ -3877,31 +3877,61 @@ fn direct_constructors_incomplete_ancestor_fails_closed_for_new1() {
 }
 
 #[test]
-fn process_bound_selectors_start_with_the_direct_call_exclusions() {
-    // ADR 0142 §1 rule 3 (BT-4299): the direct-call exclusion list is the
-    // constructor prefix of the process-bound list, not a second copy, and
-    // the other process-bound selectors leave ADR 0129 eligibility unchanged.
+fn process_bound_selectors_are_never_direct_call_eligible() {
+    // ADR 0142 §1 rule 3 (BT-4299, BT-4301): every process-bound selector
+    // keeps its routing, so none is direct-call eligible even when the class
+    // defines it and its chain has no class variables.
     let bound = ClassInfo::process_bound_class_selectors();
-    for ctor in ["new", "new:", "startLink", "startLink:"] {
-        assert!(ClassInfo::is_direct_call_excluded_selector(ctor), "{ctor}");
-        assert!(bound.contains(&ctor), "{ctor}");
-    }
-    for routed in [
-        "spawn",
-        "spawnWith:",
-        "supervise",
-        "spawnAs:",
-        "spawnWith:as:",
-        "runAll",
-        "runAll:",
-        "run:",
-        "run:method:",
-    ] {
-        assert!(bound.contains(&routed), "{routed}");
-        assert!(
-            !ClassInfo::is_direct_call_excluded_selector(routed),
-            "{routed} must not change ADR 0129 direct-call eligibility"
-        );
-    }
     assert_eq!(bound.len(), 13);
+    let methods: String = bound
+        .iter()
+        .map(|sel| {
+            let parts: Vec<&str> = sel.split_inclusive(':').collect();
+            if sel.ends_with(':') {
+                let header: Vec<String> = parts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, kw)| format!("{kw} a{i}"))
+                    .collect();
+                format!("  class {} => nil\n", header.join(" "))
+            } else {
+                format!("  class {sel} => nil\n")
+            }
+        })
+        .collect();
+    let source = format!("Object subclass: Pb\n{methods}  class plain => nil\n");
+    let hierarchy = bt4099_hierarchy_for_source(&source);
+    for sel in bound {
+        assert!(!hierarchy.is_direct_call_eligible("Pb", sel), "{sel}");
+    }
+    assert!(hierarchy.is_direct_call_eligible("Pb", "plain"));
+}
+
+#[test]
+fn direct_call_eligibility_is_adr_0142s_rule() {
+    // BT-4301: no `sealed`/`class sealed` requirement; the class must define
+    // the method itself; no class in its chain may declare class variables
+    // (the runtime's chain-wide rule 2); class-variable reflection selectors
+    // are never eligible.
+    let hierarchy = bt4099_hierarchy_for_source(
+        "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
+         Open subclass: OpenSub\n  class bar => 3\n\n\
+         Object subclass: Stateful\n  classState: n :: Integer = 0\n  class foo => 1\n\n\
+         Stateful subclass: StatelessSub\n  class bar => 3\n",
+    );
+    assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
+    assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
+    assert!(hierarchy.is_direct_call_eligible("OpenSub", "bar"));
+    assert!(
+        !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
+        "an inherited class method is not in the class's own table"
+    );
+    assert!(!hierarchy.is_direct_call_eligible("Stateful", "foo"));
+    assert!(
+        !hierarchy.is_direct_call_eligible("StatelessSub", "bar"),
+        "a subclass of a class with class variables keeps its process"
+    );
+    assert!(hierarchy.chain_has_class_variables("StatelessSub"));
+    assert!(!hierarchy.chain_has_class_variables("OpenSub"));
+    assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
 }

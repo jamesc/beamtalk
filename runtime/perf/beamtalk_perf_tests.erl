@@ -1098,7 +1098,10 @@ bench_class_self_dispatch() ->
     FunName    = beamtalk_class_dispatch:class_method_fun_name(Selector),
     case {beamtalk_class_registry:whereis_class('Collection'),
           beamtalk_class_registry:whereis_class(ChildClass),
-          erlang:function_exported(ParentMod, FunName, 3)} of
+          %% `ClassSelf` plus the one argument (ADR 0130 §3); load the module
+          %% first, as `function_exported/3` only sees loaded code.
+          code:ensure_loaded(ParentMod) =:= {module, ParentMod} andalso
+              erlang:function_exported(ParentMod, FunName, 2)} of
         {undefined, _, _} ->
             io:format(standard_error,
                 "PERF: class_self_dispatch SKIP (Collection not registered)~n", []);
@@ -1107,17 +1110,16 @@ bench_class_self_dispatch() ->
                 "PERF: class_self_dispatch SKIP (~p not registered)~n", [ChildClass]);
         {_, _, false} ->
             io:format(standard_error,
-                "PERF: class_self_dispatch SKIP (~p:~p/3 not exported)~n",
+                "PERF: class_self_dispatch SKIP (~p:~p/2 not exported)~n",
                 [ParentMod, FunName]);
         _ ->
             run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName)
     end.
 
 run_class_self_dispatch_bench(ChildClass, Selector, ParentMod, FunName) ->
-    %% Construct the same ClassSelf the helper would build on the inherited
-    %% path — `class_mod` is the defining module (Collection), which matches
-    %% the helper at beamtalk_class_dispatch:class_self_send/3 and the
-    %% gen_server path at invoke_class_method/7.
+    %% The receiving class's `ClassSelf`: the helper
+    %% (beamtalk_class_dispatch:class_self_send/3) takes the calling method's
+    %% own `ClassSelf` (BT-4301), and the direct apply gets the same one.
     Tag = beamtalk_class_registry:class_object_tag(ChildClass),
     ClassSelf = #beamtalk_object{class = Tag, class_mod = ParentMod, pid = self()},
     %% Collection>>class withAll: takes a list and builds an instance.
@@ -1149,7 +1151,7 @@ probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
         end,
     case DirectOk of
         ok ->
-            try beamtalk_class_dispatch:class_self_send(ChildClass, Selector, Args) of
+            try beamtalk_class_dispatch:class_self_send(ClassSelf, Selector, Args) of
                 _ -> ok
             catch
                 C2:E2 ->
@@ -1160,7 +1162,7 @@ probe_both_paths(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
             SkipDirect
     end.
 
-run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
+run_class_self_dispatch_measure(_ChildClass, Selector, ParentMod, FunName, ClassSelf, Args) ->
     %% Direct apply (simulates local class-method self-send terminal step).
     DirectNs = method_bench(fun() ->
         erlang:apply(ParentMod, FunName, [ClassSelf | Args])
@@ -1168,7 +1170,7 @@ run_class_self_dispatch_measure(ChildClass, Selector, ParentMod, FunName, ClassS
 
     %% Via helper (simulates the inherited self-dispatch path).
     HelperNs = method_bench(fun() ->
-        beamtalk_class_dispatch:class_self_send(ChildClass, Selector, Args)
+        beamtalk_class_dispatch:class_self_send(ClassSelf, Selector, Args)
     end),
 
     report_ns("class_self_dispatch/direct_apply", DirectNs, ?METHOD_ITERATIONS),

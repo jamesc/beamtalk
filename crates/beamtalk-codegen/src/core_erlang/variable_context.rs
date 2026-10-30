@@ -54,6 +54,7 @@ pub(super) const TEMP_MARKER: char = '@';
 /// token, not as part of a longer name. A name character is anything a Core
 /// variable this compiler emits can contain: ASCII alphanumerics, `_`, and
 /// [`TEMP_MARKER`]. A match inside a string or atom literal still counts.
+#[cfg(test)]
 pub(super) fn text_mentions_var(text: &str, var: &str) -> bool {
     let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == TEMP_MARKER;
     text.match_indices(var).any(|(at, _)| {

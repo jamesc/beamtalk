@@ -472,8 +472,8 @@ pub fn generate(module: &Module) -> Result<String> {
 
 impl CoreErlangGenerator {
     /// Computes `direct_call_eligible` and, from it, the compiled class's own
-    /// `own_direct_class_methods` (ADR 0129 Phase 0b) so the runtime's dynamic
-    /// `class_send/3` shares the rule via `__beamtalk_meta/0`.
+    /// `own_direct_constructors` so the runtime's dynamic `class_send/3` shares
+    /// the constructor verdict via `__beamtalk_meta/0`.
     fn set_direct_call_eligible(
         &mut self,
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
@@ -481,7 +481,6 @@ impl CoreErlangGenerator {
     ) {
         self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
         if let Some(class) = module.classes.first() {
-            self.own_direct_class_methods = self.own_direct_class_methods_for(&class.name.name);
             self.own_direct_constructors = self.own_direct_constructors_for(&class.name.name);
             self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
             self.own_overrides_collection_selector =
@@ -600,44 +599,14 @@ impl CoreErlangGenerator {
         own
     }
 
-    /// A class's direct-call-eligible class methods as sorted
-    /// `(safe selector, safe function name)` pairs, read from the already
-    /// computed `direct_call_eligible` (ADR 0129 Phase 0b) — the value baked
-    /// into `__beamtalk_meta/0` as `direct_class_methods`.
-    fn own_direct_class_methods_for(&self, class_name: &str) -> Vec<(String, String)> {
-        let Some(info) = self.direct_call_eligible.get(class_name) else {
-            return Vec::new();
-        };
-        // The key is the *safe* selector, not the raw one: a keyword
-        // constructor over many fields exceeds Erlang's 255-char atom limit,
-        // and a raw key would make the module's own `.core` unscannable
-        // (`core_scan_error`). `safe_class_method_selector` is the
-        // identity for short selectors, so existing entries are unchanged;
-        // for long ones it is the same `kw_<hash>` form send sites emit
-        // (`generate_class_method_call`) and `class_method_info` keys use,
-        // so runtime lookup still hits.
-        let mut own: Vec<(String, String)> = info
-            .selectors
-            .iter()
-            .map(|sel| {
-                (
-                    super::selector_mangler::safe_class_method_selector(sel),
-                    super::selector_mangler::safe_class_method_fn_name(sel),
-                )
-            })
-            .collect();
-        own.sort();
-        own
-    }
-
-    /// Determines if a class is an actor (process-based) or value type (plain term).
-    /// Computes the set of sealed classes whose class methods are eligible
-    /// for direct calls (bypassing `gen_server` dispatch).
+    /// Computes the classes whose class methods may run in the caller (ADR
+    /// 0142 §1), each compiled to a guarded direct call at static call sites
+    /// (ADR 0142 §2).
     ///
-    /// Eligibility is `ClassInfo::is_direct_call_eligible` in `beamtalk-core`
-    /// (sealed class, no class variables, not `new`/`new:`/`startLink`/
-    /// `startLink:`, `class sealed` method); the class must also have class
-    /// methods.
+    /// Eligibility is `ClassHierarchy::is_direct_call_eligible` in
+    /// `beamtalk-core` (the class defines the method, no class variables in
+    /// its chain, not a process-bound selector); the class must also have
+    /// class methods.
     ///
     /// Returns a mapping from class name to `DirectCallClassInfo` with the module
     /// name and set of eligible selectors.
@@ -669,17 +638,17 @@ impl CoreErlangGenerator {
             // still gets a direct `new/0`.
             if !class_info.class_methods.is_empty() {
                 for method in &class_info.class_methods {
-                    // Sealed class, no class variables, not a process-state
-                    // constructor, `class sealed` method: the single rule shared
-                    // with the `class-state-abroad` lint.
-                    if !class_info.is_direct_call_eligible(method) {
+                    // ADR 0142 §1: own method, no class variables in the
+                    // chain, not process-bound. The single rule shared with
+                    // REPL codegen and the lints.
+                    if !hierarchy.is_direct_call_eligible(class_name, &method.selector) {
                         continue;
                     }
                     selectors.insert(method.selector.to_string());
                 }
             }
-            // constructors. Keyword constructors share the direct
-            // `(nil, args...)` shape, so they join the selector set;
+            // constructors. Keyword constructors share the guarded direct
+            // `(ClassRef, args...)` shape, so they join the selector set;
             // `new`/`new:` need arity-specific emission/lookup and travel in
             // dedicated flags instead (never in `selectors`).
             let ctors = hierarchy.direct_constructors(class_name);
@@ -704,6 +673,7 @@ impl CoreErlangGenerator {
         result
     }
 
+    /// Determines if a class is an actor (process-based) or value type (plain term).
     ///
     /// **Actor classes:** Inherit from Actor or its subclasses. Generate `gen_server` code.
     /// **Value types:** Inherit from Object or Value (but not Actor). Generate plain Erlang

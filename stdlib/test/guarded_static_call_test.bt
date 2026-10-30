@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301 / ADR 0142 §2: a literal-receiver class send to a method the class
+// itself defines compiles to a direct call behind the
+// `beamtalk_class_shadow_flags:direct_call_ok/2` guard, whose fallback is the
+// dynamic `class_send`. The ADR 0129 static direct calls were unguarded; these
+// are the regression tests for the bugs that caused:
+// - BT-4133: a class-side extension shadowing a direct-called method was
+//   silently bypassed;
+// - BT-4126: hot-patching a direct-called method with a runtime fun left
+//   static callers on the compiled method;
+// - BT-4037: callers passed `nil` as `ClassSelf`.
+// (BT-4134, a re-parent under a class with class variables, is covered by the
+// runtime test `beamtalk_class_in_caller_tests`.)
+//
+// Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,
+// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,
+// fixtures/gsc_pong.bt.
+
+TestCase subclass: GuardedStaticCallTest
+
+  // BT-4133: an extension on a sealed class's `class sealed` method is honoured.
+  testExtensionShadowsSealedClassMethod =>
+    self assert: GscSealedExt shadowMe equals: #compiled
+    Erlang beamtalk_extensions
+      register: #'GscSealedExt class'
+      selector: #shadowMe
+      fun: [:args :receiver | #extension]
+      owner: #test
+    shadowed := GscSealedExt shadowMe
+    Erlang beamtalk_extensions
+      unregister: #GscSealedExt
+      selector: #shadowMe
+      classSide: true
+    self assert: shadowed equals: #extension
+    self assert: GscSealedExt shadowMe equals: #compiled
+
+  // BT-4133: the same for an open class, and for a class-side self-send.
+  testExtensionShadowsOpenClassMethodAndSelfSend =>
+    self assert: GscOpenExt viaSelf equals: #compiled
+    Erlang beamtalk_extensions
+      register: #'GscOpenExt class'
+      selector: #shadowMe
+      fun: [:args :receiver | #extension]
+      owner: #test
+    literal := GscOpenExt shadowMe
+    viaSelf := GscOpenExt viaSelf
+    Erlang beamtalk_extensions
+      unregister: #GscOpenExt
+      selector: #shadowMe
+      classSide: true
+    self assert: literal equals: #extension
+    self assert: viaSelf equals: #extension
+
+  // BT-4126: a runtime fun replacing a class method is reached by static
+  // callers compiled before the patch.
+  testRuntimeFunPatchReachesStaticCallers =>
+    self assert: GscPatched patchMe equals: #compiled
+    pid := Erlang beamtalk_class_registry whereis_class: #GscPatched
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: #patchMe
+      fun: [:classSelf | #fromRuntimeFun]
+    self assert: GscPatched patchMe equals: #fromRuntimeFun
+
+  // The guarded direct call stays a tail call: a million-deep recursion
+  // through literal class references runs in the stack a shallow one uses.
+  testGuardedDirectCallIsATailCall =>
+    shallow := GscPing ping: 10
+    deep := GscPing ping: 1000000
+    self assert: deep - shallow < 50
+
+  // BT-4037: the callee gets the real class reference, on the direct path and
+  // on the fallback alike.
+  testCalleeGetsTheRealClass =>
+    self assert: GscClassSelf me equals: GscClassSelf
+    self assert: GscClassSelf viaSibling equals: GscClassSelf
+    // Raising the class-variable input turns the guard off: the same static
+    // send now takes the `class_send` fallback through the class process.
+    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true
+    guardOff := (Erlang beamtalk_class_shadow_flags) direct_call_ok: #'GscClassSelf class' with: #GscClassSelf
+    viaFallback := GscClassSelf me
+    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
+    self deny: guardOff
+    self assert: viaFallback equals: GscClassSelf

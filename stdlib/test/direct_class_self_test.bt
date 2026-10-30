@@ -1,13 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4029: inside a direct-called `class sealed` method (ADR 0129 Phase 0b),
-// the class-side `self` is the real class object, whichever way the method was
-// reached: a static send (`Cls sel`), a dynamic send through a variable
-// (`cls sel`, which the runtime routes through `lookup_direct_call` with
-// `ClassSelf = nil`), or `perform:`. Before the fix every `ClassSelf` read in
-// such a method (instantiation, `spawn`/`spawnWith:`, `self` as a value,
-// `self class`, class-side self-sends, `self error:`) raised `badarg`.
+// BT-4029 / BT-4301: inside a class method that runs in the caller, the
+// class-side `self` is the real class object, whichever way the method was
+// reached: a static send (`Cls sel`, the guarded direct call, which passes
+// the class reference), a dynamic send through a variable (`cls sel`), or
+// `perform:`. Callers once passed `nil` as `ClassSelf` (BT-4037), and every
+// `ClassSelf` read in such a method (instantiation, `spawn`/`spawnWith:`,
+// `self` as a value, `self class`, class-side self-sends, `self error:`)
+// raised `badarg`; BT-4301 retired that convention.
 //
 // Fixtures: fixtures/direct_class_self_value.bt,
 // fixtures/direct_class_self_actor.bt.

@@ -166,12 +166,11 @@ fn writing_block_passed_to_a_stateful_class_warns() {
 }
 
 #[test]
-fn class_sealed_method_of_an_open_stateless_class_still_warns() {
-    // Not direct-called: the class is not sealed, so `each:` runs in `Lib`'s
-    // gen_server even though the method is `class sealed` and `Lib` has no
-    // class variables (codegen's direct-call gate 1).
+fn class_sealed_method_of_an_open_stateless_class_stays_home() {
+    // ADR 0142 §1 (BT-4301): sealing plays no part. `Lib` has no class
+    // variables, so `each:` runs in the caller and the block stays home.
     let d = only("  class a => Lib each: [self bump]\n");
-    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d.is_empty(), "{d:?}");
 }
 
 #[test]
@@ -181,9 +180,22 @@ fn directly_writing_block_passed_to_a_stateful_class_warns() {
 }
 
 #[test]
-fn writing_block_passed_to_an_open_stateless_class_warns() {
-    // Not `class sealed`: the method runs in that class's own process.
+fn writing_block_passed_to_an_open_stateless_class_stays_home() {
+    // ADR 0142 §1 (BT-4301): a class method of a class with no class
+    // variables in its chain runs in the caller, `class sealed` or not.
     let d = only("  class a => OpenStateless each: [self bump]\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+#[test]
+fn writing_block_passed_to_a_stateless_subclass_of_a_stateful_class_warns() {
+    // ADR 0142 §1 rule 2 over the chain (BT-4301): the subclass holds its
+    // ancestor's class variables in its own process, so its class methods run
+    // there, as the runtime's `chain_has_class_variables/1` decides.
+    let d = only(
+        "  class a => StatelessSub each: [self bump]\n\n\
+         Driver subclass: StatelessSub\n  class each: aBlock => aBlock value\n",
+    );
     assert_eq!(d.len(), 1, "{d:?}");
 }
 
@@ -351,9 +363,12 @@ Base subclass: Sub
 
 #[test]
 fn write_of_a_redeclared_class_variable_is_a_write() {
-    // `Sub` redeclares `n`; its own write is a write for the lint.
+    // `Sub` redeclares `n`; its own write is a write for the lint. (`Driver`
+    // declares class state so its `each:` runs in its own process, ADR 0142.)
     let d = abroad(
         "Object subclass: Driver
+  classState: ticks = 0
+
   class each: aBlock => aBlock value
 
 Object subclass: Base

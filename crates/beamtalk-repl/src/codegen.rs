@@ -129,12 +129,14 @@ pub fn generate_repl_expressions_with_index(
 }
 
 /// Like [`generate_repl_expressions_with_index`] but also computes direct-call
-/// eligibility from `hierarchy` (ADR 0129 §2, Phase 0a).
+/// eligibility from `hierarchy` (ADR 0142 §1-§2).
 ///
-/// Sends to sealed, stateless class-side facades (`System osPlatform`) then emit
-/// a direct `call 'Module':'Fn'(...)` in the caller's process instead of
-/// `beamtalk_object_class:class_send`. The gates are the ones module codegen
-/// uses (`CoreErlangGenerator::compute_direct_call_eligible`).
+/// A send of a class method the class defines and may run in the caller
+/// (`System osPlatform`) then emits the guarded direct call, a
+/// `direct_call_ok/2` guard around `call 'Module':'Fn'(ClassRef, ...)` with
+/// `beamtalk_object_class:class_send` as the fallback. The rule is the one
+/// module codegen and the lints use (`ClassHierarchy::is_direct_call_eligible`,
+/// through `CoreErlangGenerator::compute_direct_call_eligible`).
 ///
 /// # Errors
 ///

@@ -2267,7 +2267,9 @@ test_class_self_dispatch_local() ->
         %% Local runtime fun resolves.
         ?assertEqual(
             local_value,
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, local, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(
+                ChildName, local, [], class_self(ChildName)
+            )
         ),
         %% A local class-var mutation is a `put` into the live home (installed
         %% by the enclosing invocation in real use) and returns the bare value.
@@ -2276,7 +2278,9 @@ test_class_self_dispatch_local() ->
         try
             ?assertEqual(
                 bumped,
-                beamtalk_class_dispatch:class_self_dispatch_local(ChildName, bump, [])
+                beamtalk_class_dispatch:class_self_dispatch_local(
+                    ChildName, bump, [], class_self(ChildName)
+                )
             ),
             ?assertEqual(#{n => 1}, erlang:get(Key))
         after
@@ -2285,12 +2289,16 @@ test_class_self_dispatch_local() ->
         %% Not local → falls back to the chain and finds the inherited method.
         ?assertEqual(
             inherited_value,
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, inherited, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(
+                ChildName, inherited, [], class_self(ChildName)
+            )
         ),
         %% Nothing anywhere → structured does_not_understand.
         ?assertError(
             #{error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_class_dispatch:class_self_dispatch_local(ChildName, missing, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(
+                ChildName, missing, [], class_self(ChildName)
+            )
         )
     after
         catch gen_server:stop(ChildPid, normal, 5000),
@@ -2646,7 +2654,7 @@ test_class_self_dispatch_extension_found() ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
     Fun = fun(_Args, _Self) -> from_self_ext end,
     ok = beamtalk_extensions:register(ClassTag, selfExt, Fun, test),
-    Result = beamtalk_class_dispatch:class_self_send(ClassName, selfExt, []),
+    Result = beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfExt, []),
     %% ADR 0130 §3: the bare result, no class_var_result wrapper.
     ?assertEqual(from_self_ext, Result).
 
@@ -2663,8 +2671,12 @@ test_class_self_dispatch_extension_threads_class_vars() ->
     Key = beamtalk_class_vars:key(ClassName),
     ok = beamtalk_class_vars:install(Key, #{count => 0}),
     try
-        ?assertEqual(1, beamtalk_class_dispatch:class_self_send(ClassName, selfBump, [])),
-        ?assertEqual(2, beamtalk_class_dispatch:class_self_send(ClassName, selfBump, [])),
+        ?assertEqual(
+            1, beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfBump, [])
+        ),
+        ?assertEqual(
+            2, beamtalk_class_dispatch:class_self_send(class_self(ClassName), selfBump, [])
+        ),
         ?assertEqual(#{count => 2}, erlang:get(Key))
     after
         beamtalk_class_vars:uninstall(Key)
@@ -2684,7 +2696,7 @@ test_class_self_dispatch_extension_crash_surfaces_error() ->
     ok = beamtalk_extensions:register(ClassTag, crashSelfExt, Fun, test),
     ?assertError(
         bt3198_deliberate_crash,
-        beamtalk_class_dispatch:class_self_send(ClassName, crashSelfExt, [])
+        beamtalk_class_dispatch:class_self_send(class_self(ClassName), crashSelfExt, [])
     ).
 
 class_self_dispatch_extension_priority_test_() ->
@@ -2724,7 +2736,7 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
         %% Sanity: without an extension, the inherited method wins via the chain.
         ?assertEqual(
             from_inherited,
-            beamtalk_class_dispatch:class_self_send(ChildName, shared, [])
+            beamtalk_class_dispatch:class_self_send(class_self(ChildName), shared, [])
         ),
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
         ExtFun = fun(_Args, _Self) -> from_extension end,
@@ -2732,7 +2744,7 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
         try
             ?assertEqual(
                 from_extension,
-                beamtalk_class_dispatch:class_self_send(ChildName, shared, [])
+                beamtalk_class_dispatch:class_self_send(class_self(ChildName), shared, [])
             )
         after
             beamtalk_extensions:unregister(ChildName, shared, true)
@@ -2759,7 +2771,9 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
         %% Sanity: without an extension, the local runtime method wins.
         ?assertEqual(
             from_local_runtime_method,
-            beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, [])
+            beamtalk_class_dispatch:class_self_dispatch_local(
+                ClassName, shared, [], class_self(ClassName)
+            )
         ),
         ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
         ExtFun = fun(_Args, _Self) -> from_extension end,
@@ -2767,7 +2781,9 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
         try
             ?assertEqual(
                 from_extension,
-                beamtalk_class_dispatch:class_self_dispatch_local(ClassName, shared, [])
+                beamtalk_class_dispatch:class_self_dispatch_local(
+                    ClassName, shared, [], class_self(ClassName)
+                )
             )
         after
             beamtalk_extensions:unregister(ClassName, shared, true)
@@ -2844,7 +2860,9 @@ test_class_super_dispatch_skips_own_extension() ->
             %% extension; `super` must not.
             ?assertEqual(
                 from_parent_method,
-                beamtalk_class_dispatch:class_super_dispatch(ChildName, shared, [], ChildTag)
+                beamtalk_class_dispatch:class_super_dispatch(
+                    ChildName, shared, [], tag_self(ChildTag)
+                )
             )
         after
             beamtalk_extensions:unregister(ChildName, shared, true)
@@ -2861,7 +2879,9 @@ test_class_super_dispatch_reaches_superclass_extension() ->
         try
             ?assertEqual(
                 201,
-                beamtalk_class_dispatch:class_super_dispatch(ChildName, extOnly, [1], ChildTag)
+                beamtalk_class_dispatch:class_super_dispatch(
+                    ChildName, extOnly, [1], tag_self(ChildTag)
+                )
             )
         after
             beamtalk_extensions:unregister(ParentName, extOnly, true)
@@ -2878,7 +2898,9 @@ test_class_super_dispatch_superclass_extension_before_method() ->
         try
             ?assertEqual(
                 from_parent_extension,
-                beamtalk_class_dispatch:class_super_dispatch(ChildName, shared, [], ChildTag)
+                beamtalk_class_dispatch:class_super_dispatch(
+                    ChildName, shared, [], tag_self(ChildTag)
+                )
             )
         after
             beamtalk_extensions:unregister(ParentName, shared, true)
@@ -2890,7 +2912,9 @@ test_class_super_dispatch_passes_receiver_tag() ->
         ReceiverTag = 'Bt4001SuperTagGrandchild class',
         ?assertEqual(
             ReceiverTag,
-            beamtalk_class_dispatch:class_super_dispatch(ChildName, tagOf, [], ReceiverTag)
+            beamtalk_class_dispatch:class_super_dispatch(
+                ChildName, tagOf, [], tag_self(ReceiverTag)
+            )
         )
     end).
 
@@ -2899,13 +2923,31 @@ test_class_super_dispatch_dnu() ->
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
         ?assertError(
             #{error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_class_dispatch:class_super_dispatch(ChildName, missing, [], ChildTag)
+            beamtalk_class_dispatch:class_super_dispatch(ChildName, missing, [], tag_self(ChildTag))
         )
     end).
 
 %%% ============================================================================
 %%% Helpers
 %%% ============================================================================
+
+%% BT-4301: the class-side self-send entry points take the calling method's
+%% own `ClassSelf`, never a name or tag to rebuild it from. These build that
+%% receiver for a direct call: the registered class's real reference, or (for a
+%% receiver tag with no class behind it) a reference carrying just the tag.
+class_self(ClassName) ->
+    case beamtalk_class_registry:resolve_class_object(ClassName) of
+        undefined -> tag_self(beamtalk_class_registry:class_object_tag(ClassName));
+        ClassSelf -> ClassSelf
+    end.
+
+tag_self(Tag) ->
+    case
+        beamtalk_class_registry:resolve_class_object(beamtalk_primitive:class_name_from_tag(Tag))
+    of
+        #beamtalk_object{} = ClassSelf -> ClassSelf;
+        undefined -> #beamtalk_object{class = Tag, class_mod = undefined, pid = self()}
+    end.
 
 ensure_counter_loaded() ->
     case beamtalk_class_registry:whereis_class('Counter') of

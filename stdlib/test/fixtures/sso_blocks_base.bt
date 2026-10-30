@@ -97,10 +97,9 @@ Object subclass: SsoBlocksBase
   // BT-3667 review: bumped from inside another class's process (ADR 0109).
   class tick -> Integer => 0
 
-  // A block run inside another class's process (ADR 0109).
-  class viaForeign -> Integer =>
-    @expect class_state_abroad "BT-3712: SsoBlocksSub overrides tick to write a class variable"
-    SsoBlocksDriver each: [self tick]
+  // A block passed to a stateless class's method: it runs in the caller, so it
+  // stays home (ADR 0142 §3; before ADR 0142 it ran in the driver's process).
+  class viaForeign -> Integer => SsoBlocksDriver each: [self tick]
 
   // Statically bound sends whose callee's own `self foo:` late-binds.
   class wrapper -> Integer => self foo: 1

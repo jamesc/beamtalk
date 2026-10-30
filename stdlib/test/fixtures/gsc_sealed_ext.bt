@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301: a sealed class whose `class sealed` method a literal-receiver send
+// reaches through the guarded direct call. See guarded_static_call_test.bt.
+
+sealed Object subclass: GscSealedExt
+
+  class sealed shadowMe -> Symbol => #compiled

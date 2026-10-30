@@ -839,54 +839,6 @@ fn test_meta_map_initialize_assigns_excludes_conditionally_assigned_slot() {
 }
 
 #[test]
-fn test_meta_direct_class_methods_emitted_empty_by_default() {
-    // ADR 0129 Phase 0b: the key is always present so the runtime can tell
-    // "no direct methods" from a module compiled before the key existed.
-    let module = module_with(make_actor_class("Counter"));
-    let output = CoreErlangGenerator::build_meta_map_doc(
-        module.classes.first().unwrap(),
-        &module,
-        false,
-        false,
-        None,
-        MetaProvenance::default(),
-    )
-    .to_pretty_string();
-    assert!(
-        output.contains("'direct_class_methods' => ~{}~"),
-        "meta map should carry an empty direct_class_methods. Got: {output}"
-    );
-}
-
-#[test]
-fn test_meta_direct_class_methods_maps_selector_to_safe_fn() {
-    let module = module_with(make_actor_class("Counter"));
-    let direct = vec![
-        ("double:".to_string(), "class_double:".to_string()),
-        ("ping".to_string(), "class_ping".to_string()),
-    ];
-    let provenance = MetaProvenance {
-        direct_class_methods: &direct,
-        ..MetaProvenance::default()
-    };
-    let output = CoreErlangGenerator::build_meta_map_doc(
-        module.classes.first().unwrap(),
-        &module,
-        false,
-        false,
-        None,
-        provenance,
-    )
-    .to_pretty_string();
-    assert!(
-        output.contains(
-            "'direct_class_methods' => ~{'double:' => 'class_double:', 'ping' => 'class_ping'}~"
-        ),
-        "direct_class_methods should map raw selector to safe fn. Got: {output}"
-    );
-}
-
-#[test]
 fn test_meta_process_bound_class_selectors_emitted_from_the_rust_list() {
     // ADR 0142 §1 rule 3 (BT-4299): every class carries the one Rust-owned
     // list, so the runtime never keeps a copy (the Erlang clauses routing part

@@ -218,65 +218,17 @@ impl CoreErlangGenerator {
             && self.class_var_names().contains(field.name.as_str())
     }
 
-    /// Whether the class method being compiled is direct-called (ADR 0129
-    /// Phase 0b): its class is `sealed` with no class variables and the method
-    /// is `class sealed`, the one `ClassInfo::is_direct_call_eligible` rule
-    /// that `compute_direct_call_eligible` applies to build
-    /// `direct_call_eligible`. Only those methods can be entered with
-    /// `ClassSelf = nil` (ADR 0130 §2); their prologue rebinds it to the real
-    /// class object when the body reads it (BT-4029,
-    /// `direct_class_self_prologue_doc`). Every other class method, including
-    /// an inheritable one of a class that has no class variables of its own,
-    /// runs with its receiver class as `ClassSelf`.
-    pub(in crate::core_erlang) fn current_class_method_is_direct_called(&self) -> bool {
-        // A ClassBuilder class-method fun always runs with the built class as
-        // `ClassSelf`; `current_method_selector` and `class_name()` still
-        // describe the enclosing compiled method there.
-        if self.builder_class_method_class().is_some() {
-            return false;
-        }
-        let Some(selector) = self.current_method_selector.as_deref() else {
-            return false;
-        };
-        self.is_own_direct_called_class_method(selector)
-    }
-
-    /// Whether this module's own class method `selector` is direct-called
-    /// (in `direct_call_eligible`). Deliberately *not* gated on
-    /// [`Self::is_shadowed_class`]: it describes how this module's own
-    /// functions are entered (their `ClassSelf` calling convention), which
-    /// shadowing does not change; only sends to a class *reference* pin a
-    /// compile-time module (BT-4271).
-    pub(in crate::core_erlang) fn is_own_direct_called_class_method(&self, selector: &str) -> bool {
-        self.direct_call_eligible
-            .get(&self.class_name())
-            .is_some_and(|info| info.selectors.contains(selector))
-    }
-
     /// THE predicate for "`receiver hasField: ...` lowers to
-    /// `beamtalk_class_vars:has`": in a class method that is not direct-called,
-    /// a `self` receiver. The `HasField` intrinsic calls it; the capture walker
+    /// `beamtalk_class_vars:has`": in a class method, a `self` receiver. The
+    /// `HasField` intrinsic calls it; the capture walker
     /// ([`Self::block_reads_class_var`]) applies the same rule.
     ///
-    /// A direct-called method is excluded: its class has no class variables,
-    /// so its `hasField:` is a constant and needs no `ClassSelf` (which is
-    /// `nil` on entry, BT-4029), see
-    /// [`Self::is_class_method_has_field_direct_called`].
+    /// No method is special-cased (BT-4301): a method of an open stateless
+    /// class may run for a subclass receiver that declares class variables,
+    /// so its `hasField:` is not a constant. In the caller, with no
+    /// class-variable home, `has/2` answers `false` for a stateless chain.
     pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
-        self.in_class_method()
-            && Self::is_self_receiver(receiver)
-            && !self.current_class_method_is_direct_called()
-    }
-
-    /// `self hasField: ...` in a direct-called class method: the class has no
-    /// class variables and there is no `ClassSelf` to ask, so it lowers to
-    /// `false` without touching the class-variable home. Complements
-    /// [`Self::is_class_var_has_field`]; exactly one of the two holds for a
-    /// class-method `self hasField:`.
-    pub(super) fn is_class_method_has_field_direct_called(&self, receiver: &Expression) -> bool {
-        self.in_class_method()
-            && Self::is_self_receiver(receiver)
-            && self.current_class_method_is_direct_called()
+        self.in_class_method() && Self::is_self_receiver(receiver)
     }
 
     /// Whether `block` (including every nested block literal) reads a class
@@ -287,14 +239,11 @@ impl CoreErlangGenerator {
     /// variable>` read outside an assignment target (exactly the nodes for which
     /// [`Self::is_class_var_field_read`] holds, the caller having checked
     /// [`Self::in_class_method`]), or a non-cascade `self hasField:` probe, which
-    /// lowers to `beamtalk_class_vars:has` exactly when
-    /// [`Self::is_class_var_has_field`] holds, i.e. unless the method is
-    /// direct-called. A write-only block reads nothing and binds no capture.
+    /// lowers to `beamtalk_class_vars:has` ([`Self::is_class_var_has_field`]).
+    /// A write-only block reads nothing and binds no capture.
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
         let accesses = class_var_accesses(block, self.class_var_names());
-        !accesses.reads.is_empty()
-            || (!accesses.has_field_probes.is_empty()
-                && !self.current_class_method_is_direct_called())
+        !accesses.reads.is_empty() || !accesses.has_field_probes.is_empty()
     }
 
     /// Runs `build_fun` (which generates the `fun` of block literal `block`) inside

@@ -22,12 +22,12 @@
 //!   through a `self`/own-class send that
 //!   [`compute_class_var_mutating_selectors`] cannot prove pure, and is passed
 //!   to a class-side send whose receiver is statically another (user-defined)
-//!   class and which is not direct-called, "raises `class_state_unreachable`".
-//!   A send is direct-called in the caller (so a block passed there stays home)
-//!   only for a `class sealed` method of a sealed class with no class
-//!   variables ([`ClassHierarchy::is_direct_call_eligible`], the rule codegen's
-//!   direct-call table uses): a `class sealed` method of an open or stateful
-//!   class still runs in that class's process.
+//!   class and which runs in that class's process, "raises
+//!   `class_state_unreachable`". A class method runs in the caller (so a block
+//!   passed there stays home) when no class in the receiving class's chain
+//!   declares class variables and its selector is not process-bound
+//!   ([`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1, the rule
+//!   codegen's direct-call table builds on), sealed or not.
 //!
 //! This is a lint, not a guarantee: a block passed through a variable or an
 //! instance method is only caught at run time, and only for writes. A block
@@ -274,7 +274,7 @@ impl ClassCtx<'_> {
 
     /// The class a class-side send reaches when its receiver is statically
     /// *another* user-defined class whose method runs in that class's process
-    /// (it is not direct-called: see `ClassHierarchy::is_direct_call_eligible`).
+    /// (see `ClassHierarchy::runs_class_method_in_caller`).
     fn foreign_class_send_target(&self, receiver: &Expression, selector: &str) -> Option<String> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
@@ -292,9 +292,9 @@ impl ClassCtx<'_> {
         if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
             return None;
         }
-        // Direct-called in the caller (codegen's rule, shared): the block stays
-        // home. Anything else runs in `target`'s process.
-        (!self.hierarchy.is_direct_call_eligible(target, selector)).then(|| target.to_string())
+        // Runs in the caller (ADR 0142 §1, the one rule): the block stays home.
+        // Anything else runs in `target`'s process.
+        (!self.hierarchy.runs_class_method_in_caller(target, selector)).then(|| target.to_string())
     }
 
     /// The first class-variable write `block` makes, in source order: a

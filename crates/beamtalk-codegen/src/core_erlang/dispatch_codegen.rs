@@ -41,7 +41,7 @@
 use super::control_flow::{Closure, FieldWriteSite};
 use super::expr_shape::is_character_typed_receiver;
 use super::gen_server::SpawnVariant;
-use super::method_frame::{CLASS_SELF_VAR, DIRECT_CLASS_SELF_PARAM};
+use super::method_frame::CLASS_SELF_VAR;
 use super::routing;
 use super::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
@@ -1641,6 +1641,8 @@ impl CoreErlangGenerator {
                 });
             }
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // BT-4301: the fun's own `ClassSelf` is the live receiver, passed
+            // as is (no registry read rebuilds it).
             let call_doc = docvec![
                 "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
                 leaf::atom(builder_class),
@@ -1648,59 +1650,65 @@ impl CoreErlangGenerator {
                 leaf::atom(selector_atom),
                 ", [",
                 args_doc,
-                "], call 'erlang':'element'(2, ",
-                leaf::var("ClassSelf"),
-                "))"
+                "], ",
+                leaf::var(CLASS_SELF_VAR),
+                ")"
             ];
             return Ok(self.class_self_send_value(&args_preamble, call_doc));
         }
 
-        // BT-3666: a class-side self-send to a selector this class defines is
-        // only bound statically (`class_<sel>` direct call) when the class is
-        // sealed — nothing can override the selector. In an open class a
-        // subclass may override it, and an inherited method's `self foo` must
-        // reach that override (template-method pattern), so it routes through
-        // the runtime hierarchy walk below instead.
+        // BT-3666 / BT-4301: a class-side send to a selector this class
+        // defines calls `class_<sel>` directly only behind the
+        // `class_self_direct_ok/4` guard, which holds while nothing shadows
+        // the compiled method (a class-side extension, an ADR 0084 runtime
+        // fun). Sealed classes and `class sealed` methods get the same guard:
+        // no class-side direct call is unguarded (ADR 0142 §2), so an
+        // extension shadowing one is honoured (BT-4133).
+        //
+        // `self foo` also requires the receiving class to be exactly this
+        // class (an inherited method's `self foo` must reach a subclass
+        // override, the template-method pattern); its fallback is the runtime
+        // walk from the receiver. An explicit own-class reference (`Base foo`)
+        // binds the method statically to this class whatever the receiver, so
+        // its guard passes this class's tag as the receiver's too, and its
+        // fallback resolves `foo` from this class (its extension, its runtime
+        // fun, then its own method and the chain above it). Both pass the
+        // method's own `ClassSelf`, the receiver.
         let defines_selector = self.class_method_selectors().contains(&selector_atom);
-        // A `class sealed` selector cannot be overridden either (ADR 0129
-        // facade shape), so it keeps the direct call in an open class too.
-        // So does an explicit own-class reference (`Base foo`): naming the
-        // class binds statically; only `self foo` late-binds on the receiver.
-        if defines_selector
-            && (self.is_class_sealed()
-                || !receiver_is_self
-                || self
-                    .sealed_class_method_selectors()
-                    .contains(&selector_atom))
-        {
-            // Route to class_<selector>(ClassSelf, Args...). Any open
-            // let-chains hoisted from sub-expression sends in the args are
-            // emitted before the call.
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
-            let call_doc = Self::class_direct_call_doc(
-                &self.module_name,
-                self.sibling_class_self_arg(&selector_atom),
-                &selector_atom,
-                args_doc,
-                !arguments.is_empty(),
-            );
-            return Ok(self.class_self_send_value(&args_preamble, call_doc));
-        }
         if defines_selector {
             // Bind every argument once, before the guarded `case`: the doc is
             // spliced into both arms, and an inline block argument containing
-            // further open-class self-sends would otherwise double per nesting
+            // further class-side self-sends would otherwise double per nesting
             // level (2^depth code growth).
             let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
             let args_doc = Self::join_docs_with_commas(arg_refs);
-            // Fast path: when the receiving class IS this class (its metaclass
-            // tag is a compile-time constant) and nothing shadows the compiled
-            // method (no class-side extension, no runtime-installed
-            // class-method fun, ADR 0084), the walk would resolve to
-            // `class_<sel>` in this very module, so call it directly. Any
-            // other receiver (a subclass running an inherited method) takes
-            // the walk, which reaches the subclass override.
-            let walk_doc = Self::class_self_send_call_doc(&selector_atom, args_doc.clone());
+            let class_name = self.class_name();
+            let class_tag = super::util::metaclass_tag(&class_name);
+            let (receiver_tag_doc, fallback_doc) = if receiver_is_self {
+                (
+                    docvec![
+                        "call 'erlang':'element'(2, ",
+                        leaf::var(CLASS_SELF_VAR),
+                        ")"
+                    ],
+                    Self::class_self_send_call_doc(&selector_atom, args_doc.clone()),
+                )
+            } else {
+                (
+                    leaf::atom(class_tag.clone()),
+                    docvec![
+                        "call 'beamtalk_class_dispatch':'class_self_dispatch_local'(",
+                        leaf::atom(class_name.clone()),
+                        ", ",
+                        leaf::atom(selector_atom.clone()),
+                        ", [",
+                        args_doc.clone(),
+                        "], ",
+                        leaf::var(CLASS_SELF_VAR),
+                        ")"
+                    ],
+                )
+            };
             let direct_doc = Self::class_direct_call_doc(
                 &self.module_name,
                 CLASS_SELF_VAR,
@@ -1708,12 +1716,11 @@ impl CoreErlangGenerator {
                 args_doc,
                 !arguments.is_empty(),
             );
-            let class_name = self.class_name();
             let call_doc = docvec![
-                "case call 'beamtalk_class_dispatch':'class_self_direct_ok'(call 'erlang':'element'(2, ",
-                leaf::var("ClassSelf"),
-                "), ",
-                leaf::atom([class_name.as_str(), " class"].concat()),
+                "case call 'beamtalk_class_dispatch':'class_self_direct_ok'(",
+                receiver_tag_doc,
+                ", ",
+                leaf::atom(class_tag),
                 ", ",
                 leaf::atom(class_name),
                 ", ",
@@ -1721,7 +1728,7 @@ impl CoreErlangGenerator {
                 ") of <'true'> when 'true' -> ",
                 direct_doc,
                 " <_> when 'true' -> ",
-                walk_doc,
+                fallback_doc,
                 " end"
             ];
             return Ok(self.class_self_send_value(&args_preamble, call_doc));
@@ -1741,15 +1748,16 @@ impl CoreErlangGenerator {
             // Erlang's 255-char atom limit.
             let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             // The generated keyword constructor ignores its class-self
-            // argument (`fun (_ClassSelf, ...)`, `value_accessors`), so pass
-            // `nil`: reading `ClassSelf` here would make a direct-called
-            // caller resolve its class object for nothing (BT-4029).
+            // argument (`fun (_ClassSelf, ...)`, `value_accessors`); it gets
+            // the receiver like every other class method (BT-4301: no `nil`
+            // class self).
             let call_doc = docvec![
                 "call ",
                 leaf::atom(module),
                 ":",
                 leaf::atom(safe_fn),
-                "('nil'",
+                "(",
+                leaf::var(CLASS_SELF_VAR),
                 comma,
                 args_doc,
                 ")"
@@ -1829,29 +1837,12 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// The class-object argument of a class-side direct call to this class's
-    /// own `selector`. BT-4029: from a direct-called method to a direct-called
-    /// sibling it forwards the method's raw incoming class-self
-    /// ([`DIRECT_CLASS_SELF_PARAM`], possibly `nil`), so the forwarding alone
-    /// never makes the caller resolve its class object; the sibling resolves
-    /// it in its own prologue if it needs it. Everywhere else it is
-    /// `ClassSelf`, which the callee may read.
-    fn sibling_class_self_arg(&self, selector: &str) -> &'static str {
-        if self.current_class_method_is_direct_called()
-            && self.is_own_direct_called_class_method(selector)
-        {
-            DIRECT_CLASS_SELF_PARAM
-        } else {
-            CLASS_SELF_VAR
-        }
-    }
-
     /// Direct call `class_<sel>(<class_self>, Args...)` into this module. Long
     /// selectors are hashed to stay within Erlang's 255-char atom limit (same
     /// guard as the keyword-constructor path).
     fn class_direct_call_doc(
         module: &str,
-        class_self: &'static str,
+        class_self: &str,
         selector_atom: &str,
         args_doc: Document<'static>,
         has_args: bool,
@@ -1864,7 +1855,7 @@ impl CoreErlangGenerator {
             ":",
             leaf::atom(safe_fn),
             "(",
-            leaf::var(class_self),
+            leaf::var(class_self.to_string()),
             comma,
             args_doc,
             ")"
@@ -1876,21 +1867,18 @@ impl CoreErlangGenerator {
     /// receiving class (BT-3666: so a subclass override wins over the method
     /// compiled here).
     ///
-    /// ADR 0109 amendment: the target class is derived from `ClassSelf`
-    /// (closure-captured, so correct even when this self-send executes inside a
-    /// block running in a foreign class's process) instead of
-    /// `erlang:get('beamtalk_class_name')` (the *executing process's* identity,
-    /// which is only the same thing outside a block). `class_name_from_tag/1`
-    /// strips the `' class'` metaclass tag `element(2, ClassSelf)` carries.
+    /// The receiver is the method's own `ClassSelf` (closure-captured, so
+    /// correct even when this self-send executes inside a block running in
+    /// another process, ADR 0109 amendment), passed as is, so the runtime
+    /// builds nothing from a name and reads no registry (BT-4301).
     fn class_self_send_call_doc(
         selector_atom: &str,
         args_doc: Document<'static>,
     ) -> Document<'static> {
         docvec![
             "call 'beamtalk_class_dispatch':'class_self_send'(",
-            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-            leaf::var("ClassSelf"),
-            ")), ",
+            leaf::var(CLASS_SELF_VAR),
+            ", ",
             leaf::atom(selector_atom.to_string()),
             ", [",
             args_doc,
@@ -2779,9 +2767,9 @@ impl CoreErlangGenerator {
         // (not even its own class-side extensions, so an extension override
         // that sends `super` cannot recurse into itself); at each ancestor it
         // checks that ancestor's class-side extensions, then its class methods.
-        // The live receiver tag (`element(2, ClassSelf)`) is passed so a
+        // The live receiver (`ClassSelf`) is passed as is (BT-4301), so a
         // subclass receiver runs the superclass method under its own
-        // class-variable key. A class method binds no instance `Self`/`State`,
+        // class-variable key with its real reference. A class method binds no instance `Self`/`State`,
         // so it must never reach the `beamtalk_dispatch:super/5` instance path
         // below.
         let class_side_super_class = (self.builder_class_method_class().is_some()
@@ -2796,9 +2784,9 @@ impl CoreErlangGenerator {
                 leaf::atom(selector_atom),
                 ", [",
                 args_doc,
-                "], call 'erlang':'element'(2, ",
-                leaf::var("ClassSelf"),
-                "))"
+                "], ",
+                leaf::var(CLASS_SELF_VAR),
+                ")"
             ];
             // ADR 0130 §3: `super` passes nothing and rebinds nothing.
             let tv = self.class_self_send_value(&args_preamble, call_doc);
@@ -3068,12 +3056,12 @@ impl CoreErlangGenerator {
 
         let class_fallback: Document<'static> =
             if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw) {
-                let safe_fn = super::selector_mangler::safe_class_method_fn_name(&raw);
-                Self::direct_class_method_call_doc(
+                self.guarded_class_direct_call_doc(
+                    class_name,
                     module_name,
-                    safe_fn,
+                    &raw,
                     args_doc.clone(),
-                    arguments.is_empty(),
+                    arguments.len(),
                 )
             } else {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
@@ -3117,22 +3105,18 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&prelude, case_doc, "BindClassRes"))
     }
 
-    /// Generates a class-level method call.
+    /// Generates a class-level method call to a literal class receiver.
     ///
-    /// For sealed classes with no class variables, generates a direct
-    /// function call to `module:class_<selector>(nil, #{}, Args...)`, bypassing
-    /// the `gen_server` round-trip. This is safe because the methods are pure functions.
+    /// ADR 0142 §2 (BT-4301): when the class itself defines the selector and
+    /// may run it in the caller ([`Self::direct_call_eligible_module`], the
+    /// one `ClassHierarchy::is_direct_call_eligible` rule), the send compiles
+    /// to the guarded direct call of [`Self::guarded_class_direct_call_doc`].
+    /// Everything else, an inherited class method included, takes the dynamic
+    /// path (`whereis_class` + `class_send`), which itself runs a stateless
+    /// class method in the caller (BT-4300): no call site names a superclass
+    /// module.
     ///
-    /// For all other classes (or unrecognized selectors), falls back to the
-    /// `gen_server` dispatch path via `beamtalk_object_class:class_send/3`.
-    ///
-    /// # Generated Code (direct call)
-    ///
-    /// ```erlang
-    /// call 'bt@stdlib@tracing':'class_setContext:'('nil', ~{}~, Ctx)
-    /// ```
-    ///
-    /// # Generated Code (`gen_server` fallback)
+    /// # Generated Code (dynamic path)
     ///
     /// ```erlang
     /// let ClassPid = call 'beamtalk_class_registry':'whereis_class'('Tracing') in
@@ -3157,9 +3141,20 @@ impl CoreErlangGenerator {
             }
         }
 
-        // Check if this class method is eligible for direct call optimization.
         if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
-            return self.generate_direct_class_method_call(&module_name, &raw_selector, arguments);
+            // Bind every argument once: the doc is spliced into both arms of
+            // the guard (an inline block argument holding further guarded
+            // sends would otherwise double per nesting level).
+            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let args_doc = Self::join_docs_with_commas(arg_refs);
+            let call_doc = self.guarded_class_direct_call_doc(
+                class_name,
+                module_name,
+                &raw_selector,
+                args_doc,
+                arguments.len(),
+            );
+            return Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"));
         }
 
         // Fallback: gen_server dispatch via class_send
@@ -3182,58 +3177,94 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
     }
 
-    /// Generates a direct function call to a sealed class method.
-    ///
-    /// Passes `nil` for `ClassSelf`: resolving the class object here would
-    /// cost every call a registry lookup, so a callee whose body reads
-    /// `ClassSelf` resolves it in its own prologue instead (BT-4029,
-    /// `direct_class_self_prologue_doc`).
+    /// ADR 0142 §2 (BT-4301): the guarded direct call of a static send of
+    /// `raw_selector`, which `class_name` itself defines, to the literal class
+    /// `class_name` compiled to `module_name`. `args_doc` must be variables or
+    /// literals: it is spliced into every arm.
     ///
     /// ```erlang
-    /// call 'module':'class_<selector>'('nil', Args...)
+    /// let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
+    /// case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Point class', 'Point') of
+    ///   <'true'> when call 'erlang':'is_pid'(ClassPid) ->
+    ///     case call 'erlang':'function_exported'('bt@point', 'class_origin', 1) of
+    ///       <'true'> when 'true' ->
+    ///         call 'bt@point':'class_origin'({'beamtalk_object', 'Point class', 'bt@point', ClassPid})
+    ///       <_> when 'true' -> call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
+    ///     end
+    ///   <_> when 'true' ->
+    ///     call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
+    /// end
     /// ```
-    fn generate_direct_class_method_call(
+    ///
+    /// The guard is the contract (ADR 0025 amendment): `direct_call_ok/2`
+    /// holds only while nothing shadows the compiled method (no class-side
+    /// extension, no ADR 0084 runtime fun) and neither the class nor an
+    /// ancestor declares class variables, exactly when the dynamic path would
+    /// run the same compiled method in the caller; otherwise the fallback is
+    /// that dynamic `class_send`, byte for byte. `function_exported/3` keeps a
+    /// method that no longer exists (`removeSelector:`, a reload that dropped
+    /// it, a module not loaded yet) on that fallback too, so it answers what a
+    /// dynamic send answers instead of `undef`. The direct call stays in tail
+    /// position: tail recursion through a literal class reference runs in
+    /// constant stack.
+    ///
+    /// The callee gets the real class reference as `ClassSelf` (its tag, its
+    /// own module and its registered pid, the value a class literal evaluates
+    /// to), never `nil` (BT-4037); a class that is not registered takes the
+    /// fallback, which raises `class_not_found` as before. The pid is looked
+    /// up by the compile-time registered name
+    /// ([`super::util::class_registered_name`], the BT-4295 form), never
+    /// baked: a restarted class process is found. The module is the
+    /// compile-time one the call names anyway.
+    pub(super) fn guarded_class_direct_call_doc(
         &mut self,
-        module_name: &str,
-        selector: &str,
-        arguments: &[Expression],
-    ) -> Result<Document<'static>> {
-        // Hash long selector atoms to stay within Erlang's 255-char atom limit.
-        // Hoist preambles from sub-expression class var mutations.
-        let safe_fn = super::selector_mangler::safe_class_method_fn_name(selector);
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
-        let call_doc = Self::direct_class_method_call_doc(
-            module_name.to_string(),
-            safe_fn,
-            args_doc,
-            arguments.is_empty(),
-        );
-
-        Ok(self.close_prelude(&args_preamble, call_doc, "DirectCall"))
-    }
-
-    /// Builds the `call Module:safe_fn('nil', Args...)` direct-call
-    /// fragment shared by [`Self::generate_direct_class_method_call`] and
-    /// `generate_binding_aware_class_send`'s already-threaded-args inline
-    /// direct-call branch.
-    fn direct_class_method_call_doc(
+        class_name: &str,
         module_name: String,
-        safe_fn: String,
+        raw_selector: &str,
         args_doc: Document<'static>,
-        args_empty: bool,
+        arg_count: usize,
     ) -> Document<'static> {
-        let comma = if args_empty { "" } else { ", " };
-        // ADR 0130 §3: the direct-called method has no class variables, so its
-        // `ClassSelf` is `nil` and nothing else is passed ahead of the args.
+        let tag = super::util::metaclass_tag(class_name);
+        let class_pid_var = self.fresh_var("ClassPid");
+        let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
+        let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
+        let comma = if arg_count == 0 { "" } else { ", " };
+        let fallback = Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
         docvec![
-            "call ",
-            leaf::atom(module_name),
+            "let ",
+            leaf::var(class_pid_var.clone()),
+            " = call 'erlang':'whereis'(",
+            leaf::atom(super::util::class_registered_name(class_name)),
+            ") in case call 'beamtalk_class_shadow_flags':'direct_call_ok'(",
+            leaf::atom(tag.clone()),
+            ", ",
+            leaf::atom(class_name.to_string()),
+            ") of <'true'> when call 'erlang':'is_pid'(",
+            leaf::var(class_pid_var.clone()),
+            ") -> case call 'erlang':'function_exported'(",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::atom(safe_fn.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> call ",
+            leaf::atom(module_name.clone()),
             ":",
             leaf::atom(safe_fn),
-            "('nil'",
+            "({'beamtalk_object', ",
+            leaf::atom(tag),
+            ", ",
+            leaf::atom(module_name),
+            ", ",
+            leaf::var(class_pid_var.clone()),
+            "}",
             comma,
             args_doc,
-            ")"
+            ") <_> when 'true' -> ",
+            fallback.clone(),
+            " end <_> when 'true' -> ",
+            fallback,
+            " end"
         ]
     }
 
@@ -3295,9 +3326,10 @@ impl CoreErlangGenerator {
     }
 
     /// Shared `direct_call_eligible` gate — returns the target module name
-    /// when a send of `raw_selector` to the class reference `class_name` is
-    /// eligible for the sealed-class direct-call optimization (no class
-    /// variables, no `gen_server` round-trip needed, name not shadowed).
+    /// when a send of `raw_selector` to the class reference `class_name`
+    /// compiles to the guarded direct call (ADR 0142 §2: the class defines the
+    /// method, no class variables in its chain, not process-bound; name not
+    /// shadowed).
     /// Used by every class-reference direct-call gate check
     /// (`generate_repl_bound_class_send`, `generate_class_method_call`)
     /// instead of each repeating the same lookup.

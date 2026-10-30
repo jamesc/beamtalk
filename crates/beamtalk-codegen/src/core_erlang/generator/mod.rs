@@ -417,18 +417,12 @@ pub struct CoreErlangGenerator {
     /// `set_supervisor_classes_from_hierarchy`; module codegen asks
     /// `class_hierarchy` instead.
     pub(in crate::core_erlang) supervisor_classes: std::collections::HashSet<String>,
-    /// ADR 0129 Phase 0b: the class being compiled's own direct-call-eligible
-    /// class methods as sorted `(safe selector, safe fn name)` pairs — a view of
-    /// `direct_call_eligible`, baked into `__beamtalk_meta/0`. The selector is
-    /// `safe_class_method_selector` (identity when short, `kw_<hash>` when the
-    /// raw selector would exceed the atom limit), matching send sites.
-    pub(in crate::core_erlang) own_direct_class_methods: Vec<(String, String)>,
     /// the class being compiled's own directly-callable
     /// constructors (`new` and/or `new:`, in that order) — a view of
     /// `direct_call_eligible`, baked into `__beamtalk_meta/0` as
-    /// `direct_constructors` for dynamic sends. Keyword constructors ride
-    /// `own_direct_class_methods` (same call shape); `new`/`new:` need
-    /// arity-specific handling, hence the separate key.
+    /// `direct_constructors` for dynamic sends. Keyword constructors are
+    /// ordinary class methods there (the in-caller path of ADR 0142 runs
+    /// them); `new`/`new:` need arity-specific handling, hence the key.
     pub(in crate::core_erlang) own_direct_constructors: Vec<String>,
     /// BT-3916: the class being compiled's instance-side methods that are
     /// provisions of a *stdlib* protocol (`uses: Enumerable`), sorted, baked
@@ -628,7 +622,6 @@ impl CoreErlangGenerator {
             is_server_subclass: false,
             direct_call_eligible: std::collections::HashMap::new(),
             supervisor_classes: std::collections::HashSet::new(),
-            own_direct_class_methods: Vec::new(),
             own_direct_constructors: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,

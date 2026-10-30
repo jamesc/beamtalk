@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4301: half of a mutual recursion through literal class references (see
+// gsc_pong.bt). Each send is a guarded direct call in tail position, so the
+// recursion runs in constant stack. The base case answers the stack size of
+// the process at the deepest point. See guarded_static_call_test.bt.
+
+Object subclass: GscPing
+
+  class ping: n :: Integer -> Integer =>
+    n =:= 0 ifTrue: [GscPing stackSize] ifFalse: [GscPong pong: n - 1]
+
+  class stackSize -> Integer =>
+    @expect class_method_process_resource "reads the caller's own stack size"
+    me := Erlang erlang self
+    info := Erlang erlang process_info: me item: #stack_size
+    Erlang erlang element: 2 of: info

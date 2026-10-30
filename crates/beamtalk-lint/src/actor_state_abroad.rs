@@ -35,11 +35,10 @@
 //! only for writes. A block that stays home never fires: self-sends and casts
 //! to `self`, inlined control flow, same-process collection operations,
 //! `on:do:`/`ensure:` and `Result tryDo:` (their receivers are `self`, the
-//! block, a local or a stdlib class), direct-called class methods (`class
-//! sealed` methods of sealed stateless classes, judged by
-//! [`ClassHierarchy::is_direct_call_eligible`], the rule codegen's
-//! direct-call table uses), and blocks that touch no field and send nothing
-//! to `self`.
+//! block, a local or a stdlib class), class methods that run in the caller
+//! (no class variables in the receiving class's chain, judged by
+//! [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1), and blocks
+//! that touch no field and send nothing to `self`.
 //!
 //! Differences from the `class-state-abroad` lint this is modelled on
 //! (`semantic_analysis::validators::class_state_abroad`): there is no
@@ -564,9 +563,9 @@ impl ClassCtx<'_> {
         if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
             return None;
         }
-        // Direct-called in the caller (codegen's rule, shared): the block stays
-        // home. Anything else runs in `target`'s process.
-        (!self.hierarchy.is_direct_call_eligible(target, selector)).then(|| {
+        // Runs in the caller (ADR 0142 §1, the one rule): the block stays home.
+        // Anything else runs in `target`'s process.
+        (!self.hierarchy.runs_class_method_in_caller(target, selector)).then(|| {
             AbroadShape::ClassMethod {
                 target: target.to_string(),
                 selector: selector.to_string(),
@@ -866,9 +865,14 @@ Actor subclass: Runner
   run: aBlock => aBlock value
 
 Object subclass: Lib
+  classState: hits = 0
+
   class each: aBlock => aBlock value
 
   class sealed eachSealed: aBlock => aBlock value
+
+Object subclass: OpenLib
+  class each: aBlock => aBlock value
 
 sealed Object subclass: SealedLib
   class sealed each: aBlock => aBlock value
@@ -882,6 +886,7 @@ Actor subclass: Counter
   state: n = 0
   state: onTick = nil
   field: tag = #c
+  classState: ticks = 0
 
   class each: aBlock => aBlock value
 
@@ -1383,7 +1388,11 @@ Actor subclass: Counter
         assert!(d.is_empty(), "{d:?}");
     }
 
-    // ---- Shape C: non-direct class method ----------------------------------
+    // ---- Shape C: a class method that runs in its class process -----------
+    //
+    // ADR 0142 §1 (BT-4301): only a class whose chain declares class variables
+    // keeps its process (`Lib`, `StatefulSealed`, `Counter` declare
+    // `classState:`); sealing plays no part.
 
     #[test]
     fn open_class_method_write_warns() {
@@ -1399,7 +1408,8 @@ Actor subclass: Counter
 
     #[test]
     fn sealed_method_of_open_class_warns() {
-        // Direct-called needs a sealed class too, not just a sealed method.
+        // A `class sealed` method of a class with class variables still runs
+        // in its class process.
         let d = only("  viaLibSealed => Lib eachSealed: [self.n := 1]\n");
         assert_eq!(d.len(), 1, "{d:?}");
         assert!(
@@ -1423,10 +1433,12 @@ Actor subclass: Counter
 
     #[test]
     fn inherited_class_side_method_warns() {
-        // An inherited method is not in the class's own table, so it is
-        // never direct-called.
+        // An inherited method of a chain with class variables runs in the
+        // receiving class's process.
         let d = abroad(
             "Object subclass: Lib
+  classState: hits = 0
+
   class each: aBlock => aBlock value
 
 Lib subclass: Kid
@@ -1479,6 +1491,32 @@ Actor subclass: Counter
     #[test]
     fn direct_called_class_method_quiet() {
         let d = only("  viaSealed => SealedLib each: [self.n := 1]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn open_stateless_class_method_quiet() {
+        // ADR 0142 §1 (BT-4301): a class with no class variables in its chain
+        // runs its class methods in the caller, `class sealed` or not.
+        let d = only("  viaOpen => OpenLib each: [self.n := 1]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn inherited_stateless_class_method_quiet() {
+        let d = abroad(
+            "Object subclass: Lib
+  class each: aBlock => aBlock value
+
+Lib subclass: Kid
+  kidHelper => nil
+
+Actor subclass: Counter
+  state: n = 0
+
+  viaKid => Kid each: [self.n := 1]
+",
+        );
         assert!(d.is_empty(), "{d:?}");
     }
 
