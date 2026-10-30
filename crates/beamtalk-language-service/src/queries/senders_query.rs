@@ -371,4 +371,136 @@ mod tests {
         let lines = find_senders_in_source("describe => self asString", "asString");
         assert_eq!(lines, vec![1]);
     }
+
+    // -----------------------------------------------------------------------
+    // Expression walker: coverage for arms not reached by the tests above
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn finds_send_inside_return_expression() {
+        // `^ x asString` is `Expression::Return { value: MessageSend{asString} }`.
+        // The walker must recurse into the return value.
+        let src = "bail: x =>\n  x = 0 ifTrue: [^ x asString]\n  x printString";
+        let lines = find_senders_in_source(src, "asString");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_inside_destructure_assignment_value() {
+        // `{a, b} := self items` — the send is in the *value* position of a
+        // DestructureAssignment and must still be collected.
+        let src = "unpack =>\n  {a, b} := self items\n  a + b";
+        let lines = find_senders_in_source(src, "items");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_parenthesized_expression() {
+        // `(self name)` is `Expression::Parenthesized`. The walker must recurse
+        // into the inner expression.
+        let src = "describe =>\n  (self name) asUppercase";
+        let lines = find_senders_in_source(src, "name");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_match_guard() {
+        // `x when: [x printString = "0"]` — the guard block is walked by
+        // `collect_send_lines`, exercising the `arm.guard` branch.
+        let src = "classify: n =>\n  n match: [x when: [x printString = \"0\"] -> x; _ -> nil]";
+        let lines = find_senders_in_source(src, "printString");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_string_interpolation() {
+        // `"Hello, {name asUppercase}!"` is `Expression::StringInterpolation`.
+        // The walker must recurse into each interpolation segment.
+        let src = "greet: name =>\n  \"Hello, {name asUppercase}!\"";
+        let lines = find_senders_in_source(src, "asUppercase");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_list_literal_element_and_tail() {
+        // `#(x size | self name)` — `x size` is the element and `self name` is
+        // the cons tail. Both the element loop and the tail branch are exercised.
+        let src = "build: x =>\n  #(x size | self name)";
+        let size_lines = find_senders_in_source(src, "size");
+        assert_eq!(size_lines, vec![2]);
+        let name_lines = find_senders_in_source(src, "name");
+        assert_eq!(name_lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_array_literal() {
+        // `#[self name, 42]` is `Expression::ArrayLiteral`. The walker must
+        // recurse into each element.
+        let src = "wrap =>\n  #[self name, 42]";
+        let lines = find_senders_in_source(src, "name");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_tuple_literal() {
+        // `{self name, 42}` is `Expression::TupleLiteral`. The walker must
+        // recurse into each element.
+        let src = "pair =>\n  {self name, 42}";
+        let lines = find_senders_in_source(src, "name");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn finds_send_in_map_literal() {
+        // `#{#key => self name}` is `Expression::MapLiteral`. The walker must
+        // recurse into both key and value expressions.
+        let src = "info =>\n  #{#key => self name}";
+        let lines = find_senders_in_source(src, "name");
+        assert_eq!(lines, vec![2]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Pattern walker: coverage for arms not reached by the tests above
+    // (Pattern::Constructor is already covered by
+    // `constructor_pattern_keyword_is_not_a_send`.)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn match_binary_pattern_body_send_found() {
+        // `<<v:8, _/binary>>` is `Pattern::Binary`. The pattern walker must
+        // traverse the segments without panicking, and the arm body send must
+        // be collected.
+        let src = "unpack: bytes =>\n  bytes match: [<<v:8, _/binary>> -> v printString; _ -> nil]";
+        let lines = find_senders_in_source(src, "printString");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn match_tuple_pattern_body_send_found() {
+        // `{a, b}` is `Pattern::Tuple`. The pattern walker traverses the
+        // elements (Variable patterns, no sends), and the arm body send is
+        // still collected.
+        let src = "check: r =>\n  r match: [{a, b} -> a asString; _ -> nil]";
+        let lines = find_senders_in_source(src, "asString");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn match_array_pattern_with_rest_body_send_found() {
+        // `#[h, ...rest]` is `Pattern::Array` with a rest element. Both the
+        // element loop and the rest-pattern branch are exercised; the arm body
+        // send is still collected.
+        let src = "get: xs =>\n  xs match: [#[h, ...rest] -> h asString; _ -> nil]";
+        let lines = find_senders_in_source(src, "asString");
+        assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn match_map_pattern_body_send_found() {
+        // `#{#name => n}` is `Pattern::Map`. The pattern walker traverses the
+        // value bindings, and the arm body send is collected.
+        let src = "get: m =>\n  m match: [#{#name => n} -> n asString; _ -> nil]";
+        let lines = find_senders_in_source(src, "asString");
+        assert_eq!(lines, vec![2]);
+    }
 }
