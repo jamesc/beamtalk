@@ -34,7 +34,9 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testWriteThenRaise/1,
     class_testWriteThenNlr/1,
     'class_testTwoArgs:and:'/3,
-    class_testGroupLeader/1
+    class_testGroupLeader/1,
+    class_testClassSelf/1,
+    class_testHasCount/1
 ]).
 
 -doc """
@@ -178,3 +180,16 @@ the second is what a nested class-method call would re-propagate.
 -spec class_testGroupLeader(term()) -> {pid(), pid() | undefined}.
 class_testGroupLeader(_ClassSelf) ->
     {group_leader(), get(beamtalk_entry_group_leader)}.
+
+-doc "Zero-argument class method that answers the `ClassSelf` it received (BT-4300).".
+-spec class_testClassSelf(term()) -> term().
+class_testClassSelf(ClassSelf) ->
+    ClassSelf.
+
+-doc """
+Zero-argument class method that tests for a class variable `count`, as a
+compiled `self hasField: #count` does (BT-4300: no home in the caller).
+""".
+-spec class_testHasCount(term()) -> boolean().
+class_testHasCount(ClassSelf) ->
+    beamtalk_class_vars:has(ClassSelf, count).

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4300 (ADR 0142): a subclass that declares no class variables of its own
+// but inherits from a class that does. It keeps its class process for every
+// class method, including one it defines itself.
+// Fixture for class_method_in_caller_test.bt.
+
+InCallerStateful subclass: InCallerStatefulSub
+
+  class runOwn: aBlock => aBlock value

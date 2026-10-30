@@ -7,6 +7,10 @@
 
 /// The object child of the BT-4252 class-protocol fixtures.
 Bt4252ClassProtocolObjectBase subclass: Bt4252ClassProtocolObjectChild
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, which is what these rows exercise; a stateless class's methods
+  // run in the caller.
+  classState: pinned = 0
 
   class selfName => self name
 

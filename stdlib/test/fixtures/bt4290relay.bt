@@ -5,5 +5,9 @@
 // so the wait cycle is three processes long.
 
 Object subclass: Bt4290Relay
+  // ADR 0142 (BT-4300): class state keeps this class's methods in its class
+  // process, which is what these rows exercise; a stateless class's methods
+  // run in the caller.
+  classState: pinned = 0
 
   class run: blk => Bt4290Runner run: blk

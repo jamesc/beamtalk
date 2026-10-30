@@ -71,11 +71,19 @@ reader's view.
   `beamtalk_class_metadata:put_class_variables/2` before the row field), so a
   send that can see a shadow or a class variable cannot see a derived `true`.
 - Erasure on every other class-metadata write (`invalidate/1`, ADR 0142 §2,
-  BT-4299): under the lock, erase the derived key before the write lands. Called
-  on reload (`beamtalk_object_class:apply_class_info/2`), a class-side
-  `removeSelector:`, a runtime `put_class_method`, and row removal
+  BT-4299): under the lock, erase the derived key. Called on reload
+  (`beamtalk_object_class:apply_class_info/2`), a class-side `removeSelector:`,
+  a runtime `put_class_method`, and row removal
   (`beamtalk_class_metadata:delete/1`); a class-variable change erases through
-  `set_class_vars/2`. The next send re-derives from the raw flags.
+  `set_class_vars/2`. This does **not** hold the fast path off until the write
+  is visible: a concurrent `direct_call_ok/2` or `shadow_free/2` miss
+  re-derives from the raw flags at once, and answers what they say. The derived
+  key is a pure function of the raw flags, so erasing it changes no answer; it
+  only forces the next send to re-derive. A fact that must bar the fast path
+  during a write therefore has to be a raw input `derive/2` reads, raised before
+  the write (as `class_vars` is). Other per-class answers (the in-caller
+  class-method owner, BT-4300) live in `beamtalk_class_derived_cache`, whose
+  generation counter, not this erasure, keeps them consistent with the write.
 - Install (`direct_call_ok/2` or `shadow_free/2` miss, lazy): outside the lock,
   cheap pre-check of the raw flags (a permanently shadowed class never takes the
   lock per send); then under the lock re-derive from readiness and the raw flags
@@ -159,15 +167,22 @@ erase_direct_flag(Tag) ->
 
 -doc """
 Erase `ClassName`'s derived direct-call flag under the per-tag lock (ADR 0142
-§2, BT-4299), so the next send re-derives it from the raw flags. Call it before
-a class-metadata write for the class becomes visible: reload, a class-side
-`removeSelector:`, a runtime `put_class_method`, row removal. Must never be
-called from inside `with_tag_lock/2`.
+§2, BT-4299), so the next send re-derives it from the raw flags. Called on a
+class-metadata write for the class: reload, a class-side `removeSelector:`, a
+runtime `put_class_method`, row removal. It does not keep the fast path off
+while the write lands: a concurrent miss re-derives from the raw flags at once
+(see the moduledoc), so anything that must bar the fast path is a raw flag,
+raised before the write. Skips the lock when no derived flag is installed, like
+`set/2`: an install racing this is one that read the raw flags, which this does
+not change. Must never be called from inside `with_tag_lock/2`.
 """.
 -spec invalidate(atom()) -> ok.
 invalidate(ClassName) ->
     Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end).
+    case persistent_term:get(Tag, false) of
+        false -> ok;
+        _ -> with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end)
+    end.
 
 -doc """
 Mirror the class-metadata fact "`ClassName` declares class variables" into the

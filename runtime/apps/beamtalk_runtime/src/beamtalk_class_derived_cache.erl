@@ -34,7 +34,8 @@ ETS read.
 Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
-`{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`).
+`{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
+`{class_method_owner, ClassPid, Selector}`).
 `instance_method_info` is `beamtalk_method_resolver:instance_method_info/2`,
 the dispatch-time method lookup behind
 `beamtalk_primitive:runtime_instance_method/2`; `class_object` is the
@@ -43,7 +44,10 @@ answers, whose cached pid is re-validated on every hit; `defining_method`
 is the send-path hierarchy resolution behind `beamtalk_dispatch:lookup/5`;
 `is_kind_of` is `Object>>isKindOf:`'s decided answer for an instance of
 `Class` (`beamtalk_behaviour_intrinsics:objectIsKindOf/2`, BT-4221), whose
-cached pids are re-validated on every hit.
+cached pids are re-validated on every hit; `class_method_owner` is the
+class-side twin of `defining_method`, the defining class and module a dynamic
+class-side send runs in the caller (`beamtalk_class_dispatch:class_send/3`,
+ADR 0142 §2), or its `decline` (cached too, flushed by the next class write).
 The `instance_method_info` key caches
 misses too (a selector no class in the chain defines, e.g. a DNU
 or `respondsTo:` probe), so the table holds up to one row per class and
@@ -59,7 +63,9 @@ method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
 `put_method_records/3` (every `publish_reflection/1`: `init/1`, `put_method`,
 reload) and `delete/1` (removal, `terminate/2`), plus the
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
-write has landed. Extension install and removal do too: compiled
+write has landed. So do the class-side writes the `class_method_owner` memo
+reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),
+`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change. Extension install and removal do too: compiled
 `has_method_local/1` consults the extension table, so an extension changes
 resolution for every chain through its class.
 Invalidation is global, not per class: a derived fact about
@@ -100,6 +106,10 @@ so they share an owner and heir and are lost together.
     fetch/3,
     inherits_from/2
 ]).
+
+%% `fetch/2` is a hot dispatch path (BT-4300's in-caller class send): inline
+%% its `fetch/3` body and the trivial validity check.
+-compile({inline, [fetch_valid/3]}).
 
 -define(TABLE, beamtalk_class_derived_cache).
 -define(GEN_KEY, {?MODULE, generation}).
@@ -162,7 +172,7 @@ path, not the class table). Without the cache table or counter (before
 """.
 -spec fetch(term(), fun(() -> {cache | nocache, Value})) -> Value.
 fetch(Key, Compute) ->
-    fetch(Key, Compute, fun always_valid/1).
+    fetch_valid(Key, Compute, always).
 
 -doc """
 `fetch/2` with a validity check on hits: a cached value for which
@@ -173,6 +183,13 @@ every call. `Valid` is applied to cached values only, never to a value
 """.
 -spec fetch(term(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean())) -> Value.
 fetch(Key, Compute, Valid) ->
+    fetch_valid(Key, Compute, Valid).
+
+%% `fetch/3`, where `always` stands for a validity check that holds for every
+%% value (`fetch/2`), so a hit calls no fun.
+-spec fetch_valid(term(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean()) | always) ->
+    Value.
+fetch_valid(Key, Compute, Valid) ->
     case persistent_term:get(?GEN_KEY, undefined) of
         undefined ->
             {_, Value} = Compute(),
@@ -181,6 +198,8 @@ fetch(Key, Compute, Valid) ->
             %% Read the generation before computing (see the moduledoc).
             Gen = atomics:get(Ref, 1),
             try ets:lookup(?TABLE, Key) of
+                [{_, Gen, Value}] when Valid =:= always ->
+                    Value;
                 [{_, Gen, Value}] ->
                     case Valid(Value) of
                         true -> Value;
@@ -214,9 +233,6 @@ inherits_from(Class, Ancestor) ->
 %%====================================================================
 %% Internal
 %%====================================================================
-
--spec always_valid(term()) -> true.
-always_valid(_) -> true.
 
 -spec compute_and_store(term(), integer(), fun(() -> {cache | nocache, Value})) -> Value.
 compute_and_store(Key, Gen, Compute) ->

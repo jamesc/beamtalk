@@ -99,9 +99,9 @@ abstract nil subclass: ProtoObject
   /// class state. Useful for long-running class methods that would otherwise
   /// block the class object's gen_server.
   ///
-  /// Limitations: only resolves methods defined directly on the target class
-  /// module (does not walk the superclass chain). Class variables and `self`
-  /// are not available to the method (`nil` and `#{}` are passed).
+  /// The selector resolves through the target class's class-method chain, so
+  /// an inherited class method is found and a subclass override wins. Class
+  /// variables are read from the class's snapshot and cannot be written.
   ///
   /// ## Examples
   /// ```beamtalk

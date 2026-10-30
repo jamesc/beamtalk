@@ -479,9 +479,10 @@ process, or a send through the File class gen_server):
    survive across REPL turns.
 2. Otherwise the caller. On the gen_server path that is
    `beamtalk_object_class:dispatch_caller_pid/0`, mirrored by
-   `dispatch_class_method/5` from the `From` of the `handle_call`. On a direct
-   call that key is unset — and `self()` *is* the caller, since a direct call is
-   a plain function call in the calling process. Any process can own a handle:
+   `dispatch_class_method/5` from the `From` of the `handle_call`. With no
+   mirror the key is unset, and `self()` *is* the caller: a direct call, and
+   (ADR 0142, BT-4300) a dynamic send, since `File` declares no class variables
+   and so runs its class methods in the calling process. Any process can own a handle:
    an actor, a supervisor worker, or the plain process a `beamtalk test` method
    or `beamtalk run` script executes in. The registry monitors pids
    generically; nothing about reclamation is actor-specific.
@@ -489,15 +490,13 @@ process, or a send through the File class gen_server):
 So this always returns a pid. `beamtalk_file_handle_registry:owner()` keeps
 `undefined` in its type for defensiveness only.
 
-Tier 2 reaches back one gen_server hop at most. A static `File open:mode:`
-is a direct call, so it runs in whatever process issued it and reads *that*
-process's mirrored caller. Say an actor with no session sends to `Logger`,
-which opens a file: if the actor's send reached `Logger` through its class
-gen_server, the File call runs there with the actor mirrored in, and the actor
-owns the handle; if the actor's send was itself a direct call, the File call
-runs in the actor and `self()` is the actor. Only a *dynamic* File send made
-from inside a class gen_server re-enters File's own class process, and then the
-caller is that class process.
+Tier 2 reaches back one gen_server hop at most. A `File open:mode:`, static or
+dynamic, runs in whatever process issued it and reads *that* process's
+mirrored caller. Say an actor with no session sends to `Logger`, which opens a
+file: if `Logger` has class variables, the actor's send reaches it through its
+class gen_server, the File call runs there with the actor mirrored in, and the
+actor owns the handle; if `Logger` is stateless, its method runs in the actor
+and `self()` is the actor.
 """.
 -spec resolve_owner() -> pid().
 resolve_owner() ->
@@ -550,13 +549,11 @@ so it never reaches the File class process. Nothing here bounds what the block
 may do — it can message `File` again, it holds nothing else up, and there is
 no time limit.
 
-The exception is reaching this function through dynamic dispatch (`perform:`),
-which still goes via the class gen_server and so runs the block there. In that
-case the pre-ADR-0109 constraints apply: the block cannot message `File`
-dynamically (that raises `dispatch_error`; a static send is a direct call, since
-`File` is sealed, and is fine), it serialises every other `File` call in the node behind it, and it
-must finish inside `beamtalk_class_dispatch`'s 60-second class-call timeout —
-past that the caller gets a timeout while the block keeps running.
+Reaching this function through dynamic dispatch (`perform:`) runs it in the
+caller too (ADR 0142, BT-4300: `File` declares no class variables), so the
+same holds there; it used to go through the File class gen_server, where the
+block could not message `File` dynamically and serialised every other `File`
+call behind it.
 
 Returns a Result ok map holding the block's value, or a Result error map if the
 file could not be opened.
