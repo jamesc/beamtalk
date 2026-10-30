@@ -466,10 +466,8 @@ impl ClassInfo {
     /// Whether this class declares class variables (`classState:`) of its
     /// own — class variables are per class, never inherited (BT-3762). The
     /// one Rust-side answer to "does this class need its process?" (ADR 0142
-    /// §1 rule 1): [`Self::is_direct_call_eligible`] and the class-method FFI
-    /// lints (`class-process-ffi`, `class-method-process-resource`) all read
-    /// it, so they cannot disagree about which classes run their class
-    /// methods in the class process.
+    /// §1 rule 1), read by [`Self::is_direct_call_eligible`] and by the
+    /// `class-process-ffi` lint's hint.
     #[must_use]
     pub fn has_class_variables(&self) -> bool {
         !self.class_variables.is_empty()

@@ -664,18 +664,20 @@ pub enum DiagnosticCategory {
     /// carried into another class's class-side method raises
     /// `class_state_unreachable`. A lint, not a guarantee.
     ClassStateAbroad,
-    /// A class-side method of a class that declares class variables (so it
-    /// runs in its class's `gen_server` process, ADR 0142) directly calls a
-    /// process-sensitive Erlang function — one that blocks, or depends on the
-    /// identity or ownership of the calling process (BT-4031). Suppressible
-    /// with `@expect class_process_ffi` for deliberate serialisation.
+    /// A class-side method that runs in its class's `gen_server` process (it
+    /// is not direct-called) and directly calls a process-sensitive Erlang
+    /// function — one that blocks, or depends on the identity or ownership of
+    /// the calling process (BT-4031, ADR 0129). Suppressible with
+    /// `@expect class_process_ffi` for deliberate serialisation.
     ClassProcessFfi,
-    /// A class-side method of a class without class variables (so it runs in
-    /// the caller's process, ADR 0142) directly calls an Erlang function that
-    /// creates a process-owned resource (ETS table, port, linked process,
-    /// link, monitor, registered name, timer) or relies on `self()` or the
-    /// process dictionary: the resource belongs to the caller and dies with
-    /// it (BT-4302). Suppressible with `@expect class_method_process_resource`.
+    /// A class-side method that is direct-called in the caller's process
+    /// (today: `class sealed` in a `sealed` class without class variables;
+    /// after ADR 0142, every class method of a class without class variables)
+    /// directly calls an Erlang function that creates a resource tied to the
+    /// calling process (ETS table, port, linked process, link, monitor,
+    /// registered name, timer) or acts on the calling process itself
+    /// (`self()`, the process dictionary, process flags) (BT-4302).
+    /// Suppressible with `@expect class_method_process_resource`.
     ClassMethodProcessResource,
     /// A block literal that reads or writes a `state:` field of its actor,
     /// probes with `hasField:`, or makes a synchronous `self` send, and is

@@ -6,30 +6,35 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! Under ADR 0142 a class method runs in its class's `gen_server` process
-//! only when the class needs that process: it declares class variables
-//! (`classState:`), or the selector is process-bound (`new`, `startLink`,
-//! `spawn`, ... — ADR 0142 §1 rule 3). Every other class method runs in the
-//! **caller**. The two lints split on that one fact,
-//! [`ClassInfo::has_class_variables`] (shared with
-//! [`ClassInfo::is_direct_call_eligible`]), so a call gets at most one of
-//! them:
+//! A class method runs either in its class's `gen_server` process or, when
+//! it is direct-called, in the caller's process. The two lints split on the
+//! one rule that decides it, [`ClassHierarchy::is_direct_call_eligible`]
+//! (shared with codegen's direct-call table and the `class-state-abroad`
+//! lint), so a call gets at most one of them:
 //!
-//! - **`class-process-ffi`** — the class declares class variables, so the
-//!   method runs in the class process, and it calls a function that depends
-//!   on the *calling* process: `gen_tcp:accept/1` blocks the one shared class
+//! - **`class-process-ffi`** — the method is not direct-called, so it runs in
+//!   the class process, and it calls a function that depends on the
+//!   *calling* process: `gen_tcp:accept/1` blocks the one shared class
 //!   process, `gen_tcp:controlling_process/2` and `file:sendfile/5` fail with
 //!   `not_owner` (the caller owns the socket), and `erlang:self/0`, the
 //!   process dictionary, `link` and `monitor` all see the class process.
 //!   Suppress deliberate serialisation with `@expect class_process_ffi`.
-//! - **`class-method-process-resource`** — the class declares no class
-//!   variables, so the method runs in the caller, and it creates a
-//!   process-owned resource (`ets:new`, `open_port`, `spawn_link`, `link`,
-//!   `monitor`, `register`, `erlang:send_after`/`start_timer`, the `timer`
-//!   timer constructors) or relies on `self()` or the process dictionary. The
-//!   resource belongs to the caller and dies with it. The fix is an Actor
-//!   that owns the resource, or `classState:` to keep the class process.
-//!   Suppress with `@expect class_method_process_resource`.
+//! - **`class-method-process-resource`** — the method is direct-called, so
+//!   it runs in the caller, and it creates a resource tied to the calling
+//!   process (`ets:new`, `open_port`, `spawn_link`, `link`, `monitor`,
+//!   `register`, `erlang:send_after`/`start_timer`, the `timer` interval
+//!   timers and `timer:send_after`) or acts on the calling process itself
+//!   (`self()`, the process dictionary, `process_flag`, `unlink`,
+//!   `demonitor`). The fix is an Actor that owns the resource, or
+//!   `classState:` to keep the class process. Suppress with
+//!   `@expect class_method_process_resource`.
+//!
+//! **The rule moves, the lints follow.** Today a method is direct-called only
+//! when it is `class sealed` in a `sealed` class without class variables (ADR
+//! 0129). ADR 0142 drops the sealing requirement, so every class method of a
+//! class without class variables runs in the caller; BT-4301 moves
+//! [`ClassInfo::is_direct_call_eligible`] to that rule, and these lints follow
+//! it with no edit here.
 //!
 //! **Fire condition** (both lints):
 //!
@@ -38,7 +43,7 @@
 //!    inspected in v1);
 //! 2. the class is known to the hierarchy and the selector is not
 //!    process-bound ([`ClassInfo::is_process_bound_class_selector`]: those
-//!    keep their routing whatever the class declares, so neither fix helps);
+//!    keep their routing whatever the class declares, so no hint can help);
 //! 3. the body contains a direct `(Erlang mod) fn ...` call listed in
 //!    [`CLASS_METHOD_FFI`] with an effect for the process the method runs in.
 //!    Transitive calls (a helper does the FFI) are not followed in v1.
@@ -46,8 +51,10 @@
 //! **Deliberately excluded from the table** (flagging them would fire on the
 //! blessed "FFI namespace" pattern): `file:open/read_file/write_file/close`
 //! and every pure or query FFI function (`lists`, `maps`, `string`, ...);
-//! `inet` entirely (a per-function audit is deferred); the `timer` helpers
-//! that create nothing (`timer:seconds/1`, `timer:tc/1`, `timer:sleep/1`,
+//! `inet` entirely (a per-function audit is deferred); the `timer` functions
+//! whose result is not tied to the caller (`timer:apply_after/4`, which
+//! outlives it, `exit_after`/`kill_after`, which target rather than own it)
+//! or that create nothing (`timer:seconds/1`, `timer:tc/1`, `timer:sleep/1`,
 //! ...); and dataflow-sensitive cases such as `process_info(self())` (needs
 //! argument tracking).
 
@@ -77,12 +84,11 @@ enum Sensitivity {
 /// (`class-method-process-resource`); selects the message wording.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CallerEffect {
-    /// The call creates a resource owned by the calling process (ETS table,
-    /// port, linked process, link, monitor, registered name, timer), so it
-    /// dies with the caller.
+    /// The call creates a resource tied to the calling process (ETS table,
+    /// port, linked process, link, monitor, registered name, timer).
     Resource,
-    /// The call reads or writes the calling process's identity or process
-    /// dictionary (`self()`, `put`/`get`/`erase`).
+    /// The call reads or changes the calling process itself: its pid, process
+    /// dictionary, process flags, links or monitors.
     Identity,
 }
 
@@ -121,7 +127,8 @@ const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 
 /// The single curated v1 table of process-sensitive Erlang functions, read by
 /// both lints: a function both lints care about (`self`, the process
-/// dictionary, `link`, `monitor`) has one row with both effects. Modelled on
+/// dictionary, `process_flag`, links, monitors) has one row with both
+/// effects. Modelled on
 /// `KNOWN_ARITIES`: a spec-derived attribute is a possible follow-up. See the
 /// module docs for what is deliberately left out.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
@@ -130,24 +137,21 @@ const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "get", OWNERSHIP, IDENTITY),
     row("erlang", "put", OWNERSHIP, IDENTITY),
     row("erlang", "erase", OWNERSHIP, IDENTITY),
-    row("erlang", "process_flag", OWNERSHIP, None),
+    row("erlang", "process_flag", OWNERSHIP, IDENTITY),
     row("erlang", "link", OWNERSHIP, RESOURCE),
-    row("erlang", "unlink", OWNERSHIP, None),
+    row("erlang", "unlink", OWNERSHIP, IDENTITY),
     row("erlang", "monitor", OWNERSHIP, RESOURCE),
-    row("erlang", "demonitor", OWNERSHIP, None),
+    row("erlang", "demonitor", OWNERSHIP, IDENTITY),
     row("erlang", "spawn_link", None, RESOURCE),
     row("erlang", "open_port", None, RESOURCE),
     row("erlang", "register", None, RESOURCE),
     row("erlang", "send_after", None, RESOURCE),
     row("erlang", "start_timer", None, RESOURCE),
     row("ets", "new", None, RESOURCE),
-    row("timer", "apply_after", None, RESOURCE),
     row("timer", "apply_interval", None, RESOURCE),
     row("timer", "apply_repeatedly", None, RESOURCE),
     row("timer", "send_after", None, RESOURCE),
     row("timer", "send_interval", None, RESOURCE),
-    row("timer", "exit_after", None, RESOURCE),
-    row("timer", "kill_after", None, RESOURCE),
     row("gen_tcp", "accept", BLOCKING, None),
     row("gen_tcp", "connect", BLOCKING, None),
     row("gen_tcp", "listen", OWNERSHIP, None),
@@ -225,9 +229,11 @@ fn check_method(
     let Some(class) = hierarchy.get_class(class_name) else {
         return;
     };
-    // ADR 0142 §1: the class needs its process exactly when it declares
-    // class variables of its own; otherwise the method runs in the caller.
-    let runs_in_class_process = class.has_class_variables();
+    // The one rule for where a class method runs. BT-4301 moves it to ADR
+    // 0142's (no class variables, not process-bound, sealing irrelevant);
+    // this lint then follows with no edit.
+    let runs_in_caller = hierarchy.is_direct_call_eligible(class_name, &selector);
+    let class_process_hint = class_process_hint(class, &selector, method.is_sealed);
 
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |expr| {
@@ -256,14 +262,43 @@ fn check_method(
                 call: format!("`{ffi_module}:{function}/{arity}`"),
                 expr,
             };
-            let diagnostic = if runs_in_class_process {
-                entry.in_class_process.map(|s| site.class_process(s))
-            } else {
+            let diagnostic = if runs_in_caller {
                 entry.in_caller.map(|e| site.caller(e))
+            } else {
+                entry
+                    .in_class_process
+                    .map(|s| site.class_process(s, &class_process_hint))
             };
             diagnostics.extend(diagnostic);
         });
     }
+}
+
+/// The `class-process-ffi` hint for a class method that runs in the class
+/// process: with class variables the class keeps its process whatever is
+/// sealed, so the call has to move; without them, the missing `sealed` /
+/// `class sealed` makes it direct-called in the caller today (ADR 0129).
+/// After BT-4301 every class method of a class without class variables is
+/// direct-called, so only the first branch stays reachable.
+fn class_process_hint(class: &ClassInfo, selector: &str, method_sealed: bool) -> String {
+    let class_name = class.name.as_str();
+    if class.has_class_variables() {
+        return format!(
+            "`{class_name}` declares class variables, so its class methods run in the class \
+             process: move the call into an instance method or an Actor"
+        );
+    }
+    let fix = match (class.is_sealed, method_sealed) {
+        (false, false) => {
+            format!("add `sealed` to class `{class_name}` and `class sealed` to `{selector}`")
+        }
+        (false, true) => format!("add `sealed` to class `{class_name}`"),
+        (true, false) => format!("add `class sealed` to `{selector}`"),
+        // Unreachable for a non-process-bound selector: such a method is
+        // direct-called. Keep the generic advice.
+        (true, true) => return "move the call into an instance method or an Actor".to_string(),
+    };
+    format!("{fix} so it is direct-called in the caller's process")
 }
 
 /// A matched FFI call inside a class method: what both messages name.
@@ -276,9 +311,9 @@ struct Site<'a> {
 }
 
 impl Site<'_> {
-    /// `class-process-ffi`: the method runs in the class process (the class
-    /// declares class variables) and the call depends on the calling process.
-    fn class_process(&self, sensitivity: Sensitivity) -> Diagnostic {
+    /// `class-process-ffi`: the method runs in the class process (it is not
+    /// direct-called) and the call depends on the calling process.
+    fn class_process(&self, sensitivity: Sensitivity, hint: &str) -> Diagnostic {
         let Self {
             class_name,
             selector,
@@ -297,23 +332,18 @@ impl Site<'_> {
         };
         Diagnostic::warning(
             format!(
-                "class method `{class_name} {selector}` calls {call}, {why} — but \
-                 `{class_name}` declares class variables, so this method runs in the class's \
-                 gen_server process, not the caller's, {consequence}"
+                "class method `{class_name} {selector}` calls {call}, {why} — but this method \
+                 runs in the class's gen_server process, not the caller's, {consequence}"
             ),
             expr.span(),
         )
-        .with_hint(format!(
-            "move the call into an instance method or an Actor, or move the class variables \
-             out of `{class_name}`: a class without `classState:` runs its class methods in the \
-             caller's process (ADR 0142)"
-        ))
+        .with_hint(hint.to_string())
         .with_category(DiagnosticCategory::ClassProcessFfi)
     }
 
-    /// `class-method-process-resource`: the method runs in the caller (the
-    /// class declares no class variables) and the call creates a resource
-    /// owned by, or relies on the identity of, the calling process.
+    /// `class-method-process-resource`: the method runs in the caller (it is
+    /// direct-called) and the call creates a resource tied to, or acts on, the
+    /// calling process.
     fn caller(&self, effect: CallerEffect) -> Diagnostic {
         let Self {
             class_name,
@@ -323,19 +353,19 @@ impl Site<'_> {
         } = self;
         let (why, consequence) = match effect {
             CallerEffect::Resource => (
-                "which creates a resource owned by the calling process",
-                "so the resource belongs to the caller and dies with it",
+                "which creates a resource tied to the calling process",
+                "so the resource is tied to the caller, not the class process",
             ),
             CallerEffect::Identity => (
-                "which relies on the calling process (`self()` or the process dictionary)",
-                "so it sees the caller, not the class process",
+                "which reads or changes the calling process itself (its pid, process \
+                 dictionary, flags, links or monitors)",
+                "so it acts on the caller, not the class process",
             ),
         };
         Diagnostic::warning(
             format!(
-                "class method `{class_name} {selector}` calls {call}, {why} — `{class_name}` \
-                 declares no class variables, so this method runs in the caller's process \
-                 (ADR 0142), {consequence}"
+                "class method `{class_name} {selector}` calls {call}, {why} — this method is \
+                 direct-called in the caller's process, {consequence}"
             ),
             expr.span(),
         )
@@ -393,34 +423,51 @@ mod tests {
         d.hint.as_deref().unwrap_or("")
     }
 
+    /// Where a probe class's method runs.
+    #[derive(Clone, Copy, Debug)]
+    enum Probe {
+        /// `class sealed` in a `sealed` class without class variables:
+        /// direct-called in the caller.
+        DirectCalled,
+        /// An open class without class variables: the class process today
+        /// (ADR 0129), the caller once BT-4301 lands.
+        OpenStateless,
+        /// A class with class variables: the class process, always.
+        Stateful,
+    }
+
     /// A one-method class calling `(Erlang module) function: x` from
-    /// `class probe: x`, with or without a class variable.
-    fn probe_class(module: &str, function: &str, stateful: bool) -> String {
-        let state = if stateful {
-            "  classState: n = 0\n\n"
-        } else {
-            ""
-        };
-        format!(
-            "Object subclass: Probe\n{state}  class probe: x => (Erlang {module}) {function}: x\n"
-        )
+    /// `class probe: x`.
+    fn probe_class(module: &str, function: &str, probe: Probe) -> String {
+        let call = format!("(Erlang {module}) {function}: x");
+        match probe {
+            Probe::DirectCalled => {
+                format!("sealed Object subclass: Probe\n  class sealed probe: x => {call}\n")
+            }
+            Probe::OpenStateless => format!("Object subclass: Probe\n  class probe: x => {call}\n"),
+            Probe::Stateful => format!(
+                "Object subclass: Probe\n  classState: n = 0\n\n  class probe: x => {call}\n"
+            ),
+        }
     }
 
     // ── table: one positive and one negative per row ─────────────────────
 
     #[test]
-    fn every_caller_row_fires_in_a_stateless_class_and_not_with_class_state() {
+    fn every_caller_row_fires_when_direct_called_and_not_in_the_class_process() {
         for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_some()) {
             let (m, f) = (entry.module, entry.function);
-            let fires = in_caller(&probe_class(m, f, false));
-            assert_eq!(fires.len(), 1, "{m}:{f} in a stateless class: {fires:?}");
+            let fires = in_caller(&probe_class(m, f, Probe::DirectCalled));
+            assert_eq!(fires.len(), 1, "{m}:{f} direct-called: {fires:?}");
             assert!(
                 fires[0].message.contains(&format!("`{m}:{f}/1`")),
                 "{fires:?}"
             );
             assert_eq!(fires[0].severity, Severity::Warning);
-            let silent = in_caller(&probe_class(m, f, true));
-            assert!(silent.is_empty(), "{m}:{f} with classState: {silent:?}");
+            for probe in [Probe::OpenStateless, Probe::Stateful] {
+                let silent = in_caller(&probe_class(m, f, probe));
+                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+            }
         }
     }
 
@@ -428,30 +475,28 @@ mod tests {
     fn rows_without_a_caller_effect_never_fire_class_method_process_resource() {
         for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_none()) {
             let (m, f) = (entry.module, entry.function);
-            let silent = in_caller(&probe_class(m, f, false));
+            let silent = in_caller(&probe_class(m, f, Probe::DirectCalled));
             assert!(silent.is_empty(), "{m}:{f}: {silent:?}");
         }
     }
 
     #[test]
-    fn every_class_process_row_fires_with_class_state_and_not_without() {
+    fn every_class_process_row_fires_in_the_class_process_and_not_when_direct_called() {
         for entry in CLASS_METHOD_FFI
             .iter()
             .filter(|r| r.in_class_process.is_some())
         {
             let (m, f) = (entry.module, entry.function);
-            let fires = in_class_process(&probe_class(m, f, true));
-            assert_eq!(fires.len(), 1, "{m}:{f} with classState: {fires:?}");
-            assert!(
-                fires[0].message.contains(&format!("`{m}:{f}/1`")),
-                "{fires:?}"
-            );
-            // Retired for stateless classes: they run in the caller (ADR 0142).
-            let silent = in_class_process(&probe_class(m, f, false));
-            assert!(
-                silent.is_empty(),
-                "{m}:{f} in a stateless class: {silent:?}"
-            );
+            for probe in [Probe::OpenStateless, Probe::Stateful] {
+                let fires = in_class_process(&probe_class(m, f, probe));
+                assert_eq!(fires.len(), 1, "{m}:{f} {probe:?}: {fires:?}");
+                assert!(
+                    fires[0].message.contains(&format!("`{m}:{f}/1`")),
+                    "{fires:?}"
+                );
+            }
+            let silent = in_class_process(&probe_class(m, f, Probe::DirectCalled));
+            assert!(silent.is_empty(), "{m}:{f} direct-called: {silent:?}");
         }
     }
 
@@ -462,8 +507,10 @@ mod tests {
             .filter(|r| r.in_class_process.is_none())
         {
             let (m, f) = (entry.module, entry.function);
-            let silent = in_class_process(&probe_class(m, f, true));
-            assert!(silent.is_empty(), "{m}:{f}: {silent:?}");
+            for probe in [Probe::OpenStateless, Probe::Stateful] {
+                let silent = in_class_process(&probe_class(m, f, probe));
+                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+            }
         }
     }
 
@@ -490,64 +537,66 @@ mod tests {
     // ── class-method-process-resource ────────────────────────────────────
 
     #[test]
-    fn stateless_resource_message_and_hint_name_the_fix() {
-        let src = "Object subclass: Tables\n  class make => (Erlang ets) new: #t with: #()\n";
+    fn direct_called_resource_message_and_hint_name_the_fix() {
+        let src = "sealed Object subclass: Tables
+  class sealed make => (Erlang ets) new: #t with: #()
+";
         let diags = in_caller(src);
         assert_eq!(diags.len(), 1, "{diags:?}");
         let msg = &diags[0].message;
         assert!(msg.contains("`Tables make`"), "{msg}");
         assert!(msg.contains("`ets:new/2`"), "{msg}");
-        assert!(msg.contains("creates a resource owned by the calling process"));
-        assert!(msg.contains("runs in the caller's process"));
-        assert!(msg.contains("dies with it"));
+        assert!(msg.contains("creates a resource tied to the calling process"));
+        assert!(msg.contains("direct-called in the caller's process"));
         let h = hint(&diags[0]);
         assert!(h.contains("Actor"), "{h}");
         assert!(h.contains("`classState:` on `Tables`"), "{h}");
     }
 
     #[test]
-    fn unary_erlang_self_in_stateless_class_relies_on_the_caller() {
-        let diags = in_caller("Object subclass: OpenC\n  class me => Erlang erlang self\n");
+    fn unary_erlang_self_when_direct_called_acts_on_the_caller() {
+        let diags =
+            in_caller("sealed Object subclass: SealedC\n  class sealed me => Erlang erlang self\n");
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("`erlang:self/0`"));
-        assert!(
-            diags[0]
-                .message
-                .contains("`self()` or the process dictionary")
-        );
-        assert!(diags[0].message.contains("sees the caller"));
+        assert!(diags[0].message.contains("calling process itself"));
+        assert!(diags[0].message.contains("acts on the caller"));
     }
 
     #[test]
-    fn sealing_plays_no_part() {
-        // ADR 0142: `sealed`/`class sealed` no longer decide where a class
-        // method runs; a stateless class runs it in the caller either way.
-        let src = "sealed Object subclass: SealedC
-  class sealed me => Erlang erlang self
-  class open: p => (Erlang erlang) open_port: p with: #()
+    fn process_flag_when_direct_called_changes_the_callers_flags() {
+        let src = "sealed Object subclass: Flags
+  class sealed trap => (Erlang erlang) process_flag: #trap_exit with: true
 ";
-        assert_eq!(in_caller(src).len(), 2);
-        assert!(in_class_process(src).is_empty());
-    }
-
-    #[test]
-    fn standalone_class_method_definition_fires_in_caller() {
-        let src = "Object subclass: Host\n\nHost class >> me => Erlang erlang self\n";
         let diags = in_caller(src);
         assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(diags[0].message.contains("`Host me`"));
+        assert!(diags[0].message.contains("`erlang:process_flag/2`"));
+    }
+
+    #[test]
+    fn timer_functions_not_tied_to_the_caller_are_silent() {
+        let src = "sealed Object subclass: Timers
+  class sealed a: m => (Erlang timer) apply_after: 1 with: m with: #f with: #()
+  class sealed k: p => (Erlang timer) kill_after: 1 with: p
+  class sealed e: p => (Erlang timer) exit_after: 1 with: p with: #r
+";
+        assert!(in_caller(src).is_empty());
     }
 
     #[test]
     fn pure_ffi_and_pure_timer_helpers_are_silent() {
-        let src = "Object subclass: Lists
-  class rev: xs => (Erlang lists) reverse: xs
-  class read: p => (Erlang file) read_file: p
-  class secs: n => (Erlang timer) seconds: n
-  class nap: n => (Erlang timer) sleep: n
-";
-        assert!(in_caller(src).is_empty());
-        assert!(in_class_process(src).is_empty());
+        for header in ["sealed Object subclass: Lists", "Object subclass: Lists"] {
+            let src = format!(
+                "{header}
+  class sealed rev: xs => (Erlang lists) reverse: xs
+  class sealed read: p => (Erlang file) read_file: p
+  class sealed secs: n => (Erlang timer) seconds: n
+  class sealed nap: n => (Erlang timer) sleep: n
+"
+            );
+            assert!(in_caller(&src).is_empty(), "{header}");
+            assert!(in_class_process(&src).is_empty(), "{header}");
+        }
     }
 
     #[test]
@@ -559,6 +608,7 @@ mod tests {
   class run: x => (Erlang erlang) link: x
 ";
         assert!(in_caller(src).is_empty());
+        assert!(in_class_process(src).is_empty());
         let stateful = "Object subclass: Ctor2
   classState: n = 0
 
@@ -570,20 +620,17 @@ mod tests {
 
     #[test]
     fn instance_side_methods_are_silent() {
-        let src = "Object subclass: Inst\n  me => Erlang erlang self\n";
+        let src = "sealed Object subclass: Inst\n  me => Erlang erlang self\n";
         assert!(in_caller(src).is_empty());
-        let stateful =
-            "Object subclass: Inst2\n  classState: n = 0\n\n  me => Erlang erlang self\n";
-        assert!(in_class_process(stateful).is_empty());
+        let open = "Object subclass: Inst2\n  me => Erlang erlang self\n";
+        assert!(in_class_process(open).is_empty());
     }
 
-    // ── class-process-ffi (classes with class variables) ─────────────────
+    // ── class-process-ffi ────────────────────────────────────────────────
 
     #[test]
-    fn issue_repro_with_class_state_fires_for_each_method() {
+    fn issue_repro_open_class_fires_for_each_method() {
         let src = "Object subclass: Tcp
-  classState: count = 0
-
   class accept: ls => (Erlang gen_tcp) accept: ls
   class handOff: s to: pid => (Erlang gen_tcp) controlling_process: s with: pid
   class sendfile: s path: p =>
@@ -596,14 +643,13 @@ mod tests {
         assert!(diags[0].message.contains("`gen_tcp:accept/1`"));
         assert!(diags[0].message.contains("blocks the calling process"));
         assert!(diags[0].message.contains("queues behind one process"));
-        assert!(diags[0].message.contains("declares class variables"));
         assert!(diags[1].message.contains("`gen_tcp:controlling_process/2`"));
         assert!(diags[1].message.contains("ownership"));
         assert!(diags[2].message.contains("`file:sendfile/5`"));
         for d in &diags {
             assert_eq!(d.severity, Severity::Warning);
             assert!(
-                hint(d).contains("move the class variables out of `Tcp`"),
+                hint(d).contains("add `sealed` to class `Tcp` and `class sealed` to"),
                 "{d:?}"
             );
         }
@@ -611,19 +657,44 @@ mod tests {
     }
 
     #[test]
-    fn stateless_open_class_no_longer_fires_class_process_ffi() {
-        let src = "Object subclass: Tcp
-  class accept: ls => (Erlang gen_tcp) accept: ls
-  class me => Erlang erlang self
-";
-        assert!(in_class_process(src).is_empty());
-        // `self` is the caller's now: the inverted lint takes over.
-        assert_eq!(in_caller(src).len(), 1);
+    fn sealed_class_unsealed_method_hint_names_class_sealed_only() {
+        let diags = in_class_process(
+            "sealed Object subclass: SealedC\n  class me2 => Erlang erlang self\n",
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let h = hint(&diags[0]);
+        assert!(h.contains("add `class sealed` to `me2`"), "{h}");
+        assert!(!h.contains("add `sealed` to class"), "{h}");
     }
 
     #[test]
-    fn standalone_class_method_of_stateful_class_fires_in_class_process() {
-        let src = "Object subclass: Host\n  classState: n = 0\n\nHost class >> me => Erlang erlang self\n";
+    fn open_class_sealed_method_hint_names_sealed_only() {
+        let diags =
+            in_class_process("Object subclass: OpenC\n  class sealed me => Erlang erlang self\n");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let h = hint(&diags[0]);
+        assert!(h.contains("add `sealed` to class `OpenC`"), "{h}");
+        assert!(!h.contains("`class sealed` to"), "{h}");
+    }
+
+    #[test]
+    fn class_with_class_state_fires_with_the_move_hint_even_when_sealed() {
+        let src = "sealed Object subclass: Stateful
+  classState: n = 0
+
+  class sealed me => Erlang erlang self
+";
+        let diags = in_class_process(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let h = hint(&diags[0]);
+        assert!(h.contains("`Stateful` declares class variables"), "{h}");
+        assert!(h.contains("instance method or an Actor"), "{h}");
+        assert!(in_caller(src).is_empty());
+    }
+
+    #[test]
+    fn standalone_class_method_definition_fires() {
+        let src = "Object subclass: Host\n\nHost class >> me => Erlang erlang self\n";
         let diags = in_class_process(src);
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("`Host me`"));
@@ -649,52 +720,42 @@ mod tests {
         }
     }
 
-    #[test]
-    fn expect_class_process_ffi_suppresses_the_warning_with_class_state() {
-        let src = "Object subclass: Stateful
-  classState: n = 0
+    fn assert_suppressed(src: &str, category: DiagnosticCategory) {
+        let diags = after_expect(src);
+        assert!(
+            !diags.iter().any(|d| d.category == Some(category)),
+            "{diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.message.contains("stale @expect")),
+            "the directive matched: {diags:?}"
+        );
+    }
 
+    #[test]
+    fn expect_class_process_ffi_suppresses_the_warning() {
+        let src = "Object subclass: OpenC
   class me =>
     @expect class_process_ffi
     Erlang erlang self
 ";
-        let diags = after_expect(src);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.category == Some(DiagnosticCategory::ClassProcessFfi)),
-            "{diags:?}"
-        );
-        assert!(
-            !diags.iter().any(|d| d.message.contains("stale @expect")),
-            "the directive matched: {diags:?}"
-        );
+        assert_suppressed(src, DiagnosticCategory::ClassProcessFfi);
     }
 
     #[test]
     fn expect_class_method_process_resource_suppresses_the_warning() {
-        let src = "Object subclass: OpenC
-  class me =>
+        let src = "sealed Object subclass: SealedC
+  class sealed me =>
     @expect class_method_process_resource
     Erlang erlang self
 ";
-        let diags = after_expect(src);
-        assert!(
-            !diags
-                .iter()
-                .any(|d| d.category == Some(DiagnosticCategory::ClassMethodProcessResource)),
-            "{diags:?}"
-        );
-        assert!(
-            !diags.iter().any(|d| d.message.contains("stale @expect")),
-            "the directive matched: {diags:?}"
-        );
+        assert_suppressed(src, DiagnosticCategory::ClassMethodProcessResource);
     }
 
     #[test]
-    fn expect_class_process_ffi_in_stateless_class_is_reported_unused() {
-        let src = "Object subclass: OpenC
-  class accept: ls =>
+    fn expect_class_process_ffi_on_a_direct_called_method_is_reported_unused() {
+        let src = "sealed Object subclass: SealedC
+  class sealed accept: ls =>
     @expect class_process_ffi
     (Erlang gen_tcp) accept: ls
 ";

@@ -64,9 +64,8 @@ pub enum ExpectCategory {
     /// function (BT-4031).
     ClassProcessFfi,
     /// Suppress class-method-process-resource warnings — a class-side method
-    /// of a class without class variables, which runs in the caller (ADR
-    /// 0142), directly creates a process-owned resource or relies on the
-    /// calling process's identity (BT-4302).
+    /// that is direct-called in the caller's process directly creates a
+    /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
