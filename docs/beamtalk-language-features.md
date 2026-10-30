@@ -816,7 +816,7 @@ Both containers use `=:=` for identity, so they agree with each other and with `
 | | Compares with |
 |---|---|
 | `includes:` on `Collection`, `List`, `Array`, `Dictionary` (searches values); `List>>indexOf:`; `TestCase>>assert:equals:` | `equals:` |
-| `Set` elements, `Dictionary` *keys*, `List>>unique` | `=:=` |
+| `Set` elements, `Dictionary` *keys*, `List>>unique`, `List>>withoutDuplicatesBy:` keys | `=:=` |
 
 The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
 
