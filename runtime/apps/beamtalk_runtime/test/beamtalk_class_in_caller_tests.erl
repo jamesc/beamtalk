@@ -234,6 +234,16 @@ errors_match() ->
         end
     end).
 
+%% Polls until `Base`'s metadata row is gone (a stand-in install's wait).
+wait_until_row_gone(Base) ->
+    case beamtalk_class_metadata:lookup_superclass(Base) of
+        {ok, _} ->
+            timer:sleep(5),
+            wait_until_row_gone(Base);
+        not_found ->
+            ok
+    end.
+
 outcome_with(Pid, Selector, Args) ->
     try send(Pid, Selector, Args) of
         V -> {returned, V}
@@ -435,6 +445,59 @@ invalidation_test_() ->
                     persistent_term:erase(LeafTag)
                 end
             end},
+        {"deleting an ancestor's row leaves no descendant flag derived from it", fun() ->
+            %% BT-4301: an install of `Leaf`'s flag that read `Base`'s row
+            %% before `delete(Base)` removed it derives `true`. Here it holds
+            %% `Leaf`'s tag lock from before the delete until the row is gone,
+            %% then puts that stale value. `delete/1` must erase the
+            %% descendants' flags after the row is gone, waiting for the lock,
+            %% so the stale value is removed. (Erasing before the removal
+            %% would wait on the install, which waits on the removal: the
+            %% delete never returns.)
+            Base = 'Bt4301DelBase',
+            Leaf = 'Bt4301DelLeaf',
+            LeafTag = tag(Leaf),
+            beamtalk_class_metadata:new(),
+            ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
+            ok = beamtalk_class_metadata:put_class_variables(Base, false),
+            ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
+            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
+            _ = persistent_term:erase(LeafTag),
+            Self = self(),
+            Installer = spawn(fun() ->
+                beamtalk_class_shadow_flags:with_tag_lock(LeafTag, fun() ->
+                    Self ! derived,
+                    wait_until_row_gone(Base),
+                    persistent_term:put(LeafTag, true)
+                end),
+                Self ! {installed, self()}
+            end),
+            receive
+                derived -> ok
+            after 5000 -> error(lock_not_taken)
+            end,
+            Writer = spawn(fun() ->
+                ok = beamtalk_class_metadata:delete(Base),
+                Self ! {deleted, self()}
+            end),
+            try
+                receive
+                    {deleted, Writer} -> ok
+                after 5000 -> error(delete_stuck)
+                end,
+                receive
+                    {installed, Installer} -> ok
+                after 5000 -> error(install_stuck)
+                end,
+                ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
+            after
+                exit(Installer, kill),
+                exit(Writer, kill),
+                beamtalk_class_metadata:delete(Leaf),
+                persistent_term:erase(LeafTag)
+            end
+        end},
         {"put_process_bound_selectors drops derived facts only on a change", fun() ->
             with_class('Bt4300Bound2', none, #{}, fun(Pid) ->
                 Key = {class_method_owner, Pid, testSelf},

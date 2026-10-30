@@ -454,9 +454,9 @@ delete(Name) ->
     delete_method_records(Name),
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     %% BT-4299: a removed class keeps no class-variable input and no derived
-    %% direct-call flag (a later class of the same name re-derives both).
+    %% direct-call flag (a later class of the same name re-derives both). The
+    %% flags are erased below, once the row is gone.
     beamtalk_class_shadow_flags:set_class_vars(Name, false),
-    beamtalk_class_shadow_flags:invalidate(Name),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
     %% otherwise Name would linger forever as a phantom subclass of its old
@@ -471,6 +471,15 @@ delete(Name) ->
     catch
         error:badarg -> ok
     end,
+    %% BT-4299 / BT-4301: erase the class's derived flag and its descendants'
+    %% only now that the row is gone. Their derived values read this row
+    %% (`chain_has_class_variables/1`), so an erase before the removal could
+    %% be followed by an install from the row still present; after it, the
+    %% chain is unresolvable and re-derives fail closed. The edges keyed on
+    %% Name (its children) survive the row, so the descendants are still
+    %% found; each erase takes its tag lock, so an install in flight that read
+    %% the old row is waited for and its value removed.
+    beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: a removed class must not keep resolving through the cache.
     beamtalk_class_derived_cache:invalidate().
 
