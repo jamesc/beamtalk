@@ -186,8 +186,8 @@ class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
 %% exit, not a successful call.
 class_send_plain(ClassPid, Selector, Args) ->
     %% ADR 0142 §2 (BT-4300): a class method of a class that needs no process
-    %% (no class variables, not shadowed, a selector that is not process-bound,
-    %% defined on a class without class variables) runs in the caller. Checked
+    %% (no class variables anywhere in its chain, not shadowed, a selector
+    %% that is not process-bound) runs in the caller. Checked
     %% before the self-call guard: an in-caller call has no gen_server to
     %% deadlock on, so a block re-entering its class answers.
     case in_caller_owner(ClassPid, Selector) of
