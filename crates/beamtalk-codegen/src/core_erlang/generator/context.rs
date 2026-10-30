@@ -38,6 +38,9 @@ pub(crate) struct ReplContext {
     /// or a REPL producer's construct). `Result tryDo:` compiles to that tuple
     /// only there; anywhere else it is an ordinary send.
     pub repl_unpack_site: Option<beamtalk_core::source_analysis::Span>,
+    /// BT-4288: the non-local-return boundary of the input being compiled
+    /// (`repl_nlr`).
+    pub eval_boundary: crate::core_erlang::repl_nlr::ReplEvalBoundary,
 }
 
 impl ReplContext {
@@ -47,6 +50,7 @@ impl ReplContext {
             is_repl_mode: false,
             repl_loop_mutated: false,
             repl_unpack_site: None,
+            eval_boundary: crate::core_erlang::repl_nlr::ReplEvalBoundary::default(),
         }
     }
 }

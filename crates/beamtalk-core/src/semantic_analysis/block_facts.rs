@@ -1722,6 +1722,98 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
     }
 }
 
+/// BT-4288: the `^`s in `exprs` whose nearest enclosing block run in a loop's
+/// or fold's place is a loop or fold body: walking outward from the `^`, a
+/// block of a [`local_threading_construct`] of the
+/// [`LocalThreadingFamily::Loop`] or [`LocalThreadingFamily::Fold`] family
+/// that codegen threads today ([`LocalThreadingConstruct::is_threaded_today`])
+/// is reached before any closure (a block literal that is no construct block:
+/// stored, passed to a method, ...). Such a `^` is compiled inside the loop's
+/// `fun`, so it reaches the end of its scope only as a non-local-return throw
+/// to that scope's boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoopBodyReturns {
+    /// Every enclosing block is run in place (a conditional arm, an evaluated
+    /// or protected block, a loop or fold body): the `^` runs while the
+    /// method or REPL input that holds it runs, so it can end it. At the REPL,
+    /// codegen establishes the eval's boundary for exactly these, and only
+    /// these throw to it.
+    pub in_place: Vec<Span>,
+    /// A closure encloses the loop (`b := [#(1, 2) do: [:x | ^x]]`,
+    /// `Holder keep: [...]`): the `^` may run in a later REPL input, after
+    /// the eval that created it has ended, so no REPL boundary can catch it.
+    /// At the REPL it answers its value inside the loop, which ignores it, so
+    /// the REPL check rejects it (BT-4003).
+    pub in_closure: Vec<Span>,
+}
+
+/// Classifies the loop-body `^`s of `exprs` ([`LoopBodyReturns`]).
+#[must_use]
+pub fn classify_loop_body_returns<'a>(
+    exprs: impl IntoIterator<Item = &'a Expression>,
+) -> LoopBodyReturns {
+    let mut in_place: HashSet<Span> = HashSet::new();
+    let mut loop_bodies: HashSet<Span> = HashSet::new();
+    let mut blocks: Vec<Span> = Vec::new();
+    let mut returns: Vec<Span> = Vec::new();
+    for expr in exprs {
+        crate::ast_walker::walk_expression(expr, &mut |e| match e {
+            Expression::Block(b) => blocks.push(b.span),
+            Expression::Return { span, .. } => returns.push(*span),
+            Expression::MessageSend { .. } => {
+                let Some(construct) =
+                    local_threading_construct(e).filter(LocalThreadingConstruct::is_threaded_today)
+                else {
+                    return;
+                };
+                let is_loop = matches!(
+                    construct.family,
+                    LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
+                );
+                for block in construct.blocks {
+                    in_place.insert(block.span);
+                    if is_loop {
+                        loop_bodies.insert(block.span);
+                    }
+                }
+            }
+            _ => {}
+        });
+    }
+    let encloses =
+        |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
+    let mut result = LoopBodyReturns::default();
+    for ret in returns {
+        // The blocks enclosing the `^`, innermost first.
+        let mut enclosing: Vec<Span> = blocks
+            .iter()
+            .copied()
+            .filter(|b| encloses(*b, ret))
+            .collect();
+        enclosing.sort_by_key(|b| b.end() - b.start());
+        let Some(loop_at) = enclosing
+            .iter()
+            .position(|b| !in_place.contains(b) || loop_bodies.contains(b))
+            .filter(|&at| loop_bodies.contains(&enclosing[at]))
+        else {
+            continue;
+        };
+        if enclosing[loop_at..].iter().all(|b| in_place.contains(b)) {
+            result.in_place.push(ret);
+        } else {
+            result.in_closure.push(ret);
+        }
+    }
+    result
+}
+
+/// The [`LoopBodyReturns::in_place`] returns of `exprs`: the ones a REPL eval
+/// boundary catches.
+#[must_use]
+pub fn loop_body_returns<'a>(exprs: impl IntoIterator<Item = &'a Expression>) -> Vec<Span> {
+    classify_loop_body_returns(exprs).in_place
+}
+
 /// ADR 0131 §1 "Transitive closure" (BT-3746): the outer locals a
 /// local-threading construct writes, in source order (first write of each
 /// name only). This is the construct's threaded set.

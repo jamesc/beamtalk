@@ -54,13 +54,14 @@ use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelect
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
-    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity, conditional_arm_blocks,
-    conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
-    exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_self_or_super, is_threaded_frame_body, literal_block_value_arm,
-    local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, match_arm_block,
-    match_arm_body_writes, match_arms, match_guard_writes, match_producer_writes,
-    operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
+    RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity,
+    classify_loop_body_returns, conditional_arm_blocks, conditional_producer_writes,
+    construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
+    is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site, is_self_or_super,
+    is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
+    loop_body_producer_sites, loop_body_returns, match_arm_block, match_arm_body_writes,
+    match_arms, match_guard_writes, match_producer_writes, operand_producer_writes,
+    outer_local_writes, outer_state_writes, producer_body_block,
     receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
     repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
     value_blocks,
@@ -1204,12 +1205,17 @@ fn check_body(
 ///   5. b value` hands the block back and answers the stale 0 (BT-4275, closed
 ///   won't-do). Telling `withFallback:` from `keep:` would need a per-callee
 ///   "does not retain its block" fact.
-/// - **A `^` in a REPL loop or fold body** (a block a loop or collection
-///   operation runs in place, [`local_threading_construct`]) is ignored: the
-///   loop runs on and the expression answers the loop's own value
-///   (`[n < 3] whileTrue: [^10]` never ends). Measured right at the REPL: a
-///   `^` at the root, in a conditional arm, an evaluated block, a protected
-///   block, and a stored closure.
+/// - **A `^` in a REPL loop or fold body that no REPL boundary catches**
+///   ([`classify_loop_body_returns`]). BT-4288: a loop-body `^` run in place
+///   ends the input with its value, as in a method, and the bindings written
+///   before it keep their values (codegen's REPL eval boundary). Two shapes
+///   stay rejected. A loop held in a closure (`b := [#(1, 2) do: [:x |
+///   ^x]]`) may run in a later input, after the eval that created it has
+///   ended: its `^` answers its value inside the loop, which ignores it and
+///   runs on (BT-4003). And such a `^` inside the value of a top-level
+///   assignment: in a method `r := xs do: [:x | ^x]` never assigns `r`, but
+///   the workspace binds a single-statement assignment's variable to the
+///   input's value, so `r` would be assigned the `^`'s value.
 fn report_stale_returns(
     context: MethodContext,
     params: &[EcoString],
@@ -1231,16 +1237,82 @@ fn report_stale_returns(
             _ => {}
         });
     }
+    if context == Repl {
+        report_repl_closure_loop_returns(body, diagnostics);
+        report_repl_assigned_loop_returns(body, diagnostics);
+    }
     let mut scan = StaleReturnScan {
         context,
         bindings: params,
         assigned,
         loops: Vec::new(),
-        in_loop_body: false,
         diagnostics,
     };
     for stmt in body {
         scan.expr(&stmt.expression);
+    }
+}
+
+/// BT-4003 / BT-4288: a `^` in a REPL loop or fold body held in a closure
+/// ([`LoopBodyReturns::in_closure`](crate::semantic_analysis::block_facts::LoopBodyReturns)).
+/// See [`report_stale_returns`].
+fn report_repl_closure_loop_returns(
+    body: &[ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let returns = classify_loop_body_returns(body.iter().map(|s| &s.expression));
+    for span in returns.in_closure {
+        diagnostics.push(
+            Diagnostic::error(
+                "a non-local return (`^`) in the body of a loop or collection operation \
+                 inside a block that is not run where it is written is not supported in a \
+                 top-level expression: the loop would ignore it and run on (BT-4003)",
+                span,
+            )
+            .with_hint(
+                "answer the value with `detect:ifNone:` or `inject:into:`, or move the \
+                 loop into a method and return from there",
+            )
+            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+        );
+    }
+}
+
+/// BT-4288: a `^` in a loop or fold body ([`loop_body_returns`]) inside the
+/// value of a top-level REPL assignment. See [`report_stale_returns`].
+fn report_repl_assigned_loop_returns(
+    body: &[ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in body {
+        let (value, what) = match &stmt.expression {
+            Expression::Assignment { target, value, .. } => match target.as_ref() {
+                Expression::Identifier(id) => (value, format!("`{}`", id.name)),
+                _ => continue,
+            },
+            Expression::DestructureAssignment { value, .. } => {
+                (value, "the destructured bindings".to_string())
+            }
+            _ => continue,
+        };
+        for span in loop_body_returns(std::iter::once(value.as_ref())) {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "a non-local return (`^`) in the body of a loop or collection \
+                         operation ends the input with its value, so the assignment to {what} \
+                         never completes; it is not supported in the value of a top-level \
+                         assignment (BT-4288)"
+                    ),
+                    span,
+                )
+                .with_hint(
+                    "answer the value with `detect:ifNone:` or `inject:into:` and assign that, \
+                     or leave the assignment out and let the `^` answer the input",
+                )
+                .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+            );
+        }
     }
 }
 
@@ -1253,9 +1325,6 @@ struct StaleReturnScan<'a> {
     assigned: Vec<(EcoString, Span)>,
     /// The spans of the enclosing loop and fold bodies run in place.
     loops: Vec<Span>,
-    /// Whether the walk is in a loop or fold body run in place, with no
-    /// closure between.
-    in_loop_body: bool,
     diagnostics: &'a mut Vec<Diagnostic>,
 }
 
@@ -1303,9 +1372,7 @@ impl StaleReturnScan<'_> {
                 );
             }
         }
-        let outer = std::mem::replace(&mut self.in_loop_body, false);
         self.body(block);
-        self.in_loop_body = outer;
     }
 
     fn is_stale(&self, name: &str, block: &Block) -> bool {
@@ -1324,22 +1391,7 @@ impl StaleReturnScan<'_> {
     #[allow(clippy::too_many_lines)] // one arm per expression kind
     fn expr(&mut self, expr: &Expression) {
         match expr {
-            Expression::Return { value, span } => {
-                if self.context == Repl && self.in_loop_body {
-                    self.diagnostics.push(
-                        Diagnostic::error(
-                            "a non-local return (`^`) in the body of a loop or collection \
-                             operation is not supported in a top-level expression: the loop \
-                             would ignore it and run on (BT-4003)",
-                            *span,
-                        )
-                        .with_hint(
-                            "answer the value with `detect:ifNone:` or `inject:into:`, or move \
-                             the loop into a method and return from there",
-                        )
-                        .with_category(DiagnosticCategory::UnmigratedLocalThreading),
-                    );
-                }
+            Expression::Return { value, .. } => {
                 self.expr(value);
             }
             Expression::MessageSend {
@@ -1361,9 +1413,7 @@ impl StaleReturnScan<'_> {
                                 LocalThreadingFamily::Loop | LocalThreadingFamily::Fold
                             ) {
                                 self.loops.push(b.span);
-                                let outer = std::mem::replace(&mut self.in_loop_body, true);
                                 self.body(b);
-                                self.in_loop_body = outer;
                                 self.loops.pop();
                             } else {
                                 self.body(b);

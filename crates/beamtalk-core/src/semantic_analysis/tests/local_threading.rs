@@ -4728,14 +4728,18 @@ fn bt4276_a_state_fold_operand_in_a_closure_in_a_fold_body_is_judged_by_the_clos
     }
 }
 
-/// PIN-BUG BT-4288 (BT-4003 item 5): a `^` in the body of a loop or collection
-/// operation at the REPL is ignored (measured: `#(1, 2) do: [:x | ^x]` answers
-/// the loop's value, and `[n < 3] whileTrue: [^10]` never ends). Rejected.
-/// Accepted (measured right): a `^` at the root, in a conditional arm, an
-/// evaluated block, a protected block and a stored closure; and every `^` in a
-/// method (item 4: `^` in an actor's tuple-accumulator `do:` answers right).
+/// BT-4288 (BT-4003 item 5): a `^` in the body of a loop or collection
+/// operation at the REPL ends the input with its value, as in a method (it
+/// used to be ignored, and was a compile error until codegen established the
+/// REPL eval's non-local-return boundary). So is a `^` at the root, in a
+/// conditional arm, an evaluated block, a protected block and a stored
+/// closure. Two shapes stay rejected: such a `^` inside the value of a
+/// top-level assignment (the workspace would bind the variable to the input's
+/// value, which a method never assigns), and, as on main (BT-4003), a loop
+/// body `^` whose loop is held in a closure: the closure may run in a later
+/// input, where no boundary catches the throw.
 #[test]
-fn bt4003_a_return_in_a_repl_loop_body_is_rejected() {
+fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
     for input in [
         "#(1, 2) do: [:x | ^x]\n",
         "#(1, 2) collect: [:x | ^x]\n",
@@ -4747,8 +4751,34 @@ fn bt4003_a_return_in_a_repl_loop_body_is_rejected() {
         "#(1, 2) do: [:x | true ifTrue: [^x]]\n",
         "true ifTrue: [#(1, 2) do: [:x | ^x]]\n",
         "w := 0\n#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]\n",
+        "(#(1, 2) do: [:x | ^x]) size\n",
+        "true ifTrue: [r := #(1, 2) do: [:x | ^x]]\n",
     ] {
         let errors = analysis_errors(input, &["n"]);
+        assert!(errors.is_empty(), "REPL {input}: {errors:?}");
+    }
+    for input in [
+        "r := #(1, 2) do: [:x | ^x]\n",
+        "w := 0\nr := #(1, 2) inject: 0 into: [:a :x | x == 2 ifTrue: [^w]. a + x]\n",
+        "r := (#(1, 2) collect: [:x | ^x]) size\n",
+        "#(a, b) := #(1, 2) collect: [:x | ^x]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4288")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+    for input in [
+        "b := [#(1, 2) do: [:x | ^x]]\n",
+        "Holder keep: [#(1, 2) do: [:x | ^x]]\n",
+        "true ifTrue: [b := [#(1, 2) do: [:x | ^x]]]\n",
+        "#(1, 2) do: [:x | b := [#(3) do: [:y | ^y]]]\n",
+        "b := [:k | 1 to: k do: [:i | i == 2 ifTrue: [^i]]]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
         assert!(
             errors
                 .iter()

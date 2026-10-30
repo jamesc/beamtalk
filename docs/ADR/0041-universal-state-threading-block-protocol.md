@@ -76,6 +76,33 @@ block that escapes may read but not assign, and the compiler reports it. The
 Tier 1 / Tier 2 block protocol below stays, scoped to those constructs and
 the stdlib collections.
 
+## Amendment (BT-4288, 2026-10-30): the REPL eval is an NLR boundary
+
+A `^` in the body of a loop or fold run in place (`block_facts::loop_body_returns`:
+reached through conditional arms, evaluated and protected blocks and nested
+loops, never through a closure) is compiled inside the loop's `fun`, so it can
+end its scope only as a 4-tuple throw to that scope's boundary. The invariant,
+per scope:
+
+| Scope | The loop-body `^`'s boundary | State the throw carries |
+|-------|------------------------------|-------------------------|
+| Actor method | the method's (`NlrBoundary::ActorReply`) | the current `State` |
+| Class method | the method's (`NlrBoundary::ClassMethod`) | `nil` (ADR 0130) |
+| Value-type method | the method's (`NlrBoundary::ValueType`) | the current `Self` |
+| REPL input | the eval's (`NlrBoundary::Repl`) | the workspace bindings map at the `^` |
+
+Methods mint their boundary whenever a block holds a `^`. The REPL eval
+mints its own for exactly the loop-body returns of the input (`repl_nlr.rs`),
+so the catch answers the eval's `{Value, Bindings}`: the bindings written
+before the `^` keep their values and the rest of the input does not run. Every
+other REPL `^` (at the root, in an arm, an evaluated or protected block outside
+a loop, a stored closure) keeps answering its value where it stands. A loop-body
+`^` lowered with no boundary is `VerifyError::LoopReturnWithoutBoundary`, in
+every scope. A loop-body `^` whose loop is held in a closure is not one of
+them: the closure may run in a later REPL input, after the eval that created
+it has ended, so the REPL rejects it (`LoopBodyReturns::in_closure`); in a
+method it throws to the method's boundary as before.
+
 ## Decision
 
 Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.

@@ -195,7 +195,7 @@ pub(in crate::core_erlang) fn render(
                 boundary, token, ..
             } => {
                 let body_doc = render(&ir[i + 1..], ctx);
-                docs.push(render_nlr_catch(*boundary, token.name(), body_doc, ctx));
+                docs.push(render_nlr_catch(boundary, token.name(), body_doc, ctx));
                 return Document::Vec(docs);
             }
             ThreadedStmt::Return(value, state, _) => docs.push(render_return(value, state, ctx)),
@@ -1254,7 +1254,7 @@ fn render_bind(
 /// still allocated here, matching production's own post-body
 /// `alloc_nlr_catch_vars` position.
 fn render_nlr_catch(
-    boundary: NlrBoundary,
+    boundary: &NlrBoundary,
     token_var: &str,
     body_doc: Document<'static>,
     ctx: &mut RenderCtx,

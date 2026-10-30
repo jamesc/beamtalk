@@ -318,7 +318,7 @@ impl CoreErlangGenerator {
                             "\n",
                             catch_vars.format_try_prefix(),
                             body_doc,
-                            catch_vars.format_catch_suffix(NlrBoundary::ValueType),
+                            catch_vars.format_catch_suffix(&NlrBoundary::ValueType),
                         ]
                     } else {
                         docvec![
