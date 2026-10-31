@@ -197,4 +197,224 @@ fn compile_file_applies_project_diagnostics_table() {
         Some(&atom("error")),
         "a genuine type mismatch must fail under the project's type = \"error\": {response:?}"
     );
+    let messages = error_diagnostic_messages(&response);
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("declared as Integer")),
+        "the failure must be the intended Integer mismatch, not a spurious alias/FFI diagnostic: {messages:?}"
+    );
+}
+
+/// BT-4322: a method patched into a project class typechecks with the same
+/// project scope as a whole-file `compile` — the merged class sees the
+/// project's aliases and FFI specs.
+#[test]
+fn compile_method_patch_sees_project_scope() {
+    let (_dir, state_path) = write_parity_project();
+    let class_source = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: ParityState\n\
+         \x20 field: scheme :: Scheme = #http\n\
+         \x20 field: addr :: DepAddr = #local\n";
+    let request = Map::from([
+        (atom("command"), atom("compile_method")),
+        (atom("class_source"), binary(class_source)),
+        (
+            atom("method_source"),
+            binary("monotonicTime -> Integer => Erlang erlang monotonic_time"),
+        ),
+        (atom("is_class_method"), atom("false")),
+        (
+            atom("source_path"),
+            binary(state_path.to_string_lossy().as_ref()),
+        ),
+    ]);
+    let response = handle_compile_method(&request);
+    let Term::Map(ref m) = response else {
+        panic!("Expected map response: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "status"),
+        Some(&atom("ok")),
+        "patched method must compile: {response:?}"
+    );
+    let warnings = compile_warnings(&response);
+    assert!(
+        !warnings.iter().any(|w| w.contains("untyped FFI")),
+        "patched zero-arg FFI with a registry spec must not warn: {warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("declared as Scheme")),
+        "merged class must see the cross-file alias: {warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("declared as DepAddr")),
+        "merged class must see the dependency alias: {warnings:?}"
+    );
+}
+
+fn error_diagnostic_messages(response: &Term) -> Vec<String> {
+    let Term::Map(m) = response else {
+        panic!("Expected map response: {response:?}");
+    };
+    let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+        panic!("Expected diagnostics list: {response:?}");
+    };
+    diagnostics
+        .elements
+        .iter()
+        .map(|diag| {
+            let Term::Map(dm) = diag else {
+                panic!("Expected diagnostic map, got {diag:?}");
+            };
+            map_get(dm, "message")
+                .and_then(term_to_string)
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// BT-4322 session-wins merge: a session alias keeps its declaration over a
+/// same-named project alias (REPL "current turn wins") instead of colliding
+/// as a hard error the moment the project reloads. The session's narrower
+/// `Scheme` still rejects the `#http` default — the project's `Scheme`
+/// would accept it, so the error proves the session declaration (not the
+/// project's) was used.
+#[test]
+fn session_alias_wins_over_project_alias() {
+    let (_dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let mut request = load_like_compile_request(&source, &state_path);
+    request.map.insert(
+        atom("known_type_aliases"),
+        Term::from(List::from(vec![binary("type Scheme = Integer")])),
+    );
+
+    let response = handle_compile(&request);
+    let Term::Map(ref m) = response else {
+        panic!("Expected map response: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "status"),
+        Some(&atom("error")),
+        "session-narrowed Scheme must still mismatch #http: {response:?}"
+    );
+    let messages = error_diagnostic_messages(&response);
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("declared as Scheme")),
+        "the session declaration must win (the project's Scheme would accept #http): {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|msg| msg.contains("collides")),
+        "no alias/alias collision may fire: {messages:?}"
+    );
+}
+
+/// Files with no enclosing manifest — and stdlib files even under a
+/// manifest — keep the legacy behaviour: no project scope. An unknown alias
+/// still surfaces (nothing is swallowed), but with no project table it stays
+/// a warning and the compile succeeds.
+#[test]
+fn manifest_less_and_stdlib_files_keep_legacy_scope() {
+    let stray_source = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: Stray\n\
+         \x20 field: s :: Scheme = #http\n";
+
+    // No beamtalk.toml above a fresh tempdir: legacy scope.
+    let bare = tempfile::tempdir().expect("bare tempdir");
+    let stray_path = bare.path().join("stray.bt");
+    fs::write(&stray_path, stray_source).expect("write stray file");
+    let response = handle_compile(&load_like_compile_request(stray_source, &stray_path));
+    let Term::Map(ref m) = response else {
+        panic!("Expected map response: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "status"),
+        Some(&atom("ok")),
+        "manifest-less file must compile: {response:?}"
+    );
+    let warnings = compile_warnings(&response);
+    assert!(
+        warnings.iter().any(|w| w.contains("declared as Scheme")),
+        "unknown alias must still surface without project scope: {warnings:?}"
+    );
+
+    // Stdlib mode under a real manifest: legacy scope too.
+    let (_dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let mut request = load_like_compile_request(&source, &state_path);
+    request.map.insert(atom("stdlib_mode"), atom("true"));
+    let response = handle_compile(&request);
+    let Term::Map(ref m) = response else {
+        panic!("Expected map response: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "status"),
+        Some(&atom("ok")),
+        "stdlib file must compile: {response:?}"
+    );
+    let warnings = compile_warnings(&response);
+    assert!(
+        warnings.iter().any(|w| w.contains("declared as Scheme")),
+        "stdlib file must not see project aliases: {warnings:?}"
+    );
+}
+
+/// Editing a project alias file re-resolves on the next compile: the memo
+/// is keyed by an exact path→mtime fingerprint, so the second compile sees
+/// the new expansion rather than a stale cached one.
+#[test]
+fn edited_alias_file_resolves_on_next_compile() {
+    let (dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let first = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&first).as_deref(),
+        Some("ok"),
+        "baseline must compile: {first:?}"
+    );
+    assert!(
+        !compile_warnings(&first)
+            .iter()
+            .any(|w| w.contains("declared as Scheme")),
+        "baseline must see Scheme: {:#?}",
+        compile_warnings(&first)
+    );
+
+    // Narrow the alias so `#http` no longer matches.
+    fs::write(
+        dir.path().join("src/parity_config.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         type Scheme = #https\n\
+         \n\
+         Value subclass: ParityConfig\n\
+         \x20 defaultScheme -> Symbol => #http\n",
+    )
+    .expect("rewrite fixture alias file");
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    let Term::Map(ref m) = second else {
+        panic!("Expected map response: {second:?}");
+    };
+    // Narrowing `Scheme` to `#https` turns the `#http` default into a genuine
+    // mismatch, which the project's `type = "error"` escalates.
+    assert_eq!(
+        map_get(m, "status"),
+        Some(&atom("error")),
+        "edited alias must reject the old default: {second:?}"
+    );
+    let messages = error_diagnostic_messages(&second);
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("declared as Scheme (#https)")),
+        "edited alias expansion must be visible on recompile: {messages:?}"
+    );
 }

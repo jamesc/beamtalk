@@ -58,17 +58,23 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // ADR 0108: see `handle_compile`'s equivalent comment — a
     // `compile_method` patch is a class-defining/-patching compile too, so
     // it needs session carried-over aliases for the same reason.
-    let mut pre_loaded_aliases = extract_known_type_aliases(request);
+    let session_aliases = extract_known_type_aliases(request);
     // BT-4322: same project-scope treatment as `handle_compile` — a method
     // patch typechecks in its class's file context, so the project's
-    // aliases, FFI registry, and `[diagnostics]` table apply here too.
+    // aliases, FFI registry, and `[diagnostics]` table apply here too (same
+    // session-wins merge and stdlib/manifest-less fallbacks).
     let source_path = map_get(request, "source_path").and_then(term_to_string);
-    let project = source_path
-        .as_deref()
-        .and_then(crate::project_context::project_context_for_source);
-    if let Some(project) = project.as_ref() {
-        pre_loaded_aliases.extend(project.aliases.iter().cloned());
-    }
+    let project = if stdlib_mode {
+        None
+    } else {
+        source_path
+            .as_deref()
+            .and_then(crate::project_context::project_context_for_source)
+    };
+    let pre_loaded_aliases = match project.as_ref() {
+        Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),
+        None => session_aliases,
+    };
 
     // 1. Parse the bare method body directly — no `Class >>`, no normalize.
     let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);

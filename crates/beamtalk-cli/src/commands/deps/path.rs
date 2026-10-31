@@ -416,7 +416,7 @@ fn compile_dependency_with_context(
     // Find source files in the dependency. `stubs/` is excluded (ADR 0075)
     // — it's type-only and never compiled.
     let src_dir = dep_root.join("src");
-    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
+    let source_files = beamtalk_core::file_walker::collect_project_source_files(dep_root)?;
 
     if source_files.is_empty() {
         debug!(dep = %dep_name, "No source files found in dependency, skipping compilation");
@@ -942,7 +942,7 @@ fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndex
     // `stubs/` is excluded (ADR 0075) — it's type-only and never
     // compiled.
     let src_dir = dep_root.join("src");
-    let source_files = crate::commands::build::collect_project_source_files(dep_root)?;
+    let source_files = beamtalk_core::file_walker::collect_project_source_files(dep_root)?;
     if source_files.is_empty() {
         return Ok(None);
     }

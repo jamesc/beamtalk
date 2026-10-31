@@ -5,7 +5,7 @@
 //! BEAM compilation (Pass 2).
 
 use crate::beam_compiler::{BeamCompiler, CompileContext, compile_source_with_bindings};
-use beamtalk_core::file_walker::FileWalker;
+use beamtalk_core::file_walker::{FileWalker, collect_project_source_files};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, info};
@@ -28,34 +28,6 @@ pub(crate) fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     }
 
     collect_project_source_files(path)
-}
-
-/// Finds a project's `.bt` source files: `src/` if it exists, else
-/// `project_root` itself — excluding `project_root/stubs/`, which
-/// `load_project_stub_registry` (ADR 0075) scans separately and
-/// never compiles as ordinary source (a `declare native:` block there is a
-/// hard error everywhere else).
-///
-/// Without the exclusion, a project with no `src/` directory would fall back
-/// to searching the whole project root, sweeping `stubs/*.bt` into the
-/// normal compile/lint pipeline. Shared by `find_source_files` (this file),
-/// `type_coverage.rs`, and `deps/path.rs`'s path-dependency compilation — all
-/// three previously duplicated the same `src/`-or-fallback logic without
-/// this exclusion.
-pub(crate) fn collect_project_source_files(project_root: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    let src_dir = project_root.join("src");
-    let search_dir = if src_dir.exists() {
-        src_dir
-    } else {
-        project_root.to_path_buf()
-    };
-
-    let files = collect_source_files_from_dir(&search_dir)?;
-    let stubs_dir = project_root.join("stubs");
-    Ok(files
-        .into_iter()
-        .filter(|f| !f.starts_with(&stubs_dir))
-        .collect())
 }
 
 /// Collect all `.bt` source files from a directory tree.

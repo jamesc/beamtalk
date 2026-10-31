@@ -45,7 +45,10 @@
 //! build's live spec extraction (the tiered cache's cold path). A project
 //! that was never built — no `_build/type_cache/` — stays registry-blind
 //! exactly as before, same as the port's completion path and the LSP's
-//! cache replay.
+//! cache replay. Likewise out of scope: path dependencies (their sources
+//! live outside `_build/deps/`; see BT-4326) and the editor `diagnostics/3`
+//! entry point, which keeps legacy behaviour on the keystroke path (see
+//! BT-4325).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -53,7 +56,6 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable;
-use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::ProjectAnalysisContext;
 use beamtalk_core::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
@@ -75,13 +77,51 @@ pub(crate) struct FileProjectContext {
     pub aliases: Vec<AliasInfo>,
 }
 
+/// Merge session-carried aliases with a project's: a name the session
+/// already defines keeps the session's declaration. The REPL's "current
+/// turn wins" rule applies — a same-named project alias would otherwise be
+/// reported as a hard alias/alias collision the moment the project
+/// reloads, breaking the redefine-in-session flow that works today.
+/// Everything else appends project-first, mirroring the build's order.
+pub(crate) fn merge_aliases(
+    session_aliases: Vec<AliasInfo>,
+    project_aliases: &[AliasInfo],
+) -> Vec<AliasInfo> {
+    let session_names: HashSet<String> = session_aliases
+        .iter()
+        .map(|info| info.name.to_string())
+        .collect();
+    let mut merged = session_aliases;
+    merged.extend(
+        project_aliases
+            .iter()
+            .filter(|info| !session_names.contains(info.name.as_str()))
+            .cloned(),
+    );
+    merged
+}
+
 /// Memoized per-root scan results. Fingerprints are exact path→mtime maps,
 /// so any added/removed/modified file re-resolves on the next compile.
 struct CachedProject {
-    alias_files: Vec<(PathBuf, SystemTime)>,
+    alias_files: Vec<(PathBuf, Option<SystemTime>)>,
     aliases: Vec<AliasInfo>,
-    cache_files: Vec<(PathBuf, SystemTime)>,
+    registry_files: Vec<(PathBuf, SystemTime)>,
     registry: Arc<NativeTypeRegistry>,
+    known_erlang_modules: HashSet<String>,
+}
+
+/// Upper bound on memoized project scopes: a long-lived port compiling many
+/// distinct checkouts (e.g. one tempdir per test) must not pin a native
+/// registry per root forever. Overflow evicts everything; the only cost is
+/// a rescan.
+const MAX_CACHED_PROJECTS: usize = 64;
+
+/// Fingerprint of a single manifest file: its path plus mtime (missing file
+/// fingerprints as absent, so creating or deleting a manifest re-resolves).
+fn manifest_fingerprint(path: &Path) -> (PathBuf, Option<SystemTime>) {
+    let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    (path.to_path_buf(), mtime)
 }
 
 static PROJECT_CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, CachedProject>>> =
@@ -114,24 +154,24 @@ fn find_project_root(source_path: &str) -> Option<PathBuf> {
     }
 }
 
-/// The project's source files for alias extraction: `src/` when it exists,
-/// else the root itself — excluding `stubs/`, which the build scans
-/// separately and never compiles as ordinary source. Mirrors
-/// `collect_project_source_files`.
+/// The project's source files for alias extraction: the one shared
+/// [`collect_project_source_files`](beamtalk_core::file_walker::collect_project_source_files)
+/// rule the build itself uses, so a layout change there applies here too.
+/// A walk failure degrades to no project aliases (with a warning) rather
+/// than failing the compile — the sibling file is unreadable, not the file
+/// being compiled.
 fn project_source_files(root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    let src_dir = root.join("src");
-    let search_dir = if src_dir.exists() {
-        src_dir
-    } else {
-        root.to_path_buf()
-    };
-    let stubs_dir = root.join("stubs");
-    FileWalker::source_files()
-        .walk(&search_dir)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|f| !f.starts_with(&stubs_dir))
-        .collect()
+    match beamtalk_core::file_walker::collect_project_source_files(root) {
+        Ok(files) => files,
+        Err(error) => {
+            tracing::warn!(
+                root = %root,
+                %error,
+                "project alias scan: failed to walk source dir, continuing with no project aliases"
+            );
+            Vec::new()
+        }
+    }
 }
 
 /// Parse every file and extract its `type` aliases, stamped with `package`.
@@ -154,13 +194,17 @@ fn extract_aliases(files: &[Utf8PathBuf], package: &str) -> Vec<AliasInfo> {
 }
 
 /// Exact path→mtime fingerprint of a file set (sorted, so comparison is a
-/// single `==`). Any add/remove/modify changes it.
-fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, SystemTime)> {
-    let mut entries: Vec<(PathBuf, SystemTime)> = files
+/// single `==`). Any add/remove/modify changes it. Unstatable files are
+/// carried as `None` rather than dropped, so a file flipping between
+/// readable and unreadable still re-resolves.
+fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, Option<SystemTime>)> {
+    let mut entries: Vec<(PathBuf, Option<SystemTime>)> = files
         .iter()
-        .filter_map(|f| {
-            let mtime = std::fs::metadata(f.as_std_path()).ok()?.modified().ok()?;
-            Some((f.as_std_path().to_path_buf(), mtime))
+        .map(|f| {
+            let mtime = std::fs::metadata(f.as_std_path())
+                .ok()
+                .and_then(|m| m.modified().ok());
+            (f.as_std_path().to_path_buf(), mtime)
         })
         .collect();
     entries.sort();
@@ -169,7 +213,12 @@ fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, SystemTime)> {
 
 /// Fingerprint of a type-cache dir: the entry filenames plus mtimes.
 fn cache_dir_fingerprint(cache_dir: &Path) -> Vec<(PathBuf, SystemTime)> {
-    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+    dir_file_fingerprint(cache_dir)
+}
+
+/// Fingerprint of a directory's immediate files: paths plus mtimes.
+fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, SystemTime)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut files: Vec<(PathBuf, SystemTime)> = entries
@@ -181,6 +230,24 @@ fn cache_dir_fingerprint(cache_dir: &Path) -> Vec<(PathBuf, SystemTime)> {
         .collect();
     files.sort();
     files
+}
+
+/// Fingerprint for the memoized registry: the type-cache entries plus the
+/// native inputs the extraction reads — dependency `.beam` files and the
+/// project's own `native/*.erl` sources. The replay itself re-validates
+/// each entry against its beam mtime, but the memo would bypass that check,
+/// so the fingerprint must cover the inputs too: otherwise a dependency
+/// rebuild without a fresh `beamtalk build` would keep serving the old
+/// specs until the port restarts. (An OTP upgrade mid-session is the
+/// accepted residual — it warrants a restart anyway.)
+fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, SystemTime)> {
+    let mut entries = cache_dir_fingerprint(cache_dir);
+    for ebin in beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(root) {
+        entries.extend(dir_file_fingerprint(ebin.as_std_path()));
+    }
+    entries.extend(dir_file_fingerprint(root.join("native").as_std_path()));
+    entries.sort();
+    entries
 }
 
 /// The project's dependency source roots: unpacked packages under
@@ -228,25 +295,39 @@ pub(crate) fn project_context_for_source(source_path: &str) -> Option<FileProjec
     // sources, in build merge order (project first).
     let mut alias_inputs: Vec<(Vec<Utf8PathBuf>, String)> =
         vec![(project_source_files(&utf8_root), package_name.clone())];
-    for (dep_root, dep_name) in dependency_roots(&utf8_root) {
-        alias_inputs.push((project_source_files(&dep_root), dep_name));
+    let dep_roots = dependency_roots(&utf8_root);
+    for (dep_root, dep_name) in &dep_roots {
+        alias_inputs.push((project_source_files(dep_root), dep_name.clone()));
     }
     let alias_files: Vec<Utf8PathBuf> = alias_inputs.iter().flat_map(|(f, _)| f.clone()).collect();
-    let alias_fingerprint = fingerprint(&alias_files);
+    // Manifests feed the package stamps (and the dep list), so a manifest‑only
+    // change — e.g. a `[package] name` rename — must re-resolve too.
+    let mut alias_fingerprint = fingerprint(&alias_files);
+    alias_fingerprint.push(manifest_fingerprint(&root));
+    for (dep_root, _) in &dep_roots {
+        alias_fingerprint.push(manifest_fingerprint(dep_root.as_std_path()));
+    }
+    alias_fingerprint.sort();
 
     let cache_dir = root.join("_build/type_cache");
-    let registry_fingerprint = cache_dir_fingerprint(&cache_dir);
+    let registry_files = registry_fingerprint(&utf8_root, &cache_dir);
 
-    // Memoized resolve: exact fingerprints, so any source or cache change
-    // re-resolves on the next compile.
-    let (aliases, registry) = {
+    // Memoized resolve: exact fingerprints, so any source, manifest, or
+    // native-input change re-resolves on the next compile. The known Erlang
+    // modules ride the same entry — their inputs (dependency `.beam` files,
+    // `native/*.erl`) are exactly the registry fingerprint's.
+    let (aliases, registry, known_erlang_modules) = {
         let mut cache = cache_lock();
         match cache.get(&root) {
             Some(entry)
                 if entry.alias_files == alias_fingerprint
-                    && entry.cache_files == registry_fingerprint =>
+                    && entry.registry_files == registry_files =>
             {
-                (entry.aliases.clone(), Arc::clone(&entry.registry))
+                (
+                    entry.aliases.clone(),
+                    Arc::clone(&entry.registry),
+                    entry.known_erlang_modules.clone(),
+                )
             }
             _ => {
                 let aliases = alias_inputs
@@ -254,22 +335,28 @@ pub(crate) fn project_context_for_source(source_path: &str) -> Option<FileProjec
                     .flat_map(|(files, package)| extract_aliases(files, package))
                     .collect::<Vec<_>>();
                 let registry = Arc::new(load_native_type_registry_from(root.as_path()));
+                let known_erlang_modules: HashSet<String> =
+                    beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&utf8_root);
+                // Bound the cache: a long-lived port compiling many distinct
+                // checkouts must not pin a registry per root forever. Evicting
+                // everything on overflow only costs a rescan.
+                if cache.len() >= MAX_CACHED_PROJECTS {
+                    cache.clear();
+                }
                 cache.insert(
                     root.clone(),
                     CachedProject {
                         alias_files: alias_fingerprint,
                         aliases: aliases.clone(),
-                        cache_files: registry_fingerprint,
+                        registry_files,
                         registry: Arc::clone(&registry),
+                        known_erlang_modules: known_erlang_modules.clone(),
                     },
                 );
-                (aliases, registry)
+                (aliases, registry, known_erlang_modules)
             }
         }
     };
-
-    let known_erlang_modules: HashSet<String> =
-        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&utf8_root);
 
     Some(FileProjectContext {
         diagnostics_table,

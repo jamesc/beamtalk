@@ -391,6 +391,40 @@ impl FileWalker {
     }
 }
 
+/// Finds a project's `.bt` source files: `src/` if it exists, else
+/// `project_root` itself — excluding `project_root/stubs/`, which the
+/// native-stub pipeline scans separately and never compiles as ordinary
+/// source (a `declare native:` block there is a hard error everywhere
+/// else).
+///
+/// Without the exclusion, a project with no `src/` directory would fall back
+/// to searching the whole project root, sweeping `stubs/*.bt` into the
+/// normal compile/lint pipeline.
+///
+/// Shared by `beamtalk build`/`lint`/`test` source discovery, dependency
+/// source indexing, and the compiler port's project-scope alias scan
+/// (BT-4322) — one rule, one implementation, so a change here (a new
+/// excluded dir, a new layout) applies to every surface at once.
+///
+/// # Errors
+///
+/// Returns an error if the search directory does not exist or cannot be read.
+pub fn collect_project_source_files(project_root: &Utf8Path) -> miette::Result<Vec<Utf8PathBuf>> {
+    let src_dir = project_root.join("src");
+    let search_dir = if src_dir.exists() {
+        src_dir
+    } else {
+        project_root.to_path_buf()
+    };
+
+    let files = FileWalker::source_files().walk(&search_dir)?;
+    let stubs_dir = project_root.join("stubs");
+    Ok(files
+        .into_iter()
+        .filter(|f| !f.starts_with(&stubs_dir))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

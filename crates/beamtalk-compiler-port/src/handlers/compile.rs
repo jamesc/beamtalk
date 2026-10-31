@@ -44,21 +44,29 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // ...` never sees the alias at all, so `AliasRegistry::add_pre_loaded`'s
     // existing collision check (alias name vs. `hierarchy`/
     // `protocol_registry`) never gets a chance to run.
-    let mut pre_loaded_aliases = extract_known_type_aliases(request);
+    let session_aliases = extract_known_type_aliases(request);
     // BT-4322: resolve the compiled file's own project from `source_path`
     // (the real file path the workspace load path always sends) so the file
     // typechecks with the same package scope `beamtalk build` gives it —
     // project + dependency aliases, the project's FFI registry, and its own
-    // `[diagnostics]` table. Session aliases stay first (today's REPL
-    // behaviour for them is unchanged); project aliases append. Files with
-    // no enclosing manifest keep the legacy behaviour (port-process cwd
-    // table, no registry, session aliases only).
-    let project = map_get(request, "source_path")
-        .and_then(term_to_string)
-        .and_then(|path| crate::project_context::project_context_for_source(&path));
-    if let Some(project) = project.as_ref() {
-        pre_loaded_aliases.extend(project.aliases.iter().cloned());
-    }
+    // `[diagnostics]` table. Files with no enclosing manifest keep the
+    // legacy behaviour (port-process cwd table, no registry, session
+    // aliases only); stdlib files do too (the stdlib has no manifest — the
+    // build compiles it as one coherent package, not via manifest
+    // walk-up). A session alias keeps its declaration over a same-named
+    // project alias (REPL "current turn wins"); everything else appends
+    // project-first, mirroring the build's merge order.
+    let project = if stdlib_mode {
+        None
+    } else {
+        map_get(request, "source_path")
+            .and_then(term_to_string)
+            .and_then(|path| crate::project_context::project_context_for_source(&path))
+    };
+    let pre_loaded_aliases = match project.as_ref() {
+        Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),
+        None => session_aliases,
+    };
     // ADR 0127 §10a / BT-3593: the live-reload fan-out recompiles a
     // protocol's users from their own files, one `compile` request per file
     // — each such request carries the just-edited protocol's full source
