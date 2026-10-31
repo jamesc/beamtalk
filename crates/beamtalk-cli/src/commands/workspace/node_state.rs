@@ -172,7 +172,7 @@ pub(super) use beamtalk_cli::pid_liveness::is_process_alive;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{BeamtalkHomeOverride, real_home_guard};
+    use crate::commands::test_support::{BeamtalkHomeOverride, closed_port, real_home_guard};
     use std::net::TcpListener;
     use std::path::Path;
 
@@ -198,16 +198,6 @@ mod tests {
         }
     }
 
-    /// Bind an ephemeral port, then drop the listener — the OS will not
-    /// reissue it immediately, so a connect attempt reliably fails without
-    /// needing a real BEAM node to have crashed.
-    fn unused_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener);
-        port
-    }
-
     // --- is_node_running: early-return / TCP-probe branches (no fixture needed) ---
 
     #[test]
@@ -222,7 +212,9 @@ mod tests {
 
     #[test]
     fn is_node_running_false_when_port_not_listening() {
-        let info = base_node_info(unused_port());
+        // `closed_port` never has a listener (BT-4058): no bind/drop window
+        // for a parallel test to steal the port through.
+        let info = base_node_info(closed_port());
         assert!(!is_node_running(&info, None));
     }
 

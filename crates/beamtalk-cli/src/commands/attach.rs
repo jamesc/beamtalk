@@ -135,18 +135,9 @@ fn connect_and_run(host: &str, port: u16, cookie: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture, real_home_guard};
-
-    /// Bind then immediately drop a `TcpListener` to obtain a port nothing
-    /// is listening on, so a connect attempt fails fast (connection
-    /// refused) instead of timing out — mirrors the pattern used by
-    /// `repl/process.rs` and `protocol.rs`'s own tests.
-    fn unbound_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener);
-        port
-    }
+    use crate::commands::test_support::{
+        BeamtalkHomeOverride, WorkspaceFixture, closed_port, real_home_guard,
+    };
 
     // --- run(): --port without --cookie ---
 
@@ -164,7 +155,7 @@ mod tests {
     fn run_with_port_and_unreachable_cookie_fails_to_connect() {
         // A cookie is provided, so we reach connect_and_run — but nothing is
         // listening on the port, so the connect itself fails.
-        let port = unbound_port();
+        let port = closed_port();
         let err = run(None, Some(port), Some("cookie"), false).unwrap_err();
         assert!(err.to_string().contains("Failed to connect"), "got: {err}");
     }
@@ -230,7 +221,7 @@ mod tests {
 
     #[test]
     fn attach_by_workspace_id_reports_not_running() {
-        let port = unbound_port();
+        let port = closed_port();
         let fixture = WorkspaceFixture::new("attach-not-running", port, 999_999);
 
         let err = attach_by_workspace_id(Some(&fixture.id)).unwrap_err();
@@ -241,7 +232,7 @@ mod tests {
 
     #[test]
     fn connect_and_run_fails_with_hint_when_unreachable() {
-        let port = unbound_port();
+        let port = closed_port();
         let err = connect_and_run("127.0.0.1", port, "cookie").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("Failed to connect to"), "{msg}");

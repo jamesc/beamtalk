@@ -409,42 +409,21 @@ impl ReplClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
+    use crate::commands::test_support::{
+        closed_port, spawn_auth_error_server, spawn_auth_ok_server,
+    };
     use std::net::TcpListener;
     use tungstenite::Message;
 
     #[test]
     fn connect_to_unbound_port_fails_with_connect_error() {
-        // Bind then immediately drop, expecting nothing to be listening on
-        // this port for the actual connect attempt below. Under a large
-        // parallel test run another test/thread can grab the just-freed
-        // ephemeral port in the gap before we connect (BT-3628), so retry
-        // with a fresh port on an unexpected success, and accept any
-        // connect-style error rather than one exact substring — a racing
-        // listener that isn't a beamtalk REPL server fails the WebSocket or
-        // auth handshake instead of the raw TCP connect.
-        for attempt in 0..5 {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-
-            match ReplClient::connect("127.0.0.1", port, "cookie") {
-                Err(err) => {
-                    let msg = err.to_string();
-                    assert!(
-                        msg.contains("Failed to connect")
-                            || msg.contains("WebSocket handshake failed")
-                            || msg.contains("auth"),
-                        "expected a connect-style error, got: {msg}"
-                    );
-                    return;
-                }
-                Ok(_) if attempt == 4 => panic!(
-                    "expected connect to fail against an unbound port after {attempt} retries"
-                ),
-                Ok(_) => {}
-            }
-        }
+        // `closed_port` never has a listener (BT-4058): no bind/drop
+        // window for a parallel test to steal the port through, so one
+        // attempt is deterministic — this replaces the BT-3628 retry loop.
+        let Err(err) = ReplClient::connect("127.0.0.1", closed_port(), "cookie") else {
+            panic!("expected connect to fail against an unbound port");
+        };
+        assert!(err.to_string().contains("Failed to connect"), "got: {err}");
     }
 
     #[test]
@@ -548,12 +527,16 @@ mod tests {
         });
         let mut client = ReplClient::connect("127.0.0.1", handler_port, "cookie").expect("connect");
         accepted.join().expect("server thread");
-        // Nothing is listening on this port any more, so every attempt fails
-        // with a connect error. Uses `reconnect_with_retries` directly (2
-        // attempts, 5ms apart) rather than the real `reconnect()` — which
-        // would otherwise pay `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` (10 *
-        // 500ms) of real wall-clock time to exercise the same exhausted-retry
-        // path this test cares about.
+        // The server thread is gone, so its port is free again — and a
+        // parallel test could grab it before the retries below run (BT-4058).
+        // Repoint at `closed_port()` (nothing can be listening there) so
+        // every attempt fails with a connect error. Uses
+        // `reconnect_with_retries` directly (2 attempts, 5ms apart) rather
+        // than the real `reconnect()` — which would otherwise pay
+        // `MAX_CONNECT_RETRIES * RETRY_DELAY_MS` (10 * 500ms) of real
+        // wall-clock time to exercise the same exhausted-retry path this
+        // test cares about.
+        client.port = closed_port();
         let err = client
             .reconnect_with_retries(2, 5)
             .expect_err("reconnect should exhaust retries and fail");
