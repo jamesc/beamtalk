@@ -340,7 +340,6 @@ fn erlang_available() -> bool {
 /// overflows it (`Os { code: 206 }`, BT-4224). Batches of 32 keep every
 /// invocation to a few kilobytes on every platform.
 fn erlc(dir: &Path, modules: &[(String, String)]) -> Result<(), String> {
-    // Windows caps a command line at ~32K characters (see below).
     const BATCH: usize = 32;
     let mut files = Vec::new();
     for (name, code) in modules {

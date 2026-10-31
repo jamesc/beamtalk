@@ -98,7 +98,13 @@ fn generate(src: &str, module: &str) -> Result<Option<String>, String> {
 }
 
 /// `Ok(())` when `erlc` accepts every module (or is not installed).
+///
+/// In batches: Windows caps a command line at ~32K characters, and this
+/// corpus is hundreds of modules, so one `erlc` call with every path
+/// overflows it (`Os { code: 206 }`, BT-4224). Batches of 32 keep every
+/// invocation to a few kilobytes on every platform.
 fn erlc(modules: &[(String, String)]) -> Result<(), String> {
+    const BATCH: usize = 32;
     let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4000_repl");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let mut files = Vec::new();
@@ -107,22 +113,32 @@ fn erlc(modules: &[(String, String)]) -> Result<(), String> {
         std::fs::write(&file, code).expect("write core");
         files.push(file);
     }
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg("-o")
-        .arg(&dir)
-        .args(&files)
-        .output();
-    let _ = std::fs::remove_dir_all(&dir);
-    match output {
-        Err(_) => Ok(()),
-        Ok(o) if o.status.success() => Ok(()),
-        Ok(o) => Err(format!(
-            "{}{}",
-            String::from_utf8_lossy(&o.stdout),
-            String::from_utf8_lossy(&o.stderr)
-        )),
+    let mut result = Ok(());
+    for chunk in files.chunks(BATCH) {
+        let output = Command::new("erlc")
+            .arg("+from_core")
+            .arg("-o")
+            .arg(&dir)
+            .args(chunk)
+            .output();
+        match output {
+            Err(_) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Ok(());
+            }
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                result = Err(format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                ));
+                break;
+            }
+        }
     }
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 #[test]
