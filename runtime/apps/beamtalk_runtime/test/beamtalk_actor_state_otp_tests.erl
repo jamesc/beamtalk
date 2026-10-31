@@ -70,9 +70,18 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State#{code_change_installed => beamtalk_actor_state:installed()}}.
 
 %% The "methods". `Self` is a #beamtalk_object{} for this process.
-method(slow_set, _From, _State) ->
+method({slow_set_sync, Notify}, _From, _State) ->
+    %% Rendezvous for sys_get_state_during_callback_test: write the value,
+    %% signal that the callback is running, then block until the test
+    %% releases us. A `sys` request issued while we are blocked here queues
+    %% behind the callback and observes the committed state on return.
     ok = beamtalk_actor_state:put(self_obj(), x, 5),
-    timer:sleep(200),
+    Notify ! slow_set_started,
+    receive
+        slow_set_release -> ok
+    after 10000 ->
+        erlang:error(slow_set_release_timeout)
+    end,
     {reply, ok};
 method(closure_updates, _From, _State) ->
     Self = self_obj(),
@@ -132,16 +141,53 @@ dictionary_has_cell(Pid) ->
 sys_get_state_during_callback_test() ->
     Pid = start(#{x => 0}),
     Caller = self(),
-    spawn_link(fun() -> Caller ! {done, gen_server:call(Pid, slow_set)} end),
-    timer:sleep(50),
-    %% System messages are handled between callbacks: this waits for the
-    %% 200 ms callback and gets the committed value, never a half-written one.
-    {Micros, State} = timer:tc(fun() -> sys:get_state(Pid) end),
-    ?assertEqual(#{x => 5}, State),
-    ?assert(Micros > 50_000),
+    spawn_link(fun() ->
+        Caller ! {done, gen_server:call(Pid, {slow_set_sync, Caller})}
+    end),
+    %% Rendezvous on the real condition: the callback has written x=5 and is
+    %% blocked waiting for release, so the `sys` request below is guaranteed
+    %% to arrive mid-callback. System messages are handled between callbacks:
+    %% `sys:get_state` waits for the callback and gets the committed value,
+    %% never a half-written one. No sleeps, no timing assertions.
+    receive
+        slow_set_started -> ok
+    after 5000 ->
+        ?assert(false)
+    end,
+    spawn_link(fun() -> Caller ! {sys_state, sys:get_state(Pid)} end),
+    ok = wait_until_sys_queued(Pid),
+    Pid ! slow_set_release,
+    receive
+        {sys_state, State} ->
+            ?assertEqual(#{x => 5}, State)
+    after 5000 ->
+        ?assert(false)
+    end,
     receive
         {done, ok} -> ok
-    after 2000 -> ?assert(false)
+    after 5000 ->
+        ?assert(false)
+    end.
+
+%% Spin until the `sys` request has queued in the server's mailbox while the
+%% callback is blocked. Uses `erlang:yield/0`, not `timer:sleep/1`: this waits
+%% on the real condition (request queued) rather than assuming a delay.
+wait_until_sys_queued(Pid) ->
+    Deadline = erlang:monotonic_time(millisecond) + 5000,
+    wait_until_sys_queued(Pid, Deadline).
+
+wait_until_sys_queued(Pid, Deadline) ->
+    case process_info(Pid, message_queue_len) of
+        {message_queue_len, N} when N > 0 ->
+            ok;
+        _ ->
+            case erlang:monotonic_time(millisecond) < Deadline of
+                true ->
+                    erlang:yield(),
+                    wait_until_sys_queued(Pid, Deadline);
+                false ->
+                    ?assert(false)
+            end
     end.
 
 sys_replace_state_sees_the_returned_state_test() ->
