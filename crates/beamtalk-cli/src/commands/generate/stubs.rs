@@ -325,10 +325,10 @@ fn format_signature(sig: &FunctionSignature) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::ScratchDir;
     use beamtalk_core::semantic_analysis::type_checker::{
         DynamicReason, FunctionSignature, InferredType, ParamType, TypeProvenance,
     };
-    use crate::commands::test_support::ScratchDir;
 
     fn sig(
         name: &str,
