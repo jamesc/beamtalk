@@ -132,8 +132,10 @@ TestCase subclass: ReactiveSubprocessTest
       args: self catArgs
       notify: delegate) unwrap
     proc writeLine: "hello"
-    // Poll up to 500 ms (50 × 10 ms) for cat to echo back
-    50 timesRepeat: [
+    // Poll up to 5 s (500 × 10 ms) for cat to echo back; early-returns
+    // as soon as the line arrives so the fast path stays fast under
+    // no load (BT-4205: 500 ms ceiling flaked under load ~30).
+    500 timesRepeat: [
       (delegate stdoutLines includes: "hello") ifFalse: [Timer sleep: 10]
     ]
     self assert: (delegate stdoutLines includes: "hello")
@@ -226,11 +228,14 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
     self assert: delegate stop equals: #ok
 
-  // Helper: poll up to 50 times (10ms each) for delegate exitReceived.
+  // Helper: poll up to 5 s (500 × 10 ms) for delegate exitReceived.
+  // Early-returns as soon as the notification arrives (no sleep once
+  // exitReceived is true), so the fast path stays fast; the generous
+  // ceiling keeps the test robust under load (BT-4205).
   // Uses timesRepeat: to work around mutable locals not threading across block
   // boundaries (BT-2308).
   waitForExit: delegate from: _proc =>
-    50 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 10]]
+    500 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 10]]
     delegate exitReceived ifFalse: [
       self fail: "Timed out waiting for subprocess exit notification"
     ]
