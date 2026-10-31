@@ -390,6 +390,66 @@ fn compile_dependency(
     )
 }
 
+/// Class-hierarchy inputs for compiling one dependency: its own Pass 1
+/// indexes plus the full `ClassInfo`s of the dependencies compiled before
+/// it (BT-4328).
+///
+/// A dependency compiles as its own package, but its superclass chain can
+/// reach into another package — without the ancestors' methods and
+/// superclass links, the chain breaks at the first cross-package ancestor
+/// and every hierarchy-driven codegen decision degrades
+/// (`is_server_subclass`, `initialize`/`trap_exit` detection, direct-call
+/// fast paths). The merge mirrors the root build's
+/// `collect_all_class_infos(&[&source_class_infos, &dep_class_infos])`
+/// (own first, dependencies after), so dep-compiled codegen matches a root
+/// build of the same sources.
+#[allow(clippy::type_complexity)]
+fn dep_compile_class_inputs(
+    source_files: &[Utf8PathBuf],
+    source_root: Option<&Utf8Path>,
+    dep_name: &str,
+    prior_deps: &[ResolvedDependency],
+) -> Result<(
+    HashMap<String, String>,
+    HashMap<String, String>,
+    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
+    HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
+)> {
+    let (
+        own_class_module_index,
+        class_superclass_index,
+        mut own_class_infos,
+        extension_index,
+        cached_asts,
+    ) = crate::commands::build::build_class_module_index(source_files, source_root, dep_name)?;
+    // Cross-file trait provisions flattened into the infos this dep's own
+    // compile and its dependents see (BT-3673), against its own protocols
+    // first and then those of the dependencies compiled before it (BT-3678).
+    crate::commands::build::flatten_package_class_infos(
+        &mut own_class_infos,
+        &cached_asts,
+        prior_protocol_defs(prior_deps),
+        dep_name,
+    );
+    // Prior dependencies contribute their exported `ClassInfo`s — already
+    // flattened at their own export — so cross-package superclass chains
+    // resolve during this dep's compilation exactly as in the root build.
+    let mut dep_class_infos = Vec::new();
+    for prior in prior_deps {
+        dep_class_infos.extend(prior.class_infos.iter().cloned());
+    }
+    let all_class_infos =
+        crate::commands::build::collect_all_class_infos(&[&own_class_infos, &dep_class_infos]);
+    Ok((
+        own_class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        extension_index,
+        cached_asts,
+    ))
+}
+
 /// Compile a dependency with context from already-compiled dependencies.
 ///
 /// The `prior_deps` parameter provides class module indexes from dependencies
@@ -439,23 +499,10 @@ fn compile_dependency_with_context(
     let (
         own_class_module_index,
         class_superclass_index,
-        mut all_class_infos,
+        all_class_infos,
         extension_index,
         cached_asts,
-    ) = crate::commands::build::build_class_module_index(
-        &source_files,
-        source_root.as_deref(),
-        dep_name,
-    )?;
-    // Cross-file trait provisions flattened into the infos this dep's own
-    // compile and its dependents see (BT-3673), against its own protocols
-    // first and then those of the dependencies compiled before it (BT-3678).
-    crate::commands::build::flatten_package_class_infos(
-        &mut all_class_infos,
-        &cached_asts,
-        prior_protocol_defs(prior_deps),
-        dep_name,
-    );
+    ) = dep_compile_class_inputs(&source_files, source_root.as_deref(), dep_name, prior_deps)?;
 
     // Build a compilation index that includes this dep's own classes plus
     // classes from already-compiled dependencies, so cross-dependency class
@@ -1540,6 +1587,94 @@ dep_utils = { path = "dep_utils" }"#,
         assert_eq!(source.text.as_str(), trait_src);
         assert_eq!(source.package.as_deref(), Some("dep_traits"));
         assert!(!protocol_sources.contains_key("Plain"));
+    }
+
+    /// BT-4328: a dependency compiling against an already-compiled
+    /// dependency sees the ancestor's full `ClassInfo` (methods and
+    /// superclass links), not just its name→module mapping. A child
+    /// class inheriting everything from a cross-package parent must
+    /// resolve the chain — otherwise hierarchy-driven codegen
+    /// (`is_server_subclass`, `initialize`/`trap_exit` detection)
+    /// silently degrades to the base-class defaults.
+    #[test]
+    fn dep_compile_class_inputs_merges_prior_dep_class_infos() {
+        let temp = TempDir::new().unwrap();
+
+        // Base package: owns `Base` and its `greet` method.
+        let base_dir = temp.path().join("dep_base");
+        fs::create_dir_all(&base_dir).unwrap();
+        write_manifest(&base_dir, "dep_base", "0.1.0", "");
+        write_source(
+            &base_dir,
+            "base.bt",
+            "Object subclass: Base\n  greet => \"hi from base\"\n",
+        );
+        let base_root = Utf8PathBuf::from_path_buf(base_dir).unwrap();
+        let (base_index, base_infos, _, _, _, _) =
+            build_dep_class_index(&base_root, "dep_base", &[]).unwrap();
+        assert!(
+            base_infos.iter().any(|c| c.name.as_str() == "Base"),
+            "base export must contain Base: {:?}",
+            base_infos
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        let base_dep = ResolvedDependency {
+            name: "dep_base".to_string(),
+            root: base_root,
+            ebin_path: Utf8PathBuf::from("/nonexistent/ebin"),
+            class_module_index: base_index,
+            class_infos: base_infos,
+            protocol_infos: Vec::new(),
+            protocol_defs: Vec::new(),
+            protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
+            alias_infos: Vec::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+            stubs_dir: None,
+        };
+
+        // Child package: `Child` inherits everything from cross-package `Base`.
+        let child_dir = temp.path().join("dep_child");
+        fs::create_dir_all(&child_dir).unwrap();
+        write_manifest(&child_dir, "dep_child", "0.1.0", "");
+        write_source(
+            &child_dir,
+            "child.bt",
+            "Base subclass: Child\n  label => \"child\"\n",
+        );
+        let child_root = Utf8PathBuf::from_path_buf(child_dir).unwrap();
+        let source_files =
+            beamtalk_core::file_walker::collect_project_source_files(&child_root).unwrap();
+        let source_root = child_root.join("src");
+        assert!(source_root.exists(), "fixture must have a src/ dir");
+
+        let (_, _, all_class_infos, _, _) = dep_compile_class_inputs(
+            &source_files,
+            Some(source_root.as_path()),
+            "dep_child",
+            &[base_dep],
+        )
+        .unwrap();
+
+        let base = all_class_infos.iter().find(|c| c.name.as_str() == "Base");
+        assert!(
+            base.is_some(),
+            "dep compile must see the cross-package ancestor Base, got: {:?}",
+            all_class_infos
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            base.is_some_and(|b| b.methods.iter().any(|m| m.selector == "greet")),
+            "ancestor Base must carry its `greet` method"
+        );
+        assert!(
+            all_class_infos.iter().any(|c| c.name.as_str() == "Child"),
+            "dep compile must keep its own Child class"
+        );
     }
 
     /// BT-4225: a dependency compiles against the same FFI type registry as
