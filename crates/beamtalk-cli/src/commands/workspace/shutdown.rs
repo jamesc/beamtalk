@@ -35,7 +35,10 @@ const FORCE_KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 /// acknowledgement. The workspace will call `init:stop()` for OTP-level
 /// graceful teardown.
 pub(super) fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<()> {
-    let mut client = ProtocolClient::connect(
+    // Exempt from the version lock (BT-4327): stopping a stale node must
+    // succeed precisely when its versions do not match this client's.
+    // Shutdown compiles nothing, so version skew is irrelevant here.
+    let mut client = ProtocolClient::connect_without_version_check(
         host,
         port,
         cookie,
@@ -319,6 +322,8 @@ mod tests {
                 let _ = ws.send(Message::Text(v.to_string().into()));
             };
             send(&mut ws, serde_json::json!({"op": "auth-required"}));
+            // Read (and discard) the `auth` frame — its version fields are
+            // irrelevant here: shutdown is exempt from the version lock.
             if ws.read().is_err() {
                 return;
             }
@@ -327,12 +332,39 @@ mod tests {
                 &mut ws,
                 serde_json::json!({"op": "session-started", "session": "sess-test"}),
             );
-            let Ok(Message::Text(_)) = ws.read() else {
-                return;
-            };
-            match error {
-                None => send(&mut ws, serde_json::json!({"status": ["done"]})),
-                Some(message) => send(&mut ws, serde_json::json!({"error": message})),
+            // A version-checking client would send its connect-time
+            // `describe` first (BT-4327) — but the shutdown client is
+            // exempt and never does. Answer any `describe` with
+            // deliberately STALE versions so these tests prove the
+            // exemption: shutdown succeeds even though the versions do
+            // not match (a non-exempt client would fail here).
+            loop {
+                let Ok(Message::Text(text)) = ws.read() else {
+                    return;
+                };
+                let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                    send(
+                        &mut ws,
+                        serde_json::json!({
+                            "id": req.get("id"),
+                            "status": ["done"],
+                            "ops": {},
+                            "versions": {
+                                "beamtalk": "0.0.0-stale",
+                                "protocol": "0.0",
+                            },
+                        }),
+                    );
+                    continue;
+                }
+                match error {
+                    None => send(&mut ws, serde_json::json!({"status": ["done"]})),
+                    Some(message) => send(&mut ws, serde_json::json!({"error": message})),
+                }
+                break;
             }
             // `ws` (and the captured `listener`) drop here, closing the port.
         });
@@ -345,6 +377,18 @@ mod tests {
     fn tcp_send_shutdown_acks_returns_ok() {
         let port = spawn_shutdown_server(None);
         tcp_send_shutdown("127.0.0.1", port, "cookie").expect("ack should succeed");
+    }
+
+    #[test]
+    fn tcp_send_shutdown_succeeds_against_version_mismatched_node() {
+        // BT-4327 exemption: `spawn_shutdown_server` answers `describe`
+        // with stale versions, but the shutdown client never sends one —
+        // stopping a stale node must succeed precisely when its versions
+        // do not match this client's. (A version-checking `connect`
+        // against this same fake would fail.)
+        let port = spawn_shutdown_server(None);
+        tcp_send_shutdown("127.0.0.1", port, "cookie")
+            .expect("shutdown of a stale node should succeed");
     }
 
     #[test]
