@@ -328,6 +328,7 @@ mod tests {
     use beamtalk_core::semantic_analysis::type_checker::{
         DynamicReason, FunctionSignature, InferredType, ParamType, TypeProvenance,
     };
+    use crate::commands::test_support::ScratchDir;
 
     fn sig(
         name: &str,
@@ -581,34 +582,6 @@ mod tests {
                 .contains("No .beam files found for the requested modules"),
             "got: {err}"
         );
-    }
-
-    /// Build a unique scratch directory under the OS temp dir, removed on
-    /// drop even on panic, mirroring `escript.rs`'s own `ScratchDir` (kept
-    /// module-local rather than shared: the no-duplication rule is
-    /// about *production* helpers, and both are tiny test-only RAII types
-    /// over a one-line `tempfile`-free pattern already used elsewhere in
-    /// this crate's tests).
-    struct ScratchDir {
-        path: Utf8PathBuf,
-    }
-
-    impl ScratchDir {
-        fn new(label: &str) -> Self {
-            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .expect("temp dir is valid UTF-8")
-                .join(format!("bt3375-stubs-{label}-{}-{n}", std::process::id()));
-            std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
-            Self { path }
-        }
-    }
-
-    impl Drop for ScratchDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(self.path.as_std_path());
-        }
     }
 
     // --- display_annotation: variants not exercised via format_signature above ---

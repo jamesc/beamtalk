@@ -441,6 +441,7 @@ readf(F) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::ScratchDir;
 
     // -- resolve_entry_and_output ---------------------------------------
 
@@ -588,31 +589,6 @@ mod tests {
     }
 
     // -- collect_project_modules --------------------------------------------
-
-    /// Build a unique scratch directory under the OS temp dir, removed on
-    /// drop even on panic (RAII), so parallel `cargo test` threads never
-    /// collide and a failing assertion never leaves stray files behind.
-    struct ScratchDir {
-        path: Utf8PathBuf,
-    }
-
-    impl ScratchDir {
-        fn new(label: &str) -> Self {
-            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .expect("temp dir is valid UTF-8")
-                .join(format!("bt3349-escript-{label}-{}-{n}", std::process::id()));
-            std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
-            Self { path }
-        }
-    }
-
-    impl Drop for ScratchDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(self.path.as_std_path());
-        }
-    }
 
     #[test]
     fn test_collect_project_modules_empty_dir_returns_empty_vec() {

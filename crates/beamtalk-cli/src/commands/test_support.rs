@@ -27,6 +27,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use camino::Utf8PathBuf;
+
 use tungstenite::{Message, WebSocket};
 
 use super::workspace::storage::{NodeInfo, WorkspaceMetadata};
@@ -39,6 +41,38 @@ pub(crate) fn unique_ws_id(label: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("bt3349-{label}-{}-{n}", std::process::id())
+}
+
+/// RAII scratch directory under the OS temp dir.
+///
+/// Created on [`ScratchDir::new`], removed (recursively) on [`Drop`] even
+/// when a test panics, so parallel `cargo test` threads never collide and a
+/// failing assertion never leaves stray files behind.
+///
+/// `label` identifies the test or context (e.g. `"empty"`, `"filter-sort"`)
+/// so a stray directory that escaped an abnormal process kill is easy to
+/// trace back to its origin. Combined with the process-ID and a per-process
+/// counter the path is unique across concurrent test threads.
+pub(crate) struct ScratchDir {
+    pub(crate) path: Utf8PathBuf,
+}
+
+impl ScratchDir {
+    pub(crate) fn new(label: &str) -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .expect("temp dir is valid UTF-8")
+            .join(format!("{label}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(path.as_std_path()).expect("create scratch dir");
+        Self { path }
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.path.as_std_path());
+    }
 }
 
 /// Guards concurrent access to the real `~/.beamtalk` directory versus a
