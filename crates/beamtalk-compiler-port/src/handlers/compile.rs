@@ -44,7 +44,21 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // ...` never sees the alias at all, so `AliasRegistry::add_pre_loaded`'s
     // existing collision check (alias name vs. `hierarchy`/
     // `protocol_registry`) never gets a chance to run.
-    let pre_loaded_aliases = extract_known_type_aliases(request);
+    let mut pre_loaded_aliases = extract_known_type_aliases(request);
+    // BT-4322: resolve the compiled file's own project from `source_path`
+    // (the real file path the workspace load path always sends) so the file
+    // typechecks with the same package scope `beamtalk build` gives it —
+    // project + dependency aliases, the project's FFI registry, and its own
+    // `[diagnostics]` table. Session aliases stay first (today's REPL
+    // behaviour for them is unchanged); project aliases append. Files with
+    // no enclosing manifest keep the legacy behaviour (port-process cwd
+    // table, no registry, session aliases only).
+    let project = map_get(request, "source_path")
+        .and_then(term_to_string)
+        .and_then(|path| crate::project_context::project_context_for_source(&path));
+    if let Some(project) = project.as_ref() {
+        pre_loaded_aliases.extend(project.aliases.iter().cloned());
+    }
     // ADR 0127 §10a / BT-3593: the live-reload fan-out recompiles a
     // protocol's users from their own files, one `compile` request per file
     // — each such request carries the just-edited protocol's full source
@@ -72,6 +86,11 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // `CodegenOptions::with_analysis` so it doesn't re-derive the class
     // hierarchy, semantic facts, and inferred method return types from
     // scratch.
+    let default_project = beamtalk_core::semantic_analysis::ProjectAnalysisContext::default();
+    let (overrides, analysis_project) = match project.as_ref() {
+        Some(project) => (&project.diagnostics_table, &project.analysis_project),
+        None => (diagnostics_overrides(), &default_project),
+    };
     let (mut all_diagnostics, analysis) =
         beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
@@ -81,7 +100,8 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
             pre_loaded_protocols,
             pre_loaded_protocol_defs,
             pre_loaded_aliases.clone(),
-            diagnostics_overrides(),
+            overrides,
+            analysis_project,
         );
     let referenced_aliases = analysis.referenced_aliases.clone();
 

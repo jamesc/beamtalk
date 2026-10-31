@@ -58,7 +58,17 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // ADR 0108: see `handle_compile`'s equivalent comment — a
     // `compile_method` patch is a class-defining/-patching compile too, so
     // it needs session carried-over aliases for the same reason.
-    let pre_loaded_aliases = extract_known_type_aliases(request);
+    let mut pre_loaded_aliases = extract_known_type_aliases(request);
+    // BT-4322: same project-scope treatment as `handle_compile` — a method
+    // patch typechecks in its class's file context, so the project's
+    // aliases, FFI registry, and `[diagnostics]` table apply here too.
+    let source_path = map_get(request, "source_path").and_then(term_to_string);
+    let project = source_path
+        .as_deref()
+        .and_then(crate::project_context::project_context_for_source);
+    if let Some(project) = project.as_ref() {
+        pre_loaded_aliases.extend(project.aliases.iter().cloned());
+    }
 
     // 1. Parse the bare method body directly — no `Class >>`, no normalize.
     let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);
@@ -188,6 +198,11 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // full `AnalysisResult` for the already-merged `merged_module` — no
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
+    let default_project = beamtalk_core::semantic_analysis::ProjectAnalysisContext::default();
+    let (overrides, analysis_project) = match project.as_ref() {
+        Some(project) => (&project.diagnostics_table, &project.analysis_project),
+        None => (diagnostics_overrides(), &default_project),
+    };
     let (mut all_diagnostics, analysis) =
         beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &merged_module,
@@ -204,7 +219,8 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             // same as before this parameter existed.
             Vec::new(),
             pre_loaded_aliases.clone(),
-            diagnostics_overrides(),
+            overrides,
+            analysis_project,
         );
     let referenced_aliases = analysis.referenced_aliases.clone();
     let options = beamtalk_core::CompilerOptions {
@@ -234,7 +250,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let module_name_override = map_get(request, "module_name").and_then(term_to_string);
     let module_name =
         derive_class_module_name(&class_name, module_name_override.as_deref(), stdlib_mode);
-    let source_path = map_get(request, "source_path").and_then(term_to_string);
     let class_module_index = match extract_optional_string_map(request, "class_module_index") {
         Ok(map) => map,
         Err(resp) => return resp,

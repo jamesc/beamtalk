@@ -584,6 +584,44 @@ impl<'a> AnalysisContext<'a> {
         self.known_erlang_modules = known_erlang_modules;
         self
     }
+
+    /// The package the module being analysed belongs to (ADR 0071).
+    /// Needed by file-at-a-time callers that know the file's package
+    /// (BT-4322); [`with_options`](Self::with_options) covers the
+    /// [`crate::CompilerOptions`]-driven callers.
+    #[must_use]
+    pub fn with_current_package(mut self, package: &'a str) -> Self {
+        self.current_package = Some(package);
+        self
+    }
+}
+
+/// Project-scoped analysis context a file-based caller assembles from the
+/// compiled file's own package (BT-4322).
+///
+/// `beamtalk build` typechecks every file with the whole package in scope:
+/// the file's package name, the package's native Erlang FFI registry, and
+/// the package's project-known Erlang modules. A per-file `compile` that
+/// leaves those at their defaults reports diagnostics the build never does
+/// (untyped-FFI `Dynamic` in `typed` classes, unknown cross-file aliases).
+/// This struct carries the [`AnalysisContext`] pieces a file-at-a-time
+/// caller (the compiler port's `compile`, backing REPL `load_project`)
+/// fills in from the file's project; the language service's
+/// `compute_diagnostics_and_analysis` applies them. `Default` (no package,
+/// no registry, no extra modules)
+/// preserves the legacy behaviour for callers with no project on disk
+/// (REPL expressions, editor diagnostics).
+#[derive(Debug, Clone, Default)]
+pub struct ProjectAnalysisContext {
+    /// The compiled file's package name (`[package] name`), applied as
+    /// [`AnalysisContext::current_package`].
+    pub package_name: Option<String>,
+    /// The package's native Erlang FFI type registry, applied as
+    /// [`AnalysisContext::native_type_registry`].
+    pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    /// The package's project-known Erlang modules, applied as
+    /// [`AnalysisContext::known_erlang_modules`].
+    pub known_erlang_modules: std::collections::HashSet<String>,
 }
 
 /// Perform semantic analysis on a module.

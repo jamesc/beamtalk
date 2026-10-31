@@ -14,6 +14,7 @@
 mod decode;
 mod diagnostics;
 mod handlers;
+mod project_context;
 mod registry;
 mod respond;
 
