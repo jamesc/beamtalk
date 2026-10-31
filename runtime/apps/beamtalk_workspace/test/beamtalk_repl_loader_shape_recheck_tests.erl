@@ -781,6 +781,66 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
             ]
         end}}.
 
+%% BT-3945: the product race behind the flaky precheck test above.
+%% `handle_load/2` only *casts* the install's shape capture to
+%% `beamtalk_workspace_shape_recheck_worker`, so a precheck issued right
+%% after the load used to read `previous/1` before the capture ran and
+%% report `{ok, []}` ("no baseline"). This forces that interleaving
+%% deterministically by suspending the worker across the load (the issue's
+%% 300 ms sleep in the worker produces the same interleaving, less
+%% deterministically): without the `sync/0` drain in
+%% `precheck_class_shape/2`, the precheck returns no findings here; with
+%% it, the precheck blocks until the resumed worker has captured and
+%% reports the dropped field.
+precheck_class_shape_waits_for_pending_capture_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_precheck_race_~p.bt", [UniqueId])
+                    ),
+                    Gen1 =
+                        <<
+                            "Actor subclass: LoaderShapePrecheckRaceCounter\n"
+                            "  state: count :: Integer = 0\n"
+                            "  state: name :: String = \"\"\n"
+                        >>,
+                    ok = file:write_file(Path, Gen1),
+                    Worker = whereis(beamtalk_workspace_shape_recheck_worker),
+                    ok = sys:suspend(Worker),
+                    try
+                        {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
+                        %% Let the worker run again shortly: the precheck
+                        %% below must block on the drain until then rather
+                        %% than report "no baseline".
+                        spawn(fun() ->
+                            timer:sleep(300),
+                            sys:resume(beamtalk_workspace_shape_recheck_worker)
+                        end),
+                        T0 = erlang:monotonic_time(millisecond),
+                        {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                            <<"LoaderShapePrecheckRaceCounter">>,
+                            <<
+                                "Actor subclass: LoaderShapePrecheckRaceCounter\n"
+                                "  state: count :: Integer = 0\n"
+                            >>
+                        ),
+                        Elapsed = erlang:monotonic_time(millisecond) - T0,
+                        Finding = find_finding(dropped_without_bump, Findings),
+                        ?assertEqual(warning, maps:get(severity, Finding)),
+                        ?assertEqual([<<"name">>], maps:get(fields, Finding)),
+                        %% The 300 ms delayed resume proves the precheck
+                        %% waited for the capture instead of racing past it.
+                        ?assert(Elapsed >= 200)
+                    after
+                        catch sys:resume(beamtalk_workspace_shape_recheck_worker)
+                    end
+                end)
+            ]
+        end}}.
+
 %% A pending edit with nothing shape-relevant changed (e.g. just a method
 %% body tweak — here, literally unchanged) reports no findings.
 precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
