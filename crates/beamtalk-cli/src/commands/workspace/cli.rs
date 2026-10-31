@@ -757,13 +757,30 @@ mod tests {
         let stopped = format!("prune-stopped-{}", std::process::id());
         run_create(&stopped).expect("seed stopped workspace should be created");
 
-        // Running workspace: the fixture holds a live listener behind a
-        // `node.info` that probes as running.
+        // Running workspace: created the same way, then given a `node.info`
+        // pointing at a live listener, so it probes as running (`nonce` stays
+        // `None`, so `is_node_running` trusts the TCP probe alone). This must
+        // NOT use `WorkspaceFixture`: that helper takes the shared real-home
+        // guard, which deadlocks against this test's exclusive
+        // `BeamtalkHomeOverride` guard (same-thread `RwLock` re-entry blocks
+        // forever, hanging the test until the runner kills it).
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("local_addr").port();
         let running = format!("prune-running-{}", std::process::id());
-        // Held to end of scope: keeps the listener (and directory) alive.
-        let fixture = WorkspaceFixture::new(&running, port, std::process::id());
+        run_create(&running).expect("seed running workspace should be created");
+        super::super::storage::save_node_info(
+            &running,
+            &super::super::storage::NodeInfo {
+                node_name: format!("{running}@localhost"),
+                port,
+                pid: std::process::id(),
+                start_time: None,
+                nonce: None,
+                bind_addr: None,
+            },
+        )
+        .expect("seed running node.info");
+        // `listener` is held to end of scope: keeps the port accepting.
 
         // Dry run reports but deletes nothing.
         run_prune(true, None).expect("dry run should succeed");
@@ -779,14 +796,14 @@ mod tests {
             "stopped workspace should be pruned"
         );
         assert!(
-            workspace_exists(&fixture.id).unwrap(),
+            workspace_exists(&running).unwrap(),
             "running workspace must survive prune"
         );
 
         // Nothing left to prune now except the running workspace.
         run_prune(false, None).expect("second prune should succeed");
         assert!(
-            workspace_exists(&fixture.id).unwrap(),
+            workspace_exists(&running).unwrap(),
             "running workspace must survive an unscoped prune too"
         );
     }
