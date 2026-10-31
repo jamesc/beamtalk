@@ -298,6 +298,61 @@ async fn describe_error() {
 }
 
 #[tokio::test]
+async fn connect_skips_push_frames_before_describe_reply() {
+    // BT-4327: the node queues actor-snapshot pushes ahead of the
+    // connect-time `describe` reply. The version check must wait for the
+    // frame echoing its `describe` id, not trust the first frame off the
+    // socket (which carries no versions map).
+    let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(|request| {
+        vec![
+            text(&serde_json::json!({
+                "type": "push",
+                "channel": "actors",
+                "event": "spawned",
+                "data": {},
+            })),
+            text(&serde_json::json!({
+                "id": request.get("id"),
+                "status": ["done"],
+                "ops": {},
+                "versions": {
+                    "beamtalk": beamtalk_repl_protocol::handshake::beamtalk_version(),
+                    "protocol": beamtalk_repl_protocol::handshake::PROTOCOL_VERSION,
+                },
+            })),
+        ]
+    });
+    let fake = spawn_ws(HandshakeMode::Ok, "fake-session", responder).await;
+    crate::client::ReplClient::connect(fake.port, "test-cookie", None)
+        .await
+        .expect("connect should skip pushes and verify versions");
+}
+
+#[tokio::test]
+async fn connect_refuses_node_with_stale_toolchain_version() {
+    // BT-4327: the fake answers the connect-time `describe` with a stale
+    // toolchain — `ReplClient::connect` must surface the mismatch instead
+    // of attaching (tools must not silently fall back to offline mode).
+    // Bypasses `fake_mcp` on purpose: that harness models a
+    // version-matching node.
+    let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(|request| {
+        vec![text(&serde_json::json!({
+            "id": request.get("id"),
+            "status": ["done"],
+            "ops": {},
+            "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
+        }))]
+    });
+    let fake = spawn_ws(HandshakeMode::Ok, "fake-session", responder).await;
+    let err = crate::client::ReplClient::connect(fake.port, "test-cookie", None)
+        .await
+        .expect_err("connect against a stale node should fail");
+    assert!(err.contains("version mismatch"), "got: {err}");
+    assert!(err.contains("0.0.0-stale"), "got: {err}");
+    assert!(err.contains("just build"), "got: {err}");
+}
+
+#[tokio::test]
 async fn list_packages_success_with_details() {
     let (_fake, mcp) = fake_mcp(respond_by_code(vec![
         (

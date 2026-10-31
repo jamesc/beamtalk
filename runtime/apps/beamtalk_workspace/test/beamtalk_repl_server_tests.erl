@@ -221,9 +221,17 @@ ws_connect(Port) ->
     {ok, Rest} = ws_consume_http_response(Sock),
     %% Read auth-required message (may already be in Rest buffer)
     {ok, _AuthRequired} = ws_recv_with_buf(Sock, Rest),
-    %% Send cookie auth
+    %% Send cookie auth, including this node's own versions for the
+    %% handshake gate (BT-4327).
     Cookie = atom_to_binary(erlang:get_cookie(), utf8),
-    AuthMsg = iolist_to_binary(json:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => Cookie})),
+    AuthMsg = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"auth">>,
+            <<"cookie">> => Cookie,
+            <<"beamtalk_version">> => beamtalk_version:app_vsn(beamtalk_workspace),
+            <<"protocol_version">> => ?PROTOCOL_VERSION
+        })
+    ),
     ws_send(Sock, AuthMsg),
     %% Read auth_ok response
     {ok, _AuthOk} = ws_recv(Sock),

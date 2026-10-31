@@ -11,6 +11,7 @@ Drives the Cowboy WebSocket callbacks (`init/2`, `websocket_init/1`,
 These live in this module, the `_tests` companion of `beamtalk_ws_handler`.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_ws_state.hrl").
 
 %%% ===========================================================================
@@ -289,6 +290,51 @@ auth_invalid_cookie_rejected_test() ->
     ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
     ?assertEqual(<<"Invalid cookie">>, maps:get(<<"message">>, Decoded)),
     ?assert(lists:keymember(close, 1, Frames)).
+
+auth_beamtalk_version_mismatch_rejected_test() ->
+    %% Correct cookie, stale client build: rejected before any session exists,
+    %% with a message naming both sides plus the rebuild hint.
+    Json = auth_json(#{<<"beamtalk_version">> => <<"0.0.0-stale">>}),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertEqual(false, State#ws_state.authenticated),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"Version mismatch">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"0.0.0-stale">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"just build">>)),
+    ?assert(lists:keymember(close, 1, Frames)).
+
+auth_protocol_version_mismatch_rejected_test() ->
+    %% Correct cookie, wrong wire protocol: same rejection path.
+    Json = auth_json(#{<<"protocol_version">> => <<"0.0">>}),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertEqual(false, State#ws_state.authenticated),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"message">>, Decoded), <<"Version mismatch">>)
+    ),
+    ?assert(lists:keymember(close, 1, Frames)).
+
+auth_missing_versions_rejected_test() ->
+    %% Correct cookie but no version keys at all: a client predating the
+    %% version handshake (BT-4327). Missing counts as mismatch, and the
+    %% message marks the absent fields.
+    {Frames, State} = beamtalk_ws_handler:websocket_handle(
+        {text, auth_json_no_versions()}, unauth_state()
+    ),
+    ?assertEqual(false, State#ws_state.authenticated),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"message">>, Decoded), <<"<missing>">>)
+    ),
+    ?assert(lists:keymember(close, 1, Frames)).
+
+%% The accept path (matching versions → session created) is covered by
+%% `handshake_success_matches_shared_wire_corpus/0` in the session
+%% fixture below, which needs the live session supervisor.
 
 %%% ===========================================================================
 %%% Shared wire-corpus conformance (auth handshake)
@@ -1024,8 +1070,23 @@ node_cookie() ->
     atom_to_binary(erlang:get_cookie(), utf8).
 
 auth_json(Extra) ->
-    Base = #{<<"type">> => <<"auth">>, <<"cookie">> => node_cookie()},
+    Base = #{
+        <<"type">> => <<"auth">>,
+        <<"cookie">> => node_cookie(),
+        %% The version gate (BT-4327) requires both: default to this node's
+        %% own versions so success-path tests exercise a matching client.
+        %% Negative tests override one or both keys via `Extra`.
+        <<"beamtalk_version">> => beamtalk_version:app_vsn(beamtalk_workspace),
+        <<"protocol_version">> => ?PROTOCOL_VERSION
+    },
     iolist_to_binary(json:encode(maps:merge(Base, Extra))).
+
+%% An `auth` frame like `auth_json/1` but with NO version keys — a client
+%% predating the version handshake (BT-4327).
+auth_json_no_versions() ->
+    iolist_to_binary(
+        json:encode(#{<<"type">> => <<"auth">>, <<"cookie">> => node_cookie()})
+    ).
 
 %% Pull the first decoded text frame whose JSON has a key K equal to V.
 has_frame_with(Frames, K, V) ->

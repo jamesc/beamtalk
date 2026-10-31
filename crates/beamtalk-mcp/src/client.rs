@@ -132,6 +132,7 @@ impl ReplClient {
                 .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
+        verify_server_versions(&mut ws).await?;
 
         let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
         let keepalive_abort = spawn_keepalive(Arc::clone(&inner)).abort_handle();
@@ -219,6 +220,8 @@ impl ReplClient {
             .clone();
         let session_id =
             perform_auth_handshake(&mut ws, &cookie, requested_session.as_deref()).await?;
+        // A restarted node may run a different toolchain — re-verify (BT-4327).
+        verify_server_versions(&mut ws).await?;
 
         let resumed =
             requested_session.is_some() && requested_session.as_deref() == session_id.as_deref();
@@ -905,8 +908,16 @@ where
     }
 
     // Send auth with optional resume. `client` tags the session surface so
-    // `Workspace sessions` can show it originated from the MCP server.
-    let auth_msg = handshake::auth_request(cookie, "mcp", resume);
+    // `Workspace sessions` can show it originated from the MCP server. The
+    // version fields let the node reject a mismatched toolchain (BT-4327)
+    // before any session exists.
+    let auth_msg = handshake::auth_request(
+        cookie,
+        "mcp",
+        resume,
+        handshake::beamtalk_version(),
+        handshake::PROTOCOL_VERSION,
+    );
     let auth_str =
         serde_json::to_string(&auth_msg).map_err(|e| format!("Failed to serialize auth: {e}"))?;
     ws.send(Message::Text(auth_str.into()))
@@ -934,6 +945,56 @@ where
         return Err(format!("Unexpected post-auth message: {session_json}"));
     }
     Ok(handshake::session_id(&session_json))
+}
+
+/// Client side of the version lock (BT-4327): ask the node for its
+/// `describe` versions and refuse a stale node.
+///
+/// A node predating the server gate ignores the new `auth` fields, so
+/// without this check a new client would silently compile against a stale
+/// toolchain. The error propagates to the tool caller — tools must not
+/// swallow it into an offline fallback.
+///
+/// The node queues actor-snapshot push frames ahead of our reply, so this
+/// waits for the frame echoing our `describe` id rather than trusting the
+/// next frame off the socket.
+async fn verify_server_versions<S>(
+    ws: &mut tokio_tungstenite::WebSocketStream<S>,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let describe = RequestBuilder::describe();
+    let want_id = describe
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let describe_str = serde_json::to_string(&describe)
+        .map_err(|e| format!("Failed to serialize describe: {e}"))?;
+    ws.send(Message::Text(describe_str.into()))
+        .await
+        .map_err(|e| format!("Failed to send describe: {e}"))?;
+    let deadline = tokio::time::Instant::now() + REPL_IO_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("Timed out waiting for the describe version check".to_string());
+        }
+        let response = read_text_message_with_timeout(ws, remaining).await?;
+        let response_json: serde_json::Value = serde_json::from_str(&response)
+            .map_err(|e| format!("Failed to parse describe response: {e}"))?;
+        let parsed: ReplResponse = serde_json::from_value(response_json)
+            .map_err(|e| format!("Failed to decode describe response: {e}"))?;
+        if want_id.is_some() && parsed.id == want_id {
+            return handshake::verify_server_versions(
+                parsed.versions.as_ref(),
+                handshake::beamtalk_version(),
+                handshake::PROTOCOL_VERSION,
+            );
+        }
+        // Anything else (actor-snapshot pushes queued ahead of our reply)
+        // is not our answer — keep waiting.
+    }
 }
 
 /// Read the next text message from a WebSocket stream.

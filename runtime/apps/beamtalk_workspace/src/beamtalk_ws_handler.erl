@@ -14,6 +14,7 @@ accepting any protocol operations.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_ws_state.hrl").
 
 -export([
@@ -399,18 +400,43 @@ handle_auth(Data, State) ->
                     crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
-                    %% Check for session resume request
-                    ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
-                    %% Origin/debug metadata for a freshly-created session: the
-                    %% client surface it declared (`repl`/`mcp`/`lsp`/…, normalised
-                    %% downstream) plus the connecting peer. Surfaced by
-                    %% `Workspace sessions` / `Session info`.
-                    Meta = #{
-                        kind => maps:get(<<"client">>, AuthMsg, undefined),
-                        peer => format_peer(State#ws_state.peer),
-                        connected_at => erlang:system_time(microsecond)
-                    },
-                    start_or_resume_session(ResumeId, Meta, State);
+                    %% Version lock (BT-4327): the client must have been built
+                    %% from the same checkout as this node — same
+                    %% `BEAMTALK_VERSION` (exact, including any `-dev+<sha>`
+                    %% suffix) and same `?PROTOCOL_VERSION`. A stale binary
+                    %% attaching to a newer node (or vice versa) previously
+                    %% failed in confusing ways far from the cause; reject it
+                    %% here, before any session exists, with a message naming
+                    %% both sides. OTP is deliberately NOT part of this gate:
+                    %% mixed OTP releases are governed by the support window
+                    %% (`beamtalk_cli::otp_support`), not an exact match.
+                    case check_client_versions(AuthMsg) of
+                        ok ->
+                            %% Check for session resume request
+                            ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
+                            %% Origin/debug metadata for a freshly-created session: the
+                            %% client surface it declared (`repl`/`mcp`/`lsp`/…, normalised
+                            %% downstream) plus the connecting peer. Surfaced by
+                            %% `Workspace sessions` / `Session info`.
+                            Meta = #{
+                                kind => maps:get(<<"client">>, AuthMsg, undefined),
+                                peer => format_peer(State#ws_state.peer),
+                                connected_at => erlang:system_time(microsecond)
+                            },
+                            start_or_resume_session(ResumeId, Meta, State);
+                        {error, VersionMessage} ->
+                            ?LOG_WARNING("WebSocket auth failed: version mismatch", #{
+                                peer => State#ws_state.peer,
+                                domain => [beamtalk, runtime]
+                            }),
+                            VersionReply = iolist_to_binary(
+                                json:encode(#{
+                                    <<"type">> => <<"auth_error">>,
+                                    <<"message">> => VersionMessage
+                                })
+                            ),
+                            {[{text, VersionReply}, {close, 1008, <<"Version mismatch">>}], State}
+                    end;
                 false ->
                     ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{
                         peer => State#ws_state.peer,
@@ -454,6 +480,49 @@ handle_auth(Data, State) ->
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     end.
+
+-doc """
+Compare the connecting client's toolchain versions against this node's.
+
+Both `beamtalk_version` (this node's `beamtalk_workspace` app `vsn`, from
+`scripts/version.escript`) and `protocol_version` (`?PROTOCOL_VERSION`)
+must match exactly. A missing field counts as a mismatch — it means the
+client predates the version handshake (BT-4327) and must be rebuilt.
+""".
+-spec check_client_versions(map()) -> ok | {error, binary()}.
+check_client_versions(AuthMsg) ->
+    ServerBeamtalk = beamtalk_version:app_vsn(beamtalk_workspace),
+    ClientBeamtalk = maps:get(<<"beamtalk_version">>, AuthMsg, undefined),
+    ClientProtocol = maps:get(<<"protocol_version">>, AuthMsg, undefined),
+    case ClientBeamtalk =:= ServerBeamtalk andalso ClientProtocol =:= ?PROTOCOL_VERSION of
+        true ->
+            ok;
+        false ->
+            {error,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Version mismatch: client is beamtalk ~s protocol ~s, "
+                        "this workspace node is beamtalk ~s protocol ~s. "
+                        "Stop the stale side and rebuild both from the same "
+                        "checkout (`just build`), then restart the workspace.",
+                        [
+                            display_vsn(ClientBeamtalk),
+                            display_vsn(ClientProtocol),
+                            display_vsn(ServerBeamtalk),
+                            display_vsn(?PROTOCOL_VERSION)
+                        ]
+                    )
+                )}
+    end.
+
+-doc """
+Render a version field for the mismatch message (`undefined` → `<missing>`,
+any non-binary → `<invalid>` — `io_lib:format`'s `~s` would raise on those).
+""".
+-spec display_vsn(term()) -> binary().
+display_vsn(undefined) -> <<"<missing>">>;
+display_vsn(Vsn) when is_binary(Vsn) -> Vsn;
+display_vsn(_) -> <<"<invalid>">>.
 
 %%% Internal — Protocol Dispatch
 

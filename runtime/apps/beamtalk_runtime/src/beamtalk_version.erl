@@ -27,7 +27,7 @@ site or the shape of any existing response.
 
 -include("beamtalk.hrl").
 
--export([get/0]).
+-export([get/0, app_vsn/1]).
 
 -export_type([version_report/0]).
 
@@ -71,7 +71,14 @@ get() ->
 %% Internal helpers
 %%====================================================================
 
--doc "Look up an application's version as a binary, or `<<\"unknown\">>` if unavailable.".
+-doc """
+Look up an application's version as a binary, or `<<"unknown">>` if unavailable.
+
+Shared by `get/0` (the `runtime_version` field), the REPL `describe` op's
+`beamtalk` version, and the WebSocket auth version gate
+(`beamtalk_ws_handler:check_client_versions/1`) — one home for the
+`application:get_key(App, vsn)` shape instead of a copy per call site.
+""".
 -spec app_vsn(atom()) -> binary().
 app_vsn(App) ->
     case application:get_key(App, vsn) of

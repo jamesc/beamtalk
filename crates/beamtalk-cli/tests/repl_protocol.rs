@@ -982,7 +982,15 @@ impl ReplClient {
         // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie).
         // `client: repl` mirrors the real CLI repl client so sessions created here
         // carry the same origin metadata (`Session current kind` => "repl").
-        let auth_msg = handshake::auth_request(E2E_COOKIE, "repl", None);
+        // Versions come from this test binary's own toolchain build (BT-4327);
+        // both sides are built from this checkout, so the gate passes.
+        let auth_msg = handshake::auth_request(
+            E2E_COOKIE,
+            "repl",
+            None,
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        );
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
 

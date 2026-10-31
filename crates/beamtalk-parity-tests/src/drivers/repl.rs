@@ -46,8 +46,14 @@ impl ReplDriver {
         // `beamtalk_repl_protocol::handshake` rather than
         // re-matching the JSON here — see that module's doc comment for why.
         let _required = read_text(&mut ws).await?;
-        // auth
-        let auth_msg = handshake::auth_request(&repl.cookie, "repl", None);
+        // auth (versions let the node reject a mismatched toolchain, BT-4327)
+        let auth_msg = handshake::auth_request(
+            &repl.cookie,
+            "repl",
+            None,
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        );
         ws.send(Message::Text(auth_msg.to_string().into()))
             .await
             .map_err(|e| format!("send auth: {e}"))?;

@@ -514,7 +514,21 @@ mod tests {
                     .to_string()
                     .into(),
             ));
-            let _ = ws.read();
+            // Capture the client's claimed versions from the `auth` frame
+            // (BT-4327) to echo back for the connect-time `describe`.
+            let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
+            if let Ok(Message::Text(text)) = ws.read() {
+                if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
+                    versions["beamtalk"] = auth
+                        .get("beamtalk_version")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    versions["protocol"] = auth
+                        .get("protocol_version")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                }
+            }
             let _ = ws.send(Message::Text(
                 serde_json::json!({"type": "auth_ok"}).to_string().into(),
             ));
@@ -523,7 +537,23 @@ mod tests {
                     .to_string()
                     .into(),
             ));
-            // Then drop the connection and stop listening entirely.
+            // Answer the connect-time `describe` version check so the
+            // initial `connect` succeeds, then drop the connection and
+            // stop listening entirely.
+            if let Ok(Message::Text(text)) = ws.read() {
+                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                    let _ = ws.send(Message::Text(
+                        serde_json::json!({
+                            "id": req.get("id"),
+                            "status": ["done"],
+                            "ops": {},
+                            "versions": versions,
+                        })
+                        .to_string()
+                        .into(),
+                    ));
+                }
+            }
         });
         let mut client = ReplClient::connect("127.0.0.1", handler_port, "cookie").expect("connect");
         accepted.join().expect("server thread");

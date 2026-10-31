@@ -234,8 +234,25 @@ pub(crate) fn spawn_auth_ok_server(
                     let _ = ws.send(Message::Text(v.to_string().into()));
                 };
                 send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                if ws.read().is_err() {
-                    return;
+                // Capture the client's claimed versions: this fake models a
+                // version-matching node (BT-4327), so a connect-time
+                // `describe` is answered by echoing them back.
+                let mut beamtalk_version = serde_json::Value::Null;
+                let mut protocol_version = serde_json::Value::Null;
+                match ws.read() {
+                    Ok(Message::Text(text)) => {
+                        if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
+                            beamtalk_version = auth
+                                .get("beamtalk_version")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
+                            protocol_version = auth
+                                .get("protocol_version")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
+                        }
+                    }
+                    _ => return,
                 }
                 send(&mut ws, serde_json::json!({"type": "auth_ok"}));
                 send(
@@ -243,7 +260,25 @@ pub(crate) fn spawn_auth_ok_server(
                     serde_json::json!({"op": "session-started", "session": "sess-test"}),
                 );
                 while let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str(&text) {
+                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                        // Answer every connect-time `describe` version check
+                        // in the fake itself — the per-test `handler` only
+                        // models the operation under test.
+                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                            send(
+                                &mut ws,
+                                serde_json::json!({
+                                    "id": req.get("id"),
+                                    "status": ["done"],
+                                    "ops": {},
+                                    "versions": {
+                                        "beamtalk": beamtalk_version,
+                                        "protocol": protocol_version,
+                                    },
+                                }),
+                            );
+                            continue;
+                        }
                         handler(req, &mut ws);
                     }
                 }
