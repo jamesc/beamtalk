@@ -334,29 +334,37 @@ fn erlang_available() -> bool {
 }
 
 /// Compiles `modules` with `erlc` into `dir`; `Err` with `erlc`'s output.
+///
+/// In batches: Windows caps a command line at ~32K characters, and this
+/// corpus is hundreds of modules, so one `erlc` call with every path
+/// overflows it (`Os { code: 206 }`, BT-4224). Batches of 32 keep every
+/// invocation to a few kilobytes on every platform.
 fn erlc(dir: &Path, modules: &[(String, String)]) -> Result<(), String> {
+    // Windows caps a command line at ~32K characters (see below).
+    const BATCH: usize = 32;
     let mut files = Vec::new();
     for (name, code) in modules {
         let file = dir.join(format!("{name}.core"));
         std::fs::write(&file, code).expect("write core");
         files.push(file);
     }
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg("-o")
-        .arg(dir)
-        .args(&files)
-        .output()
-        .expect("run erlc");
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ))
+    for chunk in files.chunks(BATCH) {
+        let output = Command::new("erlc")
+            .arg("+from_core")
+            .arg("-o")
+            .arg(dir)
+            .args(chunk)
+            .output()
+            .expect("run erlc");
+        if !output.status.success() {
+            return Err(format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
     }
+    Ok(())
 }
 
 fn repo_root() -> PathBuf {
@@ -403,43 +411,54 @@ fn runtime_ebins() -> Vec<PathBuf> {
 /// for a trace module) on a node with the stdlib started, from the bindings
 /// `w => 0, x => 0`, and answers per module the input's value (a trace
 /// module's last step's, with the step count) and the bindings `w` and `x`.
+///
+/// In batches: the `-eval` script lists every module, and one call for the
+/// whole corpus approaches the Windows ~32K command-line limit (BT-4224).
+/// Batches of 128 keep every invocation to a few kilobytes on every
+/// platform.
 fn run_on_beam(dir: &Path, modules: &[(String, bool)]) -> HashMap<String, String> {
-    let list = modules
-        .iter()
-        .map(|(m, trace)| format!("{{'{m}', {trace}}}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let script = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-         lists:foreach(fun({{M, Trace}}) -> \
-           Out = try {{Trace, M:eval(#{{w => 0, x => 0}})}} of \
-             {{true, {{Steps, B}}}} -> \
-               {{_, V}} = lists:last(Steps), \
-               io_lib:format(\"~w ~w ~w steps=~w\", [V, maps:get(w, B), maps:get(x, B), length(Steps)]); \
-             {{false, {{V, B}}}} -> \
-               io_lib:format(\"~w ~w ~w\", [V, maps:get(w, B), maps:get(x, B)]) \
-           catch C:E:St -> io_lib:format(\"error ~w:~0p ~0p\", [C, E, hd(St)]) end, \
-           io:format(\"~s => ~s~n\", [M, Out]) \
-         end, [{list}]), halt().",
-    );
-    let mut cmd = Command::new("erl");
-    // The node runs in `dir`, so a crash dump never lands in the source tree.
-    cmd.current_dir(dir).arg("-noshell").arg("-pa").arg(dir);
-    for ebin in runtime_ebins() {
-        cmd.arg("-pa").arg(ebin);
+    const BATCH: usize = 128;
+    let mut merged = HashMap::new();
+    for chunk in modules.chunks(BATCH) {
+        let list = chunk
+            .iter()
+            .map(|(m, trace)| format!("{{'{m}', {trace}}}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let script = format!(
+            "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+             lists:foreach(fun({{M, Trace}}) -> \
+               Out = try {{Trace, M:eval(#{{w => 0, x => 0}})}} of \
+                 {{true, {{Steps, B}}}} -> \
+                   {{_, V}} = lists:last(Steps), \
+                   io_lib:format(\"~w ~w ~w steps=~w\", [V, maps:get(w, B), maps:get(x, B), length(Steps)]); \
+                 {{false, {{V, B}}}} -> \
+                   io_lib:format(\"~w ~w ~w\", [V, maps:get(w, B), maps:get(x, B)]) \
+               catch C:E:St -> io_lib:format(\"error ~w:~0p ~0p\", [C, E, hd(St)]) end, \
+               io:format(\"~s => ~s~n\", [M, Out]) \
+             end, [{list}]), halt().",
+        );
+        let mut cmd = Command::new("erl");
+        // The node runs in `dir`, so a crash dump never lands in the source tree.
+        cmd.current_dir(dir).arg("-noshell").arg("-pa").arg(dir);
+        for ebin in runtime_ebins() {
+            cmd.arg("-pa").arg(ebin);
+        }
+        let output = cmd.arg("-eval").arg(script).output().expect("run erl");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "erl failed:\n{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        merged.extend(
+            stdout
+                .lines()
+                .filter_map(|l| l.split_once(" => "))
+                .map(|(m, out)| (m.to_string(), out.to_string())),
+        );
     }
-    let output = cmd.arg("-eval").arg(script).output().expect("run erl");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "erl failed:\n{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    stdout
-        .lines()
-        .filter_map(|l| l.split_once(" => "))
-        .map(|(m, out)| (m.to_string(), out.to_string()))
-        .collect()
+    merged
 }
 
 /// Whether the `erl` output `out` of a module agrees with `expected`.
