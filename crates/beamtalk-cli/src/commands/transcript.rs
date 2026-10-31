@@ -338,16 +338,16 @@ mod tests {
 
     mod transcript_client {
         use super::super::TranscriptClient;
-        use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
+        use crate::commands::test_support::{
+            closed_port, spawn_auth_error_server, spawn_auth_ok_server,
+        };
         use tungstenite::Message;
 
         #[test]
         fn connect_fails_against_unbound_port() {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-
-            let Err(err) = TranscriptClient::connect("127.0.0.1", port, "cookie") else {
+            // `closed_port` never has a listener (BT-4058): no bind/drop
+            // window for a parallel test to steal the port through.
+            let Err(err) = TranscriptClient::connect("127.0.0.1", closed_port(), "cookie") else {
                 panic!("expected connect to fail against an unbound port");
             };
             assert!(err.to_string().contains("Failed to connect"));
@@ -449,7 +449,9 @@ mod tests {
 
     mod run_early_returns {
         use super::super::run;
-        use crate::commands::test_support::{WorkspaceFixture, spawn_auth_error_server};
+        use crate::commands::test_support::{
+            WorkspaceFixture, closed_port, spawn_auth_error_server,
+        };
         use crate::commands::workspace::storage::save_workspace_cookie;
 
         #[test]
@@ -460,12 +462,10 @@ mod tests {
 
         #[test]
         fn node_not_running_errors_and_cleans_up() {
-            // Bind then drop so nothing is listening on this port — the TCP
-            // liveness probe in `is_node_running` fails.
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-            let fixture = WorkspaceFixture::new("not-running", port, 4_194_304);
+            // `closed_port` never has a listener (BT-4058) — the TCP
+            // liveness probe in `is_node_running` fails, with no bind/drop
+            // window for a parallel test to steal the port through.
+            let fixture = WorkspaceFixture::new("not-running", closed_port(), 4_194_304);
 
             let err = run(Some(&fixture.id), None).unwrap_err();
             assert!(err.to_string().contains("No workspace found"), "got: {err}");

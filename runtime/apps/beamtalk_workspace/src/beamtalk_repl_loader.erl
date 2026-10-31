@@ -2615,18 +2615,38 @@ differently-worded compile-failure report would be redundant, not helpful.
 The baseline is `beamtalk_workspace_shape_store:previous/1`, which an
 install records asynchronously (`spawn_shape_recheck/1` casts the capture
 to `beamtalk_workspace_shape_recheck_worker`). A precheck sent immediately
-after a class's *first* install can therefore still see no baseline and
-return `{ok, []}`; acceptable for an advisory check, and the next precheck
-sees it.
+after a class's *first* install would therefore race the worker and could
+still see no baseline and return `{ok, []}` (BT-3945), so this drains the
+worker's queue first (`beamtalk_workspace_shape_recheck_worker:sync/0`,
+best-effort: a stopped worker or a congested backlog simply falls back to
+whatever the store currently holds), and only then reads the baseline. A
+`{ok, []}` from here therefore means "genuinely nothing recorded", not
+"the install's capture has not run yet".
 """.
 -spec precheck_class_shape(binary(), binary()) ->
     {ok, [beamtalk_shape_diff:reload_finding()]}.
 precheck_class_shape(ClassNameBin, PendingSource) ->
+    drain_shape_recheck_worker(),
     case beamtalk_workspace_shape_store:previous(ClassNameBin) of
         undefined ->
             {ok, []};
         PrevGen ->
             {ok, precheck_class_shape_against(ClassNameBin, PrevGen, PendingSource)}
+    end.
+
+%% Best-effort drain of `beamtalk_workspace_shape_recheck_worker` (BT-3945):
+%% a `sync/0` call returns only after the worker has handled every cast
+%% queued ahead of it (including this session's install captures), so the
+%% `previous/1` read in `precheck_class_shape/2` cannot observe a
+%% not-yet-captured baseline. Never fails the precheck: when the worker is
+%% not running (no live reload path) or the queue is congested past the
+%% call timeout, fall back to whatever the store currently holds.
+drain_shape_recheck_worker() ->
+    try beamtalk_workspace_shape_recheck_worker:sync() of
+        ok -> ok
+    catch
+        exit:_ -> ok;
+        error:_ -> ok
     end.
 
 -spec precheck_class_shape_against(binary(), beamtalk_shape_diff:generation(), binary()) ->

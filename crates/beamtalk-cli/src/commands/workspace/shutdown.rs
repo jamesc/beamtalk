@@ -287,7 +287,7 @@ pub fn stop_workspace(name_or_id: Option<&str>, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::WorkspaceFixture;
+    use crate::commands::test_support::{WorkspaceFixture, closed_port};
     use std::net::TcpListener;
     use tungstenite::{Message, WebSocket};
 
@@ -360,11 +360,10 @@ mod tests {
 
     #[test]
     fn wait_for_workspace_exit_returns_ok_once_port_closes() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener); // Simulate the node having already exited.
-
-        wait_for_workspace_exit("127.0.0.1", port, 5).expect("port already closed");
+        // Simulate the node having already exited with a port nothing can
+        // be listening on (BT-4058) — no bind/drop window for a parallel
+        // test to steal the port through.
+        wait_for_workspace_exit("127.0.0.1", closed_port(), 5).expect("port already closed");
     }
 
     #[test]
@@ -496,12 +495,10 @@ mod tests {
 
     #[test]
     fn stop_workspace_when_node_not_running_errors() {
-        // Bind then drop immediately so the port is guaranteed free — the
-        // node.info entry is stale (the node isn't actually listening).
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener);
-        let fixture = WorkspaceFixture::new("not-running", port, 4_194_304);
+        // `closed_port` never has a listener (BT-4058) — the node.info
+        // entry is stale (the node isn't actually listening), with no
+        // bind/drop window for a parallel test to steal the port through.
+        let fixture = WorkspaceFixture::new("not-running", closed_port(), 4_194_304);
 
         let err = stop_workspace(Some(&fixture.id), false).unwrap_err();
         assert!(err.to_string().contains("is not running"), "got: {err}");
