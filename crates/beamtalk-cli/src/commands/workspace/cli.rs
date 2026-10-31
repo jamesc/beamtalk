@@ -24,6 +24,15 @@ pub enum WorkspaceCommand {
         /// Output as JSON for machine-readable consumption
         #[arg(long)]
         json: bool,
+
+        /// Only show workspaces with this status (`running` or `stopped`)
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Only show workspaces whose project path or ID contains this substring
+        /// (case-insensitive)
+        #[arg(long)]
+        project: Option<String>,
     },
 
     /// Stop a running workspace
@@ -126,13 +135,34 @@ pub enum WorkspaceCommand {
         #[arg(long)]
         confirm_network: bool,
     },
+
+    /// Delete on-disk state for stopped workspaces
+    ///
+    /// `stop` leaves the workspace directory behind, so stopped entries
+    /// accumulate in `workspace list`. Prune removes them. Running
+    /// workspaces and releases are never touched.
+    Prune {
+        /// Show what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Only prune workspaces whose project path or ID contains this
+        /// substring (case-insensitive)
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 /// Run a workspace subcommand.
 pub fn run(command: WorkspaceCommand) -> Result<()> {
     match command {
-        WorkspaceCommand::List { json } => run_list(json),
+        WorkspaceCommand::List {
+            json,
+            status,
+            project,
+        } => run_list(json, status.as_deref(), project.as_deref()),
         WorkspaceCommand::Stop { name, force } => stop_workspace(name.as_deref(), force),
+        WorkspaceCommand::Prune { dry_run, project } => run_prune(dry_run, project.as_deref()),
         WorkspaceCommand::Status { name } => run_status(name.as_deref()),
         WorkspaceCommand::Attach {
             name,
@@ -179,9 +209,242 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
     }
 }
 
+/// Replace a leading home directory with `~` for compact display.
+///
+/// Uses [`Path::strip_prefix`](std::path::Path::strip_prefix), not string
+/// prefix matching, so a sibling like `/Users/james2/…` never abbreviates
+/// to `~2/…` when `$HOME` is `/Users/james`.
+fn abbreviate_home(path: &std::path::Path) -> String {
+    match dirs::home_dir() {
+        Some(home) => match path.strip_prefix(&home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.to_string_lossy().into_owned(),
+        },
+        None => path.to_string_lossy().into_owned(),
+    }
+}
+
+/// Abbreviate a project path for the `workspace list` table.
+///
+/// Applies [`abbreviate_home`], then — if still wider than `max_width` —
+/// truncates from the LEFT, keeping the distinguishing tail. Truncating the
+/// head is what matters: sibling checkouts share long prefixes
+/// (`~/source/beamtalk`, `~/source/beamtalk-b`, …) and differ only in the
+/// suffix, so keeping the first N chars (as this table used to do) renders
+/// every row identical.
+fn display_project_path(path: &std::path::Path, max_width: usize) -> String {
+    let s = abbreviate_home(path);
+    let len = s.chars().count();
+    if len > max_width && max_width > 1 {
+        let tail: String = s.chars().skip(len - max_width + 1).collect();
+        format!("…{tail}")
+    } else {
+        s
+    }
+}
+
+/// Parse the `--status` filter for `workspace list`.
+fn parse_list_status_filter(
+    status_filter: Option<&str>,
+) -> Result<Option<super::lifecycle::WorkspaceStatus>> {
+    use super::lifecycle::WorkspaceStatus;
+
+    match status_filter {
+        None => Ok(None),
+        Some(s) if s.eq_ignore_ascii_case("running") => Ok(Some(WorkspaceStatus::Running)),
+        Some(s) if s.eq_ignore_ascii_case("stopped") => Ok(Some(WorkspaceStatus::Stopped)),
+        Some(s) => Err(miette::miette!(
+            "Invalid --status '{s}': expected 'running' or 'stopped'"
+        )),
+    }
+}
+
+/// Apply the `--status`/`--project` filters to a workspace listing.
+///
+/// The project filter is a case-insensitive substring matched against the
+/// project path or workspace ID.
+fn apply_list_filters(
+    workspaces: Vec<super::lifecycle::WorkspaceSummary>,
+    status_filter: Option<super::lifecycle::WorkspaceStatus>,
+    project_filter: Option<&str>,
+) -> Vec<super::lifecycle::WorkspaceSummary> {
+    let project_needle = project_filter.map(str::to_lowercase);
+    workspaces
+        .into_iter()
+        .filter(|ws| status_filter.is_none_or(|wanted| ws.status == wanted))
+        .filter(|ws| match &project_needle {
+            None => true,
+            Some(needle) => {
+                let path_hit = ws
+                    .project_path
+                    .as_ref()
+                    .is_some_and(|p| p.to_string_lossy().to_lowercase().contains(needle));
+                path_hit || ws.workspace_id.to_lowercase().contains(needle)
+            }
+        })
+        .collect()
+}
+
+/// One rendered row of the `workspace list` table.
+struct ListRow {
+    marker: &'static str,
+    id: String,
+    project: String,
+    kind: String,
+    status: super::lifecycle::WorkspaceStatus,
+    port: String,
+    sort_key: String,
+}
+
+/// Build table rows sorted by project path, so sibling checkouts land next
+/// to each other (the listing itself is sorted by opaque hash ID).
+fn build_list_rows(
+    workspaces: &[super::lifecycle::WorkspaceSummary],
+    current_project_root: Option<&std::path::Path>,
+) -> Vec<ListRow> {
+    let mut rows: Vec<ListRow> = workspaces
+        .iter()
+        .map(|ws| {
+            let is_current = ws.project_path.as_deref().is_some_and(|ws_path| {
+                current_project_root.is_some_and(|root| {
+                    // Compare canonicalized paths to handle symlinks/relative paths
+                    let root_canon = root.canonicalize().ok();
+                    let ws_canon = ws_path.canonicalize().ok();
+                    match (root_canon, ws_canon) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => root == ws_path,
+                    }
+                })
+            });
+
+            // `-` for a release node (`ws.project_path` is `None` — see
+            // `WorkspaceKind::Release`), not the original build-time path.
+            let full_project = ws
+                .project_path
+                .as_ref()
+                .map_or_else(|| "-".to_string(), |p| abbreviate_home(p));
+
+            ListRow {
+                marker: if is_current { "▸" } else { "" },
+                id: ws.workspace_id.clone(),
+                project: full_project.clone(),
+                kind: ws.kind.to_string(),
+                status: ws.status,
+                port: ws.port.map_or_else(|| "-".to_string(), |p| p.to_string()),
+                sort_key: full_project,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| a.sort_key.cmp(&b.sort_key).then_with(|| a.id.cmp(&b.id)));
+    rows
+}
+
+/// Print the `workspace list` table and summary line.
+fn print_list_table(mut rows: Vec<ListRow>, total: usize) {
+    use super::lifecycle::WorkspaceStatus;
+
+    // The KIND column carries no information when every visible row is the
+    // same kind (the common case: all dev workspaces), so hide it then and
+    // only show it when releases and workspaces are mixed.
+    let show_kind = rows
+        .first()
+        .is_some_and(|first| rows.iter().any(|r| r.kind != first.kind));
+
+    // Size the PROJECT column to the longest visible path, capped by the
+    // actual terminal width so the table never wraps: every other column has
+    // a fixed width, PROJECT gets what's left (at least enough for `~/…x`).
+    // Piped output has no terminal size — fall back to the classic 80.
+    let term_width = terminal_size::terminal_size().map_or(80, |(w, _)| w.0 as usize);
+    // Field widths plus the single spaces between them.
+    let fixed_width = if show_kind {
+        36 + 10 // marker, workspace, kind, status, port
+    } else {
+        36 // marker, workspace, status, port
+    };
+    let max_project_width = term_width.saturating_sub(fixed_width).clamp(10, 60);
+    let project_width = rows
+        .iter()
+        .map(|r| r.project.chars().count())
+        .max()
+        .unwrap_or(7)
+        .min(max_project_width);
+    for r in &mut rows {
+        r.project = display_project_path(std::path::Path::new(&r.project), project_width);
+    }
+
+    if show_kind {
+        println!(
+            "{:<2} {:<14} {:<width$} {:<9} {:<10} {:<6}",
+            "",
+            "WORKSPACE",
+            "PROJECT",
+            "KIND",
+            "STATUS",
+            "PORT",
+            width = project_width
+        );
+        for r in &rows {
+            println!(
+                "{:<2} {:<14} {:<width$} {:<9} {:<10} {:<6}",
+                r.marker,
+                r.id,
+                r.project,
+                r.kind,
+                r.status,
+                r.port,
+                width = project_width
+            );
+        }
+    } else {
+        println!(
+            "{:<2} {:<14} {:<width$} {:<10} {:<6}",
+            "",
+            "WORKSPACE",
+            "PROJECT",
+            "STATUS",
+            "PORT",
+            width = project_width
+        );
+        for r in &rows {
+            println!(
+                "{:<2} {:<14} {:<width$} {:<10} {:<6}",
+                r.marker,
+                r.id,
+                r.project,
+                r.status,
+                r.port,
+                width = project_width
+            );
+        }
+    }
+
+    let running = rows
+        .iter()
+        .filter(|r| r.status == WorkspaceStatus::Running)
+        .count();
+    let stopped = rows.len() - running;
+    if rows.len() == total {
+        println!("\n{total} workspace(s) total ({running} running, {stopped} stopped)");
+    } else {
+        println!(
+            "\n{} workspace(s) shown ({running} running, {stopped} stopped) — filtered from {total} total",
+            rows.len(),
+        );
+    }
+}
+
 /// List all workspaces with formatted output.
-fn run_list(json: bool) -> Result<()> {
+///
+/// `status_filter` accepts `"running"`/`"stopped"` (case-insensitive);
+/// `project_filter` is a case-insensitive substring matched against the
+/// project path or workspace ID. Both filters also apply to `--json` output
+/// so scripts can use them too.
+fn run_list(json: bool, status_filter: Option<&str>, project_filter: Option<&str>) -> Result<()> {
+    let status_filter = parse_list_status_filter(status_filter)?;
+
     let workspaces = list_workspaces()?;
+    let total = workspaces.len();
+    let workspaces = apply_list_filters(workspaces, status_filter, project_filter);
 
     if json {
         let output = serde_json::to_string_pretty(&workspaces)
@@ -191,8 +454,12 @@ fn run_list(json: bool) -> Result<()> {
     }
 
     if workspaces.is_empty() {
-        println!("No workspaces found.");
-        println!("Start a REPL to create one: beamtalk repl");
+        if total == 0 {
+            println!("No workspaces found.");
+            println!("Start a REPL to create one: beamtalk repl");
+        } else {
+            println!("No workspaces match the given filters ({total} total).");
+        }
         return Ok(());
     }
 
@@ -201,42 +468,41 @@ fn run_list(json: bool) -> Result<()> {
         .ok()
         .map(|cwd| discovery::discover_project_root(&cwd));
 
-    // Table header
-    println!(
-        "{:<2} {:<14} {:<30} {:<9} {:<10} {:<6}",
-        "", "WORKSPACE", "PROJECT", "KIND", "STATUS", "PORT"
+    print_list_table(
+        build_list_rows(&workspaces, current_project_root.as_deref()),
+        total,
     );
 
-    for ws in &workspaces {
-        let is_current = ws.project_path.as_deref().is_some_and(|ws_path| {
-            current_project_root.as_ref().is_some_and(|root| {
-                // Compare canonicalized paths to handle symlinks/relative paths
-                let root_canon = root.canonicalize().ok();
-                let ws_canon = ws_path.canonicalize().ok();
-                match (root_canon, ws_canon) {
-                    (Some(a), Some(b)) => a == b,
-                    _ => root == ws_path,
-                }
-            })
-        });
-        let marker = if is_current { "▸" } else { "" };
+    Ok(())
+}
 
-        // `-` for a release node (`ws.project_path` is `None` — see
-        // `WorkspaceKind::Release`), not the original build-time path.
-        let project = ws.project_path.as_ref().map_or_else(
-            || "-".to_string(),
-            |p| p.to_string_lossy().chars().take(30).collect::<String>(),
-        );
+/// Delete on-disk state for stopped workspaces.
+fn run_prune(dry_run: bool, project_filter: Option<&str>) -> Result<()> {
+    let report = super::prune_workspaces(dry_run, project_filter)?;
 
-        let port_str = ws.port.map_or_else(|| "-".to_string(), |p| p.to_string());
-
-        println!(
-            "{:<2} {:<14} {:<30} {:<9} {:<10} {:<6}",
-            marker, ws.workspace_id, project, ws.kind, ws.status, port_str
-        );
+    if report.removed.is_empty() {
+        println!("Nothing to prune.");
+    } else {
+        for id in &report.removed {
+            println!("{} {id}", if dry_run { "would remove" } else { "removed" });
+        }
     }
 
-    println!("\n{} workspace(s) total", workspaces.len());
+    if dry_run {
+        println!(
+            "\n{} workspace(s) would be removed ({} running and {} release(s) skipped)",
+            report.removed.len(),
+            report.skipped_running,
+            report.skipped_releases
+        );
+    } else {
+        println!(
+            "\n{} workspace(s) pruned ({} running and {} release(s) skipped)",
+            report.removed.len(),
+            report.skipped_running,
+            report.skipped_releases
+        );
+    }
 
     Ok(())
 }
@@ -424,7 +690,7 @@ mod tests {
     /// `run_list`'s success path, both table and `--json` output:
     /// with at least one real workspace present, exercises the non-empty
     /// table-printing loop (current-project marker detection, path
-    /// truncation, port formatting) and the JSON-serialization branch —
+    /// abbreviation, port formatting) and the JSON-serialization branch —
     /// previously only the underlying `list_workspaces()` was covered
     /// (`workspace::mod`'s tests), not this wrapper's own body.
     #[test]
@@ -435,8 +701,152 @@ mod tests {
         let name = format!("run-list-test-{}", std::process::id());
         run_create(&name).expect("seed workspace should be created");
 
-        run_list(false).expect("table output should succeed");
-        run_list(true).expect("json output should succeed");
+        run_list(false, None, None).expect("table output should succeed");
+        run_list(true, None, None).expect("json output should succeed");
+        // Filters that match / don't match the seeded workspace.
+        run_list(false, Some("stopped"), None).expect("status filter should succeed");
+        run_list(false, None, Some(&name)).expect("project filter should succeed");
+        run_list(false, None, Some("no-such-project-xyz"))
+            .expect("non-matching filter should succeed with empty table");
+        run_list(true, Some("running"), None).expect("json with filter should succeed");
+    }
+
+    /// The KIND column only renders when workspace and release rows are
+    /// mixed. Fabricate that mix directly (a live release node can't be
+    /// staged hermetically) and smoke-print it: asserts the mixed-kind
+    /// branch runs without panicking, on empty and narrow inputs too.
+    #[test]
+    fn print_list_table_with_mixed_kinds() {
+        use super::super::lifecycle::{WorkspaceKind, WorkspaceStatus, WorkspaceSummary};
+
+        let summaries = vec![
+            WorkspaceSummary {
+                workspace_id: "abc123def456".to_string(),
+                project_path: Some(std::path::PathBuf::from("/tmp/some-project")),
+                kind: WorkspaceKind::Workspace,
+                status: WorkspaceStatus::Stopped,
+                port: None,
+                pid: None,
+                created_at: Some(1_000_000),
+            },
+            WorkspaceSummary {
+                workspace_id: "my-release".to_string(),
+                project_path: None,
+                kind: WorkspaceKind::Release,
+                status: WorkspaceStatus::Running,
+                port: Some(1234),
+                pid: None,
+                created_at: None,
+            },
+        ];
+        let rows = build_list_rows(&summaries, None);
+        assert_eq!(rows.len(), 2);
+        // Release row (sort key "-") sorts before the absolute path.
+        assert_eq!(rows[0].id, "my-release");
+        print_list_table(rows, 2);
+    }
+
+    /// `prune` deletes stopped workspaces but never a running one: seed
+    /// one of each, dry-run first (deletes nothing), then prune for real.
+    #[test]
+    fn run_prune_removes_stopped_and_spares_running() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+
+        // Stopped workspace: created, never started, so no live node.
+        let stopped = format!("prune-stopped-{}", std::process::id());
+        run_create(&stopped).expect("seed stopped workspace should be created");
+
+        // Running workspace: the fixture holds a live listener behind a
+        // `node.info` that probes as running.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("local_addr").port();
+        let running = format!("prune-running-{}", std::process::id());
+        // Held to end of scope: keeps the listener (and directory) alive.
+        let fixture = WorkspaceFixture::new(&running, port, std::process::id());
+
+        // Dry run reports but deletes nothing.
+        run_prune(true, None).expect("dry run should succeed");
+        assert!(
+            workspace_exists(&stopped).unwrap(),
+            "dry run must not delete the stopped workspace"
+        );
+
+        // Scoped to the stopped one by --project: running is out of scope.
+        run_prune(false, Some("prune-stopped")).expect("scoped prune should succeed");
+        assert!(
+            !workspace_exists(&stopped).unwrap(),
+            "stopped workspace should be pruned"
+        );
+        assert!(
+            workspace_exists(&fixture.id).unwrap(),
+            "running workspace must survive prune"
+        );
+
+        // Nothing left to prune now except the running workspace.
+        run_prune(false, None).expect("second prune should succeed");
+        assert!(
+            workspace_exists(&fixture.id).unwrap(),
+            "running workspace must survive an unscoped prune too"
+        );
+    }
+
+    #[test]
+    fn run_list_rejects_invalid_status_filter() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+
+        assert!(run_list(false, Some("bogus"), None).is_err());
+        // Case-insensitive acceptance is checked by success, not output text.
+        run_list(false, Some("RUNNING"), None).expect("status should be case-insensitive");
+    }
+
+    /// Sibling checkouts must stay distinguishable: the table keeps the
+    /// path TAIL (`…/source/beamtalk-b`), never the shared head.
+    #[test]
+    fn display_project_path_keeps_distinguishing_tail() {
+        use std::path::PathBuf;
+
+        // `~`-abbreviation applies when under $HOME.
+        if let Some(home) = dirs::home_dir() {
+            let p: PathBuf = home.join("source/beamtalk-b");
+            assert_eq!(
+                display_project_path(&p, 60),
+                "~/source/beamtalk-b",
+                "short paths keep the full abbreviated form"
+            );
+            // Narrow width cuts the head, keeps the tail.
+            let shown = display_project_path(&p, 10);
+            assert!(
+                shown.starts_with('…') && shown.ends_with("eamtalk-b"),
+                "narrow width must keep the tail, got: {shown}"
+            );
+        }
+
+        // A sibling directory that merely shares a string prefix with
+        // $HOME (`/Users/james2/…` vs `/Users/james`) must NOT abbreviate.
+        if let Some(home) = dirs::home_dir() {
+            if let Some(home_str) = home.to_str() {
+                let sibling = PathBuf::from(format!("{home_str}2/some-project"));
+                assert!(
+                    !display_project_path(&sibling, 60).starts_with('~'),
+                    "sibling prefix must not abbreviate, got: {}",
+                    display_project_path(&sibling, 60)
+                );
+            }
+        }
+
+        // Non-home paths are never `~`-prefixed, but still tail-truncated.
+        let p = PathBuf::from("/private/tmp/beamtalk-parity-cwd-12345");
+        let shown = display_project_path(&p, 20);
+        assert!(
+            shown.starts_with('…'),
+            "long non-home path must truncate from the left, got: {shown}"
+        );
+        assert!(
+            !display_project_path(&p, 60).starts_with('~'),
+            "non-home path must not gain a ~ prefix"
+        );
     }
 
     /// `run_status`'s success path: with a real workspace present,

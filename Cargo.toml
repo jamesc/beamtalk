@@ -116,6 +116,7 @@ toml = "1.0"
 
 # System directories
 dirs = "7"
+terminal_size = "0.4"
 
 # Cryptography
 sha2 = "0.11"

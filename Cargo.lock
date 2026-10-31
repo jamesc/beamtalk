@@ -227,6 +227,7 @@ dependencies = [
  "signal-hook",
  "similar 3.2.1",
  "tempfile",
+ "terminal_size",
  "thiserror",
  "toml",
  "tracing",
