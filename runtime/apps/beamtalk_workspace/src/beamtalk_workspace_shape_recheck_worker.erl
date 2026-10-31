@@ -78,7 +78,7 @@ class-body reload path in run mode for this to guard).
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, enqueue/1, enqueue_leaf_change/1, enqueue_alias_change/1]).
+-export([start_link/0, enqueue/1, enqueue_leaf_change/1, enqueue_alias_change/1, sync/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -127,6 +127,30 @@ concurrent shape/leaf-change reload's round trips for the same
 -spec enqueue_alias_change([binary()]) -> ok.
 enqueue_alias_change(AliasNameBins) ->
     gen_server:cast(?MODULE, {alias_change, AliasNameBins}).
+
+-doc """
+Block until every shape/leaf-change/alias-change re-check enqueued before
+this call has run to completion, then return `ok`.
+
+A `gen_server:call` is handled in mailbox order behind every `cast` queued
+ahead of it, so when this returns, the worker has processed each prior
+`enqueue/1`/`enqueue_leaf_change/1`/`enqueue_alias_change/1`, including
+the `capture/1` each one performs. `beamtalk_repl_loader:
+precheck_class_shape/2` uses this (best-effort, BT-3945) to close the race
+where a precheck issued right after `handle_load/2` returned read
+`beamtalk_workspace_shape_store:previous/1` before the install's own
+asynchronous capture had run and reported `{ok, []}` ("no baseline").
+
+Best-effort contract: callers must tolerate `exit:{noproc, _}` (worker not
+started, e.g. run mode has no live class-body reload path) and
+`exit:{timeout, _}` (a congested backlog) by falling back to whatever the
+store currently holds, exactly as before this call existed. Never call
+this from the worker process itself (a `call` to self deadlocks); it is
+only for processes outside this `gen_server`, which never re-enters it.
+""".
+-spec sync() -> ok.
+sync() ->
+    gen_server:call(?MODULE, sync).
 
 %%====================================================================
 %% gen_server callbacks
@@ -196,6 +220,8 @@ handle_cast({alias_change, AliasNameBins}, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_call(sync, _From, State) ->
+    {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
