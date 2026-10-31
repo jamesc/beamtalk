@@ -33,6 +33,9 @@
 //! - [`protocol_sources_wire`] — `protocol_sources` (ADR 0127 §10a /
 //!   BT-3593): a cross-file protocol's full source flattening a `uses:`
 //!   line through the wire
+//! - [`load_project_parity`] — BT-4322: `compile` typechecks a file with
+//!   its own project's aliases, FFI specs, and `[diagnostics]` table,
+//!   like `beamtalk build`
 
 use super::*;
 // The compiler port's crate-root `main.rs` no longer imports the full ETF
@@ -142,6 +145,7 @@ mod compile_roundtrip_proptest;
 mod completion_and_native_types;
 mod diagnostics_class_hierarchy;
 mod dispatch_and_hierarchy_meta;
+mod load_project_parity;
 mod module_naming_and_misc;
 mod protocol_sources_wire;
 mod source_queries;

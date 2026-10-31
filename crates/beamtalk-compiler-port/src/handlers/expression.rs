@@ -88,6 +88,8 @@ pub(crate) fn parse_and_check_expression(
             Vec::new(),
             pre_loaded_aliases,
             diagnostics_overrides(),
+            // REPL-typed expressions carry no file project — see BT-4322.
+            &beamtalk_core::semantic_analysis::ProjectAnalysisContext::default(),
         );
 
     let options = beamtalk_core::CompilerOptions::default();

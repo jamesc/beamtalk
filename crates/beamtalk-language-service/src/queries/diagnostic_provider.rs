@@ -526,6 +526,9 @@ pub fn compute_diagnostics_and_referenced_aliases(
         Vec::new(),
         pre_loaded_aliases,
         diagnostics_overrides,
+        // Diagnostics-only entry point: no project on disk, so the legacy
+        // defaults (no package, no registry) apply — see BT-4322.
+        &beamtalk_core::semantic_analysis::ProjectAnalysisContext::default(),
     );
     (diagnostics, analysis_result.referenced_aliases)
 }
@@ -565,13 +568,19 @@ pub fn compute_diagnostics_and_analysis(
     pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
+    project: &beamtalk_core::semantic_analysis::ProjectAnalysisContext,
 ) -> (Vec<Diagnostic>, semantic_analysis::AnalysisResult) {
-    let ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
+    let mut ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
         .with_known_vars(known_vars)
         .with_pre_loaded_classes(pre_loaded_classes)
         .with_pre_loaded_protocols(pre_loaded_protocols)
         .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
-        .with_pre_loaded_aliases(pre_loaded_aliases);
+        .with_pre_loaded_aliases(pre_loaded_aliases)
+        .with_native_type_registry(project.native_type_registry.clone())
+        .with_known_erlang_modules(project.known_erlang_modules.clone());
+    if let Some(package) = project.package_name.as_deref() {
+        ctx = ctx.with_current_package(package);
+    }
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // Diagnostics are consumed by `run_diagnostic_pipeline` below;
     // take them out so the rest of `analysis_result` can be returned for
