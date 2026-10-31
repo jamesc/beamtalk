@@ -913,7 +913,13 @@ async fn verify_server_versions(ws: &mut WsStream) -> Result<(), String> {
     ws.send(Message::Text(describe_str.into()))
         .await
         .map_err(|e| format!("failed to send describe: {e}"))?;
+    // Bound the whole wait: a node emitting a continuous push stream would
+    // otherwise delay connect indefinitely.
+    let deadline = tokio::time::Instant::now() + IO_TIMEOUT;
     loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("timed out waiting for the describe version check".to_string());
+        }
         let response = read_text(ws).await?;
         let response_json: serde_json::Value = serde_json::from_str(&response)
             .map_err(|e| format!("failed to parse describe response: {e}"))?;

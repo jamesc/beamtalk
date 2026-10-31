@@ -1134,8 +1134,67 @@ auth_session_test_() ->
         fun(_) ->
             {"auth success matches shared wire corpus",
                 fun handshake_success_matches_shared_wire_corpus/0}
+        end,
+        fun(_) ->
+            {"shutdown surface skips version gate", fun shutdown_surface_skips_version_gate/0}
+        end,
+        fun(_) ->
+            {"shutdown-only session rejects eval", fun shutdown_only_session_rejects_eval/0}
+        end,
+        fun(_) ->
+            {"normal sessions are not shutdown-restricted",
+                fun shutdown_restriction_absent_for_normal_sessions/0}
         end
     ]}.
+
+%% The `shutdown` admin surface (`workspace stop`) is exempt from the
+%% version lock: stale versions still authenticate. The connection is
+%% restricted to the `shutdown` op (see below), so the exemption grants
+%% no compilation or eval capability.
+shutdown_surface_skips_version_gate() ->
+    Json = auth_json(#{
+        <<"client">> => <<"shutdown">>,
+        <<"beamtalk_version">> => <<"0.0.0-stale">>,
+        <<"protocol_version">> => <<"0.0">>
+    }),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assert(State#ws_state.authenticated),
+    ?assert(State#ws_state.shutdown_only),
+    ?assert(has_frame_with(Frames, <<"type">>, <<"auth_ok">>)).
+
+%% A version-exempt shutdown connection that tries anything but `shutdown`
+%% is rejected and closed — a mismatched client must not gain eval.
+shutdown_only_session_rejects_eval() ->
+    AuthJson = auth_json(#{
+        <<"client">> => <<"shutdown">>,
+        <<"beamtalk_version">> => <<"0.0.0-stale">>,
+        <<"protocol_version">> => <<"0.0">>
+    }),
+    {_AuthFrames, Authed} = beamtalk_ws_handler:websocket_handle(
+        {text, AuthJson}, unauth_state()
+    ),
+    ?assert(Authed#ws_state.authenticated),
+    EvalJson = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"msg-1">>})
+    ),
+    {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, EvalJson}, Authed),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"message">>, Decoded), <<"shutdown">>)
+    ),
+    ?assert(lists:keymember(close, 1, Frames)).
+
+%% A normal (non-shutdown) session is unaffected by the restriction: the
+%% flag defaults to false, so eval flows to normal dispatch (covered by the
+%% existing eval tests — here we only pin the flag itself).
+shutdown_restriction_absent_for_normal_sessions() ->
+    {ok, Pid} = beamtalk_session_sup:start_session(<<"normal-sess">>),
+    beamtalk_session_table:insert(<<"normal-sess">>, Pid),
+    Json = auth_json(#{<<"resume">> => <<"normal-sess">>}),
+    {_Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assert(State#ws_state.authenticated),
+    ?assertNot(State#ws_state.shutdown_only).
 
 auth_success_creates_session() ->
     {Frames, State} = beamtalk_ws_handler:websocket_handle({text, auth_json(#{})}, unauth_state()),

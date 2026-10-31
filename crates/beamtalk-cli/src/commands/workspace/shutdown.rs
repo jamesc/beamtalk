@@ -35,10 +35,12 @@ const FORCE_KILL_WAIT_TIMEOUT_SECS: u64 = 5;
 /// acknowledgement. The workspace will call `init:stop()` for OTP-level
 /// graceful teardown.
 pub(super) fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<()> {
-    // Exempt from the version lock (BT-4327): stopping a stale node must
-    // succeed precisely when its versions do not match this client's.
-    // Shutdown compiles nothing, so version skew is irrelevant here.
-    let mut client = ProtocolClient::connect_without_version_check(
+    // The `shutdown` admin surface is exempt from the version lock on both
+    // sides (BT-4327): the server skips its auth gate for it and restricts
+    // the connection to the `shutdown` op, and this client skips the
+    // post-auth `describe` check. Stopping a stale node must succeed
+    // precisely when its versions do not match this client's.
+    let mut client = ProtocolClient::connect_for_shutdown(
         host,
         port,
         cookie,
@@ -322,9 +324,30 @@ mod tests {
                 let _ = ws.send(Message::Text(v.to_string().into()));
             };
             send(&mut ws, serde_json::json!({"op": "auth-required"}));
-            // Read (and discard) the `auth` frame — its version fields are
-            // irrelevant here: shutdown is exempt from the version lock.
-            if ws.read().is_err() {
+            // The shutdown client authenticates as the `shutdown` surface
+            // and skips the version handshake (BT-4327) — like the real
+            // server, this fake requires that surface for the shutdown flow.
+            // Its `describe` answers below are deliberately stale to prove
+            // the exemption: a version-checking `connect` would fail here.
+            let shutdown_surface = match ws.read() {
+                Ok(Message::Text(text)) => {
+                    serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|auth| {
+                            auth.get("client")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_default()
+                        == "shutdown"
+                }
+                _ => false,
+            };
+            if !shutdown_surface {
+                send(
+                    &mut ws,
+                    serde_json::json!({"type": "auth_error", "message": "expected shutdown surface"}),
+                );
                 return;
             }
             send(&mut ws, serde_json::json!({"type": "auth_ok"}));

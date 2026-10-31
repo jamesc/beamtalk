@@ -66,7 +66,19 @@ impl ReplDriver {
         }
         // session-started
         let _session = read_text(&mut ws).await?;
-        Ok(Self { ws })
+        let mut driver = Self { ws };
+        // Client side of the version lock (BT-4327): a node predating the
+        // server gate ignores the new `auth` fields, so verify its
+        // `describe` versions before driving any evals. `rpc` correlates on
+        // the `describe` id, skipping the actor-snapshot pushes the node
+        // queues ahead of the reply.
+        let described = driver.rpc(RequestBuilder::describe()).await?;
+        handshake::verify_server_versions(
+            described.versions.as_ref(),
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        )?;
+        Ok(driver)
     }
 
     /// Send a request value and read the next response that correlates with

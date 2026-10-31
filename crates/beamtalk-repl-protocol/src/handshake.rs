@@ -247,10 +247,12 @@ mod tests {
 
     #[test]
     fn protocol_version_matches_erlang_macro() {
-        // Pinned to `?PROTOCOL_VERSION` in
-        // `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`. Bump both
-        // together; the wire corpus and the Erlang describe conformance test
-        // pin the server side.
+        // Documents the current wire value; the real cross-side pinning is
+        // the shared wire corpus (Rust `matches_shared_wire_corpus` and the
+        // Erlang `handshake_*_matches_shared_wire_corpus` tests) plus the
+        // Erlang `describe` conformance test. Bump this constant together
+        // with `?PROTOCOL_VERSION` in
+        // `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`.
         assert_eq!(PROTOCOL_VERSION, "2.0");
     }
 
