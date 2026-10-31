@@ -520,6 +520,74 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceSummary>> {
     Ok(summaries)
 }
 
+/// Outcome of [`prune_workspaces`].
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PruneReport {
+    /// Workspace IDs whose on-disk state was removed — or, with
+    /// `dry_run`, would be removed.
+    pub removed: Vec<String>,
+    /// Running workspaces left untouched. Never pruned, even with `--project`.
+    pub skipped_running: usize,
+    /// Release rows left untouched. A stopped release's `port` file is its
+    /// only artifact; deleting it races a release that is starting up
+    /// (port file written, not yet accepting), so prune leaves releases
+    /// alone — use `workspace stop` for those.
+    pub skipped_releases: usize,
+}
+
+/// Delete on-disk state for stopped dev workspaces.
+///
+/// `stop` leaves the workspace directory behind, so stopped entries
+/// accumulate in `workspace list` forever. Prune removes the directory
+/// (metadata, cookie, logs, stale `node.info`) plus the workspace's `.lock`
+/// file for every stopped [`WorkspaceKind::Workspace`].
+///
+/// Safety: each candidate is re-probed under its workspace lock, so a node
+/// that started after listing is still never deleted. Running workspaces
+/// and releases are only counted, never touched. With `dry_run`, nothing
+/// is deleted and `removed` names what would be.
+pub fn prune_workspaces(dry_run: bool, project_filter: Option<&str>) -> Result<PruneReport> {
+    let needle = project_filter.map(str::to_lowercase);
+    let mut report = PruneReport::default();
+
+    for ws in list_workspaces()? {
+        if ws.kind != WorkspaceKind::Workspace {
+            report.skipped_releases += 1;
+            continue;
+        }
+        if let Some(needle) = &needle {
+            let path_hit = ws
+                .project_path
+                .as_ref()
+                .is_some_and(|p| p.to_string_lossy().to_lowercase().contains(needle));
+            if !path_hit && !ws.workspace_id.to_lowercase().contains(needle) {
+                continue;
+            }
+        }
+
+        // Serialize with a concurrent start: a node that comes up between
+        // listing and deletion re-probes as running here and is spared.
+        let _lock = acquire_workspace_lock(&ws.workspace_id)?;
+        let (status, _) = probe_node_status(&ws.workspace_id);
+        if status == WorkspaceStatus::Running {
+            report.skipped_running += 1;
+            continue;
+        }
+
+        if !dry_run {
+            let dir = workspace_dir(&ws.workspace_id)?;
+            fs::remove_dir_all(&dir).into_diagnostic()?;
+            let lockfile = workspaces_base_dir()?.join(format!("{}.lock", ws.workspace_id));
+            // Best-effort: the lock file may never have been created.
+            let _ = fs::remove_file(&lockfile);
+        }
+        report.removed.push(ws.workspace_id);
+    }
+
+    report.removed.sort();
+    Ok(report)
+}
+
 /// Detailed status information for a workspace.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceDetail {

@@ -65,7 +65,9 @@ mod startup_command;
 /// File I/O operations for workspace metadata, cookies, and node information.
 pub mod storage;
 
-pub use lifecycle::{create_workspace, get_or_start_workspace, list_workspaces, workspace_status};
+pub use lifecycle::{
+    create_workspace, get_or_start_workspace, list_workspaces, prune_workspaces, workspace_status,
+};
 pub use node_state::is_node_running;
 pub use shutdown::stop_workspace;
 pub use storage::{
