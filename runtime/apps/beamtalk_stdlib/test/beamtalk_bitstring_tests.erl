@@ -49,6 +49,54 @@ binary_concat_bitstring_is_type_error_test() ->
         beamtalk_binary:concat(<<255>>, <<2:3>>)
     ).
 
+%% Defensive type-error guards: called directly with a non-bitstring receiver.
+%% These are unreachable through Beamtalk dispatch (class routing prevents it)
+%% but exist for robustness of the Erlang API.
+
+bit_size_receiver_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:bitSize(42)
+    ).
+
+to_bits_receiver_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:toBits(42)
+    ).
+
+concat_receiver_type_error_test() ->
+    %% Receiver (first arg) is not a bitstring — different guard from the
+    %% argument type error tested in concat_type_error_test.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:concat(42, <<1:1>>)
+    ).
+
+as_binary_binary_input_test() ->
+    %% asBinary/1 is total for direct callers: a binary is already byte-aligned
+    %% so it returns ok. Unreachable via dispatch (a binary has class Binary).
+    #{'isOk' := IsOk} = beamtalk_bitstring:asBinary(<<1, 2>>),
+    ?assertEqual(true, IsOk).
+
+as_binary_receiver_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:asBinary(42)
+    ).
+
+print_string_receiver_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:printString(42)
+    ).
+
+display_string_receiver_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Bitstring'}},
+        beamtalk_bitstring:displayString(42)
+    ).
+
 reflection_on_a_bitstring_test() ->
     ?assertEqual([], beamtalk_reflection:field_names(<<2:3>>)),
     ?assertEqual(false, beamtalk_reflection:has_field(x, <<2:3>>)),
