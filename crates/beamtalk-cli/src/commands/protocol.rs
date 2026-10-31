@@ -535,15 +535,16 @@ mod tests {
         use tungstenite::Message;
 
         use super::super::ProtocolClient;
-        use crate::commands::test_support::{spawn_auth_error_server, spawn_auth_ok_server};
+        use crate::commands::test_support::{
+            closed_port, spawn_auth_error_server, spawn_auth_ok_server,
+        };
 
         #[test]
         fn connect_to_unbound_port_fails_with_connect_error() {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-
-            let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
+            // `closed_port` never has a listener (BT-4058): no bind/drop
+            // window for a parallel test to steal the port through.
+            let Err(err) = ProtocolClient::connect("127.0.0.1", closed_port(), "cookie", None)
+            else {
                 panic!("expected connect to fail against an unbound port");
             };
             assert!(err.to_string().contains("Failed to connect"));
@@ -603,23 +604,13 @@ mod tests {
                 .expect("connect");
             server.join().expect("server thread");
 
-            // BT-3608: `handshake_port` is free again here, and under a full
-            // parallel `cargo test` run a sibling test's own
+            // BT-3608/BT-4058: `handshake_port` is free again here, and
+            // under a full parallel `cargo test` run a sibling test's own
             // `TcpListener::bind("127.0.0.1:0")` can grab that exact
-            // ephemeral port before `reconnect()` below runs — making this
-            // assertion flaky, since it then either succeeds against a
-            // stranger's server or fails with a different message than the
-            // one asserted. Point the client at a fixed sub-1024 port
-            // instead of reusing `handshake_port`: every fake server in this
-            // test suite binds via `"127.0.0.1:0"` (an OS-assigned ephemeral
-            // port — see `spawn_auth_ok_server`/`spawn_auth_error_server` in
-            // `test_support.rs` and the inline servers in this file), and OS
-            // ephemeral-port allocators never hand out ports below 1024, so
-            // no test in this binary can ever be listening on it. Binding it
-            // ourselves would additionally require root, so it stays closed
-            // for the life of the process rather than merely for as long as
-            // some listener we'd otherwise have to keep alive.
-            client.port = 1;
+            // ephemeral port before `reconnect()` below runs. Point the
+            // client at `closed_port()` (a port no test can be listening
+            // on — see its doc comment) instead of reusing `handshake_port`.
+            client.port = closed_port();
             let err = client
                 .reconnect()
                 .expect_err("reconnect against a closed port should fail");

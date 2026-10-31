@@ -303,7 +303,9 @@ fn print_if_matches(line: &str, min_level: Option<LogLevel>, format: Option<LogF
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::test_support::{BeamtalkHomeOverride, WorkspaceFixture, real_home_guard};
+    use crate::commands::test_support::{
+        BeamtalkHomeOverride, WorkspaceFixture, closed_port, real_home_guard,
+    };
 
     // --- run(): argument-validation bail branches (before touching a workspace) ---
 
@@ -360,13 +362,9 @@ mod tests {
 
     #[test]
     fn run_reports_missing_log_file_for_existing_workspace() {
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-            port
-        };
-        let fixture = WorkspaceFixture::new("logs-no-file", port, 999_999);
+        // `closed_port` never has a listener (BT-4058): no bind/drop window
+        // for a parallel test to steal the port through.
+        let fixture = WorkspaceFixture::new("logs-no-file", closed_port(), 999_999);
 
         let err = run(Some(&fixture.id), false, None, None, false).unwrap_err();
         assert!(err.to_string().contains("No log file found at"), "{err}");
@@ -376,13 +374,9 @@ mod tests {
 
     #[test]
     fn run_path_only_succeeds_even_without_a_log_file() {
-        let port = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("local_addr").port();
-            drop(listener);
-            port
-        };
-        let fixture = WorkspaceFixture::new("logs-path-only", port, 999_999);
+        // `closed_port` never has a listener (BT-4058): no bind/drop window
+        // for a parallel test to steal the port through.
+        let fixture = WorkspaceFixture::new("logs-path-only", closed_port(), 999_999);
 
         // No log file was written for this fixture; --path-only must still
         // succeed (it only prints the path, never checks existence).

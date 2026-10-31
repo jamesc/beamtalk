@@ -513,17 +513,20 @@ mod tests {
 
     #[test]
     fn connect_with_retries_exhausts_and_returns_last_error() {
-        // Bind then immediately drop a listener to get a port nothing is
-        // listening on, so every connect attempt fails fast (connection
-        // refused) rather than timing out. Small retry count/delay so the
-        // exhausted-retries branch is exercised without paying
-        // MAX_CONNECT_RETRIES * RETRY_DELAY_MS of real wall-clock time
-        // (mirrors client.rs's reconnect_with_retries_exhausts_* tests).
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("local_addr").port();
-        drop(listener);
-
-        let result = connect_with_retries_and_delay("127.0.0.1", port, "cookie", 2, 5);
+        // `closed_port` never has a listener (BT-4058), so every connect
+        // attempt fails fast (connection refused) rather than timing out —
+        // with no bind/drop window for a parallel test to steal the port
+        // through. Small retry count/delay so the exhausted-retries branch
+        // is exercised without paying MAX_CONNECT_RETRIES * RETRY_DELAY_MS
+        // of real wall-clock time (mirrors client.rs's
+        // reconnect_with_retries_exhausts_* tests).
+        let result = connect_with_retries_and_delay(
+            "127.0.0.1",
+            crate::commands::test_support::closed_port(),
+            "cookie",
+            2,
+            5,
+        );
         assert!(result.is_err(), "expected connection failure to propagate");
     }
 }

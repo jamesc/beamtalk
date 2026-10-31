@@ -33,6 +33,21 @@ use tungstenite::{Message, WebSocket};
 
 use super::workspace::storage::{NodeInfo, WorkspaceMetadata};
 
+/// A port that is guaranteed to refuse TCP connections for the life of the
+/// test process (BT-4058).
+///
+/// Never bind-then-drop `TcpListener::bind("127.0.0.1:0")` when a test needs
+/// "nothing listening": the freed ephemeral port can be rehanded to a
+/// parallel test's own listener before the probe runs, flipping the test
+/// down the node-is-running path. Every fake server in this binary binds via
+/// `"127.0.0.1:0"` (an OS-assigned ephemeral port), and OS ephemeral-port
+/// allocators never hand out ports below 1024 — while binding one ourselves
+/// would require root — so port 1 stays closed with no bind/drop window at
+/// all (same rationale as BT-3608's `client.port = 1` in `protocol.rs`).
+pub(crate) fn closed_port() -> u16 {
+    1
+}
+
 /// Build a unique workspace ID per test so parallel `cargo test` threads
 /// never collide on the same on-disk directory or lockfile. `label` should
 /// identify the calling test module (e.g. `"shutdown"`, `"transcript"`) so a
