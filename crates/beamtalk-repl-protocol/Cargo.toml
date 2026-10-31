@@ -27,6 +27,9 @@ tokio = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures-util = { version = "0.3", optional = true }
 
+[build-dependencies]
+beamtalk-build.workspace = true
+
 [dev-dependencies]
 insta.workspace = true
 # why: BT-3331 — this crate's own `#[cfg(test)]` build (e.g. `cargo test`/

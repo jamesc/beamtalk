@@ -12,7 +12,7 @@
 use std::net::TcpStream;
 use std::time::Duration;
 
-use beamtalk_repl_protocol::handshake;
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
 use miette::{IntoDiagnostic, Result, miette};
 use tungstenite::{Error as WsError, Message, WebSocket};
 
@@ -48,6 +48,14 @@ pub struct ProtocolClient {
     cookie: String,
     /// Read timeout to reapply on reconnect.
     read_timeout: Option<Duration>,
+    /// Whether to verify the node's `describe` versions after auth.
+    /// `false` only for the shutdown admin surface (which the server also
+    /// exempts from its auth gate and restricts to the `shutdown` op):
+    /// killing a stale node must work precisely when versions mismatch.
+    verify_versions: bool,
+    /// Client surface tag sent in the `auth` frame (`"repl"` everywhere,
+    /// except `"shutdown"` for the version-exempt admin surface).
+    client_surface: &'static str,
     /// Whether the transcript output cursor is at the beginning of a line.
     /// Used to insert the `│ ` gutter prefix only at line starts.
     transcript_bol: bool,
@@ -81,6 +89,37 @@ impl ProtocolClient {
         read_timeout: Option<Duration>,
         resume: Option<&str>,
     ) -> Result<Self> {
+        Self::connect_impl(host, port, cookie, read_timeout, resume, true, "repl")
+    }
+
+    /// Connect for workspace shutdown (BT-4327).
+    ///
+    /// The `shutdown` admin surface is exempt from the version lock on both
+    /// sides: the server skips its auth gate for it (and restricts the
+    /// connection to the `shutdown` op, so the exemption grants no
+    /// compilation or eval capability), and this client skips the post-auth
+    /// `describe` check. Stopping a stale node must succeed precisely when
+    /// its versions do not match this client's.
+    pub fn connect_for_shutdown(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        read_timeout: Option<Duration>,
+    ) -> Result<Self> {
+        Self::connect_impl(host, port, cookie, read_timeout, None, false, "shutdown")
+    }
+
+    /// Shared constructor: `verify_versions` selects the post-auth
+    /// `describe` version check, `client_surface` tags the `auth` frame.
+    fn connect_impl(
+        host: &str,
+        port: u16,
+        cookie: &str,
+        read_timeout: Option<Duration>,
+        resume: Option<&str>,
+        verify_versions: bool,
+        client_surface: &'static str,
+    ) -> Result<Self> {
         let addr = format!("{host}:{port}");
         let tcp_stream = TcpStream::connect_timeout(
             &addr.parse().into_diagnostic()?,
@@ -105,6 +144,8 @@ impl ProtocolClient {
             port,
             cookie: cookie.to_string(),
             read_timeout,
+            verify_versions,
+            client_surface,
             transcript_bol: true,
             print_transcript: true,
         };
@@ -137,9 +178,17 @@ impl ProtocolClient {
 
         // Build auth message with optional resume field. `client` records the
         // originating surface so `Workspace sessions` can show where a session
-        // came from; every CLI command (repl, transcript, completion probe)
-        // connects through this client, so they all report `repl`.
-        let auth_msg = handshake::auth_request(self.cookie.as_str(), "repl", resume);
+        // came from (`repl` for repl/transcript/completion probe, `shutdown`
+        // for the version-exempt admin surface). The version fields let the
+        // node reject a mismatched toolchain (BT-4327) before any session
+        // exists.
+        let auth_msg = handshake::auth_request(
+            self.cookie.as_str(),
+            self.client_surface,
+            resume,
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        );
         self.send_only(&auth_msg)?;
 
         // Read auth response
@@ -162,7 +211,40 @@ impl ProtocolClient {
         }
         self.session_id = handshake::session_id(&session_msg);
 
+        // Client side of the version lock (BT-4327): a node predating the
+        // server gate ignores the new `auth` fields, so verify its `describe`
+        // versions against our own before issuing any work. Skipped only for
+        // administrative connections (shutdown) that compile nothing.
+        if self.verify_versions {
+            self.verify_server_versions()?;
+        }
+
         Ok(())
+    }
+
+    /// Ask the node for its `describe` versions and refuse a stale node.
+    ///
+    /// Mirrors the server's `auth` gate for nodes that predate it: an old
+    /// node accepts any `auth` frame, so without this check a new CLI would
+    /// silently compile against a stale toolchain.
+    fn verify_server_versions(&mut self) -> Result<()> {
+        // `send_raw`, not `send_request`: the latter reconnects (hence
+        // re-runs this handshake) on transport failure, which would recurse
+        // here. A failed describe during connect is a hard error.
+        //
+        // No `id` correlation (unlike the MCP/LSP clients): this runs on a
+        // fresh socket with no pipelining, and `read_response` already skips
+        // push frames — the first non-push frame can only be our describe
+        // reply. Pre-auth pushes are impossible: unauthenticated sockets only
+        // run `handle_auth`.
+        let raw = self.send_raw(&RequestBuilder::describe())?;
+        let response: ReplResponse = serde_json::from_value(raw).into_diagnostic()?;
+        handshake::verify_server_versions(
+            response.versions.as_ref(),
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        )
+        .map_err(|e| miette!("{e}"))
     }
 
     /// Attempt to reconnect the underlying WebSocket and resume the session
@@ -178,12 +260,17 @@ impl ProtocolClient {
             has_session = requested_session.is_some(),
             "Attempting WebSocket reconnect"
         );
-        let new_client = match Self::connect_with_resume(
+        // Preserve this connection's version policy and surface across the
+        // reconnect: a shutdown connection stays exempt, everything else
+        // re-verifies.
+        let new_client = match Self::connect_impl(
             &self.host,
             self.port,
             &self.cookie,
             self.read_timeout,
             requested_session.as_deref(),
+            self.verify_versions,
+            self.client_surface,
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -590,7 +677,22 @@ mod tests {
                         .to_string()
                         .into(),
                 ));
-                let _ = ws.read();
+                // Capture the client's claimed versions from the `auth`
+                // frame (BT-4327) to echo back for the connect-time
+                // `describe` version check below.
+                let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
+                if let Ok(Message::Text(text)) = ws.read() {
+                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
+                        versions["beamtalk"] = auth
+                            .get("beamtalk_version")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                        versions["protocol"] = auth
+                            .get("protocol_version")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                    }
+                }
                 let _ = ws.send(Message::Text(
                     serde_json::json!({"type": "auth_ok"}).to_string().into(),
                 ));
@@ -599,6 +701,23 @@ mod tests {
                         .to_string()
                         .into(),
                 ));
+                // Answer the connect-time `describe` version check (BT-4327)
+                // so `connect` succeeds; the test then points the client at
+                // a closed port for the actual reconnect assertion.
+                if let Ok(Message::Text(text)) = ws.read() {
+                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({
+                                "id": req.get("id"),
+                                "status": ["done"],
+                                "ops": {},
+                                "versions": versions,
+                            })
+                            .to_string()
+                            .into(),
+                        ));
+                    }
+                }
             });
             let mut client = ProtocolClient::connect("127.0.0.1", handshake_port, "cookie", None)
                 .expect("connect");
@@ -615,6 +734,57 @@ mod tests {
                 .reconnect()
                 .expect_err("reconnect against a closed port should fail");
             assert!(err.to_string().contains("Failed to connect"));
+        }
+
+        #[test]
+        fn connect_fails_when_node_reports_a_stale_toolchain_version() {
+            // The node answers the connect-time `describe` with versions
+            // older than this client's (BT-4327): `connect` must refuse
+            // the stale node with a rebuild hint instead of attaching.
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept");
+                let mut ws = tungstenite::accept(stream).expect("accept ws");
+                let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+                            v: serde_json::Value| {
+                    let _ = ws.send(Message::Text(v.to_string().into()));
+                };
+                send(&mut ws, serde_json::json!({"op": "auth-required"}));
+                if ws.read().is_err() {
+                    return;
+                }
+                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
+                send(
+                    &mut ws,
+                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
+                );
+                while let Ok(Message::Text(text)) = ws.read() {
+                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                            send(
+                                &mut ws,
+                                serde_json::json!({
+                                    "id": req.get("id"),
+                                    "status": ["done"],
+                                    "ops": {},
+                                    "versions": {
+                                        "beamtalk": "0.0.0-stale",
+                                        "protocol": "0.0",
+                                    },
+                                }),
+                            );
+                        }
+                    }
+                }
+            });
+            let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
+                panic!("connect against a stale node should fail");
+            };
+            let msg = err.to_string();
+            assert!(msg.contains("version mismatch"), "got: {msg}");
+            assert!(msg.contains("0.0.0-stale"), "got: {msg}");
+            assert!(msg.contains("just build"), "got: {msg}");
         }
 
         #[test]
@@ -652,9 +822,38 @@ mod tests {
                                 .to_string()
                                 .into(),
                         ));
-                        if ws.read().is_err() {
+                        // Capture the client's claimed versions from the
+                        // `auth` frame (BT-4327) to echo back for the
+                        // connect-time `describe` version check.
+                        let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
+                        if let Ok(Message::Text(text)) = ws.read() {
+                            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
+                                versions["beamtalk"] = auth
+                                    .get("beamtalk_version")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                                versions["protocol"] = auth
+                                    .get("protocol_version")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                            }
+                        } else {
                             return;
                         }
+                        let answer_describe =
+                            |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+                             req: &serde_json::Value| {
+                                let _ = ws.send(Message::Text(
+                                    serde_json::json!({
+                                        "id": req.get("id"),
+                                        "status": ["done"],
+                                        "ops": {},
+                                        "versions": versions,
+                                    })
+                                    .to_string()
+                                    .into(),
+                                ));
+                            };
                         let _ = ws.send(Message::Text(
                             serde_json::json!({"type": "auth_ok"}).to_string().into(),
                         ));
@@ -664,15 +863,25 @@ mod tests {
                                 .into(),
                         ));
                         if i == 0 {
-                            // Read (and discard) the ping, then close without
-                            // ever replying — the client's `send_request`
-                            // sees this as a transport failure and retries.
+                            // Answer the connect-time `describe` version
+                            // check, then read (and discard) the ping and
+                            // close without ever replying to it — the
+                            // client's `send_request` sees this as a
+                            // transport failure and retries.
+                            if let Ok(Message::Text(text)) = ws.read() {
+                                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                                    answer_describe(&mut ws, &req);
+                                }
+                            }
                             let _ = ws.read();
                             let _ = ws.close(None);
                         } else {
                             while let Ok(Message::Text(text)) = ws.read() {
                                 if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    if req.get("op").and_then(|v| v.as_str()) == Some("ping") {
+                                    if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                                        answer_describe(&mut ws, &req);
+                                    } else if req.get("op").and_then(|v| v.as_str()) == Some("ping")
+                                    {
                                         let _ = ws.send(Message::Text(
                                             serde_json::json!({"pong": true}).to_string().into(),
                                         ));
@@ -692,6 +901,135 @@ mod tests {
                 .send_request(&serde_json::json!({"op": "ping"}))
                 .expect("send_request should transparently reconnect and retry");
             assert_eq!(resp, serde_json::json!({"pong": true}));
+        }
+
+        #[test]
+        fn send_request_fails_when_reconnect_hits_version_mismatch() {
+            // The node restarts at a stale toolchain between connections:
+            // the first connection verifies fine, then the server drops the
+            // ping; on reconnect the `describe` check reports stale versions
+            // and the version error must surface (not retry, not eval).
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            std::thread::spawn(move || {
+                for (i, stream) in listener.incoming().flatten().enumerate() {
+                    std::thread::spawn(move || {
+                        let mut ws = tungstenite::accept(stream).expect("accept ws");
+                        let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+                                    v: serde_json::Value| {
+                            let _ = ws.send(Message::Text(v.to_string().into()));
+                        };
+                        send(&mut ws, serde_json::json!({"op": "auth-required"}));
+                        let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
+                        if let Ok(Message::Text(text)) = ws.read() {
+                            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
+                                versions["beamtalk"] = auth
+                                    .get("beamtalk_version")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                                versions["protocol"] = auth
+                                    .get("protocol_version")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null);
+                            }
+                        } else {
+                            return;
+                        }
+                        // Second connection: the restarted node is stale.
+                        if i == 1 {
+                            versions = serde_json::json!({
+                                "beamtalk": "0.0.0-stale",
+                                "protocol": "0.0",
+                            });
+                        }
+                        send(&mut ws, serde_json::json!({"type": "auth_ok"}));
+                        send(
+                            &mut ws,
+                            serde_json::json!({"op": "session-started", "session": "sess-test"}),
+                        );
+                        // Answer the connect-time `describe` (echo on the
+                        // first connection, stale on the second).
+                        if let Ok(Message::Text(text)) = ws.read() {
+                            if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                                if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                                    send(
+                                        &mut ws,
+                                        serde_json::json!({
+                                            "id": req.get("id"),
+                                            "status": ["done"],
+                                            "ops": {},
+                                            "versions": versions,
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                        if i == 0 {
+                            // Drop the ping without replying: forces the
+                            // client onto its reconnect path.
+                            let _ = ws.read();
+                            let _ = ws.close(None);
+                        }
+                    });
+                    if i >= 1 {
+                        break;
+                    }
+                }
+            });
+            let mut client =
+                ProtocolClient::connect("127.0.0.1", port, "cookie", None).expect("connect");
+            let Err(err) = client.send_request::<serde_json::Value>(&serde_json::json!({
+                "op": "ping"
+            })) else {
+                panic!("send_request against a stale restarted node should fail");
+            };
+            let msg = err.to_string();
+            assert!(msg.contains("version mismatch"), "got: {msg}");
+            assert!(msg.contains("0.0.0-stale"), "got: {msg}");
+        }
+
+        #[test]
+        fn connect_fails_when_describe_reports_no_versions() {
+            // A node predating the version handshake answers `describe`
+            // without a versions map: the client must refuse it as stale
+            // rather than attaching silently.
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("local_addr").port();
+            std::thread::spawn(move || {
+                let (stream, _) = listener.accept().expect("accept");
+                let mut ws = tungstenite::accept(stream).expect("accept ws");
+                let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+                            v: serde_json::Value| {
+                    let _ = ws.send(Message::Text(v.to_string().into()));
+                };
+                send(&mut ws, serde_json::json!({"op": "auth-required"}));
+                let _ = ws.read();
+                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
+                send(
+                    &mut ws,
+                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
+                );
+                while let Ok(Message::Text(text)) = ws.read() {
+                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
+                            send(
+                                &mut ws,
+                                serde_json::json!({
+                                    "id": req.get("id"),
+                                    "status": ["done"],
+                                    "ops": {},
+                                }),
+                            );
+                        }
+                    }
+                }
+            });
+            let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
+                panic!("connect against a version-less node should fail");
+            };
+            let msg = err.to_string();
+            assert!(msg.contains("predates"), "got: {msg}");
+            assert!(msg.contains("just build"), "got: {msg}");
         }
 
         #[test]

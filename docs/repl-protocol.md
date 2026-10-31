@@ -15,17 +15,27 @@ The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communic
 1. **TCP connect** to `127.0.0.1:{port}`
 2. **WebSocket upgrade** to `ws://127.0.0.1:{port}/ws`
 3. **Read auth-required** — server sends `{"op":"auth-required"}` (no session yet)
-4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>"}` as first message
-5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure
+4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (fields below)
+5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure. A stale toolchain is rejected here (see Version lock).
 6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
-7. **Protocol ready** — client can now send protocol operations
+7. **Version check** — client sends `{"op":"describe"}`, waits for the reply echoing its request `id` (actor-snapshot pushes may arrive first — correlate on `id`, do not trust the first frame), and refuses a version mismatch. Skipped only by `workspace stop`, which compiles nothing.
+8. **Protocol ready** — client can now send protocol operations
 
-The auth message accepts two optional fields:
+The auth message accepts these fields:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `client` | string | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`. |
-| `resume` | string | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `cookie` | string | yes | Workspace cookie, validated against `erlang:get_cookie()`. |
+| `client` | string | no | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`, `shutdown`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`, `workspace stop` sends `shutdown` (version-exempt, restricted to the `shutdown` op). |
+| `resume` | string | no | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. |
+| `beamtalk_version` | string | yes (gated nodes) | Client toolchain version (`BEAMTALK_VERSION`, verbatim). Missing or mismatched values are rejected with `auth_error` — the field is required in practice; only pre-lock nodes accept auth without it. |
+| `protocol_version` | string | yes (gated nodes) | Client wire protocol version (`2.0`). Same required-in-practice status as `beamtalk_version`. |
+
+### Version lock (BT-4327)
+
+Client and node must be built from the same checkout: `beamtalk_version` (exact, including any `-dev+<sha>` suffix) and `protocol_version` (exact) must match on both sides. The server gates at `auth`; the client re-verifies via `describe` (covering pre-lock nodes that ignore the new `auth` fields). Either side refuses with a message naming both versions plus the `just build` rebuild hint. OTP is deliberately not part of the lock — mixed OTP releases are governed by the support window, not an exact match.
+
+`workspace stop` connects as the `shutdown` admin surface, which is exempt from the version lock on both sides: the server skips the gate for it, and the client skips the `describe` check. A shutdown-surface connection is restricted to the `shutdown` op (anything else is rejected and the connection closed), so the exemption grants no compilation or eval capability — and `shutdown` itself re-validates the cookie from the op body. Stopping a stale node therefore succeeds precisely when its versions do not match.
 
 Session creation is deferred until after successful authentication to prevent resource exhaustion from unauthenticated connections.
 

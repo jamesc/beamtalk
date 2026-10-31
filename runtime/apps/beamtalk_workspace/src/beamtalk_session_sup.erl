@@ -28,7 +28,18 @@ terminate when the connection closes.
 %% (anything else, including a spoofed or future client string, collapses to
 %% `<<"unknown">>`).
 -define(KNOWN_KINDS, [
-    <<"repl">>, <<"mcp">>, <<"lsp">>, <<"liveview">>, <<"ide">>, <<"attach">>, <<"unknown">>
+    <<"repl">>,
+    <<"mcp">>,
+    <<"lsp">>,
+    <<"liveview">>,
+    <<"ide">>,
+    <<"attach">>,
+    %% Version-exempt admin surface (BT-4327): `workspace stop` connects as
+    %% `shutdown`. Its sessions are restricted to the `shutdown` op by
+    %% `beamtalk_ws_handler:handle_protocol/3`, so the exemption grants no
+    %% compilation or eval capability.
+    <<"shutdown">>,
+    <<"unknown">>
 ]).
 
 %%% Public API

@@ -46,8 +46,14 @@ impl ReplDriver {
         // `beamtalk_repl_protocol::handshake` rather than
         // re-matching the JSON here — see that module's doc comment for why.
         let _required = read_text(&mut ws).await?;
-        // auth
-        let auth_msg = handshake::auth_request(&repl.cookie, "repl", None);
+        // auth (versions let the node reject a mismatched toolchain, BT-4327)
+        let auth_msg = handshake::auth_request(
+            &repl.cookie,
+            "repl",
+            None,
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        );
         ws.send(Message::Text(auth_msg.to_string().into()))
             .await
             .map_err(|e| format!("send auth: {e}"))?;
@@ -60,7 +66,19 @@ impl ReplDriver {
         }
         // session-started
         let _session = read_text(&mut ws).await?;
-        Ok(Self { ws })
+        let mut driver = Self { ws };
+        // Client side of the version lock (BT-4327): a node predating the
+        // server gate ignores the new `auth` fields, so verify its
+        // `describe` versions before driving any evals. `rpc` correlates on
+        // the `describe` id, skipping the actor-snapshot pushes the node
+        // queues ahead of the reply.
+        let described = driver.rpc(RequestBuilder::describe()).await?;
+        handshake::verify_server_versions(
+            described.versions.as_ref(),
+            handshake::beamtalk_version(),
+            handshake::PROTOCOL_VERSION,
+        )?;
+        Ok(driver)
     }
 
     /// Send a request value and read the next response that correlates with

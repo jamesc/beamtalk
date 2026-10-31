@@ -56,6 +56,29 @@ pub const TYPE_AUTH_ERROR: &str = "auth_error";
 /// The `op` value on the post-auth session frame.
 pub const OP_SESSION_STARTED: &str = "session-started";
 
+/// The REPL/workspace wire protocol version this client speaks.
+///
+/// Must stay identical to `?PROTOCOL_VERSION` in
+/// `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` — the workspace node
+/// rejects an `auth` request whose `protocol_version` differs, and the client
+/// likewise rejects a `describe` response whose `protocol` differs. Bump both
+/// together; the shared wire corpus plus the Erlang `describe` conformance
+/// test pin the two sides to each other.
+pub const PROTOCOL_VERSION: &str = "2.0";
+
+/// The connecting toolchain's Beamtalk version (`BEAMTALK_VERSION`, verbatim —
+/// e.g. `0.4.0`, or `0.4.0-dev+<sha>` off a release tag).
+///
+/// Baked in at compile time from the workspace `VERSION` file + git state (see
+/// this crate's `build.rs`), the same source the workspace node's Erlang app
+/// `vsn` comes from (`scripts/version.escript`). The server requires an exact
+/// match — including the `-dev+<sha>` suffix — so a stale binary can never
+/// attach to a node built from a different commit.
+#[must_use]
+pub fn beamtalk_version() -> &'static str {
+    env!("BEAMTALK_VERSION")
+}
+
 /// True when `frame` is the pre-auth `{"op": "auth-required"}` welcome the
 /// workspace sends immediately on connect, before any auth message is sent.
 #[must_use]
@@ -69,17 +92,70 @@ pub fn is_auth_required(frame: &Value) -> bool {
 /// so `Workspace sessions` can show where a session originated
 /// (`beamtalk_ws_handler:handle_auth/2`'s `Meta.kind`). `resume`, when
 /// present, requests resuming a previous session by id.
+///
+/// `beamtalk_version` is the connecting toolchain's `BEAMTALK_VERSION`
+/// (see [`beamtalk_version`]) and `protocol_version` is [`PROTOCOL_VERSION`];
+/// the server rejects the request when either differs from its own, so mixed
+/// toolchains fail fast with a rebuild hint instead of silently miscompiling.
+/// Pass [`beamtalk_version()`] and [`PROTOCOL_VERSION`] — never a hardcoded
+/// version string, which would go stale on the next bump.
 #[must_use]
-pub fn auth_request(cookie: &str, client_surface: &str, resume: Option<&str>) -> Value {
+pub fn auth_request(
+    cookie: &str,
+    client_surface: &str,
+    resume: Option<&str>,
+    beamtalk_version: &str,
+    protocol_version: &str,
+) -> Value {
     let mut msg = serde_json::json!({
         "type": TYPE_AUTH,
         "cookie": cookie,
         "client": client_surface,
+        "beamtalk_version": beamtalk_version,
+        "protocol_version": protocol_version,
     });
     if let Some(session) = resume {
         msg["resume"] = Value::String(session.to_string());
     }
     msg
+}
+
+/// Verify a workspace node's `describe` versions against this client's.
+///
+/// `versions` is the `versions` map from a `describe` response (`protocol`
+/// and `beamtalk` keys). This is the client side of the version lock: the
+/// server gates new clients at `auth`, but an older node predating the gate
+/// ignores the new `auth` fields, so the client must refuse the stale node
+/// itself here. Exact match on both, mirroring the server's check.
+///
+/// # Errors
+///
+/// Returns a version-mismatch message (naming both sides plus the rebuild
+/// hint) when `versions` is absent or either version differs.
+pub fn verify_server_versions(
+    versions: Option<&Value>,
+    beamtalk_version: &str,
+    protocol_version: &str,
+) -> Result<(), String> {
+    let versions = versions.ok_or_else(|| {
+        format!(
+            "Workspace did not report versions (describe has no versions map) — \
+             the node predates the version handshake. Stop it and rebuild from \
+             the same checkout: `just build`. Client is beamtalk {beamtalk_version}."
+        )
+    })?;
+    let server_beamtalk = versions.get("beamtalk").and_then(Value::as_str);
+    let server_protocol = versions.get("protocol").and_then(Value::as_str);
+    match (server_beamtalk, server_protocol) {
+        (Some(bt), Some(p)) if bt == beamtalk_version && p == protocol_version => Ok(()),
+        _ => Err(format!(
+            "Workspace version mismatch: node reports beamtalk {}, protocol {}; \
+             this client is beamtalk {beamtalk_version}, protocol {protocol_version}. \
+             Stop the stale node and rebuild from the same checkout: `just build`.",
+            server_beamtalk.unwrap_or("<missing>"),
+            server_protocol.unwrap_or("<missing>"),
+        )),
+    }
 }
 
 /// The server's response to an `auth` request.
@@ -149,20 +225,62 @@ mod tests {
 
     #[test]
     fn auth_request_without_resume_omits_field() {
-        let req = auth_request("cookie-1", "repl", None);
+        let req = auth_request("cookie-1", "repl", None, "0.4.0", PROTOCOL_VERSION);
         assert_eq!(req["type"], "auth");
         assert_eq!(req["cookie"], "cookie-1");
         assert_eq!(req["client"], "repl");
+        assert_eq!(req["beamtalk_version"], "0.4.0");
+        assert_eq!(req["protocol_version"], PROTOCOL_VERSION);
         assert!(req.get("resume").is_none());
     }
 
     #[test]
     fn auth_request_with_resume_includes_field() {
-        let req = auth_request("cookie-1", "mcp", Some("sess-42"));
+        let req = auth_request("cookie-1", "mcp", Some("sess-42"), "0.4.0", "9.9");
         assert_eq!(req["type"], "auth");
         assert_eq!(req["cookie"], "cookie-1");
         assert_eq!(req["client"], "mcp");
         assert_eq!(req["resume"], "sess-42");
+        assert_eq!(req["beamtalk_version"], "0.4.0");
+        assert_eq!(req["protocol_version"], "9.9");
+    }
+
+    #[test]
+    fn protocol_version_matches_erlang_macro() {
+        // Documents the current wire value; the real cross-side pinning is
+        // the shared wire corpus (Rust `matches_shared_wire_corpus` and the
+        // Erlang `handshake_*_matches_shared_wire_corpus` tests) plus the
+        // Erlang `describe` conformance test. Bump this constant together
+        // with `?PROTOCOL_VERSION` in
+        // `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`.
+        assert_eq!(PROTOCOL_VERSION, "2.0");
+    }
+
+    #[test]
+    fn verify_server_versions_accepts_match() {
+        let versions = serde_json::json!({"protocol": "2.0", "beamtalk": "0.4.0"});
+        assert!(verify_server_versions(Some(&versions), "0.4.0", "2.0").is_ok());
+    }
+
+    #[test]
+    fn verify_server_versions_rejects_beamtalk_mismatch() {
+        let versions = serde_json::json!({"protocol": "2.0", "beamtalk": "0.3.0"});
+        let err = verify_server_versions(Some(&versions), "0.4.0", "2.0").unwrap_err();
+        assert!(err.contains("0.3.0"), "{err}");
+        assert!(err.contains("just build"), "{err}");
+    }
+
+    #[test]
+    fn verify_server_versions_rejects_protocol_mismatch() {
+        let versions = serde_json::json!({"protocol": "1.0", "beamtalk": "0.4.0"});
+        let err = verify_server_versions(Some(&versions), "0.4.0", "2.0").unwrap_err();
+        assert!(err.contains("1.0"), "{err}");
+    }
+
+    #[test]
+    fn verify_server_versions_rejects_absent_versions() {
+        let err = verify_server_versions(None, "0.4.0", "2.0").unwrap_err();
+        assert!(err.contains("predates"), "{err}");
     }
 
     #[test]
@@ -277,6 +395,37 @@ mod tests {
             .unwrap_or_else(|| panic!("corpus is missing case {id:?}"))
     }
 
+    /// Check one `auth_request`-shaped corpus case: rebuild the frame from
+    /// its own field values via [`auth_request`] and require an exact match,
+    /// plus presence of every dynamic field. `resume` is passed through when
+    /// the case carries one.
+    fn check_auth_request_case(cases: &[Case], id: &str) {
+        let case = find(cases, id);
+        let field = |key: &str| {
+            case.frame[key]
+                .as_str()
+                .unwrap_or_else(|| panic!("{id}.frame.{key} is a string"))
+        };
+        let resume = case.frame.get("resume").and_then(Value::as_str);
+        assert_eq!(
+            auth_request(
+                field("cookie"),
+                field("client"),
+                resume,
+                field("beamtalk_version"),
+                field("protocol_version"),
+            ),
+            case.frame,
+            "corpus mismatch for {id:?}",
+        );
+        for dynamic in ["cookie", "client", "beamtalk_version", "protocol_version"] {
+            assert!(
+                case.dynamic_fields.contains(&dynamic.to_string()),
+                "{id:?} must list {dynamic:?} as dynamic"
+            );
+        }
+    }
+
     /// Conformance: this module's frame recognition/construction must
     /// agree with the shared corpus the Erlang side (`beamtalk_ws_handler`'s
     /// production code) is pinned to as well — see the module doc comment.
@@ -292,46 +441,8 @@ mod tests {
         );
         assert!(!is_auth_required(&serde_json::json!({"op": "not-it"})));
 
-        let auth_request_case = find(&corpus, "auth_request");
-        let cookie = auth_request_case.frame["cookie"]
-            .as_str()
-            .expect("auth_request.frame.cookie is a string");
-        let client_surface = auth_request_case.frame["client"]
-            .as_str()
-            .expect("auth_request.frame.client is a string");
-        assert_eq!(
-            auth_request(cookie, client_surface, None),
-            auth_request_case.frame,
-            "corpus mismatch for {:?}",
-            auth_request_case.id
-        );
-        assert!(
-            auth_request_case
-                .dynamic_fields
-                .contains(&"cookie".to_string())
-        );
-        assert!(
-            auth_request_case
-                .dynamic_fields
-                .contains(&"client".to_string())
-        );
-
-        let auth_request_resume_case = find(&corpus, "auth_request_with_resume");
-        let resume = auth_request_resume_case.frame["resume"]
-            .as_str()
-            .expect("auth_request_with_resume.frame.resume is a string");
-        let resume_cookie = auth_request_resume_case.frame["cookie"]
-            .as_str()
-            .expect("auth_request_with_resume.frame.cookie is a string");
-        let resume_client = auth_request_resume_case.frame["client"]
-            .as_str()
-            .expect("auth_request_with_resume.frame.client is a string");
-        assert_eq!(
-            auth_request(resume_cookie, resume_client, Some(resume)),
-            auth_request_resume_case.frame,
-            "corpus mismatch for {:?}",
-            auth_request_resume_case.id
-        );
+        check_auth_request_case(&corpus, "auth_request");
+        check_auth_request_case(&corpus, "auth_request_with_resume");
 
         let auth_ok = find(&corpus, "auth_ok");
         assert_eq!(

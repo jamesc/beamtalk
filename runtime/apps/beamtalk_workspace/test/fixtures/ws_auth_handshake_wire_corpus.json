@@ -7,14 +7,14 @@
   },
   {
     "id": "auth_request",
-    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "repl"},
-    "dynamic_fields": ["cookie", "client"],
-    "why": "client's auth request without a resume id — `cookie` is the node secret, `client` tags the connecting surface (repl/mcp/lsp) for `Workspace sessions`"
+    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "repl", "beamtalk_version": "0.4.0-dev+abc1234", "protocol_version": "2.0"},
+    "dynamic_fields": ["cookie", "client", "beamtalk_version", "protocol_version"],
+    "why": "client's auth request without a resume id — `cookie` is the node secret, `client` tags the connecting surface (repl/mcp/lsp) for `Workspace sessions`; `beamtalk_version`/`protocol_version` carry the client's toolchain versions for the handshake gate (values vary per build, so dynamic)"
   },
   {
     "id": "auth_request_with_resume",
-    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "mcp", "resume": "sess-abc"},
-    "dynamic_fields": ["cookie", "client", "resume"],
+    "frame": {"type": "auth", "cookie": "test-cookie-123", "client": "mcp", "resume": "sess-abc", "beamtalk_version": "0.4.0-dev+abc1234", "protocol_version": "2.0"},
+    "dynamic_fields": ["cookie", "client", "resume", "beamtalk_version", "protocol_version"],
     "why": "client's auth request requesting to resume a previous session by id"
   },
   {

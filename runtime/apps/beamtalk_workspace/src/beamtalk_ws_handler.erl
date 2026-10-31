@@ -14,6 +14,7 @@ accepting any protocol operations.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_ws_state.hrl").
 
 -export([
@@ -399,18 +400,61 @@ handle_auth(Data, State) ->
                     crypto:hash_equals(ProvidedCookie, NodeCookie),
             case CookieValid of
                 true ->
-                    %% Check for session resume request
-                    ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
-                    %% Origin/debug metadata for a freshly-created session: the
-                    %% client surface it declared (`repl`/`mcp`/`lsp`/…, normalised
-                    %% downstream) plus the connecting peer. Surfaced by
-                    %% `Workspace sessions` / `Session info`.
-                    Meta = #{
-                        kind => maps:get(<<"client">>, AuthMsg, undefined),
-                        peer => format_peer(State#ws_state.peer),
-                        connected_at => erlang:system_time(microsecond)
-                    },
-                    start_or_resume_session(ResumeId, Meta, State);
+                    %% Version lock (BT-4327): the client must have been built
+                    %% from the same checkout as this node — same
+                    %% `BEAMTALK_VERSION` (exact, including any `-dev+<sha>`
+                    %% suffix) and same `?PROTOCOL_VERSION`. A stale binary
+                    %% attaching to a newer node (or vice versa) previously
+                    %% failed in confusing ways far from the cause; reject it
+                    %% here, before any session exists, with a message naming
+                    %% both sides. OTP is deliberately NOT part of this gate:
+                    %% mixed OTP releases are governed by the support window
+                    %% (`beamtalk_cli::otp_support`), not an exact match.
+                    %%
+                    %% The `shutdown` admin surface (`workspace stop`) is
+                    %% exempt: stopping a stale node must work precisely when
+                    %% its versions do not match. Shutdown loads no code, and
+                    %% the resulting connection is restricted to the
+                    %% `shutdown` op by `handle_protocol/3`, so the
+                    %% exemption grants no compilation or eval capability.
+                    %% (`handle_shutdown/2` additionally re-validates the
+                    %% cookie from the op body.)
+                    ClientSurface = maps:get(<<"client">>, AuthMsg, undefined),
+                    ShutdownOnly = ClientSurface =:= <<"shutdown">>,
+                    VersionCheck =
+                        case ShutdownOnly of
+                            true -> ok;
+                            false -> check_client_versions(AuthMsg)
+                        end,
+                    case VersionCheck of
+                        ok ->
+                            %% Check for session resume request
+                            ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
+                            %% Origin/debug metadata for a freshly-created session: the
+                            %% client surface it declared (`repl`/`mcp`/`lsp`/`shutdown`/…,
+                            %% normalised downstream) plus the connecting peer. Surfaced by
+                            %% `Workspace sessions` / `Session info`.
+                            Meta = #{
+                                kind => ClientSurface,
+                                peer => format_peer(State#ws_state.peer),
+                                connected_at => erlang:system_time(microsecond)
+                            },
+                            start_or_resume_session(
+                                ResumeId, Meta, State#ws_state{shutdown_only = ShutdownOnly}
+                            );
+                        {error, VersionMessage} ->
+                            ?LOG_WARNING("WebSocket auth failed: version mismatch", #{
+                                peer => State#ws_state.peer,
+                                domain => [beamtalk, runtime]
+                            }),
+                            VersionReply = iolist_to_binary(
+                                json:encode(#{
+                                    <<"type">> => <<"auth_error">>,
+                                    <<"message">> => VersionMessage
+                                })
+                            ),
+                            {[{text, VersionReply}, {close, 1008, <<"Version mismatch">>}], State}
+                    end;
                 false ->
                     ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{
                         peer => State#ws_state.peer,
@@ -455,49 +499,119 @@ handle_auth(Data, State) ->
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
     end.
 
+-doc """
+Compare the connecting client's toolchain versions against this node's.
+
+Both `beamtalk_version` (this node's `beamtalk_workspace` app `vsn`, from
+`scripts/version.escript`) and `protocol_version` (`?PROTOCOL_VERSION`)
+must match exactly. A missing field counts as a mismatch — it means the
+client predates the version handshake (BT-4327) and must be rebuilt.
+""".
+-spec check_client_versions(map()) -> ok | {error, binary()}.
+check_client_versions(AuthMsg) ->
+    ServerBeamtalk = beamtalk_version:app_vsn(beamtalk_workspace),
+    ClientBeamtalk = maps:get(<<"beamtalk_version">>, AuthMsg, undefined),
+    ClientProtocol = maps:get(<<"protocol_version">>, AuthMsg, undefined),
+    case ClientBeamtalk =:= ServerBeamtalk andalso ClientProtocol =:= ?PROTOCOL_VERSION of
+        true ->
+            ok;
+        false ->
+            {error,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Version mismatch: client is beamtalk ~s protocol ~s, "
+                        "this workspace node is beamtalk ~s protocol ~s. "
+                        "Stop the stale side and rebuild both from the same "
+                        "checkout (`just build`), then restart the workspace.",
+                        [
+                            display_vsn(ClientBeamtalk),
+                            display_vsn(ClientProtocol),
+                            display_vsn(ServerBeamtalk),
+                            display_vsn(?PROTOCOL_VERSION)
+                        ]
+                    )
+                )}
+    end.
+
+-doc """
+Render a version field for the mismatch message (`undefined` → `<missing>`,
+any non-binary → `<invalid>` — `io_lib:format`'s `~s` would raise on those).
+""".
+-spec display_vsn(term()) -> binary().
+display_vsn(undefined) -> <<"<missing>">>;
+display_vsn(Vsn) when is_binary(Vsn) -> Vsn;
+display_vsn(_) -> <<"<invalid>">>.
+
 %%% Internal — Protocol Dispatch
 
--doc "Dispatch a protocol message after authentication.".
+-doc """
+Dispatch a protocol message after authentication.
+
+Connections on the version-exempt `shutdown` admin surface (BT-4327) may
+only issue the `shutdown` op — anything else is rejected and the
+connection closed, so the exemption grants no compilation or eval
+capability to a version-mismatched client.
+""".
 handle_protocol(Data, SessionPid, State) ->
     case beamtalk_repl_protocol:decode(Data) of
         {ok, Msg} ->
             Op = beamtalk_repl_protocol:get_op(Msg),
-            case Op of
-                <<"shutdown">> ->
-                    handle_shutdown(Msg, State);
-                <<"eval">> ->
-                    %% Use async eval for streaming output. The async path
-                    %% bypasses beamtalk_repl_ops:dispatch/4, so it consults
-                    %% the capability check itself (ADR 0125 §1.5).
-                    with_capability(Op, Msg, State, fun() ->
-                        handle_eval_async(Msg, SessionPid, State)
-                    end);
-                <<"run-entry">> ->
-                    %% Connected-mode `beamtalk run` — dispatch a class
-                    %% entry method with argv, streaming output like async
-                    %% eval. Compile-free, so available in every mode
-                    %% (ADR 0125 §1.5); still routed through the check so the
-                    %% classification stays the single source of truth.
-                    with_capability(Op, Msg, State, fun() ->
-                        handle_run_entry_async(Msg, SessionPid, State)
-                    end);
-                <<"stdin">> ->
-                    %% Route stdin input to IO capture process
-                    handle_stdin(Msg, State);
-                <<"subscribe-logs">> ->
-                    %% Subscribe to live log streaming
-                    handle_subscribe_logs(Msg, State);
-                <<"unsubscribe-logs">> ->
-                    %% Unsubscribe from log streaming
-                    handle_unsubscribe_logs(Msg, State);
-                _ ->
-                    Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
-                    {[{text, Response}], State}
+            case State#ws_state.shutdown_only andalso Op =/= <<"shutdown">> of
+                true ->
+                    ?LOG_WARNING("Rejected op on shutdown-only session", #{
+                        op => Op,
+                        peer => State#ws_state.peer,
+                        domain => [beamtalk, runtime]
+                    }),
+                    Restricted = iolist_to_binary(
+                        json:encode(#{
+                            <<"type">> => <<"auth_error">>,
+                            <<"message">> =>
+                                <<
+                                    "Session is restricted to the shutdown operation "
+                                    "(version-exempt admin surface)"
+                                >>
+                        })
+                    ),
+                    {[{text, Restricted}, {close, 1008, <<"Restricted session">>}], State};
+                false ->
+                    dispatch_protocol_op(Op, Msg, SessionPid, State)
             end;
         {error, DecodeError} ->
             ErrorJson = beamtalk_repl_json:format_error(DecodeError),
             {[{text, ErrorJson}], State}
     end.
+
+dispatch_protocol_op(<<"shutdown">>, Msg, _SessionPid, State) ->
+    handle_shutdown(Msg, State);
+dispatch_protocol_op(<<"eval">>, Msg, SessionPid, State) ->
+    %% Use async eval for streaming output. The async path
+    %% bypasses beamtalk_repl_ops:dispatch/4, so it consults
+    %% the capability check itself (ADR 0125 §1.5).
+    with_capability(<<"eval">>, Msg, State, fun() ->
+        handle_eval_async(Msg, SessionPid, State)
+    end);
+dispatch_protocol_op(<<"run-entry">>, Msg, SessionPid, State) ->
+    %% Connected-mode `beamtalk run` — dispatch a class
+    %% entry method with argv, streaming output like async
+    %% eval. Compile-free, so available in every mode
+    %% (ADR 0125 §1.5); still routed through the check so the
+    %% classification stays the single source of truth.
+    with_capability(<<"run-entry">>, Msg, State, fun() ->
+        handle_run_entry_async(Msg, SessionPid, State)
+    end);
+dispatch_protocol_op(<<"stdin">>, Msg, _SessionPid, State) ->
+    %% Route stdin input to IO capture process
+    handle_stdin(Msg, State);
+dispatch_protocol_op(<<"subscribe-logs">>, Msg, _SessionPid, State) ->
+    %% Subscribe to live log streaming
+    handle_subscribe_logs(Msg, State);
+dispatch_protocol_op(<<"unsubscribe-logs">>, Msg, _SessionPid, State) ->
+    %% Unsubscribe from log streaming
+    handle_unsubscribe_logs(Msg, State);
+dispatch_protocol_op(_Op, Msg, SessionPid, State) ->
+    Response = beamtalk_repl_server:handle_protocol_request(Msg, SessionPid),
+    {[{text, Response}], State}.
 
 -doc """
 Run `Handle` only if this node may perform `Op`

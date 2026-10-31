@@ -73,8 +73,32 @@ pub(crate) type FakeReplResponder =
 /// answers every subsequent request via `responder`, defaulting `id`
 /// (echoed from the request) and `status` (`["done"]`) when the
 /// responder didn't set them.
+///
+/// The fake models a version-matching node (BT-4327): the *first*
+/// `describe` — the client's connect-time version check — is answered
+/// here with this test binary's own toolchain versions, so per-test
+/// responders only model the operation under test. Later `describe`
+/// requests (e.g. the `describe` tool itself) pass through to `responder`.
 pub(crate) async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let version_check_done = Arc::new(AtomicBool::new(false));
     let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(move |request| {
+        let is_first_describe = request.get("op").and_then(|v| v.as_str()) == Some("describe")
+            && !version_check_done.swap(true, Ordering::SeqCst);
+        if is_first_describe {
+            let versions = serde_json::json!({
+                "beamtalk": beamtalk_repl_protocol::handshake::beamtalk_version(),
+                "protocol": beamtalk_repl_protocol::handshake::PROTOCOL_VERSION,
+            });
+            return vec![text(&serde_json::json!({
+                "id": request.get("id"),
+                "status": ["done"],
+                "ops": {},
+                "versions": versions,
+            }))];
+        }
         let mut reply = responder(request);
         if reply.get("id").is_none() {
             reply["id"] = request

@@ -427,6 +427,9 @@ impl RuntimeClient {
         perform_auth_handshake(&mut ws, cookie)
             .await
             .map_err(|e| RuntimeError::Connect { port, reason: e })?;
+        verify_server_versions(&mut ws)
+            .await
+            .map_err(|e| RuntimeError::Connect { port, reason: e })?;
 
         info!(port, "LSP runtime client connected to workspace");
 
@@ -848,8 +851,16 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
     }
 
     // Send auth (no resume — LSP always opens fresh). `client` tags the session
-    // surface so `Workspace sessions` can show it originated from the LSP.
-    let auth_msg = handshake::auth_request(cookie, "lsp", None);
+    // surface so `Workspace sessions` can show it originated from the LSP. The
+    // version fields let the node reject a mismatched toolchain (BT-4327)
+    // before any session exists.
+    let auth_msg = handshake::auth_request(
+        cookie,
+        "lsp",
+        None,
+        handshake::beamtalk_version(),
+        handshake::PROTOCOL_VERSION,
+    );
     let auth_str =
         serde_json::to_string(&auth_msg).map_err(|e| format!("failed to serialise auth: {e}"))?;
     ws.send(Message::Text(auth_str.into()))
@@ -877,6 +888,53 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
         return Err(format!("unexpected post-auth message: {started_json}"));
     }
     Ok(())
+}
+
+/// Client side of the version lock (BT-4327): ask the node for its
+/// `describe` versions and refuse a stale node.
+///
+/// A node predating the server gate ignores the new `auth` fields, so
+/// without this check a new client would silently compile against a stale
+/// toolchain.
+///
+/// The node queues actor-snapshot push frames ahead of our reply, so this
+/// waits for the frame echoing our `describe` id rather than trusting the
+/// next frame off the socket.
+async fn verify_server_versions(ws: &mut WsStream) -> Result<(), String> {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let describe = RequestBuilder::describe();
+    let want_id = describe
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let describe_str = serde_json::to_string(&describe)
+        .map_err(|e| format!("failed to serialise describe: {e}"))?;
+    ws.send(Message::Text(describe_str.into()))
+        .await
+        .map_err(|e| format!("failed to send describe: {e}"))?;
+    // Bound the whole wait: a node emitting a continuous push stream would
+    // otherwise delay connect indefinitely.
+    let deadline = tokio::time::Instant::now() + IO_TIMEOUT;
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("timed out waiting for the describe version check".to_string());
+        }
+        let response = read_text(ws).await?;
+        let response_json: serde_json::Value = serde_json::from_str(&response)
+            .map_err(|e| format!("failed to parse describe response: {e}"))?;
+        let parsed: ReplResponse = serde_json::from_value(response_json)
+            .map_err(|e| format!("failed to decode describe response: {e}"))?;
+        if want_id.is_some() && parsed.id == want_id {
+            return handshake::verify_server_versions(
+                parsed.versions.as_ref(),
+                handshake::beamtalk_version(),
+                handshake::PROTOCOL_VERSION,
+            );
+        }
+        // Anything else (actor-snapshot pushes queued ahead of our reply)
+        // is not our answer — keep waiting.
+    }
 }
 
 async fn read_text(ws: &mut WsStream) -> Result<String, String> {
@@ -1469,7 +1527,32 @@ mod tests {
     };
 
     /// Spawn a fake workspace on an ephemeral loopback port.
+    ///
+    /// The fake models a version-matching node (BT-4327): the *first*
+    /// `describe` — the client's connect-time version check — is answered
+    /// here with this test binary's own toolchain versions, so per-test
+    /// responders only model the operation under test.
     async fn spawn_workspace(handshake: Handshake, responder: Responder) -> FakeWorkspace {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let version_check_done = Arc::new(AtomicBool::new(false));
+        let responder: Responder = Box::new(move |request| {
+            let is_first_describe = request.get("op").and_then(|v| v.as_str()) == Some("describe")
+                && !version_check_done.swap(true, Ordering::SeqCst);
+            if is_first_describe {
+                return vec![text(&json!({
+                    "id": request["id"],
+                    "status": ["done"],
+                    "ops": {},
+                    "versions": {
+                        "beamtalk": handshake::beamtalk_version(),
+                        "protocol": handshake::PROTOCOL_VERSION,
+                    },
+                }))];
+            }
+            responder(request)
+        });
         beamtalk_repl_protocol::test_support::spawn(handshake, "", responder).await
     }
 
@@ -1552,9 +1635,14 @@ mod tests {
         let sinks = Sinks::new();
         let _client = connect_client(&ws, &sinks).await;
 
-        // The auth frame is the only thing the server has seen so far.
+        // The server has seen the auth frame plus the connect-time
+        // `describe` version check (BT-4327).
         let seen = ws.seen.lock().await;
-        assert_eq!(seen.len(), 1, "exactly the auth frame: {seen:?}");
+        assert_eq!(
+            seen.len(),
+            2,
+            "auth frame plus version-check describe: {seen:?}"
+        );
         assert_eq!(seen[0]["type"], "auth");
         assert_eq!(seen[0]["cookie"], "test-cookie");
         // `Workspace sessions` shows the originating surface from this field.
@@ -1563,6 +1651,60 @@ mod tests {
             seen[0].get("resume").is_none(),
             "the LSP always opens a fresh session"
         );
+        // The version lock rides on the handshake: both versions present.
+        assert!(seen[0].get("beamtalk_version").is_some());
+        assert!(seen[0].get("protocol_version").is_some());
+        assert_eq!(seen[1]["op"], "describe");
+    }
+
+    #[tokio::test]
+    async fn connect_to_skips_push_frames_before_describe_reply() {
+        // BT-4327: the node queues actor-snapshot pushes ahead of the
+        // connect-time `describe` reply. The version check must wait for
+        // the frame echoing its `describe` id, not trust the first frame
+        // off the socket (which carries no versions map).
+        let push_then_describe: Responder = Box::new(|request| {
+            vec![
+                text(&json!({
+                    "type": "push",
+                    "channel": "actors",
+                    "event": "spawned",
+                    "data": {},
+                })),
+                text(&json!({
+                    "id": request["id"],
+                    "status": ["done"],
+                    "ops": {},
+                    "versions": {
+                        "beamtalk": handshake::beamtalk_version(),
+                        "protocol": handshake::PROTOCOL_VERSION,
+                    },
+                })),
+            ]
+        });
+        let ws = beamtalk_repl_protocol::test_support::spawn(Handshake::Ok, "", push_then_describe)
+            .await;
+        let sinks = Sinks::new();
+        let _client = connect_client(&ws, &sinks).await;
+    }
+
+    #[tokio::test]
+    async fn connect_to_refuses_node_with_stale_toolchain_version() {
+        // BT-4327: bypasses `spawn_workspace` on purpose — that harness
+        // models a version-matching node. A stale node is refused with a
+        // rebuild hint instead of silently serving stale compiles.
+        let stale: Responder = Box::new(|request| {
+            vec![text(&json!({
+                "id": request["id"],
+                "status": ["done"],
+                "ops": {},
+                "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
+            }))]
+        });
+        let ws = beamtalk_repl_protocol::test_support::spawn(Handshake::Ok, "", stale).await;
+        let sinks = Sinks::new();
+        let err = connect_err(&ws, &sinks).await;
+        assert_connect_error(&err, ws.port, "version mismatch");
     }
 
     #[tokio::test]

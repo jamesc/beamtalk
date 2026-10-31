@@ -19,5 +19,11 @@
     io_capture_pid :: pid() | undefined,
     stdin_ref :: reference() | undefined,
     %% Whether this session is subscribed to log streaming.
-    log_subscribed = false :: boolean()
+    log_subscribed = false :: boolean(),
+    %% Version-exempt admin surface (BT-4327): when the client authenticated
+    %% with `client = shutdown`, the version handshake is skipped and this
+    %% connection may only issue the `shutdown` op (enforced in
+    %% `handle_protocol/3`). Shutdown loads no code, so version skew is
+    %% irrelevant — but it must grant nothing else.
+    shutdown_only = false :: boolean()
 }).

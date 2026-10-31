@@ -609,12 +609,7 @@ handle_term(<<"load-tests">>, _Params, _Msg, _SessionPid) ->
     end;
 handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
     Ops = describe_ops(),
-    BeamtalkVsnBin =
-        case application:get_key(beamtalk_workspace, vsn) of
-            {ok, Vsn} when is_list(Vsn) -> list_to_binary(Vsn);
-            {ok, Vsn} when is_binary(Vsn) -> Vsn;
-            _ -> <<"unknown">>
-        end,
+    BeamtalkVsnBin = beamtalk_version:app_vsn(beamtalk_workspace),
     Versions = #{
         %% Bumped to 2.0 — removed deprecated ops docs/load-file/reload/modules.
         %% Shared with beamtalk_version:get/0 via the ?PROTOCOL_VERSION
