@@ -7,7 +7,8 @@
 %% binary, to decide whether it dispatches as String or Binary. That scan is
 %% wasted for selectors where String and Binary behave identically regardless
 %% of which one the receiver "really" is (byteAt:, byteSize, part:size:,
-%% concat:, toBytes, asStringUnchecked, asBase64, asBase64Url, asHex) — see
+%% concat:, toBytes, asCharlist, asStringUnchecked, asBase64, asBase64Url,
+%% asHex) — see
 %% is_string_binary_shared_selector/1. This benchmark measures the O(1)
 %% byte-level selector `byteAt:` sent dynamically, in a loop, to the *same*
 %% >=1 MB untyped binary receiver (the acceptance-criteria scenario: an

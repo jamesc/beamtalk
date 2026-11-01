@@ -937,7 +937,7 @@ selector that a `String` extension has overridden — an unconditional
 fast path would skip a String-only extension on a `String` receiver.
 
 Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`:
-all 9 shared selectors are locally defined on `Binary`, and ADR
+all 10 shared selectors are locally defined on `Binary`, and ADR
 0066 extensions cannot override a class-body-defined method, so `Binary`
 itself can never have a competing extension for one of them — only
 `String`'s extension registry needs checking (done above), and going
@@ -970,8 +970,8 @@ True for selectors where `String` and `Binary` behave identically.
 Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
 primitives String inherits unchanged (`byteAt:`, `part:size:`, `concat:`,
-`toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`, `asHex`,
-`bitSize`).
+`toBytes`, `asCharlist`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
+`asHex`, `bitSize`).
 Every other Binary-defined selector (`size`, `at:`, `do:`,
 `printString`, `asString`) is overridden by `String` with grapheme-aware
 behaviour, and every String-only selector (`uppercase`, `split:`, …) simply
@@ -1016,6 +1016,7 @@ is_string_binary_shared_selector(toBytes) -> true;
 is_string_binary_shared_selector(asStringUnchecked) -> true;
 is_string_binary_shared_selector(asBase64) -> true;
 is_string_binary_shared_selector(asBase64Url) -> true;
+is_string_binary_shared_selector(asCharlist) -> true;
 is_string_binary_shared_selector(asHex) -> true;
 is_string_binary_shared_selector(bitSize) -> true;
 is_string_binary_shared_selector(_) -> false.
