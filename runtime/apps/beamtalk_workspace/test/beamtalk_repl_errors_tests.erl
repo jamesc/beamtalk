@@ -570,3 +570,37 @@ normalize_diagnostic_tuple_fallback_test() ->
     #{message := Msg} = Result,
     ?assert(is_binary(Msg)),
     ?assert(byte_size(Msg) > 0).
+
+%%% BT-4332: compiler diagnostics may carry Beamtalk String values
+%%% ({beamtalk_string, Bin}) as message/hint. Normalization must coerce
+%%% them to binaries — the load-project wire encoder feeds error maps to
+%%% raw json:encode, which cannot serialize the tuple and fails the whole
+%%% load with an opaque unsupported_type error.
+normalize_diagnostic_beamtalk_string_message_test() ->
+    D = #{message => {beamtalk_string, <<"Line 118: Dynamic in typed class">>}, line => 118},
+    ?assertEqual(
+        #{message => <<"Line 118: Dynamic in typed class">>, line => 118},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_beamtalk_string_hint_test() ->
+    D = #{message => <<"Error">>, hint => {beamtalk_string, <<"add an annotation">>}},
+    ?assertEqual(
+        #{message => <<"Error">>, hint => <<"add an annotation">>},
+        beamtalk_repl_errors:normalize_diagnostic(D)
+    ).
+
+normalize_diagnostic_wire_encoding_test() ->
+    Norm = beamtalk_repl_errors:normalize_diagnostic(#{
+        message => {beamtalk_string, <<"boom">>},
+        hint => {beamtalk_string, <<"h">>}
+    }),
+    %% Must survive the raw json:encode used by encode_load_project.
+    Encoded = iolist_to_binary(
+        json:encode(#{
+            <<"message">> => maps:get(message, Norm),
+            <<"hint">> => maps:get(hint, Norm)
+        })
+    ),
+    ?assert(is_binary(Encoded)),
+    ?assert(byte_size(Encoded) > 0).

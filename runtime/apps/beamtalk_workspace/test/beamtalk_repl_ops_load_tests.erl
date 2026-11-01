@@ -198,6 +198,20 @@ structured_file_errors_non_compile_error_test() ->
     ?assertEqual(<<"/src/Missing.bt">>, maps:get(<<"path">>, E)),
     ?assertEqual(<<"file_not_found">>, maps:get(<<"kind">>, E)).
 
+structured_file_errors_beamtalk_string_message_test() ->
+    %% BT-4332: #beamtalk_error{} messages are Beamtalk Strings
+    %% ({beamtalk_string, Bin}); the wire map must carry binaries or the
+    %% raw json:encode in encode_load_project fails the whole load.
+    Err = beamtalk_error:with_message(
+        beamtalk_error:new(internal_error, 'Workspace'),
+        {beamtalk_string, <<"boom">>}
+    ),
+    Result = beamtalk_repl_ops_load:structured_file_errors("/src/X.bt", Err),
+    ?assertEqual(1, length(Result)),
+    [E] = Result,
+    ?assertEqual(<<"boom">>, maps:get(<<"message">>, E)),
+    ?assert(is_binary(iolist_to_binary(json:encode(E)))).
+
 %%====================================================================
 %% format_collision_warning/3
 %%====================================================================

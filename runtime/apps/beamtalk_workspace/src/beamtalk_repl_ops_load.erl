@@ -1951,15 +1951,25 @@ structured_file_errors(Path, {compile_error, Diagnostics}) when
 structured_file_errors(Path, Reason) ->
     #beamtalk_error{kind = Kind, message = Msg, hint = Hint} =
         beamtalk_repl_errors:ensure_structured_error(Reason),
-    ErrMap = #{
+    %% BT-4332: #beamtalk_error{} messages/hints are Beamtalk Strings
+    %% ({beamtalk_string, Bin}); route through normalize_diagnostic so the
+    %% load-project wire encoder only ever sees binaries.
+    D0 = #{message => Msg},
+    D1 =
+        case Hint of
+            undefined -> D0;
+            _ -> D0#{hint => Hint}
+        end,
+    Norm = beamtalk_repl_errors:normalize_diagnostic(D1),
+    Base = #{
         <<"path">> => list_to_binary(Path),
         <<"kind">> => atom_to_binary(Kind, utf8),
-        <<"message">> => Msg
+        <<"message">> => maps:get(message, Norm)
     },
     [
-        case Hint of
-            undefined -> ErrMap;
-            _ -> ErrMap#{<<"hint">> => Hint}
+        case maps:find(hint, Norm) of
+            {ok, NormHint} -> Base#{<<"hint">> => NormHint};
+            error -> Base
         end
     ].
 

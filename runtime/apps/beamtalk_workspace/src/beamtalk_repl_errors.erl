@@ -425,7 +425,7 @@ present in the source map.
 -spec normalize_diagnostic(term()) ->
     #{message := binary(), line => integer(), hint => binary()}.
 normalize_diagnostic(D) when is_map(D) ->
-    Msg = maps:get(message, D, <<"Unknown error">>),
+    Msg = beamtalk_text:to_binary(maps:get(message, D, <<"Unknown error">>)),
     Base = #{message => Msg},
     % elp:fixme W0032 maps:find with complex branch logic
     Base1 =
@@ -435,6 +435,10 @@ normalize_diagnostic(D) when is_map(D) ->
         end,
     % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, D) of
+        %% BT-4332: compiler hints may be Beamtalk Strings — unwrap them.
+        %% Any other non-binary is still omitted (pinned by
+        %% normalize_diagnostic_map_non_binary_hint_omitted_test).
+        {ok, {beamtalk_string, Bin}} when is_binary(Bin) -> Base1#{hint => Bin};
         {ok, Hint} when is_binary(Hint) -> Base1#{hint => Hint};
         _ -> Base1
     end;
