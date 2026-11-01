@@ -413,3 +413,31 @@ TestCase subclass: BinaryPatternsTest
       _ -> #fallback
     ]
     self assert: result equals: #fallback
+
+  // BT-4143: <<"hi"/utf16>> matches each character as a 2-byte code unit.
+  testMatchUtf16StringLiteralValue =>
+    bin := Binary fromBytes: #(0, 104, 0, 105)
+    result := bin match: [
+      <<"hi"/utf16, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: wrong bytes do not match <<"hi"/utf16>>.
+  testMatchUtf16StringLiteralValueFallsThrough =>
+    bin := Binary fromBytes: #(0, 104, 0, 106)
+    result := bin match: [
+      <<"hi"/utf16>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: little-endian utf16 decodes low byte first.
+  testMatchLittleUtf16Segment =>
+    bin := Binary fromBytes: #(65, 0)
+    result := bin match: [
+      <<c/utf16-little, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 65
+    self assert: (result at: 2) equals: #()

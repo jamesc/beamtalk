@@ -1823,7 +1823,45 @@ impl CoreErlangGenerator {
     /// (parameters, locals, earlier chunks) emits inline. Each segment's
     /// value binds into a scope that ends with the pattern; the caller binds
     /// all pattern variables separately for the guard/body.
-    fn generate_binary_pattern(&mut self, segments: &[BinarySegment]) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn generate_binary_pattern(
+        &mut self,
+        segments: &[BinarySegment],
+    ) -> Result<Document<'static>> {
+        // BT-4143: a string literal with a `utf8`/`utf16`/`utf32` type
+        // expands to one segment per character — exactly what `erlc` emits
+        // for `<<"hi"/utf16>> (two `'utf16'` segments). Sizes and units
+        // never reach here on such segments (the parser rejects them), so
+        // the expansion carries every other specifier unchanged.
+        let mut expanded: Vec<BinarySegment> = Vec::with_capacity(segments.len());
+        for seg in segments {
+            let utf_string = match &seg.value {
+                Pattern::Literal(Literal::String(s), span) => match seg.segment_type {
+                    Some(
+                        BinarySegmentType::Utf8
+                        | BinarySegmentType::Utf16
+                        | BinarySegmentType::Utf32,
+                    ) if seg.size.is_none() => Some((s.clone(), *span)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((s, span)) = utf_string {
+                for c in s.chars() {
+                    expanded.push(BinarySegment {
+                        value: Pattern::Literal(Literal::Character(c), span),
+                        size: None,
+                        segment_type: seg.segment_type,
+                        signedness: seg.signedness,
+                        endianness: seg.endianness,
+                        unit: seg.unit,
+                        span: seg.span,
+                    });
+                }
+            } else {
+                expanded.push(seg.clone());
+            }
+        }
+        let segments = expanded.as_slice();
         self.push_scope();
         let mut bound_here: HashSet<&str> = HashSet::new();
         let mut parts = vec![Document::Str("#{")];
@@ -1934,10 +1972,10 @@ impl CoreErlangGenerator {
         seg: &BinarySegment,
     ) -> Result<Document<'static>> {
         // Value: the variable, wildcard, or literal. A string literal folds
-        // to one big-endian integer over its UTF-8 bytes, exactly like
-        // `erlc` (`<<"hi">>` is `#<26729>(16,1,'integer',...)`); characters
-        // and floats lower through the ordinary literal path (codepoint
-        // integer and float literal, respectively).
+        // to one big-endian integer over its bytes — `erlc`-identical for
+        // ASCII (see `binary_string_folded_value` for the UTF-8 decision);
+        // characters and floats lower through the ordinary literal path
+        // (codepoint integer and float literal, respectively).
         let value_doc = match &seg.value {
             Pattern::Literal(Literal::String(s), _) => binary_string_folded_value(s),
             _ => self.generate_pattern(&seg.value)?,
@@ -2215,11 +2253,14 @@ fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
     plan.len() > 1 || plan.iter().any(|chunk| !chunk.hoists.is_empty())
 }
 
-/// Folds a string literal's UTF-8 bytes into the single big-endian integer
-/// `erlc` emits for a string literal segment value (`<<"hi">>` is
-/// `#<26729>(16,1,'integer',...)`), rendered decimal. Core Erlang integers
-/// are bignums, so a base-10^9 limb fold handles strings of any length —
-/// no `i64`/`u64` ceiling at 8 bytes.
+/// Folds a string literal's bytes into the single big-endian integer used
+/// as its segment value (`<<"hi">>` is `#<26729>(16,1,'integer',...)`),
+/// rendered decimal. The fold runs over UTF-8 bytes — Beamtalk source is
+/// UTF-8, so this matches the literal's runtime bytes exactly (this is a
+/// deliberate divergence from `erlc`, which folds the source file's raw
+/// encoding bytes instead). Core Erlang integers are bignums, so a
+/// base-10^9 limb fold handles strings of any length — no `i64`/`u64`
+/// ceiling at 8 bytes.
 fn binary_string_folded_value(s: &str) -> Document<'static> {
     const BASE: u64 = 1_000_000_000;
     let mut limbs: Vec<u32> = vec![0];

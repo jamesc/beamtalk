@@ -56,6 +56,13 @@ fn literal_int_with_span(expr: &Expression) -> Option<(i64, Span)> {
     }
 }
 
+/// The `unit:` multiplier as an `i64`: `1` when no unit is given (BT-4143).
+/// `parse_unit_specifier` pins units to `1..=256`, so the conversion is
+/// always exact.
+fn unit_multiplier(unit: Option<usize>) -> i64 {
+    unit.map_or(1, |u| i64::try_from(u).unwrap_or(1))
+}
+
 /// Whether integer `value` fits in `size_bits` bits (review finding 3).
 ///
 /// `size_bits` is non-negative (negative sizes are rejected separately).
@@ -2424,6 +2431,33 @@ impl Parser {
         if self.reject_utf_size_or_unit(seg_type, value, size, size_lit, unit) {
             return;
         }
+        // String literal values take no size or unit, and no type other
+        // than an explicit `utf8`/`utf16`/`utf32` — `erlc` folds `<<"hi">>`
+        // to one integer but expands `<<"hi"/utf16>>` to one segment per
+        // character, while bare signedness/endianness (`<<"hi"/signed>>`)
+        // and every other type are errors ("must not have a type or a
+        // size"). The string error takes precedence over the
+        // unit-without-size error below (verified against `erlc`:
+        // `<<"hi"/unit:8>>` reports the string error).
+        if let Pattern::Literal(Literal::String(_), value_span) = value {
+            let utf_typed = matches!(
+                seg_type,
+                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32
+            );
+            if !utf_typed
+                && (size.is_some()
+                    || segment_type.is_some()
+                    || signedness.is_some()
+                    || endianness.is_some()
+                    || unit.is_some())
+            {
+                self.diagnostics.push(Diagnostic::error(
+                    "a literal string in a binary pattern must not have a type or a size",
+                    *value_span,
+                ));
+            }
+            return;
+        }
         // `erlc`: "a bit unit size must not be specified unless a size is
         // specified too".
         if unit.is_some() && size.is_none() {
@@ -2433,28 +2467,15 @@ impl Parser {
             ));
             return;
         }
-        // `erlc`: "a literal string in a binary pattern must not have a
-        // type or a size" — that covers signedness/endianness/unit too.
-        if let Pattern::Literal(Literal::String(_), value_span) = value {
-            if size.is_some()
-                || segment_type.is_some()
-                || signedness.is_some()
-                || endianness.is_some()
-                || unit.is_some()
-            {
-                self.diagnostics.push(Diagnostic::error(
-                    "a literal string in a binary pattern must not have a type or a size",
-                    *value_span,
-                ));
-            }
-            return;
-        }
         if seg_type == BinarySegmentType::Float {
             if let Some((n, span)) = size_lit {
-                if n != 16 && n != 32 && n != 64 {
+                // `erlc` validates size × unit (`<<X:4/unit:8-float>>` is a
+                // clean 32-bit float; `<<X:16/unit:8-float>>` warns).
+                let effective = n.saturating_mul(unit_multiplier(unit));
+                if effective != 16 && effective != 32 && effective != 64 {
                     self.diagnostics.push(Diagnostic::warning(
                         format!(
-                            "bad float bit size: float segments must be 16, 32, or 64 bits, got {n}"
+                            "bad float bit size: float segments must be 16, 32, or 64 bits, got {effective}"
                         ),
                         span,
                     ));
@@ -2471,7 +2492,14 @@ impl Parser {
                 _ => None,
             };
             if let Some(v) = int_value {
-                self.check_binary_int_literal_shape(v, *value_span, seg_type, size_lit, signedness);
+                self.check_binary_int_literal_shape(
+                    v,
+                    *value_span,
+                    seg_type,
+                    size_lit,
+                    signedness,
+                    unit,
+                );
                 return;
             }
             // Float literals with a non-float type warn, `erlc`-style
@@ -2547,6 +2575,7 @@ impl Parser {
         seg_type: BinarySegmentType,
         size_lit: Option<(i64, crate::source_analysis::Span)>,
         signedness: Option<BinarySignedness>,
+        unit: Option<usize>,
     ) {
         match seg_type {
             BinarySegmentType::Binary | BinarySegmentType::Bitstring => {
@@ -2563,8 +2592,13 @@ impl Parser {
                 ));
             }
             BinarySegmentType::Integer => {
-                // Default integer size is 8 bits (same as codegen).
-                let size_bits = size_lit.map_or(8, |(n, _)| n);
+                // Default integer size is 8 bits (same as codegen); with a
+                // unit the effective size is size × unit (`<<4660:2/unit:8>>`
+                // is a clean 16-bit match).
+                let size_bits = match size_lit {
+                    Some((n, _)) => n.saturating_mul(unit_multiplier(unit)),
+                    None => 8,
+                };
                 let signed = signedness == Some(BinarySignedness::Signed);
                 if !binary_literal_fits(v, size_bits, signed) {
                     let message = if !signed && v < 0 {
@@ -2617,13 +2651,18 @@ impl Parser {
                 Pattern::Wildcard(span)
             }
         };
-        let size = if matches!(self.current_kind(), TokenKind::Colon) {
+        let size = self.parse_binary_value_size_suffix();
+        (value, size)
+    }
+
+    /// Parses the optional `:size` suffix of a binary segment literal value.
+    fn parse_binary_value_size_suffix(&mut self) -> Option<Box<Expression>> {
+        if matches!(self.current_kind(), TokenKind::Colon) {
             self.advance(); // consume `:`
             self.parse_binary_segment_size()
         } else {
             None
-        };
-        (value, size)
+        }
     }
 
     /// Parses a float literal binary segment value with optional `:size`.
@@ -2653,12 +2692,7 @@ impl Parser {
                 Pattern::Wildcard(span)
             }
         };
-        let size = if matches!(self.current_kind(), TokenKind::Colon) {
-            self.advance(); // consume `:`
-            self.parse_binary_segment_size()
-        } else {
-            None
-        };
+        let size = self.parse_binary_value_size_suffix();
         (value, size)
     }
 
@@ -2674,12 +2708,7 @@ impl Parser {
             self.error("Expected string literal in binary segment");
             return (Pattern::Wildcard(span), None);
         };
-        let size = if matches!(self.current_kind(), TokenKind::Colon) {
-            self.advance(); // consume `:`
-            self.parse_binary_segment_size()
-        } else {
-            None
-        };
+        let size = self.parse_binary_value_size_suffix();
         (Pattern::Literal(Literal::String(raw), span), size)
     }
 
@@ -2693,12 +2722,7 @@ impl Parser {
             self.error("Expected character literal in binary segment");
             return (Pattern::Wildcard(span), None);
         };
-        let size = if matches!(self.current_kind(), TokenKind::Colon) {
-            self.advance(); // consume `:`
-            self.parse_binary_segment_size()
-        } else {
-            None
-        };
+        let size = self.parse_binary_value_size_suffix();
         (Pattern::Literal(Literal::Character(c), span), size)
     }
 

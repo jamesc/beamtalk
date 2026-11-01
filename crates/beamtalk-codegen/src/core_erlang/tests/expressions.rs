@@ -1845,6 +1845,11 @@ fn test_binary_pattern_string_literal_value_folds() {
     for (text, folded, bits) in [
         ("hi", "26729", 16),
         ("hello world!", "32309054545037006034346730529", 96),
+        // Non-ASCII folds UTF-8 bytes (Beamtalk source is UTF-8): "hé" is
+        // 68 C3 A9, a deliberate divergence from `erlc`'s file encoding.
+        ("hé", "6865833", 24),
+        // Degenerate: the empty string folds to zero with a zero size.
+        ("", "0", 0),
     ] {
         let seg = BinarySegment {
             value: Pattern::Literal(Literal::String(text.into()), Span::new(0, 2)),
@@ -1862,6 +1867,56 @@ fn test_binary_pattern_string_literal_value_folds() {
             "Expected folded string value for {text:?}, got: {output}"
         );
     }
+}
+
+#[test]
+fn test_binary_pattern_integer_literal_with_utf16() {
+    // BT-4143: <<65/utf16>> — like `erlc`, an integer literal keeps the
+    // 'undefined' size/unit of its utf16 type.
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Literal(Literal::Integer(65), Span::new(0, 2)),
+        size: None,
+        segment_type: Some(BinarySegmentType::Utf16),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 2),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("#<65>('undefined','undefined','utf16'"),
+        "Expected utf16 integer segment, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_utf_string_expands_per_character() {
+    // BT-4143: <<"hi"/utf16>> lowers to one segment per character, exactly
+    // like `erlc` — endianness rides along on each expanded segment.
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Literal(Literal::String("hi".into()), Span::new(0, 4)),
+        size: None,
+        segment_type: Some(BinarySegmentType::Utf16),
+        signedness: None,
+        endianness: Some(BinaryEndianness::Little),
+        unit: None,
+        span: Span::new(0, 4),
+    };
+    let doc = generator
+        .generate_binary_pattern(std::slice::from_ref(&seg))
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("#<104>('undefined','undefined','utf16',['unsigned'|['little']])"),
+        "Expected first character segment, got: {output}"
+    );
+    assert!(
+        output.contains("#<105>('undefined','undefined','utf16',['unsigned'|['little']])"),
+        "Expected second character segment, got: {output}"
+    );
 }
 
 #[test]

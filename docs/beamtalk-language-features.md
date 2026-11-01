@@ -4663,7 +4663,9 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   <<"hi", rest/binary>> -> rest size;
   _ -> -1
 ]
-// => 0: string literal values match exact bytes; <<$A>> matches byte 65.
+// => 0: string literal values match exact bytes (UTF-8 for non-ASCII);
+// <<$A>> matches byte 65. With a utf type a string matches per
+// character instead: <<"hi"/utf16>> matches bytes #(0, 104, 0, 105).
 
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
