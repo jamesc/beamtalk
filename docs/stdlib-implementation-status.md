@@ -181,6 +181,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `part:size:` | @primitive selector | ✅ | Zero-copy byte-level slice |
 | `concat:` | @primitive selector | ✅ | Byte concatenation |
 | `toBytes` | @primitive selector | ✅ | Byte list |
+| `asCharlist` | pure BT (delegates to `toBytes`) | ✅ | Erlang charlist (byte list) for FFI |
 | `asString` | @primitive selector | ✅ | Validate UTF-8 and return as String |
 | `asStringUnchecked` | @primitive selector | ✅ | Return as String without UTF-8 validation |
 | `asBase64` | pure BT (Erlang FFI) | ✅ | Standard (RFC 4648 §4) base64 encoding |
