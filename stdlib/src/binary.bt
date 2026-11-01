@@ -267,6 +267,24 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   /// ```
   toBytes -> List(Integer) => @primitive
 
+  /// Convert this binary to an Erlang charlist (list of byte integers).
+  ///
+  /// Answers the same bytes as `toBytes` — a `List` of `Integer` (0-255)
+  /// suitable for Erlang FFI functions that take charlists (e.g.
+  /// `inet:parse_address/1`). Multi-byte UTF-8 input answers individual
+  /// bytes, not graphemes or code points: `"é" asCharlist` is
+  /// `#(195, 169)`, not `#(233)`.
+  ///
+  /// `String` inherits this through `Binary`, so `"127.0.0.1" asCharlist`
+  /// is ready to pass to `inet:parse_address/1`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101)) asCharlist   // => #(104, 101)
+  /// "hello" asCharlist   // => #(104, 101, 108, 108, 111)
+  /// ```
+  asCharlist -> List(Integer) => self toBytes
+
   /// Validate UTF-8 and return a Result: `ok:` with the String on
   /// success, `error:` with a `parse_error` carrying the byte offset of
   /// the invalid sequence on failure.
