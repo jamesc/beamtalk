@@ -210,8 +210,15 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
 6. Sequence **after BT-4143 merges** (shared files: `parser/expressions.rs`,
    `unparse/mod.rs`, guide, `binary_patterns_test.bt`).
 
+## Implementation Tracking
+
+**Epic:** BT-4138
+**Issues:** BT-4346 (Phase 1: AST + parser + unparse) → BT-4347 (Phase 2: codegen, blocked by BT-4346) → BT-4348 (Phase 3: tests + e2e + docs, blocked by BT-4347)
+**Status:** Planned
+**Note:** BT-4142 (design + build monolith) retired as superseded by this split; BT-4143 (match-side parity) landed in #4729.
+
 ## References
-- Related issues: BT-4142, BT-4143, BT-4097
+- Related issues: BT-4142 (superseded), BT-4143, BT-4097, BT-4346, BT-4347, BT-4348
 - Related ADRs: ADR 0023 (interpolation compiles to binary construction),
   ADR 0141 (Bitstring class for unaligned tails), ADR 0142 (class-process
   caller rule), ADR 0052 (Pratt binary-operator parsing)
