@@ -46,6 +46,7 @@ fn run_script_mode_invokes_class_method() {
 /// status 3, and `System halt: 4` halts it with status 4.
 #[test]
 fn run_script_mode_program_exit_and_system_halt_status() {
+    cli_common::require_built_stdlib();
     let project = cli_common::fixture_project();
     std::fs::write(
         project.path().join("src/Quitter.bt"),
@@ -81,6 +82,7 @@ fn run_script_mode_program_exit_and_system_halt_status() {
 
 #[test]
 fn run_script_mode_dispatches_subdirectory_class_by_name() {
+    cli_common::require_built_stdlib();
     // ADR 0119 Phase 3: package-compiler/e2e regression test for the
     // subdirectory-dispatch bug this guards against.
     //
@@ -133,6 +135,7 @@ fn run_script_mode_dispatches_subdirectory_class_by_name() {
 /// running the entry. The entry's own class is stateless, so it runs there too.
 #[test]
 fn run_script_mode_dynamic_file_open_is_caller_owned() {
+    cli_common::require_built_stdlib();
     let project = cli_common::fixture_project();
     std::fs::write(
         project.path().join("src/Owner.bt"),
@@ -375,6 +378,7 @@ fn run_service_mode_status_lines_go_to_stderr_not_stdout() {
 /// consumer's `Rank new foo` runs (no `does_not_understand` at runtime).
 #[test]
 fn dependency_own_stdlib_named_protocol_is_compiled_and_runs_bt_3915() {
+    cli_common::require_built_stdlib();
     let root = tempfile::tempdir().unwrap();
     let dep = root.path().join("producer");
     std::fs::create_dir_all(dep.join("src")).unwrap();

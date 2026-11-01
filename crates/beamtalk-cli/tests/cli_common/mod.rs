@@ -189,6 +189,26 @@ fn runtime_dir() -> &'static Path {
     DIR.get_or_init(|| beamtalk_workspace::cargo_workspace_root!().join("runtime"))
 }
 
+/// Fail fast when the `just build` artifacts that run-mode tests need are
+/// missing (BT-4331).
+///
+/// `beamtalk run` resolves stdlib classes (e.g. `Console` for `printLine:`)
+/// against the compiled beams in `runtime/apps/beamtalk_stdlib/ebin/`, which
+/// only `just build` (`build-stdlib`) produces. Running this crate's tier
+/// standalone (`just test-rust-crate beamtalk-cli`) without a preceding
+/// `just build` otherwise fails later with confusing
+/// `Class 'unknown' not found` subprocess errors. Call this at the start of
+/// run-mode tests so the tier names the missing prerequisite instead.
+#[allow(dead_code)] // some test binaries don't call every helper
+pub fn require_built_stdlib() {
+    let sentinel = runtime_dir().join("apps/beamtalk_stdlib/ebin/bt@stdlib@console.beam");
+    assert!(
+        sentinel.is_file(),
+        "stdlib beams missing ({} not found); run `just build` first, then re-run this test tier (BT-4331)",
+        sentinel.display()
+    );
+}
+
 /// Create a fresh temp directory holding a minimal Beamtalk library project.
 ///
 /// The project has:

@@ -1165,6 +1165,9 @@ test-rust: (_test-rust "")
 # The fast tier of one crate, for the edit loop (`just test-rust-crate
 # beamtalk-codegen`): the skills run this after each change and leave the
 # whole workspace to `just ci-changed`, the one full local run of a PR.
+# NOTE (BT-4331): `beamtalk-cli`'s `cli_run` e2e tests need the `just build`
+# artifacts (`runtime/apps/beamtalk_stdlib/ebin/*.beam`); without a preceding
+# `just build` they fail fast naming that prerequisite instead of passing.
 test-rust-crate CRATE: (_test-rust "-p " + CRATE)
 
 # PARTITION is an optional nextest `--partition` spec (e.g. `count:1/2`) so CI can
