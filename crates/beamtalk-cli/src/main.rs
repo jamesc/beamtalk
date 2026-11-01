@@ -273,6 +273,12 @@ enum Command {
         /// Output format for lint diagnostics
         #[arg(long, default_value = "text")]
         format: commands::OutputFormat,
+
+        /// Treat type/DNU warnings and hints as errors — fail on the same
+        /// live-recheck diagnostics a REPL `load-project` rejects (BT-4334).
+        /// Without it, lint only fails on lint-severity diagnostics.
+        #[arg(long)]
+        warnings_as_errors: bool,
     },
 
     /// Manage workspaces (list, stop, status, attach, transcript, logs, create)
@@ -722,7 +728,11 @@ fn dispatch_command(command: Command) -> Result<()> {
             commands::fmt::run_fmt(&paths, false)
         }
         Command::FmtCheck { paths } => commands::fmt::run_fmt(&paths, true),
-        Command::Lint { path, format } => commands::lint::run_lint(&path, format),
+        Command::Lint {
+            path,
+            format,
+            warnings_as_errors,
+        } => commands::lint::run_lint(&path, format, warnings_as_errors),
         Command::Workspace { action } => commands::workspace::cli::run(action),
         Command::TestScript {
             path,

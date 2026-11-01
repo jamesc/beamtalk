@@ -109,6 +109,45 @@ The summary is suppressed when `--no-warnings` is passed.
 
 `beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes and against the producing compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — if the underlying module has been recompiled since the cache was written, or the entry was written by a `beamtalk` build with different type-mapping logic, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
 
+### CLI/REPL Diagnostic Parity (BT-4334)
+
+The same source must get the same verdict from batch compilation and from a
+REPL `load-project`. All surfaces share one checker (`analyse_full` via the
+`diagnostic_provider` pipelines) and one severity mapping (the package's
+`[diagnostics]` table applied after `@expect` suppression), with the same
+config: project-complete knowledge scope inside a package, the manifest's
+`has_package_dependencies` guard, `current_package`, the FFI type registry,
+and project-known Erlang modules. `beamtalk test` previously compiled
+test/fixture files with the conservative `ModuleOnly` default, suppressing
+DNU/Type diagnostics the REPL live recheck reported — it now declares the
+same scope as `build`.
+
+- `beamtalk build` / `beamtalk test` fail on `Error` diagnostics, and with
+  `--warnings-as-errors` also on `Warning`/`Hint` (except the documented
+  `Deprecation`/`UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
+  which an explicit `[diagnostics]` entry can opt back in).
+- `beamtalk lint` is the lint-severity gate by default. With
+  `--warnings-as-errors` it additionally fails on the live-recheck set — the
+  non-error `Dnu`/`Type` diagnostics the REPL whole-image recheck surfaces
+  (`relevant_image_diagnostic` in `beamtalk_recheck.erl`) plus any `Error` —
+  so CI fails the same sources a REPL load rejects. Run
+  `beamtalk lint --warnings-as-errors` as the CI parity gate.
+
+Intentionally surface-specific behaviour (not parity bugs):
+
+- Plain `beamtalk lint` failing only on lint-severity diagnostics is by
+  design; use the flag for the type/DNU verdict.
+- `beamtalk build` replays cached diagnostics for unchanged files
+  (content-hash incremental cache); `beamtalk build --force` or the
+  cache-free `lint` gate re-sweeps everything.
+- The compiler-port `diagnostics/3` entry (keystroke squiggles, recheck
+  round-trips) runs without on-disk project context (no FFI registry or
+  manifest package — BT-4322), while the batch paths load both. FFI-heavy
+  code can therefore still read stricter in the REPL than in `build`; that
+  residual gap tracks BT-4322, not this policy.
+- The MCP `lint` tool (`crates/beamtalk-mcp`) is a separate implementation
+  with its own options plumbing and is not covered by the CLI flag.
+
 ### Build Artifact Layout (`BuildLayout`)
 
 All build output goes under `_build/` in the project root. The `BuildLayout` struct centralises path construction so all commands (build, test, run, repl, deps) use consistent locations.
