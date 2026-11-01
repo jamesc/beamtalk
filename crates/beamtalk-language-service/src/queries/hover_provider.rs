@@ -3535,4 +3535,63 @@ mod tests {
         assert_eq!(wrapped_selector.contents, bare_selector.contents);
         assert_eq!(wrapped_selector.documentation, bare_selector.documentation);
     }
+
+    /// BT-4341: hover on a method documented with the BT-4337 `## Options`
+    /// convention shows the signature plus the rendered option bullets —
+    /// both on the declaration selector and at a send site.
+    #[test]
+    fn hover_on_options_doc_shows_signature_plus_option_bullets() {
+        let source = concat!(
+            "Object subclass: Fetcher\n",
+            "  /// Fetch a URL with options.\n",
+            "  ///\n",
+            "  /// ## Arguments\n",
+            "  /// - `url` (String) — the URL to fetch.\n",
+            "  ///\n",
+            "  /// ## Options\n",
+            "  /// - `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n",
+            "  /// - `#retries` (Integer, default `3`) — times to retry on failure.\n",
+            "  class fetch: url options: opts => url\n",
+            "  run => Fetcher fetch: 1 options: 2\n",
+        );
+        let tokens = lex_with_eof(source);
+        let (module, diags) = parse(tokens);
+        assert!(diags.is_empty(), "Parse errors: {diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let assert_options_hover = |hover: Option<HoverInfo>| {
+            let hover = hover.expect("hover on method with ## Options docs");
+            assert!(
+                hover.contents.contains("fetch:"),
+                "hover shows the signature, got: {}",
+                hover.contents
+            );
+            let doc = hover.documentation.as_deref().unwrap_or_default();
+            assert!(
+                doc.contains("## Options"),
+                "hover keeps the ## Options section, got: {doc:?}"
+            );
+            for bullet in ["`#timeout`", "`#retries`", "default `5000`", "default `3`"] {
+                assert!(
+                    doc.contains(bullet),
+                    "hover keeps option bullet {bullet:?}, got: {doc:?}"
+                );
+            }
+        };
+
+        // Declaration selector.
+        let offset = source.find("fetch: url").unwrap();
+        assert_options_hover(hover_at(source, pos_at(source, offset)));
+
+        // Send site: hovering the call resolves via the hierarchy.
+        let offset = source.rfind("fetch: 1").unwrap();
+        assert_options_hover(compute_hover(
+            &module,
+            source,
+            pos_at(source, offset),
+            &hierarchy,
+            None,
+            None,
+        ));
+    }
 }

@@ -126,6 +126,20 @@ defmodule BtAttach.DocFormatTest do
       assert out =~ ~s(<ul class="doc-list">)
       refute out =~ ~s(<pre class="doc-code">)
     end
+
+    test "a ## Options section renders heading plus option bullets (BT-4341)" do
+      out =
+        html(
+          "Fetch a URL with options.\n\n## Options\n- `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n- `#retries` (Integer, default `3`) — times to retry on failure."
+        )
+
+      assert out =~ ~s(<h4 class="doc-h">Options</h4>)
+      assert out =~ ~s(<ul class="doc-list">)
+      assert out =~ "<code>#timeout</code>"
+      assert out =~ "<code>#retries</code>"
+      assert out =~ "<code>5000</code>"
+      assert out =~ "<code>3</code>"
+    end
   end
 
   describe "inline spans" do

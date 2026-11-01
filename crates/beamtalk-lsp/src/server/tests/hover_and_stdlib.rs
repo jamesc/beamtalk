@@ -124,6 +124,25 @@ fn extract_hover_class_name_from_package_qualified_hover() {
     assert_eq!(extract_hover_class_name(text), Some("Parser"));
 }
 
+/// BT-4341: the LSP hover formatter keeps a BT-4337 `## Options` section
+/// intact — the heading is demoted for compact display but the option
+/// bullets survive verbatim.
+#[test]
+fn format_hover_documentation_keeps_options_bullets() {
+    let doc = "Fetch a URL with options.\n\n## Options\n- `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n- `#retries` (Integer, default `3`) — times to retry on failure.";
+    let formatted = format_hover_documentation(doc);
+    assert!(
+        formatted.contains("#### Options"),
+        "heading demoted for compact display, got: {formatted:?}"
+    );
+    for bullet in ["`#timeout`", "`#retries`", "default `5000`", "default `3`"] {
+        assert!(
+            formatted.contains(bullet),
+            "option bullet {bullet:?} survives formatting, got: {formatted:?}"
+        );
+    }
+}
+
 #[test]
 fn extract_hover_class_name_from_resolved_method_hover() {
     let text = "```beamtalk\n+\n```\n\nResolved on `Integer` (defined in `Integer`)\n\n_instance-side, sealed_";
