@@ -567,11 +567,25 @@ sealed typed Binary subclass: String
 
   /// Test if the string matches a pattern with PCRE options.
   ///
+  /// ## Arguments
+  /// - `pattern` (String) — the PCRE pattern to match against.
+  /// - `opts` (List(RegexOption), default `#()`) — compile flags.
+  ///
+  /// ## Options
+  /// - `#caseless` — case-insensitive matching.
+  /// - `#multiline` — `^` and `$` match at line breaks, not just the subject bounds.
+  /// - `#dotall` — `.` also matches newlines.
+  /// - `#extended` — ignore unescaped whitespace and `#` comments in the pattern.
+  /// - `#ungreedy` — quantifiers are lazy by default.
+  ///
+  /// Unknown options raise `regex_error`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// "Hello" matchesRegex: "[a-z]+" options: #(#caseless)  // => true
   /// ```
-  matchesRegex: pattern options: opts :: List -> Boolean => @primitive
+  matchesRegex: pattern :: String options: opts :: List(RegexOption) -> Boolean =>
+    @primitive
 
   /// Find the first regex match, returning matched String or nil.
   ///

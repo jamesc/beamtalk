@@ -1,6 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// A single PCRE compile flag. Pass a `List(RegexOption)` to
+/// `from:options:` or `String matchesRegex:options:`.
+type RegexOption = #caseless | #multiline | #dotall | #extended | #ungreedy
 /// Regex — Compiled regular expressions via Erlang re module (PCRE2).
 ///
 /// Provides compiled regex objects for efficient reuse and inspection.
@@ -37,13 +40,24 @@ sealed typed Value subclass: Regex native: beamtalk_regex
 
   /// Compile a regex pattern with PCRE options (class method).
   ///
-  /// Options: caseless, multiline, dotall, extended, ungreedy.
+  /// ## Arguments
+  /// - `pattern` (String) — the PCRE pattern to compile.
+  /// - `opts` (List(RegexOption), default `#()`) — compile flags.
+  ///
+  /// ## Options
+  /// - `#caseless` — case-insensitive matching.
+  /// - `#multiline` — `^` and `$` match at line breaks, not just the subject bounds.
+  /// - `#dotall` — `.` also matches newlines.
+  /// - `#extended` — ignore unescaped whitespace and `#` comments in the pattern.
+  /// - `#ungreedy` — quantifiers are lazy by default.
+  ///
+  /// Unknown options raise `regex_error`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Regex from: "[a-z]+" options: #(#caseless)
   /// ```
-  class sealed from: pattern :: String options: opts :: List(Symbol) -> Result(Regex, Error) =>
+  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
     self delegate
 
   // ===== Instance Methods — Accessors =====
