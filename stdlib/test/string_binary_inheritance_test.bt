@@ -65,6 +65,18 @@ TestCase subclass: StringBinaryInheritanceTest
     // toBytes returns list of byte integers
     self assert: "hello" toBytes equals: #(104, 101, 108, 108, 111)
 
+  testAsCharlistAnswersBytes =>
+    // asCharlist is the FFI charlist spelling of toBytes (BT-4324)
+    self assert: "hello" asCharlist equals: #(104, 101, 108, 108, 111)
+    self assert: "hello" asCharlist equals: "hello" toBytes
+    // Multi-byte: "é" is 2 UTF-8 bytes (C3 A9), not 1 code point (233)
+    self assert: "é" asCharlist equals: #(195, 169)
+    // Non-UTF8 bytes pass through untouched (byte semantics, not text)
+    self assert: (Binary fromBytes: #(255, 254)) asCharlist equals: #(255, 254)
+    self assert: "café" asCharlist equals: "café" toBytes
+    self assert: (Binary fromBytes: #(195, 169)) asCharlist equals: #(195, 169)
+    self assert: "" asCharlist equals: #()
+
   testAsStringOnString =>
     // asString on a String is a no-op, returns the string itself
     self assert: "hello" asString equals: "hello"
