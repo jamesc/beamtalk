@@ -2334,26 +2334,52 @@ impl Parser {
             // `0:1` — integer literal segment value (BT-4097)
             TokenKind::Integer(_) => self.parse_binary_literal_value(false),
 
-            // `-1:8` — negative integer literal segment value (BT-4097)
+            // `1.5/float` — float literal segment value (BT-4143)
+            TokenKind::Float(_) => self.parse_binary_float_value(false),
+
+            // `"hi"` — string literal segment value (BT-4143)
+            TokenKind::String(_) => self.parse_binary_string_value(),
+
+            // `$A` — character literal segment value (BT-4143)
+            TokenKind::Character(_) => self.parse_binary_character_value(),
+
+            // `-1:8`, `-1.5/float` — negative literal segment values
+            // (BT-4097 for integers, BT-4143 for floats)
             TokenKind::BinarySelector(op) if op.as_str() == "-" => {
                 self.advance(); // consume `-`
-                self.parse_binary_literal_value(true)
+                match self.current_kind() {
+                    TokenKind::Float(_) => self.parse_binary_float_value(true),
+                    TokenKind::Integer(_) => self.parse_binary_literal_value(true),
+                    _ => {
+                        let span = self.current_token().span();
+                        self.error("Expected number after '-' in binary segment");
+                        (Pattern::Wildcard(span), None)
+                    }
+                }
             }
 
             _ => {
                 let span = self.current_token().span();
-                self.error("Expected variable name or integer literal in binary segment");
+                self.error("Expected variable name or literal value in binary segment");
                 (Pattern::Wildcard(span), None)
             }
         };
 
-        // Optional type/modifiers: `/type[-modifier]*`
-        let (segment_type, signedness, endianness) = self.parse_binary_segment_specifiers();
+        // Optional type/modifiers: `/type[-modifier]*` (BT-4143 adds
+        // `utf16`, `utf32`, and `unit:N` to the specifier set)
+        let (segment_type, signedness, endianness, unit) = self.parse_binary_segment_specifiers();
 
         // Literal shape checks (review finding 3): mirror `erlc` — error
         // where it errors, warn where it warns — so mistyped literals are
         // diagnostics, never silently dead arms or invalid Core Erlang.
-        self.check_binary_literal_shapes(&value, size.as_deref(), segment_type, signedness);
+        self.check_binary_literal_shapes(
+            &value,
+            size.as_deref(),
+            segment_type,
+            signedness,
+            endianness,
+            unit,
+        );
 
         let end = self.tokens[self.current.saturating_sub(1)].span();
         BinarySegment {
@@ -2362,23 +2388,27 @@ impl Parser {
             segment_type,
             signedness,
             endianness,
-            unit: None,
+            unit,
             span: start.merge(end),
         }
     }
 
     /// Validates literal sizes and values against the segment type.
     ///
-    /// Mirrors `erlc` (review finding 3): negative literal sizes and sizes
-    /// on `utf8` segments are errors; values that cannot fit, integer
-    /// literals with `binary`/`bitstring` type, and bad float bit sizes are
-    /// warnings. Variable sizes are unchecked (validated at runtime).
+    /// Mirrors `erlc` (review finding 3, BT-4143): negative literal sizes,
+    /// sizes or units on `utf8`/`utf16`/`utf32` segments, a unit without a
+    /// size, and any type/size on a string literal value are errors; values
+    /// that cannot fit, literals of the wrong type for their segment, and
+    /// bad float bit sizes are warnings. Variable sizes are unchecked
+    /// (validated at runtime).
     fn check_binary_literal_shapes(
         &mut self,
         value: &Pattern,
         size: Option<&Expression>,
         segment_type: Option<BinarySegmentType>,
         signedness: Option<BinarySignedness>,
+        endianness: Option<BinaryEndianness>,
+        unit: Option<usize>,
     ) {
         let size_lit = size.and_then(literal_int_with_span);
         if let Some((n, span)) = size_lit {
@@ -2391,12 +2421,32 @@ impl Parser {
             }
         }
         let seg_type = segment_type.unwrap_or(BinarySegmentType::Integer);
-        if seg_type == BinarySegmentType::Utf8 && size.is_some() {
-            let span = size_lit.map_or_else(|| value.span(), |(_, s)| s);
+        if self.reject_utf_size_or_unit(seg_type, value, size, size_lit, unit) {
+            return;
+        }
+        // `erlc`: "a bit unit size must not be specified unless a size is
+        // specified too".
+        if unit.is_some() && size.is_none() {
             self.diagnostics.push(Diagnostic::error(
-                "size must not be given for segments of type utf8",
-                span,
+                "a bit unit size must not be specified unless a size is specified too",
+                value.span(),
             ));
+            return;
+        }
+        // `erlc`: "a literal string in a binary pattern must not have a
+        // type or a size" — that covers signedness/endianness/unit too.
+        if let Pattern::Literal(Literal::String(_), value_span) = value {
+            if size.is_some()
+                || segment_type.is_some()
+                || signedness.is_some()
+                || endianness.is_some()
+                || unit.is_some()
+            {
+                self.diagnostics.push(Diagnostic::error(
+                    "a literal string in a binary pattern must not have a type or a size",
+                    *value_span,
+                ));
+            }
             return;
         }
         if seg_type == BinarySegmentType::Float {
@@ -2412,9 +2462,92 @@ impl Parser {
             }
             return;
         }
-        let Pattern::Literal(Literal::Integer(v), value_span) = value else {
-            return;
+        // Integer-valued literals: integers and characters (`$A` is its
+        // codepoint, exactly like `erlc`).
+        if let Pattern::Literal(lit, value_span) = value {
+            let int_value = match lit {
+                Literal::Integer(v) => Some(*v),
+                Literal::Character(c) => Some(i64::from(*c as u32)),
+                _ => None,
+            };
+            if let Some(v) = int_value {
+                self.check_binary_int_literal_shape(v, *value_span, seg_type, size_lit, signedness);
+                return;
+            }
+            // Float literals with a non-float type warn, `erlc`-style
+            // (`<<1.5>>` warns that '1.5' is not of the expected type).
+            if let Literal::Float(f) = lit {
+                let expected = match seg_type {
+                    BinarySegmentType::Integer => "integer",
+                    BinarySegmentType::Binary => "binary",
+                    BinarySegmentType::Bitstring => "bitstring",
+                    BinarySegmentType::Utf8 => "utf8",
+                    BinarySegmentType::Utf16 => "utf16",
+                    BinarySegmentType::Utf32 => "utf32",
+                    BinarySegmentType::Float => return,
+                };
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "this arm can never match because '{f}' is not of the expected type '{expected}'"
+                    ),
+                    *value_span,
+                ));
+            }
+        }
+    }
+
+    /// Rejects sizes and units on `utf8`/`utf16`/`utf32` segments, mirroring
+    /// `erlc` ("neither size nor unit must be given"). Answers whether any
+    /// error was reported.
+    fn reject_utf_size_or_unit(
+        &mut self,
+        seg_type: BinarySegmentType,
+        value: &Pattern,
+        size: Option<&Expression>,
+        size_lit: Option<(i64, crate::source_analysis::Span)>,
+        unit: Option<usize>,
+    ) -> bool {
+        if !matches!(
+            seg_type,
+            BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32
+        ) {
+            return false;
+        }
+        let type_name = match seg_type {
+            BinarySegmentType::Utf8 => "utf8",
+            BinarySegmentType::Utf16 => "utf16",
+            _ => "utf32",
         };
+        let mut errored = false;
+        if size.is_some() {
+            let span = size_lit.map_or_else(|| value.span(), |(_, s)| s);
+            self.diagnostics.push(Diagnostic::error(
+                format!("size must not be given for segments of type {type_name}"),
+                span,
+            ));
+            errored = true;
+        }
+        if unit.is_some() {
+            self.diagnostics.push(Diagnostic::error(
+                format!("unit must not be given for segments of type {type_name}"),
+                value.span(),
+            ));
+            errored = true;
+        }
+        errored
+    }
+
+    /// Warns when an integer-valued literal cannot match its segment:
+    /// integer literals with `binary`/`bitstring` type, and values that do
+    /// not fit the (signed or unsigned) size.
+    fn check_binary_int_literal_shape(
+        &mut self,
+        v: i64,
+        value_span: crate::source_analysis::Span,
+        seg_type: BinarySegmentType,
+        size_lit: Option<(i64, crate::source_analysis::Span)>,
+        signedness: Option<BinarySignedness>,
+    ) {
         match seg_type {
             BinarySegmentType::Binary | BinarySegmentType::Bitstring => {
                 let name = if seg_type == BinarySegmentType::Binary {
@@ -2426,15 +2559,15 @@ impl Parser {
                     format!(
                         "this arm can never match because '{v}' is not of the expected type '{name}'"
                     ),
-                    *value_span,
+                    value_span,
                 ));
             }
             BinarySegmentType::Integer => {
                 // Default integer size is 8 bits (same as codegen).
                 let size_bits = size_lit.map_or(8, |(n, _)| n);
                 let signed = signedness == Some(BinarySignedness::Signed);
-                if !binary_literal_fits(*v, size_bits, signed) {
-                    let message = if !signed && *v < 0 {
+                if !binary_literal_fits(v, size_bits, signed) {
+                    let message = if !signed && v < 0 {
                         format!(
                             "this arm can never match because the negative value {v} will never match the value of an 'unsigned' binary segment"
                         )
@@ -2445,10 +2578,13 @@ impl Parser {
                         )
                     };
                     self.diagnostics
-                        .push(Diagnostic::warning(message, *value_span));
+                        .push(Diagnostic::warning(message, value_span));
                 }
             }
-            BinarySegmentType::Float | BinarySegmentType::Utf8 => {}
+            BinarySegmentType::Float
+            | BinarySegmentType::Utf8
+            | BinarySegmentType::Utf16
+            | BinarySegmentType::Utf32 => {}
         }
     }
 
@@ -2490,94 +2626,153 @@ impl Parser {
         (value, size)
     }
 
+    /// Parses a float literal binary segment value with optional `:size`.
+    ///
+    /// `negated` is true when the caller consumed a leading `-` (BT-4143).
+    /// A signed `Float("-1.5")` token (no space after `-`) parses directly;
+    /// an explicit `-` before it double-negates, exactly like integers.
+    fn parse_binary_float_value(&mut self, negated: bool) -> (Pattern, Option<Box<Expression>>) {
+        let token = self.advance();
+        let span = token.span();
+        let TokenKind::Float(raw) = token.into_kind() else {
+            self.error("Expected float literal in binary segment");
+            return (Pattern::Wildcard(span), None);
+        };
+        let value = match raw.parse::<f64>() {
+            // Reject values that overflow `f64` — same rule as `parse_literal`.
+            Ok(val) if val.is_finite() => {
+                let val = if negated { -val } else { val };
+                // Negating a finite float stays finite.
+                Pattern::Literal(Literal::Float(val), span)
+            }
+            _ => {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("Float literal out of range: {raw}"),
+                    span,
+                ));
+                Pattern::Wildcard(span)
+            }
+        };
+        let size = if matches!(self.current_kind(), TokenKind::Colon) {
+            self.advance(); // consume `:`
+            self.parse_binary_segment_size()
+        } else {
+            None
+        };
+        (value, size)
+    }
+
+    /// Parses a string literal binary segment value with optional `:size`.
+    ///
+    /// `erlc` rejects any type/size on string literals — the size and
+    /// specifiers still parse here so the shape check can report the same
+    /// error on the right span.
+    fn parse_binary_string_value(&mut self) -> (Pattern, Option<Box<Expression>>) {
+        let token = self.advance();
+        let span = token.span();
+        let TokenKind::String(raw) = token.into_kind() else {
+            self.error("Expected string literal in binary segment");
+            return (Pattern::Wildcard(span), None);
+        };
+        let size = if matches!(self.current_kind(), TokenKind::Colon) {
+            self.advance(); // consume `:`
+            self.parse_binary_segment_size()
+        } else {
+            None
+        };
+        (Pattern::Literal(Literal::String(raw), span), size)
+    }
+
+    /// Parses a character literal binary segment value with optional `:size`.
+    ///
+    /// `$A` is its codepoint — an integer-valued literal, exactly like `erlc`.
+    fn parse_binary_character_value(&mut self) -> (Pattern, Option<Box<Expression>>) {
+        let token = self.advance();
+        let span = token.span();
+        let TokenKind::Character(c) = token.into_kind() else {
+            self.error("Expected character literal in binary segment");
+            return (Pattern::Wildcard(span), None);
+        };
+        let size = if matches!(self.current_kind(), TokenKind::Colon) {
+            self.advance(); // consume `:`
+            self.parse_binary_segment_size()
+        } else {
+            None
+        };
+        (Pattern::Literal(Literal::Character(c), span), size)
+    }
+
     /// Parses optional `/type[-modifier]*` specifiers for a binary segment.
     ///
-    /// Returns `(segment_type, signedness, endianness)`.
+    /// Returns `(segment_type, signedness, endianness, unit)`.
     fn parse_binary_segment_specifiers(
         &mut self,
     ) -> (
         Option<BinarySegmentType>,
         Option<BinarySignedness>,
         Option<BinaryEndianness>,
+        Option<usize>,
     ) {
         let mut segment_type = None;
         let mut signedness = None;
         let mut endianness = None;
+        let mut unit = None;
 
         if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "/") {
             self.advance(); // consume `/`
-            if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+            if !matches!(
+                self.current_kind(),
+                TokenKind::Identifier(_) | TokenKind::Keyword(_)
+            ) {
                 self.error("Expected a binary segment specifier after '/'");
             }
 
-            // Parse identifiers separated by `-` (e.g. `signed-little`)
-            while let TokenKind::Identifier(name) = self.current_kind() {
-                let name = name.clone();
-                self.advance();
-                let span = self.tokens[self.current - 1].span();
-                match name.as_str() {
-                    "integer" | "float" | "binary" | "bytes" | "bits" | "bitstring" | "utf8" => {
-                        if segment_type.is_some() {
-                            self.diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Conflicting binary segment type specifier '{name}': type already set"
-                                ),
-                                span,
-                            ));
-                        } else {
-                            segment_type = Some(match name.as_str() {
-                                "integer" => BinarySegmentType::Integer,
-                                "float" => BinarySegmentType::Float,
-                                "utf8" => BinarySegmentType::Utf8,
-                                "bits" | "bitstring" => BinarySegmentType::Bitstring,
-                                _ => BinarySegmentType::Binary, // "binary" | "bytes"
-                            });
-                        }
-                    }
-                    "signed" | "unsigned" => {
-                        if signedness.is_some() {
-                            self.diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Conflicting binary segment signedness specifier '{name}': signedness already set"
-                                ),
-                                span,
-                            ));
-                        } else {
-                            signedness = Some(if name.as_str() == "signed" {
-                                BinarySignedness::Signed
-                            } else {
-                                BinarySignedness::Unsigned
-                            });
-                        }
-                    }
-                    "big" | "little" | "native" => {
-                        if endianness.is_some() {
-                            self.diagnostics.push(Diagnostic::error(
-                                format!(
-                                    "Conflicting binary segment endianness specifier '{name}': endianness already set"
-                                ),
-                                span,
-                            ));
-                        } else {
-                            endianness = Some(match name.as_str() {
-                                "big" => BinaryEndianness::Big,
-                                "little" => BinaryEndianness::Little,
-                                _ => BinaryEndianness::Native, // "native"
-                            });
-                        }
-                    }
-                    unknown => {
+            // Parse specifiers separated by `-` (e.g. `signed-little`,
+            // `integer-unit:8`). `unit:N` lexes as `Keyword("unit:")` when
+            // the colon is attached, or `Identifier("unit")` + `Colon`
+            // when spaced — both forms are accepted.
+            loop {
+                if self.at_unit_specifier() {
+                    if unit.is_some() {
+                        let span = self.current_token().span();
                         self.diagnostics.push(Diagnostic::error(
-                            format!("Unknown binary segment specifier: '{unknown}'"),
+                            "Conflicting binary segment unit specifier 'unit': unit already set",
                             span,
                         ));
+                        self.skip_unit_specifier();
+                    } else {
+                        unit = self.parse_unit_specifier();
                     }
+                } else if let TokenKind::Identifier(name) = self.current_kind() {
+                    let name = name.clone();
+                    self.advance();
+                    let span = self.tokens[self.current - 1].span();
+                    self.apply_named_segment_specifier(
+                        &name,
+                        span,
+                        &mut segment_type,
+                        &mut signedness,
+                        &mut endianness,
+                    );
+                } else if let TokenKind::Keyword(kw) = self.current_kind() {
+                    let kw = kw.clone();
+                    let span = self.advance().span();
+                    self.diagnostics.push(Diagnostic::error(
+                        format!("Unknown binary segment specifier: '{kw}'"),
+                        span,
+                    ));
+                    break;
+                } else {
+                    break;
                 }
                 // Continue if next is `-` (chained modifiers like `signed-little`)
                 if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "-")
                 {
                     self.advance(); // consume `-`
-                    if !matches!(self.current_kind(), TokenKind::Identifier(_)) {
+                    if !matches!(
+                        self.current_kind(),
+                        TokenKind::Identifier(_) | TokenKind::Keyword(_)
+                    ) {
                         self.error("Expected a specifier name after '-' in binary segment type");
                         break;
                     }
@@ -2587,7 +2782,160 @@ impl Parser {
             }
         }
 
-        (segment_type, signedness, endianness)
+        (segment_type, signedness, endianness, unit)
+    }
+
+    /// Applies one named (`Identifier`) segment specifier — a type,
+    /// signedness, endianness, or the bare word `unit` (which needs `:N`).
+    fn apply_named_segment_specifier(
+        &mut self,
+        name: &str,
+        span: crate::source_analysis::Span,
+        segment_type: &mut Option<BinarySegmentType>,
+        signedness: &mut Option<BinarySignedness>,
+        endianness: &mut Option<BinaryEndianness>,
+    ) {
+        match name {
+            "integer" | "float" | "binary" | "bytes" | "bits" | "bitstring" | "utf8" | "utf16"
+            | "utf32" => {
+                if segment_type.is_some() {
+                    self.diagnostics.push(Diagnostic::error(
+                        format!(
+                            "Conflicting binary segment type specifier '{name}': type already set"
+                        ),
+                        span,
+                    ));
+                } else {
+                    *segment_type = Some(match name {
+                        "integer" => BinarySegmentType::Integer,
+                        "float" => BinarySegmentType::Float,
+                        "utf8" => BinarySegmentType::Utf8,
+                        "utf16" => BinarySegmentType::Utf16,
+                        "utf32" => BinarySegmentType::Utf32,
+                        "bits" | "bitstring" => BinarySegmentType::Bitstring,
+                        _ => BinarySegmentType::Binary, // "binary" | "bytes"
+                    });
+                }
+            }
+            "signed" | "unsigned" => {
+                if signedness.is_some() {
+                    self.diagnostics.push(Diagnostic::error(
+                        format!(
+                            "Conflicting binary segment signedness specifier '{name}': signedness already set"
+                        ),
+                        span,
+                    ));
+                } else {
+                    *signedness = Some(if name == "signed" {
+                        BinarySignedness::Signed
+                    } else {
+                        BinarySignedness::Unsigned
+                    });
+                }
+            }
+            "big" | "little" | "native" => {
+                if endianness.is_some() {
+                    self.diagnostics.push(Diagnostic::error(
+                        format!(
+                            "Conflicting binary segment endianness specifier '{name}': endianness already set"
+                        ),
+                        span,
+                    ));
+                } else {
+                    *endianness = Some(match name {
+                        "big" => BinaryEndianness::Big,
+                        "little" => BinaryEndianness::Little,
+                        _ => BinaryEndianness::Native, // "native"
+                    });
+                }
+            }
+            "unit" => {
+                self.diagnostics.push(Diagnostic::error(
+                    "'unit' must be followed by ':' and an integer, e.g. 'unit:8'",
+                    span,
+                ));
+            }
+            unknown => {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("Unknown binary segment specifier: '{unknown}'"),
+                    span,
+                ));
+            }
+        }
+    }
+
+    /// Whether the current token opens a `unit:N` specifier: either
+    /// `Keyword("unit:")` (attached colon) or `Identifier("unit")`
+    /// followed by `Colon` (spaced).
+    fn at_unit_specifier(&self) -> bool {
+        match self.current_kind() {
+            TokenKind::Keyword(kw) => kw.trim_end_matches(':') == "unit",
+            TokenKind::Identifier(name) => {
+                name.as_str() == "unit"
+                    && matches!(
+                        self.tokens.get(self.current + 1).map(Token::kind),
+                        Some(TokenKind::Colon)
+                    )
+            }
+            _ => false,
+        }
+    }
+
+    /// Consumes a `unit:N` specifier and answers its value, or `None` on
+    /// error. `erlc` only accepts literal units from 1 to 256.
+    fn parse_unit_specifier(&mut self) -> Option<usize> {
+        match self.current_kind() {
+            TokenKind::Keyword(_) => {
+                self.advance(); // consume `unit:`
+            }
+            TokenKind::Identifier(_) => {
+                self.advance(); // consume `unit`
+                self.advance(); // consume `:`
+            }
+            _ => unreachable!("at_unit_specifier implies Keyword or Identifier"),
+        }
+        let TokenKind::Integer(raw) = self.current_kind() else {
+            let span = self.current_token().span();
+            self.diagnostics.push(Diagnostic::error(
+                "Expected an integer after 'unit:' in binary segment, e.g. 'unit:8'",
+                span,
+            ));
+            return None;
+        };
+        let raw = raw.clone();
+        let span = self.advance().span();
+        match parse_integer(&raw) {
+            // The guard pins `n` to `1..=256`, so the conversion is exact.
+            Ok(n) if (1..=256).contains(&n) => usize::try_from(n).ok(),
+            Ok(n) => {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("binary segment unit must be between 1 and 256, got {n}"),
+                    span,
+                ));
+                None
+            }
+            Err(e) => {
+                self.diagnostics.push(Diagnostic::error(e, span));
+                None
+            }
+        }
+    }
+
+    /// Skips a duplicate `unit:N` specifier for error recovery.
+    fn skip_unit_specifier(&mut self) {
+        match self.current_kind() {
+            TokenKind::Keyword(_) => {
+                self.advance();
+            }
+            TokenKind::Identifier(_) => {
+                self.advance();
+                self.advance();
+            }
+            _ => unreachable!("at_unit_specifier implies Keyword or Identifier"),
+        }
+        if matches!(self.current_kind(), TokenKind::Integer(_)) {
+            self.advance();
+        }
     }
 
     /// Whether the current token is the `no_user_code` mark of a primitive pragma

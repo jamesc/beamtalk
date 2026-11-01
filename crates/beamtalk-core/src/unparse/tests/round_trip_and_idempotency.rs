@@ -567,3 +567,22 @@ fn native_declaration_keeps_source_order() {
 fn native_declaration_header_trailing_comment() {
     assert_native_round_trip("declare native: lists  // FFI stubs\n  node -> Symbol\n");
 }
+
+#[test]
+fn binary_pattern_new_spellings_round_trip() {
+    // BT-4143: every new binary-pattern spelling unparses back to itself —
+    // utf16/utf32, unit:N in the specifier list, and float, string, and
+    // character literal values.
+    for source in [
+        "x match: [<<c/utf16, rest/binary>> -> c]",
+        "x match: [<<d/utf32, rest/binary>> -> d]",
+        "x match: [<<v:2/unit:8, rest/binary>> -> v]",
+        "x match: [<<v:16/signed-little-unit:2, rest/binary>> -> v]",
+        "x match: [<<1.5/float, rest/binary>> -> rest]",
+        "x match: [<<-1.5/float, rest/binary>> -> rest]",
+        "x match: [<<\"hi\", rest/binary>> -> rest]",
+        "x match: [<<$A, rest/binary>> -> rest]",
+    ] {
+        assert_idempotent(source);
+    }
+}

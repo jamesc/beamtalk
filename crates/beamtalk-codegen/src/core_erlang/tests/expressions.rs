@@ -1751,6 +1751,142 @@ fn test_binary_pattern_utf8_segment() {
 }
 
 #[test]
+fn test_binary_pattern_utf16_utf32_segments() {
+    // BT-4143: <<c/utf16, d/utf32>> — like `erlc`, 'undefined' size and
+    // unit with the utf16/utf32 type atoms.
+    let mut generator = CoreErlangGenerator::new("test");
+    for (name, ty) in [
+        ("c", BinarySegmentType::Utf16),
+        ("d", BinarySegmentType::Utf32),
+    ] {
+        let seg = BinarySegment {
+            value: Pattern::Variable(Identifier::new(name, Span::new(0, 1))),
+            size: None,
+            segment_type: Some(ty),
+            signedness: None,
+            endianness: None,
+            unit: None,
+            span: Span::new(0, 1),
+        };
+        let doc = generator.generate_binary_segment(&seg).unwrap();
+        let output = doc.to_pretty_string();
+        let expected = match ty {
+            BinarySegmentType::Utf16 => "'utf16'",
+            _ => "'utf32'",
+        };
+        assert!(
+            output.contains(expected),
+            "Expected {expected} type, got: {output}"
+        );
+        assert!(
+            output.contains("'undefined'"),
+            "UTF segment should have 'undefined' size and unit, got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_binary_pattern_explicit_unit_segment() {
+    // BT-4143: <<v:2/unit:8>> — the explicit unit overrides the default.
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("v", Span::new(0, 1))),
+        size: Some(Box::new(Expression::Literal(
+            Literal::Integer(2),
+            Span::new(2, 3),
+        ))),
+        segment_type: None,
+        signedness: None,
+        endianness: None,
+        unit: Some(8),
+        span: Span::new(0, 1),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    // erlc: #<V>(2,8,'integer',['unsigned'|['big']])
+    assert!(
+        output.contains("(2,8,'integer'"),
+        "Expected (2,8,'integer' size/unit/type, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_float_literal_value() {
+    // BT-4143: <<1.5/float>> — the float literal is the segment value.
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Literal(Literal::Float(1.5), Span::new(0, 3)),
+        size: None,
+        segment_type: Some(BinarySegmentType::Float),
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 3),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    // erlc: #<1.5...e+00>(64,1,'float',['unsigned'|['big']])
+    assert!(
+        output.contains("1.5"),
+        "Expected float literal value, got: {output}"
+    );
+    assert!(
+        output.contains("(64,1,'float'"),
+        "Expected (64,1,'float' size/unit/type, got: {output}"
+    );
+}
+
+#[test]
+fn test_binary_pattern_string_literal_value_folds() {
+    // BT-4143: <<"hi">> — the bytes fold to one big-endian integer, like
+    // `erlc` (#<26729>(16,1,'integer',...)); a 12-byte string exercises the
+    // bignum path past the u64 ceiling.
+    let mut generator = CoreErlangGenerator::new("test");
+    for (text, folded, bits) in [
+        ("hi", "26729", 16),
+        ("hello world!", "32309054545037006034346730529", 96),
+    ] {
+        let seg = BinarySegment {
+            value: Pattern::Literal(Literal::String(text.into()), Span::new(0, 2)),
+            size: None,
+            segment_type: None,
+            signedness: None,
+            endianness: None,
+            unit: None,
+            span: Span::new(0, 2),
+        };
+        let doc = generator.generate_binary_segment(&seg).unwrap();
+        let output = doc.to_pretty_string();
+        assert!(
+            output.contains(&format!("#<{folded}>({bits},1,'integer'")),
+            "Expected folded string value for {text:?}, got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_binary_pattern_character_literal_value() {
+    // BT-4143: <<$A>> — the codepoint is the segment value, like `erlc`
+    // (#<65>(8,1,'integer',...)).
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Literal(Literal::Character('A'), Span::new(0, 2)),
+        size: None,
+        segment_type: None,
+        signedness: None,
+        endianness: None,
+        unit: None,
+        span: Span::new(0, 2),
+    };
+    let doc = generator.generate_binary_segment(&seg).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("#<65>(8,1,'integer'"),
+        "Expected codepoint segment value, got: {output}"
+    );
+}
+
+#[test]
 fn test_binary_pattern_signed_little_segment() {
     // <<val:16/signed-little>> — signed little-endian integer
     let mut generator = CoreErlangGenerator::new("test");

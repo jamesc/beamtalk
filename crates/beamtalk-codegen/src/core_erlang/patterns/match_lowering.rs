@@ -19,6 +19,7 @@
 //! [`super::destructure`].
 
 use std::collections::HashSet;
+use std::fmt::Write as _;
 
 use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
@@ -29,7 +30,8 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, Expression,
-    ExpressionStatement, Identifier, MatchArm, MessageSelector, Pattern, WellKnownSelector,
+    ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector, Pattern,
+    WellKnownSelector,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -1924,14 +1926,22 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// Defaults: type=integer, signedness=unsigned, endianness=big,
-    /// size=8 for integer/float, 'all' for binary/bitstring, 'undefined' for utf8.
-    /// Unit=1 for integer/float/bitstring, 8 for binary, 'undefined' for utf8.
+    /// size=8 for integer/float, 'all' for binary/bitstring, 'undefined'
+    /// for utf8/utf16/utf32. Unit=1 for integer/float/bitstring, 8 for
+    /// binary, 'undefined' for utf8/utf16/utf32.
     pub(in crate::core_erlang) fn generate_binary_segment(
         &mut self,
         seg: &BinarySegment,
     ) -> Result<Document<'static>> {
-        // Value: the variable or wildcard
-        let value_doc = self.generate_pattern(&seg.value)?;
+        // Value: the variable, wildcard, or literal. A string literal folds
+        // to one big-endian integer over its UTF-8 bytes, exactly like
+        // `erlc` (`<<"hi">>` is `#<26729>(16,1,'integer',...)`); characters
+        // and floats lower through the ordinary literal path (codepoint
+        // integer and float literal, respectively).
+        let value_doc = match &seg.value {
+            Pattern::Literal(Literal::String(s), _) => binary_string_folded_value(s),
+            _ => self.generate_pattern(&seg.value)?,
+        };
 
         // Resolve type (default: integer)
         let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
@@ -1942,20 +1952,31 @@ impl CoreErlangGenerator {
         } else {
             match seg_type {
                 BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'all'"),
-                BinarySegmentType::Utf8 => Document::Str("'undefined'"),
-                BinarySegmentType::Integer => Document::Str("8"),
+                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32 => {
+                    Document::Str("'undefined'")
+                }
+                BinarySegmentType::Integer => {
+                    // A folded string literal spans its bytes (8 bits each).
+                    if let Pattern::Literal(Literal::String(s), _) = &seg.value {
+                        Document::Owned((s.len() * 8).to_string())
+                    } else {
+                        Document::Str("8")
+                    }
+                }
                 BinarySegmentType::Float => Document::Str("64"),
             }
         };
 
-        // Unit: explicit override (synthetic split tails, BT-4096) or the
-        // type default — 8 for binary, 1 for bitstring (bits) and
-        // integer/float, 'undefined' for utf8.
+        // Unit: explicit override (`/unit:N`, or synthetic split tails from
+        // BT-4096) or the type default — 8 for binary, 1 for bitstring
+        // (bits) and integer/float, 'undefined' for utf8/utf16/utf32.
         let unit_doc = match seg.unit {
             Some(unit) => Document::Owned(unit.to_string()),
             None => match seg_type {
                 BinarySegmentType::Binary => Document::Str("8"),
-                BinarySegmentType::Utf8 => Document::Str("'undefined'"),
+                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32 => {
+                    Document::Str("'undefined'")
+                }
                 BinarySegmentType::Integer
                 | BinarySegmentType::Float
                 | BinarySegmentType::Bitstring => Document::Str("1"),
@@ -1970,6 +1991,8 @@ impl CoreErlangGenerator {
             BinarySegmentType::Float => Document::Str("'float'"),
             BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'binary'"),
             BinarySegmentType::Utf8 => Document::Str("'utf8'"),
+            BinarySegmentType::Utf16 => Document::Str("'utf16'"),
+            BinarySegmentType::Utf32 => Document::Str("'utf32'"),
         };
 
         // Flags: cons-cell list ['signedness'|['endianness']]
@@ -2190,6 +2213,38 @@ pub(in crate::core_erlang) fn plan_binary_split(
 fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
     let plan = plan_binary_split(segments);
     plan.len() > 1 || plan.iter().any(|chunk| !chunk.hoists.is_empty())
+}
+
+/// Folds a string literal's UTF-8 bytes into the single big-endian integer
+/// `erlc` emits for a string literal segment value (`<<"hi">>` is
+/// `#<26729>(16,1,'integer',...)`), rendered decimal. Core Erlang integers
+/// are bignums, so a base-10^9 limb fold handles strings of any length —
+/// no `i64`/`u64` ceiling at 8 bytes.
+fn binary_string_folded_value(s: &str) -> Document<'static> {
+    const BASE: u64 = 1_000_000_000;
+    let mut limbs: Vec<u32> = vec![0];
+    for &b in s.as_bytes() {
+        let mut carry = u64::from(b);
+        for limb in &mut limbs {
+            let cur = u64::from(*limb) * 256 + carry;
+            *limb = (cur % BASE) as u32;
+            carry = cur / BASE;
+        }
+        while carry > 0 {
+            limbs.push((carry % BASE) as u32);
+            carry /= BASE;
+        }
+    }
+    let mut out = String::new();
+    let mut limbs = limbs.iter().rev();
+    // The most significant limb renders unpadded; the rest are 9 digits each.
+    if let Some(top) = limbs.next() {
+        out.push_str(&top.to_string());
+    }
+    for limb in limbs {
+        let _ = write!(out, "{limb:09}");
+    }
+    Document::Owned(out)
 }
 
 /// True for sizes that emit inline: literals and variables, with any
