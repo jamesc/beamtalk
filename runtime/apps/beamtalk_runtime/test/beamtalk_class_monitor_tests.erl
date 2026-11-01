@@ -125,8 +125,13 @@ kill_and_wait(Pid, Reason) ->
     after 5000 -> ?assert(false)
     end.
 
+%% 100 x 20ms (~2s) proved too tight under full-suite parallel load
+%% (BT-4330: BudgetClass restart-count assertion failed once in 8583
+%% tests when the DOWN handling was delayed by scheduler pressure).
+%% 300 x 20ms (~6s) keeps the failure signal fast while tolerating
+%% loaded runners; the loop still exits as soon as Fun() is true.
 wait_until(Fun) ->
-    wait_until(Fun, 100).
+    wait_until(Fun, 300).
 
 wait_until(_Fun, 0) ->
     timeout;
