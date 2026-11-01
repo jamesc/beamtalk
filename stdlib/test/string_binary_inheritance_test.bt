@@ -71,6 +71,8 @@ TestCase subclass: StringBinaryInheritanceTest
     self assert: "hello" asCharlist equals: "hello" toBytes
     // Multi-byte: "é" is 2 UTF-8 bytes (C3 A9), not 1 code point (233)
     self assert: "é" asCharlist equals: #(195, 169)
+    // Non-UTF8 bytes pass through untouched (byte semantics, not text)
+    self assert: (Binary fromBytes: #(255, 254)) asCharlist equals: #(255, 254)
     self assert: "café" asCharlist equals: "café" toBytes
     self assert: (Binary fromBytes: #(195, 169)) asCharlist equals: #(195, 169)
     self assert: "" asCharlist equals: #()
