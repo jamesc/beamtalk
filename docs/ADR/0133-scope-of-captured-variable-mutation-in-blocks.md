@@ -756,7 +756,10 @@ BT-3908 (Phase 2); BT-3909 (Phase 2/3 boundary); BT-3910, BT-3911, BT-3912,
 BT-3913 (Phase 3); BT-3914 (LSP code action); BT-4003 (the BT-3912
 residuals made compile errors, among them the permanent `ensure:` rule under
 Consequences)
-**Status:** Planned
+**Status:** Phase 3 done. BT-3910, BT-3911 and BT-3912 lowered every local
+assignment, conditional/match/handler arm and loop/fold/REPL body through
+frames; BT-3913 retired `DENY_SET`/`ALLOW_SET` (the 733-shape oracle reports
+zero silent drops), moving ADR 0131 to Implemented.
 
 The ADR 0131 residuals epic BT-3883 is cancelled and replaced by BT-3901:
 BT-3862, BT-3858 and BT-3843 are absorbed by BT-3902 and BT-3903; BT-3860,

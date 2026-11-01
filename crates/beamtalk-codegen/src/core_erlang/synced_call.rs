@@ -1660,6 +1660,31 @@ impl CoreErlangGenerator {
         self.guarded_op_take_reads()
     }
 
+    /// BT-3913: whether a `StateAcc` pack prefix seeded right now must take
+    /// the actor's state from the cell rather than the threaded `State` in
+    /// scope. Inside a loop that will bracket guarded operators, the slow
+    /// paths write the cell past the loop-entry `State`, so a seed packed
+    /// from that `State` is stale. Unlike [`Self::state_seeds_from_cell`] —
+    /// which decides reads in a frame that holds no whole `State`, where the
+    /// frame's own `State` is the source — the seed of a nested `StateAcc`
+    /// frame must come from the cell even when the current frame holds a
+    /// whole `State`: that state was itself packed from the loop entry (or
+    /// an ancestor's seed of it) and is stale under the bracket too. A
+    /// `do:separatedBy:` in an actor loop nest seeded its accumulator from
+    /// the method `State` and drew `StaleStateSeedInBracketedLoop`.
+    pub(in crate::core_erlang) fn state_seed_seeds_from_cell(&self) -> bool {
+        #[cfg(test)]
+        if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
+            return false;
+        }
+        self.synced
+            .guarded_op_loops
+            .borrow()
+            .iter()
+            .any(|m| m.will_bracket)
+            && !self.in_cell_closure()
+    }
+
     /// The bracket decision of [`Self::checkout_guarded_op_loop`].
     fn checkout_guarded_op_loop_decision(
         &mut self,

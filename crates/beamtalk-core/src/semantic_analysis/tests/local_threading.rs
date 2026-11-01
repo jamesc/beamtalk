@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-3745 (ADR 0131 Phase 0b): the §6 error for a Tier 2 block value with no
-//! return channel, and the Phase 0 allow-set error for a local-threading
+//! return channel, and the retired position-check error for a local-threading
 //! construct in a position that does not thread its outer-local writes yet (BT-3743).
 
 use super::*;
@@ -42,7 +42,7 @@ fn of_category(diags: &[Diagnostic], category: DiagnosticCategory) -> Vec<&Diagn
 /// method, because its block holds a construct that is not one either (a
 /// `detect:ifNone:` with a stored search block, so its handler's write is not
 /// packed, and `conditional_arms_lower_as_producer` declines the block). The
-/// Phase 0 error names the `value:` send at the position it sits in; the
+/// position-check error names the `value:` send at the position it sits in; the
 /// `detect:ifNone:` inside gets an error of its own. `b` is bound first by
 /// [`NON_PRODUCER_VALUE_PRELUDE`].
 const NON_PRODUCER_VALUE: &str = "[:v | #(1, 2) detect: b ifNone: [t := t + v]. 1] value: 2";
@@ -50,7 +50,7 @@ const NON_PRODUCER_VALUE: &str = "[:v | #(1, 2) detect: b ifNone: [t := t + v]. 
 /// The statement that binds [`NON_PRODUCER_VALUE`]'s search block.
 const NON_PRODUCER_VALUE_PRELUDE: &str = "b := [:q | q > 5]\n";
 
-/// The Phase 0 errors that name a `value:` send.
+/// The position-check errors that name a `value:` send.
 fn value_send_errors(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     of_category(diags, DiagnosticCategory::UnmigratedLocalThreading)
         .into_iter()
@@ -838,11 +838,11 @@ fn section6_nested_write_makes_the_outer_block_a_tier2_value() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 0: the allow-set error
+// The retired position check: operand errors
 // ---------------------------------------------------------------------------
 
 #[test]
-fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
+fn operand_position_is_an_error_naming_construct_and_position() {
     // o1's operand shape with a construct that is not a producer: a `value:`
     // sent to a block literal whose block the producer cannot lower (an
     // `on:do:` is one since BT-3817, ADR 0131 Phase 3b, a unary `value` since
@@ -858,18 +858,18 @@ fn allow_set_operand_position_is_an_error_naming_construct_position_and_epic() {
     assert_eq!(
         d.message.as_str(),
         "`value:` writes outer local `t`, but as the receiver of a message in a class \
-         method the write is not threaded back yet (BT-3743)"
+         method the write is not threaded back (BT-3913)"
     );
     assert!(
         d.hint
             .as_deref()
-            .is_some_and(|h| h.contains("as a statement of its own")),
+            .is_some_and(|h| h.contains("statement of its own")),
         "{d:?}"
     );
 }
 
 #[test]
-fn allow_set_statement_and_listed_assign_rhs_are_accepted() {
+fn statement_and_producer_assign_rhs_are_accepted() {
     // o11, s3, s5, s8.
     for body in [
         "4 =:= 5 ifFalse: [t := t + 1]\na := t\n[t := t + 1] ensure: [nil]\n#[a, t]",
@@ -917,10 +917,10 @@ fn a_returned_do_inside_a_block_is_accepted_in_class_and_value_methods() {
     //
     // BT-3813: in any other closure (a `detect:ifNone:` handler, a sort block)
     // codegen lowers the `^` value through the producer with the `Discard`
-    // tail (`nlr_return_construct_value`), so the `ALLOW_SET` row accepts it
-    // in class and value-type methods (the BUnit pins are `doReturnedInClosure`
-    // and friends in `adr0131do_producer_test.bt`). An actor method keeps the
-    // error: its row lists only the conditionals.
+    // tail (`nlr_return_construct_value`), so the position check accepts a
+    // `do:`-family loop there in class and value-type methods (the BUnit pins
+    // are `doReturnedInClosure` and friends in `adr0131do_producer_test.bt`).
+    // An actor method keeps the error except for conditionals.
     for body in [
         "#(1) detect: [:y | y > c] ifNone: [^#(1, 2) do: [:x | t := t + x]]\nt",
         "#(1) detect: [:y | y > c] ifNone: [^(#{#a => 1} do: [:x | t := t + x])]\nt",
@@ -944,10 +944,10 @@ fn a_returned_do_inside_a_block_is_accepted_in_class_and_value_methods() {
 fn a_loop_nested_in_an_actor_fold_through_a_closure_is_rejected() {
     // BT-3796: codegen's `in_fold_frame` crosses a closure between a fold and a
     // nested loop, as `local_producer_sites` does (the validator's
-    // `frame_sites` stop being all frames there), so the nested loop is judged
-    // by the rows, not as a frame site. In an actor it is a Phase 0 error and
-    // so never reaches the narrowing; the agreement test's closure two-level
-    // FRAMES pin that the two sides agree on the rest.
+    // `frame_sites` stop being all frames there), so the nested loop is not a
+    // frame site. In an actor it is a position-check error and so never
+    // reaches the narrowing; the agreement test's closure two-level FRAMES
+    // pin that the two sides agree on the rest.
     //
     // ADR 0131 Phase 3c (BT-3822): an arm between the two is a `BranchArm`
     // frame now (the conditional is a producer in the fold body), so the loop in
@@ -974,7 +974,7 @@ fn a_loop_nested_in_an_actor_fold_through_a_closure_is_rejected() {
 }
 
 #[test]
-fn allow_set_do_assignment_is_accepted_in_every_context() {
+fn do_assignment_is_accepted_in_every_context() {
     // `r := coll do: [...]` dropped the write in class and value-type methods
     // and worked in an actor method. ADR 0131 Phase 2c (BT-3796) makes `do:` a
     // local-threading producer (`producer_body_arg_index`), so it is accepted
@@ -987,7 +987,7 @@ fn allow_set_do_assignment_is_accepted_in_every_context() {
 }
 
 #[test]
-fn allow_set_field_assignment_in_class_method_is_an_error() {
+fn field_assignment_of_non_producer_in_class_method_is_an_error() {
     // o5's shape with a construct that is not a producer yet (an `on:do:` is one
     // since BT-3817, a `value:` whose block the producer lowers since BT-4263):
     // the tuple would be stored in the class variable.
@@ -1010,7 +1010,7 @@ fn allow_set_field_assignment_in_class_method_is_an_error() {
 }
 
 #[test]
-fn allow_set_nested_assignment_crossing_a_block_is_an_error() {
+fn nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
     // local needs the loop to thread it on. A construct that is not a
     // local-threading producer in the body keeps the error: an actor's fold
@@ -1047,7 +1047,7 @@ fn a_conditional_assigned_in_a_loop_body_is_a_producer_in_class_and_value_method
 }
 
 #[test]
-fn allow_set_nested_assignment_of_block_local_is_accepted() {
+fn nested_assignment_of_block_local_is_accepted() {
     // vt_threading_constructs_test.bt `branchNestedAssign:`: the construct only
     // writes locals of its own branch block, so it threads in that frame.
     let src = in_value(
@@ -1058,7 +1058,7 @@ fn allow_set_nested_assignment_of_block_local_is_accepted() {
 }
 
 #[test]
-fn allow_set_detect_if_none_handler_write_is_a_producer_everywhere() {
+fn detect_if_none_handler_write_is_a_producer_everywhere() {
     // s2: a verifier panic (class), unbound `State` (value) or a silently
     // dropped write (actor) before BT-3745. ADR 0131 Phase 2c (BT-3794): the
     // fold packs the `ifNone:` handler's writes with its search block's, so a
@@ -1188,7 +1188,7 @@ fn parenthesised_block_operands_analyse_like_bare_ones() {
 }
 
 #[test]
-fn allow_set_repl_uses_its_own_row() {
+fn repl_conditional_receiver_keeps_the_error() {
     let known = ["t"];
     // REPL o4: receiver position. A local-threading producer since BT-3795
     // (ADR 0131 Phase 2d); a conditional's receiver is not a site, and keeps
@@ -1245,7 +1245,7 @@ fn try_do_is_a_producer_in_every_position_of_every_method_context() {
 }
 
 #[test]
-fn try_do_that_is_not_a_producer_keeps_the_allow_set_error() {
+fn try_do_that_is_not_a_producer_keeps_an_error() {
     // A `tryDo:` whose Tier 2 block reaches the arity-0 native raises, so
     // wherever the producer does not lower it the write is a compile error:
     // inside a closure, as the argument of a send that does not sequence its
@@ -1317,66 +1317,29 @@ fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
     assert!(adr0131_diagnostics(&src).is_empty());
 }
 
-/// PIN-BUG BT-3913: every method in the inert `*_pending.bt.pending` probe
-/// fixtures is rejected by an ADR 0131 diagnostic today, and no method in the
-/// compiled fixtures is. A phase of the BT-3743 epic that makes a shape
-/// compile moves it out of the pending fixture (and its test into
-/// `adr0131local_rebind_test.bt`), which keeps this green; BT-3841 deletes the
-/// allow-set and with it the pending allow-set shapes.
+/// BT-3913: every method in the compiled probe fixtures
+/// (`adr0131local_rebind_{class,value,actor}.bt`) is accepted — the retired
+/// position check rejects nothing they hold. (The inert
+/// `*_pending.bt.pending` fixtures are long gone: the last pending shape
+/// moved to the compiled fixture with BT-3798, so there is no pending half
+/// left to pin.)
 #[test]
 fn adr0131_probe_matrix_pins() {
-    // The contexts whose last pending shape was lowered, so they have no
-    // pending fixture left (the actor column's last shape, s1, moved to the
-    // compiled fixture with BT-3798). Pinned explicitly (BT-3855): a context
-    // not listed must have its pending fixture, so deleting one by accident
-    // fails here instead of skipping the context.
-    const NO_PENDING_FIXTURE: &[&str] = &["class", "value", "actor"];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/test/fixtures");
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
     };
-    let mut moved = Vec::new();
     for context in ["class", "value", "actor"] {
+        let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
+        assert!(
+            !root.join(&pending).exists(),
+            "{pending} exists: the pending fixtures are gone, move its methods to the \
+             compiled fixture"
+        );
         let compiled = format!("adr0131local_rebind_{context}.bt");
         let diags = adr0131_diagnostics(&read(&compiled));
         assert!(diags.is_empty(), "{compiled}: {diags:?}");
-
-        let pending = format!("adr0131local_rebind_{context}_pending.bt.pending");
-        if NO_PENDING_FIXTURE.contains(&context) {
-            assert!(
-                !root.join(&pending).exists(),
-                "{pending} exists, but `{context}` is pinned as having no pending \
-                 fixture: drop it from NO_PENDING_FIXTURE"
-            );
-            continue;
-        }
-        let src = read(&pending);
-        let module = parse_module(&src);
-        let diags = adr0131_diagnostics(&src);
-        let class = &module.classes[0];
-        let methods = class.methods.iter().chain(class.class_methods.iter());
-        let mut count = 0;
-        let mut accepted = Vec::new();
-        for method in methods {
-            count += 1;
-            if !diags
-                .iter()
-                .any(|d| method.span.start() <= d.span.start() && d.span.end() <= method.span.end())
-            {
-                accepted.push(method.selector.name().to_string());
-            }
-        }
-        if !accepted.is_empty() {
-            moved.push(format!("{pending}: {accepted:?}"));
-        }
-        assert!(count > 0, "{pending} has no methods");
     }
-    assert!(
-        moved.is_empty(),
-        "no longer rejected by an ADR 0131 diagnostic; move them (and their tests) out of \
-         the pending files:\n{}",
-        moved.join("\n")
-    );
 }
 
 /// ADR 0131 probe s4 (a stored closure invoked directly) was a permanent §6
@@ -1420,6 +1383,34 @@ fn section6_cascade_messages_are_never_inlined() {
                 "{src}: {diags:?}"
             );
         }
+    }
+}
+
+/// BT-3913 (BT-3738 follow-up): a loop or fold that writes a local of its
+/// arm, as the value of an assignment in that arm, keeps the
+/// `UnmigratedLocalThreading` error — the arm frame carries only method-level
+/// locals, so the write would not thread back. The compliant rewrite (the
+/// writing loop as a statement of its own, the pure fold value captured)
+/// draws no diagnostic; `adr0131cond_non_producer_test.bt` runs both.
+#[test]
+fn residual_arm_local_producer_as_assign_value_is_rejected() {
+    for body in [
+        "true ifTrue: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "true ifTrue: [\n  m := 0\n  sq := #(1, 2) collect: [:e | m := m + e]\n  sq size + m]",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert_eq!(
+            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            1,
+            "{body}: {diags:?}"
+        );
+    }
+    for body in [
+        "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  s := #(1, 2) inject: 0 into: [:a :e | a + e]\n  m + s]",
+        "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  sq := #(1, 2) collect: [:e | e * 2]\n  sq size + m]",
+    ] {
+        let diags = adr0131_diagnostics(&in_actor(body));
+        assert!(diags.is_empty(), "{body}: {diags:?}");
     }
 }
 
@@ -1674,41 +1665,50 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3753: statement positions that lose the write
+// BT-3794 (kept by BT-3913): a handler-writing `detect:ifNone:` with a stored
+// search block is not packed, so its write would be dropped
 // ---------------------------------------------------------------------------
 
 #[test]
-fn deny_set_nested_statement_names_the_enclosing_block() {
+fn stored_search_detect_in_an_arm_keeps_the_error_naming_the_block() {
+    // The `detect:ifNone:` with a stored search block is rejected where it
+    // sits (a statement under the conditional arm, inside the evaluated
+    // block); the enclosing `value:` send itself is a producer shape and
+    // draws no error of its own.
     let src = in_class(&format!(
         "{NON_PRODUCER_VALUE_PRELUDE}4 > 3 ifTrue: [{NON_PRODUCER_VALUE}]\nt"
     ));
     let diags = adr0131_diagnostics(&src);
-    let p0 = value_send_errors(&diags);
+    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
-        "`value:` writes outer local `t`, but as a statement inside a conditional arm \
-         in a class method the write is not threaded back yet (BT-3743)"
+        "`detect:ifNone:` writes outer local `t`, but as a statement inside a conditional arm \
+         in a class method the write is not threaded back (BT-3913)"
     );
     assert!(
         p0[0]
             .hint
             .as_deref()
-            .is_some_and(|h| h.contains("compute the new value of `t`")),
+            .is_some_and(|h| h.contains("not inside a conditional arm")),
         "{:?}",
         p0[0]
     );
 }
 
 #[test]
-fn deny_set_method_body_statement_is_rejected_per_context() {
-    // A `value:` whose block the producer cannot lower in a class method loses
-    // the write as a class method statement.
+fn stored_search_detect_as_a_statement_keeps_the_error() {
+    // A `detect:ifNone:` with a stored search block loses the write as a
+    // class method statement, in an arm or at the root alike.
     let body = format!("{NON_PRODUCER_VALUE_PRELUDE}{NON_PRODUCER_VALUE}\nt");
     let diags = adr0131_diagnostics(&in_class(&body));
-    let p0 = value_send_errors(&diags);
+    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
     assert_eq!(p0.len(), 1, "{diags:?}");
-    assert!(p0[0].message.contains("as a statement in"), "{:?}", p0[0]);
+    assert!(
+        p0[0].message.contains("as a statement inside"),
+        "{:?}",
+        p0[0]
+    );
     // BT-4263: one whose block it can lower is a producer in every context
     // (`argStA` in adr0131eval_block_test.bt).
     let body = "t := 0\n[:v | t := t + v] value: 1\nt";
@@ -1811,7 +1811,8 @@ fn a_nested_do_in_a_class_loop_body_is_accepted_with_or_without_state_access() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-3753: the statement-position probe matrix (`DENY_SET`)
+// BT-3753: the statement-position probe matrix (retired with the check,
+// BT-3913)
 // ---------------------------------------------------------------------------
 
 use crate::test_helpers::statement_probes::{
@@ -1829,19 +1830,16 @@ fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -
     }
 }
 
-/// PIN-BUG BT-3913: the statement-position probe matrix, measured on the
-/// real build (BT-3753). Every shape `adr0131_statement_probes.tsv` records
-/// as answering wrong, raising or failing to compile (`bad`) is rejected by
-/// an ADR 0131 diagnostic, and every shape it records as answering right
-/// (`ok`) is not, except where a [`DENY_SET`] row is coarser than one
-/// measurement (`over`: the row's kind family or block role also covers
-/// shapes measured wrong). The block-local cells (targets `local` and
-/// `dlocal`, a construct that writes only a local of its own enclosing block)
-/// were `gap` lines until BT-3776 measured them and flipped them to `ok`,
-/// `bad` or `over`; the only `gap` lines left are two REPL method-body rows
-/// (unmeasured, BT-3823), which this test does not judge. A phase that makes a shape answer right
-/// deletes or narrows its row and flips its line to `ok`, which keeps this
-/// green.
+/// BT-3913: the retired statement-position probe matrix. Every `ok` row is
+/// accepted; every `bad` row is rejected by a permanent diagnostic (the
+/// loop-condition cells by the `whileTrue:`/`whileFalse:` condition check,
+/// which does not thread an assignment in its condition). The block-local
+/// cells (targets `local` and `dlocal`) were `gap` lines until BT-3776
+/// measured them; the only `gap` lines left are two REPL method-body rows
+/// (unmeasured, BT-3823), which this test does not judge. Whether an
+/// accepted row answers right is the oracle's question, not this pin's:
+/// `adr0131_measured.tsv` for the method rows, the REPL oracle script for
+/// the `repl` rows.
 #[test]
 fn adr0131_statement_probe_pins() {
     let mut checked = 0;
@@ -1878,92 +1876,6 @@ fn adr0131_statement_probe_pins() {
     );
 }
 
-/// Cells that answer right but that Phase 0 still rejects, because the facts a
-/// statement position carries cannot tell them from a sibling cell that
-/// answers wrong. Empty now (BT-4194 fixed the last two); a phase that adds a
-/// carve-out lists its right-answering casualties here.
-const KNOWN_OVER_REJECTED: &[(&str, &str, &str, &str)] = &[];
-
-/// PIN-BUG BT-3913: Phase 0 accepts exactly what codegen lowers correctly.
-/// `adr0131_statement_measured.tsv` records, for every class, value-type and
-/// actor cell the check once rejected, what the cell answers when compiled
-/// with the check bypassed and run on a BEAM (regenerate it with `just
-/// measure-adr0131-statements`, which fails when the numbers drift). Both
-/// directions are asserted: a cell that answers `wrong` or fails `erlc` must
-/// be rejected (soundness: no silent wrong answer), and a cell that answers
-/// `right` must be accepted (the table is not coarser than the measurement)
-/// except the [`KNOWN_OVER_REJECTED`] ones, and the verdict table agrees with
-/// the measurement.
-#[test]
-fn adr0131_phase0_agrees_with_measured_answers() {
-    let verdicts: std::collections::HashMap<(String, String, String, String), String> =
-        probe_rows()
-            .into_iter()
-            .map(|r| ((r.context, r.container, r.target, r.kind), r.verdict))
-            .collect();
-    let mut problems = Vec::new();
-    let measured = Matrix::Statement.measured();
-    assert!(
-        measured.len() >= 733,
-        "only {} measured cells",
-        measured.len()
-    );
-    for [context, container, target, kind, answer] in measured {
-        let right = match answer.as_str() {
-            "right" => true,
-            "wrong" | "erlc" => false,
-            other => panic!("unknown answer {other}"),
-        };
-        let rejected = !probe_diagnostics(&context, &container, &target, &kind).is_empty();
-        let cell = format!("{context}\t{container}\t{target}\t{kind}");
-        let over_rejected = KNOWN_OVER_REJECTED.contains(&(
-            context.as_str(),
-            container.as_str(),
-            target.as_str(),
-            kind.as_str(),
-        ));
-        // A known over-rejected cell answers right and is still rejected; the
-        // phase that lowers it deletes its entry.
-        let agrees = if over_rejected {
-            rejected && right
-        } else {
-            rejected != right
-        };
-        if !agrees {
-            problems.push(format!(
-                "{cell}\tmeasured {answer}, but Phase 0 {}",
-                match (rejected, over_rejected) {
-                    (true, false) => "rejects it (coarser than the measurement)",
-                    (false, false) => "accepts it (a silent wrong answer or a compile failure)",
-                    (_, true) => "no longer rejects it (delete it from KNOWN_OVER_REJECTED)",
-                }
-            ));
-        }
-        match verdicts
-            .get(&(context, container, target, kind))
-            .map(String::as_str)
-        {
-            Some("ok") if !right => problems.push(format!("{cell}\tverdict ok, measured {answer}")),
-            Some("bad") if right => {
-                problems.push(format!("{cell}\tverdict bad, measured right"));
-            }
-            Some("over") if !over_rejected => {
-                problems.push(format!(
-                    "{cell}\tverdict over, but not in KNOWN_OVER_REJECTED"
-                ));
-            }
-            Some("ok" | "bad" | "over") => {}
-            other => problems.push(format!("{cell}\tno usable verdict line ({other:?})")),
-        }
-    }
-    assert!(
-        problems.is_empty(),
-        "{} disagreements:\n{}",
-        problems.len(),
-        problems.join("\n")
-    );
-}
-
 /// The ADR 0131 diagnostics the operand-matrix probe `(context, container,
 /// position, kind)` draws.
 fn operand_diagnostics(
@@ -1983,13 +1895,13 @@ fn operand_diagnostics(
     adr0131_diagnostics(&class_source(context, "P", &[method]))
 }
 
-/// PIN-BUG BT-3913: the operand-position half of Phase 0 (`ALLOW_SET`) is
+/// BT-3913: the operand-position half of the retired position check is
 /// sound. `adr0131_operand_measured.tsv` records what a construct answers as
 /// the value of an assignment, a receiver, an argument, a cascade part, a
-/// literal element, a `match:` subject or an interpolation, with the check
-/// bypassed and run on a BEAM; every cell that does not answer right must be
-/// rejected. Not every right cell is accepted (`ALLOW_SET` is deliberately
-/// coarse here): the count of those is the BT-3841 backlog, not asserted.
+/// literal element, a `match:` subject or an interpolation, run on a BEAM;
+/// every cell that does not answer right must be rejected. Not every right
+/// cell is accepted (only producer sites thread the write there): the count
+/// of those is backlog, not asserted.
 #[test]
 fn adr0131_phase0_operand_positions_are_sound() {
     let measured = Matrix::Operand.measured();
@@ -2018,17 +1930,19 @@ fn adr0131_phase0_operand_positions_are_sound() {
 
 /// The BT-3841 summary: for the statement matrix, how many cells answer right,
 /// wrong or fail to compile, by family, by block-role group and by context; for
-/// the operand matrix, the same by position plus what Phase 0 does with them.
+/// the operand matrix, the same by position plus what the position check does
+/// with them.
 fn phase0_summary() -> String {
     use crate::test_helpers::statement_probes::{container_group, statement_family};
     use std::collections::BTreeMap;
     let mut text = String::from(
-        "# ADR 0131 Phase 0 measurement summary (BT-3841), generated from the two measured\n\
-         # tables by `adr0131_phase0_summary_is_checked_in`; regenerate with\n\
+        "# ADR 0131 measurement summary (BT-3841; the check retired in BT-3913),\n\
+         # generated from the two measured tables by\n\
+         # `adr0131_phase0_summary_is_checked_in`; regenerate with\n\
          # `ADR0131_BLESS=1 cargo test -p beamtalk-core --lib adr0131_phase0_summary`.\n\
          # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc\n\
          # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells\n\
-         # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right\n",
+         # operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>accepts<TAB>rejects-right\n",
     );
     let mut by_family: BTreeMap<(String, String), [usize; 3]> = BTreeMap::new();
     let mut by_group: BTreeMap<(String, String, String), usize> = BTreeMap::new();
@@ -2084,9 +1998,10 @@ fn phase0_summary() -> String {
     text
 }
 
-/// PIN-BUG BT-3913: the checked-in summary of the measurement
-/// (`adr0131_phase0_summary.tsv`) is the one the measured tables and Phase 0
-/// produce now; the family counts in the PR and the ADR are read off it.
+/// BT-3913: the checked-in summary of the measurement
+/// (`adr0131_phase0_summary.tsv`) is the one the measured tables and the
+/// position check produce now; the family counts in the PR and the ADR are
+/// read off it.
 #[test]
 fn adr0131_phase0_summary_is_checked_in() {
     let summary = phase0_summary();
@@ -2102,12 +2017,12 @@ fn adr0131_phase0_summary_is_checked_in() {
     );
 }
 
-/// BT-3841 review: the unfinished families were rejected past depth two unless
-/// a row named the exact shape (`anySatisfy:`, the keyed iterations, the
-/// enumerations and `detect:ifNone:` were here until their producers landed;
-/// an `anySatisfy:` chain once accepted by the coarse rows raised `bad
-/// argument` in a value-type method). BT-4263: a block `value:` was the last
-/// one. It is a producer by rule at any depth, like `[...] value` (BT-3841):
+/// BT-3841 review: the unfinished families were rejected past depth two
+/// (`anySatisfy:`, the keyed iterations, the enumerations and
+/// `detect:ifNone:` were gated until their producers landed; an `anySatisfy:`
+/// chain once accepted raised `bad argument` in a value-type method).
+/// BT-4263: a block `value:` was the last one. It is a producer by rule at
+/// any depth, like `[...] value` (BT-3841):
 /// the depth-3 chain (a `value:` in an arm in a protected body in a `do:`
 /// body) and the depth-4 one are accepted in every context and answer 2 and 4
 /// on a BEAM (`argDeep3`/`argDeep4` in `adr0131eval_block_test.bt`).
@@ -2139,10 +2054,9 @@ fn block_value_chains_past_the_measured_depth_are_producers() {
 }
 
 /// BT-3841 review: the middle roles of a three-block nesting were rejected for
-/// the unfinished families, whatever the outermost and innermost roles were
-/// (no `RIGHT_STATEMENTS` row exists past depth two). An evaluated literal
-/// block is not one of them since BT-3841, nor one with arguments since
-/// BT-4263: it is a producer by rule at any depth
+/// the unfinished families, whatever the outermost and innermost roles were.
+/// An evaluated literal block is not one of them since BT-3841, nor one with
+/// arguments since BT-4263: it is a producer by rule at any depth
 /// (`evaluated_literal_blocks_are_producers_at_any_depth`), and these chains
 /// answer 6, 2 and 2 on a BEAM (`argThreeDeep*` in
 /// `adr0131eval_block_test.bt`).
@@ -2278,7 +2192,7 @@ fn keyed_iterations_on_a_statically_non_dictionary_receiver_keep_the_section6_er
 }
 
 #[test]
-fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
+fn while_loop_in_a_loop_body_is_accepted_everywhere() {
     // BT-3746 follow-up (PR #4230): a `whileTrue:` nested as a statement in a
     // `to:do:` or `do:` body answered 0 instead of 3 in every method context.
     // ADR 0131 Phase 2b (BT-3793) lowers it as a local-threading producer in
@@ -2298,7 +2212,7 @@ fn deny_set_while_loop_in_a_loop_body_is_accepted_everywhere() {
 }
 
 /// ADR 0131 Phase 2b (BT-3793): what the loop-body producer accept does not
-/// cover stays a Phase 0 error: a closure around the construct and, in an
+/// cover stays a position-check error: a closure around the construct and, in an
 /// actor, a value-bearing site (`detect:ifNone:` was on this list until ADR
 /// 0133 Phase 3, BT-3911).
 #[test]
@@ -2390,7 +2304,7 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
 /// without sequencing them (`super`, `error:`, `fieldAt:put:`, a stored-block
 /// `value:` call, a self-send with a block argument) must not make a fold in
 /// its operands a producer site: the fold's construct tuple would leak and
-/// the write be dropped. They stay Phase 0 errors in every context.
+/// the write be dropped. They stay position-check errors in every context.
 #[test]
 fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
     let fold = "(#(1, 2) collect: [:x | t := t + x])";
@@ -4000,7 +3914,7 @@ fn section6_last_statement_assignment_escape_is_the_same_in_every_context() {
 
 // ---------------------------------------------------------------------------
 // ADR 0133 Phase 3: the residuals made loud before the IR consolidation
-// (BT-3909, `RESIDUAL_DENY_SET`)
+// (BT-3909; the position check that once accepted them is retired in BT-3913)
 // ---------------------------------------------------------------------------
 
 /// The messages of the ADR 0131 errors `src` draws (as a module-level
@@ -4690,7 +4604,7 @@ fn bt4287_an_actor_state_fold_as_an_operand_in_a_fold_body_is_accepted() {
         // At the method level, and with a pure inner fold.
         "r := 1 + (self.items inject: 0 into: [:b :y | b + self bump])\nr",
         "#(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + y])]\nself.n",
-        // One that writes an outer local is the Phase 0 check's.
+        // One that writes an outer local is the position check's.
         "1 to: 2 do: [:i | t := #[#(1, 2) do: [:x | t := t + 1. self.n := self.n + 1], t] size]\nt",
     ];
     for body in accepted {

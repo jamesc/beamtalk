@@ -130,7 +130,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // method body's last statement (`ends_with_self_field_write`, BT-4235), and
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
-    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 39),
+    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (

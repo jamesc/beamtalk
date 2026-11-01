@@ -3030,12 +3030,77 @@ impl CoreErlangGenerator {
                 }
                 // C6 — self.field := <control-flow-with-mutations>.
                 // The sanctioned Gensym two-hop.
+                //
+                // BT-3913: the RHS is threaded ahead first, exactly as the
+                // method-root field assignment (`lower_field_assignment_bind`)
+                // and the arm's own local assignment (`lower_local_var_assignment_bind`)
+                // do. A RHS that is a local-threading producer at a producer
+                // site (`self.n := #(1, 2) do: [...]` in an arm) is spliced
+                // as a prelude and `expression_doc` reads back its
+                // already-unwrapped value — compiling it in place here drops
+                // the write and trips `ProducerSiteNotThreaded`.
+                //
+                // BT-3913 follow-up: the unwrapped value covers loop and
+                // fold producers too, not just `thread_ahead_unwraps`
+                // shapes (inline control flow, exception and evaluated-block
+                // producers): `thread_ahead` splices a loop's prelude and
+                // `expression_doc` answers `element(1, <carrier>)`, so the
+                // tuple two-hop below re-unwraps the plain value and raises
+                // `badarg` at run time. Like C3b's guard
+                // (`control_flow_has_mutations && !expr_has_local_producer
+                // && !thread_ahead_unwraps`), only a RHS with mutations but
+                // no local producer still answers a closed `{Value, State}`
+                // tuple here.
                 BodyExprKind::FieldAssignmentControlFlow => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::FieldAccess { field, .. } = target.as_ref() {
+                            let thread_scope = self.thread_ahead(value, &mut stmts, frame)?;
+                            let rhs_doc = self.expression_doc(value)?;
+                            self.finish_precompiled_scope(thread_scope)?;
+                            if self.thread_ahead_unwraps(value)
+                                || self.expr_has_local_producer(value)
+                            {
+                                let val_var = self.fresh_temp_var("CfVal");
+                                stmts.push(ThreadedStmt::Statement(
+                                    docvec![
+                                        "let ",
+                                        leaf::var(val_var.clone()),
+                                        " = ",
+                                        rhs_doc,
+                                        " in ",
+                                    ],
+                                    span,
+                                ));
+                                let source_version = self.state_version();
+                                let _ = self.next_state_var();
+                                let target_version = self.state_version();
+                                stmts.push(ThreadedStmt::Bind {
+                                    target: VersionedVar::new(
+                                        VersionPrefix::State,
+                                        target_version,
+                                        frame,
+                                    ),
+                                    source: VersionedVar::new(
+                                        VersionPrefix::State,
+                                        source_version,
+                                        frame,
+                                    ),
+                                    op: BindOp::Put {
+                                        field: field.name.to_string(),
+                                        value: ValueRef::Var(val_var.clone()),
+                                    },
+                                    span,
+                                });
+                                self.push_control_flow_threaded_var_rereads(
+                                    value, span, &mut stmts,
+                                );
+                                if is_last {
+                                    last_result = Some(ValueRef::Var(val_var));
+                                }
+                                continue;
+                            }
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
-                            let rhs_doc = self.expression_doc(value)?;
                             let rhs_state = self.fresh_temp_var("CfState");
                             let source_version = self.state_version();
                             stmts.push(ThreadedStmt::Statement(

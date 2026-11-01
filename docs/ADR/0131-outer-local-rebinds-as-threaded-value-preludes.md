@@ -1,12 +1,12 @@
 # ADR 0131: Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context
 
 ## Status
-Accepted (2026-10-08)
+Implemented (2026-11-01)
 
 ## Implementation Tracking
 
 **Epic:** [BT-3743](https://linear.app/beamtalk/issue/BT-3743) (closed 2026-10-17 at a boundary); open follow-ups: [BT-3883](https://linear.app/beamtalk/issue/BT-3883)
-**Status:** All phases merged. The Phase 0 position diagnostic is retained (see Remaining work at close-out); the ADR's Status line is unchanged.
+**Status:** All phases merged. The Phase 0 position diagnostic is retired ([BT-3913](https://linear.app/beamtalk/issue/BT-3913), ADR 0133 Phase 3 close-out): the 733-shape oracle reports zero silent drops and zero `erlc` failures.
 
 | Phase | Issue | Description | Size | PR |
 |---|---|---|---|---|
@@ -24,7 +24,7 @@ Accepted (2026-10-08)
 | 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; flip every pin (the allow-set diagnostic is kept: 552 of 733 measured statement shapes still drop writes with it bypassed; see BT-3841) | S | [#4299](https://github.com/jamesc/beamtalk/pull/4299) |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, known limitations | S | this PR |
 | follow-up | [BT-3910](https://linear.app/beamtalk/issue/BT-3910) (spec: [BT-3860](https://linear.app/beamtalk/issue/BT-3860)) | A local assignment in value position is a producer (§1, §1a, §2 `CarrierSlot::Whole`, §4 `UnthreadedLocalAssignment`); retire the BT-3864 `ValuePositionLocalAssignment` stopgap; `^t := e` is legal, with the `dead_returned_assignment` lint | M | this PR |
-| follow-up | [BT-3841](https://linear.app/beamtalk/issue/BT-3841) | Retire the Phase 0 position diagnostic (`DENY_SET`/`ALLOW_SET`); ADR Status to Implemented | L | open |
+| follow-up | [BT-3841](https://linear.app/beamtalk/issue/BT-3841) (closed as duplicate of BT-3913) | Retire the Phase 0 position diagnostic (`DENY_SET`/`ALLOW_SET`); ADR Status to Implemented | L | this PR ([BT-3913](https://linear.app/beamtalk/issue/BT-3913)) |
 
 Dependency order: 3744 → 3745 → {3746, 3747} → 3748 → 3749 → 3738 → 3817 → 3750 → 3751 → 3752.
 Alternative D is tracked separately as [BT-3742](https://linear.app/beamtalk/issue/BT-3742).
@@ -39,12 +39,12 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 
 What remains, in priority order, verified against the code on `main` at the time of writing:
 
-1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841): the Phase 0 position diagnostic is retained** (`DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`, message "`X` writes outer local `t`, but as <position> in <context> the write is not threaded back yet (BT-3743)"). Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
+1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841) (Done, closed as duplicate of [BT-3913](https://linear.app/beamtalk/issue/BT-3913)): the Phase 0 position diagnostic is retired.** It was `DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`. ADR 0133 Phase 3 lowered every remaining statement shape through frames; the 733-shape oracle reports zero silent drops and zero `erlc` failures (statement probes 6124 right / 0 wrong / 18 `erlc`, the 18 rejected by the permanent `whileTrue:`/`whileFalse:` condition check). Every statement is now accepted; at operand positions only producer sites are. Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
 2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833): three legacy write-back paths are still alive**: the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`. The "delete the remaining write-back paths" goal of Phases 3b and 3c is therefore only partly met.
-3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839)** (done): a `Dictionary` lookup whose handler writes an outer local is a producer in a loop or fold body in class, value-type and actor methods (`keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]`), under the same site rule as a conditional (an actor fold body's value-bearing sites stay errors, `is_actor_fold_value_site`). A lookup inside a closure that is not inlined keeps its §6 error ([BT-3862](https://linear.app/beamtalk/issue/BT-3862)), and a `detect:ifNone:` handler write in an actor loop or fold body keeps its `UnmigratedLocalThreading` error (measured `bad` in `adr0131_statement_probes.tsv`; [BT-3861](https://linear.app/beamtalk/issue/BT-3861)); class and value-type methods lower it since BT-3841. The verifier check that a fold body returns its accumulator is [BT-3863](https://linear.app/beamtalk/issue/BT-3863).
+3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839)** (done): a `Dictionary` lookup whose handler writes an outer local is a producer in a loop or fold body in class, value-type and actor methods (`keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]`), under the same site rule as a conditional (an actor fold body's value-bearing sites stay errors, `is_actor_fold_value_site`). A lookup inside a closure that is not inlined keeps its §6 error ([BT-3862](https://linear.app/beamtalk/issue/BT-3862)), and a `detect:ifNone:` handler write in an actor loop or fold body is a producer there since [BT-3911](https://linear.app/beamtalk/issue/BT-3911) ([BT-3861](https://linear.app/beamtalk/issue/BT-3861) done as its duplicate); class and value-type methods lower it since BT-3841. The verifier check that a fold body returns its accumulator is [BT-3863](https://linear.app/beamtalk/issue/BT-3863).
 4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823)** (Done, [#4346](https://github.com/jamesc/beamtalk/pull/4346)): REPL conditional arms, `on:do:`/`ensure:` blocks, `Result tryDo:` blocks and evaluated block literals are producer frames (the o7/o8 REPL pins flipped). Still open from it: a construct inside a REPL loop or fold body ([BT-3876](https://linear.app/beamtalk/issue/BT-3876)), `match:` arms as producers ([BT-3875](https://linear.app/beamtalk/issue/BT-3875); a `match:` arm write is the value-position compile error of [BT-3864](https://linear.app/beamtalk/issue/BT-3864)), and a block literal sent a `value` selector of another arity at the REPL root ([BT-3881](https://linear.app/beamtalk/issue/BT-3881)).
-5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check, so the `DENY_SET` rows it introduced are retired with item 1, not separately.
-6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))**: `^xs do: [...]` inside a plain closure in a class or value-type method is still rejected; the arm and handler cases are done.
+5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check; the `DENY_SET` rows it introduced are retired with item 1, not separately.
+6. **Plain-closure case ([BT-3813](https://linear.app/beamtalk/issue/BT-3813))** (Done): `^xs do: [...]` inside a plain closure in a class or value-type method is accepted — codegen lowers the `^` value through the producer with the `Discard` tail; an actor method keeps the error except for conditionals. The arm and handler cases were done earlier.
 7. **[BT-3824](https://linear.app/beamtalk/issue/BT-3824)** (done): `Dictionary` defines `at:ifPresent:`/`at:ifPresent:ifAbsent:`, and their handlers are producers like `at:ifAbsent:` (the present handler's parameter is bound to the found value). `at:ifAbsentPut:` and `removeKey:ifAbsent:` stay §6 errors permanently by decision, since an immutable `Dictionary` has no such behaviour. The three `Dictionary` lookups are producers only for `Dictionary` receivers (inline behind a runtime guard; other receivers raise a structured `type_error`, and a receiver statically known not to be a `Dictionary` is a compile error).
 8. **[BT-3835](https://linear.app/beamtalk/issue/BT-3835)** (Done): a conditional producer's `LocalRebind` in a `StateAcc` fold frame emitted a redundant identity `MapPut`. A `MapPut` cell whose read goes through the frame's own current map is now lowered to `RebindLowering::MapHeld` (the value is bound, the map takes no version step), checked by `HeldRebindNotIdentity` (BT-3857).
 9. **[BT-3834](https://linear.app/beamtalk/issue/BT-3834)** (Done): a counted loop whose body holds a non-producer conditional with a nested loop writing an arm-local panicked the debug verifier with `StateAccLoopWithoutLocals`. A loop or fold that carries nothing now lowers as a plain loop (§2, BT-3834 amendment).
@@ -1419,10 +1419,10 @@ of either matrix; `^` positions are not measured (BT-3813).
 
 No *correct* program changes behaviour. Programs that today fail at runtime
 or answer wrong either become correct (phases 2–4) or get a compile error
-(§6 and the phase 0 allow-set diagnostic). The §6 error's help text gives
-the rewrite. The one working shape §6 rejects, a Tier 2 block value stored
-and never invoked through a channel-less send, needs its block rewritten to
-return the value rather than write the local.
+(§6 and the retired position check's remaining operand-position errors). The
+§6 error's help text gives the rewrite. The one working shape §6 rejects, a
+Tier 2 block value stored and never invoked through a channel-less send,
+needs its block rewritten to return the value rather than write the local.
 
 ## Open Questions
 

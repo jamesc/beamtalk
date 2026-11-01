@@ -1705,15 +1705,16 @@ test-class-var-corpus $CV_CORPUS_CASES=env_var_or_default("CV_CORPUS_CASES", "48
     cargo test -p beamtalk-cli --test cli class_var_agreement_enabled_shapes -- --nocapture
     cargo test -p beamtalk-codegen --test class_var_agreement
 
-# ADR 0131 (BT-3841): compile every Phase 0 probe cell with the position check
-# bypassed, run it on a BEAM and compare with the checked-in measured table
+# ADR 0131 oracle (BT-3841; the check retired in BT-3913): compile every probe
+# cell, run it on a BEAM and compare with the checked-in measured table
 # (`semantic_analysis/tests/adr0131_statement_measured.tsv`,
-# `adr0131_operand_measured.tsv`). `ADR0131_MEASURE_BLESS=1 just
+# `adr0131_operand_measured.tsv`), asserting zero silent drops (no cell
+# answers `wrong`). `ADR0131_MEASURE_BLESS=1 just
 # measure-adr0131-statements` rewrites the tables.
 measure-adr0131-statements: build-stdlib
-    @echo "📐 Measuring the ADR 0131 Phase 0 probe cells on a BEAM..."
-    cargo build --workspace --features beamtalk-core/measure-bypass
-    cargo test -p beamtalk-cli --features beamtalk-core/measure-bypass --test cli adr0131_ -- --ignored --nocapture --test-threads=1
+    @echo "📐 Measuring the ADR 0131 probe cells on a BEAM..."
+    cargo build --workspace
+    cargo test -p beamtalk-cli --test cli adr0131_ -- --ignored --nocapture --test-threads=1
 
 # Bare `rebar3 eunit` (no --app/--module) runs the `eunit_tests` set that
 # runtime/rebar.config.script generates: every app's source modules + their
@@ -1834,9 +1835,8 @@ llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/mai
 #     crates/beamtalk-desktop-broker/tests/live_front.rs) — never CI.
 #   - dump_program: an `#[ignore]`d reproduction aid that panics unless CV_SEED is
 #     set; it is run by hand to print a generated program (BT-3733).
-#   - adr0131_measure_*: the ADR 0131 Phase 0 measurement harness needs a
-#     `--features beamtalk-core/measure-bypass` build; it is run by
-#     `just measure-adr0131-statements` (BT-3841).
+#   - adr0131_measure_*: the ADR 0131 oracle harness runs on a BEAM; it is run
+#     by `just measure-adr0131-statements` (BT-3841, BT-3913).
 coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip negative_test_invalid_spec_detected_by_dialyzer \
     --skip dump_program \

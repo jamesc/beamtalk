@@ -684,6 +684,52 @@ fn stateacc_producer_in_bracketed_loop_seeds_from_the_cell() {
     }
 }
 
+/// BT-3913: a `do:separatedBy:` nested in an actor loop nest packs its
+/// `StateAcc` accumulator from the cell, never from the loop-entry `State`.
+/// The middle loop brackets its guarded operators, so the entry is stale
+/// inside — even though the current frame holds a whole `State` (packed from
+/// the entry itself). Verifier-clean; under the pre-fix fault the checkout
+/// reports the stale seed. The 733-shape oracle pins the answer (`actor`
+/// loop-nest `dlocal` `dsb` cells).
+/// BT-3913: a field assignment in a conditional arm whose RHS is a
+/// local-threading producer (`self.n := #(1, 2) do: ...`) threads the RHS
+/// ahead and puts the unwrapped value — the pre-fix arm lowering compiled
+/// the RHS in place, dropped the write, and tripped
+/// `ProducerSiteNotThreaded`. Verifier-clean; the 733-shape oracle pins the
+/// answer (`actor` `arm` `field` cells, all but `value`).
+#[test]
+fn arm_field_assignment_with_producer_rhs_threads_ahead() {
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: c =>\n    t := 0\n    c ifTrue: [self.n := #(1, 2) do: [:e | t := t + e]]\n    t\n"
+    );
+    assert_eq!(enforce_report(&src), None, "{src}");
+    let out = compile(&src);
+    assert!(
+        out.contains("'n'"),
+        "the arm puts the field it assigns:\n{src}\n{out}"
+    );
+}
+
+#[test]
+fn separated_by_in_actor_loop_nest_seeds_from_the_cell() {
+    let src = format!(
+        "{ACTOR_PREAMBLE}  run: c =>\n    t := 0\n    m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. #(1, 2) do: [:x | u := u + x] separatedBy: [u := u + 10]. t := t + u]]\n    t\n"
+    );
+    assert_eq!(enforce_report(&src), None, "{src}");
+    let out = compile(&src);
+    assert!(
+        out.contains("TakeSeed") && out.contains("= call 'beamtalk_actor_state':'take'() in"),
+        "nested StateAcc seeds from the cell:\n{src}\n{out}"
+    );
+    for (src, report) in faulted_reports(vec![src]) {
+        let report = report.unwrap_or_else(|| panic!("faulted compile should report:\n{src}"));
+        assert!(
+            report.contains("StaleStateSeedInBracketedLoop"),
+            "loud stale-seed finding for\n{src}\n{report}"
+        );
+    }
+}
+
 #[test]
 fn checkout_reports_only_uses_of_its_entry_state() {
     // A bracketing checkout reports a use of its own entry `State`, and
