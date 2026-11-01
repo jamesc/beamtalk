@@ -1853,6 +1853,21 @@ coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
 # the fast suites keep default parallelism in pass 1 and only the
 # REPL-spawning ignored tests are serialized in pass 2.
 #
+# Pass 1 additionally excludes the `corpus_tests` slow tier (the same
+# filterset `test-rust`/`test-corpus` share, defined once at the top of this
+# file): the state-threading agreement and corpus proofs that dominate
+# pass 1's wall-clock (beamtalk-codegen's lib suite alone was ~17 min
+# instrumented on a 4-core runner, pushing the coverage job past its
+# 45-minute timeout). Correctness of that tier is already proven on every
+# push to main by the `test-corpus` CI job (sharded in two); re-running it
+# here bought only marginal line coverage — the same codegen paths are
+# exercised by the fast tier's thousands of unit tests — at the cost of the
+# whole job. This runs through `cargo llvm-cov nextest` (not plain
+# `cargo llvm-cov`, i.e. cargo test) because only nextest understands the
+# `-E` filterset; the coverage CI job installs cargo-nextest for exactly
+# this reason. Without nextest, pass 1 falls back to unfiltered cargo test
+# (slow but complete).
+#
 # The e2e-binary force-build happens between the clean and the two test
 # passes, not before: beamtalk-parity-tests' CLI/LSP/MCP e2e drivers spawn
 # beamtalk/-lsp/-mcp/-compiler-port as subprocesses, locating them next to
@@ -1869,12 +1884,25 @@ coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
 # "compiler/LSP/MCP not available" test failure, not a missing-binary error.
 [private]
 _coverage-rust-run-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cargo llvm-cov clean --workspace
     cargo llvm-cov run --no-report -p beamtalk-lsp --bin beamtalk-lsp -- --help > /dev/null 2>&1 || true
     cargo llvm-cov run --no-report -p beamtalk-mcp --bin beamtalk-mcp -- --help > /dev/null 2>&1 || true
     cargo llvm-cov run --no-report -p beamtalk-compiler-port --bin beamtalk-compiler-port -- --help > /dev/null 2>&1 || true
-    cargo llvm-cov --no-report --lib --bins --tests --workspace
-    cargo llvm-cov --no-report --lib --bins --tests --workspace -- --ignored --test-threads=1 {{coverage_rust_skip}}
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        cargo llvm-cov --no-report nextest --lib --bins --tests --workspace --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }})'
+    else
+        echo "⚠️  cargo-nextest not found; coverage pass 1 falls back to cargo test (runs the slow corpus tier too)"
+        cargo llvm-cov --no-report --lib --bins --tests --workspace
+    fi
+    # Pass 2 doubles as the Erlang E2E coverdata collection: E2E_COVER=1 makes
+    # the repl_protocol tests export e2e*.coverdata (same 8 tests `just
+    # coverage-e2e` would run — running them again there would boot every BEAM
+    # node twice). Serial --test-threads=1 keeps the per-workspace cover
+    # exports from interleaving (see CoverFiles in repl_protocol.rs, BT-3785).
+    # `just coverage-all` merges those files; it does not re-run them.
+    E2E_COVER=1 cargo llvm-cov --no-report --lib --bins --tests --workspace -- --ignored --test-threads=1 {{coverage_rust_skip}}
 
 # Generate Rust coverage (requires cargo-llvm-cov)
 coverage-rust: _coverage-rust-run-tests
@@ -1942,7 +1970,9 @@ coverage-runtime: build-stdlib
     echo "  📁 XML reports: runtime/_build/test/covertool/*.covertool.xml"
 
 # Unix-only: uses bash constructs (wc, file size checks)
-# Collect E2E test coverage (runs E2E tests with Erlang cover instrumentation)
+# Collect E2E test coverage (runs E2E tests with Erlang cover instrumentation).
+# Standalone/dev use: in CI, `coverage-all` gets these same files from
+# `coverage-rust-cobertura`'s pass 2 (E2E_COVER=1) instead of running this.
 [unix]
 coverage-e2e: build-stdlib
     #!/usr/bin/env bash
@@ -2001,14 +2031,19 @@ coverage-bunit: build-stdlib
     fi
 
 # Unix-only: depends on Unix-only coverage recipes
-# Runs eunit with --cover, then E2E with cover, then stdlib + BUnit with cover, then merges all into one report.
+# Runs eunit with --cover, then stdlib + BUnit with cover, then merges all
+# into one report — including the E2E coverdata that `coverage-rust-cobertura`'s
+# pass 2 (E2E_COVER=1) already exported, so the E2E tests are not run twice.
 # Generate combined Erlang coverage (eunit + E2E + stdlib + BUnit)
 [unix]
-coverage-all: coverage-runtime coverage-e2e coverage-stdlib coverage-bunit
+coverage-all: coverage-runtime coverage-stdlib coverage-bunit
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime
     echo "📊 Merging eunit + E2E + stdlib coverage data..."
+    if ! ls _build/test/cover/e2e*.coverdata >/dev/null 2>&1; then
+        echo "  ⚠️  No e2e*.coverdata found — run 'just coverage-rust-cobertura' (pass 2 collects it) or 'just coverage-e2e' first for E2E Erlang coverage"
+    fi
     # Merge all .coverdata files into eunit.coverdata so rebar3 covertool sees them
     # (covertool only imports eunit.coverdata, not e2e/stdlib coverdata)
     # A truncated or corrupt file (for example from a force-killed E2E BEAM, BT-3785)
