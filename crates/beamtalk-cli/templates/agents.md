@@ -261,6 +261,15 @@ Object subclass: Search
     nil
 ```
 
+## Style
+
+- Prefer tuple destructuring over positional access: `{method, target, headers, t} := ...`
+  keeps field names at the use site and reads better than `req at: 1` chains.
+- For multi-field `Value` construction, prefer the `new:` map form with one
+  entry per line (missing keys keep defaults). It scales better than long
+  `withX:` chains and, unlike the keyword constructor, does not require
+  every slot.
+
 ## Language Documentation
 
 - Full language reference: https://www.beamtalk.dev/docs/language-features (read it when starting work on a new Beamtalk codebase)
