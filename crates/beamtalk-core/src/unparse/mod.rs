@@ -2198,37 +2198,40 @@ fn unparse_binary_segment(seg: &BinarySegment) -> Document<'static> {
         docs.push(Document::Str(":"));
         docs.push(unparse_expression(size));
     }
-    let mut specs: Vec<&str> = Vec::new();
+    // `unit:N` rides in the `/`-specifier list, exactly as written
+    // (BT-4143 mirrors `erlc`: `<<x:2/unit:8>>`), so a parsed segment
+    // always unparses back to its own spelling.
+    let mut specs: Vec<Document<'static>> = Vec::new();
     if let Some(t) = &seg.segment_type {
-        specs.push(match t {
+        specs.push(Document::Str(match t {
             BinarySegmentType::Integer => "integer",
             BinarySegmentType::Float => "float",
             BinarySegmentType::Binary => "binary",
             BinarySegmentType::Bitstring => "bitstring",
             BinarySegmentType::Utf8 => "utf8",
-        });
+            BinarySegmentType::Utf16 => "utf16",
+            BinarySegmentType::Utf32 => "utf32",
+        }));
     }
     if let Some(s) = &seg.signedness {
-        specs.push(match s {
+        specs.push(Document::Str(match s {
             BinarySignedness::Signed => "signed",
             BinarySignedness::Unsigned => "unsigned",
-        });
+        }));
     }
     if let Some(e) = &seg.endianness {
-        specs.push(match e {
+        specs.push(Document::Str(match e {
             BinaryEndianness::Big => "big",
             BinaryEndianness::Little => "little",
             BinaryEndianness::Native => "native",
-        });
+        }));
+    }
+    if let Some(unit) = seg.unit {
+        specs.push(docvec!["unit:", leaf::nat_lit(unit)]);
     }
     if !specs.is_empty() {
         docs.push(Document::Str("/"));
-        let spec_docs: Vec<Document<'static>> = specs.iter().map(|s| Document::Str(s)).collect();
-        docs.push(join_docs(spec_docs, "-"));
-    }
-    if let Some(unit) = seg.unit {
-        docs.push(Document::Str(":"));
-        docs.push(leaf::nat_lit(unit));
+        docs.push(join_docs(specs, "-"));
     }
     concat(docs)
 }

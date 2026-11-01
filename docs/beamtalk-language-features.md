@@ -4621,7 +4621,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => 42
 
-// Binary patterns (BT-663; BT-4096, BT-4097)
+// Binary patterns (BT-663; BT-4096, BT-4097, BT-4143)
 (Binary fromBytes: #(3, 104, 105, 33, 99)) match: [
   <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;
   _ -> #()
@@ -4644,6 +4644,28 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => Bitstring: an unaligned tail is a Bitstring (ADR 0141); use
 // bitSize/toBits on it, not the byte protocol. An aligned tail is a Binary.
+(Binary fromBytes: #(0, 65)) match: [
+  <<c/utf16, rest/binary>> -> c;
+  _ -> -1
+]
+// => 65: utf16/utf32 decode 2-/4-byte big-endian code units.
+(Binary fromBytes: #(18, 52, 7)) match: [
+  <<v:2/unit:8, rest/binary>> -> v;
+  _ -> -1
+]
+// => 4660: unit: multiplies the size — 2 units of 8 bits read 16 bits.
+(Binary fromBytes: #(63, 248, 0, 0, 0, 0, 0, 0)) match: [
+  <<1.5/float, rest/binary>> -> rest size;
+  _ -> -1
+]
+// => 0: float literal values match exactly, like integers.
+"hi" match: [
+  <<"hi", rest/binary>> -> rest size;
+  _ -> -1
+]
+// => 0: string literal values match exact bytes (UTF-8 for non-ASCII);
+// <<$A>> matches byte 65. With a utf type a string matches per
+// character instead: <<"hi"/utf16>> matches bytes #(0, 104, 0, 105).
 
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil

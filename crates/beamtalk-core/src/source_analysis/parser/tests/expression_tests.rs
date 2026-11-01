@@ -1223,6 +1223,373 @@ fn parse_binary_pattern_misfit_literals_warn() {
 }
 
 #[test]
+fn parse_binary_pattern_utf16_utf32() {
+    // BT-4143: <<c/utf16, d/utf32, rest/binary>> — segment types
+    use crate::ast::{BinarySegmentType, Pattern};
+    let module = parse_ok("x match: [<<c/utf16, d/utf32, rest/binary>> -> c]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert_eq!(segments.len(), 3);
+    assert_eq!(segments[0].segment_type, Some(BinarySegmentType::Utf16));
+    assert_eq!(segments[1].segment_type, Some(BinarySegmentType::Utf32));
+    assert_eq!(segments[2].segment_type, Some(BinarySegmentType::Binary));
+}
+
+#[test]
+fn parse_binary_pattern_utf16_with_size_is_error() {
+    // BT-4143: `erlc` rejects sizes on utf16 ("neither size nor unit must
+    // be given for segments of type utf8/utf16/utf32").
+    use crate::source_analysis::Severity;
+    for (source, needle) in [
+        ("x match: [<<c:8/utf16, rest/binary>> -> c]", "utf16"),
+        ("x match: [<<c:8/utf32, rest/binary>> -> c]", "utf32"),
+    ] {
+        let diagnostics = parse_err(source);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected one error for {source}, got: {errors:?}"
+        );
+        assert!(
+            errors[0].message.contains("must not be given"),
+            "expected must-not-be-given error for {source}, got: {}",
+            errors[0].message
+        );
+        assert!(
+            errors[0].message.contains(needle),
+            "expected {needle} in error for {source}, got: {}",
+            errors[0].message
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_unit() {
+    // BT-4143: <<v:2/unit:8, rest/binary>> — attached and spaced spellings
+    use crate::ast::Pattern;
+    for source in [
+        "x match: [<<v:2/unit:8, rest/binary>> -> v]",
+        "x match: [<<v:2/unit : 8, rest/binary>> -> v]",
+    ] {
+        let module = parse_ok(source);
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match for {source}");
+        };
+        let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Binary for {source}");
+        };
+        assert_eq!(segments[0].unit, Some(8), "expected unit 8 for {source}");
+        assert_eq!(
+            segments[0].segment_type, None,
+            "unit-only segment keeps default type for {source}"
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_unit_errors() {
+    // BT-4143: `erlc` parity — a unit without a size, a unit on a utf
+    // segment, and an out-of-range unit are all errors.
+    use crate::source_analysis::Severity;
+    for (source, needle) in [
+        (
+            "x match: [<<v/unit:8, rest/binary>> -> v]",
+            "unless a size is specified too",
+        ),
+        (
+            "x match: [<<c/utf16-unit:2, rest/binary>> -> c]",
+            "unit must not be given",
+        ),
+        (
+            "x match: [<<v:2/unit:0, rest/binary>> -> v]",
+            "between 1 and 256",
+        ),
+        (
+            "x match: [<<v:2/unit:8-unit:1, rest/binary>> -> v]",
+            "unit already set",
+        ),
+    ] {
+        let diagnostics = parse_err(source);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|d| d.message.contains(needle)),
+            "expected '{needle}' error for {source}, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_float_literal_value() {
+    // BT-4143: <<1.5/float>> and <<-1.5/float>> — float literal values
+    use crate::ast::Pattern;
+    for (source, expected) in [
+        ("x match: [<<1.5/float, rest/binary>> -> rest]", 1.5_f64),
+        ("x match: [<<-1.5/float, rest/binary>> -> rest]", -1.5_f64),
+    ] {
+        let module = parse_ok(source);
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match for {source}");
+        };
+        let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Binary for {source}");
+        };
+        assert!(
+            matches!(&segments[0].value, Pattern::Literal(Literal::Float(f), _) if (*f - expected).abs() < f64::EPSILON),
+            "expected float literal {expected}, got: {:?}",
+            segments[0].value
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_float_out_of_range_is_error() {
+    // BT-4143: `1e309` overflows f64 — same "out of range" rule as
+    // `parse_literal`, so the message stays in sync with it.
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("x match: [<<1e309/float, rest/binary>> -> rest]");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert!(
+        errors[0].message.contains("out of range"),
+        "expected out-of-range error, got: {}",
+        errors[0].message
+    );
+}
+
+#[test]
+fn parse_binary_pattern_string_literal_value() {
+    // BT-4143: <<"hi">> — string literal values take no type or size
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<\"hi\", rest/binary>> -> rest]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(&segments[0].value, Pattern::Literal(Literal::String(s), _) if s.as_str() == "hi"),
+        "expected string literal, got: {:?}",
+        segments[0].value
+    );
+}
+
+#[test]
+fn parse_binary_pattern_utf_string_expands() {
+    // BT-4143: `<<"hi"/utf16>>` is valid — codegen expands it to one
+    // segment per character, like `erlc`. Bare signedness/endianness
+    // without a utf type is still an error.
+    use crate::ast::{BinarySegmentType, Pattern};
+    use crate::source_analysis::Severity;
+    for source in [
+        "x match: [<<\"hi\"/utf16, rest/binary>> -> rest]",
+        "x match: [<<\"hi\"/utf32-little, rest/binary>> -> rest]",
+    ] {
+        let module = parse_ok(source);
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match for {source}");
+        };
+        let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Binary for {source}");
+        };
+        assert!(
+            matches!(
+                &segments[0].value,
+                Pattern::Literal(Literal::String(s), _) if s.as_str() == "hi"
+            ),
+            "expected string literal value for {source}, got: {:?}",
+            segments[0].value
+        );
+        assert!(
+            matches!(
+                segments[0].segment_type,
+                Some(BinarySegmentType::Utf16 | BinarySegmentType::Utf32)
+            ),
+            "expected utf type for {source}, got: {:?}",
+            segments[0].segment_type
+        );
+    }
+    for source in [
+        "x match: [<<\"hi\"/signed, rest/binary>> -> rest]",
+        "x match: [<<\"hi\"/little, rest/binary>> -> rest]",
+    ] {
+        let diagnostics = parse_err(source);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected one error for {source}, got: {errors:?}"
+        );
+        assert!(
+            errors[0].message.contains("must not have a type or a size"),
+            "expected type-or-size error for {source}, got: {}",
+            errors[0].message
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_unit_boundaries() {
+    // BT-4143: `erlc` accepts units 1..=256.
+    use crate::ast::Pattern;
+    use crate::source_analysis::Severity;
+    let module = parse_ok("x match: [<<v:2/unit:256, rest/binary>> -> v]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert_eq!(segments[0].unit, Some(256));
+    let diagnostics = parse_err("x match: [<<v:2/unit:257, rest/binary>> -> v]");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.message.contains("between 1 and 256")),
+        "expected range error, got: {errors:?}"
+    );
+}
+
+#[test]
+fn parse_binary_pattern_string_literal_with_type_is_error() {
+    // BT-4143: `erlc` — "a literal string in a binary pattern must not
+    // have a type or a size".
+    use crate::source_analysis::Severity;
+    for source in [
+        "x match: [<<\"hi\"/binary, rest/binary>> -> rest]",
+        "x match: [<<\"hi\":16, rest/binary>> -> rest]",
+        // The string error takes precedence over the unit-without-size
+        // error (verified against `erlc`).
+        "x match: [<<\"hi\"/unit:8, rest/binary>> -> rest]",
+    ] {
+        let diagnostics = parse_err(source);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected one error for {source}, got: {errors:?}"
+        );
+        assert!(
+            errors[0].message.contains("must not have a type or a size"),
+            "expected type-or-size error for {source}, got: {}",
+            errors[0].message
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_character_literal_value() {
+    // BT-4143: <<$A>> — character literal values (the codepoint, like `erlc`)
+    use crate::ast::Pattern;
+    let module = parse_ok("x match: [<<$A, rest/binary>> -> rest]");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
+    assert!(
+        matches!(
+            &segments[0].value,
+            Pattern::Literal(Literal::Character('A'), _)
+        ),
+        "expected character literal, got: {:?}",
+        segments[0].value
+    );
+}
+
+#[test]
+fn parse_binary_pattern_new_literal_misfits_warn() {
+    // BT-4143: float/character literals of the wrong type warn, `erlc`-style.
+    use crate::source_analysis::Severity;
+    for (source, needle) in [
+        (
+            "x match: [<<1.5, rest/binary>> -> rest]",
+            "not of the expected type 'integer'",
+        ),
+        (
+            "x match: [<<1.5/utf16, rest/binary>> -> rest]",
+            "not of the expected type 'utf16'",
+        ),
+        (
+            "x match: [<<$A/binary, rest/binary>> -> rest]",
+            "not of the expected type 'binary'",
+        ),
+        // `erlc` validates size × unit: 16×8 = 128 bits warns, and a
+        // 300 that needs 9 bits warns against an effective 8.
+        (
+            "x match: [<<1.5:16/unit:8-float, rest/binary>> -> rest]",
+            "bad float bit size",
+        ),
+        (
+            "x match: [<<300:1/unit:8, rest/binary>> -> rest]",
+            "will not fit",
+        ),
+    ] {
+        let diagnostics = parse_err(source);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected one warning for {source}, got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains(needle),
+            "expected {needle} for {source}, got: {}",
+            warnings[0].message
+        );
+    }
+    for source in [
+        "x match: [<<1.5/float, rest/binary>> -> rest]",
+        "x match: [<<1.5:32/float, rest/binary>> -> rest]",
+        // 4 units of 8 bits is a clean 32-bit float.
+        "x match: [<<1.5:4/unit:8-float, rest/binary>> -> rest]",
+        "x match: [<<$A, rest/binary>> -> rest]",
+        "x match: [<<$A:16, rest/binary>> -> rest]",
+        "x match: [<<65/utf16, rest/binary>> -> rest]",
+        // 2 units of 8 bits hold 4660 (0x1234) exactly.
+        "x match: [<<4660:2/unit:8, rest/binary>> -> v]",
+        "x match: [<<\"hi\", rest/binary>> -> rest]",
+        "x match: [<<\"hi\"/utf16, rest/binary>> -> rest]",
+        "x match: [<<v:2/unit:8, rest/binary>> -> v]",
+    ] {
+        let module = parse_ok(source);
+        assert_eq!(
+            module.expressions.len(),
+            1,
+            "expected clean parse for {source}"
+        );
+    }
+}
+
+#[test]
 fn lex_ltlt_gtgt_tokens() {
     use crate::source_analysis::TokenKind;
     let tokens = lex_with_eof("<<");

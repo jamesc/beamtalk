@@ -246,8 +246,9 @@ pub struct BinarySegment {
     pub signedness: Option<BinarySignedness>,
     /// Endianness.
     pub endianness: Option<BinaryEndianness>,
-    /// Unit override. The parser always leaves this `None` (units come from
-    /// the type default); codegen sets it on synthetic split tails (BT-4096).
+    /// Unit override from an explicit `/unit:N` specifier (BT-4143); `None`
+    /// means the type default. Codegen also sets it on synthetic split
+    /// tails (BT-4096).
     pub unit: Option<usize>,
     /// Source location.
     pub span: Span,
@@ -266,6 +267,10 @@ pub enum BinarySegmentType {
     Bitstring,
     /// UTF-8 string.
     Utf8,
+    /// UTF-16 string (BT-4143).
+    Utf16,
+    /// UTF-32 string (BT-4143).
+    Utf32,
 }
 
 /// Signedness for integer binary segments.

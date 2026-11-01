@@ -315,3 +315,129 @@ TestCase subclass: BinaryPatternsTest
       _ -> nil
     ]
     self assert: result equals: #(104, 101)
+
+  // BT-4143: utf16 segments decode 2-byte big-endian code units.
+  testMatchUtf16Segment =>
+    bin := Binary fromBytes: #(0, 65)
+    result := bin match: [
+      <<c/utf16, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 65
+    self assert: (result at: 2) equals: #()
+
+  // BT-4143: an odd byte count cannot match a utf16 segment.
+  testMatchUtf16Fallthrough =>
+    bin := Binary fromBytes: #(65)
+    result := bin match: [
+      <<c/utf16>> -> c;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: utf32 segments decode 4-byte big-endian code units.
+  testMatchUtf32Segment =>
+    bin := Binary fromBytes: #(0, 0, 0, 65)
+    result := bin match: [
+      <<c/utf32, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 65
+    self assert: (result at: 2) equals: #()
+
+  // BT-4143: size 2, unit 8 reads 16 bits big-endian (18 * 256 + 52).
+  testMatchUnitSegment =>
+    bin := Binary fromBytes: #(18, 52, 7)
+    result := bin match: [
+      <<v:2/unit:8, rest/binary>> -> {v, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 4660
+    self assert: (result at: 2) equals: #(7)
+
+  // BT-4143: 1.5 as big-endian float64 is #(63, 248, 0, 0, 0, 0, 0, 0).
+  testMatchFloatLiteralValue =>
+    bin := Binary fromBytes: #(63, 248, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<1.5/float, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: 2.5 (#(64, 4, ...)) does not match <<1.5/float>>.
+  testMatchFloatLiteralValueFallsThrough =>
+    bin := Binary fromBytes: #(64, 4, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<1.5/float, rest/binary>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: -1.5 as big-endian float64 is #(191, 248, 0, 0, 0, 0, 0, 0).
+  testMatchNegativeFloatLiteralValue =>
+    bin := Binary fromBytes: #(191, 248, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<-1.5/float, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: <<"hi">> matches the exact bytes.
+  testMatchStringLiteralValue =>
+    result := "hi" match: [
+      <<"hi", rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: "ho" does not match <<"hi">>.
+  testMatchStringLiteralValueFallsThrough =>
+    result := "ho" match: [
+      <<"hi">> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: <<$A>> matches byte 65.
+  testMatchCharacterLiteralValue =>
+    result := "A" match: [
+      <<$A, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: "B" does not match <<$A>>.
+  testMatchCharacterLiteralValueFallsThrough =>
+    result := "B" match: [
+      <<$A>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: <<"hi"/utf16>> matches each character as a 2-byte code unit.
+  testMatchUtf16StringLiteralValue =>
+    bin := Binary fromBytes: #(0, 104, 0, 105)
+    result := bin match: [
+      <<"hi"/utf16, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4143: wrong bytes do not match <<"hi"/utf16>>.
+  testMatchUtf16StringLiteralValueFallsThrough =>
+    bin := Binary fromBytes: #(0, 104, 0, 106)
+    result := bin match: [
+      <<"hi"/utf16>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4143: little-endian utf16 decodes low byte first.
+  testMatchLittleUtf16Segment =>
+    bin := Binary fromBytes: #(65, 0)
+    result := bin match: [
+      <<c/utf16-little, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 65
+    self assert: (result at: 2) equals: #()
