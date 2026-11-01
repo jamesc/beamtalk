@@ -1123,6 +1123,44 @@ Beamtalk help: Counter selector: #increment
 
 Doc comments flow from source → AST → compiled BEAM module → runtime. They are not stripped at compilation. The `## Examples` blocks are the source for `Beamtalk help:` output and can be verified by the test framework.
 
+#### Documenting Parameters (`## Arguments` / `## Options`)
+
+The signature carries the machine-checked shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
+
+- `## Arguments` — one bullet per parameter: name in backticks, type in parentheses, then what it means.
+- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style): one bullet per key, each with its type and default.
+
+The recipe for an option list:
+
+1. Declare a named `type` alias for the option shape so the signature stays readable.
+2. Type each parameter as `name :: Type` and give the method a `-> ReturnType`.
+3. Under `## Options`, list one bullet per key with its type and default value.
+
+```beamtalk
+/// A single fetch option: a key tuple of name plus value.
+type FetchOption = Tuple(Symbol, String | Integer | Boolean)
+
+Object subclass: Fetcher
+  /// Fetch a URL with options.
+  ///
+  /// ## Arguments
+  /// - `url` (String) — the URL to fetch.
+  ///
+  /// ## Options
+  /// - `#timeout` (Integer, default `5000`) — request timeout in milliseconds.
+  /// - `#retries` (Integer, default `3`) — times to retry on failure.
+  /// - `#agent` (String, default `"beamtalk"`) — User-Agent header value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Fetcher fetch: "https://example.com" options: #({#timeout, 1000})
+  /// ```
+  class fetch: url :: String options: opts :: List(FetchOption) -> String =>
+    opts isEmpty ifTrue: [url] ifFalse: [url]
+```
+
+This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the machine-checked shape, the bullet list is the prose.
+
 ### Method Category Dividers (`// === Name ===`)
 
 A `// === Name ===` comment placed between methods introduces a **method category** — a named group used across all surfaces: the LSP outline (`documentSymbol`), VS Code breadcrumbs/sticky-scroll, LSP folding ranges (`textDocument/foldingRange`), REPL `:help` grouped method listing, and MCP `docs` structured output.
