@@ -2337,6 +2337,3 @@ t := 0
 t
 // => 1
 
-rows: 176
-test semantic_analysis::tests::local_threading::scratch_gen_repl_oracle ... ok
-
