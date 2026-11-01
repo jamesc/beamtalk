@@ -14,15 +14,16 @@
 //
 // An expression whose answer differs from the ADR today pins today's answer
 // under a `PIN-BUG` marker that cites the open issue and names the correct
-// answer. Each phase of the BT-3743 epic flipped the pins it fixed; the rest
-// are the REPL loop and fold bodies (BT-3876), `match:` arms (BT-3875) and the
-// Phase 0 position diagnostic that BT-3751 could not delete (BT-3841). Each shape resets `t` first, so one
-// shape's wrong answer does not change the next shape's input (the ADR
-// transcript is the exception: it is one stateful sequence, as the ADR writes
-// it).
+// answer. Each phase of the BT-3743 epic flipped the pins it fixed; the last
+// ones were the REPL loop and fold bodies (frames in BT-3912), `match:` arms
+// as producers (BT-3947) and the Phase 0 position diagnostic (retired in
+// BT-3913, whose oracle below pins every probe row). Each shape resets `t`
+// first, so one shape's wrong answer does not change the next shape's input
+// (the ADR transcript is the exception: it is one stateful sequence, as the
+// ADR writes it).
 //
 // Since BT-3745 (ADR 0131 Phase 0b) every shape that crashed or answered
-// wrong is a compile error (the Phase 0 allow-set error, or §6), so its pin
+// wrong is a compile error (the position-check error, or §6), so its pin
 // asserts that error; a rejected input runs nothing, so the `t` that follows
 // it still reads the value before it.
 
@@ -339,18 +340,17 @@ t := 0
 t
 // => 3
 
-// A loop in a `do:` body.
+// A loop in a `do:` body: raised `invalid argument` before BT-3753, a
+// compile error since, accepted with ADR 0133 Phase 3 (BT-3912 lower loop
+// bodies as frames; BT-3913 retires the check).
 t := 0
 // => 0
 
-// PIN-BUG BT-3913: raised `invalid argument` before BT-3753, a compile error
-// since. Correct answer: 2.
 #(1) do: [:z | [t < 2] whileTrue: [t := t + 1]]
-// => ERROR: `whileTrue:` writes outer local `t`, but as a statement inside a `do:` iteration
+// => _
 
-// PIN-BUG BT-3913: correct answer 2.
 t
-// => 0
+// => 2
 
 // `nil ifNil:` as a statement.
 t := 0
@@ -476,18 +476,18 @@ t := 0
 r := 0. r := r + ((4 =:= 4) ifTrue: [t := t + 1. 2] ifFalse: [3]). #[r, t]
 // => #[2, 1]
 
-// `on:do:` / `ensure:` as a statement of a REPL loop body is still a Phase 0
-// error (the REPL's loop frames are not producer frames yet, BT-3876; its arms
-// are since BT-3823), so nothing reaches codegen to mis-thread the loop's
-// accumulator.
+// `on:do:` / `ensure:` as a statement of a REPL loop body was a Phase 0
+// error until ADR 0133 Phase 3 lowered loop bodies as frames (BT-3912) and
+// retired the check (BT-3913): the loop threads the binding and the handler
+// or cleanup runs each iteration.
 t := 0. #(1, 2, 3) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t
-// => ERROR: `on:do:` writes outer local `t`
+// => 6
 
 t := 0. #(1, 2, 3) do: [:x | [t := t + x] ensure: [t := t + 10]]. t
-// => ERROR: `ensure:` writes outer local `t`
+// => 36
 
 t := 0. 1 to: 3 do: [:i | [Error signal: "x"] on: Error do: [:e | t := t + i]]. t
-// => ERROR: `on:do:` writes outer local `t`
+// => 6
 
 // ===========================================================================
 // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` whose block writes a binding is
@@ -762,33 +762,36 @@ t
 // => 0
 
 // A block `value:` whose argument is a writing fold is not lowered: the fold is
-// an operand of a construct, not a site, so it keeps the Phase 0 error in an
-// arm (as in class, value-type and actor methods) rather than dropping the
-// block's write.
+// an operand of a construct, not a site, so it keeps the position-check error
+// in an arm (as in class, value-type and actor methods) rather than dropping
+// the block's write.
 t := 0
 // => 0
 
 r := 4 =:= 4 ifTrue: [u := [:k | t := t + k. k] value: (#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]). u] ifFalse: [0]
 // => ERROR: `inject:into:` writes outer local `t`
 
-// A loop body is not an arm: an `on:do:` in a `do:` in an arm keeps the Phase
-// 0 error (BT-3876).
+// A loop body is not an arm: an `on:do:` in a `do:` in an arm was a Phase 0
+// error until ADR 0133 Phase 3 lowered loop bodies as frames (BT-3912) and
+// retired the check (BT-3913).
 t := 0
 // => 0
 
 r := 4 =:= 4 ifTrue: [#(1, 2) do: [:x | [t := t + x] on: Error do: [:e | 0]]. t] ifFalse: [0]
-// => ERROR: `on:do:` writes outer local `t`
+// => 3
 
 // A REPL loop whose only write sits in a fold behind a nested conditional. Its
-// body now threads the bindings map (BT-3823 widened what a REPL loop treats
-// as carried), but the fold in the arm of a loop body is not a site yet, so the
-// Phase 0 check keeps the error (BT-3876). With the check bypassed, codegen
-// compiles it (no verifier error) and answers `t` = 1.
+// body threads the bindings map (BT-3823 widened what a REPL loop treats as
+// carried), and the fold in the arm of a loop body is a statement, accepted
+// since BT-3913: codegen compiles it and answers `t` = 1.
 t := 0
 // => 0
 
 #(1, 2) do: [:k | (k > 1) ifTrue: [#(1) do: [:j | t := t + j]]]
-// => ERROR: `do:` writes outer local `t`
+// => _
+
+t
+// => 1
 
 // BT-3877: a conditional statement of a REPL loop body that writes a binding
 // tripped the debug verifier (`BindFrameMismatch`). Since BT-3823 the
@@ -918,3 +921,1422 @@ i := 0
 
 i
 // => 6
+
+// ===========================================================================
+// BT-3913 oracle: every row of `adr0131_statement_probes.tsv` with a `repl`
+// context, run through the real REPL. Each row resets `t`, runs the probe as
+// one input (answer unchecked: the collection or block value differs per
+// kind) and reads `t`, which must hold the ADR-expected value. A wrong answer
+// here is a silent drop of the write: file it, do not bless it.
+// ===========================================================================
+// BT-3913 oracle: repl/arm/outer/and answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [4 =:= 4 and: [t := t + 1. true]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/any answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/arm/outer/collect answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) collect: [:x | t := t + x]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/det answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 0]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/dinH answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/dinS answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/arm/outer/do answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) do: [:e | t := t + e]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/dsb answers 13
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]]
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/arm/outer/ensure answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] ensure: [nil]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/ewi answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) eachWithIndex: [:x :i | t := t + x]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/ifNil answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [nil ifNil: [t := t + 1]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/ifTrue answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [4 =:= 4 ifTrue: [t := t + 1]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/inject answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/kv answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/onDo answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] on: Error do: [:e | 0]]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/times answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [2 timesRepeat: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/arm/outer/toDo answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [1 to: 2 do: [:i | t := t + i]]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/arm/outer/value answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] value]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/arm/outer/while answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t < 2] whileTrue: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/armNL/outer/and answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [4 =:= 4 and: [t := t + 1. true]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/any answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]. 5]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/armNL/outer/collect answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) collect: [:x | t := t + x]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/det answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 0]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/dinH answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/dinS answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]. 5]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/armNL/outer/do answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) do: [:e | t := t + e]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/dsb answers 13
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. 5]
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/armNL/outer/ensure answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] ensure: [nil]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/ewi answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) eachWithIndex: [:x :i | t := t + x]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/ifNil answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [nil ifNil: [t := t + 1]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/ifTrue answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [4 =:= 4 ifTrue: [t := t + 1]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/inject answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/kv answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/onDo answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] on: Error do: [:e | 0]. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/times answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [2 timesRepeat: [t := t + 1]. 5]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/armNL/outer/toDo answers 3
+t := 0
+// => 0
+4 =:= 4 ifTrue: [1 to: 2 do: [:i | t := t + i]. 5]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/armNL/outer/value answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t := t + 1] value. 5]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/armNL/outer/while answers 2
+t := 0
+// => 0
+4 =:= 4 ifTrue: [[t < 2] whileTrue: [t := t + 1]. 5]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/and answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | 4 =:= 4 and: [t := t + 1. true]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/any answers 4
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/iter/outer/collect answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) collect: [:x | t := t + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/det answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) detect: [:e | t := t + 1. e > 0]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/dinH answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/dinS answers 4
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/iter/outer/do answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) do: [:e | t := t + e]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/dsb answers 26
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]]
+// => _
+t
+// => 26
+
+// BT-3913 oracle: repl/iter/outer/ensure answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | [t := t + 1] ensure: [nil]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/ewi answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) eachWithIndex: [:x :i | t := t + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/ifNil answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | nil ifNil: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/ifTrue answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | 4 =:= 4 ifTrue: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/inject answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/kv answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | #{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/onDo answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | [t := t + 1] on: Error do: [:e | 0]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/times answers 4
+t := 0
+// => 0
+#(1, 2) do: [:z | 2 timesRepeat: [t := t + 1]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/iter/outer/toDo answers 6
+t := 0
+// => 0
+#(1, 2) do: [:z | 1 to: 2 do: [:i | t := t + i]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/iter/outer/value answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | [t := t + 1] value]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/iter/outer/while answers 2
+t := 0
+// => 0
+#(1, 2) do: [:z | [t < 2] whileTrue: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/prot/outer/and answers 1
+t := 0
+// => 0
+[4 =:= 4 and: [t := t + 1. true]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/any answers 2
+t := 0
+// => 0
+[#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/prot/outer/collect answers 3
+t := 0
+// => 0
+[#(1, 2) collect: [:x | t := t + x]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/det answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 0]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/dinH answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/dinS answers 2
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/prot/outer/do answers 3
+t := 0
+// => 0
+[#(1, 2) do: [:e | t := t + e]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/dsb answers 13
+t := 0
+// => 0
+[#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/prot/outer/ensure answers 1
+t := 0
+// => 0
+[[t := t + 1] ensure: [nil]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/ewi answers 3
+t := 0
+// => 0
+[#(1, 2) eachWithIndex: [:x :i | t := t + x]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/ifNil answers 1
+t := 0
+// => 0
+[nil ifNil: [t := t + 1]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/ifTrue answers 1
+t := 0
+// => 0
+[4 =:= 4 ifTrue: [t := t + 1]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/inject answers 3
+t := 0
+// => 0
+[#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/kv answers 3
+t := 0
+// => 0
+[#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/onDo answers 1
+t := 0
+// => 0
+[[t := t + 1] on: Error do: [:e | 0]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/times answers 2
+t := 0
+// => 0
+[2 timesRepeat: [t := t + 1]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/prot/outer/toDo answers 3
+t := 0
+// => 0
+[1 to: 2 do: [:i | t := t + i]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/prot/outer/value answers 1
+t := 0
+// => 0
+[[t := t + 1] value. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/prot/outer/while answers 2
+t := 0
+// => 0
+[[t < 2] whileTrue: [t := t + 1]. 7] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/protLast/outer/and answers 1
+t := 0
+// => 0
+[4 =:= 4 and: [t := t + 1. true]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/any answers 2
+t := 0
+// => 0
+[#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/protLast/outer/collect answers 3
+t := 0
+// => 0
+[#(1, 2) collect: [:x | t := t + x]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/det answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 0]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/dinH answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/dinS answers 2
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/protLast/outer/do answers 3
+t := 0
+// => 0
+[#(1, 2) do: [:e | t := t + e]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/dsb answers 13
+t := 0
+// => 0
+[#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]] on: Error do: [:e | 0]
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/protLast/outer/ensure answers 1
+t := 0
+// => 0
+[[t := t + 1] ensure: [nil]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/ewi answers 3
+t := 0
+// => 0
+[#(1, 2) eachWithIndex: [:x :i | t := t + x]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/ifNil answers 1
+t := 0
+// => 0
+[nil ifNil: [t := t + 1]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/ifTrue answers 1
+t := 0
+// => 0
+[4 =:= 4 ifTrue: [t := t + 1]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/inject answers 3
+t := 0
+// => 0
+[#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/kv answers 3
+t := 0
+// => 0
+[#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/onDo answers 1
+t := 0
+// => 0
+[[t := t + 1] on: Error do: [:e | 0]] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/times answers 2
+t := 0
+// => 0
+[2 timesRepeat: [t := t + 1]] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/protLast/outer/toDo answers 3
+t := 0
+// => 0
+[1 to: 2 do: [:i | t := t + i]] on: Error do: [:e | 0]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/protLast/outer/value answers 1
+t := 0
+// => 0
+[[t := t + 1] value] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/protLast/outer/while answers 2
+t := 0
+// => 0
+[[t < 2] whileTrue: [t := t + 1]] on: Error do: [:e | 0]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/replLoop/outer/and answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [4 =:= 4 and: [t := t + 1. true]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/any answers 102
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]. t := t + 100]
+// => _
+t
+// => 102
+
+// BT-3913 oracle: repl/replLoop/outer/collect answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) collect: [:x | t := t + x]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/det answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) detect: [:e | t := t + 1. e > 0]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/dinH answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/dinS answers 102
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]. t := t + 100]
+// => _
+t
+// => 102
+
+// BT-3913 oracle: repl/replLoop/outer/do answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) do: [:e | t := t + e]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/dsb answers 113
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]. t := t + 100]
+// => _
+t
+// => 113
+
+// BT-3913 oracle: repl/replLoop/outer/ensure answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [[t := t + 1] ensure: [nil]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/ewi answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) eachWithIndex: [:x :i | t := t + x]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/ifNil answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [nil ifNil: [t := t + 1]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/ifTrue answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [4 =:= 4 ifTrue: [t := t + 1]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/inject answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/kv answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/onDo answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [[t := t + 1] on: Error do: [:e | 0]. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/times answers 102
+t := 0
+// => 0
+[t < 100] whileTrue: [2 timesRepeat: [t := t + 1]. t := t + 100]
+// => _
+t
+// => 102
+
+// BT-3913 oracle: repl/replLoop/outer/toDo answers 103
+t := 0
+// => 0
+[t < 100] whileTrue: [1 to: 2 do: [:i | t := t + i]. t := t + 100]
+// => _
+t
+// => 103
+
+// BT-3913 oracle: repl/replLoop/outer/value answers 101
+t := 0
+// => 0
+[t < 100] whileTrue: [[t := t + 1] value. t := t + 100]
+// => _
+t
+// => 101
+
+// BT-3913 oracle: repl/replLoop/outer/while answers 102
+t := 0
+// => 0
+[t < 100] whileTrue: [[t < 2] whileTrue: [t := t + 1]. t := t + 100]
+// => _
+t
+// => 102
+
+// BT-3913 oracle: repl/toDoC/outer/and answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | 4 =:= 4 and: [t := t + 1. true]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/any answers 4
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) anySatisfy: [:e | t := t + 1. e > 5]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/toDoC/outer/collect answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) collect: [:x | t := t + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/det answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) detect: [:e | t := t + 1. e > 0]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/dinH answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/dinS answers 4
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/toDoC/outer/do answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) do: [:e | t := t + e]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/dsb answers 26
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]]
+// => _
+t
+// => 26
+
+// BT-3913 oracle: repl/toDoC/outer/ensure answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | [t := t + 1] ensure: [nil]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/ewi answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) eachWithIndex: [:x :i | t := t + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/ifNil answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | nil ifNil: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/ifTrue answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | 4 =:= 4 ifTrue: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/inject answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | #(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/kv answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | #{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/onDo answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | [t := t + 1] on: Error do: [:e | 0]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/times answers 4
+t := 0
+// => 0
+1 to: 2 do: [:z | 2 timesRepeat: [t := t + 1]]
+// => _
+t
+// => 4
+
+// BT-3913 oracle: repl/toDoC/outer/toDo answers 6
+t := 0
+// => 0
+1 to: 2 do: [:z | 1 to: 2 do: [:i | t := t + i]]
+// => _
+t
+// => 6
+
+// BT-3913 oracle: repl/toDoC/outer/value answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | [t := t + 1] value]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/toDoC/outer/while answers 2
+t := 0
+// => 0
+1 to: 2 do: [:z | [t < 2] whileTrue: [t := t + 1]]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/top/outer/and answers 1
+t := 0
+// => 0
+4 =:= 4 and: [t := t + 1. true]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/any answers 2
+t := 0
+// => 0
+#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/top/outer/collect answers 3
+t := 0
+// => 0
+#(1, 2) collect: [:x | t := t + x]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/det answers 1
+t := 0
+// => 0
+#(1, 2) detect: [:e | t := t + 1. e > 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/dinH answers 1
+t := 0
+// => 0
+#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/dinS answers 2
+t := 0
+// => 0
+#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/top/outer/do answers 3
+t := 0
+// => 0
+#(1, 2) do: [:e | t := t + e]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/dsb answers 13
+t := 0
+// => 0
+#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/top/outer/ensure answers 1
+t := 0
+// => 0
+[t := t + 1] ensure: [nil]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/ewi answers 3
+t := 0
+// => 0
+#(1, 2) eachWithIndex: [:x :i | t := t + x]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/ifNil answers 1
+t := 0
+// => 0
+nil ifNil: [t := t + 1]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/ifTrue answers 1
+t := 0
+// => 0
+4 =:= 4 ifTrue: [t := t + 1]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/inject answers 3
+t := 0
+// => 0
+#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/kv answers 3
+t := 0
+// => 0
+#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/onDo answers 1
+t := 0
+// => 0
+[t := t + 1] on: Error do: [:e | 0]
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/times answers 2
+t := 0
+// => 0
+2 timesRepeat: [t := t + 1]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/top/outer/toDo answers 3
+t := 0
+// => 0
+1 to: 2 do: [:i | t := t + i]
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/top/outer/value answers 1
+t := 0
+// => 0
+[t := t + 1] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/top/outer/while answers 2
+t := 0
+// => 0
+[t < 2] whileTrue: [t := t + 1]
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/val/outer/and answers 1
+t := 0
+// => 0
+[4 =:= 4 and: [t := t + 1. true]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/any answers 2
+t := 0
+// => 0
+[#(1, 2) anySatisfy: [:e | t := t + 1. e > 5]] value
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/val/outer/collect answers 3
+t := 0
+// => 0
+[#(1, 2) collect: [:x | t := t + x]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/det answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 0]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/dinH answers 1
+t := 0
+// => 0
+[#(1, 2) detect: [:e | e > 5] ifNone: [t := t + 1]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/dinS answers 2
+t := 0
+// => 0
+[#(1, 2) detect: [:e | t := t + 1. e > 5] ifNone: [nil]] value
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/val/outer/do answers 3
+t := 0
+// => 0
+[#(1, 2) do: [:e | t := t + e]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/dsb answers 13
+t := 0
+// => 0
+[#(1, 2) do: [:x | t := t + x] separatedBy: [t := t + 10]] value
+// => _
+t
+// => 13
+
+// BT-3913 oracle: repl/val/outer/ensure answers 1
+t := 0
+// => 0
+[[t := t + 1] ensure: [nil]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/ewi answers 3
+t := 0
+// => 0
+[#(1, 2) eachWithIndex: [:x :i | t := t + x]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/ifNil answers 1
+t := 0
+// => 0
+[nil ifNil: [t := t + 1]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/ifTrue answers 1
+t := 0
+// => 0
+[4 =:= 4 ifTrue: [t := t + 1]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/inject answers 3
+t := 0
+// => 0
+[#(1, 2) inject: 0 into: [:a :x | t := t + x. a + x]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/kv answers 3
+t := 0
+// => 0
+[#{#a => 1, #b => 2} keysAndValuesDo: [:k :w | t := t + w]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/onDo answers 1
+t := 0
+// => 0
+[[t := t + 1] on: Error do: [:e | 0]] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/times answers 2
+t := 0
+// => 0
+[2 timesRepeat: [t := t + 1]] value
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/val/outer/toDo answers 3
+t := 0
+// => 0
+[1 to: 2 do: [:i | t := t + i]] value
+// => _
+t
+// => 3
+
+// BT-3913 oracle: repl/val/outer/value answers 1
+t := 0
+// => 0
+[[t := t + 1] value] value
+// => _
+t
+// => 1
+
+// BT-3913 oracle: repl/val/outer/while answers 2
+t := 0
+// => 0
+[[t < 2] whileTrue: [t := t + 1]] value
+// => _
+t
+// => 2
+
+// BT-3913 oracle: repl/cond/fresh/and answers 0
+t := 0
+// => 0
+i := 0. [4 =:= 4 and: [u := 1. true]. i < 2] whileTrue: [i := i + 1]
+// => _
+t
+// => 0
+
+// BT-3913 oracle: repl/cond/fresh/ifNil answers 0
+t := 0
+// => 0
+i := 0. [nil ifNil: [u := 1]. i < 2] whileTrue: [i := i + 1]
+// => _
+t
+// => 0
+
+// BT-3913 oracle: repl/cond/fresh/ifTrue answers 0
+t := 0
+// => 0
+i := 0. [4 =:= 4 ifTrue: [u := 1]. i < 2] whileTrue: [i := i + 1]
+// => _
+t
+// => 0
+
+// BT-3913 oracle: repl/top/fresh/groupBy answers 0
+t := 0
+// => 0
+(#(1, 3) groupBy: [:e | u := e. e > 2]) at: true
+// => _
+t
+// => 0
+
+// BT-3913 oracle: repl/top/outer/match answers 1
+t := 0
+// => 0
+3 match: [_ -> (t := t + 1)]
+// => _
+t
+// => 1
+
+rows: 176
+test semantic_analysis::tests::local_threading::scratch_gen_repl_oracle ... ok
+

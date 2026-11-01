@@ -3,10 +3,14 @@
 
 // BT-3738 (ADR 0131 Phase 3): actor conditionals that are NOT local-threading
 // producers (their arms write a field or send to `self`, and write no outer
-// local) but hold a loop or fold that writes a local of the arm. Codegen
-// registers an arm frame only for a conditional producer, the same predicate
-// the Phase 0 check reads, so these keep the legacy arm lowering. The expected
-// answers are in stdlib/test/adr0131cond_non_producer_test.bt.
+// local) but hold a loop or fold that writes a local of the arm. BT-3913
+// retired the legacy arm lowering these relied on: the writing loop answers
+// right as a statement of its own, but as the value of an assignment in the
+// arm it keeps the `UnmigratedLocalThreading` error (pinned in
+// `local_threading.rs`), so `injectInArm` and `collectInArm` hoist the
+// arm-local write to a `do:` of its own and capture the pure fold value.
+// The expected answers are in
+// stdlib/test/adr0131cond_non_producer_test.bt.
 
 Actor subclass: Adr0131CondNonProducerActor
   state: n = 0
@@ -40,12 +44,8 @@ Actor subclass: Adr0131CondNonProducerActor
       ifTrue: [
         self.n := 1
         m := 0
-        s := #(1, 2)
-          inject: 0
-          into: [:a :e |
-            m := m + e
-            a + e
-          ]
+        #(1, 2) do: [:e | m := m + e]
+        s := #(1, 2) inject: 0 into: [:a :e | a + e]
         m + s
       ]
       ifFalse: [0]
@@ -67,7 +67,8 @@ Actor subclass: Adr0131CondNonProducerActor
       ifTrue: [
         self.n := 1
         m := 0
-        sq := #(1, 2) collect: [:e | m := m + e]
+        #(1, 2) do: [:e | m := m + e]
+        sq := #(1, 2) collect: [:e | e * 2]
         sq size + m
       ]
       ifFalse: [0]

@@ -1153,7 +1153,7 @@ impl ThreadingPlan {
                 " = call 'maps':'new'() in ",
             ]);
             init_map_var
-        } else if generator.state_seeds_from_cell() {
+        } else if generator.state_seed_seeds_from_cell() {
             let take_var = generator.fresh_temp_var("TakeSeed");
             pack_docs.push(docvec![
                 "let ",

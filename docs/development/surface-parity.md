@@ -701,10 +701,12 @@ reports the same message at the same span. No operation is surface-specific.
     `sealed` method of an actor's own class, or a stored block sent `value` in
     an actor method, compiled and threaded its write; both are now this error
     on every surface.
-- Category `UnmigratedLocalThreading` (temporary; BT-3841 retires it): a
-  local-threading construct whose blocks write an outer local sits in a
-  position that does not thread the write back yet, including the statement
-  positions that lose the write (BT-3753).
+- Category `UnmigratedLocalThreading` (permanent for the shapes it still
+  covers; BT-3913 retired the statement-position half of it): a
+  local-threading construct whose blocks write an outer local sits in an
+  operand position no producer lowers. A `detect:ifNone:` with a stored
+  search block, a lookup that is not a producer and an arm write of a
+  `match:` that is not a producer keep their own variants of it.
 - **A local assignment in value position is a producer (BT-3910; the BT-3864
   `ValuePositionLocalAssignment` error is gone).** An operand, a literal or
   interpolated element, another assignment's or `^`'s value or a receiver that is a local assignment rebinds the local in class,

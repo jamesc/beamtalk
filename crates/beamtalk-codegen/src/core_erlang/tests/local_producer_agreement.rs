@@ -961,14 +961,15 @@ fn returned_producers(
     out
 }
 
-/// BT-3813: every `^<construct>` inside a block that the Phase 0 check
-/// accepts (the `ReturnValue { nested: true }` rows of `ALLOW_SET`, or a
-/// producer site of an arm or loop frame) and that the core rule
-/// (`operand_producer_writes`) names a producer is lowered by codegen's
-/// producer threading exactly its names, so the `^` throws the construct's
-/// value and never its `{Value, StateAcc}` carrier. Fails with the BT-3813
-/// row and without `nlr_return_construct_value`: the closure cases (a
-/// `detect:ifNone:` handler, a sort block) lower no producer.
+/// BT-3813: every `^<construct>` inside a block that the position check
+/// accepts (a `do:`-family loop in a class or value-type method, a
+/// conditional in an actor method — the retired allow-set's nested-return
+/// shapes, BT-3913 — or a producer site of an arm or loop frame) and that
+/// the core rule (`operand_producer_writes`) names a producer is lowered by
+/// codegen's producer threading exactly its names, so the `^` throws the
+/// construct's value and never its `{Value, StateAcc}` carrier. Fails without
+/// the BT-3813 rule and without `nlr_return_construct_value`: the closure
+/// cases (a `detect:ifNone:` handler, a sort block) lower no producer.
 #[test]
 fn every_nested_return_value_the_check_accepts_is_lowered_by_the_producer() {
     let mut checked = 0;

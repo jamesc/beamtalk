@@ -1,29 +1,26 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0131 Phase 0 measurement harness (BT-3841): what does codegen do with
-//! each statement-position probe, with the position check out of the way?
+//! ADR 0131 statement/operand oracle (BT-3841, retired the check in BT-3913):
+//! what does codegen do with each probe cell, with the position check gone?
 //!
 //! `beamtalk-core`'s `test_helpers::statement_probes` holds the probe matrix
 //! (`adr0131_statement_probes.tsv`: one `t := 0` method per construct kind,
 //! per block role, per method context, per write target). This harness
 //! compiles every class, value-type and actor cell that is not a `gap` line
-//! through the real `beamtalk test` pipeline with the Phase 0 statement check
-//! bypassed (`BEAMTALK_ADR0131_MEASURE_BYPASS_PHASE0`, read only by a build with the
-//! `beamtalk-core/measure-bypass` cargo feature),
-//! runs it on a BEAM, and records the answer in
-//! `adr0131_statement_measured.tsv`:
+//! through the real `beamtalk test` pipeline, runs it on a BEAM, and records
+//! the answer in `adr0131_statement_measured.tsv`:
 //!
 //! - `right`: the method answers the ADR-expected value
 //!   (`STATEMENT_PROBE_KINDS`);
 //! - `wrong`: it compiles and answers something else, or raises (a silent
 //!   drop of the write);
-//! - `erlc`: the module does not compile (a codegen error, a `ThreadedIr`
-//!   verifier panic or an `erlc` failure).
+//! - `erlc`: the module does not compile (a diagnostic, a codegen error, a
+//!   `ThreadedIr` verifier panic or an `erlc` failure).
 //!
-//! The Phase 0 pin tests in `beamtalk-core` assert that Phase 0 rejects a cell
-//! exactly when this table says it does not answer `right`; this harness
-//! keeps that table honest. It is `#[ignore]`d (about a minute on a BEAM):
+//! BT-3913 asserts the oracle reports zero silent drops: no accepted cell may
+//! answer `wrong` (cells the check rejects are `erlc`). It is `#[ignore]`d
+//! (about a minute on a BEAM):
 //!
 //! ```text
 //! just measure-adr0131-statements          # fail when the table drifts
@@ -36,7 +33,6 @@
 
 use crate::cli_common;
 
-use beamtalk_core::test_helpers::ADR0131_MEASURE_BYPASS_ENV;
 use beamtalk_core::test_helpers::statement_probes::{Matrix, class_source, probe_method};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -215,9 +211,7 @@ fn std_command(dir: &Path) -> std::process::Command {
             None => cmd.env_remove(key),
         };
     }
-    cmd.current_dir(dir)
-        .env(ADR0131_MEASURE_BYPASS_ENV, "1")
-        .arg("test");
+    cmd.current_dir(dir).arg("test");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -382,47 +376,17 @@ fn table(matrix: Matrix, answers: &BTreeMap<Cell, &'static str>, order: &[Cell])
         ),
     };
     let mut text = format!(
-        "# ADR 0131 Phase 0 measured answers (BT-3841). One line per class, value-type and\n\
-         # actor {what}: context, block\n\
+        "# ADR 0131 measured answers (BT-3841; the check retired in BT-3913). One line per\n\
+         # class, value-type and actor {what}: context, block\n\
          # role, {third}, construct kind, answer. `right` is the ADR-expected value,\n\
          # `wrong` a different answer or a raise, `erlc` a module that does not compile,\n\
-         # all with the Phase 0 statement check bypassed and run on a BEAM. Regenerate with\n\
+         # all run on a BEAM. Regenerate with\n\
          # `ADR0131_MEASURE_BLESS=1 just measure-adr0131-statements`.\n"
     );
     for cell in order {
         let _ = writeln!(text, "{}", cell.line(answers[cell]));
     }
     text
-}
-
-/// Asserts the `beamtalk` binary under test was built with the
-/// `measure-bypass` feature: a cell Phase 0 rejects must compile (`just
-/// measure-adr0131-statements` builds it that way). The probe is the first
-/// checked-in `wrong` cell (Phase 0 rejects exactly the cells that do not answer
-/// `right`, and a `wrong` cell compiles), so it stays a rejected cell as
-/// families become producers. With no `wrong` cell left, the bypass changes no
-/// answer and there is nothing to check.
-fn preflight() {
-    let Some([context, container, target, kind, _]) = Matrix::Statement
-        .measured()
-        .into_iter()
-        .find(|[.., answer]| answer == "wrong")
-    else {
-        return;
-    };
-    let cell = Cell {
-        context,
-        container,
-        target,
-        kind,
-    };
-    let run = run_package(&render(Matrix::Statement, &[cell], CHUNK));
-    assert!(
-        ran(&run.text) && summary(&run.text).is_some(),
-        "the Phase 0 position check was not bypassed: build with `--features \
-         beamtalk-core/measure-bypass` (use `just measure-adr0131-statements`):\n{}",
-        run.text
-    );
 }
 
 /// `ADR0131_MEASURE_ONLY=kv,ewi`: measure only the cells of these construct
@@ -437,7 +401,6 @@ fn only_kinds() -> Option<Vec<String>> {
 
 #[allow(clippy::too_many_lines)] // one linear measure-and-compare flow
 fn run_matrix(matrix: Matrix, file: &str) {
-    preflight();
     let full = cells(matrix);
     assert!(full.len() > 1000, "only {} cells", full.len());
     let only = only_kinds();
@@ -476,6 +439,20 @@ fn run_matrix(matrix: Matrix, file: &str) {
     });
     let answers = answers.into_inner().expect("lock");
     assert_eq!(answers.len(), order.len(), "every cell has an answer");
+
+    // BT-3913: the oracle reports zero silent drops — no cell may compile
+    // and answer wrong (a cell the check rejects does not compile: `erlc`).
+    let wrong: Vec<String> = answers
+        .iter()
+        .filter(|(_, answer)| **answer == "wrong")
+        .map(|(cell, answer)| cell.line(answer))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "{} silent drops (compiled, answered wrong):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 
     let mut counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
     for (cell, answer) in &answers {

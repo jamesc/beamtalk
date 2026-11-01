@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3909 (ADR 0133 Phase 3): the actor `groupBy:` positions the
-// `RESIDUAL_DENY_SET` leaves accepted answer the grouped dictionary. The
+// BT-3909 (ADR 0133 Phase 3): the actor `groupBy:` positions the retired
+// position check leaves accepted answer the grouped dictionary. The
 // rejected positions, and the other residuals made compile errors (BT-3891,
 // BT-3875), are pinned in
 // crates/beamtalk-core/src/semantic_analysis/tests/local_threading.rs

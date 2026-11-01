@@ -1,8 +1,8 @@
-# ADR 0131 Phase 0 measured answers (BT-3841). One line per class, value-type and
-# actor statement-position probe cells (adr0131_statement_probes.tsv, not `gap`): context, block
+# ADR 0131 measured answers (BT-3841; the check retired in BT-3913). One line per
+# class, value-type and actor statement-position probe cells (adr0131_statement_probes.tsv, not `gap`): context, block
 # role, write target, construct kind, answer. `right` is the ADR-expected value,
 # `wrong` a different answer or a raise, `erlc` a module that does not compile,
-# all with the Phase 0 statement check bypassed and run on a BEAM. Regenerate with
+# all run on a BEAM. Regenerate with
 # `ADR0131_MEASURE_BLESS=1 just measure-adr0131-statements`.
 actor	arm	cvar	do	right
 actor	arm	cvar	ewi	right
