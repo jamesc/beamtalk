@@ -228,6 +228,21 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
+      # check-codegen-boundary used to be its own job; it needs only the Rust
+      # toolchain + Just (cargo metadata, no compilation), both already here —
+      # and unlike check-corpus it is not a required status check, so folding
+      # it in saves a runner spin-up per run for zero wall-clock cost (it
+      # takes seconds alongside clippy).
+      - name: Check codegen dependency boundary (BT-3371)
+        run: just check-codegen-boundary
+
+      # dialyzer-specs used to run in test-dialyzer on every OTP matrix leg;
+      # the generated -spec attributes don't depend on the OTP version, so it
+      # runs once here instead. Needs the beamtalk binary + stdlib (built via
+      # coverage-build, no --all-targets) and escript — both available here.
+      - name: Dialyzer spec validation (generated -spec attributes)
+        run: just dialyzer-specs
+
   # The fast Rust tier on Linux (everything but the corpus tier, which is the
   # test-corpus job). Full test-stdlib/test-bunit/test-runtime run in the
   # test-beam / test-runtime jobs.
@@ -408,30 +423,6 @@ jobs:
   # a future dependency edge back onto beamtalk-codegen would compile and
   # pass every existing test, silently regressing the build-time win. Rust-only
   # (just resolves the dependency graph, no compilation needed), so it stays fast.
-  check-codegen-boundary:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      - name: Check beamtalk-lsp/beamtalk-lint do not depend on beamtalk-codegen
-        run: just check-codegen-boundary
-
   # ─── Corpus .core diff harness (BT-3509, ADR 0122 Phase 0) ────────────
   # Informational: reports whether a PR touching crates/beamtalk-codegen/
   # changes generated Core Erlang for the stdlib + bootstrap-test corpus
@@ -836,6 +827,10 @@ jobs:
 
   test-dialyzer:
     needs: [changes, otp-matrix]
+    # No path-gated steps remain in this job (`dialyzer-specs` moved to the
+    # lint job, where it runs once instead of once per OTP leg), so the whole
+    # job only runs when runtime/ changed — on main that is always true.
+    if: needs.changes.outputs.runtime == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -846,7 +841,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -903,11 +897,7 @@ jobs:
         run: just build
 
       - name: Dialyzer type checking (Erlang runtime)
-        if: needs.changes.outputs.runtime == 'true'
         run: just dialyzer
-
-      - name: Dialyzer spec validation (generated -spec attributes)
-        run: just dialyzer-specs
 
   # ─── Learning-guide doctests (BT-3927) ─────────────────────────────────
   # `just test-learn` compiles every docs/learning/ fixture and runs the
@@ -1090,25 +1080,36 @@ jobs:
             cat "$f"
           done
 
-  coverage:
+  # ─── Coverage (Rust + Erlang), split in two parallel jobs ─────────────
+  # Was one 45-minute job: dev build + instrumented build + Rust passes +
+  # Erlang suites, sequentially (~41 min, repeatedly timing out on main).
+  # The halves are independent — each builds what it needs and collects its
+  # own coverdata on its own runner — so they run side by side and the wall
+  # clock is the slower leg, not the sum (an artifact handoff between the
+  # legs would serialize them again: download-artifact has no wait/retry):
+  # - coverage-rust: instrumented build + `just coverage-rust-cobertura`
+  #   (fast tier via nextest, then the serialized e2e/ignored suites).
+  # - coverage-erlang: `just coverage-all` (eunit + E2E + stdlib + BUnit
+  #   with cover), collecting its own E2E coverdata via `coverage-e2e`.
+  # - publish-coverage: pushes both badges once both legs are green.
+  # Pass 1 excludes the corpus_tests slow tier (see Justfile's
+  # _coverage-rust-run-tests): that tier already runs sharded in
+  # test-corpus on every main push, and re-running it instrumented here
+  # cost ~17 min alone.
+  coverage-rust:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # 45: coverage-rust runs two passes over the workspace (the fast tier via
-    # nextest, then the serialized e2e/ignored suites) plus the Erlang
-    # eunit/stdlib/BUnit suites — ~25 min expected. Pass 1 excludes the
-    # corpus_tests slow tier (see Justfile's _coverage-rust-run-tests): that
-    # tier already runs sharded in test-corpus on every main push, and
-    # re-running it instrumented here cost ~17 min alone. Pass 2 doubles as
-    # the E2E Erlang-coverdata collection (E2E_COVER=1), so coverage-all no
-    # longer re-runs repl_protocol. See Justfile's coverage-rust-cobertura.
-    timeout-minutes: 45
+    # Measured ~22 min (instrumented build ~10, fast tier ~6.5, serialized
+    # e2e ~5); 40 leaves headroom for cold caches.
+    timeout-minutes: 40
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      rust_coverage: ${{ steps.rust_thresholds.outputs.rust_coverage }}
     steps:
-      # persist-credentials kept: the step below pushes coverage badges to the `badges` branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -1159,15 +1160,11 @@ jobs:
             "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
           cargo nextest --version
 
-      # The Erlang runtime + stdlib must be built before `cargo llvm-cov`
-      # because some Rust integration tests (e.g. cli_doctor from BT-2084)
-      # exec the real `beamtalk` binary against the workspace runtime,
-      # which fails fast if stdlib .beam files are missing.
-      - name: Build Erlang runtime
-        run: just build-erlang
-
-      - name: Build standard library
-        run: just build-stdlib
+      # Lean pre-build (no `cargo build --all-targets`): the Rust suites run
+      # instrumented under llvm-cov, and the spawned BEAM nodes only need the
+      # stdlib .beam files — see `coverage-build` in the Justfile.
+      - name: Build coverage prerequisites
+        run: just coverage-build
 
       - name: Generate Rust coverage (Cobertura format for action)
         # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
@@ -1181,15 +1178,15 @@ jobs:
         if: failure()
         run: |
           epmd -names || true
+          # startup.log holds VM boot / -eval crash output; workspace.log holds the
+          # OTP logger stream where beamtalk_ws_handler writes session/auth failures
+          # (e.g. "Session creation failed"). The "port accepting TCP but WS health
+          # check failed" flake (BT-2532) leaves startup.log empty — the real cause
+          # is in workspace.log — so dump both.
           for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
             echo "=== $f ==="
             cat "$f"
           done
-
-      # E2E Erlang coverdata was already exported by coverage-rust-cobertura's
-      # pass 2 (E2E_COVER=1); coverage-all merges it without re-running it.
-      - name: Generate Erlang coverage (unit + E2E + stdlib)
-        run: just coverage-all
 
       - name: Rust Coverage Summary
         id: rust_coverage
@@ -1204,52 +1201,21 @@ jobs:
 
       - name: Preserve Rust Coverage Report
         run: |
-          # Rename Rust coverage report before Erlang step overwrites it
           if [ -f code-coverage-results.md ]; then
             mv code-coverage-results.md rust-coverage-results.md
           fi
 
-      - name: Erlang Coverage Summary
-        id: erlang_coverage
-        continue-on-error: true
-        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
-        with:
-          # All four runtime apps. bt@* compiled-Beamtalk modules carry no
-          # Erlang abstract code and are auto-excluded from cover (BT-1672), so
-          # the stdlib XML reports only its hand-written FFI .erl modules.
-          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml,runtime/_build/test/covertool/beamtalk_stdlib.covertool.xml,runtime/_build/test/covertool/beamtalk_compiler.covertool.xml'
-          badge: true
-          format: markdown
-          output: both
-          hide_branch_rate: false
-          hide_complexity: true
-          indicators: true
-          thresholds: '60 70'
-
-      - name: Preserve Erlang Runtime Coverage Report
-        run: |
-          # Rename Erlang coverage report for clarity
-          if [ -f code-coverage-results.md ]; then
-            mv code-coverage-results.md erlang-coverage-results.md
-          fi
-
-      - name: Upload Coverage Reports
+      - name: Upload Rust Coverage Reports
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: coverage-reports
+          name: rust-coverage-reports
           path: |
             rust-coverage-results.md
-            erlang-coverage-results.md
-            runtime/_build/test/cover/index.html
-            runtime/_build/test/cover/aggregate/*.html
             coverage.cobertura.xml
-            runtime/_build/test/covertool/*.xml
           retention-days: 30
 
-      - name: Add Coverage to Job Summary
+      - name: Add Rust Coverage to Job Summary
         run: |
-          echo "## 📊 Code Coverage Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
           if [ -f rust-coverage-results.md ]; then
             cat rust-coverage-results.md >> $GITHUB_STEP_SUMMARY
@@ -1258,19 +1224,6 @@ jobs:
           else
             echo "⚠️ WARNING: Rust coverage report not generated" >> $GITHUB_STEP_SUMMARY
           fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f erlang-coverage-results.md ]; then
-            cat erlang-coverage-results.md >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "![Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ WARNING: Erlang coverage report not generated" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📁 **Detailed HTML Reports:** Download the \`coverage-reports\` artifact for per-module breakdowns" >> $GITHUB_STEP_SUMMARY
 
       - name: Check Coverage Thresholds
         id: rust_thresholds
@@ -1278,9 +1231,11 @@ jobs:
         run: |
           # Extract Rust line coverage percentage from CodeCoverageSummary output
           # The action outputs to rust-coverage-results.md (markdown format)
+          # Missing report fails the leg: warn-and-pass here once published
+          # a grey "unknown" badge for a dead coverage pipeline.
           if [ ! -f rust-coverage-results.md ]; then
-            echo "⚠️ WARNING: rust-coverage-results.md not found, skipping threshold check"
-            exit 0
+            echo "❌ FAILURE: rust-coverage-results.md not found, cannot check thresholds"
+            exit 1
           fi
           
           # Extract coverage percentages from markdown format
@@ -1309,13 +1264,136 @@ jobs:
           
           echo "✅ Coverage thresholds met"
 
+      - name: Fail if Rust coverage thresholds not met
+        if: steps.rust_thresholds.outcome == 'failure'
+        run: |
+          echo "❌ Rust coverage thresholds not met (see above for details)"
+          exit 1
+
+  coverage-erlang:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Measured ~10.5 min (eunit + stdlib + BUnit with cover); 25 leaves
+    # headroom for cold caches.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      erlang_coverage: ${{ steps.erlang_thresholds.outputs.erlang_coverage }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      # Lean pre-build (no `cargo build --all-targets`): the Erlang suites
+      # drive `cargo run --bin beamtalk`, which builds just the binary and
+      # its deps on demand — see `coverage-build` in the Justfile.
+      - name: Build coverage prerequisites
+        run: just coverage-build
+
+      - name: Generate Erlang coverage (unit + E2E + stdlib)
+        # `coverage-all` runs its own E2E pass (`coverage-e2e`) on this
+        # runner, so the legs stay independent (no cross-job artifact wait).
+        run: just coverage-all
+
+      - name: Dump workspace startup logs
+        # coverage-stdlib/coverage-bunit boot real workspace BEAM nodes, same
+        # as test-parity above.
+        if: failure()
+        run: |
+          epmd -names || true
+          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
+      - name: Erlang Coverage Summary
+        id: erlang_coverage
+        continue-on-error: true
+        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
+        with:
+          # All four runtime apps. bt@* compiled-Beamtalk modules carry no
+          # Erlang abstract code and are auto-excluded from cover (BT-1672), so
+          # the stdlib XML reports only its hand-written FFI .erl modules.
+          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml,runtime/_build/test/covertool/beamtalk_stdlib.covertool.xml,runtime/_build/test/covertool/beamtalk_compiler.covertool.xml'
+          badge: true
+          format: markdown
+          output: both
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          thresholds: '60 70'
+
+      - name: Preserve Erlang Runtime Coverage Report
+        run: |
+          # Rename Erlang coverage report for clarity
+          if [ -f code-coverage-results.md ]; then
+            mv code-coverage-results.md erlang-coverage-results.md
+          fi
+
+      - name: Upload Erlang Coverage Reports
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: erlang-coverage-reports
+          path: |
+            erlang-coverage-results.md
+            runtime/_build/test/cover/index.html
+            runtime/_build/test/cover/aggregate/*.html
+            runtime/_build/test/covertool/*.xml
+          retention-days: 30
+
+      - name: Add Erlang Coverage to Job Summary
+        run: |
+          echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
+          if [ -f erlang-coverage-results.md ]; then
+            cat erlang-coverage-results.md >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "![Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ WARNING: Erlang coverage report not generated" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Check Erlang Coverage Thresholds
         id: erlang_thresholds
         continue-on-error: true
         run: |
+          # Missing report fails the leg: warn-and-pass here once published
+          # a grey "unknown" badge for a dead coverage pipeline.
           if [ ! -f erlang-coverage-results.md ]; then
-            echo "⚠️ WARNING: erlang-coverage-results.md not found, skipping threshold check"
-            exit 0
+            echo "❌ FAILURE: erlang-coverage-results.md not found, cannot check thresholds"
+            exit 1
           fi
           
           erlang_coverage=$(grep -E 'Summary.*\|.*%' erlang-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
@@ -1340,6 +1418,25 @@ jobs:
           
           echo "✅ Erlang coverage thresholds met"
 
+      - name: Fail if Erlang coverage thresholds not met
+        if: steps.erlang_thresholds.outcome == 'failure'
+        run: |
+          echo "❌ Erlang coverage thresholds not met (see above for details)"
+          exit 1
+
+  publish-coverage:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [coverage-rust, coverage-erlang]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # persist-credentials kept: the step below pushes coverage badges to the `badges` branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
+        with:
+          persist-credentials: true
+
       - name: Publish coverage badges
         run: |
           # Determine badge colors based on coverage percentage
@@ -1354,8 +1451,8 @@ jobs:
             }'
           }
 
-          RUST_COV="${{ steps.rust_thresholds.outputs.rust_coverage }}"
-          ERLANG_COV="${{ steps.erlang_thresholds.outputs.erlang_coverage }}"
+          RUST_COV="${{ needs.coverage-rust.outputs.rust_coverage }}"
+          ERLANG_COV="${{ needs.coverage-erlang.outputs.erlang_coverage }}"
 
           # Guard against missing or non-numeric coverage values
           RUST_MSG="unknown"
@@ -1380,9 +1477,3 @@ jobs:
             "Update coverage badges [skip ci]" \
             rust-coverage.json "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" \
             erlang-coverage.json "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}"
-
-      - name: Fail if coverage thresholds not met
-        if: steps.rust_thresholds.outcome == 'failure' || steps.erlang_thresholds.outcome == 'failure'
-        run: |
-          echo "❌ Coverage thresholds not met (see above for details)"
-          exit 1
