@@ -371,12 +371,42 @@ send_every_unregistered_name_stops_test() ->
     T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
     wait_for_exit(maps:get(pid, T), 1000).
 
+%% The timer keeps phase with wall-clock deadlines instead of drifting.
+%%
+%% Synchronised on observable conditions, not guessed sleeps (BT-4249): the
+%% first tick proves the timer is inside send_loop with a deadline, then the
+%% test counts ticks until 10 deadlines elapse on the monotonic clock. A
+%% descheduled test process extends the wait instead of silently eating a
+%% fixed `timer:sleep/1` window, so loaded runners no longer fail the count.
+%% Only a lower bound is asserted: missed-tick bursts are pinned by
+%% `send_every_skips_missed_ticks_test`'s `=< 1`, and the count prints on
+%% failure so the next flake log names N directly.
 send_every_does_not_drift_test() ->
-    T = beamtalk_timer:'send:to:every:'(tick, self(), 20),
-    timer:sleep(210),
+    Ms = 20,
+    T = beamtalk_timer:'send:to:every:'(tick, self(), Ms),
+    receive
+        tick -> ok
+    after 1000 -> ?assert(false, "no first tick")
+    end,
+    Deadline = erlang:monotonic_time(millisecond) + 10 * Ms,
+    N = count_ticks_until(Deadline, 0),
     ?assert(beamtalk_timer:cancel(T)),
-    N = count_ticks(0),
-    ?assert(N >= 6 andalso N =< 11).
+    ?assert(N >= 8, io_lib:format("only ~p ticks in 10 periods", [N])).
+
+%% Drain ticks until the monotonic clock reaches Deadline (ms), then return
+%% the count. Unlike `timer:sleep(N)` + `count_ticks/1`, a descheduled test
+%% process still observes the full window: the deadline is on the clock, not
+%% in the sleeper.
+count_ticks_until(Deadline, N) ->
+    case Deadline - erlang:monotonic_time(millisecond) of
+        Left when Left > 0 ->
+            receive
+                tick -> count_ticks_until(Deadline, N + 1)
+            after Left -> count_ticks_until(Deadline, N)
+            end;
+        _ ->
+            N + count_ticks(0)
+    end.
 
 %% Ticks missed while the timer process is descheduled are skipped, not
 %% replayed as a burst.
