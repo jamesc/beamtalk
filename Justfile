@@ -611,9 +611,17 @@ build-stdlib: build-rust build-erlang
 # and the Erlang suites drive `cargo run --bin beamtalk`, which builds just
 # the binary and its deps on demand. Saves minutes on cold caches, where the
 # full workspace build was the coverage job's second-biggest cost.
+#
+# `--bins` (not just `--bin beamtalk`) is load-bearing: BEAM-side port code
+# resolves helper binaries from `target/debug/` — `beamtalk-compiler-port`
+# (beamtalk_compiler_port.erl) and `beamtalk-exec` (beamtalk_exec_port.erl) —
+# and `resolve_sibling_binary` falls back there too. Building only the
+# `beamtalk` binary breaks every suite that boots a BEAM node (e2e, eunit
+# git tests) with "Compiler not available" / missing-binary errors.
 [unix]
 coverage-build: build-erlang
-    @echo "🔨 Building coverage prerequisites (Erlang runtime + beamtalk binary + stdlib)..."
+    @echo "🔨 Building coverage prerequisites (Erlang runtime + binaries + stdlib)..."
+    @cargo build --bins --quiet
     @cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
     @echo "✅ Coverage prerequisites complete"
 
