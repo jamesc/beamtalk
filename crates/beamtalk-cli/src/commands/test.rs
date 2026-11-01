@@ -470,11 +470,19 @@ fn generate_core_file(
     // when compiling test/fixture files, matching what `beamtalk build` and
     // `beamtalk lint` enforce — the checks are gated on
     // `current_package: Some(_)` and silently emit zero diagnostics otherwise.
+    //
+    // BT-4334: declare the same checker scope `build` does. Without
+    // `ProjectComplete`, cross-file receivers stay `Open` and their DNU/Type
+    // diagnostics are suppressed, so `test --warnings-as-errors` passes code
+    // the REPL live recheck (full image hierarchy) rejects.
+    let (knowledge_scope, has_package_dependencies) = test_compile_scope(source_path);
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
         allow_primitives: false,
         warnings_as_errors,
         current_package: current_package.map(str::to_string),
+        knowledge_scope,
+        has_package_dependencies,
         // BT-4022: project-known Erlang modules so the `unresolved_ffi`
         // check agrees with `build`/`lint` on hex-dep and own-`native/`
         // modules.
@@ -503,6 +511,41 @@ fn generate_core_file(
     .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
 
     Ok(core_file)
+}
+
+/// Resolve the checker scope for compiling a test/fixture file (BT-4334).
+///
+/// Mirrors what `beamtalk build` declares in `commands::build::build`: a file
+/// inside a package is analysed with project-complete knowledge (every
+/// project file's classes are present in the hierarchy, so a genuinely
+/// unresolved selector is eligible for a DNU/Type diagnostic), while a
+/// manifest-less file keeps the conservative `ModuleOnly` default. `build`
+/// additionally treats "has dependencies" as unknown-extension surface (the
+/// pre-WS3 guard), so that flag is derived from the same manifest read —
+/// without it `test` would emit diagnostics `build` suppresses (and vice
+/// versa), reopening the CLI/REPL verdict split this helper closes.
+///
+/// Returns `(knowledge_scope, has_package_dependencies)`.
+fn test_compile_scope(
+    source_path: &Utf8Path,
+) -> (beamtalk_core::semantic_analysis::KnowledgeScope, bool) {
+    let scope = |root: &Utf8Path| {
+        let has_deps = manifest::find_manifest_full(root)
+            .ok()
+            .flatten()
+            .is_some_and(|m| !m.dependencies.is_empty());
+        (
+            beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+            has_deps,
+        )
+    };
+    find_package_root(source_path).map_or(
+        (
+            beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
+            false,
+        ),
+        |root| scope(&root),
+    )
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -3215,5 +3258,52 @@ mod tests {
         let result = parse_bunit_result_json(json, "").unwrap();
         assert_eq!(result.tests[0].class, None);
         assert_eq!(result.tests[0].name, "testFoo");
+    }
+
+    /// BT-4334: test-file compilation must declare the same checker scope as
+    /// `build`, or `test --warnings-as-errors` passes code the REPL live
+    /// recheck rejects (DNU/Type suppressed under `ModuleOnly`).
+    #[test]
+    fn test_compile_scope_matches_build() {
+        use beamtalk_core::semantic_analysis::KnowledgeScope;
+
+        // A package file without dependencies: project-complete, no dep guard.
+        let (_temp, dir) = temp_utf8_dir();
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src_dir = dir.join("test");
+        fs::create_dir_all(&src_dir).unwrap();
+        let file = src_dir.join("my_test.bt");
+        fs::write(&file, "").unwrap();
+        let (scope, has_deps) = test_compile_scope(&file);
+        assert_eq!(scope, KnowledgeScope::ProjectComplete);
+        assert!(!has_deps);
+
+        // A package file with dependencies: the pre-WS3 unknown-extension
+        // guard applies, exactly as `build` sets it.
+        let (_temp, dir) = temp_utf8_dir();
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n\n[dependencies]\nfoo = { path = \"../foo\" }\n",
+        )
+        .unwrap();
+        let src_dir = dir.join("test");
+        fs::create_dir_all(&src_dir).unwrap();
+        let file = src_dir.join("my_test.bt");
+        fs::write(&file, "").unwrap();
+        let (scope, has_deps) = test_compile_scope(&file);
+        assert_eq!(scope, KnowledgeScope::ProjectComplete);
+        assert!(has_deps);
+
+        // A manifest-less file keeps the conservative default.
+        let (_temp, dir) = temp_utf8_dir();
+        let file = dir.join("loose.bt");
+        fs::write(&file, "").unwrap();
+        let (scope, has_deps) = test_compile_scope(&file);
+        assert_eq!(scope, KnowledgeScope::ModuleOnly);
+        assert!(!has_deps);
     }
 }

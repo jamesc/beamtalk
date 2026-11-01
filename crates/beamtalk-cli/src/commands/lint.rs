@@ -15,6 +15,10 @@
 //!
 //! Lint diagnostics are suppressed during normal `check`/`compile` — this is
 //! the only command that surfaces them.
+//!
+//! With `--warnings-as-errors`, the command additionally fails on the
+//! live-recheck set (non-error `Dnu`/`Type` diagnostics plus any `Error`),
+//! matching a REPL `load-project` verdict (BT-4334).
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
@@ -175,11 +179,39 @@ fn dedup_pre_loaded_alias_collision(
     }
 }
 
+/// Whether a lint-pipeline diagnostic is a live-recheck failure (BT-4334).
+///
+/// Mirrors `relevant_image_diagnostic/1` in
+/// `runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`: the REPL
+/// whole-image recheck surfaces non-`error` `Dnu`/`Type` diagnostics as
+/// findings that fail `load-project`. `beamtalk lint` collects the same
+/// diagnostics (via `run_post_analysis_lint_pipeline`'s `category.is_some()`
+/// filter) but only counts `Severity::Lint` toward its failure threshold, so
+/// the same source passes CLI and fails REPL. With `warnings_as_errors`,
+/// these categories fail the command too, giving CI the same verdict as a
+/// REPL load. Any `Error` diagnostic also fails under the flag (lint
+/// otherwise never fails on errors by design — it is the lint-severity gate).
+fn is_live_recheck_failure(diag: &beamtalk_core::source_analysis::Diagnostic) -> bool {
+    use beamtalk_core::source_analysis::DiagnosticCategory;
+    if diag.severity == Severity::Error {
+        return true;
+    }
+    matches!(diag.severity, Severity::Warning | Severity::Hint)
+        && matches!(
+            diag.category,
+            Some(DiagnosticCategory::Dnu | DiagnosticCategory::Type)
+        )
+}
+
 /// Run lint passes on the given path (file or directory).
 ///
 /// Prints each lint diagnostic and returns an error if any are found.
+/// With `warnings_as_errors`, live-recheck diagnostics (non-error
+/// `Dnu`/`Type` findings, plus any `Error`) also fail the command, so the
+/// buccaneer-style sources the REPL `load-project` rejects fail CI here too
+/// (BT-4334).
 #[allow(clippy::too_many_lines)] // current_package resolution joins an already-large orchestration function
-pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
+pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
 
@@ -335,6 +367,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
+    // BT-4334: live-recheck failures surfaced only under --warnings-as-errors.
+    let mut total_recheck_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
     // Flattened-provision diagnostics, held until every file has been analysed.
     let mut all_provision_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
@@ -448,6 +482,15 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             .filter(|d| d.severity == Severity::Lint)
             .count();
 
+        // BT-4334: with `--warnings-as-errors`, the live-recheck categories
+        // fail the command too so CI agrees with a REPL `load-project`.
+        if warnings_as_errors {
+            total_recheck_count += lint_diags
+                .iter()
+                .filter(|d| is_live_recheck_failure(d))
+                .count();
+        }
+
         // Collect diagnostics for the summary.
         all_diags.extend(lint_diags);
     }
@@ -474,6 +517,9 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         }
         if diag.severity == Severity::Lint {
             total_lint_count += 1;
+        }
+        if warnings_as_errors && is_live_recheck_failure(&diag) {
+            total_recheck_count += 1;
         }
         all_diags.push(diag);
     }
@@ -510,6 +556,15 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         let plural = if total_lint_count == 1 { "" } else { "s" };
         miette::bail!(
             "{total_lint_count} lint diagnostic{plural} found in {total_files_checked} file(s)"
+        );
+    }
+
+    // BT-4334: the REPL-parity gate. Reported separately so the default
+    // lint-severity message above stays unchanged for existing callers.
+    if total_recheck_count > 0 {
+        let plural = if total_recheck_count == 1 { "" } else { "s" };
+        miette::bail!(
+            "{total_recheck_count} type/DNU diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
         );
     }
 
@@ -2733,6 +2788,81 @@ mod tests {
         assert!(
             registry.lookup("gen_tcp", "close", 1).is_some(),
             "gen_tcp module should be loaded independently"
+        );
+    }
+
+    /// BT-4334: the `--warnings-as-errors` gate must mirror the REPL
+    /// whole-image recheck (`relevant_image_diagnostic/1` in
+    /// `beamtalk_recheck.erl`): non-error `Dnu`/`Type` plus any `Error`.
+    #[test]
+    fn live_recheck_failure_matches_repl_image_categories() {
+        use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+
+        // The three buccaneer shapes: DNU hint, Type warning, hard error.
+        let dnu_hint = Diagnostic::hint("Integer does not understand 'foo'", Span::default())
+            .with_category(DiagnosticCategory::Dnu);
+        assert!(is_live_recheck_failure(&dnu_hint));
+        let type_warning = Diagnostic::warning(
+            "expression inferred as Dynamic in typed class `Exchange`",
+            Span::default(),
+        )
+        .with_category(DiagnosticCategory::Type);
+        assert!(is_live_recheck_failure(&type_warning));
+        let hard_error = Diagnostic::error("expected expression, found =>", Span::default());
+        assert!(is_live_recheck_failure(&hard_error));
+
+        // Everything else stays a display-only diagnostic under the flag:
+        // lint-severity findings, stale-`@expect` warnings (no category),
+        // and categories outside the recheck's Dnu/Type remit.
+        let lint_diag = Diagnostic::hint("unnecessary '.'", Span::default())
+            .with_category(DiagnosticCategory::Lint);
+        assert!(!is_live_recheck_failure(&lint_diag));
+        let stale_expect = Diagnostic::warning("stale @expect directive", Span::default());
+        assert!(!is_live_recheck_failure(&stale_expect));
+        let unrelated = Diagnostic::warning("unresolved class `Foo`", Span::default())
+            .with_category(DiagnosticCategory::UnresolvedClass);
+        assert!(!is_live_recheck_failure(&unrelated));
+    }
+
+    /// BT-4334 regression: a fixture carrying a REPL-only diagnostic today
+    /// (DNU hint on a builtin, which plain `lint` displays but does not fail
+    /// on) must fail the CLI gate with `--warnings-as-errors`, matching a
+    /// REPL `load-project` verdict.
+    #[test]
+    fn lint_warnings_as_errors_fails_on_repl_only_dnu() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"recheck_probe\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            src_dir.join("recheck_probe.bt"),
+            "Value subclass: RecheckProbe\n\n  probe => 42 foo\n",
+        )
+        .unwrap();
+
+        let path = root.to_str().unwrap().to_string();
+        // Plain lint is the lint-severity gate: the DNU hint is displayed
+        // but does not fail the command.
+        let plain = run_lint(&path, OutputFormat::Text, false);
+        assert!(
+            plain.is_ok(),
+            "plain lint must stay green on a DNU hint: {plain:?}"
+        );
+        // The parity gate fails on the same source, like REPL load-project.
+        let strict = run_lint(&path, OutputFormat::Text, true);
+        assert!(
+            strict.is_err(),
+            "lint --warnings-as-errors must fail on the REPL-only DNU hint"
+        );
+        let msg = format!("{:?}", strict.unwrap_err());
+        assert!(
+            msg.contains("type/DNU"),
+            "failure must name the parity gate, got: {msg}"
         );
     }
 }
