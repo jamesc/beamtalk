@@ -19,3 +19,21 @@ TestCase subclass: Bt3913ArmFieldProducerTest
 
   testInjectNotTakenLeavesBoth =>
     self assert: (Bt3913ArmFieldProducerActor spawn viaInject: false) equals: #[0, 0]
+
+  testCollectKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaCollect: true) equals: #[3, #(2, 4)]
+
+  testValueKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaValue: true) equals: #[1, 5]
+
+  testOnDoKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaOnDo: true) equals: #[1, 5]
+
+  testIfKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaIf: true) equals: #[1, 7]
+
+  testNoneTakenLeavesBothForEveryKind =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaCollect: false) equals: #[0, 0]
+    self assert: (Bt3913ArmFieldProducerActor spawn viaValue: false) equals: #[0, 0]
+    self assert: (Bt3913ArmFieldProducerActor spawn viaOnDo: false) equals: #[0, 0]
+    self assert: (Bt3913ArmFieldProducerActor spawn viaIf: false) equals: #[0, 0]
