@@ -1343,21 +1343,45 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 2b. Verify the stdlib class beams (bt@*.beam) were installed, and all of
-    # them: they come from `build-stdlib`'s output dir, not rebar3's _build
-    # (scripts/install-otp-apps.sh, BT-4119). A source count of 0 means the
-    # stdlib build no longer writes where install-otp-apps.sh reads.
-    SRC_CLASS_COUNT=$(find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | wc -l)
-    INSTALLED_CLASS_COUNT=$(find "$STDLIB_DIR" -maxdepth 1 -name 'bt@*.beam' | wc -l)
-    if [ "$SRC_CLASS_COUNT" -eq 0 ]; then
+    # 2b. Verify the installed stdlib class beams (bt@*.beam) are exactly the
+    # modules the installed beamtalk_stdlib.app activates. Both come from
+    # `build-stdlib`'s output dir, not rebar3's _build
+    # (scripts/install-otp-apps.sh, BT-4119/BT-4384): a class beam missing
+    # from the `classes`/`protocol_modules` env is never activated, an env
+    # entry with no beam fails activation at startup, and the `modules` list
+    # must match the installed beams. A count of 0 means the stdlib build no
+    # longer writes where install-otp-apps.sh reads.
+    if ! find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | grep -q .; then
         echo "❌ No bt@*.beam in runtime/apps/beamtalk_stdlib/ebin after build-stdlib — has its output dir moved?"
         exit 1
     fi
-    if [ "$INSTALLED_CLASS_COUNT" -ne "$SRC_CLASS_COUNT" ]; then
-        echo "❌ Installed $INSTALLED_CLASS_COUNT stdlib class beams, expected $SRC_CLASS_COUNT"
+    erl -noshell -eval '
+        [Ebin] = init:get_plain_arguments(),
+        {ok, [{application, beamtalk_stdlib, Props}]} =
+            file:consult(filename:join(Ebin, "beamtalk_stdlib.app")),
+        Env = proplists:get_value(env, Props),
+        Activated = lists:usort(
+            [maps:get(module, C) || C <- proplists:get_value(classes, Env)] ++
+                proplists:get_value(protocol_modules, Env)),
+        Listed = lists:usort(proplists:get_value(modules, Props)),
+        Beams = lists:usort([list_to_atom(filename:basename(F, ".beam"))
+                             || F <- filelib:wildcard("*.beam", Ebin)]),
+        ClassBeams = [M || M <- Beams, lists:prefix("bt@", atom_to_list(M))],
+        Checks = [{"class beams missing from the classes/protocol_modules env", ClassBeams -- Activated},
+                  {"classes/protocol_modules env entries with no installed beam", Activated -- ClassBeams},
+                  {"installed beams missing from the modules list", Beams -- Listed},
+                  {"modules list entries with no installed beam", Listed -- Beams}],
+        Failed = [{What, Mods} || {What, Mods} <- Checks, Mods =/= []],
+        [io:format("installed beamtalk_stdlib.app mismatch: ~s: ~p~n", [What, Mods])
+         || {What, Mods} <- Failed],
+        io:format("~b~n", [length(ClassBeams)]),
+        halt(case Failed of [] -> 0; _ -> 1 end).
+    ' -extra "$STDLIB_DIR" > "$TMPDIR/stdlib-app-check.out" || {
+        cat "$TMPDIR/stdlib-app-check.out"
+        echo "❌ Installed stdlib class beams and beamtalk_stdlib.app disagree"
         exit 1
-    fi
-    echo "✅ All $INSTALLED_CLASS_COUNT stdlib class beams installed"
+    }
+    echo "✅ All $(tail -n 1 "$TMPDIR/stdlib-app-check.out") installed stdlib class beams match beamtalk_stdlib.app"
 
     # 3. Verify runtime include headers are present
     test -f "$TMPDIR/lib/beamtalk/lib/beamtalk_runtime/include/beamtalk.hrl"
