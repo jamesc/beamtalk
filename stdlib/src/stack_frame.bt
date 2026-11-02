@@ -81,6 +81,6 @@ typed Value subclass: StackFrame
   ///
   /// ## Examples
   /// ```beamtalk
-  /// frame printString   // => "Counter>>dispatch/4 (counter.bt:42)"
+  /// frame printString   // => "Counter>>dispatch (counter.bt:42)"
   /// ```
   printString -> String => @primitive

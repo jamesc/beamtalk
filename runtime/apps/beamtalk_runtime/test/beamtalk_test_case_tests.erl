@@ -462,7 +462,11 @@ format_frame_identical_across_test_and_stackframe_paths_test_() ->
         {'bt@user@A', '-run/0-fun-3-', 1, [{file, "a.bt"}, {line, 8}]},
         {'bt@user@A', '-run/0-loop/1-0-', 1, [{line, 9}]},
         {'bt@user@NoSuchTraceModule', helper, 0, []},
-        {'bt@user@A', 'timesRepeat:', 1, [{file, "a.bt"}, {line, 0}]}
+        {'bt@user@A', 'timesRepeat:', 1, [{file, "a.bt"}, {line, 0}]},
+        %% Non-ASCII source paths (Latin-1 range and above 255) must render,
+        %% not crash the trace (which would lose the failing test's result).
+        {'bt@user@A', run, 2, [{file, "/tmp/jos\x{e9}/a.bt"}, {line, 7}]},
+        {'bt@user@A', run, 2, [{file, "/tmp/\x{4e2d}\x{6587}/a.bt"}, {line, 7}]}
     ],
     [
         ?_test(begin

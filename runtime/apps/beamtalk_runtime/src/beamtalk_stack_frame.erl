@@ -88,7 +88,7 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
     File =
         case proplists:get_value(file, Location) of
             undefined -> nil;
-            F -> list_to_binary(F)
+            F -> unicode:characters_to_binary(F)
         end,
     Line =
         case proplists:get_value(line, Location) of
