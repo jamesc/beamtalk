@@ -84,6 +84,71 @@ from_options_type_error_test() ->
     ).
 
 %%% ============================================================================
+%%% RegexOption conformance (BT-4381)
+%%%
+%%% The option set lives in three places: the `RegexOption` type alias in
+%%% stdlib/src/regex.bt, `beamtalk_regex:valid_options/0` (which drives
+%%% `translate_option/1` and its hint), and the `regex_option()` Erlang type.
+%%% These tests fail if any one of them changes alone.
+%%% ============================================================================
+
+regex_option_alias_matches_runtime_test() ->
+    ?assertEqual(
+        lists:sort(beamtalk_regex:valid_options()),
+        lists:sort(regex_option_alias_members())
+    ).
+
+regex_option_erlang_type_matches_runtime_test() ->
+    ?assertEqual(
+        lists:sort(beamtalk_regex:valid_options()),
+        lists:sort(regex_option_type_members())
+    ).
+
+every_valid_option_compiles_test() ->
+    lists:foreach(
+        fun(Opt) ->
+            R = beamtalk_regex:'from:options:'(<<"a">>, [Opt]),
+            ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R)
+        end,
+        beamtalk_regex:valid_options()
+    ).
+
+unknown_option_hint_lists_valid_options_test() ->
+    try beamtalk_regex:'from:options:'(<<"a">>, [bogus]) of
+        _ -> ?assert(false)
+    catch
+        error:#{error := #beamtalk_error{kind = regex_error, hint = {beamtalk_string, Hint}}} ->
+            lists:foreach(
+                fun(Opt) ->
+                    ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Opt)))
+                end,
+                beamtalk_regex:valid_options()
+            )
+    end.
+
+%% Members of `type RegexOption = #a | #b | ...` as recorded in the stdlib
+%% app's `type_aliases` env (generated from stdlib/src/regex.bt).
+regex_option_alias_members() ->
+    _ = application:load(beamtalk_stdlib),
+    {ok, Aliases} = application:get_env(beamtalk_stdlib, type_aliases),
+    [Expansion] = [E || #{name := 'RegexOption', expansion := E} <- Aliases],
+    [
+        list_to_atom(string:trim(Member, leading, "#"))
+     || Member <- string:lexemes(unicode:characters_to_list(Expansion), "| ")
+    ].
+
+%% Members of the `-type regex_option() :: a | b | ...` union, read from the
+%% compiled module's abstract code.
+regex_option_type_members() ->
+    {ok, {beamtalk_regex, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
+        beam_lib:chunks(code:which(beamtalk_regex), [abstract_code]),
+    [Members] = [
+        Ms
+     || {attribute, _, type, {regex_option, {type, _, union, Ms}, []}} <- Forms
+    ],
+    [Atom || {atom, _, Atom} <- Members].
+
+%%% ============================================================================
 %%% FFI no-colon aliases
 %%% ============================================================================
 

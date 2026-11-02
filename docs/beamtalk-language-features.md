@@ -1125,10 +1125,10 @@ Doc comments flow from source → AST → compiled BEAM module → runtime. They
 
 #### Documenting Parameters (`## Arguments` / `## Options`)
 
-The signature carries the machine-checked shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
+The signature carries the declared shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
 
 - `## Arguments` — one bullet per parameter: name in backticks, type in parentheses, then what it means.
-- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style): one bullet per key, each with its type and default.
+- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style) or a flag list (a `List` of symbols): one bullet per key or flag, each with what it means (and, for a keyed option, its type and default).
 
 The recipe for an option list:
 
@@ -1159,7 +1159,29 @@ Object subclass: Fetcher
     opts isEmpty ifTrue: [url] ifFalse: [url]
 ```
 
-This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the machine-checked shape, the bullet list is the prose.
+**Flag lists.** When every option is a bare on/off flag, declare the alias as a union of symbol literals and type the parameter `List(Alias)`. Each bullet under `## Options` names one flag; there is no per-flag type or default. The parameter itself is still required — describe the empty case as "pass `#()` for none", never as a default, and offer a shorter selector without the list when callers commonly pass no flags. `Regex class>>from:options:` is the stdlib example:
+
+```beamtalk
+/// A single PCRE compile flag.
+type RegexOption = #caseless | #multiline | #dotall | #extended | #ungreedy
+
+sealed typed Value subclass: Regex native: beamtalk_regex
+  /// Compile a regex pattern with PCRE options (class method).
+  ///
+  /// ## Arguments
+  /// - `pattern` (String) — the PCRE pattern to compile.
+  /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
+  ///
+  /// ## Options
+  /// - `#caseless` — case-insensitive matching.
+  /// - `#multiline` — `^` and `$` match at line breaks.
+  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
+    self delegate
+```
+
+Document the flags once, on the canonical method, and point other methods that take the same alias at it with `@see` (for example `String>>matchesRegex:options:` has `@see Regex class>>from:options:`) rather than copying the bullets. When the flags are interpreted by native Erlang code, the runtime's accepted set must be tested against the alias members — `beamtalk_regex_tests` does this for `RegexOption` by reading the alias from the stdlib app's `type_aliases` metadata.
+
+This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the declared shape, the bullet list is the prose. The type checker does not yet check the *elements* of a list literal against `List(E)` — `options: #(#bogus)` compiles without a warning and fails only at runtime (tracked in BT-4385) — so the alias documents the accepted values and the native implementation must still validate them.
 
 ### Method Category Dividers (`// === Name ===`)
 

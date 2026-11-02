@@ -42,7 +42,8 @@ sealed typed Value subclass: Regex native: beamtalk_regex
   ///
   /// ## Arguments
   /// - `pattern` (String) — the PCRE pattern to compile.
-  /// - `opts` (List(RegexOption), default `#()`) — compile flags.
+  /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
+  ///   Use `from:` when there are no flags.
   ///
   /// ## Options
   /// - `#caseless` — case-insensitive matching.
