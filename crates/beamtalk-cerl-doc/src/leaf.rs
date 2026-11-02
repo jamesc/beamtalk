@@ -28,6 +28,7 @@
 //! | [`string_lit`]   | `"escaped string"`         | `docvec!["\"", Document::String(e), "\""]`|
 //! | [`int_lit`]      | `42`                       | `Document::String(n.to_string())`         |
 //! | [`float_lit`]    | `3.14` / `5.0`             | the `Literal::Float` arm of codegen       |
+//! | [`bigint_lit`]   | `26729` (any width)        | the folded string value of a binary segment |
 //! | [`fname`]        | `'escaped_name'/arity`     | `docvec!["'", Document::String(f), "'/", …]` |
 //! | [`binary_lit`]   | `#{#<…>(…), …}#`            | `Document::String(Self::binary_string_literal(s))` |
 //! | [`annotated`]    | `( Expr -\| [Line, {'file', F}] )` | hand-rolled `-\|` annotation docvecs |
@@ -134,6 +135,56 @@ pub fn float_lit(f: f64) -> Document<'static> {
     } else {
         docvec![Document::Owned(s), ".0"]
     }
+}
+
+/// `26729` — the non-negative Core Erlang integer whose big-endian bytes are
+/// `be_bytes`, rendered in decimal at any width.
+///
+/// Core Erlang integers are bignums, so this is not bounded by `i64`/`u64`:
+/// a base-10^9 limb fold handles any number of bytes. Used for the folded
+/// value of a string literal in a binary pattern segment (`<<"hi">>` is
+/// `#<26729>(16,1,'integer',…)`). An empty slice renders `0`.
+///
+/// ```text
+/// bigint_lit(b"hi")                        => 26729
+/// bigint_lit(&[1, 0, 0, 0, 0, 0, 0, 0, 0]) => 18446744073709551616
+/// ```
+#[must_use]
+pub fn bigint_lit(be_bytes: &[u8]) -> Document<'static> {
+    use std::fmt::Write as _;
+    const BASE: u32 = 1_000_000_000;
+    // Little-endian base-10^9 limbs, each `< BASE`.
+    let mut limbs: Vec<u32> = vec![0];
+    for &b in be_bytes {
+        let mut carry = u64::from(b);
+        for limb in &mut limbs {
+            let cur = u64::from(*limb) * 256 + carry;
+            (*limb, carry) = split_limb(cur, BASE);
+        }
+        while carry > 0 {
+            let (low, high) = split_limb(carry, BASE);
+            limbs.push(low);
+            carry = high;
+        }
+    }
+    let mut out = String::new();
+    let mut limbs = limbs.iter().rev();
+    // The most significant limb renders unpadded; the rest are 9 digits each.
+    if let Some(top) = limbs.next() {
+        let _ = write!(out, "{top}");
+    }
+    for limb in limbs {
+        let _ = write!(out, "{limb:09}");
+    }
+    Document::Owned(out)
+}
+
+/// Splits `n` into `(n % base, n / base)`, the low part narrowed to `u32`
+/// (lossless: it is `< base`).
+fn split_limb(n: u64, base: u32) -> (u32, u64) {
+    let base = u64::from(base);
+    let low = u32::try_from(n % base).unwrap_or_default();
+    (low, n / base)
 }
 
 /// `'escaped_name'/arity` — a Core Erlang function name (atom plus arity).
@@ -362,6 +413,37 @@ mod tests {
     fn float_lit_whole_number_gets_decimal_point() {
         // 5.0.to_string() is "5"; Core Erlang needs the decimal point.
         assert_eq!(float_lit(5.0).to_pretty_string(), "5.0");
+    }
+
+    #[test]
+    fn bigint_lit_small_values() {
+        assert_eq!(bigint_lit(&[]).to_pretty_string(), "0");
+        assert_eq!(bigint_lit(&[0]).to_pretty_string(), "0");
+        assert_eq!(bigint_lit(b"hi").to_pretty_string(), "26729");
+        assert_eq!(bigint_lit(&[0xff, 0xff]).to_pretty_string(), "65535");
+    }
+
+    #[test]
+    fn bigint_lit_crosses_limb_and_u64_boundaries() {
+        // 10^9 exactly: the low limb must render zero-padded.
+        assert_eq!(
+            bigint_lit(&1_000_000_000u64.to_be_bytes()).to_pretty_string(),
+            "1000000000"
+        );
+        assert_eq!(
+            bigint_lit(&u64::MAX.to_be_bytes()).to_pretty_string(),
+            u64::MAX.to_string()
+        );
+        // 2^64 — one past the u64 ceiling.
+        assert_eq!(
+            bigint_lit(&[1, 0, 0, 0, 0, 0, 0, 0, 0]).to_pretty_string(),
+            "18446744073709551616"
+        );
+        let wide = u128::MAX - 12345;
+        assert_eq!(
+            bigint_lit(&wide.to_be_bytes()).to_pretty_string(),
+            wide.to_string()
+        );
     }
 
     #[test]

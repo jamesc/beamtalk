@@ -63,6 +63,18 @@ fn unit_multiplier(unit: Option<usize>) -> i64 {
     unit.map_or(1, |u| i64::try_from(u).unwrap_or(1))
 }
 
+/// The unit a binary segment type name implies, verified against `erlc`
+/// (BT-4376): `bits`/`bitstring` imply 1 and `bytes` implies 8, so a
+/// different explicit `unit:` is a conflict. `binary` and the other types
+/// imply none (`<<X:2/binary-unit:16>>` is accepted).
+fn implied_segment_unit(type_name: &str) -> Option<usize> {
+    match type_name {
+        "bits" | "bitstring" => Some(1),
+        "bytes" => Some(8),
+        _ => None,
+    }
+}
+
 /// Whether integer `value` fits in `size_bits` bits (review finding 3).
 ///
 /// `size_bits` is non-negative (negative sizes are rejected separately).
@@ -2459,8 +2471,16 @@ impl Parser {
             return;
         }
         // `erlc`: "a bit unit size must not be specified unless a size is
-        // specified too".
-        if unit.is_some() && size.is_none() {
+        // specified too" — only for integer and float segments; a sizeless
+        // `binary`/`bits` segment takes a unit (`<<X/binary-unit:16>>`
+        // matches the rest when its bit length is a multiple of 16).
+        if unit.is_some()
+            && size.is_none()
+            && matches!(
+                seg_type,
+                BinarySegmentType::Integer | BinarySegmentType::Float
+            )
+        {
             self.diagnostics.push(Diagnostic::error(
                 "a bit unit size must not be specified unless a size is specified too",
                 value.span(),
@@ -2492,6 +2512,25 @@ impl Parser {
                 _ => None,
             };
             if let Some(v) = int_value {
+                // A non-ASCII character in a default 8-bit integer segment
+                // matches one byte holding its code point (`<<$é>>` is
+                // byte 233, exactly like `erlc`), not its UTF-8 encoding —
+                // so it disagrees with `<<"é">>`, which folds to the UTF-8
+                // bytes (BT-4376). Code points above 255 already warn below
+                // that they do not fit.
+                if let Literal::Character(c) = lit {
+                    if seg_type == BinarySegmentType::Integer
+                        && size.is_none()
+                        && (128..=255).contains(&u32::from(*c))
+                    {
+                        self.diagnostics.push(Diagnostic::warning(
+                            format!(
+                                "character literal ${c} matches the single byte {v} (its code point), not its UTF-8 encoding; use \"{c}\" or ${c}/utf8 to match the UTF-8 bytes"
+                            ),
+                            *value_span,
+                        ));
+                    }
+                }
                 self.check_binary_int_literal_shape(
                     v,
                     *value_span,
@@ -2741,6 +2780,8 @@ impl Parser {
         let mut signedness = None;
         let mut endianness = None;
         let mut unit = None;
+        // The unit a `bits`/`bitstring`/`bytes` type implies (BT-4376).
+        let mut implied_unit: Option<usize> = None;
 
         if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "/") {
             self.advance(); // consume `/`
@@ -2765,12 +2806,18 @@ impl Parser {
                         ));
                         self.skip_unit_specifier();
                     } else {
+                        let start = self.current_token().span();
                         unit = self.parse_unit_specifier();
+                        let span = start.merge(self.tokens[self.current - 1].span());
+                        if let (Some(explicit), Some(implied)) = (unit, implied_unit) {
+                            self.check_unit_conflict(explicit, implied, span);
+                        }
                     }
                 } else if let TokenKind::Identifier(name) = self.current_kind() {
                     let name = name.clone();
                     self.advance();
                     let span = self.tokens[self.current - 1].span();
+                    let had_type = segment_type.is_some();
                     self.apply_named_segment_specifier(
                         &name,
                         span,
@@ -2778,6 +2825,17 @@ impl Parser {
                         &mut signedness,
                         &mut endianness,
                     );
+                    // `bits`/`bitstring` imply unit 1 and `bytes` unit 8
+                    // (`binary` implies none): `erlc` rejects a different
+                    // explicit `unit:`, in either order (BT-4376).
+                    if !had_type {
+                        if let Some(implied) = implied_segment_unit(&name) {
+                            implied_unit = Some(implied);
+                            if let Some(explicit) = unit {
+                                self.check_unit_conflict(implied, explicit, span);
+                            }
+                        }
+                    }
                 } else if let TokenKind::Keyword(kw) = self.current_kind() {
                     let kw = kw.clone();
                     let span = self.advance().span();
@@ -2807,6 +2865,25 @@ impl Parser {
         }
 
         (segment_type, signedness, endianness, unit)
+    }
+
+    /// Reports `erlc`'s "conflict in unit specification" when a segment's
+    /// explicit `unit:` and the unit its type implies differ. `later` is the
+    /// unit given second and `earlier` the first, the order `erlc` names
+    /// them in (`<<X:2/bits-unit:8>>` reports '8' and '1'); `span` covers
+    /// the later specifier.
+    fn check_unit_conflict(
+        &mut self,
+        later: usize,
+        earlier: usize,
+        span: crate::source_analysis::Span,
+    ) {
+        if later != earlier {
+            self.diagnostics.push(Diagnostic::error(
+                format!("conflict in unit specification for bit field: '{later}' and '{earlier}'"),
+                span,
+            ));
+        }
     }
 
     /// Applies one named (`Identifier`) segment specifier — a type,
