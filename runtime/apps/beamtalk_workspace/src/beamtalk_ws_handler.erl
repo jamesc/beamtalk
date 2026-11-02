@@ -419,13 +419,16 @@ handle_auth(Data, State) ->
                     %% exemption grants no compilation or eval capability.
                     %% (`handle_shutdown/2` additionally re-validates the
                     %% cookie from the op body.)
+                    %%
+                    %% The `vscode` surface (BT-4373) is checked on
+                    %% `protocol_version` only: the extension compiles no
+                    %% code (its `eval` is compiled here, by this node's own
+                    %% compiler), and it ships separately on the marketplace,
+                    %% so an exact toolchain match would break it on every
+                    %% rebuild. See `check_client_versions/2`.
                     ClientSurface = maps:get(<<"client">>, AuthMsg, undefined),
                     ShutdownOnly = ClientSurface =:= <<"shutdown">>,
-                    VersionCheck =
-                        case ShutdownOnly of
-                            true -> ok;
-                            false -> check_client_versions(AuthMsg)
-                        end,
+                    VersionCheck = check_client_versions(ClientSurface, AuthMsg),
                     case VersionCheck of
                         ok ->
                             %% Check for session resume request
@@ -497,6 +500,56 @@ handle_auth(Data, State) ->
                 })
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
+    end.
+
+-doc """
+Apply the version gate for the connecting client's declared surface.
+
+- `shutdown` (`workspace stop`, BT-4327): exempt — it must be able to stop
+  a stale node, and its connection is restricted to the `shutdown` op.
+- `vscode` (the VS Code extension's workspace client, BT-4373): only
+  `protocol_version` must match. The extension never compiles code — every
+  `eval` it sends is compiled inside this node by this node's compiler — so
+  the toolchain-identity half of the lock guards nothing for it, while an
+  exact `-dev+<sha>` match would break a marketplace-installed extension on
+  every rebuild.
+- every other surface (CLI REPL, MCP, LSP, …): full toolchain lock via
+  `check_client_versions/1`.
+""".
+-spec check_client_versions(term(), map()) -> ok | {error, binary()}.
+check_client_versions(<<"shutdown">>, _AuthMsg) ->
+    ok;
+check_client_versions(<<"vscode">>, AuthMsg) ->
+    check_client_protocol(AuthMsg);
+check_client_versions(_ClientSurface, AuthMsg) ->
+    check_client_versions(AuthMsg).
+
+-doc """
+Protocol-only gate (the `vscode` surface): `protocol_version` must equal
+`?PROTOCOL_VERSION`. A missing field counts as a mismatch.
+""".
+-spec check_client_protocol(map()) -> ok | {error, binary()}.
+check_client_protocol(AuthMsg) ->
+    ClientProtocol = maps:get(<<"protocol_version">>, AuthMsg, undefined),
+    case ClientProtocol =:= ?PROTOCOL_VERSION of
+        true ->
+            ok;
+        false ->
+            {error,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Protocol mismatch: the VS Code extension speaks workspace "
+                        "protocol ~s, this workspace node (beamtalk ~s) speaks "
+                        "protocol ~s. Update the Beamtalk extension or the "
+                        "beamtalk toolchain so they agree, then restart the "
+                        "workspace.",
+                        [
+                            display_vsn(ClientProtocol),
+                            display_vsn(beamtalk_version:app_vsn(beamtalk_workspace)),
+                            display_vsn(?PROTOCOL_VERSION)
+                        ]
+                    )
+                )}
     end.
 
 -doc """

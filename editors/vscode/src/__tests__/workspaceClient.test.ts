@@ -1,9 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { WebSocketCallbacks, WebSocketFactory } from "../workspaceClient";
-import { WorkspaceClient } from "../workspaceClient";
+import { WORKSPACE_PROTOCOL_VERSION, WorkspaceClient } from "../workspaceClient";
 
 // ─── Mock WebSocket ───────────────────────────────────────────────────────────
 
@@ -92,11 +94,40 @@ function respondTo(ws: MockWebSocket, serverPayload: Record<string, unknown>): v
 // ─── Auth flow ────────────────────────────────────────────────────────────────
 
 describe("WorkspaceClient auth flow", () => {
-  it("sends cookie in response to auth-required challenge", () => {
+  it("sends cookie, vscode surface and protocol version in response to auth-required", () => {
     const { ws } = makeClient();
     ws.receive({ op: "auth-required" });
     const authMsg = ws.sent.find((m) => m.type === "auth");
-    expect(authMsg).toEqual({ type: "auth", cookie: "test-cookie" });
+    // BT-4373: the workspace gates the `vscode` surface on protocol_version
+    // only; a frame without it is rejected as a pre-handshake client.
+    expect(authMsg).toEqual({
+      type: "auth",
+      cookie: "test-cookie",
+      client: "vscode",
+      protocol_version: WORKSPACE_PROTOCOL_VERSION,
+    });
+  });
+
+  it("speaks the protocol version defined by the runtime header", () => {
+    // The canonical protocol version is `?PROTOCOL_VERSION` in beamtalk.hrl;
+    // fail here (not at a user's auth handshake) if the extension drifts.
+    const hrl = readFileSync(
+      path.resolve(__dirname, "../../../../runtime/apps/beamtalk_runtime/include/beamtalk.hrl"),
+      "utf8"
+    );
+    const match = /-define\(PROTOCOL_VERSION,\s*<<"([^"]+)">>\)\./.exec(hrl);
+    expect(match).not.toBeNull();
+    expect(WORKSPACE_PROTOCOL_VERSION).toBe(match?.[1]);
+  });
+
+  it("notifies auth-error handlers with the server message", () => {
+    const { client, ws } = makeClient();
+    const messages: string[] = [];
+    client.onAuthError((m) => messages.push(m));
+    ws.receive({ op: "auth-required" });
+    ws.receive({ type: "auth_error", message: "Protocol mismatch: ..." });
+    expect(messages).toEqual(["Protocol mismatch: ..."]);
+    client.dispose();
   });
 
   it("transitions to connected after session-started", () => {
