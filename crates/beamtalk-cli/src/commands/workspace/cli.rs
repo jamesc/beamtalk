@@ -272,15 +272,10 @@ fn apply_list_filters(
     workspaces
         .into_iter()
         .filter(|ws| status_filter.is_none_or(|wanted| ws.status == wanted))
-        .filter(|ws| match &project_needle {
-            None => true,
-            Some(needle) => {
-                let path_hit = ws
-                    .project_path
-                    .as_ref()
-                    .is_some_and(|p| p.to_string_lossy().to_lowercase().contains(needle));
-                path_hit || ws.workspace_id.to_lowercase().contains(needle)
-            }
+        .filter(|ws| {
+            project_needle
+                .as_deref()
+                .is_none_or(|needle| ws.matches_project_filter(needle))
         })
         .collect()
 }
@@ -480,7 +475,7 @@ fn run_list(json: bool, status_filter: Option<&str>, project_filter: Option<&str
 fn run_prune(dry_run: bool, project_filter: Option<&str>) -> Result<()> {
     let report = super::prune_workspaces(dry_run, project_filter)?;
 
-    if report.removed.is_empty() {
+    if report.removed.is_empty() && report.failed.is_empty() {
         println!("Nothing to prune.");
     } else {
         for id in &report.removed {
@@ -502,6 +497,21 @@ fn run_prune(dry_run: bool, project_filter: Option<&str>) -> Result<()> {
             report.skipped_running,
             report.skipped_releases
         );
+    }
+
+    // Report every removal above before failing, so a mid-run error never
+    // hides what was already deleted.
+    for failure in &report.failed {
+        eprintln!(
+            "failed to remove {}: {}",
+            failure.workspace_id, failure.error
+        );
+    }
+    if !report.failed.is_empty() {
+        return Err(miette::miette!(
+            "{} workspace(s) could not be pruned",
+            report.failed.len()
+        ));
     }
 
     Ok(())
