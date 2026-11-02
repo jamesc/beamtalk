@@ -523,10 +523,37 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
         end,
     case Test of
         #{error := Error} ->
-            Base#{<<"error">> => error_text(Error)};
+            Base1 = Base#{<<"error">> => error_text(Error)},
+            case Test of
+                #{frames := Frames} when is_list(Frames) ->
+                    Base1#{<<"frames">> => [serialize_frame(F) || F <- Frames]};
+                _ ->
+                    Base1
+            end;
         _ ->
             Base
     end.
+
+-doc """
+Serialize one structured stack frame (BT-4355): Beamtalk terms only —
+`class`, `selector`, `block`, `file` (null when unknown), `line` (null when
+unknown) and `repeat`. No Erlang module/function/arity is ever emitted.
+""".
+-spec serialize_frame(map()) -> map().
+serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame) ->
+    #{
+        <<"class">> => ensure_utf8(Class),
+        <<"selector">> => ensure_utf8(Selector),
+        <<"block">> => Block,
+        <<"file">> => null_if_nil(maps:get(file, Frame, nil)),
+        <<"line">> => null_if_nil(maps:get(line, Frame, nil)),
+        <<"repeat">> => maps:get(repeat, Frame, 1)
+    }.
+
+-spec null_if_nil(term()) -> term().
+null_if_nil(nil) -> null;
+null_if_nil(File) when is_binary(File) -> ensure_utf8(File);
+null_if_nil(Other) -> Other.
 
 -doc "A failed test's error as UTF-8 text (a binary as-is, anything else printed).".
 -spec error_text(term()) -> binary().

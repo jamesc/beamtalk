@@ -346,6 +346,47 @@ result_to_json_with_failure_test() ->
     ?assertEqual(<<"fail">>, maps:get(<<"status">>, Test)),
     ?assertEqual(<<"expected 1 got 2">>, maps:get(<<"error">>, Test)).
 
+result_to_json_includes_structured_frames_test() ->
+    Frame = #{
+        class => <<"A">>,
+        selector => <<"m1">>,
+        block => true,
+        file => nil,
+        line => nil,
+        repeat => 2
+    },
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{
+            name => testBad,
+            class => 'T',
+            status => fail,
+            error => <<"boom">>,
+            frames => [Frame]
+        }
+    ]),
+    Decoded = json:decode(beamtalk_test_runner:result_to_json(Result)),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    [F] = maps:get(<<"frames">>, Test),
+    ?assertEqual(
+        #{
+            <<"class">> => <<"A">>,
+            <<"selector">> => <<"m1">>,
+            <<"block">> => true,
+            <<"file">> => null,
+            <<"line">> => null,
+            <<"repeat">> => 2
+        },
+        F
+    ).
+
+result_to_json_no_frames_key_without_frames_test() ->
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testBad, class => 'T', status => fail, error => <<"boom">>}
+    ]),
+    Decoded = json:decode(beamtalk_test_runner:result_to_json(Result)),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertNot(maps:is_key(<<"frames">>, Test)).
+
 result_to_json_skip_has_no_error_key_test() ->
     Result = make_result(1, 0, 0, 1, 0.1, [
         #{name => testSkip, class => 'T', status => skip, reason => <<"unix only">>}
