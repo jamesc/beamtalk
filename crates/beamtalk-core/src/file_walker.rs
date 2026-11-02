@@ -149,7 +149,10 @@ impl FileWalker {
     /// - Rules are matched against each entry the walk visits, never against
     ///   the walk root itself: an explicitly requested directory is always
     ///   walked even if an ancestor rule ignores it (e.g. a dependency
-    ///   checkout under a gitignored `_build/`).
+    ///   checkout under a gitignored `_build/`). In that case the rules from
+    ///   above the ignored ancestor (including `.git/info/exclude`) do not
+    ///   apply inside the walk root at all; `.gitignore` files between the
+    ///   ignored ancestor and the walk root still do.
     /// - The user's global excludes file (`core.excludesFile`) is not
     ///   consulted: it is per-machine configuration, and which project files
     ///   a command sees must not differ between machines.
@@ -525,10 +528,12 @@ impl IgnoreStack {
     /// including, the walk root (whose own `.gitignore` `walk_dir` pushes).
     ///
     /// An explicitly walked directory is always walked: when those rules
-    /// ignore the walk root or any directory on the way down to it (e.g.
+    /// ignore the walk root or a directory on the way down to it (e.g.
     /// `_build/` or `_build/**` above a walk of `_build/deps/<dep>/src`),
-    /// none of them apply, since a glob like `_build/**` would otherwise
-    /// still match every entry inside the root.
+    /// every rule from above that ignored directory — `.git/info/exclude`
+    /// included — is dropped, since a glob like `_build/**` would otherwise
+    /// still match every entry inside the root. `.gitignore` files below the
+    /// ignored directory (a dependency's own) still apply.
     fn above_walk_root(canonical_root: &Path) -> Self {
         let mut stack = Self::default();
         let Some(repo_root) = canonical_root
@@ -552,12 +557,12 @@ impl IgnoreStack {
             // own `.gitignore` is pushed; the repository root (`i == 0`) is
             // never itself ignored.
             if i > 0 && stack.is_ignored(dir, true) {
-                return Self::default();
+                stack = Self::default();
             }
             stack.push_dir(dir);
         }
         if stack.is_ignored(canonical_root, true) {
-            return Self::default();
+            stack = Self::default();
         }
         stack
     }
@@ -1023,6 +1028,13 @@ mod tests {
         write_file(&repo.join("src/a.bt"), "");
 
         let dep_src = repo.join("_build/deps/dep/src");
+        let files = FileWalker::source_files().walk(&dep_src).unwrap();
+        assert_eq!(relative_names(&dep_src, &files), vec!["c.bt"]);
+
+        // A dependency's own `.gitignore` below the ignored ancestor still
+        // applies.
+        write_file(&repo.join("_build/deps/dep/.gitignore"), "src/scratch/\n");
+        write_file(&repo.join("_build/deps/dep/src/scratch/d.bt"), "");
         let files = FileWalker::source_files().walk(&dep_src).unwrap();
         assert_eq!(relative_names(&dep_src, &files), vec!["c.bt"]);
 

@@ -165,6 +165,10 @@ impl Backend {
             // `did_open` registers meanwhile (BT-4158) loads strictly after
             // it, rather than racing its whole-session setter calls.
             let root_load_guard = self.root_load_lock.lock().await;
+            // The per-root loaders replace whole-session state, so feed them
+            // every known root — not just `config.roots` — in case a
+            // `did_open` registered one before this lock was taken.
+            let all_roots = self.workspace_roots_snapshot();
             // mark preload in-flight so a didOpen/didChange racing
             // this sequence defers its own `publish_diagnostics` to the
             // self-healing republish below instead of racing it to be the
@@ -182,13 +186,13 @@ impl Backend {
             // files when they run. (The [diagnostics] table below needs no
             // such care: it is applied per-request at diagnostic-computation
             // time.)
-            self.load_root_packages(&config.roots).await;
+            self.load_root_packages(&all_roots).await;
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
-            self.load_type_cache(&config.roots).await;
+            self.load_type_cache(&all_roots).await;
             // ADR 0100 Rule 3: load beamtalk.toml's [diagnostics]
             // severity-override table so the LSP agrees with `beamtalk build`.
-            self.load_diagnostics_table(&config.roots).await;
+            self.load_diagnostics_table(&all_roots).await;
             // the project index is now fully populated (and won't
             // change again from this startup sequence) — clear the flag
             // *before* republishing below, so republish's own
