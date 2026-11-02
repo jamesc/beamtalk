@@ -250,6 +250,33 @@ impl CoreErlangGenerator {
         doc
     }
 
+    /// BT-4356: annotates one `call`/`apply` node — the instruction that
+    /// actually transfers control for a send — with the source line of the
+    /// send's `span`.
+    ///
+    /// [`Self::annotate_send_with_line`] wraps a send's *whole* document, and
+    /// the OTP compiler takes a call's stack-frame location from the
+    /// annotation on the `call`/`apply` node itself: one on an enclosing
+    /// `let`/`case` never reaches it. A send that lowers to `let _V = Recv
+    /// in case is_function(_V) of ... -> apply _V () ...` (a block `value` on
+    /// a non-literal receiver) therefore left its frame with no location, and
+    /// a stack trace through it — `Integer>>timesRepeat:` evaluating its
+    /// `block value` — rendered with no `file:line`. Emitters whose call is
+    /// nested inside such a wrapper annotate the call node through this.
+    ///
+    /// A single call node is always a closed expression, so unlike
+    /// [`Self::annotate_send_with_line`] this needs no open-chain check.
+    pub(super) fn annotate_call_node_with_line(
+        &self,
+        call: Document<'static>,
+        span: Span,
+    ) -> Document<'static> {
+        match self.span_to_line(span) {
+            Some(line_num) => self.annotate_with_line(call, line_num),
+            None => call,
+        }
+    }
+
     /// Removes every entry `scope` registered, once the parent compile
     /// that was meant to consult them is done. An entry that was never
     /// consulted means that compile bypassed `generate_expression` for the

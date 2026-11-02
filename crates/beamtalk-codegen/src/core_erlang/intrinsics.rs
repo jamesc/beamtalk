@@ -276,6 +276,26 @@ impl CoreErlangGenerator {
                 "Block",
                 "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
             );
+            // BT-4356: each control-transferring node carries the send's line
+            // (see `annotate_call_node_with_line`).
+            let at = receiver.span();
+            let apply_doc = self.annotate_call_node_with_line(
+                docvec!["apply ", leaf::var(recv_var.clone()), " ()"],
+                at,
+            );
+            // The same apply in the arity >= 2 branch (0 and 1 are ruled out
+            // before it), where it always badarity-crashes — the existing
+            // behaviour for wrong-arity plain functions, preserved
+            // deliberately.
+            let badarity_apply_doc = apply_doc.clone();
+            let send_doc = self.annotate_call_node_with_line(
+                docvec![
+                    "call 'beamtalk_message_dispatch':'send'(",
+                    leaf::var(recv_var.clone()),
+                    ", 'value', [])"
+                ],
+                at,
+            );
             let call_doc = docvec![
                 "let ",
                 leaf::var(recv_var.clone()),
@@ -283,23 +303,19 @@ impl CoreErlangGenerator {
                 recv_doc,
                 " in case call 'erlang':'is_function'(",
                 leaf::var(recv_var.clone()),
-                ", 0) of 'true' when 'true' -> apply ",
-                leaf::var(recv_var.clone()),
-                " () 'false' when 'true' -> case call 'erlang':'is_function'(",
+                ", 0) of 'true' when 'true' -> ",
+                apply_doc,
+                " 'false' when 'true' -> case call 'erlang':'is_function'(",
                 leaf::var(recv_var.clone()),
                 ", 1) of 'true' when 'true' -> ",
                 stateful_branch,
                 " 'false' when 'true' -> case call 'erlang':'is_function'(",
-                leaf::var(recv_var.clone()),
-                // Only arity >= 2 funs reach this branch (0 and 1 were ruled
-                // out above), so this apply always badarity-crashes — the
-                // existing behaviour for wrong-arity plain functions,
-                // preserved deliberately.
-                ") of 'true' when 'true' -> apply ",
-                leaf::var(recv_var.clone()),
-                " () 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
                 leaf::var(recv_var),
-                ", 'value', []) end end end",
+                ") of 'true' when 'true' -> ",
+                badarity_apply_doc,
+                " 'false' when 'true' -> ",
+                send_doc,
+                " end end end",
             ];
             seq.close(self, call_doc, "ValRes")
         };
@@ -805,7 +821,11 @@ impl CoreErlangGenerator {
 
         let args_doc = join(arg_docs, &Document::Str(", "));
 
-        parts.push(docvec!["apply ", leaf::var(fun_var), " (", args_doc, ")",]);
+        // BT-4356: the apply node itself carries the send's line.
+        parts.push(self.annotate_call_node_with_line(
+            docvec!["apply ", leaf::var(fun_var), " (", args_doc, ")",],
+            receiver.span(),
+        ));
         Ok(Document::Vec(parts))
     }
 
@@ -836,16 +856,25 @@ impl CoreErlangGenerator {
         for arg in arguments {
             arg_docs.push(self.expression_doc(arg)?);
         }
+        // BT-4356: the `badarity` is raised by the apply node, so it carries
+        // the send's line.
+        let apply_doc = self.annotate_call_node_with_line(
+            docvec![
+                "apply ",
+                leaf::var(fun_var.clone()),
+                " (",
+                join(arg_docs, &Document::Str(", ")),
+                ")",
+            ],
+            block.span,
+        );
         Ok(docvec![
             "let ",
-            leaf::var(fun_var.clone()),
+            leaf::var(fun_var),
             " = fun (",
             join(params, &Document::Str(", ")),
-            ") -> 'nil' in apply ",
-            leaf::var(fun_var),
-            " (",
-            join(arg_docs, &Document::Str(", ")),
-            ")",
+            ") -> 'nil' in ",
+            apply_doc,
         ])
     }
 
@@ -990,34 +1019,47 @@ impl CoreErlangGenerator {
         );
         let arity = arguments.len();
 
+        // BT-4356: each control-transferring node carries the send's line
+        // (see `annotate_call_node_with_line`). The arity-matched apply and
+        // the fall-through (badarity) apply are the same node.
+        let at = receiver.span();
+        let apply_doc = self.annotate_call_node_with_line(
+            docvec!["apply ", leaf::var(recv_var.clone()), " (", apply_args, ")"],
+            at,
+        );
+        let send_doc = self.annotate_call_node_with_line(
+            docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(recv_var.clone()),
+                ", ",
+                leaf::atom(selector_name.to_string()),
+                ", ",
+                send_list,
+                ")"
+            ],
+            at,
+        );
+
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
             leaf::var(recv_var.clone()),
             ", ",
             leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
-            ") of 'true' when 'true' -> apply ",
-            leaf::var(recv_var.clone()),
-            " (",
-            apply_args.clone(),
-            ") 'false' when 'true' -> case call 'erlang':'is_function'(",
+            ") of 'true' when 'true' -> ",
+            apply_doc.clone(),
+            " 'false' when 'true' -> case call 'erlang':'is_function'(",
             leaf::var(recv_var.clone()),
             ", ",
             leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
             ") of 'true' when 'true' -> ",
             stateful_branch,
             " 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(recv_var.clone()),
-            ") of 'true' when 'true' -> apply ",
-            leaf::var(recv_var.clone()),
-            " (",
-            apply_args,
-            ") 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             leaf::var(recv_var),
-            ", ",
-            leaf::atom(selector_name.to_string()),
-            ", ",
-            send_list,
-            ") end end end",
+            ") of 'true' when 'true' -> ",
+            apply_doc,
+            " 'false' when 'true' -> ",
+            send_doc,
+            " end end end",
         ];
 
         // ADR 0118 phase 5b: `parts` is already a self-contained
@@ -1117,16 +1159,18 @@ impl CoreErlangGenerator {
         arg_docs.push(leaf::var(current_state));
         let args_doc = join(arg_docs, &Document::Str(", "));
 
+        // BT-4356: the apply node itself carries the send's line.
+        let apply_doc = self.annotate_call_node_with_line(
+            docvec!["apply ", leaf::var(fun_var.clone()), " (", args_doc, ")"],
+            receiver.span(),
+        );
         let doc = docvec![
             "let ",
-            leaf::var(fun_var.clone()),
+            leaf::var(fun_var),
             " = ",
             recv_code,
-            " in apply ",
-            leaf::var(fun_var),
-            " (",
-            args_doc,
-            ")",
+            " in ",
+            apply_doc
         ];
         Ok(doc)
     }
@@ -1354,20 +1398,38 @@ impl CoreErlangGenerator {
         let recv_var = self.thread_value_call_receiver(receiver, "ValRecv", &mut parts)?;
         let args_var = self.thread_value_call_argument(args_expr, "ValArgs", &mut parts)?;
 
+        // BT-4356: each control-transferring node carries the send's line.
+        let at = receiver.span();
+        let apply_doc = self.annotate_call_node_with_line(
+            docvec![
+                "call 'erlang':'apply'(",
+                leaf::var(recv_var.clone()),
+                ", ",
+                leaf::var(args_var.clone()),
+                ")"
+            ],
+            at,
+        );
+        let send_doc = self.annotate_call_node_with_line(
+            docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(recv_var.clone()),
+                ", ",
+                leaf::atom("valueWithArguments:"),
+                ", [",
+                leaf::var(args_var),
+                "])"
+            ],
+            at,
+        );
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
-            leaf::var(recv_var.clone()),
-            ") of 'true' when 'true' -> call 'erlang':'apply'(",
-            leaf::var(recv_var.clone()),
-            ", ",
-            leaf::var(args_var.clone()),
-            ") 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             leaf::var(recv_var),
-            ", ",
-            leaf::atom("valueWithArguments:"),
-            ", [",
-            leaf::var(args_var),
-            "]) end",
+            ") of 'true' when 'true' -> ",
+            apply_doc,
+            " 'false' when 'true' -> ",
+            send_doc,
+            " end",
         ];
 
         parts.push(case_doc);
@@ -1425,34 +1487,60 @@ impl CoreErlangGenerator {
             ") in ",
         ];
 
+        // BT-4356: each control-transferring node carries the send's line.
+        let at = receiver.span();
+        let tier1_apply = self.annotate_call_node_with_line(
+            docvec![
+                "call 'erlang':'apply'(",
+                leaf::var(fun_var.clone()),
+                ", ",
+                leaf::var(args_var.clone()),
+                ")"
+            ],
+            at,
+        );
+        let tier2_apply = self.annotate_call_node_with_line(
+            docvec![
+                "call 'erlang':'apply'(",
+                leaf::var(fun_var.clone()),
+                ", call 'erlang':'++'(",
+                leaf::var(args_var.clone()),
+                ", [",
+                leaf::var(current_state.clone()),
+                "]))"
+            ],
+            at,
+        );
+        let send_doc = self.annotate_call_node_with_line(
+            docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(fun_var.clone()),
+                ", ",
+                leaf::atom("valueWithArguments:"),
+                ", [",
+                leaf::var(args_var),
+                "])"
+            ],
+            at,
+        );
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
             leaf::var(fun_var.clone()),
             ", ",
             leaf::var(tier1_arity_var),
-            ") of 'true' when 'true' -> {call 'erlang':'apply'(",
-            leaf::var(fun_var.clone()),
+            ") of 'true' when 'true' -> {",
+            tier1_apply,
             ", ",
-            leaf::var(args_var.clone()),
-            "), ",
             leaf::var(current_state.clone()),
             "} 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(fun_var.clone()),
-            ", ",
-            leaf::var(tier2_arity_var),
-            ") of 'true' when 'true' -> call 'erlang':'apply'(",
-            leaf::var(fun_var.clone()),
-            ", call 'erlang':'++'(",
-            leaf::var(args_var.clone()),
-            ", [",
-            leaf::var(current_state.clone()),
-            "])) 'false' when 'true' -> {call 'beamtalk_message_dispatch':'send'(",
             leaf::var(fun_var),
             ", ",
-            leaf::atom("valueWithArguments:"),
-            ", [",
-            leaf::var(args_var),
-            "]), ",
+            leaf::var(tier2_arity_var),
+            ") of 'true' when 'true' -> ",
+            tier2_apply,
+            " 'false' when 'true' -> {",
+            send_doc,
+            ", ",
             leaf::var(current_state),
             "} end end",
         ];

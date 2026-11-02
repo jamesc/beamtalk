@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4356: a block-evaluation send (`value`, `value:`) on a non-literal
+// receiver compiles to a runtime arity check around the block's `apply`.
+// The source-line annotation must sit on that `apply` itself — the OTP
+// compiler ignores one on the enclosing `let`/`case` — so the frame of the
+// method evaluating the block reports the send's real `.bt` line instead of
+// no location at all. Each `runBlock:` keeps its block send out of tail
+// position (a tail call leaves no frame to report). If a line above
+// `runBlock:` shifts, update the expected line numbers below to match.
+
+TestCase subclass: BlockCallSiteLineTest
+
+  runBlock: blk =>
+    blk value
+    nil
+
+  runBlock: blk with: arg =>
+    blk value: arg
+    nil
+
+  frameFor: selector in: trace => trace detect: [:f | f method =:= selector]
+
+  testValueSendFrameReportsItsLine =>
+    trace := [self runBlock: [1 / 0]] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #runBlock: in: trace
+    self assert: frame line equals: 16
+    self assert: (frame file endsWith: "block_call_site_line_test.bt")
+
+  testValueColonSendFrameReportsItsLine =>
+    trace := [
+      self runBlock: [:x | x / 0] with: 1
+    ] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #runBlock:with: in: trace
+    self assert: frame line equals: 20
+    self assert: (frame file endsWith: "block_call_site_line_test.bt")
+
+  testTimesRepeatFrameReportsItsLine =>
+    // The motivating case: `Integer>>timesRepeat:` evaluates its block with
+    // `block value`, and its frame used to render with no location.
+    trace := [3 timesRepeat: [1 / 0]] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #timesRepeat: in: trace
+    self deny: frame line isNil
+    self assert: (frame file endsWith: "integer.bt")
+
+  testToDoFrameReportsItsLine =>
+    trace := [1 to: 3 do: [:i | i / 0]] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #to:do: in: trace
+    self deny: frame line isNil
+    self assert: (frame file endsWith: "integer.bt")
