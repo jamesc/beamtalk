@@ -495,12 +495,16 @@ impl CoreErlangGenerator {
 
     /// Builds the `apply HandlerFun (ExObj)` or `apply HandlerFun ()` fragment
     /// for `on:do:` exception handlers.
+    ///
+    /// BT-4366: the apply sits inside the catch clause's `case`, so it carries
+    /// the `on:do:` send's line itself.
     fn make_handler_apply(
+        &self,
         handler_var: String,
         ex_obj_var: String,
         takes_arg: bool,
     ) -> Document<'static> {
-        if takes_arg {
+        self.annotate_current_send_call(if takes_arg {
             docvec![
                 "apply ",
                 leaf::var(handler_var),
@@ -510,7 +514,7 @@ impl CoreErlangGenerator {
             ]
         } else {
             docvec!["apply ", leaf::var(handler_var), " ()"]
-        }
+        })
     }
 
     /// Whether `block` needs `on:do:`/`ensure:`'s inlined, state-threading
@@ -590,13 +594,21 @@ impl CoreErlangGenerator {
         let handler_code = self.expression_doc(handler)?;
 
         let handler_apply =
-            Self::make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
+            self.make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
         let pre_region_state = self.state_var_to_store();
         let catch_boundary = self.on_do_catch_boundary(
             catch_vars,
             &pre_region_state,
             TryRegion {
-                body: docvec!["apply ", leaf::var(block_var.clone()), " () "],
+                // BT-4366: the protected block's apply is nested in the `try`.
+                body: docvec![
+                    self.annotate_current_send_call(docvec![
+                        "apply ",
+                        leaf::var(block_var.clone()),
+                        " ()"
+                    ]),
+                    " "
+                ],
                 result_var,
             },
             receiver.span(),
@@ -1129,16 +1141,22 @@ impl CoreErlangGenerator {
             cleanup_code,
             " in try let ",
             leaf::var(try_result_var.clone()),
-            " = apply ",
-            leaf::var(block_var),
-            " () in ",
+            " = ",
+            // BT-4366: each apply is nested in the `try`, so it carries the
+            // `ensure:` send's line itself.
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(block_var), " ()"]),
+            " in ",
             leaf::var(try_result_var),
             " ",
             "of ",
             leaf::var(result_var.clone()),
-            " -> let _ = apply ",
-            leaf::var(cleanup_var.clone()),
-            " () in ",
+            " -> let _ = ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_var.clone()),
+                " ()"
+            ]),
+            " in ",
             leaf::var(result_var),
             " ",
             "catch <",
@@ -1147,9 +1165,9 @@ impl CoreErlangGenerator {
             leaf::var(error_var.clone()),
             ", ",
             leaf::var(stack_var.clone()),
-            "> -> do apply ",
-            leaf::var(cleanup_var),
-            " () ",
+            "> -> do ",
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(cleanup_var), " ()"]),
+            " ",
             Self::emit_raw_raise(type_var, error_var, stack_var),
         ])
     }
@@ -1453,15 +1471,24 @@ impl CoreErlangGenerator {
         let handler_dispatch = docvec![
             "case call 'erlang':'is_function'(",
             leaf::var(handler_param.clone()),
-            ", 0) of <'true'> when 'true' -> apply ",
+            ", 0) of <'true'> when 'true' -> ",
+            // BT-4366: each apply is nested in the arity `case`.
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(handler_param.clone()),
+                " ()"
+            ]),
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
             leaf::var(handler_param.clone()),
-            " () <'false'> when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(handler_param.clone()),
-            ", 1) of <'true'> when 'true' -> apply ",
-            leaf::var(handler_param),
-            " (",
-            leaf::var(ex_obj_var.clone()),
-            ") <'false'> when 'true' -> ",
+            ", 1) of <'true'> when 'true' -> ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(handler_param),
+                " (",
+                leaf::var(ex_obj_var.clone()),
+                ")"
+            ]),
+            " <'false'> when 'true' -> ",
             handler_stateful_error,
             " end end",
         ];
@@ -1471,7 +1498,14 @@ impl CoreErlangGenerator {
             catch_vars,
             "State",
             TryRegion {
-                body: docvec!["apply ", Document::Str(self_var), " () "],
+                body: docvec![
+                    self.annotate_current_send_call(docvec![
+                        "apply ",
+                        Document::Str(self_var),
+                        " ()"
+                    ]),
+                    " "
+                ],
                 result_var,
             },
             beamtalk_core::source_analysis::Span::default(),
@@ -1607,15 +1641,19 @@ impl CoreErlangGenerator {
         let tier1_try = docvec![
             "try let ",
             leaf::var(try_result_var.clone()),
-            " = apply ",
-            Document::Str(self_var),
-            " () in ",
+            " = ",
+            self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
+            " in ",
             leaf::var(try_result_var),
             " of ",
             leaf::var(result_var.clone()),
-            " -> let _ = apply ",
-            leaf::var(cleanup_param.clone()),
-            " () in ",
+            " -> let _ = ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_param.clone()),
+                " ()"
+            ]),
+            " in ",
             leaf::var(result_var),
             " catch <",
             leaf::var(type_var.clone()),
@@ -1623,9 +1661,13 @@ impl CoreErlangGenerator {
             leaf::var(error_var.clone()),
             ", ",
             leaf::var(stack_var.clone()),
-            "> -> do apply ",
-            leaf::var(cleanup_param.clone()),
-            " () ",
+            "> -> do ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_param.clone()),
+                " ()"
+            ]),
+            " ",
             Self::emit_raw_raise(type_var, error_var, stack_var),
         ];
 

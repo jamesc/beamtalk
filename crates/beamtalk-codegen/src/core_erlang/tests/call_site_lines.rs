@@ -137,3 +137,250 @@ fn annotated_block_sends_compile_through_erlc() {
     );
     assert_compiles_through_erlc("runner", &codegen_with_lines(src));
 }
+
+// ---------------------------------------------------------------------------
+// BT-4366: the invariant, over a corpus
+// ---------------------------------------------------------------------------
+
+/// Prefixes of the nodes that transfer control for a send: the class-side
+/// and instance-side runtime dispatch, and an `apply` of a variable (a block,
+/// handler, cleanup or other user fun).
+const DISPATCH_CALL_PREFIXES: [&str; 3] = [
+    "call 'beamtalk_object_class':'class_send'(",
+    "call 'beamtalk_message_dispatch':'send'(",
+    "apply _",
+];
+
+/// Advances `i` past a quoted atom/string or character literal starting at
+/// `bytes[i]`, returning the index of its last byte; `i` unchanged otherwise.
+fn skip_literal(bytes: &[u8], mut i: usize) -> usize {
+    match bytes[i] {
+        quote @ (b'\'' | b'"') => {
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i
+        }
+        b'$' => {
+            i + if bytes.get(i + 1) == Some(&b'\\') {
+                2
+            } else {
+                1
+            }
+        }
+        _ => i,
+    }
+}
+
+/// The `(start, end)` byte ranges of every parenthesised node carrying a
+/// source-line annotation (`( node -| [Line, ...] )`) in `code`. Atoms,
+/// strings and character literals are skipped, so a `(` inside one never
+/// opens a node.
+fn annotated_ranges(code: &str) -> Vec<(usize, usize)> {
+    let bytes = code.as_bytes();
+    let mut stack: Vec<(usize, bool)> = Vec::new();
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        i = skip_literal(bytes, i);
+        match bytes[i] {
+            b'(' => stack.push((i, false)),
+            b')' => {
+                if let Some((open, true)) = stack.pop() {
+                    ranges.push((open, i));
+                }
+            }
+            b'-' if code[i..].starts_with("-| [")
+                && bytes.get(i + 4).is_some_and(u8::is_ascii_digit) =>
+            {
+                if let Some(top) = stack.last_mut() {
+                    top.1 = true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    ranges
+}
+
+/// Every dispatch call in `code` that sits inside an annotated node without
+/// carrying an annotation itself: a `call`/`apply` the OTP compiler will give
+/// no stack-frame location, because the annotation that names its send's
+/// line is on an enclosing `let`/`case`. Returns `(byte offset, snippet)`.
+fn unannotated_dispatch_calls(code: &str) -> Vec<(usize, String)> {
+    let ranges = annotated_ranges(code);
+    let starts: std::collections::HashSet<usize> = ranges.iter().map(|r| r.0).collect();
+    let mut found = Vec::new();
+    for prefix in DISPATCH_CALL_PREFIXES {
+        for (at, _) in code.match_indices(prefix) {
+            let own = at >= 2 && &code[at - 2..at] == "( " && starts.contains(&(at - 2));
+            if own {
+                continue;
+            }
+            // A method's own `( fun (..) -> .. -| [Line] )` annotation names the
+            // method's line, not a send: a call in a fixed-shape primitive body
+            // (`perform:withArguments:timeout:`) has no send to annotate.
+            let inside_a_send =
+                |&&(s, e): &&(usize, usize)| s < at && at < e && !code[s..].starts_with("( fun (");
+            if ranges.iter().any(|r| inside_a_send(&r)) {
+                let snippet: String = code[at..].chars().take(60).collect();
+                found.push((at, snippet));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_scanner_flags_a_call_whose_annotation_sits_on_a_let() {
+    let bad = "( let _P = call 'm':'f'() in call 'beamtalk_object_class':'class_send'(_P, 'x', []) -| [3, {'file', \"a.bt\"}] )";
+    assert_eq!(unannotated_dispatch_calls(bad).len(), 1);
+    let good = "( let _P = call 'm':'f'() in ( call 'beamtalk_object_class':'class_send'(_P, 'x', []) -| [3, {'file', \"a.bt\"}] ) -| [3, {'file', \"a.bt\"}] )";
+    assert!(unannotated_dispatch_calls(good).is_empty());
+    let bare = "let _P = call 'm':'f'() in call 'beamtalk_object_class':'class_send'(_P, 'x', [])";
+    assert!(unannotated_dispatch_calls(bare).is_empty());
+}
+
+/// The invariant over the real corpus: no lowering leaves a dispatch call
+/// without its own line inside an annotated send, so a new lowering that
+/// nests its call in a `let`/`case` cannot silently regress stack traces.
+#[test]
+fn no_dispatch_call_is_unannotated_inside_an_annotated_send_over_the_corpus() {
+    let root = super::repo_root();
+    let sources = super::corpus_files(&root, &["stdlib/src", "stdlib/test", "examples"]);
+    assert!(sources.len() > 50, "corpus unexpectedly small");
+    let mut violations = Vec::new();
+    for (i, path) in sources.iter().enumerate() {
+        let Ok(source) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let (module, _) = super::parse_normalised(&source);
+        let stdlib = path.starts_with(root.join("stdlib/src"));
+        let options = CodegenOptions::new(&format!("call_site_corpus_{i}"))
+            .with_stdlib_mode(stdlib)
+            .with_source(&source)
+            .with_source_path_opt(Some("corpus.bt"));
+        // A fixture meant to fail codegen has no Core to check.
+        let Ok(core) = generate_module(&module, options) else {
+            continue;
+        };
+        for (at, snippet) in unannotated_dispatch_calls(&core) {
+            violations.push(format!("{} @{at}: {snippet}", path.display()));
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} dispatch call(s) lack their own line annotation:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// One method per lowering BT-4366 audited, each nesting its control-
+/// transferring call inside a `let`/`case`/`try`/`letrec`.
+const AUDITED_LOWERINGS: &str = concat!(
+    "Object subclass: Runner\n",
+    "  classSend => Integer to: 3 do: [:i | i]\n",
+    "  classSendValue => Tracing setContext: 1\n",
+    "  ifNotNil: x blk: b => x ifNotNil: b\n",
+    "  ifNilNotNil: x nil: n blk: b => x ifNil: n ifNotNil: b\n",
+    "  onDo: blk handler: h => blk on: Error do: h\n",
+    "  ensure: blk cleanup: c => blk ensure: c\n",
+    "  whileTrue: c body: b => c whileTrue: b\n",
+    "  repeat: b => b repeat\n",
+    "  cascade: x => x foo; bar\n",
+    "  listOp: xs blk: b => xs do: b\n",
+    "  detect: xs blk: b none: n => xs detect: b ifNone: n\n",
+    "  binary: a with: b => a + b\n",
+    "  interp: a => \"x {a} y\"\n",
+);
+
+#[test]
+fn every_audited_lowering_annotates_its_dispatch_call() {
+    let code = codegen_with_lines(AUDITED_LOWERINGS);
+    let missed = unannotated_dispatch_calls(&code);
+    assert!(
+        missed.is_empty(),
+        "dispatch calls without their own line annotation: {missed:#?}\n{code}"
+    );
+}
+
+/// The class send is the node the issue names: `class_send` sits inside the
+/// `whereis_class` `let`, and carries the send's own line.
+#[test]
+fn a_class_send_annotates_the_class_send_node() {
+    let src = concat!(
+        "Object subclass: Runner\n",
+        "  run =>\n",
+        "    Integer to: 3 do: [:i | i]\n",
+        "    nil\n",
+    );
+    let code = codegen_with_lines(src);
+    assert_every_node_annotated(&code, "call 'beamtalk_object_class':'class_send'(", 3);
+}
+
+/// `ifNotNil:` on a non-literal block: the `apply` is inside the nil-test
+/// `case`, and carries the send's line.
+#[test]
+fn an_if_not_nil_send_annotates_its_apply_node() {
+    let src = concat!(
+        "Object subclass: Runner\n",
+        "  run: x blk: b =>\n",
+        "    x ifNotNil: b\n",
+        "    nil\n",
+    );
+    let code = codegen_with_lines(src);
+    assert_every_node_annotated(&code, "apply _NotNilBlk", 3);
+}
+
+/// `on:do:` and `ensure:` on non-literal blocks: the protected block, handler
+/// and cleanup applies are inside the `try`/`catch`.
+#[test]
+fn on_do_and_ensure_sends_annotate_their_apply_nodes() {
+    let on_do = concat!(
+        "Object subclass: Runner\n",
+        "  run: b handler: h =>\n",
+        "    b on: Error do: h\n",
+        "    nil\n",
+    );
+    let code = codegen_with_lines(on_do);
+    assert_every_node_annotated(&code, "apply _BlockFun", 3);
+    assert_every_node_annotated(&code, "apply _HandlerFun", 3);
+
+    let ensure = concat!(
+        "Object subclass: Runner\n",
+        "  run: b cleanup: c =>\n",
+        "    b ensure: c\n",
+        "    nil\n",
+    );
+    let code = codegen_with_lines(ensure);
+    assert_every_node_annotated(&code, "apply _BlockFun", 3);
+    assert_every_node_annotated(&code, "apply _CleanupFun", 3);
+}
+
+/// `whileTrue:` on non-literal blocks: both applies are inside the loop's
+/// `letrec`.
+#[test]
+fn a_while_true_send_annotates_its_apply_nodes() {
+    let src = concat!(
+        "Object subclass: Runner\n",
+        "  run: c body: b =>\n",
+        "    c whileTrue: b\n",
+        "    nil\n",
+    );
+    let code = codegen_with_lines(src);
+    assert_every_node_annotated(&code, "apply _CondFun", 3);
+    assert_every_node_annotated(&code, "apply _BodyFun", 3);
+}
+
+/// The annotated output is still well-formed Core Erlang.
+#[test]
+fn annotated_audited_lowerings_compile_through_erlc() {
+    assert_compiles_through_erlc("runner", &codegen_with_lines(AUDITED_LOWERINGS));
+}

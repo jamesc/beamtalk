@@ -898,7 +898,9 @@ impl CoreErlangGenerator {
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
 
-        let direct_doc = docvec![
+        // BT-4366: both calls sit inside the type-test `case`, so each carries
+        // the send's line itself.
+        let direct_doc = self.annotate_current_send_call(docvec![
             "call ",
             leaf::atom(target.module_name.clone()),
             ":'dispatch'(",
@@ -908,8 +910,8 @@ impl CoreErlangGenerator {
             "], ",
             leaf::var(receiver_var.clone()),
             ")",
-        ];
-        let fallback_doc = docvec![
+        ]);
+        let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
             ", ",
@@ -917,7 +919,7 @@ impl CoreErlangGenerator {
             ", [",
             args_list_doc,
             "])",
-        ];
+        ]);
 
         let no_match_inner = self.fresh_temp_var("TSealedNoMatch");
         let no_match_outer = self.case_clause_fallback("TSealedOuterNoMatch");
@@ -1030,12 +1032,16 @@ impl CoreErlangGenerator {
     /// is the precomputed `Cond` variable and whose closures compile where
     /// the arm is taken). The call is byte-identical however the operands
     /// were sourced; only the sourcing differs.
+    ///
+    /// BT-4366: the call carries the enclosing send's line itself — the
+    /// pure-conditional fallback arm nests it inside a `case`.
     pub(in crate::core_erlang) fn runtime_send_call(
+        &self,
         receiver_doc: Document<'static>,
         selector_atom: &str,
         arg_docs: Vec<Document<'static>>,
     ) -> Document<'static> {
-        docvec![
+        self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             receiver_doc,
             ", ",
@@ -1043,7 +1049,7 @@ impl CoreErlangGenerator {
             ", [",
             Self::join_docs_with_commas(arg_docs),
             "])"
-        ]
+        ])
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3`.
@@ -1092,7 +1098,7 @@ impl CoreErlangGenerator {
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
-        let call_doc = Self::runtime_send_call(actual_receiver, &selector_atom, seq.rest());
+        let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
 
         Ok(seq.close(self, call_doc, "DispRes"))
     }
@@ -3173,7 +3179,7 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
-            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
+            self.class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
 
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
@@ -3231,7 +3237,25 @@ impl CoreErlangGenerator {
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let comma = if arg_count == 0 { "" } else { ", " };
-        let fallback = Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
+        let fallback = self.class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
+        // BT-4366: the direct call sits inside the guard `case`, so it carries
+        // the send's line itself.
+        let direct_call = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::atom(module_name.clone()),
+            ":",
+            leaf::atom(safe_fn.clone()),
+            "({'beamtalk_object', ",
+            leaf::atom(tag.clone()),
+            ", ",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::var(class_pid_var.clone()),
+            "}",
+            comma,
+            args_doc,
+            ")"
+        ]);
         docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
@@ -3244,25 +3268,14 @@ impl CoreErlangGenerator {
             ") of <'true'> when call 'erlang':'is_pid'(",
             leaf::var(class_pid_var.clone()),
             ") -> case call 'erlang':'function_exported'(",
-            leaf::atom(module_name.clone()),
-            ", ",
-            leaf::atom(safe_fn.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> call ",
-            leaf::atom(module_name.clone()),
-            ":",
-            leaf::atom(safe_fn),
-            "({'beamtalk_object', ",
-            leaf::atom(tag),
-            ", ",
             leaf::atom(module_name),
             ", ",
-            leaf::var(class_pid_var.clone()),
-            "}",
-            comma,
-            args_doc,
-            ") <_> when 'true' -> ",
+            leaf::atom(safe_fn),
+            ", ",
+            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            direct_call,
+            " <_> when 'true' -> ",
             fallback.clone(),
             " end <_> when 'true' -> ",
             fallback,
@@ -3287,7 +3300,7 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_class_registry':'whereis_class'(",
             leaf::atom(class_name.to_string()),
             ") in ",
-            Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
+            self.class_send_call_doc(&class_pid_var, class_selector, args_doc),
         ]
     }
 
@@ -3295,12 +3308,18 @@ impl CoreErlangGenerator {
     /// 'beamtalk_object_class':'class_send'(ClassPid, Selector, [Args])`
     /// fragment — the runtime `gen_server` dispatch every class-send fallback
     /// eventually reaches, once a live `ClassPid` is in hand.
+    ///
+    /// BT-4366: every caller nests this call inside a `let` (the `ClassPid`
+    /// binding) or `case` (the direct-call guard), where the send's
+    /// whole-document line annotation never reaches the call node — so the
+    /// node carries the line itself.
     fn class_send_call_doc(
+        &self,
         class_pid_var: &str,
         selector_atom: String,
         args_doc: Document<'static>,
     ) -> Document<'static> {
-        docvec![
+        self.annotate_current_send_call(docvec![
             "call 'beamtalk_object_class':'class_send'(",
             leaf::var(class_pid_var.to_string()),
             ", ",
@@ -3308,7 +3327,7 @@ impl CoreErlangGenerator {
             ", [",
             args_doc,
             "])"
-        ]
+        ])
     }
 
     /// The `direct_call_eligible` entry a send to the class *reference*
