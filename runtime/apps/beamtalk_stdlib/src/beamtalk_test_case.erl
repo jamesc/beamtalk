@@ -50,6 +50,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
     format_stackframe/1,
     ensure_test_context/4,
     stack_frames/1,
+    source_snippet/2,
     test_failure/4,
     test_failure_untraced/4
 ]).
@@ -487,11 +488,17 @@ decode_beam_error(timeout) ->
 decode_beam_error(Other) ->
     beamtalk_primitive:print_string(Other).
 
+-type trace_entry() :: {
+    Rendered :: binary(), Parts :: map(), Count :: pos_integer(), Src :: binary() | nil
+}.
+
 -doc """
 Format a BEAM stacktrace for display in test failure messages.
 
 Filters out internal test runner and OTP frames; shows up to 3 user frames
 (all of them with `beamtalk test --full-traces`).
+The innermost frame whose source file and line are readable is followed by a
+source snippet (BT-4358); snippet lines are context, not extra frames.
 Error location (innermost frame) is shown first, with callers going outward.
 Returns an empty binary when no relevant frames exist.
 """.
@@ -507,8 +514,121 @@ format_stacktrace(Frames) ->
         [] ->
             <<>>;
         Entries ->
-            Lines = [entry_line(E) || E <- Entries],
+            Snippet = first_snippet(Entries),
+            Lines = [
+                [entry_line(E), snippet_after(Idx, Snippet)]
+             || {Idx, E} <- lists:zip(lists:seq(1, length(Entries)), Entries)
+            ],
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
+    end.
+
+%% Snippet lines follow the `at` line of the entry they belong to. They never
+%% start with `  at `, so the i-th `at` line still pairs with `frames[i]`.
+-spec snippet_after(pos_integer(), {pos_integer(), binary()} | none) -> iodata().
+snippet_after(Idx, {Idx, Snippet}) -> Snippet;
+snippet_after(_Idx, _) -> [].
+
+-doc """
+The source snippet for the innermost entry whose source file and line are
+readable, as `{Index, Snippet}` (1-based entry index), or `none` (BT-4358).
+""".
+-spec first_snippet([trace_entry()]) -> {pos_integer(), binary()} | none.
+first_snippet(Entries) ->
+    first_snippet(Entries, 1).
+
+-spec first_snippet([trace_entry()], pos_integer()) -> {pos_integer(), binary()} | none.
+first_snippet([], _Idx) ->
+    none;
+first_snippet([{_Text, #{line := Line}, _N, Src} | Rest], Idx) ->
+    case is_integer(Line) andalso is_binary(Src) andalso source_snippet(Src, Line) of
+        Snippet when is_binary(Snippet) -> {Idx, Snippet};
+        _ -> first_snippet(Rest, Idx + 1)
+    end.
+
+%% Caps on what a snippet reads and shows, so a huge or minified source file
+%% can neither stall a test run nor flood its output.
+-define(SNIPPET_MAX_READ_BYTES, 262144).
+-define(SNIPPET_MAX_LINE_CHARS, 160).
+-define(SNIPPET_CONTEXT, 1).
+
+-doc """
+Render the source around `Line` of the file `Path`: the failing line marked
+`>` with one line of context either side, as `"\n    12 | text"` lines.
+
+Returns `none` (never crashes) when the file is unreadable, `Line` is beyond
+the first 256 KiB or the end of the file, or the text is not valid UTF-8.
+Overlong lines are truncated with `...`.
+""".
+-spec source_snippet(binary(), pos_integer()) -> binary() | none.
+source_snippet(Path, Line) when is_binary(Path), is_integer(Line), Line > 0 ->
+    case read_head(Path) of
+        {ok, Data} ->
+            Rows = binary:split(Data, <<"\n">>, [global]),
+            From = max(1, Line - ?SNIPPET_CONTEXT),
+            To = Line + ?SNIPPET_CONTEXT,
+            case Line =< length(Rows) of
+                true -> render_snippet(Rows, From, To, Line);
+                false -> none
+            end;
+        error ->
+            none
+    end;
+source_snippet(_, _) ->
+    none.
+
+-spec read_head(binary()) -> {ok, binary()} | error.
+read_head(Path) ->
+    try file:open(Path, [read, binary, raw]) of
+        {ok, Fd} ->
+            try file:read(Fd, ?SNIPPET_MAX_READ_BYTES) of
+                {ok, Data} -> {ok, Data};
+                _ -> error
+            after
+                file:close(Fd)
+            end;
+        _ ->
+            error
+    catch
+        _:_ -> error
+    end.
+
+-spec render_snippet([binary()], pos_integer(), pos_integer(), pos_integer()) -> binary() | none.
+render_snippet(Rows, From, To, Line) ->
+    Window = lists:sublist(Rows, From, To - From + 1),
+    Numbered = lists:zip(lists:seq(From, From + length(Window) - 1), Window),
+    Width = length(integer_to_list(From + length(Window) - 1)),
+    Rendered = [snippet_row(N, Text, Width, N =:= Line) || {N, Text} <- Numbered],
+    case lists:member(invalid, Rendered) of
+        true -> none;
+        false -> iolist_to_binary(Rendered)
+    end.
+
+-spec snippet_row(pos_integer(), binary(), pos_integer(), boolean()) -> iodata() | invalid.
+snippet_row(N, Raw, Width, IsFailing) ->
+    Text0 = string:trim(Raw, trailing, "\r"),
+    case unicode:characters_to_binary(Text0) of
+        Text when is_binary(Text) ->
+            Marker =
+                case IsFailing of
+                    true -> ">";
+                    false -> " "
+                end,
+            Num = string:pad(integer_to_list(N), Width, leading),
+            ["\n    ", Marker, " ", Num, " | ", truncate_line(Text)];
+        _ ->
+            invalid
+    end.
+
+-spec truncate_line(binary()) -> binary().
+truncate_line(Text) ->
+    case string:length(Text) > ?SNIPPET_MAX_LINE_CHARS of
+        true ->
+            <<
+                (unicode:characters_to_binary(string:slice(Text, 0, ?SNIPPET_MAX_LINE_CHARS)))/binary,
+                "..."
+            >>;
+        false ->
+            Text
     end.
 
 -doc """
@@ -538,7 +658,7 @@ full_traces() ->
 Filtered, selected and repeat-collapsed frames as `{Line, Parts, Count}`,
 where Line is the rendered text of the frame.
 """.
--spec trace_entries(list()) -> [{binary(), map(), pos_integer()}].
+-spec trace_entries(list()) -> [trace_entry()].
 trace_entries(Frames) ->
     Relevant = select_frames(filter_stackframes(Frames)),
     collapse_repeats([
@@ -547,18 +667,19 @@ trace_entries(Frames) ->
             {
                 beamtalk_stack_frame:format_frame(Wrapped),
                 beamtalk_stack_frame:frame_parts(Wrapped),
-                1
+                1,
+                beamtalk_stack_frame:frame_source_path(Wrapped)
             }
         end
      || F <- Relevant
     ]).
 
--spec entry_line({binary(), map(), pos_integer()}) -> binary().
-entry_line({Line, _Parts, 1}) -> Line;
-entry_line({Line, _Parts, N}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+-spec entry_line(trace_entry()) -> binary().
+entry_line({Line, _Parts, 1, _Src}) -> Line;
+entry_line({Line, _Parts, N, _Src}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
 
--spec entry_frame({binary(), map(), pos_integer()}) -> map().
-entry_frame({_Line, Parts, N}) -> Parts#{repeat => N}.
+-spec entry_frame(trace_entry()) -> map().
+entry_frame({_Line, Parts, N, _Src}) -> Parts#{repeat => N}.
 
 -doc """
 Collapse adjacent identical rendered frame lines into one.
@@ -568,13 +689,12 @@ Distinct frames that still render identically (a recursive send such as
 the same `Class>>selector (file)` line twice. The repeat count is kept, in
 Beamtalk terms, as a trailing `[xN]` marker.
 """.
--spec collapse_repeats([{binary(), map(), pos_integer()}]) ->
-    [{binary(), map(), pos_integer()}].
+-spec collapse_repeats([trace_entry()]) -> [trace_entry()].
 collapse_repeats([]) ->
     [];
-collapse_repeats([{Line, Parts, N} | Rest]) ->
-    {Same, Others} = lists:splitwith(fun({L, _, _}) -> L =:= Line end, Rest),
-    [{Line, Parts, N + length(Same)} | collapse_repeats(Others)].
+collapse_repeats([{Line, Parts, N, Src} | Rest]) ->
+    {Same, Others} = lists:splitwith(fun({L, _, _, _}) -> L =:= Line end, Rest),
+    [{Line, Parts, N + length(Same), Src} | collapse_repeats(Others)].
 
 -doc """
 Format a single raw BEAM stacktrace frame for display. Delegates to the shared
