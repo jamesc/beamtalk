@@ -1005,6 +1005,11 @@ impl Backend {
     }
 
     /// The session-wide preload file budget still unspent (BT-4383).
+    ///
+    /// A walk reads this, runs, then [`Self::spend_preload_budget`]s what it
+    /// used — not atomic as a whole, so the server's two walkers (the
+    /// startup preload and [`Self::ensure_package_root_loaded`]) both do it
+    /// while holding `root_load_lock`.
     pub(in crate::server) fn preload_budget_remaining(&self) -> usize {
         *self
             .preload_budget_remaining
