@@ -791,7 +791,10 @@ impl Backend {
         };
         {
             // Check-and-insert under one lock so concurrent `did_open`s for
-            // files of the same package load it exactly once.
+            // files of the same package load it exactly once. A second opener
+            // does not wait for that load: it returns here and may publish
+            // against a half-loaded index; the `republish_open_diagnostics`
+            // at the end of this load corrects it.
             let mut roots = self
                 .workspace_roots
                 .lock()

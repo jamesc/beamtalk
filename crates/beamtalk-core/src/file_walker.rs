@@ -523,6 +523,12 @@ impl IgnoreStack {
     /// `canonical_root`: `.git/info/exclude` and the `.gitignore` files of
     /// the directories from the enclosing repository root down to, but not
     /// including, the walk root (whose own `.gitignore` `walk_dir` pushes).
+    ///
+    /// An explicitly walked directory is always walked: when those rules
+    /// ignore the walk root or any directory on the way down to it (e.g.
+    /// `_build/` or `_build/**` above a walk of `_build/deps/<dep>/src`),
+    /// none of them apply, since a glob like `_build/**` would otherwise
+    /// still match every entry inside the root.
     fn above_walk_root(canonical_root: &Path) -> Self {
         let mut stack = Self::default();
         let Some(repo_root) = canonical_root
@@ -541,8 +547,17 @@ impl IgnoreStack {
             .take_while(|dir| dir.starts_with(repo_root))
             .collect();
         ancestors.reverse();
-        for dir in ancestors {
+        for (i, dir) in ancestors.iter().enumerate() {
+            // `dir` is checked against the rules from above it before its
+            // own `.gitignore` is pushed; the repository root (`i == 0`) is
+            // never itself ignored.
+            if i > 0 && stack.is_ignored(dir, true) {
+                return Self::default();
+            }
             stack.push_dir(dir);
+        }
+        if stack.is_ignored(canonical_root, true) {
+            return Self::default();
         }
         stack
     }
@@ -992,6 +1007,28 @@ mod tests {
         let vendor = repo.join("_vendor");
         let files = FileWalker::source_files().walk(&vendor).unwrap();
         assert_eq!(relative_names(&vendor, &files), vec!["dep/c.bt"]);
+    }
+
+    /// A glob ancestor rule (`_build/**`) matches entries *inside* the walk
+    /// root, not just the root itself; an explicitly walked directory under
+    /// it must still yield its files (dependency sources under
+    /// `_build/deps/<dep>/src`).
+    #[test]
+    fn test_walk_root_under_glob_ignored_ancestor_is_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8Path::from_path(dir.path()).unwrap();
+        fs::create_dir(repo.join(".git")).unwrap();
+        write_file(&repo.join(".gitignore"), "_build/**\n");
+        write_file(&repo.join("_build/deps/dep/src/c.bt"), "");
+        write_file(&repo.join("src/a.bt"), "");
+
+        let dep_src = repo.join("_build/deps/dep/src");
+        let files = FileWalker::source_files().walk(&dep_src).unwrap();
+        assert_eq!(relative_names(&dep_src, &files), vec!["c.bt"]);
+
+        // The rule still applies to a walk from the repository root.
+        let files = FileWalker::source_files().walk(repo).unwrap();
+        assert_eq!(relative_names(repo, &files), vec!["src/a.bt"]);
     }
 
     /// Outside any repository, `.gitignore` files above the walk root do
