@@ -300,6 +300,39 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
         })
     ).
 
+%% BT-4377: shared Rust/Erlang conformance corpus for the REPL load verdict.
+%% `crates/beamtalk-cli/src/commands/lint.rs`'s
+%% `live_recheck_verdict_matches_shared_corpus` asserts the same rows against
+%% `beamtalk lint --warnings-as-errors`'s `live_recheck_verdict`. A row is a
+%% recheck finding here exactly when its verdict is `finding`; `compile_error`
+%% rows fail the compile before the recheck runs, so this filter drops them.
+%% A `null` category is sent without the key, as the compiler port does.
+relevant_image_diagnostic_matches_shared_corpus_test() ->
+    Rows = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "live_recheck_verdict_conformance.json"
+    ]),
+    ?assert(length(Rows) > 0),
+    lists:foreach(
+        fun(#{<<"severity">> := Severity, <<"category">> := Category, <<"verdict">> := Verdict} = Row) ->
+            Diagnostic =
+                case Category of
+                    null -> #{severity => Severity};
+                    _ -> #{severity => Severity, category => Category}
+                end,
+            ?assertEqual(
+                Verdict =:= <<"finding">>,
+                beamtalk_recheck:relevant_image_diagnostic(Diagnostic),
+                Row
+            )
+        end,
+        Rows
+    ).
+
 %%====================================================================
 %% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A)
 %%====================================================================
