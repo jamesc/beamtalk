@@ -123,6 +123,44 @@ fn reading_block_passed_to_an_actor_warns() {
 }
 
 #[test]
+fn reading_block_passed_to_a_spawn_with_actor_warns() {
+    let d = only(
+        "  class a =>\n    a := Worker spawnWith: #{#blk => nil}\n    a keep: [self.n]\n    a run\n",
+    );
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("handed to an actor by 'keep:', which may keep it"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn reading_block_passed_to_a_named_or_remote_spawn_does_not_warn() {
+    // BT-4187: `spawnAs:` / `spawnOn:` answer `Result(Self, Error)` and
+    // `spawnMonitored` a `Tuple`, not an actor, so the local is not a
+    // statically known actor.
+    for spawn in [
+        "Worker spawnAs: #w",
+        "Worker spawnOn: n",
+        "(Worker) spawnAs: #w",
+        "Worker spawnMonitored",
+    ] {
+        let d = only(&format!(
+            "  class a: n =>\n    a := {spawn}\n    a keep: [self.n]\n    a\n"
+        ));
+        assert!(d.is_empty(), "{spawn}: {d:?}");
+    }
+}
+
+#[test]
+fn reading_block_passed_to_a_parenthesised_spawn_warns() {
+    let d = only("  class a =>\n    a := (Worker) spawn\n    a keep: [self.n]\n    a run\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+}
+
+#[test]
 fn reading_block_passed_to_a_cast_warns() {
     let d = only("  class a: w => w keep: [self.n]!\n");
     assert_eq!(d.len(), 1, "{d:?}");

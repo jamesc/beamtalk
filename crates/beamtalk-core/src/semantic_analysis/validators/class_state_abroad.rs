@@ -53,11 +53,12 @@
 //! process and raises, but rule (b) only covers class-side receivers.
 
 use crate::ast::{Block, ClassDefinition, Expression, ExpressionStatement, MethodKind, Module};
-use crate::ast_walker::{SendRef, walk_expression, walk_sends};
+use crate::ast_walker::{SendRef, walk_sends};
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use crate::semantic_analysis::block_facts::{
-    ClassVarAccesses, EscapeShape, HasFieldProbe, analyze_method_body, class_var_accesses,
-    compute_class_var_mutating_selectors, escaping_blocks,
+    ClassVarAccesses, EscapeShape, analyze_method_body, class_var_accesses,
+    compute_class_var_mutating_selectors, escaping_blocks, probe_clause,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use std::collections::{HashMap, HashSet};
@@ -172,7 +173,7 @@ fn check_method_body(
         }
     }
 
-    let actors = actor_locals(body, ctx);
+    let actors = actor_locals(ctx.hierarchy, body);
     for stmt in body {
         // Cascades expanded: a later cascade message is judged against the
         // shared receiver like any send (BT-3716).
@@ -247,7 +248,7 @@ impl ClassCtx<'_> {
                 receiver: inner,
                 selector: spawn,
                 ..
-            } => self.is_actor_spawn(inner, &spawn.name()).then(to_actor),
+            } => is_actor_spawn(self.hierarchy, inner, &spawn.name()).then(to_actor),
             Expression::ClassReference { name, package, .. } if package.is_none() => self
                 .hierarchy
                 .find_class_method(name.name.as_str(), selector)
@@ -260,16 +261,6 @@ impl ClassCtx<'_> {
                 }),
             _ => None,
         }
-    }
-
-    /// `ActorClass spawn` / `spawnWith:` / `new` ... : an instance of an actor.
-    fn is_actor_spawn(&self, receiver: &Expression, selector: &str) -> bool {
-        selector.starts_with("spawn")
-            && matches!(
-                receiver,
-                Expression::ClassReference { name, package, .. }
-                    if package.is_none() && self.hierarchy.is_actor_subclass(name.name.as_str())
-            )
     }
 
     /// The class a class-side send reaches when its receiver is statically
@@ -449,53 +440,12 @@ impl ClassCtx<'_> {
     }
 }
 
-/// Locals bound to an actor instance (`a := Worker spawn`) anywhere in `body`.
-fn actor_locals(body: &[ExpressionStatement], ctx: &ClassCtx<'_>) -> HashSet<String> {
-    let mut actors = HashSet::new();
-    for stmt in body {
-        walk_expression(&stmt.expression, &mut |e| {
-            let Expression::Assignment { target, value, .. } = e else {
-                return;
-            };
-            let Expression::Identifier(local) = &**target else {
-                return;
-            };
-            if let Expression::MessageSend {
-                receiver, selector, ..
-            } = value.unwrap_parens()
-            {
-                if ctx.is_actor_spawn(receiver, &selector.name()) {
-                    actors.insert(local.name.to_string());
-                }
-            }
-        });
-    }
-    actors
-}
-
 fn shape_clause(shape: EscapeShape) -> String {
     match shape {
         EscapeShape::Returned => "returned".to_string(),
         EscapeShape::StoredLocal => "stored in a local".to_string(),
         EscapeShape::StoredClassVar => "stored in a class variable".to_string(),
         EscapeShape::StoredInLiteral => "stored in a collection literal".to_string(),
-    }
-}
-
-/// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
-/// symbol, `` `hasField:` ``.
-fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> String {
-    let symbols: Vec<String> = probes
-        .iter()
-        .filter_map(|p| match p {
-            HasFieldProbe::Symbol(name) => Some(format!("#{name}")),
-            HasFieldProbe::Computed => None,
-        })
-        .collect();
-    match symbols.as_slice() {
-        [] => "`hasField:`".to_string(),
-        [one] => format!("`hasField: {one}`"),
-        many => format!("`hasField:` ({})", many.join(", ")),
     }
 }
 

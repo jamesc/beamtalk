@@ -19,6 +19,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+pub mod actor_spawn;
 pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;

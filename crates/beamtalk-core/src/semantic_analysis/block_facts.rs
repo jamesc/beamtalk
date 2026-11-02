@@ -537,6 +537,25 @@ pub enum HasFieldProbe {
     Computed,
 }
 
+/// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
+/// symbol, `` `hasField:` ``: how the `class-state-abroad` and
+/// `actor-state-abroad` lints name a block's probes.
+#[must_use]
+pub fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> String {
+    let symbols: Vec<String> = probes
+        .iter()
+        .filter_map(|p| match p {
+            HasFieldProbe::Symbol(name) => Some(format!("#{name}")),
+            HasFieldProbe::Computed => None,
+        })
+        .collect();
+    match symbols.as_slice() {
+        [] => "`hasField:`".to_string(),
+        [one] => format!("`hasField: {one}`"),
+        many => format!("`hasField:` ({})", many.join(", ")),
+    }
+}
+
 impl ClassVarAccesses {
     /// Whether the block reads class state at all: a `self.name` read or a
     /// `hasField:` probe. Exactly the blocks for which codegen binds a capture
