@@ -21,7 +21,6 @@
 //! matching a REPL `load-project` verdict (BT-4334).
 
 use crate::commands::OutputFormat;
-use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::file_walker::FileWalker;
@@ -602,7 +601,8 @@ fn collect_lint_files(
         // `declare native:` stub file would otherwise be swept in and
         // rejected here as a hard error.
         let stubs_dir = project_root.join("stubs");
-        collect_source_files_from_dir(source_path)?
+        FileWalker::lint_files()
+            .walk(source_path)?
             .into_iter()
             .filter(|f| !f.starts_with(&stubs_dir))
             .collect()
@@ -1516,7 +1516,7 @@ mod tests {
         // Emulate what run_lint does: walk the `test/` directory, but extract
         // class infos from the full package source set (src/ + test/).
         let test_utf8 = camino::Utf8PathBuf::from_path_buf(test.clone()).unwrap();
-        let test_files = collect_source_files_from_dir(&test_utf8).unwrap();
+        let test_files = crate::commands::build::collect_source_files_from_dir(&test_utf8).unwrap();
         let pkg_root = find_package_root(&test_utf8).expect("package root must be found");
         let extraction_files = collect_package_class_files(&pkg_root, &test_files);
 
