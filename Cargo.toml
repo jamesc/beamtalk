@@ -164,6 +164,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 # Diff generation (for beamtalk fmt-check unified diff output)
 similar = "3"
 
+# .gitignore matching for FileWalker (BT-4135)
+ignore = "0.4"
+
 # Testing
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"

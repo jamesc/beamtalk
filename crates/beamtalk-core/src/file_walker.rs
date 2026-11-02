@@ -9,9 +9,13 @@
 //! across the codebase with a single, builder-pattern `FileWalker`.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use ignore::Match;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use miette::{IntoDiagnostic, WrapErr};
 use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
+use tracing::warn;
 
 /// Configurable file walker that recursively collects files matching a set of
 /// criteria.
@@ -46,6 +50,9 @@ pub struct FileWalker {
     sort: bool,
     /// Whether to recurse into subdirectories (default: true).
     recursive: bool,
+    /// Whether to skip paths ignored by `.gitignore` files (default: true).
+    /// See [`FileWalker::respect_gitignore`] for the exact rules.
+    respect_gitignore: bool,
 }
 
 impl Default for FileWalker {
@@ -58,6 +65,7 @@ impl Default for FileWalker {
             strict_errors: true,
             sort: true,
             recursive: true,
+            respect_gitignore: true,
         }
     }
 }
@@ -119,6 +127,35 @@ impl FileWalker {
     #[must_use]
     pub fn recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
+        self
+    }
+
+    /// Whether to skip paths ignored by `.gitignore` files. Default: `true`
+    /// (BT-4135), so every preset — and therefore `beamtalk lint`, `build`,
+    /// `fmt`, `test`, `doc`, MCP lint and LSP preload, which all walk through
+    /// this type — skips ignored trees such as a `.worktrees/` directory
+    /// holding nested checkouts, instead of reporting each nested copy's
+    /// files as duplicates of the main tree's.
+    ///
+    /// Rules, following git's (and ripgrep's) semantics:
+    /// - Every `.gitignore` in the walk root and the directories below it
+    ///   applies to its own subtree, deeper files taking precedence (`!`
+    ///   negations included).
+    /// - When the walk root lies inside a git repository (the root itself or
+    ///   an ancestor contains `.git`), the `.gitignore` files of the
+    ///   directories from the repository root down to the walk root apply
+    ///   too, as does `.git/info/exclude`. Without a repository, only the
+    ///   walk root's own and nested `.gitignore` files apply.
+    /// - Rules are matched against each entry the walk visits, never against
+    ///   the walk root itself: an explicitly requested directory is always
+    ///   walked even if an ancestor rule ignores it (e.g. a dependency
+    ///   checkout under a gitignored `_build/`).
+    /// - The user's global excludes file (`core.excludesFile`) is not
+    ///   consulted: it is per-machine configuration, and which project files
+    ///   a command sees must not differ between machines.
+    #[must_use]
+    pub fn respect_gitignore(mut self, respect: bool) -> Self {
+        self.respect_gitignore = respect;
         self
     }
 
@@ -197,7 +234,8 @@ impl FileWalker {
     /// Preset for linting `.bt` files.
     ///
     /// Same as `source_files()` — recursive, sorted, strict errors,
-    /// excluding `.git`/`target`/`node_modules`/`_build`.
+    /// excluding `.git`/`target`/`node_modules`/`_build` and gitignored
+    /// paths (see [`FileWalker::respect_gitignore`]).
     pub fn lint_files() -> Self {
         Self::source_files()
     }
@@ -228,7 +266,18 @@ impl FileWalker {
         }
 
         let mut files = Vec::new();
-        self.walk_dir(path, &mut files)?;
+        // `None` (gitignore handling off, or a root that cannot be
+        // canonicalised) means nothing is ignored.
+        let canonical_root = if self.respect_gitignore {
+            fs::canonicalize(path).ok()
+        } else {
+            None
+        };
+        let mut ignores = match &canonical_root {
+            Some(root) => IgnoreStack::above_walk_root(root),
+            None => IgnoreStack::default(),
+        };
+        self.walk_dir(path, canonical_root.as_deref(), &mut ignores, &mut files)?;
 
         if self.sort {
             files.sort();
@@ -278,11 +327,34 @@ impl FileWalker {
         self.max_files.is_some_and(|max| files.len() >= max)
     }
 
-    fn walk_dir(&self, dir: &Utf8Path, files: &mut Vec<Utf8PathBuf>) -> miette::Result<()> {
+    /// Walk `dir`, whose canonical path is `canonical_dir` when gitignore
+    /// handling is active, pushing its own `.gitignore` (if any) for the
+    /// duration of its subtree.
+    fn walk_dir(
+        &self,
+        dir: &Utf8Path,
+        canonical_dir: Option<&Path>,
+        ignores: &mut IgnoreStack,
+        files: &mut Vec<Utf8PathBuf>,
+    ) -> miette::Result<()> {
         if self.budget_exhausted(files) {
             return Ok(());
         }
+        let pushed = canonical_dir.is_some_and(|canonical| ignores.push_dir(canonical));
+        let result = self.walk_dir_entries(dir, canonical_dir, ignores, files);
+        if pushed {
+            ignores.pop_dir();
+        }
+        result
+    }
 
+    fn walk_dir_entries(
+        &self,
+        dir: &Utf8Path,
+        canonical_dir: Option<&Path>,
+        ignores: &mut IgnoreStack,
+        files: &mut Vec<Utf8PathBuf>,
+    ) -> miette::Result<()> {
         let entries = if self.strict_errors {
             fs::read_dir(dir)
                 .into_diagnostic()
@@ -320,19 +392,31 @@ impl FileWalker {
             let entry_path = Utf8PathBuf::from_path_buf(entry.path())
                 .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", dir))?;
 
+            let canonical_entry = canonical_dir.map(|dir| dir.join(entry.file_name()));
+            let is_ignored = |is_dir: bool| {
+                canonical_entry
+                    .as_deref()
+                    .is_some_and(|path| ignores.is_ignored(path, is_dir))
+            };
+
             if file_type.is_symlink() {
-                self.collect_symlink_target(&entry_path, files)?;
+                if !is_ignored(false) {
+                    self.collect_symlink_target(&entry_path, files)?;
+                }
                 continue;
             }
 
             if file_type.is_dir() {
-                if self.is_excluded_dir(&entry_path) {
+                if self.is_excluded_dir(&entry_path) || is_ignored(true) {
                     continue;
                 }
                 if self.recursive {
-                    self.walk_dir(&entry_path, files)?;
+                    self.walk_dir(&entry_path, canonical_entry.as_deref(), ignores, files)?;
                 }
-            } else if file_type.is_file() && self.matches_extension_utf8(&entry_path) {
+            } else if file_type.is_file()
+                && self.matches_extension_utf8(&entry_path)
+                && !is_ignored(false)
+            {
                 files.push(entry_path);
             }
         }
@@ -423,6 +507,92 @@ pub fn collect_project_source_files(project_root: &Utf8Path) -> miette::Result<V
         .into_iter()
         .filter(|f| !f.starts_with(&stubs_dir))
         .collect())
+}
+
+/// The `.gitignore` matchers in effect at the current point of a walk
+/// (BT-4135), outermost first. Matchers are rooted at canonical directory
+/// paths, so entries are matched by their canonical path rather than the
+/// walk's own (possibly relative) spelling of it.
+#[derive(Debug, Default)]
+struct IgnoreStack {
+    matchers: Vec<Gitignore>,
+}
+
+impl IgnoreStack {
+    /// Seed the stack with the rules that apply from above a walk rooted at
+    /// `canonical_root`: `.git/info/exclude` and the `.gitignore` files of
+    /// the directories from the enclosing repository root down to, but not
+    /// including, the walk root (whose own `.gitignore` `walk_dir` pushes).
+    fn above_walk_root(canonical_root: &Path) -> Self {
+        let mut stack = Self::default();
+        let Some(repo_root) = canonical_root
+            .ancestors()
+            .find(|dir| dir.join(".git").exists())
+        else {
+            return stack;
+        };
+        stack.push_file(
+            repo_root,
+            &repo_root.join(".git").join("info").join("exclude"),
+        );
+        let mut ancestors: Vec<&Path> = canonical_root
+            .ancestors()
+            .skip(1)
+            .take_while(|dir| dir.starts_with(repo_root))
+            .collect();
+        ancestors.reverse();
+        for dir in ancestors {
+            stack.push_dir(dir);
+        }
+        stack
+    }
+
+    /// Push `dir`'s `.gitignore`, returning whether one was pushed.
+    fn push_dir(&mut self, dir: &Path) -> bool {
+        self.push_file(dir, &dir.join(".gitignore"))
+    }
+
+    /// Push a matcher rooted at `root` built from the ignore file `file`.
+    /// Returns `false` (pushing nothing) when the file is absent, has no
+    /// rules, or cannot be parsed (logged).
+    fn push_file(&mut self, root: &Path, file: &Path) -> bool {
+        if !file.is_file() {
+            return false;
+        }
+        let mut builder = GitignoreBuilder::new(root);
+        if let Some(err) = builder.add(file) {
+            warn!("ignoring malformed rules in '{}': {err}", file.display());
+        }
+        match builder.build() {
+            Ok(matcher) if !matcher.is_empty() => {
+                self.matchers.push(matcher);
+                true
+            }
+            Ok(_) => false,
+            Err(err) => {
+                warn!("failed to load '{}': {err}", file.display());
+                false
+            }
+        }
+    }
+
+    fn pop_dir(&mut self) {
+        self.matchers.pop();
+    }
+
+    /// Whether the entry at canonical `path` is ignored. The innermost
+    /// matcher with an opinion wins, so a nested `!pattern` re-includes what
+    /// an outer file ignored.
+    fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
+        for matcher in self.matchers.iter().rev() {
+            match matcher.matched(path, is_dir) {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => {}
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -719,5 +889,122 @@ mod tests {
             .unwrap();
         assert_eq!(files.len(), 1);
         assert!(files[0].as_str().ends_with("real.bt"));
+    }
+
+    // ── .gitignore handling (BT-4135) ───────────────────────────────────
+
+    fn write_file(path: &Utf8Path, content: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+
+    /// Relative paths (`/`-separated) of `files` under `root`, sorted.
+    fn relative_names(root: &Utf8Path, files: &[Utf8PathBuf]) -> Vec<String> {
+        let mut names: Vec<String> = files
+            .iter()
+            .map(|f| {
+                f.strip_prefix(root)
+                    .unwrap()
+                    .components()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The reported bug: a gitignored `.worktrees/` holding a nested
+    /// checkout must not be walked, or every project command reports each
+    /// file twice.
+    #[test]
+    fn test_walk_skips_gitignored_nested_checkout() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        write_file(&root.join(".gitignore"), ".worktrees/\n*.gen.bt\n");
+        write_file(&root.join("src/main.bt"), "");
+        write_file(&root.join("src/skip.gen.bt"), "");
+        // A nested checkout: its `.git` is a file, as for `git worktree`.
+        write_file(&root.join(".worktrees/feature/.git"), "gitdir: elsewhere\n");
+        write_file(&root.join(".worktrees/feature/src/main.bt"), "");
+
+        let files = FileWalker::source_files().walk(root).unwrap();
+        assert_eq!(relative_names(root, &files), vec!["src/main.bt"]);
+    }
+
+    #[test]
+    fn test_walk_respect_gitignore_opt_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        write_file(&root.join(".gitignore"), "ignored/\n");
+        write_file(&root.join("a.bt"), "");
+        write_file(&root.join("ignored/b.bt"), "");
+
+        let files = FileWalker::source_files()
+            .respect_gitignore(false)
+            .walk(root)
+            .unwrap();
+        assert_eq!(relative_names(root, &files), vec!["a.bt", "ignored/b.bt"]);
+    }
+
+    /// A nested `.gitignore` applies to its own subtree only, and a deeper
+    /// `!` negation re-includes what an outer file ignored.
+    #[test]
+    fn test_walk_nested_gitignore_and_negation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        write_file(&root.join(".gitignore"), "*.gen.bt\n");
+        write_file(&root.join("lib/.gitignore"), "!keep.gen.bt\nlocal/\n");
+        write_file(&root.join("top.gen.bt"), "");
+        write_file(&root.join("local/a.bt"), "");
+        write_file(&root.join("lib/keep.gen.bt"), "");
+        write_file(&root.join("lib/drop.gen.bt"), "");
+        write_file(&root.join("lib/local/b.bt"), "");
+
+        let files = FileWalker::source_files().walk(root).unwrap();
+        assert_eq!(
+            relative_names(root, &files),
+            vec!["lib/keep.gen.bt", "local/a.bt"]
+        );
+    }
+
+    /// Inside a repository, `.gitignore` files above the walk root (up to
+    /// the repository root) and `.git/info/exclude` apply too — but the
+    /// walk root itself is always walked, even when an ancestor rule
+    /// ignores it.
+    #[test]
+    fn test_walk_applies_ancestor_rules_inside_repo_but_not_to_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Utf8Path::from_path(dir.path()).unwrap();
+        write_file(&repo.join(".git/info/exclude"), "excluded.bt\n");
+        write_file(&repo.join(".gitignore"), "scratch/\n_vendor/\n");
+        write_file(&repo.join("pkg/a.bt"), "");
+        write_file(&repo.join("pkg/excluded.bt"), "");
+        write_file(&repo.join("pkg/scratch/b.bt"), "");
+        write_file(&repo.join("_vendor/dep/c.bt"), "");
+
+        let pkg = repo.join("pkg");
+        let files = FileWalker::source_files().walk(&pkg).unwrap();
+        assert_eq!(relative_names(&pkg, &files), vec!["a.bt"]);
+
+        let vendor = repo.join("_vendor");
+        let files = FileWalker::source_files().walk(&vendor).unwrap();
+        assert_eq!(relative_names(&vendor, &files), vec!["dep/c.bt"]);
+    }
+
+    /// Outside any repository, `.gitignore` files above the walk root do
+    /// not apply.
+    #[test]
+    fn test_walk_ignores_ancestor_gitignore_outside_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer = Utf8Path::from_path(dir.path()).unwrap();
+        write_file(&outer.join(".gitignore"), "*.bt\n");
+        write_file(&outer.join("proj/a.bt"), "");
+
+        let proj = outer.join("proj");
+        let files = FileWalker::source_files().walk(&proj).unwrap();
+        assert_eq!(relative_names(&proj, &files), vec!["a.bt"]);
     }
 }

@@ -1850,6 +1850,43 @@ mod tests {
         );
     }
 
+    /// BT-4135: a gitignored directory holding a nested checkout of the
+    /// same project (`.worktrees/<name>/`, as `git worktree` users keep
+    /// them) must not be linted — otherwise every diagnostic is reported
+    /// once per checkout.
+    #[test]
+    fn collect_lint_files_skips_gitignored_nested_checkout() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), ".worktrees/\n").unwrap();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let checkout = root.join(".worktrees").join("feature");
+        for base in [root, checkout.as_path()] {
+            std::fs::create_dir_all(base.join("src")).unwrap();
+            std::fs::write(
+                base.join("src").join("Main.bt"),
+                "Object subclass: Main\n  foo => 1\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(checkout.join(".git"), "gitdir: elsewhere\n").unwrap();
+
+        let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let (source_files, _erl_files) =
+            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+
+        assert_eq!(
+            source_files,
+            vec![source_path.join("src").join("Main.bt")],
+            "gitignored .worktrees/ checkout must not be linted"
+        );
+    }
+
     /// Acceptance criterion: a project depending on a package that
     /// declares a type alias exactly once must lint clean across every file
     /// in the project — no false "Pre-loaded type alias ... collides with

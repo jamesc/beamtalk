@@ -45,6 +45,14 @@ serde_json.workspace = true
 # (non-fatal by design), matching the tracing usage already established in
 # `beamtalk-cli`/`beamtalk-lsp`.
 tracing.workspace = true
+# why: BT-4135 — `file_walker::FileWalker` honours `.gitignore` files so a
+# project walk (`beamtalk lint`/`build`/`fmt`/`test`, LSP preload) skips
+# ignored trees such as nested `.worktrees/` checkouts. Only the crate's
+# `gitignore::Gitignore` matcher is used (the walk itself stays ours); every
+# transitive dependency (globset, regex-automata, walkdir, ...) was already
+# in the lockfile, so this adds a single crate rather than re-implementing
+# gitignore pattern semantics by hand.
+ignore.workspace = true
 # why: BT-3100 — `test_support::arb_declared_type` (the shared proptest
 # generator for type-string fidelity tests) needs proptest in the normal
 # dependency graph, not just dev-dependencies, so it compiles for dependent
