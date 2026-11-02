@@ -1,9 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3913: a `do:separatedBy:` nested in an actor loop nest seeds its
-// accumulator from the cell. A field write made earlier in the enclosing loop
-// body must survive it. Asserted in bt3913nested_seed_test.bt.
+// BT-3913: a field write made in an enclosing actor loop body must survive a
+// nested `do:separatedBy:`. Asserted in bt3913nested_seed_test.bt.
 
 Actor subclass: Bt3913NestedSeedActor
   state: n = 0
