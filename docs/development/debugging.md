@@ -593,18 +593,20 @@ via `beamtalk_message_dispatch:send/3`. This is the dynamic-site report
 provenance, or `Dynamic`/union/negation) and the reason the send stayed
 dynamic. The word after `reason:` is a stable token for counting sites
 (`untyped`, `builtin`, `supervisor`, `abstract`, `root`, `actor`,
-`ambiguous`, `exception`, `binary-selector`, …); for a built-in receiver the rest names
-its row of the shared routing fixture
-(`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`).
-The reason is the gate of the same decision the guarded direct call is
-emitted from (`typed_tagged_send_target` in `dispatch_codegen.rs`), so the
+`ambiguous`, `exception`, `binary-selector`, `perform`, …). A built-in
+receiver whose row of the shared routing fixture
+(`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`)
+has a single route (`List`, `Dictionary`, `Integer`, …) is no longer a dynamic
+site (BT-4294); for the built-ins that stay dynamic the rest names the row's
+reason. The reason is the gate of the same decision the guarded direct call is
+emitted from (`typed_send_target` in `dispatch_codegen.rs`), so the
 report cannot disagree with the generated code.
 
 Examples:
 
 ```text
 Send 'foo:' at line 23: dynamic dispatch (receiver: Dynamic (unannotated parameter) [dynamic]; reason: untyped)
-Send 'at:put:' at line 12: dynamic dispatch (receiver: Dictionary [Object, declared]; reason: builtin — representation-routed: untagged_map guard -> bt@stdlib@dictionary)
+Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string)
 Send 'start' at line 40: dynamic dispatch (receiver: AppSupervisor [Object, declared]; reason: supervisor — AppSupervisor instances are Supervisor handles (beamtalk_supervisor tuples))
 ```
 

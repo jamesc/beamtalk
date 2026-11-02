@@ -1,15 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4069, BT-4293: sends to a receiver typed as a tagged-map (Value or
-//! Object) class — sealed or open — compile to a guarded direct
+//! BT-4069, BT-4293, BT-4294: sends to a receiver typed as a tagged-map
+//! (Value or Object) class — sealed or open — or as a representation-routed
+//! built-in (`List`, `Dictionary`, `Integer`, …) compile to a guarded direct
 //! `Module:dispatch/3` call instead of a dynamic
 //! `beamtalk_message_dispatch:send/3`.
 //!
-//! Positive tests pin the guarded direct path (the `typed_tagged` handler);
+//! Positive tests pin the guarded direct path (the `typed_guarded` handler);
 //! negative tests (untyped/union, abstract classes, the supervisor family,
-//! raw-representation builtins, exception kin, `Character` literals) lock in
-//! the dynamic behavior so the handler cannot steal those sends.
+//! built-ins without a single route, exception kin, `Character` literals)
+//! lock in the dynamic behavior so the handler cannot steal those sends.
 
 use super::codegen;
 
@@ -295,7 +296,9 @@ fn abstract_value_typed_param_stays_dynamic() {
 
 #[test]
 fn abstract_builtin_typed_param_stays_dynamic() {
-    // `Object` and `Value` are abstract builtins.
+    // `Object` and `Value` are ancestors of representation-routed built-ins:
+    // their static types admit raw terms (integers, lists, …) that no class
+    // tag matches, so they stay dynamic (the `RepresentationAncestor` gate).
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: o :: Object -> Object =>\n",
@@ -370,45 +373,177 @@ fn union_typed_param_stays_dynamic() {
     );
 }
 
-#[test]
-fn integer_typed_param_stays_dynamic() {
-    // `Integer` instances are raw Erlang integers, never tagged maps: the
-    // tag guard could never match, so emitting it would only pessimize.
-    // (`frobnicate` is intentionally undefined — DNU only matters at
-    // runtime; codegen shape is what this asserts.)
-    let code = codegen(concat!(
-        "Object subclass: Caller\n",
-        "  useIt: n :: Integer -> Object =>\n",
-        "    n frobnicate\n",
-    ));
-    assert!(
-        !code.contains("call 'bt@stdlib@integer':'dispatch'('frobnicate'"),
-        "raw-term receiver must stay dynamic. Got:\n{code}"
-    );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "raw-term receiver send should still exist as a dynamic send. Got:\n{code}"
-    );
+// ---------------------------------------------------------------------------
+// BT-4294: built-in receivers take a representation-guarded direct call
+// ---------------------------------------------------------------------------
+
+/// Compiles `recv frobnicate` with `recv :: <ty>` and returns the code.
+/// (`frobnicate` is intentionally undefined: no earlier handler claims it,
+/// and DNU only matters at run time.)
+fn builtin_typed_send(ty: &str) -> String {
+    codegen(&format!(
+        "Object subclass: Caller\n  useIt: r :: {ty} -> Object =>\n    r frobnicate\n"
+    ))
 }
 
 #[test]
-fn dictionary_typed_param_stays_dynamic() {
-    // `Dictionary` instances are untagged maps: the tag guard could never
-    // match. (`at:`/`at:put:` are dict intrinsics claimed before dispatch
-    // selection, so this uses an unclaimed selector.)
+fn builtin_typed_params_send_direct_to_the_fixture_module() {
+    // Every row of the routing fixture with a single route, by its static
+    // type, guard (one distinctive fragment of its rendering) and module.
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "Integer",
+            "call 'erlang':'is_integer'(",
+            "bt@stdlib@integer",
+        ),
+        ("Float", "call 'erlang':'is_float'(", "bt@stdlib@float"),
+        (
+            "List(Integer)",
+            "call 'erlang':'is_list'(",
+            "bt@stdlib@list",
+        ),
+        ("Block", "call 'erlang':'is_function'(", "bt@stdlib@block"),
+        (
+            "Reference",
+            "call 'erlang':'is_reference'(",
+            "bt@stdlib@reference",
+        ),
+        ("Port", "call 'erlang':'is_port'(", "bt@stdlib@port"),
+        ("Symbol", ", 'nil')", "bt@stdlib@symbol"),
+        (
+            "True",
+            "<'true'> when 'true' -> call 'bt@stdlib@true'",
+            "bt@stdlib@true",
+        ),
+        (
+            "False",
+            "<'false'> when 'true' -> call 'bt@stdlib@false'",
+            "bt@stdlib@false",
+        ),
+        (
+            "UndefinedObject",
+            "<'nil'> when 'true' -> call 'bt@stdlib@undefined_object'",
+            "bt@stdlib@undefined_object",
+        ),
+        (
+            "Dictionary(Symbol, Integer)",
+            "is_map_key'('__class_mod__'",
+            "bt@stdlib@dictionary",
+        ),
+        (
+            "Tuple",
+            "<'beamtalk_object'> when 'true' -> 'false'",
+            "bt@stdlib@tuple",
+        ),
+    ];
+    for (ty, guard, module) in cases {
+        let code = builtin_typed_send(ty);
+        assert!(
+            code.contains(&format!("call '{module}':'dispatch'('frobnicate'")),
+            "{ty} receiver should direct-call {module}. Got:\n{code}"
+        );
+        assert!(
+            code.contains(guard),
+            "{ty} direct call should stand behind its representation guard {guard:?}. Got:\n{code}"
+        );
+        assert!(
+            code.contains("beamtalk_message_dispatch':'send'("),
+            "{ty} guard miss should fall back to the dynamic send. Got:\n{code}"
+        );
+        super::assert_compiles_through_erlc("test", &code);
+    }
+}
+
+#[test]
+fn tuple_guard_rejects_reserved_heads_at_every_size() {
+    // The dynamic path sends any tuple of size >= 2 headed `beamtalk_object`
+    // to `gen_server:call/2`, not only the 4-tuple the type-pattern test
+    // rejects, so the send guard rejects every reserved head at every size:
+    // no `tuple_size` comparison but the empty-tuple check.
+    let code = builtin_typed_send("Tuple");
+    for tag in [
+        "beamtalk_string",
+        "beamtalk_future",
+        "beamtalk_object",
+        "beamtalk_supervisor",
+    ] {
+        assert!(
+            code.contains(&format!("<'{tag}'> when 'true' -> 'false'")),
+            "Tuple guard should reject the reserved head {tag}. Got:\n{code}"
+        );
+    }
+    assert!(
+        code.contains("tuple_size'(_TTaggedRecv"),
+        "Tuple guard should check for the empty tuple. Got:\n{code}"
+    );
+    for size in [2, 4] {
+        assert!(
+            !code.contains(&format!("), {size}) of")),
+            "Tuple send guard must not be size-specific. Got:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn builtin_typed_keyword_send_binds_args_once() {
+    // `Dictionary at:put:` is the largest built-in group in Catalina; the
+    // dict intrinsic only claims literal receivers, so a typed parameter
+    // reaches the guarded call with each operand bound once.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: d :: Dictionary(Symbol, Integer) -> Object =>\n",
-        "    d frobnicate\n",
+        "    d frobnicate: 1 with: 2\n",
     ));
     assert!(
-        !code.contains("call 'bt@stdlib@dictionary':'dispatch'('frobnicate'"),
-        "untagged-map receiver must stay dynamic. Got:\n{code}"
+        code.contains("call 'bt@stdlib@dictionary':'dispatch'('frobnicate:with:', ["),
+        "keyword send to a Dictionary should direct-call. Got:\n{code}"
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "untagged-map receiver send should still exist as a dynamic send. Got:\n{code}"
-    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn builtins_without_a_single_route_stay_dynamic() {
+    // From the routing fixture: `String` and `Pid` answer some selectors
+    // outside their module, `Binary`'s test also admits a `String` (routed
+    // to `bt@stdlib@string`), and `Boolean`, `Bitstring`, `Character`,
+    // `Class`, `Metaclass` and `ErlangModule` carry a `dynamic_only` reason.
+    for ty in [
+        "String",
+        "Pid",
+        "Binary",
+        "Boolean",
+        "Bitstring",
+        "Character",
+        "Class",
+        "Metaclass",
+        "ErlangModule",
+    ] {
+        let code = builtin_typed_send(ty);
+        assert!(
+            !code.contains("'dispatch'('frobnicate'"),
+            "{ty} receiver must stay dynamic. Got:\n{code}"
+        );
+        assert!(
+            code.contains("beamtalk_message_dispatch':'send'("),
+            "{ty} receiver send should still exist as a dynamic send. Got:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn rewritten_selector_on_typed_receiver_stays_dynamic() {
+    // `perform:withArguments:timeout:` is rewritten by
+    // `beamtalk_message_dispatch:send/3` into a `send/4` of the target
+    // selector before the receiver is classified, so no `dispatch/3` sees it.
+    for ty in ["List(Integer)", "SealedWidget"] {
+        let code = codegen(&format!(
+            "Object subclass: Caller\n  useIt: r :: {ty} -> Object =>\n    r perform: #size withArguments: #() timeout: 100\n\nsealed Value subclass: SealedWidget\n  field: x :: Integer = 0\n"
+        ));
+        assert!(
+            !code.contains("'dispatch'('perform:withArguments:timeout:'"),
+            "{ty}: a rewritten selector must stay dynamic. Got:\n{code}"
+        );
+    }
 }
 
 #[test]
@@ -1013,10 +1148,10 @@ fn all_builtins_are_classified_for_static_dispatch() {
 
 #[test]
 fn send_handlers_keep_priority_positions() {
-    // BT-4069 (review F2): `HANDLERS` order is load-bearing — `typed_tagged`
+    // BT-4069 (review F2): `HANDLERS` order is load-bearing — `typed_guarded`
     // must stay last (it converts only would-be-dynamic sends) and
-    // `character_typed` first. A handler appended after `typed_tagged`
-    // would silently never fire for tagged-class-typed receivers.
+    // `character_typed` first. A handler appended after `typed_guarded`
+    // would silently never fire for statically typed receivers.
     let handlers = crate::core_erlang::dispatch_codegen::HANDLERS;
     assert_eq!(
         handlers.first().map(|(name, _)| *name),
@@ -1025,17 +1160,19 @@ fn send_handlers_keep_priority_positions() {
     );
     assert_eq!(
         handlers.last().map(|(name, _)| *name),
-        Some("typed_tagged"),
-        "typed_tagged must stay last"
+        Some("typed_guarded"),
+        "typed_guarded must stay last"
     );
 }
 
 #[test]
 fn non_tagged_exclusions_are_sealed_builtin_values() {
     // Every non-tagged-map row of the routing table must still be a sealed
-    // builtin of Value- or Object-kind: the typed-sealed path checks the row
-    // before the sealed gate, so a row that stopped being sealed would hide
-    // which gate excludes the class — re-check its representation.
+    // builtin of Value- or Object-kind. The routing table keeps these classes
+    // off the typed-tagged path (and gives them a representation-guarded
+    // route instead, BT-4294), so a row that became open must have its
+    // subclasses' representation re-checked: a subclass whose instances are
+    // tagged maps would need the tagged path, not the row's.
     use beamtalk_core::ast::ClassKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
     let module = beamtalk_core::ast::Module::new(
