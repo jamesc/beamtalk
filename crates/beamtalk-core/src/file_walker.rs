@@ -132,15 +132,16 @@ impl FileWalker {
 
     /// Whether to skip paths ignored by `.gitignore` files. Default: `false`.
     ///
-    /// The [`lint_files`](Self::lint_files), [`format_files`](Self::format_files)
-    /// and [`preload_files`](Self::preload_files) presets turn it on
-    /// (BT-4135), so `beamtalk lint`, `beamtalk fmt`, MCP lint and LSP
-    /// preload skip ignored trees such as a `.worktrees/` directory holding
-    /// nested checkouts, instead of reporting each nested copy's files as
-    /// duplicates of the main tree's. Build, test, doc and dependency
-    /// collection (`source_files`, `test_files`, [`collect_project_source_files`])
-    /// leave it off: what gets compiled must not depend on `.gitignore`, so a
-    /// generated, uncommitted `.bt` source under `src/` still builds.
+    /// The [`lint_files`](Self::lint_files) and
+    /// [`format_files`](Self::format_files) presets turn it on (BT-4135), so
+    /// `beamtalk lint`, `beamtalk fmt` and MCP lint skip ignored trees such as
+    /// a `.worktrees/` directory holding nested checkouts, instead of
+    /// reporting each nested copy's files as duplicates of the main tree's.
+    /// Build, test, doc, dependency collection and LSP preload
+    /// (`source_files`, `test_files`, `preload_files`,
+    /// [`collect_project_source_files`]) leave it off: what gets compiled must
+    /// not depend on `.gitignore`, so a generated, uncommitted `.bt` source
+    /// under `src/` still builds, and the LSP indexes exactly what builds.
     ///
     /// Rules, following git's (and ripgrep's) semantics:
     /// - Every `.gitignore` in the walk root and the directories below it
@@ -234,15 +235,15 @@ impl FileWalker {
     /// Preset for LSP/IDE preloading with a file budget.
     ///
     /// Skips common non-source directories (`.git`, `target`, `node_modules`,
-    /// `_build`) and gitignored paths (see [`FileWalker::respect_gitignore`]),
-    /// silently ignores errors, and caps the number of files.
+    /// `_build`), silently ignores errors, and caps the number of files.
+    /// Like the build, it does not consult `.gitignore`, so the LSP indexes
+    /// exactly the sources that build.
     pub fn preload_files(budget: usize) -> Self {
         Self::new()
             .extensions(&["bt"])
             .exclude_dirs(&[".git", "target", "node_modules", "_build"])
             .max_files(budget)
             .strict_errors(false)
-            .respect_gitignore(true)
     }
 
     /// Preset for linting `.bt` files.
@@ -534,15 +535,17 @@ struct IgnoreStack {
 
 impl IgnoreStack {
     /// Seed the stack with the rules that apply from above a walk rooted at
-    /// `canonical_root`: the `.gitignore` files of the directories from the enclosing repository root down to, but not
-    /// including, the walk root (whose own `.gitignore` `walk_dir` pushes).
+    /// `canonical_root`: the `.gitignore` files of the directories from the
+    /// enclosing repository root down to, but not including, the walk root
+    /// (whose own `.gitignore` `walk_dir` pushes).
     ///
     /// An explicitly walked directory is always walked: when those rules
     /// ignore the walk root or a directory on the way down to it (e.g.
     /// `_build/` or `_build/**` above a walk of `_build/deps/<dep>/src`),
-    /// every rule from above that ignored directory is dropped, since a glob like `_build/**` would otherwise
-    /// still match every entry inside the root. `.gitignore` files below the
-    /// ignored directory (a dependency's own) still apply.
+    /// every rule from above that ignored directory is dropped, since a glob
+    /// like `_build/**` would otherwise still match every entry inside the
+    /// root. `.gitignore` files below the ignored directory (a dependency's
+    /// own) still apply.
     fn above_walk_root(canonical_root: &Path) -> Self {
         let mut stack = Self::default();
         let Some(repo_root) = canonical_root
@@ -959,9 +962,9 @@ mod tests {
         assert_eq!(relative_names(root, &files), vec!["src/main.bt"]);
     }
 
-    /// Only lint/fmt/preload honour `.gitignore`: build, test and doc
-    /// walks compile everything they find, so a generated, uncommitted
-    /// source still builds.
+    /// Only lint and fmt honour `.gitignore`: build, test, doc and LSP
+    /// preload walk everything they find, so a generated, uncommitted
+    /// source still builds and is indexed.
     #[test]
     fn test_walk_respect_gitignore_opt_out() {
         let dir = tempfile::tempdir().unwrap();
@@ -976,6 +979,7 @@ mod tests {
         for walker in [
             FileWalker::source_files(),
             FileWalker::test_files(),
+            FileWalker::preload_files(100),
             FileWalker::lint_files().respect_gitignore(false),
         ] {
             let files = walker.walk(root).unwrap();
@@ -984,8 +988,6 @@ mod tests {
         let files = FileWalker::lint_files().walk(root).unwrap();
         assert_eq!(relative_names(root, &files), vec!["a.bt"]);
         let files = FileWalker::format_files().walk(root).unwrap();
-        assert_eq!(relative_names(root, &files), vec!["a.bt"]);
-        let files = FileWalker::preload_files(100).walk(root).unwrap();
         assert_eq!(relative_names(root, &files), vec!["a.bt"]);
     }
 
