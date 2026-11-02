@@ -2512,23 +2512,9 @@ impl Parser {
                 _ => None,
             };
             if let Some(v) = int_value {
-                // A non-ASCII character in a default 8-bit integer segment
-                // matches one byte holding its code point (`<<$é>>` is
-                // byte 233, exactly like `erlc`), not its UTF-8 encoding —
-                // so it disagrees with `<<"é">>`, which folds to the UTF-8
-                // bytes (BT-4376). Code points above 255 already warn below
-                // that they do not fit.
                 if let Literal::Character(c) = lit {
-                    if seg_type == BinarySegmentType::Integer
-                        && size.is_none()
-                        && (128..=255).contains(&u32::from(*c))
-                    {
-                        self.diagnostics.push(Diagnostic::warning(
-                            format!(
-                                "character literal ${c} matches the single byte {v} (its code point), not its UTF-8 encoding; use \"{c}\" or ${c}/utf8 to match the UTF-8 bytes"
-                            ),
-                            *value_span,
-                        ));
+                    if seg_type == BinarySegmentType::Integer && size.is_none() {
+                        self.warn_non_ascii_byte_character(*c, *value_span);
                     }
                 }
                 self.check_binary_int_literal_shape(
@@ -2560,6 +2546,23 @@ impl Parser {
                     *value_span,
                 ));
             }
+        }
+    }
+
+    /// Warns when a non-ASCII character fills a default 8-bit integer
+    /// segment (BT-4376): `<<$é>>` matches one byte holding its code point
+    /// (233, exactly like `erlc`), not its UTF-8 encoding, so it disagrees
+    /// with `<<"é">>`, which folds to the UTF-8 bytes. Code points above 255
+    /// already warn that they do not fit, so only `128..=255` warns here.
+    fn warn_non_ascii_byte_character(&mut self, c: char, span: crate::source_analysis::Span) {
+        let code_point = u32::from(c);
+        if (128..=255).contains(&code_point) {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "character literal ${c} matches the single byte {code_point} (its code point), not its UTF-8 encoding; use \"{c}\" or ${c}/utf8 to match the UTF-8 bytes"
+                ),
+                span,
+            ));
         }
     }
 
