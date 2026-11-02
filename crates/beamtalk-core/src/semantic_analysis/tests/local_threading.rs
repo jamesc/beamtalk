@@ -20,7 +20,7 @@ fn adr0131_diagnostics_with(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
                 d.category,
                 Some(
                     DiagnosticCategory::Tier2BlockNoReturnChannel
-                        | DiagnosticCategory::UnmigratedLocalThreading
+                        | DiagnosticCategory::UnthreadedLocalWrite
                 )
             )
         })
@@ -52,7 +52,7 @@ const NON_PRODUCER_VALUE_PRELUDE: &str = "b := [:q | q > 5]\n";
 
 /// The position-check errors that name a `value:` send.
 fn value_send_errors(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
-    of_category(diags, DiagnosticCategory::UnmigratedLocalThreading)
+    of_category(diags, DiagnosticCategory::UnthreadedLocalWrite)
         .into_iter()
         .filter(|d| d.message.starts_with("`value:`"))
         .collect()
@@ -934,7 +934,7 @@ fn a_returned_do_inside_a_block_is_accepted_in_class_and_value_methods() {
         let src = in_actor(body);
         let diags = adr0131_diagnostics_with(&src, &["c"]);
         assert!(
-            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
             "{src}: {diags:?}"
         );
     }
@@ -1199,7 +1199,7 @@ fn repl_conditional_receiver_keeps_the_error() {
         "(#(1, 2) collect: [:x | t := t + x]) isEmpty ifTrue: [0]\n",
         &known,
     );
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    let p0 = of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(p0[0].message.contains("in a top-level expression"));
     // REPL s2 works: detect:ifNone: RHS.
@@ -1295,7 +1295,7 @@ fn a_try_do_assigned_in_an_actor_fold_body_keeps_the_phase0_error() {
     );
     let diags = adr0131_diagnostics(&rejected);
     assert!(
-        of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading)
+        of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite)
             .iter()
             .any(|d| d.message.contains("`tryDo:` writes outer local `t`")),
         "{diags:?}"
@@ -1388,7 +1388,7 @@ fn section6_cascade_messages_are_never_inlined() {
 
 /// BT-3913 (BT-3738 follow-up): a loop or fold that writes a local of its
 /// arm, as the value of an assignment in that arm, keeps the
-/// `UnmigratedLocalThreading` error — the arm frame carries only method-level
+/// `UnthreadedLocalWrite` error — the arm frame carries only method-level
 /// locals, so the write would not thread back. The compliant rewrite (the
 /// writing loop as a statement of its own, the pure fold value captured)
 /// draws no diagnostic; `adr0131cond_non_producer_test.bt` runs both.
@@ -1400,7 +1400,7 @@ fn residual_arm_local_producer_as_assign_value_is_rejected() {
     ] {
         let diags = adr0131_diagnostics(&in_actor(body));
         assert_eq!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+            of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len(),
             1,
             "{body}: {diags:?}"
         );
@@ -1493,7 +1493,7 @@ fn producer_sites_stop_at_blocks_conditionals_and_unthreaded_writes() {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
             assert_eq!(
-                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len()
+                of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len()
                     + of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len(),
                 1,
                 "{src}: {diags:?}"
@@ -1560,7 +1560,7 @@ fn repl_producer_sites_stop_at_blocks_conditionals_and_statement_constructs() {
     ] {
         let diags = adr0131_diagnostics_with(src, &known);
         assert!(
-            !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
             "{src}: {diags:?}"
         );
     }
@@ -1587,7 +1587,7 @@ fn field_write_value_sites_are_producers_in_class_and_actor_methods() {
             // The last value is a conditional's receiver: still rejected.
             let expect_rejected = value.contains("ifTrue:");
             assert_eq!(
-                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
                 expect_rejected,
                 "{src}: {diags:?}"
             );
@@ -1617,7 +1617,7 @@ fn field_write_value_sites_stop_at_returns_assignments_and_blocks() {
         for src in [class, actor] {
             let diags = adr0131_diagnostics(&src);
             assert_eq!(
-                of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len(),
+                of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len(),
                 1,
                 "{src}: {diags:?}"
             );
@@ -1679,7 +1679,7 @@ fn stored_search_detect_in_an_arm_keeps_the_error_naming_the_block() {
         "{NON_PRODUCER_VALUE_PRELUDE}4 > 3 ifTrue: [{NON_PRODUCER_VALUE}]\nt"
     ));
     let diags = adr0131_diagnostics(&src);
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    let p0 = of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert_eq!(
         p0[0].message.as_str(),
@@ -1702,7 +1702,7 @@ fn stored_search_detect_as_a_statement_keeps_the_error() {
     // class method statement, in an arm or at the root alike.
     let body = format!("{NON_PRODUCER_VALUE_PRELUDE}{NON_PRODUCER_VALUE}\nt");
     let diags = adr0131_diagnostics(&in_class(&body));
-    let p0 = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+    let p0 = of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite);
     assert_eq!(p0.len(), 1, "{diags:?}");
     assert!(
         p0[0].message.contains("as a statement inside"),
@@ -1804,7 +1804,7 @@ fn a_nested_do_in_a_class_loop_body_is_accepted_with_or_without_state_access() {
     ] {
         let diags = adr0131_diagnostics(&in_class(body));
         assert!(
-            of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+            of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
             "{body}: {diags:?}"
         );
     }
@@ -2293,7 +2293,7 @@ fn loop_body_producer_accept_stops_where_codegen_does() {
             .zip(expect_error)
         {
             let diags = adr0131_diagnostics(&src);
-            let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).len()
+            let errors = of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len()
                 + of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).len();
             assert_eq!(errors > 0, expect_error, "{src}: {diags:?}");
         }
@@ -2322,7 +2322,7 @@ fn producer_sites_stop_at_sends_that_do_not_sequence_their_operands() {
         for src in [in_class(&body), in_value(&body), in_actor(&body)] {
             let diags = adr0131_diagnostics(&src);
             assert!(
-                !of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading).is_empty(),
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
                 "{src}: {diags:?}"
             );
         }
@@ -3101,7 +3101,7 @@ fn match_arm_write_that_is_not_a_producer_stays_a_structured_error() {
     ] {
         for src in [in_class(body), in_value(body), in_actor(body)] {
             let diags = adr0131_diagnostics(&src);
-            let errors = of_category(&diags, DiagnosticCategory::UnmigratedLocalThreading);
+            let errors = of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite);
             assert!(
                 errors
                     .iter()
@@ -3597,7 +3597,7 @@ fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
         assert!(
             !of_category(
                 &adr0131_diagnostics(&src),
-                DiagnosticCategory::UnmigratedLocalThreading
+                DiagnosticCategory::UnthreadedLocalWrite
             )
             .is_empty(),
             "{src}"

@@ -26,7 +26,7 @@ The auth message accepts these fields:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `cookie` | string | yes | Workspace cookie, validated against `erlang:get_cookie()`. |
-| `client` | string | no | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`, `shutdown`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`, `workspace stop` sends `shutdown` (version-exempt, restricted to the `shutdown` op). |
+| `client` | string | no | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`, `vscode`, `shutdown`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`, the VS Code extension's workspace client `vscode` (protocol-only version gate, see below), `workspace stop` sends `shutdown` (version-exempt, restricted to the `shutdown` op). |
 | `resume` | string | no | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. |
 | `beamtalk_version` | string | yes (gated nodes) | Client toolchain version (`BEAMTALK_VERSION`, verbatim). Missing or mismatched values are rejected with `auth_error` — the field is required in practice; only pre-lock nodes accept auth without it. |
 | `protocol_version` | string | yes (gated nodes) | Client wire protocol version (`2.0`). Same required-in-practice status as `beamtalk_version`. |
@@ -34,6 +34,8 @@ The auth message accepts these fields:
 ### Version lock (BT-4327)
 
 Client and node must be built from the same checkout: `beamtalk_version` (exact, including any `-dev+<sha>` suffix) and `protocol_version` (exact) must match on both sides. The server gates at `auth`; the client re-verifies via `describe` (covering pre-lock nodes that ignore the new `auth` fields). Either side refuses with a message naming both versions plus the `just build` rebuild hint. OTP is deliberately not part of the lock — mixed OTP releases are governed by the support window, not an exact match.
+
+The VS Code extension's workspace client connects as the `vscode` surface and is gated on `protocol_version` **only** (BT-4373): it compiles no code — every `eval` it sends is compiled inside the node by the node's own compiler — and it ships separately on the marketplace, so requiring an exact `beamtalk_version` match would break it on every rebuild. It must still send a matching `protocol_version`; a mismatch is refused with a message naming the extension. Its session is otherwise a normal, unrestricted session.
 
 `workspace stop` connects as the `shutdown` admin surface, which is exempt from the version lock on both sides: the server skips the gate for it, and the client skips the `describe` check. A shutdown-surface connection is restricted to the `shutdown` op (anything else is rejected and the connection closed), so the exemption grants no compilation or eval capability — and `shutdown` itself re-validates the cookie from the op body. Stopping a stale node therefore succeeds precisely when its versions do not match.
 

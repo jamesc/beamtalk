@@ -153,6 +153,24 @@ export interface IWebSocket {
  */
 export type WebSocketFactory = (url: string, callbacks: WebSocketCallbacks) => IWebSocket;
 
+// ─── Auth handshake constants ────────────────────────────────────────────────
+
+/**
+ * Workspace wire-protocol version this client speaks, sent as
+ * `protocol_version` in the auth frame. The canonical value is
+ * `?PROTOCOL_VERSION` in `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`;
+ * `workspaceClient.test.ts` reads that header and fails if this drifts.
+ */
+export const WORKSPACE_PROTOCOL_VERSION = "2.0";
+
+/**
+ * Client surface declared in the auth frame (BT-4373). The workspace gates
+ * this surface on `protocol_version` only — the extension compiles no code,
+ * so it need not be built from the same checkout as the node (unlike the
+ * CLI/MCP/LSP, which carry the full toolchain lock, BT-4327).
+ */
+export const WORKSPACE_CLIENT_SURFACE = "vscode";
+
 // ─── Reconnect constants ─────────────────────────────────────────────────────
 
 const RECONNECT_BASE_MS = 1_000;
@@ -195,6 +213,7 @@ export class WorkspaceClient {
   private pending = new Map<string, PendingRequest>();
 
   private connectionHandlers: Array<(state: ConnectionState) => void> = [];
+  private authErrorHandlers: Array<(message: string) => void> = [];
   private pushHandlers: Array<(event: PushEvent) => void> = [];
 
   constructor(
@@ -542,6 +561,19 @@ export class WorkspaceClient {
   }
 
   /**
+   * Subscribe to terminal auth failures (bad cookie, or a protocol mismatch
+   * between this extension and the workspace node). The handler receives the
+   * server's message. The client does not reconnect after an auth failure.
+   * Returns a disposal function that removes the handler.
+   */
+  onAuthError(handler: (message: string) => void): () => void {
+    this.authErrorHandlers.push(handler);
+    return () => {
+      this.authErrorHandlers = this.authErrorHandlers.filter((h) => h !== handler);
+    };
+  }
+
+  /**
    * Subscribe to incoming push events from the workspace
    * (transcript output, actor lifecycle, class-loaded).
    * Returns a disposal function that removes the handler.
@@ -616,7 +648,14 @@ export class WorkspaceClient {
 
     // Auth challenge — send cookie
     if (msg.op === "auth-required") {
-      this.ws?.send(JSON.stringify({ type: "auth", cookie: this.cookie }));
+      this.ws?.send(
+        JSON.stringify({
+          type: "auth",
+          cookie: this.cookie,
+          client: WORKSPACE_CLIENT_SURFACE,
+          protocol_version: WORKSPACE_PROTOCOL_VERSION,
+        })
+      );
       return;
     }
 
@@ -628,7 +667,15 @@ export class WorkspaceClient {
     // Auth failure — terminal, do not reconnect (cookie won't change)
     if (msg.type === "auth_error") {
       this.authFailed = true;
-      this._rejectAllPending(new Error(`Auth error: ${String(msg.message ?? "unknown")}`));
+      const message = String(msg.message ?? "unknown");
+      this._rejectAllPending(new Error(`Auth error: ${message}`));
+      for (const h of this.authErrorHandlers) {
+        try {
+          h(message);
+        } catch {
+          // Ignore handler errors to prevent one bad handler blocking others.
+        }
+      }
       this.ws?.close();
       return;
     }

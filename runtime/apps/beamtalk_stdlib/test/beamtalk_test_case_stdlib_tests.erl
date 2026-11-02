@@ -109,21 +109,21 @@ run_test_method_error_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testError, #{}, nil
     ),
-    ?assertMatch({fail, testError, _}, Result).
+    ?assertMatch({fail, testError, _, _}, Result).
 
 run_test_method_throw_test() ->
     %% Hits: TestClass:TestReason:TestST  catch-all (line 833–835)
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testThrow, #{}, nil
     ),
-    ?assertMatch({fail, testThrow, _}, Result).
+    ?assertMatch({fail, testThrow, _, _}, Result).
 
 run_test_method_exit_test() ->
     %% Hits: TestClass:TestReason:TestST  catch-all with exit class
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testExit, #{}, nil
     ),
-    ?assertMatch({fail, testExit, _}, Result).
+    ?assertMatch({fail, testExit, _, _}, Result).
 
 run_test_method_skip_test() ->
     %% Hits: throw:{bunit_skip, Reason} -> {skip, MethodName, Reason}
@@ -137,21 +137,21 @@ run_test_method_assert_fail_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testAssertFail, #{}, nil
     ),
-    ?assertMatch({fail, testAssertFail, _}, Result).
+    ?assertMatch({fail, testAssertFail, _, _}, Result).
 
 run_test_method_beamtalk_error_test() ->
     %% Hits: error:#beamtalk_error{message = ErrMsg} catch-all (line 820–823)
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBeamtalkError, #{}, nil
     ),
-    ?assertMatch({fail, testBeamtalkError, _}, Result).
+    ?assertMatch({fail, testBeamtalkError, _, _}, Result).
 
 run_test_method_undef_test() ->
     %% Hits: error:undef:TestST -> beamtalk_exception_handler:ensure_wrapped (line 824–829)
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testUndef, #{}, nil
     ),
-    ?assertMatch({fail, testUndef, _}, Result).
+    ?assertMatch({fail, testUndef, _, _}, Result).
 
 %%% ============================================================================
 %%% execute_tests/5 — runAll with methods (lines 163–187)
@@ -254,8 +254,8 @@ decode_error_future_rejected_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testFutureRejected, #{}, nil
     ),
-    ?assertMatch({fail, testFutureRejected, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testFutureRejected, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"future rejected">>)).
 
 decode_error_error_map_with_key_test() ->
@@ -263,22 +263,22 @@ decode_error_error_map_with_key_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testErrorMapWithKey, #{}, nil
     ),
-    ?assertMatch({fail, testErrorMapWithKey, _}, Result).
+    ?assertMatch({fail, testErrorMapWithKey, _, _}, Result).
 
 decode_error_error_map_no_key_test() ->
     %% {error, Map} with no error key → print_string(Map)
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testErrorMapNoKey, #{}, nil
     ),
-    ?assertMatch({fail, testErrorMapNoKey, _}, Result).
+    ?assertMatch({fail, testErrorMapNoKey, _, _}, Result).
 
 decode_error_exception_map_test() ->
     %% #{class := 'Exception', error := #beamtalk_error{message}} → extracts message
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testExceptionMap, #{}, nil
     ),
-    ?assertMatch({fail, testExceptionMap, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testExceptionMap, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"exc msg">>)).
 
 decode_error_class_map_test() ->
@@ -286,112 +286,112 @@ decode_error_class_map_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testClassMap, #{}, nil
     ),
-    ?assertMatch({fail, testClassMap, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testClassMap, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"cls msg">>)).
 
 decode_error_badkey_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadKey, #{}, nil
     ),
-    ?assertMatch({fail, testBadKey, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadKey, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"not found in dictionary">>)).
 
 decode_error_badmap_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadMap, #{}, nil
     ),
-    ?assertMatch({fail, testBadMap, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadMap, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"is not a map">>)).
 
 decode_error_badmatch_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadMatch, #{}, nil
     ),
-    ?assertMatch({fail, testBadMatch, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadMatch, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no match of right-hand side">>)).
 
 decode_error_case_clause_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testCaseClause, #{}, nil
     ),
-    ?assertMatch({fail, testCaseClause, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testCaseClause, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no case clause matched">>)).
 
 decode_error_try_clause_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testTryClause, #{}, nil
     ),
-    ?assertMatch({fail, testTryClause, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testTryClause, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no try clause matched">>)).
 
 decode_error_function_clause_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testFunctionClause, #{}, nil
     ),
-    ?assertMatch({fail, testFunctionClause, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testFunctionClause, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no matching function clause">>)).
 
 decode_error_if_clause_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testIfClause, #{}, nil
     ),
-    ?assertMatch({fail, testIfClause, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testIfClause, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no true branch">>)).
 
 decode_error_badarity_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadArity, #{}, nil
     ),
-    ?assertMatch({fail, testBadArity, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadArity, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"function expects">>)).
 
 decode_error_badfun_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadFun, #{}, nil
     ),
-    ?assertMatch({fail, testBadFun, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadFun, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"is not a function">>)).
 
 decode_error_badarg_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadArg, #{}, nil
     ),
-    ?assertMatch({fail, testBadArg, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadArg, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"bad argument">>)).
 
 decode_error_badarith_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadArith, #{}, nil
     ),
-    ?assertMatch({fail, testBadArith, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testBadArith, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"bad arithmetic">>)).
 
 decode_error_noproc_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testNoproc, #{}, nil
     ),
-    ?assertMatch({fail, testNoproc, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testNoproc, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"no such process">>)).
 
 decode_error_timeout_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testTimeout, #{}, nil
     ),
-    ?assertMatch({fail, testTimeout, Msg} when is_binary(Msg), Result),
-    {fail, _, Msg} = Result,
+    ?assertMatch({fail, testTimeout, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"timed out">>)).
 
 %%% ============================================================================

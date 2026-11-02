@@ -674,6 +674,14 @@ function connectWorkspace(workspaceId: string): void {
     }
   });
 
+  // Surface terminal auth failures (BT-4373) — e.g. a protocol mismatch
+  // between this extension and the workspace node. The client won't retry,
+  // so without this the workspace views would just stay empty.
+  newClient.onAuthError((message) => {
+    outputChannel?.error(`Workspace ${workspaceId}: ${message}`);
+    void vscode.window.showErrorMessage(`Beamtalk workspace connection refused: ${message}`);
+  });
+
   // Subscribe to log streaming once connected (BT-1433).
   newClient.onConnectionChange((state) => {
     if (state === "connected") {

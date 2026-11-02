@@ -118,6 +118,88 @@ source_file_from_module_returns_path_for_compiled_bt_module_test() ->
             ok
     end.
 
+source_file_from_module_latin1_range_path_is_utf8_test() ->
+    Path = [$/, $t, $m, $p, $/, 233, $., $b, $t],
+    Mod = bt4370_latin1,
+    load_source_module(Mod, Path),
+    try
+        Bin = beamtalk_reflection:source_file_from_module(Mod),
+        ?assertEqual(<<"/tmp/", 195, 169, ".bt">>, Bin),
+        ?assertEqual(Bin, unicode:characters_to_binary(Bin, utf8))
+    after
+        unload_module(Mod)
+    end.
+
+source_file_from_module_above_latin1_path_is_utf8_test() ->
+    Path = [$/, 8364, $., $b, $t],
+    Mod = bt4370_wide,
+    load_source_module(Mod, Path),
+    try
+        Bin = beamtalk_reflection:source_file_from_module(Mod),
+        ?assertEqual(<<"/", 226, 130, 172, ".bt">>, Bin)
+    after
+        unload_module(Mod)
+    end.
+
+source_file_from_module_invalid_path_is_nil_test() ->
+    Mod = bt4370_invalid,
+    load_source_module(Mod, [$/, 16#110000, $a]),
+    try
+        ?assertEqual(nil, beamtalk_reflection:source_file_from_module(Mod))
+    after
+        unload_module(Mod)
+    end.
+
+stack_frame_non_ascii_file_is_utf8_test() ->
+    Frame = {bt4370_nomod, f, 0, [{file, [8364, $a]}, {line, 1}]},
+    #{file := File} = beamtalk_stack_frame:wrap_frame(Frame),
+    ?assertEqual(<<226, 130, 172, $a>>, File).
+
+stack_frame_unconvertible_file_is_nil_test() ->
+    Frame = {bt4370_nomod, f, 0, [{file, [16#110000]}, {line, 1}]},
+    #{file := File} = beamtalk_stack_frame:wrap_frame(Frame),
+    ?assertEqual(nil, File).
+
+source_file_from_module_utf8_bytes_via_core_pipeline_test() ->
+    %% Real pipeline: core_scan yields UTF-8 *bytes* for string literals.
+    Mod = bt4370_core,
+    Core = unicode:characters_to_binary(
+        "module 'bt4370_core' ['module_info'/0]\n"
+        "  attributes ['beamtalk_source' = [\"/jos\\303\\251.bt\"]]\n"
+        "'module_info'/0 = fun () -> 'ok'\n"
+        "end\n"
+    ),
+    {ok, Toks, _} = core_scan:string(binary_to_list(Core)),
+    {ok, Ast} = core_parse:parse(Toks),
+    {ok, Mod, Bin} = compile:forms(Ast, [from_core, return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt4370_core.beam", Bin),
+    try
+        ?assertEqual(<<"/jos", 195, 169, ".bt">>, beamtalk_reflection:source_file_from_module(Mod))
+    after
+        unload_module(Mod)
+    end.
+
+stack_frame_utf8_byte_list_file_test() ->
+    Frame = {bt4370_nomod, f, 0, [{file, [$/, 195, 169, $., $b, $t]}, {line, 1}]},
+    #{file := File} = beamtalk_stack_frame:wrap_frame(Frame),
+    ?assertEqual(<<"/", 195, 169, ".bt">>, File).
+
+load_source_module(Mod, Path) ->
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, beamtalk_source, [Path]},
+        {eof, 3}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt4370.beam", Bin),
+    ok.
+
+unload_module(Mod) ->
+    code:purge(Mod),
+    code:delete(Mod),
+    code:purge(Mod),
+    ok.
+
 %%% ============================================================================
 %%% inspect_string/1 tests
 %%% ============================================================================

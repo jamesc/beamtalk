@@ -61,9 +61,10 @@ pub const OP_SESSION_STARTED: &str = "session-started";
 /// Must stay identical to `?PROTOCOL_VERSION` in
 /// `runtime/apps/beamtalk_runtime/include/beamtalk.hrl` — the workspace node
 /// rejects an `auth` request whose `protocol_version` differs, and the client
-/// likewise rejects a `describe` response whose `protocol` differs. Bump both
-/// together; the shared wire corpus plus the Erlang `describe` conformance
-/// test pin the two sides to each other.
+/// likewise rejects a `describe` response whose `protocol` differs. The
+/// header is canonical: `protocol_version_matches_erlang_macro` reads it and
+/// fails if this constant drifts (as does the VS Code extension's own test
+/// for its `WORKSPACE_PROTOCOL_VERSION`).
 pub const PROTOCOL_VERSION: &str = "2.0";
 
 /// The connecting toolchain's Beamtalk version (`BEAMTALK_VERSION`, verbatim —
@@ -247,13 +248,23 @@ mod tests {
 
     #[test]
     fn protocol_version_matches_erlang_macro() {
-        // Documents the current wire value; the real cross-side pinning is
-        // the shared wire corpus (Rust `matches_shared_wire_corpus` and the
-        // Erlang `handshake_*_matches_shared_wire_corpus` tests) plus the
-        // Erlang `describe` conformance test. Bump this constant together
-        // with `?PROTOCOL_VERSION` in
-        // `runtime/apps/beamtalk_runtime/include/beamtalk.hrl`.
-        assert_eq!(PROTOCOL_VERSION, "2.0");
+        // `?PROTOCOL_VERSION` in beamtalk.hrl is the canonical value; read it
+        // from the header so bumping only one side fails here. The VS Code
+        // extension's `WORKSPACE_PROTOCOL_VERSION` is pinned to the same
+        // header by `editors/vscode/src/__tests__/workspaceClient.test.ts`.
+        let hrl_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../runtime/apps/beamtalk_runtime/include/beamtalk.hrl");
+        let hrl = std::fs::read_to_string(&hrl_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", hrl_path.display()));
+        let erlang_value = hrl
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("-define(PROTOCOL_VERSION, <<\"")?
+                    .strip_suffix("\">>).")
+            })
+            .expect("beamtalk.hrl defines ?PROTOCOL_VERSION as a binary literal");
+        assert_eq!(PROTOCOL_VERSION, erlang_value);
     }
 
     #[test]

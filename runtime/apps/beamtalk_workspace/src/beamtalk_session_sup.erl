@@ -34,6 +34,9 @@ terminate when the connection closes.
     <<"liveview">>,
     <<"ide">>,
     <<"attach">>,
+    %% VS Code extension workspace client (BT-4373): version-gated on
+    %% `protocol_version` only — see `beamtalk_ws_handler:check_client_versions/2`.
+    <<"vscode">>,
     %% Version-exempt admin surface (BT-4327): `workspace stop` connects as
     %% `shutdown`. Its sessions are restricted to the `shutdown` op by
     %% `beamtalk_ws_handler:handle_protocol/3`, so the exemption grants no

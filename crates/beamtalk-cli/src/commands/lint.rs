@@ -21,7 +21,6 @@
 //! matching a REPL `load-project` verdict (BT-4334).
 
 use crate::commands::OutputFormat;
-use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
 use beamtalk_core::file_walker::FileWalker;
@@ -602,7 +601,8 @@ fn collect_lint_files(
         // `declare native:` stub file would otherwise be swept in and
         // rejected here as a hard error.
         let stubs_dir = project_root.join("stubs");
-        collect_source_files_from_dir(source_path)?
+        FileWalker::lint_files()
+            .walk(source_path)?
             .into_iter()
             .filter(|f| !f.starts_with(&stubs_dir))
             .collect()
@@ -1516,7 +1516,7 @@ mod tests {
         // Emulate what run_lint does: walk the `test/` directory, but extract
         // class infos from the full package source set (src/ + test/).
         let test_utf8 = camino::Utf8PathBuf::from_path_buf(test.clone()).unwrap();
-        let test_files = collect_source_files_from_dir(&test_utf8).unwrap();
+        let test_files = crate::commands::build::collect_source_files_from_dir(&test_utf8).unwrap();
         let pkg_root = find_package_root(&test_utf8).expect("package root must be found");
         let extraction_files = collect_package_class_files(&pkg_root, &test_files);
 
@@ -1847,6 +1847,43 @@ mod tests {
             source_files.iter().all(|f| !f.as_str().contains("_build")),
             "vendored dependency source under _build/ must never be treated as project \
              source: {source_files:?}"
+        );
+    }
+
+    /// BT-4135: a gitignored directory holding a nested checkout of the
+    /// same project (`.worktrees/<name>/`, as `git worktree` users keep
+    /// them) must not be linted — otherwise every diagnostic is reported
+    /// once per checkout.
+    #[test]
+    fn collect_lint_files_skips_gitignored_nested_checkout() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), ".worktrees/\n").unwrap();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let checkout = root.join(".worktrees").join("feature");
+        for base in [root, checkout.as_path()] {
+            std::fs::create_dir_all(base.join("src")).unwrap();
+            std::fs::write(
+                base.join("src").join("Main.bt"),
+                "Object subclass: Main\n  foo => 1\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(checkout.join(".git"), "gitdir: elsewhere\n").unwrap();
+
+        let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let (source_files, _erl_files) =
+            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+
+        assert_eq!(
+            source_files,
+            vec![source_path.join("src").join("Main.bt")],
+            "gitignored .worktrees/ checkout must not be linted"
         );
     }
 

@@ -1,0 +1,56 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4295: a class literal looks its class up by the compile-time registered
+// name (one `erlang:whereis/1`, no per-use `binary_to_atom`), and an `on:do:`
+// filter that is a class literal is passed by name, building no class
+// object. Neither may change what the program observes: a class literal is
+// still the class object a dynamic reference answers, a literal filter
+// catches exactly what the same class held in a variable catches, and a
+// missing class still raises `class_not_found`.
+//
+// Fixtures: stdlib/test/fixtures/my_custom_error.bt
+
+TestCase subclass: Bt4295ClassReferenceTest
+
+  testClassLiteralIsTheClassObject =>
+    self assert: Integer equals: 3 class
+    self assert: Integer name equals: 3 class name
+    self assert: (Integer == Integer) equals: true
+
+  testLiteralFilterCatchesItsOwnClass =>
+    r := [MyCustomError signal: "mine"] on: MyCustomError do: [:e | e message]
+    self assert: r equals: "mine"
+
+  testLiteralFilterCatchesASubclass =>
+    cls := Error
+    static := [MyCustomError signal: "sub"] on: Error do: [:e | e class]
+    dynamic := [MyCustomError signal: "sub"] on: cls do: [:e | e class]
+    self assert: static equals: dynamic
+    self assert: static equals: MyCustomError
+
+  testLiteralFilterLetsAnUnrelatedClassPass =>
+    cls := TypeError
+    static := [
+      [MyCustomError signal: "pass"] on: TypeError do: [:e | #wrong]
+    ] on: Error do: [:e | #outer]
+    dynamic := [
+      [MyCustomError signal: "pass"] on: cls do: [:e | #wrong]
+    ] on: Error do: [:e | #outer]
+    self assert: static equals: dynamic
+    self assert: static equals: #outer
+
+  testLiteralFilterInAThreadedHandler =>
+    hits := 0
+    [Error signal: "count"] on: Error do: [:e | hits := hits + 1]
+    self assert: hits equals: 1
+
+  testMissingFilterClassRaisesClassNotFound =>
+    @expect unresolved_class
+    self should: [
+      [1] on: BT4295NoSuchClass do: [:e | 0]
+    ] raise: #class_not_found
+
+  testMissingClassLiteralRaisesClassNotFound =>
+    @expect unresolved_class
+    self should: [BT4295NoSuchClass] raise: #class_not_found

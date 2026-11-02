@@ -277,6 +277,7 @@ impl CoreErlangGenerator {
     /// follow the `bt@…` convention.
     pub(in crate::core_erlang) fn register_own_class_module(&mut self, class_name: &str) {
         use beamtalk_core::semantic_analysis::ModuleName;
+        self.class_context_mut().own_class_name = Some(class_name.into());
         let pkg = self.own_package_id();
         let disagrees = self
             .class_module_registry()
@@ -289,6 +290,17 @@ impl CoreErlangGenerator {
         self.class_context_mut()
             .class_module_registry
             .insert(pkg, class_name, module);
+    }
+
+    /// BT-4293: the module that defines `class_name`'s `dispatch/3` when
+    /// `class_name` is the class this unit compiles — this unit's own module.
+    /// `None` for every other class.
+    pub(in crate::core_erlang) fn own_class_module(&self, class_name: &str) -> Option<String> {
+        self.class_context
+            .as_ref()
+            .and_then(|ctx| ctx.own_class_name.as_ref())
+            .filter(|own| own.as_str() == class_name)
+            .map(|_| self.module_name.to_string())
     }
 
     /// BT-4151: installs the class names declared by more than one package in

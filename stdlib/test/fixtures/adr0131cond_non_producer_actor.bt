@@ -6,7 +6,7 @@
 // local) but hold a loop or fold that writes a local of the arm. BT-3913
 // retired the legacy arm lowering these relied on: the writing loop answers
 // right as a statement of its own, but as the value of an assignment in the
-// arm it keeps the `UnmigratedLocalThreading` error (pinned in
+// arm it keeps the `UnthreadedLocalWrite` error (pinned in
 // `local_threading.rs`), so `injectInArm` and `collectInArm` hoist the
 // arm-local write to a `do:` of its own and capture the pure fold value.
 // The expected answers are in

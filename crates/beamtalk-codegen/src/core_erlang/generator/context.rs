@@ -115,8 +115,8 @@ pub(in crate::core_erlang) struct ClassContext {
     /// name collides into one last-wins runtime class, so the compile-time
     /// package's module is not necessarily the one a dynamic send reaches.
     /// Read only through [`CoreErlangGenerator::is_shadowed_class`], which
-    /// keeps these sends dynamic: typed sealed-Value instance sends
-    /// (`typed_sealed_value_target`, BT-4151) and sends to a class reference
+    /// keeps these sends dynamic: typed tagged-class instance sends
+    /// (`typed_tagged_target`, BT-4151) and sends to a class reference
     /// that would direct-call its module — `class sealed` class methods,
     /// keyword constructors and nullary `new` (`class_reference_direct_call_info`,
     /// BT-4271). Own-class self-sends are unaffected (`self` is this module's
@@ -126,6 +126,17 @@ pub(in crate::core_erlang) struct ClassContext {
     ///
     /// [`CoreErlangGenerator::is_shadowed_class`]: crate::core_erlang::CoreErlangGenerator::is_shadowed_class
     pub shadowed_class_names: std::collections::HashSet<ecow::EcoString>,
+    /// The class this unit compiles (the module's first class), set by the
+    /// driver via [`CoreErlangGenerator::register_own_class_module`]. Its
+    /// compiled module is this unit's own `module_name`, whatever the index
+    /// or the package-qualified derivation says — `beamtalk test` emits a
+    /// test file's class unqualified (`bt@<stem>`) with no index entry while
+    /// stamping it with the current package (BT-4293). Unlike
+    /// `class_identity`, it is not re-scoped while an extension body
+    /// generates.
+    ///
+    /// [`CoreErlangGenerator::register_own_class_module`]: crate::core_erlang::CoreErlangGenerator::register_own_class_module
+    pub own_class_name: Option<ecow::EcoString>,
     /// Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     pub sealed_method_selectors: std::collections::HashSet<String>,
@@ -201,6 +212,7 @@ impl ClassContext {
             class_method_selectors: std::collections::HashSet::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             shadowed_class_names: std::collections::HashSet::new(),
+            own_class_name: None,
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,
             in_class_method: false,

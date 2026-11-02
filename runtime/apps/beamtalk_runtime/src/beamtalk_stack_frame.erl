@@ -31,7 +31,10 @@ StackFrame objects are value types (tagged maps) with fields:
     wrap/1,
     dispatch/3,
     has_method/1,
-    module_to_class/1
+    module_to_class/1,
+    wrap_frame/1,
+    format_frame/1,
+    frame_parts/1
 ]).
 
 -doc """
@@ -64,8 +67,19 @@ wrap(Stacktrace) when is_list(Stacktrace) ->
 wrap(_) ->
     [].
 
+-doc """
+Convert a single raw Erlang stacktrace entry to a StackFrame tagged map,
+resolving its class with a single registry lookup. Used by paths that render
+one frame at a time (test failure output) so they share `format_frame/1`.
+""".
+-spec wrap_frame(term()) -> map().
+wrap_frame({Module, _, _, _} = Frame) when is_atom(Module) ->
+    wrap_frame(Frame, #{Module => module_to_class(Module)});
+wrap_frame(Other) ->
+    wrap_frame(Other, #{}).
+
 -doc "Convert a single Erlang stacktrace entry to a StackFrame tagged map.".
--spec wrap_frame(tuple(), #{atom() => atom()}) -> map().
+-spec wrap_frame(term(), #{atom() => atom()}) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
     Arity =
         case is_list(ArityOrArgs) of
@@ -74,8 +88,11 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
         end,
     File =
         case proplists:get_value(file, Location) of
-            undefined -> nil;
-            F -> list_to_binary(F)
+            undefined ->
+                nil;
+            F ->
+                %% Shared byte-aware conversion; nil keeps `String | Nil` (BT-4370).
+                beamtalk_reflection:path_to_utf8(F)
         end,
     Line =
         case proplists:get_value(line, Location) of
@@ -247,34 +264,128 @@ has_method('file') -> true;
 has_method('printString') -> true;
 has_method(_) -> false.
 
--doc "Format a StackFrame as a human-readable string.".
+-doc """
+Format a StackFrame as a human-readable string. This is the single renderer
+for every trace display: `Exception>>stackTrace` (`printString`) and test
+failure output (`beamtalk_test_case:format_stacktrace/1`).
+
+Shape: `Class>>selector [block] (file:line)`.
+  - Class: the Beamtalk class, else the module name, else `?`.
+  - Selector: compiler-lifted funs (`'-sel/N-fun-M-'`, `-anonymous-`, loops
+    `'-sel/N-name/K-M-'`) render as `sel [block]`. Arity and fun index are
+    never shown; raw Erlang `module:function/arity` is never emitted.
+  - Location: the frame's file, else the module's `beamtalk_source`
+    attribute. Stdlib modules (`bt@stdlib@*`) show the basename only; other
+    absolute paths are made relative to CWD (basename if outside it). The
+    line is omitted when unknown or 0; no file means no location part.
+""".
 -spec format_frame(map()) -> binary().
-format_frame(#{
-    class_name := ClassName,
-    function := Function,
-    arity := Arity,
-    file := File,
-    line := Line
-}) ->
-    ClassPart =
-        case ClassName of
-            nil -> <<"?">>;
-            _ -> atom_to_binary(ClassName, utf8)
-        end,
+format_frame(Frame) ->
+    #{class := ClassPart, selector := Selector, block := IsBlock, file := File, line := Line} =
+        frame_parts(Frame),
     FunPart =
-        case Function of
-            undefined -> <<"?">>;
-            _ -> atom_to_binary(Function, utf8)
+        case IsBlock of
+            true -> <<Selector/binary, " [block]">>;
+            false -> Selector
         end,
-    ArityBin = integer_to_binary(Arity),
     LocationPart =
-        case {File, Line} of
-            {nil, _} ->
+        case File of
+            nil ->
                 <<>>;
-            {_, nil} ->
-                <<" (", File/binary, ")">>;
             _ ->
-                LineBin = integer_to_binary(Line),
-                <<" (", File/binary, ":", LineBin/binary, ")">>
+                case Line of
+                    nil -> <<" (", File/binary, ")">>;
+                    _ -> <<" (", File/binary, ":", (integer_to_binary(Line))/binary, ")">>
+                end
         end,
-    <<ClassPart/binary, ">>", FunPart/binary, "/", ArityBin/binary, LocationPart/binary>>.
+    <<ClassPart/binary, ">>", FunPart/binary, LocationPart/binary>>.
+
+-doc """
+The Beamtalk-term parts of a frame, as displayed by `format_frame/1` (which is
+built on this, so the text and structured forms cannot drift; BT-4355):
+`class` (class, else module name, else `?`), `selector` (without the
+` [block]` marker), `block` (true for compiler-lifted funs), `file` (the
+display path, `nil` when unknown) and `line` (`nil` when unknown or 0).
+Never carries an Erlang function name with arity.
+""".
+-spec frame_parts(map()) ->
+    #{
+        class := binary(),
+        selector := binary(),
+        block := boolean(),
+        file := binary() | nil,
+        line := pos_integer() | nil
+    }.
+frame_parts(#{module := Module, function := Function} = Frame) ->
+    ClassPart =
+        case maps:get(class_name, Frame, nil) of
+            nil when is_atom(Module), Module =/= undefined -> atom_to_binary(Module, utf8);
+            nil -> <<"?">>;
+            ClassName -> atom_to_binary(ClassName, utf8)
+        end,
+    {Selector, IsBlock} =
+        case Function of
+            undefined -> {<<"?">>, false};
+            _ -> fun_name_parts(Function)
+        end,
+    Line =
+        case maps:get(line, Frame, nil) of
+            L when is_integer(L), L > 0 -> L;
+            _ -> nil
+        end,
+    File =
+        case frame_file(Module, maps:get(file, Frame, nil)) of
+            nil -> nil;
+            Path -> unicode:characters_to_binary(format_file_path(Module, Path))
+        end,
+    #{class => ClassPart, selector => Selector, block => IsBlock, file => File, line => Line}.
+
+-doc """
+Source file for a frame: its own `file` when present, otherwise the module's
+`beamtalk_source` attribute (`nil` when neither is known).
+""".
+-spec frame_file(atom(), binary() | nil) -> string() | nil.
+frame_file(_Module, File) when is_binary(File), File =/= <<>> ->
+    unicode:characters_to_list(File);
+frame_file(Module, _) when is_atom(Module), Module =/= undefined ->
+    case beamtalk_reflection:source_file_from_module(Module) of
+        nil -> nil;
+        Path -> unicode:characters_to_list(Path)
+    end;
+frame_file(_, _) ->
+    nil.
+
+-spec format_file_path(atom(), string()) -> string().
+format_file_path(Module, File) ->
+    case lists:prefix("bt@stdlib@", atom_to_list(Module)) of
+        true -> filename:basename(File);
+        false -> make_relative(File)
+    end.
+
+-spec make_relative(string()) -> string().
+make_relative(File) ->
+    case filename:pathtype(File) of
+        relative ->
+            File;
+        _ ->
+            case file:get_cwd() of
+                {ok, Cwd} ->
+                    CwdComps = filename:split(Cwd),
+                    FileComps = filename:split(File),
+                    case lists:prefix(CwdComps, FileComps) of
+                        true -> filename:join(lists:nthtail(length(CwdComps), FileComps));
+                        false -> filename:basename(File)
+                    end;
+                _ ->
+                    filename:basename(File)
+            end
+    end.
+
+-spec fun_name_parts(atom()) -> {binary(), boolean()}.
+fun_name_parts(Fun) ->
+    FunStr = atom_to_list(Fun),
+    %% Lazy match keeps selectors that themselves contain '/' (`/`, `//`) intact.
+    case re:run(FunStr, "^-(.+?)/[0-9]+-", [{capture, all_but_first, list}, unicode]) of
+        {match, [BaseName]} -> {unicode:characters_to_binary(BaseName), true};
+        nomatch -> {unicode:characters_to_binary(FunStr), false}
+    end.

@@ -40,7 +40,7 @@ fn simple_language_service_reports_adr0131_local_threading_errors() {
     let diagnostics = service.diagnostics(&file);
     for category in [
         DiagnosticCategory::Tier2BlockNoReturnChannel,
-        DiagnosticCategory::UnmigratedLocalThreading,
+        DiagnosticCategory::UnthreadedLocalWrite,
     ] {
         let found: Vec<_> = diagnostics
             .iter()

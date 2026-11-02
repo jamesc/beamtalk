@@ -332,6 +332,55 @@ auth_missing_versions_rejected_test() ->
     ),
     ?assert(lists:keymember(close, 1, Frames)).
 
+%% The `vscode` surface (BT-4373) is gated on protocol only, but that gate
+%% is still a gate: a wrong or missing `protocol_version` is rejected with a
+%% message that names the extension, not the `just build` rebuild hint.
+auth_vscode_protocol_mismatch_rejected_test() ->
+    Json = auth_json(#{
+        <<"client">> => <<"vscode">>,
+        <<"protocol_version">> => <<"0.0">>
+    }),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertEqual(false, State#ws_state.authenticated),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    Message = maps:get(<<"message">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"Protocol mismatch">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"VS Code extension">>)),
+    ?assertEqual(nomatch, binary:match(Message, <<"just build">>)),
+    ?assert(lists:keymember(close, 1, Frames)).
+
+auth_vscode_missing_protocol_rejected_test() ->
+    Json = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"auth">>,
+            <<"cookie">> => node_cookie(),
+            <<"client">> => <<"vscode">>
+        })
+    ),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertEqual(false, State#ws_state.authenticated),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"auth_error">>, maps:get(<<"type">>, Decoded)),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"message">>, Decoded), <<"<missing>">>)
+    ).
+
+%% The protocol-only relaxation is scoped to `vscode`: any other surface
+%% sending a stale toolchain version with the right protocol is still
+%% rejected by the full lock.
+auth_non_vscode_surface_keeps_full_lock_test() ->
+    Json = auth_json(#{
+        <<"client">> => <<"lsp">>,
+        <<"beamtalk_version">> => <<"0.0.0-stale">>
+    }),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertEqual(false, State#ws_state.authenticated),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(maps:get(<<"message">>, first_text(Frames)), <<"Version mismatch">>)
+    ).
+
 %% The accept path (matching versions → session created) is covered by
 %% `handshake_success_matches_shared_wire_corpus/0` in the session
 %% fixture below, which needs the live session supervisor.
@@ -1142,6 +1191,9 @@ auth_session_test_() ->
             {"shutdown-only session rejects eval", fun shutdown_only_session_rejects_eval/0}
         end,
         fun(_) ->
+            {"vscode surface checks protocol only", fun vscode_surface_checks_protocol_only/0}
+        end,
+        fun(_) ->
             {"normal sessions are not shutdown-restricted",
                 fun shutdown_restriction_absent_for_normal_sessions/0}
         end
@@ -1161,6 +1213,27 @@ shutdown_surface_skips_version_gate() ->
     ?assert(State#ws_state.authenticated),
     ?assert(State#ws_state.shutdown_only),
     ?assert(has_frame_with(Frames, <<"type">>, <<"auth_ok">>)).
+
+%% The VS Code extension (BT-4373) authenticates with a matching protocol
+%% even when its build differs from the node's (or it sends no
+%% `beamtalk_version` at all — a marketplace build has no checkout), and it
+%% gets a normal, unrestricted session: it needs `eval`, `inspect`, etc.
+vscode_surface_checks_protocol_only() ->
+    Json = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"auth">>,
+            <<"cookie">> => node_cookie(),
+            <<"client">> => <<"vscode">>,
+            <<"protocol_version">> => ?PROTOCOL_VERSION
+        })
+    ),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assert(State#ws_state.authenticated),
+    ?assertNot(State#ws_state.shutdown_only),
+    ?assert(has_frame_with(Frames, <<"type">>, <<"auth_ok">>)),
+    ?assert(has_frame_with(Frames, <<"op">>, <<"session-started">>)),
+    {ok, _Id, Meta} = beamtalk_repl_shell:get_session_meta(State#ws_state.session_pid),
+    ?assertEqual(<<"vscode">>, maps:get(kind, Meta)).
 
 %% A version-exempt shutdown connection that tries anything but `shutdown`
 %% is rejected and closed — a mismatched client must not gain eval.

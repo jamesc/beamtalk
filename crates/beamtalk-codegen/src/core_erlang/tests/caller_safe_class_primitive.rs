@@ -50,7 +50,7 @@ fn class_literal_signal_compiles_to_direct_handler_call() {
         );
     }
     for class in ["Error", "MyError", "Exception"] {
-        let lookup = format!("'beamtalk_class_registry':'whereis_class'('{class}')");
+        let lookup = format!("'erlang':'whereis'('beamtalk_class_{class}')");
         assert!(
             !out.contains(&lookup),
             "a caller-safe class primitive must not reach the {class} class process. Got:\n{out}"

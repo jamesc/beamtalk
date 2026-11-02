@@ -8,11 +8,10 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! The reason is not re-derived here: it is the [`StaysDynamic`] gate that
-//! [`CoreErlangGenerator::typed_sealed_send_target`] — the same decision the
+//! [`CoreErlangGenerator::typed_tagged_send_target`] — the same decision the
 //! `typed_sealed` handler emits from — rejected the send at. This module
 //! only describes it, adding detail the gate does not need (the routing row
-//! of a built-in, whether an open class is abstract, an actor or in the
-//! supervisor family). Epic BT-4291 measures its baseline and progress with
+//! of a built-in, the supervisor-family root of a supervisor subclass). Epic BT-4291 measures its baseline and progress with
 //! it (`benchmarks/vs-elixir/results/bench-bt4292-baseline.md`).
 //!
 //! Each hint reads
@@ -22,12 +21,12 @@
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
-//! `supervisor`, `abstract`, `actor`, `open`, `exception`, …) for counting
+//! `supervisor`, `abstract`, `root`, `actor`, `exception`, …) for counting
 //! sites by reason.
 
 use super::CoreErlangGenerator;
-use super::dispatch_codegen::{StaysDynamic, is_exception_family};
-use super::routing::{self, Guard, Representation};
+use super::dispatch_codegen::{StaysDynamic, supervisor_family_root};
+use super::routing::{self, Guard};
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
 
@@ -120,11 +119,11 @@ impl CoreErlangGenerator {
                 .filter(|h| h.get_class(class).is_some())
                 .map(|h| h.resolve_class_kind(class))
         });
-        let reason = match self.typed_sealed_send_target(receiver, selector) {
-            // The `typed_sealed` handler would have claimed this send had it
+        let reason = match self.typed_tagged_send_target(receiver, selector) {
+            // The `typed_tagged` handler would have claimed this send had it
             // reached `HANDLERS`; a dynamic send here came another way.
-            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_sealed handler".to_string(),
-            Err(gate) => self.describe_gate(&gate, class_name, kind, selector.name().as_str()),
+            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_tagged handler".to_string(),
+            Err(gate) => self.describe_gate(&gate, class_name, selector.name().as_str()),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))
     }
@@ -133,7 +132,6 @@ impl CoreErlangGenerator {
         &self,
         gate: &StaysDynamic,
         class_name: Option<&str>,
-        kind: Option<ClassKind>,
         selector: &str,
     ) -> String {
         let class = class_name.unwrap_or("?");
@@ -148,7 +146,11 @@ impl CoreErlangGenerator {
                 format!("runtime-only — {class} has no compiled module")
             }
             StaysDynamic::UnknownClass => format!("unknown-class — {class} is not in scope"),
-            StaysDynamic::NotSealed => self.describe_open_class(class, kind),
+            StaysDynamic::Abstract => format!("abstract — {class} has no instances of its own"),
+            StaysDynamic::RepresentationAncestor => format!(
+                "root — {class} is an ancestor of representation-routed built-ins, so its instances are rarely tagged {class}"
+            ),
+            StaysDynamic::SupervisorFamily => self.describe_supervisor_family(class),
             StaysDynamic::AmbiguousPackage => {
                 format!("ambiguous — {class} is declared by more than one package (BT-4151)")
             }
@@ -163,43 +165,14 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Detail for an open (unsealed) class: which exclusion a guarded call
-    /// to it would still hit once the sealed gate is lifted (BT-4293).
-    fn describe_open_class(&self, class: &str, kind: Option<ClassKind>) -> String {
-        let Some(hierarchy) = self.class_hierarchy.as_ref() else {
-            return format!("open — {class} is not sealed");
-        };
-        if let Some(supervisor) = self.describe_supervisor_family(class) {
-            return supervisor;
-        }
-        if is_exception_family(hierarchy, class) {
-            return format!("exception — {class} dispatches through bt@stdlib@exception");
-        }
-        if kind == Some(ClassKind::Actor) {
-            return format!("actor — {class} instances are actor references");
-        }
-        if hierarchy
-            .get_class(class)
-            .is_some_and(|info| info.is_abstract)
-        {
-            return format!("abstract — {class} has no instances of its own");
-        }
-        format!("open — {class} is not sealed")
-    }
-
-    /// The `supervisor` reason when `class` is a `Supervisor` /
-    /// `DynamicSupervisor` (or a subclass) behind the `NotSealed` gate: its
-    /// instances are `beamtalk_supervisor` tuples.
-    fn describe_supervisor_family(&self, class: &str) -> Option<String> {
-        let hierarchy = self.class_hierarchy.as_ref()?;
-        let root = std::iter::once(class.into())
-            .chain(hierarchy.superclass_chain(class))
-            .find(|ancestor: &ecow::EcoString| {
-                routing::row(ancestor.as_str())
-                    .is_some_and(|row| row.representation == Representation::SupervisorTuple)
-            })?;
-        Some(format!(
-            "supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)"
-        ))
+    /// The `supervisor` reason: `class`'s instances are the `beamtalk_supervisor`
+    /// tuples of its supervisor-family root.
+    fn describe_supervisor_family(&self, class: &str) -> String {
+        let root = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|hierarchy| supervisor_family_root(hierarchy, class))
+            .unwrap_or_else(|| class.into());
+        format!("supervisor — {class} instances are {root} handles (beamtalk_supervisor tuples)")
     }
 }

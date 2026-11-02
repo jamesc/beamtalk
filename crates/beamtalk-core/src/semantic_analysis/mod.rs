@@ -19,6 +19,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+pub mod actor_spawn;
 pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;
@@ -653,7 +654,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 
 /// ADR 0131 (BT-3754): only the outer-local threading compile errors for
 /// `module` — §6 ([`DiagnosticCategory::Tier2BlockNoReturnChannel`]) and the
-/// Phase 0 allow-set ([`DiagnosticCategory::UnmigratedLocalThreading`]) —
+/// Phase 0 allow-set ([`DiagnosticCategory::UnthreadedLocalWrite`]) —
 /// as [`analyse_full`] reports them, against `hierarchy` and with no
 /// REPL-known variables, except that it has no type map: a lookup receiver is
 /// judged non-`Dictionary` only syntactically (`self`/`super`), so a typed one
@@ -670,7 +671,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// span-joining pass the normalised module).
 ///
 /// [`DiagnosticCategory::Tier2BlockNoReturnChannel`]: crate::source_analysis::DiagnosticCategory::Tier2BlockNoReturnChannel
-/// [`DiagnosticCategory::UnmigratedLocalThreading`]: crate::source_analysis::DiagnosticCategory::UnmigratedLocalThreading
+/// [`DiagnosticCategory::UnthreadedLocalWrite`]: crate::source_analysis::DiagnosticCategory::UnthreadedLocalWrite
 #[must_use]
 pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();

@@ -223,7 +223,7 @@ fn check_operand_agreement(src: &str, checked: &mut usize) {
             && matches!(
                 d.category,
                 Some(
-                    DiagnosticCategory::UnmigratedLocalThreading
+                    DiagnosticCategory::UnthreadedLocalWrite
                         | DiagnosticCategory::Tier2BlockNoReturnChannel
                 )
             )
@@ -702,7 +702,7 @@ pub(super) fn loop_body_agreement(src: &str) -> Result<usize, AgreementFailure> 
             && matches!(
                 d.category,
                 Some(
-                    DiagnosticCategory::UnmigratedLocalThreading
+                    DiagnosticCategory::UnthreadedLocalWrite
                         | DiagnosticCategory::Tier2BlockNoReturnChannel
                 )
             )
@@ -860,7 +860,7 @@ fn a_writing_detect_if_none_is_accepted_exactly_when_the_producer_rule_names_it(
                                 && matches!(
                                     d.category,
                                     Some(
-                                        DiagnosticCategory::UnmigratedLocalThreading
+                                        DiagnosticCategory::UnthreadedLocalWrite
                                             | DiagnosticCategory::Tier2BlockNoReturnChannel
                                     )
                                 )
@@ -985,7 +985,7 @@ fn every_nested_return_value_the_check_accepts_is_lowered_by_the_producer() {
                         && matches!(
                             d.category,
                             Some(
-                                DiagnosticCategory::UnmigratedLocalThreading
+                                DiagnosticCategory::UnthreadedLocalWrite
                                     | DiagnosticCategory::Tier2BlockNoReturnChannel
                             )
                         )

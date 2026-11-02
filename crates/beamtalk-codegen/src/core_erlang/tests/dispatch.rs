@@ -3068,6 +3068,35 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     );
 }
 
+/// BT-4295: a bare class literal looks its class up with one
+/// `erlang:whereis/1` on the compile-time registered name (no
+/// `whereis_class/1`, whose `registry_name/1` runs `binary_to_atom` per use),
+/// keeps the `class_not_found` arm, and still builds the class object from
+/// the run-time pid and module (neither is baked).
+#[test]
+fn test_class_literal_uses_compile_time_registered_name() {
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+    let doc = generator.generate_class_reference("Point", None).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("case call 'erlang':'whereis'('beamtalk_class_Point') of"),
+        "class literal must look up its registered name. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("whereis_class"),
+        "class literal must not call whereis_class. Got:\n{output}"
+    );
+    assert!(
+        output.contains("'class_not_found', 'Point'"),
+        "a missing class must still raise class_not_found. Got:\n{output}"
+    );
+    assert!(
+        output.contains("'beamtalk_object_class':'module_name_safe'(")
+            && output.contains("{'beamtalk_object', 'Point class', "),
+        "the class object takes its module and pid at run time. Got:\n{output}"
+    );
+}
+
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
 
 #[test]
@@ -3094,7 +3123,7 @@ fn test_qualified_class_method_call() {
 
     // Should look up by short class name in class registry
     assert!(
-        output.contains("'beamtalk_class_registry':'whereis_class'('Parser')"),
+        output.contains("'erlang':'whereis'('beamtalk_class_Parser')"),
         "Should use short class name for registry lookup. Got:\n{output}"
     );
 
@@ -4125,7 +4154,7 @@ fn test_direct_new0_emits_module_new_call() {
         "eligible `Pt new` must call the synthesized builder directly. Got:\n{output}"
     );
     assert!(
-        !output.contains("whereis_class") && !output.contains("class_send"),
+        !output.contains("whereis") && !output.contains("class_send"),
         "direct `new` must not touch the registry or gen_server dispatch. Got:\n{output}"
     );
 }
@@ -4144,7 +4173,7 @@ fn test_direct_new0_flag_off_falls_back_to_class_send() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("'beamtalk_class_registry':'whereis_class'('Pt')"),
+        output.contains("'erlang':'whereis'('beamtalk_class_Pt')"),
         "ineligible `new` must look the class up in the registry. Got:\n{output}"
     );
     assert!(

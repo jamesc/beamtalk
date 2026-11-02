@@ -47,6 +47,7 @@ impl Backend {
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
             workspace_roots: Mutex::new(Vec::new()),
+            root_load_lock: tokio::sync::Mutex::new(()),
             otp_lib_dir: Mutex::new(None),
             runtime: tokio::sync::Mutex::new(None),
             flush_listener: tokio::sync::Mutex::new(None),
@@ -716,9 +717,13 @@ impl Backend {
             }
         }
 
+        // Also count package roots `did_open` registered before this ran
+        // (BT-4158) — they are not in `config.roots`, and this whole-session
+        // setter must not clear the flag their own load already set.
+        let deps_present = loaded.deps_present
+            || super::config::any_dependency_src_dirs(&self.workspace_roots_snapshot());
         let mut svc = self.service.lock().expect("service lock poisoned");
         let budget_exhausted = loaded.budget_exhausted;
-        let deps_present = loaded.deps_present;
         for (path, content) in loaded.user_files {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
@@ -756,6 +761,117 @@ impl Backend {
         // but such a workspace cannot resolve dep classes at all, so hint
         // noise is the lesser concern.)
         svc.set_has_package_dependencies(deps_present);
+    }
+
+    /// Per-open-file package root discovery (BT-4158).
+    ///
+    /// Startup resolves roots once per workspace folder, so an editor that
+    /// opened a *parent* of the package root (e.g. `~/source` holding several
+    /// checkouts) leaves every package's manifest, sources and fetched
+    /// dependencies unloaded — dependency classes then show up as falsely
+    /// unresolved. This resolves `path`'s own package root (nearest
+    /// `beamtalk.toml` ancestor) and, when it is not yet a known root,
+    /// registers it in `workspace_roots` and runs the same per-root loading
+    /// the startup sequence does: `[package]` name, the root's `src/`,
+    /// `test/` and fetched-dependency sources, type cache and
+    /// `[diagnostics]` table. Open diagnostics are republished afterwards.
+    ///
+    /// A no-op (beyond the ancestor walk) when `path` already lies under a
+    /// known root's preloaded directories — the common package-root-opened
+    /// case — or has no package root at all.
+    pub(in crate::server) async fn ensure_package_root_loaded(&self, path: &Utf8PathBuf) {
+        use super::config::{any_dependency_src_dirs, package_root_for_file, preload_covers};
+
+        let known_roots = self.workspace_roots_snapshot();
+        if preload_covers(path.as_std_path(), &known_roots) {
+            return;
+        }
+        let Some(root) = package_root_for_file(path.as_std_path()) else {
+            return;
+        };
+        {
+            // Check-and-insert under one lock so concurrent `did_open`s for
+            // files of the same package load it exactly once. A second opener
+            // does not wait for that load: it returns here and may publish
+            // against a half-loaded index; the `republish_open_diagnostics`
+            // at the end of this load corrects it.
+            let mut roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            if roots.contains(&root) {
+                return;
+            }
+            roots.push(root.clone());
+            roots.sort_unstable();
+        }
+        debug!(root = %root.display(), "Registering package root discovered from open file");
+
+        let root_load_guard = self.root_load_lock.lock().await;
+        {
+            let mut svc = self.service.lock().expect("service lock poisoned");
+            svc.set_preload_in_progress(true);
+        }
+        let all_roots = self.workspace_roots_snapshot();
+        self.load_root_packages(&all_roots).await;
+
+        let loaded = tokio::task::spawn_blocking(move || {
+            collect_preload_files(PreloadConfig {
+                roots: vec![root],
+                stdlib_dirs: Vec::new(),
+            })
+        })
+        .await
+        .unwrap_or_default();
+        {
+            let stdlib_paths = self
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned")
+                .clone();
+            let mut svc = self.service.lock().expect("service lock poisoned");
+            for (path, content) in loaded.user_files {
+                let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
+                    continue;
+                };
+                // A stdlib file keeps its stdlib classification (as in
+                // `collect_preload_files`), and an open buffer is the source
+                // of truth for its file — the on-disk bytes may be stale.
+                // (Lock order service → versions matches `did_close`.)
+                let is_open = self
+                    .versions
+                    .lock()
+                    .expect("versions lock poisoned")
+                    .contains_key(&utf8_path);
+                if !is_open && !stdlib_paths.contains(&utf8_path) {
+                    svc.update_file(utf8_path, content);
+                }
+            }
+            // A partial walk of this root means the index can no longer
+            // claim project completeness; a full one leaves the startup
+            // verdict for the other roots untouched.
+            if loaded.budget_exhausted {
+                svc.set_project_complete(false);
+            }
+            svc.set_has_package_dependencies(any_dependency_src_dirs(&all_roots));
+        }
+        self.load_type_cache(&all_roots).await;
+        self.load_diagnostics_table(&all_roots).await;
+        {
+            let mut svc = self.service.lock().expect("service lock poisoned");
+            svc.set_preload_in_progress(false);
+        }
+        drop(root_load_guard);
+        self.republish_open_diagnostics().await;
+    }
+
+    /// Clones the current workspace root list (initial roots plus any
+    /// package roots registered since by [`Self::ensure_package_root_loaded`]).
+    pub(in crate::server) fn workspace_roots_snapshot(&self) -> Vec<PathBuf> {
+        self.workspace_roots
+            .lock()
+            .expect("workspace_roots lock poisoned")
+            .clone()
     }
 
     /// Handles the `beamtalk-lsp/fetchContent` custom request.

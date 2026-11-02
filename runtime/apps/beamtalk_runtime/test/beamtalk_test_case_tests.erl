@@ -318,6 +318,95 @@ format_stacktrace_selects_first_two_plus_last_test() ->
     ?assertEqual(nomatch, binary:match(Result, <<"m3">>)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
 
+%% BT-4355: --full-traces keeps every filtered frame (same per-frame format).
+format_stacktrace_full_traces_keeps_all_frames_test() ->
+    Frames = [
+        {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', m3, 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    Default = beamtalk_test_case:format_stacktrace(Frames),
+    application:set_env(beamtalk_stdlib, full_traces, true),
+    try
+        Full = beamtalk_test_case:format_stacktrace(Frames),
+        ?assertNotEqual(nomatch, binary:match(Full, <<"m3">>)),
+        ?assertEqual(4, length(binary:matches(Full, <<"\n  at ">>))),
+        ?assertEqual(3, length(binary:matches(Default, <<"\n  at ">>))),
+        %% Every default line appears verbatim in the full trace.
+        [_ | DefaultLines] = binary:split(Default, <<"\n  at ">>, [global]),
+        lists:foreach(
+            fun(L) -> ?assertNotEqual(nomatch, binary:match(Full, L)) end, DefaultLines
+        )
+    after
+        application:unset_env(beamtalk_stdlib, full_traces)
+    end.
+
+%% BT-4355: structured frames match the rendered lines and carry no MFA.
+stack_frames_match_rendered_text_test() ->
+    Frames = [
+        {'bt@user@A', 'm1', 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', '-m2/1-fun-0-', 1, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', 'm3', 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', 'm4', 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    Structured = beamtalk_test_case:stack_frames(Frames),
+    ?assertEqual(3, length(Structured)),
+    [F1, F2, F3] = Structured,
+    ?assertEqual(<<"m1">>, maps:get(selector, F1)),
+    ?assertEqual(false, maps:get(block, F1)),
+    ?assertEqual(1, maps:get(line, F1)),
+    ?assertEqual(<<"a.bt">>, maps:get(file, F1)),
+    ?assertEqual(<<"m2">>, maps:get(selector, F2)),
+    ?assertEqual(true, maps:get(block, F2)),
+    ?assertEqual(<<"m4">>, maps:get(selector, F3)),
+    ?assertEqual(
+        [block, class, file, line, repeat, selector],
+        lists:sort(maps:keys(F1))
+    ),
+    %% Each structured frame's selector and line appear in the rendered text.
+    Text = beamtalk_test_case:format_stacktrace(Frames),
+    lists:foreach(
+        fun(#{selector := Sel, line := Line}) ->
+            ?assertNotEqual(nomatch, binary:match(Text, Sel)),
+            ?assertNotEqual(
+                nomatch, binary:match(Text, <<"a.bt:", (integer_to_binary(Line))/binary>>)
+            )
+        end,
+        Structured
+    ).
+
+stack_frames_collapse_repeats_test() ->
+    Same = {'bt@user@A', m1, 0, []},
+    [F] = beamtalk_test_case:stack_frames([Same, Same]),
+    ?assertEqual(2, maps:get(repeat, F)),
+    ?assertEqual(nil, maps:get(line, F)).
+
+test_failure_includes_synthetic_test_frame_test() ->
+    Stack = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
+    Base = <<"boom", (beamtalk_test_case:format_stacktrace(Stack))/binary>>,
+    {fail, testFoo, Msg, Frames} =
+        beamtalk_test_case:test_failure(testFoo, Base, 'bt@user@A', Stack),
+    %% One rendered `at` line per structured frame, test method last.
+    ?assertEqual(length(binary:matches(Msg, <<"\n  at ">>)), length(Frames)),
+    ?assertEqual(<<"testFoo">>, maps:get(selector, lists:last(Frames))).
+
+%% The DNU (`undef`) message has no rendered trace, so its structured frames
+%% must line up with the `at` lines it does have: only the synthetic
+%% test-method line, or none when the test frame is already in the stack.
+test_failure_untraced_frames_match_text_test() ->
+    NoTestFrame = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
+    {fail, testFoo, Msg1, Frames1} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', NoTestFrame),
+    ?assertEqual(1, length(binary:matches(Msg1, <<"\n  at ">>))),
+    ?assertEqual(1, length(Frames1)),
+    ?assertEqual(<<"testFoo">>, maps:get(selector, hd(Frames1))),
+    WithTestFrame = [{'bt@user@A', testFoo, 0, [{file, "a.bt"}, {line, 3}]}],
+    {fail, testFoo, Msg2, Frames2} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', WithTestFrame),
+    ?assertEqual(0, length(binary:matches(Msg2, <<"\n  at ">>))),
+    ?assertEqual([], Frames2).
+
 %%% ============================================================================
 %%% ensure_test_context/4 Tests (frame ordering)
 %%% ============================================================================
@@ -453,6 +542,33 @@ format_stacktrace_block_name_forms_test() ->
     ?assertEqual(<<"\n  at A>>/ [block]">>, Render('-//2-fun-0-')),
     ?assertEqual(<<"\n  at A>>// [block]">>, Render('-///2-fun-0-')),
     ?assertEqual(<<"\n  at A>>timesRepeat:">>, Render('timesRepeat:')).
+
+%% BT-4357: the test path and the Exception/StackFrame path print the same
+%% frame byte-identically (class, block marker, arity policy, file rules).
+format_frame_identical_across_test_and_stackframe_paths_test_() ->
+    Frames = [
+        {'bt@user@A', run, 2, [{file, "a.bt"}, {line, 7}]},
+        {'bt@user@A', '-run/0-fun-3-', 1, [{file, "a.bt"}, {line, 8}]},
+        {'bt@user@A', '-run/0-loop/1-0-', 1, [{line, 9}]},
+        {'bt@user@NoSuchTraceModule', helper, 0, []},
+        {'bt@user@A', 'timesRepeat:', 1, [{file, "a.bt"}, {line, 0}]},
+        %% Non-ASCII source paths (Latin-1 range and above 255) must render,
+        %% not crash the trace (which would lose the failing test's result).
+        {'bt@user@A', run, 2, [{file, "/tmp/jos\x{e9}/a.bt"}, {line, 7}]},
+        %% Compiler-style UTF-8 byte list.
+        {'bt@user@A', run, 2, [{file, [$/, 195, 169, $., $b, $t]}, {line, 7}]},
+        {'bt@user@A', run, 2, [{file, "/tmp/\x{4e2d}\x{6587}/a.bt"}, {line, 7}]}
+    ],
+    [
+        ?_test(begin
+            ViaTest = iolist_to_binary(beamtalk_test_case:format_stackframe(F)),
+            [Wrapped] = beamtalk_stack_frame:wrap([F]),
+            ViaFrame = beamtalk_stack_frame:format_frame(Wrapped),
+            ?assertEqual(ViaFrame, ViaTest),
+            ?assertNot(has_raw_mfa(ViaTest))
+        end)
+     || F <- Frames
+    ].
 
 %% Distinct frames that still render identically (recursive send with no
 %% line) collapse into one line with a repeat count.

@@ -30,6 +30,7 @@ See also: beamtalk_tagged_map
     clear_field/2,
     inspect_string/1,
     source_file_from_module/1,
+    path_to_utf8/1,
     is_predefined_function/1
 ]).
 
@@ -189,7 +190,7 @@ source_file_from_module(ModuleName) ->
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
                 {beamtalk_source, [Path]} when is_binary(Path) -> Path;
-                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                {beamtalk_source, [Path]} when is_list(Path) -> path_to_utf8(Path);
                 _ -> nil
             end
     catch
@@ -199,6 +200,47 @@ source_file_from_module(ModuleName) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
+
+-doc """
+Convert a source-path list (a `beamtalk_source` attribute or a stacktrace
+`file` entry) to a UTF-8 binary. Never raises; `nil` means "no usable path"
+so callers keep their `binary() | nil` contract (BT-4370).
+
+Compiler output stores the path as a list of UTF-8 *bytes* (core_scan yields
+bytes for string literals), so the list is first read as bytes and accepted
+when that is valid UTF-8. Otherwise (invalid UTF-8 bytes such as Latin-1
+code points, or values above 255) it is read as code points via
+`unicode:characters_to_binary/1`; an error or incomplete result is `nil`.
+
+Known, accepted ambiguity: a code-point list whose low bytes happen to form
+valid UTF-8 (e.g. `[195, 169]` meaning two Latin-1 characters) is read as
+bytes. Real paths come from the compiler as bytes, so bytes win.
+""".
+-spec path_to_utf8(term()) -> binary() | 'nil'.
+path_to_utf8(Path) when is_binary(Path) ->
+    case unicode:characters_to_binary(Path) of
+        Path -> Path;
+        _ -> nil
+    end;
+path_to_utf8(Path) ->
+    try list_to_binary(Path) of
+        Bin ->
+            case unicode:characters_to_binary(Bin) of
+                Bin -> Bin;
+                _ -> code_points_to_utf8(Path)
+            end
+    catch
+        error:_ -> code_points_to_utf8(Path)
+    end.
+
+-spec code_points_to_utf8(term()) -> binary() | 'nil'.
+code_points_to_utf8(Path) ->
+    try unicode:characters_to_binary(Path) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> nil
+    catch
+        error:_ -> nil
+    end.
 
 -doc """
 True when `Name` is declared `late` (ADR 0124 §1) on `State`'s class or an

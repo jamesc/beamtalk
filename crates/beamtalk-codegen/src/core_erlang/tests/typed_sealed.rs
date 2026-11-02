@@ -1,14 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4069: sends to a receiver typed as a sealed Value class compile to a
-//! guarded direct `Module:dispatch/3` call instead of a dynamic
+//! BT-4069, BT-4293: sends to a receiver typed as a tagged-map (Value or
+//! Object) class — sealed or open — compile to a guarded direct
+//! `Module:dispatch/3` call instead of a dynamic
 //! `beamtalk_message_dispatch:send/3`.
 //!
-//! Positive tests (sealed receivers take the direct path) fail until the
-//! `typed_sealed` handler lands; negative tests (open/untyped/union,
+//! Positive tests pin the guarded direct path (the `typed_tagged` handler);
+//! negative tests (untyped/union, abstract classes, the supervisor family,
 //! raw-representation builtins, exception kin, `Character` literals) lock in
-//! today's dynamic behavior so the new handler cannot steal those sends.
+//! the dynamic behavior so the handler cannot steal those sends.
 
 use super::codegen;
 
@@ -97,12 +98,12 @@ fn sealed_value_keyword_send_binds_args_once() {
     // maps:get, direct call, both fallback sends). Any inlining or double
     // binding changes these counts.
     assert_eq!(
-        code.matches("TSealedArg").count(),
+        code.matches("TTaggedArg").count(),
         4,
         "argument should be bound once and read three times. Got:\n{code}"
     );
     assert_eq!(
-        code.matches("TSealedRecv").count(),
+        code.matches("TTaggedRecv").count(),
         6,
         "receiver should be bound once and read five times. Got:\n{code}"
     );
@@ -186,7 +187,10 @@ fn sealed_value_field_send_as_server_match_scrutinee_is_bracketed() {
 }
 
 #[test]
-fn open_value_typed_param_stays_dynamic() {
+fn open_value_typed_param_sends_direct_with_tag_guard() {
+    // BT-4293: `sealed` adds nothing to soundness — the guard matches the
+    // exact class tag, so a subclass instance misses it and takes the
+    // dynamic fallback (ADR 0025 amendment §1).
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: OpenWidget -> Integer =>\n",
@@ -195,12 +199,140 @@ fn open_value_typed_param_stays_dynamic() {
         "  field: x :: Integer = 0\n",
     ));
     assert!(
-        !code.contains("call 'bt@open_widget':'dispatch'('x'"),
-        "open (subclassable) receiver must stay dynamic. Got:\n{code}"
+        code.contains("call 'bt@open_widget':'dispatch'('x'"),
+        "open Value receiver should direct-call the class module. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<'OpenWidget'> when 'true' ->"),
+        "the direct call should be guarded on the exact class tag. Got:\n{code}"
     );
     assert!(
         code.contains("beamtalk_message_dispatch':'send'("),
-        "open receiver send should still exist as a dynamic send. Got:\n{code}"
+        "guard mismatch should fall back to the dynamic send. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn open_object_typed_param_sends_direct() {
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: c :: OpenCounter -> Integer =>\n",
+        "    c answer\n\n",
+        "Object subclass: OpenCounter\n",
+        "  answer -> Integer => 42\n",
+    ));
+    assert!(
+        code.contains("call 'bt@open_counter':'dispatch'('answer'"),
+        "open Object-kind receiver should direct-call too. Got:\n{code}"
+    );
+}
+
+#[test]
+fn open_value_with_subclass_guards_on_the_declared_class() {
+    // The receiver is typed as the parent: the guard names the parent, so a
+    // `Sub` instance misses it and dispatches dynamically (its own override
+    // or the inherited method, exactly as `send/3` would).
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: b :: OpenBase -> Integer =>\n",
+        "    b x\n\n",
+        "Value subclass: OpenBase\n",
+        "  field: x :: Integer = 0\n\n",
+        "OpenBase subclass: OpenSub\n",
+        "  x -> Integer => 7\n",
+    ));
+    assert!(
+        code.contains("<'OpenBase'> when 'true' ->")
+            && code.contains("call 'bt@open_base':'dispatch'('x'"),
+        "parent-typed receiver should guard on the parent's tag. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("<'OpenSub'> when 'true' ->"),
+        "the guard must name the declared class only. Got:\n{code}"
+    );
+}
+
+#[test]
+fn open_value_self_send_sends_direct() {
+    // BT-4293: in a Value class `self` is typed `Known{C}` (Inferred), so an
+    // own-class self-send takes the guarded call; a subclass instance running
+    // the inherited method misses the guard and stays dynamic. The unit's own
+    // class targets the module the unit emits ('test' here), never a derived
+    // name: `beamtalk test` emits a test class unqualified with no index entry.
+    let code = codegen(concat!(
+        "Value subclass: OpenPoint\n",
+        "  field: x :: Integer = 0\n",
+        "  doubled -> Integer => self x * 2\n",
+    ));
+    assert!(
+        code.contains("<'OpenPoint'> when 'true' ->")
+            && code.contains("call 'test':'dispatch'('x'"),
+        "an open Value self-send should take the guarded direct call. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn abstract_value_typed_param_stays_dynamic() {
+    // No instance carries an abstract class's tag: a guard would never hit.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: s :: Shape -> Integer =>\n",
+        "    s area\n\n",
+        "abstract Value subclass: Shape\n",
+        "  area -> Integer => 0\n",
+    ));
+    assert!(
+        !code.contains("'dispatch'('area'"),
+        "abstract receiver must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "abstract receiver send should still exist as a dynamic send. Got:\n{code}"
+    );
+}
+
+#[test]
+fn abstract_builtin_typed_param_stays_dynamic() {
+    // `Object` and `Value` are abstract builtins.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: o :: Object -> Object =>\n",
+        "    o frobnicate\n",
+        "  useValue: v :: Value -> Object =>\n",
+        "    v frobnicate\n",
+    ));
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "abstract builtin receivers must stay dynamic. Got:\n{code}"
+    );
+}
+
+#[test]
+fn supervisor_subclass_typed_param_stays_dynamic() {
+    // Supervisor-family instances are `{beamtalk_supervisor, …}` tuples
+    // (routing fixture), never tagged maps — whether the declared class is
+    // the abstract root or a concrete subclass.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: s :: AppSup -> Object =>\n",
+        "    s frobnicate\n",
+        "  useRoot: s :: Supervisor -> Object =>\n",
+        "    s frobnicate\n",
+        "  usePool: p :: AppPool -> Object =>\n",
+        "    p frobnicate\n\n",
+        "Supervisor subclass: AppSup\n",
+        "  class childSpecs => #()\n\n",
+        "DynamicSupervisor(Object) subclass: AppPool\n",
+    ));
+    assert!(
+        !code.contains("'dispatch'('frobnicate'"),
+        "supervisor-family receivers must stay dynamic. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "supervisor sends should still exist as dynamic sends. Got:\n{code}"
     );
 }
 
@@ -733,23 +865,27 @@ fn sealed_class_repeated_within_one_package_sends_direct() {
     );
 }
 
-/// BT-4069 (review F1): sealed Value/Object builtins whose instances are
-/// `'$beamtalk_class'`-tagged maps with a compiled module — the complement of
-/// the routing table's non-tagged-map rows
+/// BT-4069 (review F1), BT-4293: concrete Value/Object builtins whose
+/// instances are `'$beamtalk_class'`-tagged maps with a compiled module — the
+/// complement of the routing table's non-tagged-map rows
 /// ([`is_non_tagged_map_class`](crate::core_erlang::routing::is_non_tagged_map_class),
-/// generated from the shared routing fixture) over the sealed builtins. Every entry is `.bt`-defined (generated builtin:
-/// a compiled `bt@stdlib@…` module exporting `dispatch/3` exists), so a
-/// tag match routes to that same module dynamically and statically alike.
-/// A newly added sealed builtin fails
-/// `all_sealed_builtins_are_classified_for_static_dispatch` until its author
-/// puts it here or in the routing fixture — with the routing reason —
-/// so an `ErlangModule`-like (native proxy) or `Exception`-like (alternate
-/// entry) addition cannot slip through unclassified.
-const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
+/// generated from the shared routing fixture) over the concrete builtins
+/// outside the exception and supervisor families. Every entry is
+/// `.bt`-defined (generated builtin: a compiled `bt@stdlib@…` module
+/// exporting `dispatch/3` exists), so a tag match routes to that same module
+/// dynamically and statically alike. A newly added builtin fails
+/// `all_builtins_are_classified_for_static_dispatch` until its author puts it
+/// here or in the routing fixture — with the routing reason — so an
+/// `ErlangModule`-like (native proxy) or `Exception`-like (alternate entry)
+/// addition cannot slip through unclassified.
+const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "ActorSpawned",
     "ActorStopped",
     "AnnouncementNavigation",
+    "Announcer",
     "Array",
+    "AtomicCounter",
+    "Bag",
     "Beamtalk",
     "BindingChanged",
     "BindingsView",
@@ -763,11 +899,13 @@ const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
     "Digest",
     "Duration",
     "Erlang",
+    "Ets",
     "File",
     "FileHandle",
     "FlushCompleted",
     "Inspector",
     "InspectorField",
+    "Interval",
     "Json",
     "Logger",
     "Node",
@@ -778,24 +916,34 @@ const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
     "ObjectStateChanged",
     "Package",
     "Parallel",
+    "ProcessNavigation",
     "Program",
     "Protocol",
+    "Queue",
     "Random",
     "Regex",
     "ReplyTo",
     "Result",
+    "RetryPolicy",
     "Session",
     "Set",
+    "StackFrame",
     "Stream",
     "Subscription",
     "SubscriptionNode",
     "SupervisionChildAdded",
     "SupervisionChildCrashed",
+    "SupervisionNode",
+    "SupervisionSpec",
+    "SupervisionTree",
     "SupervisorChild",
     "System",
     "SystemAnnouncer",
     "SystemNavigation",
     "Telemetry",
+    "TestCase",
+    "TestResult",
+    "TestRunner",
     "Time",
     "Timer",
     "Tracing",
@@ -805,7 +953,7 @@ const KNOWN_TAGGED_SEALED_BUILTINS: &[&str] = &[
 ];
 
 #[test]
-fn all_sealed_builtins_are_classified_for_static_dispatch() {
+fn all_builtins_are_classified_for_static_dispatch() {
     use beamtalk_core::ast::ClassKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
     let module = beamtalk_core::ast::Module::new(
@@ -814,11 +962,21 @@ fn all_sealed_builtins_are_classified_for_static_dispatch() {
     );
     let (hierarchy_result, _) = ClassHierarchy::build(&module);
     let hierarchy = hierarchy_result.expect("builtin hierarchy should build");
+    let mut unclassified = Vec::new();
     for name in hierarchy.class_names() {
         let info = hierarchy
             .get_class(name)
             .unwrap_or_else(|| panic!("{name} should still resolve"));
-        if !info.is_sealed {
+        // BT-4293: open classes are candidates too; abstract classes,
+        // ancestors of representation-routed built-ins, the supervisor family
+        // and the exception family are gated separately (each with its own
+        // negative test).
+        if info.is_abstract
+            || crate::core_erlang::dispatch_codegen::is_representation_ancestor(&hierarchy, name)
+            || crate::core_erlang::dispatch_codegen::supervisor_family_root(&hierarchy, name)
+                .is_some()
+            || crate::core_erlang::dispatch_codegen::is_exception_family(&hierarchy, name)
+        {
             continue;
         }
         if !matches!(
@@ -837,23 +995,28 @@ fn all_sealed_builtins_are_classified_for_static_dispatch() {
             );
             continue;
         }
-        assert!(
-            crate::core_erlang::routing::is_non_tagged_map_class(name.as_str())
-                || KNOWN_TAGGED_SEALED_BUILTINS.contains(&name.as_str()),
-            "{name} is a new sealed builtin — classify it: a row of \
-             tagged_map_routing_conformance.json (never a tagged map of its own \
-             name) or KNOWN_TAGGED_SEALED_BUILTINS \
-             (.bt-defined: compiled module + tagged-map instances)"
-        );
+        if !(crate::core_erlang::routing::is_non_tagged_map_class(name.as_str())
+            || KNOWN_TAGGED_BUILTINS.contains(&name.as_str()))
+        {
+            unclassified.push(name.to_string());
+        }
     }
+    unclassified.sort();
+    assert!(
+        unclassified.is_empty(),
+        "new builtins {unclassified:?} — classify each: a row of \
+         tagged_map_routing_conformance.json (never a tagged map of its own \
+         name) or KNOWN_TAGGED_BUILTINS \
+         (.bt-defined: compiled module + tagged-map instances)"
+    );
 }
 
 #[test]
 fn send_handlers_keep_priority_positions() {
-    // BT-4069 (review F2): `HANDLERS` order is load-bearing — `typed_sealed`
+    // BT-4069 (review F2): `HANDLERS` order is load-bearing — `typed_tagged`
     // must stay last (it converts only would-be-dynamic sends) and
-    // `character_typed` first. A handler appended after `typed_sealed`
-    // would silently never fire for sealed-typed receivers.
+    // `character_typed` first. A handler appended after `typed_tagged`
+    // would silently never fire for tagged-class-typed receivers.
     let handlers = crate::core_erlang::dispatch_codegen::HANDLERS;
     assert_eq!(
         handlers.first().map(|(name, _)| *name),
@@ -862,8 +1025,8 @@ fn send_handlers_keep_priority_positions() {
     );
     assert_eq!(
         handlers.last().map(|(name, _)| *name),
-        Some("typed_sealed"),
-        "typed_sealed must stay last"
+        Some("typed_tagged"),
+        "typed_tagged must stay last"
     );
 }
 
