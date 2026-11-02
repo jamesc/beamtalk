@@ -1292,7 +1292,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
         "Should check locals map for the class name first. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
+        code.contains("call 'erlang':'whereis'('beamtalk_class_Point')"),
         "Should look the class up in the class registry. Got:\n{code}"
     );
     assert!(
@@ -1342,7 +1342,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
         "Should check locals map for the class name first. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
+        code.contains("call 'erlang':'whereis'('beamtalk_class_NonExistentClass')"),
         "Should look the class up in the class registry. Got:\n{code}"
     );
     assert!(
@@ -1477,7 +1477,7 @@ fn test_qualified_class_reference_standalone() {
 
     // Registry lookup uses the short class name
     assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('Parser')"),
+        code.contains("call 'erlang':'whereis'('beamtalk_class_Parser')"),
         "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
     );
 

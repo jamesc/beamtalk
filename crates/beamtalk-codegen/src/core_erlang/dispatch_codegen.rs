@@ -3114,14 +3114,14 @@ impl CoreErlangGenerator {
     /// one `ClassHierarchy::is_direct_call_eligible` rule), the send compiles
     /// to the guarded direct call of [`Self::guarded_class_direct_call_doc`].
     /// Everything else, an inherited class method included, takes the dynamic
-    /// path (`whereis_class` + `class_send`), which itself runs a stateless
+    /// path (registered-name `whereis` + `class_send`), which itself runs a stateless
     /// class method in the caller (BT-4300): no call site names a superclass
     /// module.
     ///
     /// # Generated Code (dynamic path)
     ///
     /// ```erlang
-    /// let ClassPid = call 'beamtalk_class_registry':'whereis_class'('Tracing') in
+    /// let ClassPid = call 'erlang':'whereis'('beamtalk_class_Tracing') in
     /// call 'beamtalk_object_class':'class_send'(ClassPid, 'setContext:', [Ctx])
     /// ```
     fn generate_class_method_call(
@@ -3170,9 +3170,9 @@ impl CoreErlangGenerator {
         let call_doc = docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
-            " = call 'beamtalk_class_registry':'whereis_class'(",
-            leaf::atom(class_name.to_string()),
-            ") in ",
+            " = ",
+            Self::registered_class_pid_doc(class_name),
+            " in ",
             Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
 
@@ -3215,7 +3215,7 @@ impl CoreErlangGenerator {
     /// to), never `nil` (BT-4037); a class that is not registered takes the
     /// fallback, which raises `class_not_found` as before. The pid is looked
     /// up by the compile-time registered name
-    /// ([`super::util::class_registered_name`], the BT-4295 form), never
+    /// ([`Self::registered_class_pid_doc`], the BT-4295 form), never
     /// baked: a restarted class process is found. The module is the
     /// compile-time one the call names anyway.
     pub(super) fn guarded_class_direct_call_doc(
@@ -3235,9 +3235,9 @@ impl CoreErlangGenerator {
         docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
-            " = call 'erlang':'whereis'(",
-            leaf::atom(super::util::class_registered_name(class_name)),
-            ") in case call 'beamtalk_class_shadow_flags':'direct_call_ok'(",
+            " = ",
+            Self::registered_class_pid_doc(class_name),
+            " in case call 'beamtalk_class_shadow_flags':'direct_call_ok'(",
             leaf::atom(tag.clone()),
             ", ",
             leaf::atom(class_name.to_string()),
@@ -3284,9 +3284,9 @@ impl CoreErlangGenerator {
         docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
-            " = call 'beamtalk_class_registry':'whereis_class'(",
-            leaf::atom(class_name.to_string()),
-            ") in ",
+            " = ",
+            Self::registered_class_pid_doc(class_name),
+            " in ",
             Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
         ]
     }

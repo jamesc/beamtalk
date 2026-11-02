@@ -586,7 +586,7 @@ impl CoreErlangGenerator {
 
         // Capture expression outputs (ADR 0018 bridge pattern)
         let receiver_code = self.expression_doc(receiver)?;
-        let ex_class_code = self.expression_doc(ex_class)?;
+        let ex_class_code = self.on_do_filter_doc(ex_class)?;
         let handler_code = self.expression_doc(handler)?;
 
         let handler_apply =
@@ -619,6 +619,19 @@ impl CoreErlangGenerator {
             " in ",
             catch_boundary,
         ])
+    }
+
+    /// The `on:do:` class filter. A literal class is passed by name
+    /// (BT-4295, [`Self::class_name_only_reference`]): `matches_class/2`
+    /// reads only the name, so building the class object would cost a
+    /// `module_name_safe/1` lookup and a tuple for nothing. Any other filter
+    /// (a variable, a REPL top-level class literal, a package-qualified
+    /// class) is evaluated as an ordinary expression.
+    fn on_do_filter_doc(&mut self, ex_class: &Expression) -> Result<Document<'static>> {
+        match self.class_name_only_reference(ex_class) {
+            Some(doc) => Ok(doc),
+            None => self.expression_doc(ex_class),
+        }
     }
 
     /// Validates the arities of an `on:do:`'s protected block (0) and handler (0
@@ -934,7 +947,7 @@ impl CoreErlangGenerator {
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
         // Bind exception class
-        let ex_class_code = self.expression_doc(ex_class)?;
+        let ex_class_code = self.on_do_filter_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
         let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by either the
@@ -2118,6 +2131,50 @@ mod tests {
         assert!(
             code.contains("primop 'raw_raise'"),
             "on:do: should re-raise NLR throws via raw_raise. Got:\n{code}"
+        );
+    }
+
+    /// BT-4295: a literal `on:do:` filter is passed by name — one
+    /// compile-time-named `whereis` keeps `class_not_found`, and no
+    /// `module_name_safe` lookup or class-object tuple is built.
+    #[test]
+    fn test_on_do_literal_filter_is_name_only() {
+        for src in [
+            // closure form
+            "Object subclass: Srv\n  run =>\n    [42] on: Error do: [:e | 0]\n",
+            // state-threading form (the handler writes an outer local)
+            "Object subclass: Srv\n  run =>\n    x := 0.\n    [42] on: Error do: [:e | x := 1].\n    x\n",
+        ] {
+            let code = codegen(src);
+            assert!(
+                code.contains("case call 'erlang':'whereis'('beamtalk_class_Error') of"),
+                "the filter must look the class up by its registered name. Got:\n{code}"
+            );
+            assert!(
+                code.contains("'class_not_found', 'Error'"),
+                "an undefined filter class must still raise class_not_found. Got:\n{code}"
+            );
+            assert!(
+                code.contains("<_> when 'true' -> 'Error' end"),
+                "the filter must be the class name atom. Got:\n{code}"
+            );
+            assert!(
+                !code.contains("'Error class'")
+                    && !code.contains("module_name_safe")
+                    && !code.contains("whereis_class"),
+                "a name-only filter must build no class object. Got:\n{code}"
+            );
+        }
+    }
+
+    /// A non-literal filter is still evaluated as an expression.
+    #[test]
+    fn test_on_do_variable_filter_is_evaluated() {
+        let src = "Object subclass: Srv\n  run: cls =>\n    [42] on: cls do: [:e | 0]\n";
+        let code = codegen(src);
+        assert!(
+            !code.contains("'erlang':'whereis'"),
+            "a variable filter must not be looked up by name. Got:\n{code}"
         );
     }
 
