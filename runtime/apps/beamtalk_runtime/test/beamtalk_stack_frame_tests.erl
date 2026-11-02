@@ -173,27 +173,43 @@ has_method_unknown_test() -> ?assertNot(beamtalk_stack_frame:has_method('nonExis
 
 format_frame_with_full_location_test() ->
     Result = beamtalk_stack_frame:dispatch('printString', [], make_test_frame()),
-    ?assertEqual({beamtalk_string, <<"Integer>>+/2 (src/beamtalk_integer.erl:42)">>}, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+ (src/beamtalk_integer.erl:42)">>}, Result).
 
 format_frame_nil_class_test() ->
     Frame = (make_test_frame())#{class_name => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual({beamtalk_string, <<"?>>+/2 (src/beamtalk_integer.erl:42)">>}, Result).
+    ?assertEqual(
+        {beamtalk_string, <<"beamtalk_integer>>+ (src/beamtalk_integer.erl:42)">>}, Result
+    ).
 
 format_frame_undefined_function_test() ->
     Frame = (make_test_frame())#{function => undefined, class_name => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual({beamtalk_string, <<"?>>?/2 (src/beamtalk_integer.erl:42)">>}, Result).
+    ?assertEqual(
+        {beamtalk_string, <<"beamtalk_integer>>? (src/beamtalk_integer.erl:42)">>}, Result
+    ).
 
 format_frame_no_location_test() ->
     Frame = (make_test_frame())#{file => nil, line => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual({beamtalk_string, <<"Integer>>+/2">>}, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+">>}, Result).
 
 format_frame_file_no_line_test() ->
     Frame = (make_test_frame())#{line => nil},
     Result = beamtalk_stack_frame:dispatch('printString', [], Frame),
-    ?assertEqual({beamtalk_string, <<"Integer>>+/2 (src/beamtalk_integer.erl)">>}, Result).
+    ?assertEqual({beamtalk_string, <<"Integer>>+ (src/beamtalk_integer.erl)">>}, Result).
+
+format_frame_block_marker_test() ->
+    Frame = (make_test_frame())#{function => '-run/0-fun-3-', arity => 2},
+    ?assertEqual(
+        <<"Integer>>run [block] (src/beamtalk_integer.erl:42)">>,
+        beamtalk_stack_frame:format_frame(Frame)
+    ).
+
+format_frame_never_emits_mfa_test() ->
+    Out = beamtalk_stack_frame:format_frame(make_test_frame()),
+    ?assertEqual(nomatch, re:run(Out, "[a-z_@]+:[^ ]+/[0-9]+")),
+    ?assertEqual(nomatch, re:run(Out, "/[0-9]+( |$)")).
 
 %%% ===================================================================
 %%% module_to_class/1 tests

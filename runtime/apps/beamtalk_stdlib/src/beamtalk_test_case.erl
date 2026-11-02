@@ -45,7 +45,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 
 -ifdef(TEST).
 %% Exported for testing stack trace formatting
--export([format_stacktrace/1, ensure_test_context/4]).
+-export([format_stacktrace/1, format_stackframe/1, ensure_test_context/4]).
 -endif.
 
 -doc """
@@ -519,120 +519,13 @@ collapse_repeats([Line | Rest]) ->
     [Rendered | collapse_repeats(Others)].
 
 -doc """
-Format a single stacktrace frame for display using Beamtalk names.
-
-Translates Erlang module names to Beamtalk class names where possible.
-Stdlib frames show just the basename (the absolute path baked at compile time
-won't exist on the user's machine). User code frames show workspace-relative
-paths for terminal clickability.
-
-When the BEAM frame carries no file (common for block entries, dispatch
-wrappers and recursive sends), the module's `beamtalk_source` attribute is used
-instead, rendered `(file)` — or `(file:line)` if a line is known. Frames with
-no recoverable source keep the bare `Class>>selector` form. Raw Erlang
-`module:function/arity` is never shown.
+Format a single raw BEAM stacktrace frame for display. Delegates to the shared
+renderer `beamtalk_stack_frame:format_frame/1`, so test failure output and
+`Exception>>stackTrace` print a frame byte-identically (BT-4357).
 """.
--spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
-format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
-    DisplayMod = format_module(Mod),
-    DisplayFun = format_fun_name(Fun),
-    %% arity not displayed — Beamtalk selectors encode it
-    _ = ArityOrArgs,
-    Line = proplists:get_value(line, Loc, 0),
-    case frame_file(Mod, Loc) of
-        nil ->
-            io_lib:format("~s>>~s", [DisplayMod, DisplayFun]);
-        File when Line =:= 0 ->
-            io_lib:format("~s>>~s (~s)", [DisplayMod, DisplayFun, format_file_path(Mod, File)]);
-        File ->
-            io_lib:format("~s>>~s (~s:~p)", [
-                DisplayMod, DisplayFun, format_file_path(Mod, File), Line
-            ])
-    end.
-
--doc """
-Source file for a frame: the BEAM location's `file` when present, otherwise
-the module's `beamtalk_source` attribute (`nil` when neither is known).
-""".
--spec frame_file(atom(), list()) -> string() | nil.
-frame_file(Mod, Loc) ->
-    case proplists:get_value(file, Loc, "") of
-        "" -> module_source_file(Mod);
-        File -> File
-    end.
-
--doc "The module's `beamtalk_source` file as a string, or `nil` if unknown.".
--spec module_source_file(atom()) -> string() | nil.
-module_source_file(Mod) ->
-    case beamtalk_reflection:source_file_from_module(Mod) of
-        nil -> nil;
-        Path -> unicode:characters_to_list(Path)
-    end.
-
--doc """
-Format a file path for display based on module origin.
-
-Stdlib modules (bt@stdlib@*) use basename only — the compile-time absolute
-path won't exist on the user's machine. User code paths are made relative
-to CWD for terminal clickability in VS Code.
-""".
--spec format_file_path(atom(), string()) -> string().
-format_file_path(Mod, File) ->
-    ModStr = atom_to_list(Mod),
-    case lists:prefix("bt@stdlib@", ModStr) of
-        true ->
-            filename:basename(File);
-        false ->
-            make_relative(File)
-    end.
-
--doc "Make a file path relative to CWD if it's under it, otherwise basename.".
--spec make_relative(string()) -> string().
-make_relative(File) ->
-    case file:get_cwd() of
-        {ok, Cwd} ->
-            CwdComps = filename:split(Cwd),
-            FileComps = filename:split(File),
-            case lists:prefix(CwdComps, FileComps) of
-                true ->
-                    RelComps = lists:nthtail(length(CwdComps), FileComps),
-                    filename:join(RelComps);
-                false ->
-                    filename:basename(File)
-            end;
-        _ ->
-            filename:basename(File)
-    end.
-
--doc "Translate an Erlang module name to a Beamtalk class name for display.".
--spec format_module(atom()) -> string().
-format_module(Mod) ->
-    case beamtalk_stack_frame:module_to_class(Mod) of
-        nil -> atom_to_list(Mod);
-        ClassName -> atom_to_list(ClassName)
-    end.
-
--doc """
-Clean up Erlang function names for display.
-
-A compiler-lifted local function — a block (`'-sel/N-fun-M-'`,
-`'-sel/N-anonymous-M-'`) or a loop body (`'-sel/N-name/K-M-'`) — is rendered
-as its enclosing selector plus a `[block]` marker (e.g.
-`'-sync_send/3-fun-1-'` → `"sync_send [block]"`), so a block frame never prints
-identically to the method frame that created it. The arity and fun index are
-never shown.
-""".
--spec format_fun_name(atom()) -> string().
-format_fun_name(Fun) ->
-    FunStr = atom_to_list(Fun),
-    %% The enclosing name is everything up to the first "/<arity>-"; the lazy
-    %% match keeps selectors that themselves contain '/' (e.g. `/`, `//`) intact.
-    case re:run(FunStr, "^-(.+?)/[0-9]+-", [{capture, all_but_first, list}, unicode]) of
-        {match, [BaseName]} ->
-            BaseName ++ " [block]";
-        nomatch ->
-            FunStr
-    end.
+-spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> binary().
+format_stackframe(Frame) ->
+    beamtalk_stack_frame:format_frame(beamtalk_stack_frame:wrap_frame(Frame)).
 
 -doc "Filter stacktrace frames, removing internal test runner and OTP frames.".
 -spec filter_stackframes(list()) -> list().

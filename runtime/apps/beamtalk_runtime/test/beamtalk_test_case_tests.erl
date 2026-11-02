@@ -454,6 +454,31 @@ format_stacktrace_block_name_forms_test() ->
     ?assertEqual(<<"\n  at A>>// [block]">>, Render('-///2-fun-0-')),
     ?assertEqual(<<"\n  at A>>timesRepeat:">>, Render('timesRepeat:')).
 
+%% BT-4357: the test path and the Exception/StackFrame path print the same
+%% frame byte-identically (class, block marker, arity policy, file rules).
+format_frame_identical_across_test_and_stackframe_paths_test_() ->
+    Frames = [
+        {'bt@user@A', run, 2, [{file, "a.bt"}, {line, 7}]},
+        {'bt@user@A', '-run/0-fun-3-', 1, [{file, "a.bt"}, {line, 8}]},
+        {'bt@user@A', '-run/0-loop/1-0-', 1, [{line, 9}]},
+        {'bt@user@NoSuchTraceModule', helper, 0, []},
+        {'bt@user@A', 'timesRepeat:', 1, [{file, "a.bt"}, {line, 0}]},
+        %% Non-ASCII source paths (Latin-1 range and above 255) must render,
+        %% not crash the trace (which would lose the failing test's result).
+        {'bt@user@A', run, 2, [{file, "/tmp/jos\x{e9}/a.bt"}, {line, 7}]},
+        {'bt@user@A', run, 2, [{file, "/tmp/\x{4e2d}\x{6587}/a.bt"}, {line, 7}]}
+    ],
+    [
+        ?_test(begin
+            ViaTest = iolist_to_binary(beamtalk_test_case:format_stackframe(F)),
+            [Wrapped] = beamtalk_stack_frame:wrap([F]),
+            ViaFrame = beamtalk_stack_frame:format_frame(Wrapped),
+            ?assertEqual(ViaFrame, ViaTest),
+            ?assertNot(has_raw_mfa(ViaTest))
+        end)
+     || F <- Frames
+    ].
+
 %% Distinct frames that still render identically (recursive send with no
 %% line) collapse into one line with a repeat count.
 format_stacktrace_collapses_identical_adjacent_frames_test() ->
