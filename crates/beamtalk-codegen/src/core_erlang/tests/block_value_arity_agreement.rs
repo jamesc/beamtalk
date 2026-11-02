@@ -210,7 +210,7 @@ fn write_errors(src: &str) -> Vec<String> {
     errors_in(
         src,
         &[
-            DiagnosticCategory::UnmigratedLocalThreading,
+            DiagnosticCategory::UnthreadedLocalWrite,
             DiagnosticCategory::Tier2BlockNoReturnChannel,
         ],
     )

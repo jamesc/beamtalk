@@ -201,7 +201,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
-        DiagnosticCategory::UnmigratedLocalThreading => "UnmigratedLocalThreading",
+        DiagnosticCategory::UnthreadedLocalWrite => "UnthreadedLocalWrite",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
         DiagnosticCategory::CodegenReport => "CodegenReport",
     }
@@ -441,8 +441,8 @@ mod tests {
                 "Tier2BlockNoReturnChannel",
             ),
             (
-                DiagnosticCategory::UnmigratedLocalThreading,
-                "UnmigratedLocalThreading",
+                DiagnosticCategory::UnthreadedLocalWrite,
+                "UnthreadedLocalWrite",
             ),
             (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
             (DiagnosticCategory::CodegenReport, "CodegenReport"),

@@ -31,7 +31,7 @@
 //!   in every context, the REPL root included (BT-3858). Reads of captured
 //!   variables and `^` inside an escaping block are unaffected.
 //! - **The retired Phase 0 position check**
-//!   ([`DiagnosticCategory::UnmigratedLocalThreading`], retired by BT-3913:
+//!   ([`DiagnosticCategory::UnthreadedLocalWrite`], retired by BT-3913:
 //!   ADR 0133 Phase 3 lowered every statement shape through frames, and the
 //!   733-shape oracle reports zero silent drops and zero `erlc` failures).
 //!   A local-threading construct ([`local_threading_construct`], of a family
@@ -589,7 +589,7 @@ fn report_repl_closure_loop_returns(
                 "answer the value with `detect:ifNone:` or `inject:into:`, or move the \
                  loop into a method and return from there",
             )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+            .with_category(DiagnosticCategory::UnthreadedLocalWrite),
         );
     }
 }
@@ -626,7 +626,7 @@ fn report_repl_assigned_loop_returns(
                     "answer the value with `detect:ifNone:` or `inject:into:` and assign that, \
                      or leave the assignment out and let the `^` answer the input",
                 )
-                .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );
         }
     }
@@ -684,7 +684,7 @@ impl StaleReturnScan<'_> {
                         "pass the current value in as a block argument (`[:v | ^v] value: \
                          {name}`), or write the block where it is run"
                     ))
-                    .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                    .with_category(DiagnosticCategory::UnthreadedLocalWrite),
                 );
             }
         }
@@ -942,7 +942,7 @@ fn report_nlr_out_of_ensure(
                              cleanup cannot read a local its protected block writes when the \
                              block can exit early)"
                         ))
-                        .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                        .with_category(DiagnosticCategory::UnthreadedLocalWrite),
                     );
                 }
             }
@@ -2486,7 +2486,7 @@ impl<'d> Walker<'d> {
                 ),
                 None,
             )
-            .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+            .with_category(DiagnosticCategory::UnthreadedLocalWrite),
         );
     }
 
@@ -2763,7 +2763,7 @@ impl<'d> Walker<'d> {
                     "bind the arm's value instead: `{name} := subject match: [pattern -> newValue; ...]`, \
                      or use `ifTrue:`/`ifNil:` for a branch that writes `{name}` (BT-3875)"
                 ))
-                .with_category(DiagnosticCategory::UnmigratedLocalThreading),
+                .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );
         }
     }

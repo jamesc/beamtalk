@@ -21,7 +21,7 @@
 //!   the one codegen's `threaded_locals_of` reads.
 //! - **Shapes a compile error rejects** are never warned about: a write
 //!   inside the span of a [`local_threading_diagnostics`] error (§6
-//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnmigratedLocalThreading`) is
+//!   `Tier2BlockNoReturnChannel`, Phase 0 `UnthreadedLocalWrite`) is
 //!   that error's to report, so `beamtalk lint` and `beamtalk build` never
 //!   flag the same write twice, and when a later phase widens any of them
 //!   this lint steps back without a change here.
@@ -1100,7 +1100,7 @@ sealed typed Value subclass: Foo
         ];
         let compile_error_categories = [
             DiagnosticCategory::Tier2BlockNoReturnChannel,
-            DiagnosticCategory::UnmigratedLocalThreading,
+            DiagnosticCategory::UnthreadedLocalWrite,
         ];
         let mut failures = Vec::new();
         let tailed = shapes

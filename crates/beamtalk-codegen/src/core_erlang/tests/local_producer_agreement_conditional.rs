@@ -255,7 +255,7 @@ pub(super) fn check_conditional_agreement(src: &str) -> Option<usize> {
             && matches!(
                 d.category,
                 Some(
-                    DiagnosticCategory::UnmigratedLocalThreading
+                    DiagnosticCategory::UnthreadedLocalWrite
                         | DiagnosticCategory::Tier2BlockNoReturnChannel
                 )
             )

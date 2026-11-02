@@ -701,8 +701,9 @@ reports the same message at the same span. No operation is surface-specific.
     `sealed` method of an actor's own class, or a stored block sent `value` in
     an actor method, compiled and threaded its write; both are now this error
     on every surface.
-- Category `UnmigratedLocalThreading` (permanent for the shapes it still
-  covers; BT-3913 retired the statement-position half of it): a
+- Category `UnthreadedLocalWrite` (named `UnmigratedLocalThreading` until
+  BT-4368 renamed it; the history below uses the old name; permanent for the
+  shapes it still covers; BT-3913 retired the statement-position half of it): a
   local-threading construct whose blocks write an outer local sits in an
   operand position no producer lowers. A `detect:ifNone:` with a stored
   search block, a lookup that is not a producer and an arm write of a

@@ -179,7 +179,7 @@ fn check_repl_agreement(constructs: &[&str], least_named: usize) {
                         && matches!(
                             d.category,
                             Some(
-                                DiagnosticCategory::UnmigratedLocalThreading
+                                DiagnosticCategory::UnthreadedLocalWrite
                                     | DiagnosticCategory::Tier2BlockNoReturnChannel
                             )
                         )
@@ -380,7 +380,7 @@ fn phase0_errors(
                 && matches!(
                     d.category,
                     Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
+                        DiagnosticCategory::UnthreadedLocalWrite
                             | DiagnosticCategory::Tier2BlockNoReturnChannel
                     )
                 )

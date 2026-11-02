@@ -551,7 +551,7 @@ pub(super) fn codegen_outcome(src: &str) -> Result<FieldCodegen, String> {
             && matches!(
                 d.category,
                 Some(
-                    DiagnosticCategory::UnmigratedLocalThreading
+                    DiagnosticCategory::UnthreadedLocalWrite
                         | DiagnosticCategory::Tier2BlockNoReturnChannel
                 )
             )
