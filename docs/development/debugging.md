@@ -63,12 +63,13 @@ Both go through one renderer, `beamtalk_stack_frame:format_frame/1`, so the
 same frame prints the same way in both places. Raw Erlang
 `module:function/arity` text is never emitted, and arity is never shown.
 
+A default test failure (3 frames, see below):
+
 ```text
 FAIL testParse
   Expected 3, got 4
   at Parser>>readToken (parser.bt:42)
   at Parser>>parse: [block] (parser.bt:31)
-  at Parser>>parse: (parser.bt:28)
   at ParserTest>>testParse (parser_test.bt:12)
 ```
 
@@ -90,7 +91,8 @@ Each frame is `Class>>selector [block] (file:line)`:
   relative to the current directory (basename if outside it).
 - **Line** is the `.bt` line of the function head or message-send call site.
   Block and loop call sites carry real lines too (BT-4356).
-- **File with no line**, e.g. `Integer>>timesRepeat: (integer.bt)`: the file is
+- **File with no line**, e.g. `ParserTest>>testParse (parser_test.bt)` (the
+  synthetic test-method line below is always like this): the file is
   known but the frame has no usable line (unknown or 0). The frame still
   identifies the class and selector; just don't expect a line to jump to.
   Frames with neither file nor line print as `Class>>selector`.
@@ -106,12 +108,13 @@ only Beamtalk user and stdlib frames, then applies these rules:
   between are dropped. With 3 or fewer, all are shown.
 - **`beamtalk test --full-traces`** disables the cap and prints the complete
   filtered trace. Filtering of internal frames still applies.
-- **Repeats are collapsed.** Adjacent identical lines are merged with a
-  trailing `[xN]`, e.g. a recursive send whose frames render identically:
+- **Repeats are collapsed.** Adjacent identical lines are merged, with a
+  trailing `[xN]` after the whole line, e.g. a recursive send whose frames
+  render identically:
 
   ```text
-    at Integer>>timesRepeat: [x2]
-    at CounterTest>>testLoop (counter_test.bt:3)
+    at Tree>>walk: (tree.bt:14) [x3]
+    at TreeTest>>testWalk (tree_test.bt:8)
   ```
 
 - **Synthetic test-method line.** The VM stacktrace depth is limited, so the
@@ -136,7 +139,8 @@ supported interface.
 
 `printString` on a `StackFrame` uses the same renderer, so it shows the same
 `Class>>selector [block] (file:line)` text as test failures. `stackTrace`
-returns the full frame list; it is not capped or collapsed. REPL-evaluated
+returns every frame the VM recorded; Beamtalk neither caps nor collapses it
+(the VM's own stacktrace depth limit still applies). REPL-evaluated
 code with no backing file shows no file in its frames.
 
 ## Test Failures
