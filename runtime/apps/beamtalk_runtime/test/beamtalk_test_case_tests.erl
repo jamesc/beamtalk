@@ -466,6 +466,8 @@ format_frame_identical_across_test_and_stackframe_paths_test_() ->
         %% Non-ASCII source paths (Latin-1 range and above 255) must render,
         %% not crash the trace (which would lose the failing test's result).
         {'bt@user@A', run, 2, [{file, "/tmp/jos\x{e9}/a.bt"}, {line, 7}]},
+        %% Compiler-style UTF-8 byte list.
+        {'bt@user@A', run, 2, [{file, [$/, 195, 169, $., $b, $t]}, {line, 7}]},
         {'bt@user@A', run, 2, [{file, "/tmp/\x{4e2d}\x{6587}/a.bt"}, {line, 7}]}
     ],
     [

@@ -87,8 +87,11 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
         end,
     File =
         case proplists:get_value(file, Location) of
-            undefined -> nil;
-            F -> unicode:characters_to_binary(F)
+            undefined ->
+                nil;
+            F ->
+                %% Shared byte-aware conversion; nil keeps `String | Nil` (BT-4370).
+                beamtalk_reflection:path_to_utf8(F)
         end,
     Line =
         case proplists:get_value(line, Location) of
