@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3913: the field write before a nested `do:separatedBy:` in an actor loop
+// nest is not lost when the nested accumulator seeds from the cell. Each
+// inner pass adds 1 + 10 + 2 = 13 to `t`; the 2 x 2 passes add 1 to `n` each.
+// See fixtures/bt3913nested_seed_actor.bt.
+
+TestCase subclass: Bt3913NestedSeedTest
+
+  testFieldWriteSurvivesTheNestedSeed =>
+    self assert: Bt3913NestedSeedActor spawn run equals: #[52, 4]
