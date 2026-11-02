@@ -858,13 +858,20 @@ impl CoreErlangGenerator {
         // `info.package` alone would target the never-emitted
         // `bt@<package>@<class>`. The qualified derivation stays as the
         // fallback for a packaged class with no index entry.
-        let module_name = self
-            .class_module_registry()
-            .module_for_class(&self.own_package_id(), class_name)
-            .map_or_else(
-                || self.compiled_module_name_qualified(class_name, info.package.as_deref()),
-                |module| module.as_str().to_string(),
-            );
+        //
+        // BT-4293: the unit's own class comes first of all — its `dispatch/3`
+        // is in the module this unit emits. `beamtalk test` emits a test
+        // file's class unqualified with no index entry, so neither the
+        // registry nor the qualified derivation names it (with the sealed
+        // gate gone, every `TestCase` self-send reaches here).
+        let module_name = self.own_class_module(class_name).unwrap_or_else(|| {
+            self.class_module_registry()
+                .module_for_class(&self.own_package_id(), class_name)
+                .map_or_else(
+                    || self.compiled_module_name_qualified(class_name, info.package.as_deref()),
+                    |module| module.as_str().to_string(),
+                )
+        });
         Ok(TypedTaggedTarget {
             class_name: class_name.to_string(),
             module_name,

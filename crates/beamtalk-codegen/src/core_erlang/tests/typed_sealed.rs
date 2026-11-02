@@ -257,7 +257,9 @@ fn open_value_with_subclass_guards_on_the_declared_class() {
 fn open_value_self_send_sends_direct() {
     // BT-4293: in a Value class `self` is typed `Known{C}` (Inferred), so an
     // own-class self-send takes the guarded call; a subclass instance running
-    // the inherited method misses the guard and stays dynamic.
+    // the inherited method misses the guard and stays dynamic. The unit's own
+    // class targets the module the unit emits ('test' here), never a derived
+    // name: `beamtalk test` emits a test class unqualified with no index entry.
     let code = codegen(concat!(
         "Value subclass: OpenPoint\n",
         "  field: x :: Integer = 0\n",
@@ -265,7 +267,7 @@ fn open_value_self_send_sends_direct() {
     ));
     assert!(
         code.contains("<'OpenPoint'> when 'true' ->")
-            && code.contains("call 'bt@open_point':'dispatch'('x'"),
+            && code.contains("call 'test':'dispatch'('x'"),
         "an open Value self-send should take the guarded direct call. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
