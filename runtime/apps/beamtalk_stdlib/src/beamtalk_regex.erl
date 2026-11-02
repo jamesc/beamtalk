@@ -427,7 +427,7 @@ The PCRE compile flags `from:options:` and `matchesRegex:options:` accept.
 The single runtime source for the set: `translate_option/1` and its
 "Valid: …" hint both read it. `beamtalk_regex_tests` checks it equals both
 the `RegexOption` alias members in `stdlib/src/regex.bt` (via the stdlib
-app's `type_aliases` env) and the `regex_option()` type below, so none of
+app's `type_aliases` env) and the `regex_option()` type above, so none of
 the three can drift alone.
 
 Every member is also an `re:compile/2` option of the same name, which is why

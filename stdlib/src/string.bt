@@ -572,7 +572,6 @@ sealed typed Binary subclass: String
   /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
   ///   Use `matchesRegex:` when there are no flags.
   ///
-  /// The flags and their meanings are the same as for `Regex class>>from:options:`.
   /// Unknown options raise `regex_error`.
   ///
   /// @see Regex class>>from:options: (the option list and what each flag does)

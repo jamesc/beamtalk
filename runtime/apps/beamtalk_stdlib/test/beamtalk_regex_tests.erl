@@ -138,10 +138,13 @@ regex_option_alias_members() ->
     ].
 
 %% Members of the `-type regex_option() :: a | b | ...` union, read from the
-%% compiled module's abstract code.
+%% compiled module's abstract code. Locates the .beam on the code path rather
+%% than via `code:which/1`, which answers `cover_compiled` under `--cover`.
 regex_option_type_members() ->
+    Beam = code:where_is_file("beamtalk_regex.beam"),
+    ?assert(is_list(Beam)),
     {ok, {beamtalk_regex, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
-        beam_lib:chunks(code:which(beamtalk_regex), [abstract_code]),
+        beam_lib:chunks(Beam, [abstract_code]),
     [Members] = [
         Ms
      || {attribute, _, type, {regex_option, {type, _, union, Ms}, []}} <- Forms
