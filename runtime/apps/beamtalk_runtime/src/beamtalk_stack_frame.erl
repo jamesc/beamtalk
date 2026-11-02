@@ -90,13 +90,8 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
             undefined ->
                 nil;
             F ->
-                %% An unconvertible path keeps the `String | Nil` contract (BT-4370).
-                try unicode:characters_to_binary(F) of
-                    Bin when is_binary(Bin) -> Bin;
-                    _ -> nil
-                catch
-                    error:_ -> nil
-                end
+                %% Shared byte-aware conversion; nil keeps `String | Nil` (BT-4370).
+                beamtalk_reflection:path_to_utf8(F)
         end,
     Line =
         case proplists:get_value(line, Location) of
