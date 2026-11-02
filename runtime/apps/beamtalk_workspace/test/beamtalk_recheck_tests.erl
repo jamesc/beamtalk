@@ -318,7 +318,10 @@ relevant_image_diagnostic_matches_shared_corpus_test() ->
     ]),
     ?assert(length(Rows) > 0),
     lists:foreach(
-        fun(#{<<"severity">> := Severity, <<"category">> := Category, <<"verdict">> := Verdict} = Row) ->
+        fun(
+            #{<<"severity">> := Severity, <<"category">> := Category, <<"verdict">> := Verdict} =
+                Row
+        ) ->
             Diagnostic =
                 case Category of
                     null -> #{severity => Severity};
