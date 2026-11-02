@@ -897,7 +897,7 @@ reports the same message at the same span. No operation is surface-specific.
   escaping-block error.
 - **Residuals made loud (ADR 0133 Phase 3, BT-3909).** Shapes that crashed or
   answered wrong without a diagnostic were compile errors
-  (`UnmigratedLocalThreading`, `RESIDUAL_DENY_SET` in `local_threading.rs`) in
+  (`UnmigratedLocalThreading`, `RESIDUAL_DENY_SET` in `local_threading.rs`, retired by BT-3913) in
   every context where they were measured wrong, with the same message on every
   surface. BT-3911 lowered the assignment inside a conditional arm in a
   `whileTrue:`/`whileFalse:` condition block (BT-3891). BT-3912 lowers the

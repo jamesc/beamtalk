@@ -534,6 +534,18 @@ t := 0. Result tryDo: [#(1, 2) do: [:x | t := t + x]. t]
 t
 // => 3
 
+// BT-3913: a `Result tryDo:` that is a statement of a REPL loop body was the
+// retired Phase 0 error (BT-3876). The producer of the REPL fold frame adopts
+// the bindings the `tryDo:` block wrote, so the write is kept.
+t := 0
+// => 0
+
+#(1) do: [:x | Result tryDo: [t := t + 1. 1]]
+// => _
+
+t
+// => 1
+
 // ===========================================================================
 // BT-3823: the REPL's arms are producer frames
 // ===========================================================================

@@ -498,10 +498,10 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
 /// `{Value, Bindings}` tuple (`beamtalk_result:'tryDo:'/2`) only where the
 /// REPL unpacks one: a statement, an assignment's value, a producer operand
 /// site, or (BT-3823) a producer site of a REPL arm or fold body, whose
-/// producer unpacks it the same way. This codegen is reached with the Phase 0
-/// check bypassed, so it must not depend on that check keeping a `tryDo:` out
-/// of a closure or an argument. (A `tryDo:` in a REPL loop body is the Phase 0
-/// error the other REPL exception constructs have, BT-3876.)
+/// producer unpacks it the same way. Codegen must not depend on the validator
+/// keeping a `tryDo:` out of a closure or an argument. (A `tryDo:` in a REPL
+/// loop body was a Phase 0 error, BT-3876; BT-3913 retired that check and
+/// `adr0131_local_rebind.btscript` pins the answer.)
 #[test]
 fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
     let tuple_call = "call 'beamtalk_result':'tryDo:'(fun (StateAcc)";
@@ -514,8 +514,8 @@ fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
         "true ifTrue: [Result tryDo: [t := t + 1. 1]]",
         "r := [(Result tryDo: [t := t + 1. 1]) isOk] on: Error do: [:e | false]",
         // A statement of a REPL fold body, whose `StateAcc` is the bindings map
-        // too: the producer adopts element 2 (the Phase 0 check still rejects
-        // the input, BT-3876).
+        // too: the producer adopts element 2 (BT-3876, answer pinned in
+        // `adr0131_local_rebind.btscript`).
         "#(1) do: [:x | Result tryDo: [t := t + 1. 1]]",
         // An evaluated block is a REPL arm (BT-3823); its arity matches the
         // send's, since a block of another arity is applied, not inlined
