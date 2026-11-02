@@ -18,7 +18,7 @@
 //!   (`x :: Integer`, `patterns::type_tests`), or the guard a typed send may
 //!   stand behind;
 //! - [`is_non_tagged_map_class`]: the classes a class-tag guard must never
-//!   target (`dispatch_codegen::typed_sealed_value_target`);
+//!   target (`dispatch_codegen::typed_tagged_target`);
 //! - [`reserved_tuple_tags`]: the tuple tags the `Tuple` test excludes;
 //! - [`row`]: a class's whole row, for the dynamic-site report's reason.
 //!
@@ -101,6 +101,11 @@ pub(in crate::core_erlang) struct ReservedTupleTag {
     pub(in crate::core_erlang) size: u32,
 }
 
+/// Every fixture row, in fixture order.
+pub(in crate::core_erlang) fn rows() -> &'static [RoutingRow] {
+    table::ROUTING_ROWS
+}
+
 /// The fixture row for `class`, if it has one.
 pub(in crate::core_erlang) fn row(class: &str) -> Option<&'static RoutingRow> {
     table::ROUTING_ROWS.iter().find(|row| row.class == class)
@@ -119,10 +124,12 @@ pub(in crate::core_erlang) fn type_test(class: &str) -> Option<Guard> {
 
 /// Whether instances of `class` are never `'$beamtalk_class'`-tagged maps
 /// carrying their own name, so a class-tag guard on them could never match
-/// (BT-4069). Every row except the supervisor family: those classes are open
-/// and abstract, so the typed-sealed path never considers them, and the rows
-/// that remain are exactly the sealed classes the `typed_sealed` hygiene
-/// tests require.
+/// (BT-4069). Every row except the supervisor family: a supervisor row's
+/// representation is shared by every subclass, so the typed-tagged path
+/// excludes the whole family by a superclass-chain walk
+/// (`dispatch_codegen::supervisor_family_root`) instead, and the rows that
+/// remain are exactly the sealed classes the `typed_sealed` hygiene tests
+/// require.
 pub(in crate::core_erlang) fn is_non_tagged_map_class(class: &str) -> bool {
     row(class).is_some_and(|row| row.representation != Representation::SupervisorTuple)
 }

@@ -89,21 +89,30 @@ fn builtin_special_selector_is_named() {
 }
 
 #[test]
-fn open_value_class_reports_open() {
+fn open_value_class_send_is_converted() {
+    // BT-4293: an open Value class takes the guarded direct call, so the
+    // send is no longer a dynamic site (only the guard-miss fallback is).
+    let hints = report(concat!(
+        "Object subclass: Caller\n",
+        "  run: p :: OpenPoint => p frobnicate\n\n",
+        "Value subclass: OpenPoint\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn object_receiver_reports_root() {
+    // `Object` is not abstract, but its static type admits raw terms (an
+    // ancestor of representation-routed built-ins), so it stays dynamic.
     let hint = hint_for(
-        concat!(
-            "Object subclass: Caller\n",
-            "  run: p :: OpenPoint => p frobnicate\n\n",
-            "Value subclass: OpenPoint\n",
-            "  field: x :: Integer = 0\n",
-        ),
+        "Object subclass: Caller\n  run: o :: Object => o frobnicate\n",
         "frobnicate",
     );
-    assert!(
-        hint.contains("reason: open — OpenPoint is not sealed"),
-        "{hint}"
-    );
-    assert!(hint.contains("[Value, declared]"), "{hint}");
+    assert!(hint.contains("reason: root — Object"), "{hint}");
 }
 
 #[test]

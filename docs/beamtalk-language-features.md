@@ -4942,6 +4942,25 @@ Registry reset          // => 0
 > Purely-programmatic `ClassBuilder` classes have no recorded source; supply their
 > class methods up front via `classMethods:` / `addClassMethod:body:` instead.
 
+**Typed sends and reload.** A send whose receiver has a static type naming a
+`Value` or `Object` class, sealed or open (`p :: Point`, or `self` inside
+`Point`'s own methods), compiles to a guarded direct call: when the receiver's
+class tag is exactly `Point` it calls `Point`'s compiled module, and any other
+receiver (a subclass instance, or a value the annotation lied about) takes the
+ordinary dynamic send. Abstract classes, `Object`, `Value`, actors, the
+supervisor and exception families and built-ins with their own representation
+always send dynamically. The result is always what a dynamic send answers
+([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
+(`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
+module all reach typed call sites at once, because they act inside that
+module. Two development-time operations do not until the calling code is
+recompiled, because the call site names the module the compiler saw:
+
+- redefining the class in the REPL so that it lands in a *different* module:
+  stale typed call sites keep reaching the old module;
+- `removeFromSystem`: a stale typed call site raises a raw `undef` error
+  instead of `does_not_understand`.
+
 ### Saving live edits back to disk — `compile:source:`, ChangeLog, and `flush` (ADR 0082)
 
 Live patches go into memory; they reach the `.bt` source file only when you
