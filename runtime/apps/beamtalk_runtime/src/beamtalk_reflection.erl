@@ -189,7 +189,7 @@ source_file_from_module(ModuleName) ->
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
                 {beamtalk_source, [Path]} when is_binary(Path) -> Path;
-                {beamtalk_source, [Path]} when is_list(Path) -> list_to_binary(Path);
+                {beamtalk_source, [Path]} when is_list(Path) -> path_to_utf8(Path);
                 _ -> nil
             end
     catch
@@ -199,6 +199,20 @@ source_file_from_module(ModuleName) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
+
+-doc """
+Convert a list-valued `beamtalk_source` path (code points) to a UTF-8 binary.
+Never raises: a conversion error or incomplete result means "no known source"
+(`nil`), so callers keep the `binary() | nil` contract (BT-4370).
+""".
+-spec path_to_utf8(list()) -> binary() | 'nil'.
+path_to_utf8(Path) ->
+    try unicode:characters_to_binary(Path) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> nil
+    catch
+        error:_ -> nil
+    end.
 
 -doc """
 True when `Name` is declared `late` (ADR 0124 §1) on `State`'s class or an

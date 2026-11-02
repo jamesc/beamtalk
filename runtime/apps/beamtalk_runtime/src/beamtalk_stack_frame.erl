@@ -87,8 +87,16 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
         end,
     File =
         case proplists:get_value(file, Location) of
-            undefined -> nil;
-            F -> unicode:characters_to_binary(F)
+            undefined ->
+                nil;
+            F ->
+                %% An unconvertible path keeps the `String | Nil` contract (BT-4370).
+                try unicode:characters_to_binary(F) of
+                    Bin when is_binary(Bin) -> Bin;
+                    _ -> nil
+                catch
+                    error:_ -> nil
+                end
         end,
     Line =
         case proplists:get_value(line, Location) of
