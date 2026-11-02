@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4367: a loop or fold that writes a local of its own conditional arm can
+// be the value of an assignment in that arm, in actor and value-type methods
+// (a class method's plain arm does not lower it and keeps the position error,
+// pinned in `local_threading.rs`). `inject:into:` answers 3 + 3, `collect:` answers 2 + 3,
+// `select:` answers 2 + 6 and `anySatisfy:` (never true) answers the sum 3;
+// an untaken arm answers 0. Fixtures: fixtures/bt4367arm_local_{actor,value}.bt.
+
+TestCase subclass: Bt4367ArmLocalTest
+
+  testActorInject =>
+    self assert: (Bt4367ArmLocalActor spawn injectIn: true) equals: 6
+
+  testActorCollect =>
+    self assert: (Bt4367ArmLocalActor spawn collectIn: true) equals: 5
+
+  testActorSelect =>
+    self assert: (Bt4367ArmLocalActor spawn selectIn: true) equals: 8
+
+  testActorAnySatisfy =>
+    self assert: (Bt4367ArmLocalActor spawn anySatisfyIn: true) equals: 3
+
+  testActorUntaken =>
+    a := Bt4367ArmLocalActor spawn
+    self assert: (a injectIn: false) equals: 0
+    self assert: (a collectIn: false) equals: 0
+    self assert: (a selectIn: false) equals: 0
+    self assert: (a anySatisfyIn: false) equals: 0
+
+  testValueInject =>
+    self assert: (Bt4367ArmLocalValue new injectIn: true) equals: 6
+
+  testValueCollect =>
+    self assert: (Bt4367ArmLocalValue new collectIn: true) equals: 5
+
+  testValueSelect =>
+    self assert: (Bt4367ArmLocalValue new selectIn: true) equals: 8
+
+  testValueAnySatisfy =>
+    self assert: (Bt4367ArmLocalValue new anySatisfyIn: true) equals: 3
+
+  testValueUntaken =>
+    v := Bt4367ArmLocalValue new
+    self assert: (v injectIn: false) equals: 0
+    self assert: (v selectIn: false) equals: 0

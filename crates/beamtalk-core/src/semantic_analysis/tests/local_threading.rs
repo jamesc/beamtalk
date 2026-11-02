@@ -1386,31 +1386,55 @@ fn section6_cascade_messages_are_never_inlined() {
     }
 }
 
-/// BT-3913 (BT-3738 follow-up): a loop or fold that writes a local of its
-/// arm, as the value of an assignment in that arm, keeps the
-/// `UnthreadedLocalWrite` error — the arm frame carries only method-level
-/// locals, so the write would not thread back. The compliant rewrite (the
-/// writing loop as a statement of its own, the pure fold value captured)
-/// draws no diagnostic; `adr0131cond_non_producer_test.bt` runs both.
+/// BT-3913 (BT-3738 follow-up), BT-4367: a loop or fold that writes a local of
+/// its own conditional arm, as the value of an assignment in that arm. The
+/// conditional writes no outer local, so its arms are plain `BranchArm` frames
+/// in which a loop or fold is a producer (BT-3911, BT-3949): an actor or
+/// value-type method lowers it right (`bt4367arm_local_test.bt` runs it on a
+/// BEAM). A class method's plain arm does not (`Tuple does not understand
+/// 'plusFromNumber:'`, wrong sums), so it keeps the `UnthreadedLocalWrite` error.
 #[test]
-fn residual_arm_local_producer_as_assign_value_is_rejected() {
+fn arm_local_producer_as_assign_value_is_accepted_in_actor_and_value_methods() {
+    for body in [
+        "true ifTrue: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "true ifTrue: [\n  m := 0\n  sq := #(1, 2) collect: [:e | m := m + e]\n  sq size + m]",
+        "true ifTrue: [\n  m := 0\n  sq := #(1, 2, 3) select: [:e | m := m + e. e > 1]\n  sq size + m]",
+        "true ifTrue: [\n  m := 0\n  f := #(1, 2) anySatisfy: [:e | m := m + e. e > 5]\n  m]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{kind}: {body}: {diags:?}");
+        }
+    }
+}
+
+#[test]
+fn arm_local_producer_as_assign_value_is_still_rejected_in_a_class_method() {
     for body in [
         "true ifTrue: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
         "true ifTrue: [\n  m := 0\n  sq := #(1, 2) collect: [:e | m := m + e]\n  sq size + m]",
     ] {
-        let diags = adr0131_diagnostics(&in_actor(body));
+        let diags = adr0131_diagnostics(&in_class(body));
         assert_eq!(
             of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len(),
             1,
             "{body}: {diags:?}"
         );
     }
+}
+
+/// The compliant rewrite (the writing loop as a statement of its own, the pure
+/// fold value captured) draws no diagnostic in any method context.
+#[test]
+fn arm_local_producer_hoisted_to_a_statement_draws_no_diagnostic() {
     for body in [
         "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  s := #(1, 2) inject: 0 into: [:a :e | a + e]\n  m + s]",
         "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  sq := #(1, 2) collect: [:e | e * 2]\n  sq size + m]",
     ] {
-        let diags = adr0131_diagnostics(&in_actor(body));
-        assert!(diags.is_empty(), "{body}: {diags:?}");
+        for src in [in_actor(body), in_value(body), in_class(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{body}: {diags:?}");
+        }
     }
 }
 
