@@ -391,6 +391,22 @@ test_failure_includes_synthetic_test_frame_test() ->
     ?assertEqual(length(binary:matches(Msg, <<"\n  at ">>)), length(Frames)),
     ?assertEqual(<<"testFoo">>, maps:get(selector, lists:last(Frames))).
 
+%% The DNU (`undef`) message has no rendered trace, so its structured frames
+%% must line up with the `at` lines it does have: only the synthetic
+%% test-method line, or none when the test frame is already in the stack.
+test_failure_untraced_frames_match_text_test() ->
+    NoTestFrame = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
+    {fail, testFoo, Msg1, Frames1} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', NoTestFrame),
+    ?assertEqual(1, length(binary:matches(Msg1, <<"\n  at ">>))),
+    ?assertEqual(1, length(Frames1)),
+    ?assertEqual(<<"testFoo">>, maps:get(selector, hd(Frames1))),
+    WithTestFrame = [{'bt@user@A', testFoo, 0, [{file, "a.bt"}, {line, 3}]}],
+    {fail, testFoo, Msg2, Frames2} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', WithTestFrame),
+    ?assertEqual(0, length(binary:matches(Msg2, <<"\n  at ">>))),
+    ?assertEqual([], Frames2).
+
 %%% ============================================================================
 %%% ensure_test_context/4 Tests (frame ordering)
 %%% ============================================================================

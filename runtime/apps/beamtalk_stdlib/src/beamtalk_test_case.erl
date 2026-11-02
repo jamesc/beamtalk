@@ -50,7 +50,8 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
     format_stackframe/1,
     ensure_test_context/4,
     stack_frames/1,
-    test_failure/4
+    test_failure/4,
+    test_failure_untraced/4
 ]).
 -endif.
 
@@ -695,13 +696,33 @@ test_failure(MethodName, FailMsg, Module, Stacktrace) ->
     Frames0 = stack_frames(Stacktrace),
     Frames =
         case lacks_test_frame(Module, MethodName, Stacktrace) of
-            false ->
-                Frames0;
-            true ->
-                Synthetic = beamtalk_stack_frame:wrap_frame({Module, MethodName, 0, []}),
-                Frames0 ++ [(beamtalk_stack_frame:frame_parts(Synthetic))#{repeat => 1}]
+            false -> Frames0;
+            true -> Frames0 ++ [synthetic_frame(Module, MethodName)]
         end,
     {fail, MethodName, Msg, Frames}.
+
+-doc """
+Like `test_failure/4` for failures whose message carries no rendered
+stacktrace (the `undef` / does-not-understand text): the only `at` line is the
+synthetic test-method one, so the structured frames hold at most that frame.
+Keeps `frames[i]` aligned with the i-th `at` line.
+""".
+-spec test_failure_untraced(atom(), binary(), atom(), list()) ->
+    {fail, atom(), binary(), [map()]}.
+test_failure_untraced(MethodName, FailMsg, Module, Stacktrace) ->
+    Msg = ensure_test_context(FailMsg, Module, MethodName, Stacktrace),
+    Frames =
+        case lacks_test_frame(Module, MethodName, Stacktrace) of
+            false -> [];
+            true -> [synthetic_frame(Module, MethodName)]
+        end,
+    {fail, MethodName, Msg, Frames}.
+
+-doc "Structured form of the synthetic test-method frame (empty location).".
+-spec synthetic_frame(atom(), atom()) -> map().
+synthetic_frame(Module, MethodName) ->
+    Synthetic = beamtalk_stack_frame:wrap_frame({Module, MethodName, 0, []}),
+    (beamtalk_stack_frame:frame_parts(Synthetic))#{repeat => 1}.
 
 -doc """
 Insert the test context line after existing stacktrace frames.
@@ -902,7 +923,9 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                         ),
                     %% BT-4173: message is a tagged String — unwrap like the
                     %% sibling clauses (ensure_test_context renders bytes).
-                    test_failure(
+                    %% The DNU text has no rendered trace, so its structured
+                    %% frames must not carry one either (frames[i] <-> "at" line i).
+                    test_failure_untraced(
                         MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
                     );
                 error:TestReason:TestST ->
