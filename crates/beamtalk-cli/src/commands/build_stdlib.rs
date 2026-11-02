@@ -541,6 +541,13 @@ fn is_stdlib_up_to_date(
         return false;
     }
 
+    // The generated `.app` is an output too — the one installed and the one
+    // dev mode loads (BT-4384) — so a missing one is never "up to date".
+    if !ebin_dir.join(STDLIB_APP_FILE).is_file() {
+        info!("Stdlib .app missing — forcing rebuild");
+        return false;
+    }
+
     // Get the oldest .beam output mtime
     let Some(oldest_output) = oldest_mtime_in_dir(ebin_dir, "beam") else {
         return false;
@@ -3965,6 +3972,7 @@ mod tests {
     fn test_is_stdlib_up_to_date_source_newer_than_output() {
         let (_temp, ebin) = temp_utf8_dir();
         let beam = ebin.join("bt@stdlib@a.beam");
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         fs::write(&beam, "").unwrap();
         set_mtime(
             &beam,
@@ -3981,7 +3989,8 @@ mod tests {
     #[test]
     fn test_is_stdlib_up_to_date_missing_source_file_metadata() {
         let (_temp, ebin) = temp_utf8_dir();
-        fs::write(ebin.join("bt@stdlib@a.beam"), "").unwrap();
+        fs::write(ebin.join("bt@stdlib@gone.beam"), "").unwrap();
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
 
         let (_temp2, src_dir) = temp_utf8_dir();
         let gone = src_dir.join("Gone.bt"); // listed but never created
@@ -3993,6 +4002,7 @@ mod tests {
     fn test_is_stdlib_up_to_date_compiler_binary_newer_forces_rebuild() {
         let (_temp, ebin) = temp_utf8_dir();
         let beam = ebin.join("bt@stdlib@a.beam");
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         fs::write(&beam, "").unwrap();
         // Far enough in the past (1970) that the real test binary — built
         // moments before this test ran — is deterministically newer.
@@ -4016,6 +4026,7 @@ mod tests {
         let (ebin_temp, ebin) = temp_utf8_dir();
         let beam = ebin.join("bt@stdlib@a.beam");
         fs::write(&beam, "").unwrap();
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         let output_time = SystemTime::UNIX_EPOCH + Duration::from_secs(4_000_000_000);
         set_mtime(&beam, output_time);
 
@@ -4096,6 +4107,16 @@ mod tests {
         let renamed = Utf8PathBuf::from_path_buf(renamed).unwrap();
 
         assert!(!is_stdlib_up_to_date(&ebin, &[renamed], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_missing_app_file_forces_rebuild() {
+        // The generated `.app` is what gets installed (BT-4384): beams
+        // without it must not count as an up-to-date build.
+        let (_ebin_temp, ebin, _src_temp, src, _output_time) = up_to_date_beam_and_source();
+        fs::remove_file(ebin.join(STDLIB_APP_FILE)).unwrap();
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[src], Some(&[])));
     }
 
     #[test]
