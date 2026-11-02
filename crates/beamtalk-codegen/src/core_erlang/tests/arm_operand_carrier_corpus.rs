@@ -756,7 +756,9 @@ fn analysis_rejects(src: &str) -> bool {
         .any(|d| {
             d.severity == beamtalk_core::source_analysis::Severity::Error
                 && d.category
-                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnmigratedLocalThreading)
+                    == Some(
+                        beamtalk_core::source_analysis::DiagnosticCategory::UnthreadedLocalWrite,
+                    )
         })
 }
 

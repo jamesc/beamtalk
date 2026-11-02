@@ -171,7 +171,7 @@ fn phase0_rejects(src: &str) -> bool {
                 && matches!(
                     d.category,
                     Some(
-                        DiagnosticCategory::UnmigratedLocalThreading
+                        DiagnosticCategory::UnthreadedLocalWrite
                             | DiagnosticCategory::Tier2BlockNoReturnChannel
                     )
                 )
