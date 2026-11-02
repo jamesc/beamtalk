@@ -49,19 +49,45 @@ fn untyped_receiver_reports_untyped() {
 }
 
 #[test]
+fn routed_builtin_send_is_converted() {
+    // BT-4294: a built-in with a single route (`Dictionary`: the untagged-map
+    // guard -> bt@stdlib@dictionary) takes the representation-guarded direct
+    // call, so the send is no longer a dynamic site.
+    let hints = report("Object subclass: Caller\n  run: d :: Dictionary => d at: #k put: 1\n");
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'at:put:'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
 fn builtin_receiver_reports_its_routing_row() {
     let hint = hint_for(
-        "Object subclass: Caller\n  run: d :: Dictionary => d at: #k put: 1\n",
-        "at:put:",
+        "Object subclass: Caller\n  run: s :: String => s size\n",
+        "size",
     );
     assert!(
         hint.contains(
-            "reason: builtin — representation-routed: untagged_map guard -> bt@stdlib@dictionary"
+            "reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string"
         ),
         "{hint}"
     );
-    assert!(hint.contains("receiver: Dictionary"), "{hint}");
+    assert!(hint.contains("receiver: String"), "{hint}");
     assert!(hint.contains("declared]"), "{hint}");
+}
+
+#[test]
+fn builtin_whose_guard_spans_routes_reports_why() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: b :: Binary => b frobnicate\n",
+        "frobnicate",
+    );
+    assert!(
+        hint.contains(
+            "reason: builtin — Binary: its representation test also admits values routed away from bt@stdlib@binary"
+        ),
+        "{hint}"
+    );
 }
 
 #[test]
@@ -77,13 +103,18 @@ fn builtin_without_a_single_module_reports_why() {
 }
 
 #[test]
-fn builtin_special_selector_is_named() {
+fn builtin_special_selectors_keep_the_whole_row_dynamic() {
+    // `Pid` answers the future protocol through `beamtalk_future`, so even a
+    // selector outside it stays dynamic: the row's module does not speak for
+    // the whole protocol.
     let hint = hint_for(
-        "Object subclass: Caller\n  run: s :: String => s asHex\n",
-        "asHex",
+        "Object subclass: Caller\n  run: p :: Pid => p frobnicate\n",
+        "frobnicate",
     );
     assert!(
-        hint.contains("reason: builtin — String: 'asHex' is answered outside bt@stdlib@string"),
+        hint.contains(
+            "reason: builtin — Pid: 'await' and 4 other selectors are answered outside bt@stdlib@pid"
+        ),
         "{hint}"
     );
 }

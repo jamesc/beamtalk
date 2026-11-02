@@ -8,8 +8,8 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! The reason is not re-derived here: it is the [`StaysDynamic`] gate that
-//! [`CoreErlangGenerator::typed_tagged_send_target`] — the same decision the
-//! `typed_sealed` handler emits from — rejected the send at. This module
+//! [`CoreErlangGenerator::typed_send_target`] — the same decision the
+//! `typed_guarded` handler emits from — rejected the send at. This module
 //! only describes it, adding detail the gate does not need (the routing row
 //! of a built-in, the supervisor-family root of a supervisor subclass). Epic BT-4291 measures its baseline and progress with
 //! it (`benchmarks/vs-elixir/results/bench-bt4292-baseline.md`).
@@ -17,7 +17,7 @@
 //! Each hint reads
 //!
 //! ```text
-//! Send 'at:put:' at line 12: dynamic dispatch (receiver: Dictionary [Object, declared]; reason: builtin — representation-routed: untagged_map guard -> bt@stdlib@dictionary)
+//! Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string)
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
@@ -26,7 +26,7 @@
 
 use super::CoreErlangGenerator;
 use super::dispatch_codegen::{StaysDynamic, supervisor_family_root};
-use super::routing::{self, Guard};
+use super::routing::{self, NoBuiltinRoute};
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
 
@@ -64,39 +64,31 @@ fn describe_provenance(provenance: &TypeProvenance) -> &'static str {
     }
 }
 
-fn describe_guard(guard: Guard) -> String {
-    match guard {
-        Guard::Bif(bif) => bif.to_string(),
-        Guard::StringTag => "string_tag".to_string(),
-        Guard::BinaryOrStringTag => "binary_or_string_tag".to_string(),
-        Guard::UnalignedBitstring => "unaligned_bitstring".to_string(),
-        Guard::UnreservedTuple => "unreserved_tuple".to_string(),
-        Guard::Symbol => "symbol".to_string(),
-        Guard::ExactAtom(atom) => format!("=:= {atom}"),
-        Guard::UntaggedMap => "untagged_map".to_string(),
-    }
-}
-
-/// The routing row's account of a representation-routed class.
-fn describe_routed(class: &str, selector: &str) -> String {
-    let Some(row) = routing::row(class) else {
-        return format!("builtin — {class} is representation-routed");
-    };
-    if let Some(why) = row.dynamic_only {
-        return format!("builtin — {class}: {why}");
-    }
-    if row.special_selectors.contains(&selector) {
-        return format!(
-            "builtin — {class}: '{selector}' is answered outside {}",
-            row.target_module.unwrap_or("its module")
-        );
-    }
-    match (row.guard, row.target_module) {
-        (Some(guard), Some(module)) => format!(
-            "builtin — representation-routed: {} guard -> {module}",
-            describe_guard(guard)
+/// The routing fixture's account of why a representation-routed class has
+/// no guarded direct route (BT-4294).
+fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
+    let row = routing::row(class);
+    let target = row
+        .and_then(|row| row.target_module)
+        .unwrap_or("its module");
+    match why {
+        NoBuiltinRoute::DynamicOnly(why) => format!("builtin — {class}: {why}"),
+        NoBuiltinRoute::NoSingleRoute => {
+            format!("builtin — {class} has no single representation route")
+        }
+        NoBuiltinRoute::SpecialSelectors => {
+            let specials = row.map_or(&[][..], |row| row.special_selectors);
+            match specials.split_first() {
+                Some((first, rest)) => format!(
+                    "builtin — {class}: '{first}' and {} other selectors are answered outside {target}",
+                    rest.len()
+                ),
+                None => format!("builtin — {class}: some selectors are answered outside {target}"),
+            }
+        }
+        NoBuiltinRoute::GuardSpansRoutes => format!(
+            "builtin — {class}: its representation test also admits values routed away from {target}"
         ),
-        _ => format!("builtin — {class} has no single representation route"),
     }
 }
 
@@ -119,21 +111,16 @@ impl CoreErlangGenerator {
                 .filter(|h| h.get_class(class).is_some())
                 .map(|h| h.resolve_class_kind(class))
         });
-        let reason = match self.typed_tagged_send_target(receiver, selector) {
-            // The `typed_tagged` handler would have claimed this send had it
+        let reason = match self.typed_send_target(receiver, selector) {
+            // The `typed_guarded` handler would have claimed this send had it
             // reached `HANDLERS`; a dynamic send here came another way.
-            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_tagged handler".to_string(),
-            Err(gate) => self.describe_gate(&gate, class_name, selector.name().as_str()),
+            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
+            Err(gate) => self.describe_gate(&gate, class_name),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))
     }
 
-    fn describe_gate(
-        &self,
-        gate: &StaysDynamic,
-        class_name: Option<&str>,
-        selector: &str,
-    ) -> String {
+    fn describe_gate(&self, gate: &StaysDynamic, class_name: Option<&str>) -> String {
         let class = class_name.unwrap_or("?");
         match gate {
             StaysDynamic::Untyped => "untyped".to_string(),
@@ -141,7 +128,10 @@ impl CoreErlangGenerator {
             StaysDynamic::FieldAtPut => {
                 "fieldAt:put: — the dynamic path raises its own hint".to_string()
             }
-            StaysDynamic::RepresentationRouted => describe_routed(class, selector),
+            StaysDynamic::PerformFamily => {
+                "perform — the dynamic path does not dispatch this selector as sent".to_string()
+            }
+            StaysDynamic::RepresentationRouted(why) => describe_routed(class, *why),
             StaysDynamic::RuntimeOnlyBuiltin => {
                 format!("runtime-only — {class} has no compiled module")
             }

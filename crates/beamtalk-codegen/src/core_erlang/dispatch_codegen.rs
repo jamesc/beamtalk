@@ -27,7 +27,10 @@
 //! compilation, while call-site dispatch uses runtime type checking — except
 //! for receivers with a statically-known tagged-map (Value/Object) class
 //! type, which compile to a guarded direct `Module:dispatch/3` call (BT-4069,
-//! widened to open classes by BT-4293; the `typed_tagged` handler below).
+//! widened to open classes by BT-4293), and receivers statically typed as a
+//! representation-routed built-in (`List`, `Dictionary`, `Integer`, …), which
+//! compile to a direct call guarded by the representation test the dynamic
+//! path routes on (BT-4294; both are the `typed_guarded` handler below).
 //!
 //! # Special Cases (Compiler Intrinsics)
 //!
@@ -73,7 +76,7 @@ type SendHandler = fn(
 /// load-bearing: earlier entries intentionally preempt later, more generic
 /// ones (e.g. `character_typed` before `protoobject`/`object`, `dict` before
 /// `list`, `class_method_self_send` before `self_dispatch`) — see each
-/// handler's own doc for why. `typed_tagged` is last deliberately: it only
+/// handler's own doc for why. `typed_guarded` is last deliberately: it only
 /// converts sends that would otherwise be fully dynamic, so every earlier,
 /// more specific handler keeps its sends. A send that no entry claims falls
 /// through to `generate_message_send`'s `generate_runtime_dispatch` default.
@@ -117,8 +120,8 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
         CoreErlangGenerator::try_handle_self_dispatch,
     ),
     (
-        "typed_tagged",
-        CoreErlangGenerator::try_handle_typed_tagged_send,
+        "typed_guarded",
+        CoreErlangGenerator::try_handle_typed_guarded_send,
     ),
 ];
 
@@ -139,10 +142,15 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
 // The fixture's supervisor-family rows are not non-tagged-map exclusions
 // either: their subclasses share the `beamtalk_supervisor` tuple, so they are
 // ruled out by a superclass-chain walk too ([`supervisor_family_root`]).
+//
+// BT-4294: a non-tagged-map row is not only an exclusion. When the fixture
+// gives it a representation test and a single target module
+// (`routing::builtin_send_route`), a typed send to it becomes a direct call
+// guarded by that test ([`TypedSendTarget::Builtin`]).
 
 /// BT-4292: why a send whose receiver did not resolve to a
-/// [`TypedTaggedTarget`] stays dynamic — one variant per gate of
-/// [`CoreErlangGenerator::typed_tagged_target`], so the dynamic-site
+/// [`TypedSendTarget`] stays dynamic — one variant per gate of
+/// [`CoreErlangGenerator::typed_send_target`], so the dynamic-site
 /// report (`BEAMTALK_CODEGEN_DIAGNOSTICS=1`) names the gate the send failed
 /// rather than re-deriving it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,8 +162,15 @@ pub(in crate::core_erlang) enum StaysDynamic {
     BinarySelector,
     /// `fieldAt:put:`, whose dynamic path raises a different hint.
     FieldAtPut,
-    /// A class the routing table says is not a tagged map of its own name.
-    RepresentationRouted,
+    /// The `perform:` family, or a selector the dynamic entry point rewrites
+    /// before classifying the receiver (`perform:withArguments:timeout:`,
+    /// from the routing fixture): the dynamic send does not reach the
+    /// receiver's `dispatch/3` with that selector (BT-4294).
+    PerformFamily,
+    /// A class the routing table says is not a tagged map of its own name
+    /// and that has no guarded direct route, with the fixture's reason
+    /// (BT-4294).
+    RepresentationRouted(routing::NoBuiltinRoute),
     /// A runtime-only built-in with no compiled module (`Future`).
     RuntimeOnlyBuiltin,
     /// The class is not in the hierarchy this unit sees.
@@ -246,6 +261,17 @@ pub(in crate::core_erlang) struct TypedTaggedTarget {
     /// qualified derivation (registry under the referenced package, else
     /// the deterministic `bt@{package}@{snake}` composition).
     pub(in crate::core_erlang) module_name: String,
+}
+
+/// BT-4294: the guarded direct call a typed send compiles to — the one
+/// decision [`CoreErlangGenerator::typed_send_target`] makes, shared by the
+/// `typed_guarded` handler and the dynamic-site report.
+pub(in crate::core_erlang) enum TypedSendTarget {
+    /// A tagged-map class: guard on its `'$beamtalk_class'` tag (BT-4069).
+    Tagged(TypedTaggedTarget),
+    /// A representation-routed built-in: guard on the representation test
+    /// the dynamic path routes on, call the module it would call.
+    Builtin(routing::BuiltinRoute),
 }
 
 impl CoreErlangGenerator {
@@ -684,15 +710,46 @@ impl CoreErlangGenerator {
         Ok(seq.close(self, call_doc, "CharDispRes"))
     }
 
-    /// BT-4069, BT-4293: resolves a send receiver to a static tagged-map
-    /// dispatch target, or the [`StaysDynamic`] gate it failed, unless every
-    /// condition holds:
+    /// BT-4069, BT-4294: the receiver's trusted static class — the class
+    /// the type checker's `TypeMap` records as `Known` for the receiver's
+    /// span with a trusted provenance (`Declared`, `Inferred` or
+    /// `Substituted` — the same set `project_recv_type` trusts, but as a
+    /// dispatch-owned rule: xref wants recall while dispatch wants precision,
+    /// so the two must not share one predicate) — or
+    /// [`StaysDynamic::Untyped`].
+    fn trusted_static_class(
+        &self,
+        receiver: &Expression,
+    ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
+        let beamtalk_core::semantic_analysis::InferredType::Known {
+            class_name,
+            provenance,
+            ..
+        } = self
+            .type_map
+            .get(receiver.span())
+            .ok_or(StaysDynamic::Untyped)?
+        else {
+            return Err(StaysDynamic::Untyped);
+        };
+        if !matches!(
+            provenance,
+            TypeProvenance::Declared(_)
+                | TypeProvenance::Inferred(_)
+                | TypeProvenance::Substituted(_)
+        ) {
+            return Err(StaysDynamic::Untyped);
+        }
+        Ok(class_name)
+    }
+
+    /// BT-4069, BT-4293: resolves a receiver's trusted static class that is
+    /// not a non-tagged routing-fixture row to a static tagged-map dispatch
+    /// target, or the [`StaysDynamic`] gate it failed, unless every condition
+    /// holds:
     ///
-    /// 1. The type checker's `TypeMap` records a `Known` class for the
-    ///    receiver's span with a trusted provenance (`Declared`, `Inferred`
-    ///    or `Substituted` — the same set `project_recv_type` trusts, but as
-    ///    a dispatch-owned rule: xref wants recall while dispatch wants
-    ///    precision, so the two must not share one predicate).
+    /// 1. The receiver has a trusted static class
+    ///    ([`Self::trusted_static_class`]).
     /// 2. The class is in the hierarchy and `Value`- or `Object`-kind (both
     ///    are `'$beamtalk_class'`-tagged maps with the same dynamic path).
     ///    It need **not** be sealed (BT-4293, ADR 0025 amendment §1): the tag
@@ -700,7 +757,8 @@ impl CoreErlangGenerator {
     ///    guard and takes the dynamic fallback — `sealed` only changes how
     ///    often the guard hits, never what the send means.
     /// 3. Its instances really are tagged maps of its own name: not in the
-    ///    routing table ([`routing::is_non_tagged_map_class`]), not a
+    ///    routing table ([`routing::is_non_tagged_map_class`], decided by
+    ///    [`Self::typed_send_target`] before this runs), not a
     ///    runtime-only builtin without a compiled module (`Future`), not
     ///    `abstract` (no instance carries an abstract class's tag:
     ///    `Collection`, `Number`, `Boolean`, …), not an ancestor of a
@@ -772,30 +830,8 @@ impl CoreErlangGenerator {
     /// where the dynamic path would degrade to `does_not_understand`.
     fn typed_tagged_target(
         &self,
-        receiver: &Expression,
+        class_name: &ecow::EcoString,
     ) -> std::result::Result<TypedTaggedTarget, StaysDynamic> {
-        let beamtalk_core::semantic_analysis::InferredType::Known {
-            class_name,
-            provenance,
-            ..
-        } = self
-            .type_map
-            .get(receiver.span())
-            .ok_or(StaysDynamic::Untyped)?
-        else {
-            return Err(StaysDynamic::Untyped);
-        };
-        if !matches!(
-            provenance,
-            TypeProvenance::Declared(_)
-                | TypeProvenance::Inferred(_)
-                | TypeProvenance::Substituted(_)
-        ) {
-            return Err(StaysDynamic::Untyped);
-        }
-        if routing::is_non_tagged_map_class(class_name.as_str()) {
-            return Err(StaysDynamic::RepresentationRouted);
-        }
         let hierarchy = self
             .class_hierarchy
             .as_ref()
@@ -878,54 +914,99 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// BT-4292: [`Self::typed_tagged_target`] plus the two selector
-    /// gates of [`Self::try_handle_typed_tagged_send`] — the one decision
-    /// whether a send becomes a guarded direct call, shared by the handler
-    /// and the dynamic-site report so the report can never disagree with
-    /// what was emitted.
-    pub(in crate::core_erlang) fn typed_tagged_send_target(
+    /// BT-4292, BT-4294: the one decision whether a send becomes a guarded
+    /// direct call, and to what — shared by the `typed_guarded` handler and
+    /// the dynamic-site report so the report can never disagree with what was
+    /// emitted.
+    ///
+    /// The selector gates come first. Binary operators never reach the
+    /// dynamic fallthrough (preserving `generate_runtime_dispatch`'s internal
+    /// error exactly). `fieldAt:put:`'s dynamic path raised a different hint
+    /// via the runtime's `is_ivar_method` check (unreachable today: the
+    /// object-reflection intrinsic claims it first; kept as enforcement). The
+    /// `perform:` family is claimed by intrinsics first too, and the
+    /// fixture's rewritten selectors (`perform:withArguments:timeout:`) never
+    /// reach a `dispatch/3` through the dynamic path, which turns them into a
+    /// `send/4` of the target selector.
+    ///
+    /// Then the receiver's trusted static class decides the target. A
+    /// routing-fixture row whose instances are not tagged maps of its own
+    /// name ([`routing::is_non_tagged_map_class`]) takes the fixture's
+    /// built-in route, or stays dynamic for the fixture's reason
+    /// ([`routing::builtin_send_route`]); every other class is a tagged-map
+    /// candidate ([`Self::typed_tagged_target`]).
+    ///
+    /// Why a built-in route is sound: its guard is the clause the dynamic
+    /// path (`beamtalk_message_dispatch:send/3` → `beamtalk_primitive:send/3`
+    /// → `module_for_value/2`, or `send_map/3` → `tagged_map_dispatch/1`)
+    /// takes to reach `target_module:dispatch/3`, which the runtime half of
+    /// the routing fixture checks; a value outside it (a lying annotation, a
+    /// reserved tuple, `nil` typed as `Symbol`) misses and takes the dynamic
+    /// send. Rows whose dynamic path answers some selectors elsewhere
+    /// (`String`, `Pid`), whose test spans two routes (`Binary`) or that
+    /// carry a `dynamic_only` reason (`Boolean`, `Bitstring`, `Character`,
+    /// the records, the proxy) stay dynamic. A stdlib built-in's module can
+    /// be neither removed nor redefined into another module, so the pinned
+    /// target never goes stale.
+    pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
         selector: &MessageSelector,
-    ) -> std::result::Result<TypedTaggedTarget, StaysDynamic> {
+    ) -> std::result::Result<TypedSendTarget, StaysDynamic> {
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(StaysDynamic::BinarySelector);
         }
-        if matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut)) {
-            return Err(StaysDynamic::FieldAtPut);
+        match selector.well_known() {
+            Some(WellKnownSelector::FieldAtPut) => return Err(StaysDynamic::FieldAtPut),
+            Some(
+                WellKnownSelector::Perform
+                | WellKnownSelector::PerformWithArgs
+                | WellKnownSelector::PerformLocallyWithArgs,
+            ) => return Err(StaysDynamic::PerformFamily),
+            _ => {}
         }
-        self.typed_tagged_target(receiver)
+        if routing::rewritten_selectors().contains(&selector.name().as_str()) {
+            return Err(StaysDynamic::PerformFamily);
+        }
+        let class_name = self.trusted_static_class(receiver)?;
+        if routing::is_non_tagged_map_class(class_name.as_str()) {
+            return match routing::builtin_send_route(class_name.as_str()) {
+                Some(Ok(route)) => Ok(TypedSendTarget::Builtin(route)),
+                Some(Err(why)) => Err(StaysDynamic::RepresentationRouted(why)),
+                None => Err(StaysDynamic::RepresentationRouted(
+                    routing::NoBuiltinRoute::NoSingleRoute,
+                )),
+            };
+        }
+        self.typed_tagged_target(class_name)
+            .map(TypedSendTarget::Tagged)
     }
 
     /// BT-4069: `HANDLERS`' last entry. Converts a send to a receiver
-    /// statically typed as a tagged-map class (sealed or open, BT-4293) into
-    /// a guarded direct
-    /// `Module:dispatch/3` call. Only fires when nothing earlier claimed the
-    /// send, so it purely converts would-be-dynamic sends.
-    ///
-    /// Two selectors never take this path: binary operators (which never
-    /// reach the dynamic fallthrough — preserving `generate_runtime_dispatch`'s
-    /// internal error exactly) and `fieldAt:put:` (whose dynamic path raises a
-    /// different hint via the runtime's `is_ivar_method` check than the
-    /// `dispatch/3` arm — semicolon vs em dash — so a direct call would
-    /// observably diverge; unreachable today since the object-reflection
-    /// intrinsic claims it first, kept as enforcement).
-    fn try_handle_typed_tagged_send(
+    /// statically typed as a tagged-map class (sealed or open, BT-4293) or a
+    /// representation-routed built-in (BT-4294) into a guarded direct
+    /// `Module:dispatch/3` call ([`Self::typed_send_target`] decides). Only
+    /// fires when nothing earlier claimed the send, so it purely converts
+    /// would-be-dynamic sends.
+    fn try_handle_typed_guarded_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        let Ok(target) = self.typed_tagged_send_target(receiver, selector) else {
+        let Ok(target) = self.typed_send_target(receiver, selector) else {
             return Ok(None);
         };
-        Ok(Some(self.generate_typed_tagged_send(
+        Ok(Some(self.generate_typed_guarded_send(
             receiver, selector, arguments, &target,
         )?))
     }
 
-    /// BT-4069: emits the guarded direct call for a
-    /// [`TypedTaggedTarget`]: an `is_map` + `maps:get/3`-default case nest
+    /// BT-4069, BT-4294: emits the guarded direct call for a
+    /// [`TypedSendTarget`]. A built-in route's guard is its representation
+    /// test, rendered by the type-pattern renderer of its fixture kind
+    /// (`render_send_guard`), with the dynamic send in every miss arm. A
+    /// [`TypedTaggedTarget`]'s guard is an `is_map` + `maps:get/3`-default case nest
     /// (the `match_lowering` idiom — `maps:get/3` never raises, so no guard
     /// position is needed) selecting between the direct `Module:dispatch/3`
     /// call and a dynamic-send fallback in each mismatch arm:
@@ -951,12 +1032,12 @@ impl CoreErlangGenerator {
     /// send they cannot stay inline. The outer boolean case carries an
     /// explicit `case_clause_fallback` like `guarded_op_doc`'s guards; the
     /// inner case is statically exhaustive via its wildcard arm.
-    fn generate_typed_tagged_send(
+    fn generate_typed_guarded_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
-        target: &TypedTaggedTarget,
+        target: &TypedSendTarget,
     ) -> Result<Document<'static>> {
         let selector_atom = selector.name().to_string();
 
@@ -979,9 +1060,13 @@ impl CoreErlangGenerator {
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
 
+        let module_name = match target {
+            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
+            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
+        };
         let direct_doc = docvec![
             "call ",
-            leaf::atom(target.module_name.clone()),
+            leaf::atom(module_name),
             ":'dispatch'(",
             leaf::atom(selector_atom.clone()),
             ", [",
@@ -1000,30 +1085,17 @@ impl CoreErlangGenerator {
             "])",
         ];
 
-        let no_match_inner = self.fresh_temp_var("TTaggedNoMatch");
-        let no_match_outer = self.case_clause_fallback("TTaggedOuterNoMatch");
-        let case_doc = docvec![
-            "case call 'erlang':'is_map'(",
-            leaf::var(receiver_var.clone()),
-            ") of ",
-            "<'true'> when 'true' -> ",
-            "case call 'maps':'get'('$beamtalk_class', ",
-            leaf::var(receiver_var.clone()),
-            ", 'undefined') of ",
-            "<",
-            leaf::atom(target.class_name.clone()),
-            "> when 'true' -> ",
-            direct_doc,
-            " <",
-            leaf::var(no_match_inner),
-            "> when 'true' -> ",
-            fallback_doc.clone(),
-            " end ",
-            "<'false'> when 'true' -> ",
-            fallback_doc,
-            no_match_outer,
-            " end",
-        ];
+        let case_doc = match target {
+            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
+                &receiver_var,
+                &tagged.class_name,
+                direct_doc,
+                fallback_doc,
+            ),
+            TypedSendTarget::Builtin(route) => {
+                self.render_send_guard(route.guard, &receiver_var, direct_doc, &fallback_doc)
+            }
+        };
 
         let mut body = case_doc;
         for (var, doc) in arg_vars.into_iter().zip(arg_docs).rev() {
@@ -1038,6 +1110,42 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// The tagged-map guard of [`Self::generate_typed_guarded_send`]:
+    /// `direct_doc` when `receiver_var` is a map tagged exactly `class_name`,
+    /// `fallback_doc` otherwise.
+    fn class_tag_guarded_doc(
+        &mut self,
+        receiver_var: &str,
+        class_name: &str,
+        direct_doc: Document<'static>,
+        fallback_doc: Document<'static>,
+    ) -> Document<'static> {
+        let no_match_inner = self.fresh_temp_var("TTaggedNoMatch");
+        let no_match_outer = self.case_clause_fallback("TTaggedOuterNoMatch");
+        docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(receiver_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(receiver_var.to_string()),
+            ", 'undefined') of ",
+            "<",
+            leaf::atom(class_name.to_string()),
+            "> when 'true' -> ",
+            direct_doc,
+            " <",
+            leaf::var(no_match_inner),
+            "> when 'true' -> ",
+            fallback_doc.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            fallback_doc,
+            no_match_outer,
+            " end",
+        ]
     }
 
     /// Generates a cast (fire-and-forget) message send.
