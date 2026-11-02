@@ -241,7 +241,7 @@ fn routing_table_rows_without_a_direct_route_say_why() {
 /// path's clause and updates the differential test's rows.
 #[test]
 fn builtin_send_routes_are_the_closed_table() {
-    use super::{BuiltinRoute, NoBuiltinRoute, SendGuard, builtin_send_route};
+    use super::{BuiltinRoute, SendGuard, builtin_send_route};
     let routed: Vec<(&str, BuiltinRoute)> = table::ROUTING_ROWS
         .iter()
         .filter_map(|row| match builtin_send_route(row.class) {
@@ -321,6 +321,12 @@ fn builtin_send_routes_are_the_closed_table() {
             ),
         ]
     );
+}
+
+/// BT-4294: why each built-in row without a direct route stays dynamic.
+#[test]
+fn builtins_without_a_send_route_say_why() {
+    use super::{NoBuiltinRoute, builtin_send_route};
     assert_eq!(
         builtin_send_route("String"),
         Some(Err(NoBuiltinRoute::SpecialSelectors))
