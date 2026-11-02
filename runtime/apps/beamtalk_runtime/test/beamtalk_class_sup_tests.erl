@@ -248,6 +248,11 @@ eager_restart_test_() ->
                             end)
                         ),
                         NewPid = beamtalk_class_registry:whereis_class('SupTest3236C'),
+                        %% BT-4295: compiled class references look the pid up
+                        %% by the compile-time registered name with a bare
+                        %% `erlang:whereis/1` (never a baked pid), so they find
+                        %% the restarted process too.
+                        ?assertEqual(NewPid, erlang:whereis('beamtalk_class_SupTest3236C')),
                         %% Re-registered in the pid reverse index and pg group.
                         ?assertEqual(
                             {ok, 'SupTest3236C'},

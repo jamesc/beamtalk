@@ -380,12 +380,12 @@ fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_name
         "expected `run:` annotated with the dependency file, line 4, got:\n{code}"
     );
     // Sends to a class reference resolve through the runtime's name-keyed class
-    // registry (`whereis_class`), package-qualified or not — so qualifying the
+    // registry (`beamtalk_class_<Name>`), package-qualified or not — so qualifying the
     // provision's reference changes what the *compiler* resolves it to, not
     // the emitted lookup. (A per-package runtime registry is a separate ADR
     // 0070 concern.)
     assert!(
-        code.contains("'whereis_class'('Parser')"),
+        code.contains("'whereis'('beamtalk_class_Parser')"),
         "expected the provision's `Parser` send to still compile, got:\n{code}"
     );
 }

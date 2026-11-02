@@ -559,9 +559,9 @@ impl CoreErlangGenerator {
                 ") of ",
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
-                "case call 'beamtalk_class_registry':'whereis_class'(",
-                leaf::atom(class_name.to_string()),
-                ") of ",
+                "case ",
+                Self::registered_class_pid_doc(class_name),
+                " of ",
                 error_doc,
                 Self::class_object_from_registry_clause(
                     &class_pid_var,
@@ -577,18 +577,84 @@ impl CoreErlangGenerator {
         let error_doc = self.class_not_found_error_doc(class_name);
 
         Ok(docvec![
-            "case call 'beamtalk_class_registry':'whereis_class'(",
-            leaf::atom(class_name.to_string()),
-            ") of ",
+            "case ",
+            Self::registered_class_pid_doc(class_name),
+            " of ",
             error_doc,
             Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, &display_name),
             "end",
         ])
     }
 
+    /// `call 'erlang':'whereis'('beamtalk_class_<Name>')`: the pid of the class
+    /// process named `class_name`, or `'undefined'`.
+    ///
+    /// BT-4295: the registered name is built at compile time
+    /// ([`util::class_registered_name`], pinned to
+    /// `beamtalk_class_registry:registry_name/1` by the shared conformance
+    /// fixture), so a class reference costs one `erlang:whereis/1` instead of
+    /// `whereis_class/1`'s per-use `binary_to_atom`. Only the *name* is
+    /// compile-time: the pid is looked up on every use, never baked, so a
+    /// restarted class process is found (ADR 0025 amendment §3), and the
+    /// module stays a run-time lookup, so a REPL redefinition into a new
+    /// module is seen.
+    pub(in crate::core_erlang) fn registered_class_pid_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            "call 'erlang':'whereis'(",
+            leaf::atom(util::class_registered_name(class_name)),
+            ")",
+        ]
+    }
+
+    /// BT-4295: a class literal used only for its name, such as an `on:do:`
+    /// filter (`beamtalk_exception_handler:matches_class/2` takes the class
+    /// name atom as well as the class object, and reads only the name):
+    ///
+    /// ```erlang
+    /// case call 'erlang':'whereis'('beamtalk_class_Error') of
+    ///   <'undefined'> when 'true' -> <class_not_found raise>
+    ///   <_> when 'true' -> 'Error'
+    /// end
+    /// ```
+    ///
+    /// The registry check stays, so an undefined class raises
+    /// `class_not_found` exactly as [`Self::generate_class_reference`] does;
+    /// only the `module_name_safe/1` ETS reads and the class-object tuple are
+    /// dropped. Returns `None` where the full class object is still needed:
+    /// a REPL top-level expression (a session binding may shadow the name,
+    /// ADR 0129 §7) and a package-qualified reference (whose class object
+    /// carries the qualified display tag).
+    pub(in crate::core_erlang) fn class_name_only_reference(
+        &mut self,
+        expr: &Expression,
+    ) -> Option<Document<'static>> {
+        let Expression::ClassReference {
+            name,
+            package: None,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if self.context == CodeGenContext::Repl {
+            return None;
+        }
+        let class_name = name.name.as_str();
+        let error_doc = self.class_not_found_error_doc(class_name);
+        Some(docvec![
+            "case ",
+            Self::registered_class_pid_doc(class_name),
+            " of ",
+            error_doc,
+            "<_> when 'true' -> ",
+            leaf::atom(class_name.to_string()),
+            " end",
+        ])
+    }
+
     /// Builds the `<ClassPid> when 'true' -> let ClassModName =
     /// module_name_safe(ClassPid) in {'beamtalk_object', Tag, ClassModName,
-    /// ClassPid}` case clause shared by both `whereis_class`-resolved
+    /// ClassPid}` case clause shared by both registry-resolved
     /// branches of [`Self::generate_class_reference`] above.
     ///
     /// `module_name_safe/1` reads the module from the class metadata table
