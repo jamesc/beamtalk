@@ -126,18 +126,28 @@ pub fn resolve_dependency_graph(
         .map(String::as_str)
         .collect();
 
-    // Phase 3: Compile each dependency in topological order
+    // Phase 3: Compile each dependency in topological order, against only
+    // the dependencies it reaches in the graph — not every one compiled
+    // before it (BT-4375).
+    let dependencies = dependency_edges(&graph);
     let mut resolved = Vec::new();
     let otp_specs = super::path::OtpTypeSpecs::default();
     for dep_name in &compilation_order {
         let node = &graph[dep_name];
-        let mut compiled = super::path::compile_dependency_at(
-            project_root,
-            &node.root,
+        let mut compiled = super::path::with_dependency_closure(
+            &mut resolved,
+            &dependencies,
             dep_name,
-            options,
-            &resolved,
-            &otp_specs,
+            |prior_deps| {
+                super::path::compile_dependency_at(
+                    project_root,
+                    &node.root,
+                    dep_name,
+                    options,
+                    prior_deps,
+                    &otp_specs,
+                )
+            },
         )?;
 
         // Set transitivity metadata
@@ -535,11 +545,15 @@ fn discover_single_dep(
 /// Returns an error if a cycle is detected (should not happen if `discover_deps`
 /// already checked, but this is a safety net).
 fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Result<Vec<String>> {
-    let dependencies = graph
+    beamtalk_cli::dep_order::topological_order(&dependency_edges(graph), root_name)
+}
+
+/// Each package's direct-dependency names — the graph's edges.
+fn dependency_edges(graph: &BTreeMap<String, DepNode>) -> BTreeMap<String, Vec<String>> {
+    graph
         .iter()
         .map(|(name, node)| (name.clone(), node.deps.clone()))
-        .collect();
-    beamtalk_cli::dep_order::topological_order(&dependencies, root_name)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1064,6 +1078,126 @@ dep_pkg = {{ path = "{dep_str}" }}"#
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// Lays out `my_app -> {zulu, app_lib}`, `app_lib -> base`, where the
+    /// unrelated `zulu` and `base` each define a class `Handler`: `zulu`'s is
+    /// a plain `Object` subclass, `base`'s a `Server` subclass, and
+    /// `app_lib`'s `Worker` inherits from `base`'s.
+    fn same_named_handler_project(temp: &TempDir) -> Utf8PathBuf {
+        let zulu = temp.path().join("zulu");
+        fs::create_dir_all(&zulu).unwrap();
+        write_manifest(&zulu, "zulu", "0.1.0", "");
+        write_source(
+            &zulu,
+            "handler.bt",
+            "Object subclass: Handler\n  label => \"plain\"\n",
+        );
+        let base = temp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+        write_manifest(&base, "base", "0.1.0", "");
+        write_source(
+            &base,
+            "handler.bt",
+            "Server subclass: Handler\n  handleInfo: msg => nil\n",
+        );
+        let app_lib = temp.path().join("app_lib");
+        fs::create_dir_all(&app_lib).unwrap();
+        write_manifest(
+            &app_lib,
+            "app_lib",
+            "0.1.0",
+            "[dependencies]\nbase = { path = \"../base\" }",
+        );
+        write_source(
+            &app_lib,
+            "worker.bt",
+            "Handler subclass: Worker\n  ping => 1\n",
+        );
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nzulu = { path = \"../zulu\" }\napp_lib = { path = \"../app_lib\" }",
+        );
+        Utf8PathBuf::from_path_buf(root).unwrap()
+    }
+
+    /// BT-4375: a dependency compiles against only its own transitive
+    /// dependencies. `zulu` compiles before `app_lib` but is unrelated to it,
+    /// so its `Handler` must not shadow `base`'s — `Worker` must resolve as
+    /// the `Server` subclass it is, in both its `.app` class kind and its
+    /// codegen.
+    #[test]
+    fn test_resolve_dependency_graph_ignores_unrelated_same_named_class() {
+        let temp = TempDir::new().unwrap();
+        let root = same_named_handler_project(&temp);
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let resolved = resolve_dependency_graph(&root, &options).unwrap();
+        let names: Vec<&str> = resolved.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["zulu", "base", "app_lib"],
+            "fixture must compile the unrelated `zulu` before `app_lib`"
+        );
+
+        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+        let ebin = layout.dep_ebin_dir("app_lib");
+        let app = fs::read_to_string(ebin.join("app_lib.app")).unwrap();
+        assert!(
+            app.contains("name => 'Worker'") && app.contains("kind => actor"),
+            "Worker inherits base's Server Handler, so it is an actor: {app}"
+        );
+        let core = fs::read_to_string(ebin.join("bt@app_lib@worker.core")).unwrap();
+        assert!(
+            core.contains("'handle_info'"),
+            "Worker must compile as a Server subclass (gen_server callbacks)"
+        );
+
+        // `app_lib` still exports only its own classes, and lists only them.
+        let app_lib = resolved.iter().find(|d| d.name == "app_lib").unwrap();
+        let exported: Vec<&str> = app_lib
+            .class_infos
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(exported, ["Worker"]);
+    }
+
+    /// BT-4375: each dependency's `class_corpus.json` lists its own classes
+    /// only — not those of the dependencies it compiled against, which MCP
+    /// already reads from their own corpora.
+    #[test]
+    fn test_dependency_corpus_lists_only_its_own_classes() {
+        let temp = TempDir::new().unwrap();
+        let root = same_named_handler_project(&temp);
+        let options = beamtalk_core::CompilerOptions::default();
+        resolve_dependency_graph(&root, &options).unwrap();
+
+        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+        let mut all_entries = Vec::new();
+        for (dep, expected) in [
+            ("zulu", "Handler"),
+            ("base", "Handler"),
+            ("app_lib", "Worker"),
+        ] {
+            let corpus = layout.dep_checkout_dir(dep).join("class_corpus.json");
+            let json: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&corpus).unwrap()).unwrap();
+            let classes: Vec<&str> = json
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(classes, [expected], "{dep}'s corpus: {classes:?}");
+            all_entries.extend(classes.iter().map(|c| format!("{dep}/{c}")));
+        }
+        let unique: std::collections::BTreeSet<&String> = all_entries.iter().collect();
+        assert_eq!(unique.len(), all_entries.len(), "duplicate corpus entries");
     }
 
     /// Create a local git repo with a beamtalk.toml, a tag, and a branch.
