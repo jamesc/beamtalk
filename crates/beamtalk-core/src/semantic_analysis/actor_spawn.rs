@@ -24,19 +24,22 @@ use std::collections::HashSet;
 /// (`actor.bt`, `generated_builtins.rs`); an actor behind `unwrap`/`value`
 /// or `first` is missed.
 ///
-/// The receiver may be parenthesised; a package-qualified class reference is
-/// not resolved and never matches.
+/// `receiver` is an operand of the operand-normalised tree
+/// (`ast::normalize`, BT-4059), so `(Worker) spawn` arrives already peeled; a
+/// package-qualified class reference is not resolved and never matches.
 #[must_use]
 pub fn is_actor_spawn(hierarchy: &ClassHierarchy, receiver: &Expression, selector: &str) -> bool {
     matches!(selector, "spawn" | "spawnWith:")
         && matches!(
-            receiver.unwrap_parens(),
+            receiver,
             Expression::ClassReference { name, package, .. }
                 if package.is_none() && hierarchy.is_actor_subclass(name.name.as_str())
         )
 }
 
-/// Locals bound to an actor instance (`a := Worker spawn`) anywhere in `body`.
+/// Locals bound to an actor instance (`a := Worker spawn`) anywhere in `body`,
+/// which must come from the operand-normalised tree. An assignment's
+/// right-hand side is not an operand, so `a := (Worker spawn)` is peeled here.
 #[must_use]
 pub fn actor_locals(hierarchy: &ClassHierarchy, body: &[ExpressionStatement]) -> HashSet<String> {
     let mut actors = HashSet::new();
@@ -72,7 +75,8 @@ mod tests {
             "Actor subclass: Worker\n  run => 1\n\nObject subclass: Plain\n  run => 1\n\n\
              Object subclass: Driver\n  class probe =>\n{body}"
         );
-        let module = parse_module(&src);
+        let mut module = parse_module(&src);
+        crate::ast::normalize::peel_operand_parens(&mut module);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.expect("hierarchy builds");
         let driver = module

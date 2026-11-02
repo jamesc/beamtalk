@@ -177,10 +177,13 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/type_checker/validation.rs",
         1,
     ),
-    // `SendRef` receivers (cascade shared receivers) and an assignment value.
+    // An assignment value (`a := (Worker spawn)`): not an operand, so
+    // `ast::normalize` keeps its parentheses.
+    ("beamtalk-core/src/semantic_analysis/actor_spawn.rs", 1),
+    // `SendRef` receivers (cascade shared receivers).
     (
         "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
-        4,
+        3,
     ),
     // Shared predicates over statements, assignment values and receivers, and
     // the cascade's folded first send.
