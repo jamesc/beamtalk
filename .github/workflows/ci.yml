@@ -1080,6 +1080,47 @@ jobs:
             cat "$f"
           done
 
+  # ─── Installed-layout smoke test from a clean checkout (BT-4119) ───────
+  # `just install` once shipped no stdlib class beams (bt@stdlib@*) from a
+  # fresh checkout, and nothing caught it: `just test-install` only ran in
+  # edge/nightly/release. This job runs it on every PR from the fresh actions
+  # checkout. It deliberately restores no runtime/_build cache, so the build is
+  # a clean-checkout build (an old _build could hide exactly this class of
+  # bug). Cost: a release build plus the debug build `build-stdlib` uses
+  # (~15-20 min cold, less with the Rust cache), in parallel with the other
+  # jobs, so it adds runner time but little wall-clock. Linux only;
+  # ci-platforms.yml and release/nightly cover the other OSes.
+  test-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: install-${{ hashFiles('Cargo.toml') }}
+
+      - name: Smoke test install (clean checkout)
+        run: just test-install
+
   # ─── Coverage (Rust + Erlang), split in two parallel jobs ─────────────
   # Was one 45-minute job: dev build + instrumented build + Rust passes +
   # Erlang suites, sequentially (~41 min, repeatedly timing out on main).
