@@ -223,8 +223,16 @@ pub struct Backend {
     preload_config: Mutex<Option<PreloadConfig>>,
     /// Paths of stdlib files loaded during preload; used to emit `beamtalk-stdlib://` URIs.
     stdlib_paths: Mutex<HashSet<Utf8PathBuf>>,
-    /// Workspace roots discovered at initialization; used for native delegate `.erl` lookup.
+    /// Workspace roots discovered at initialization, plus any package root
+    /// registered later by `did_open`'s per-file discovery (BT-4158); used
+    /// for native delegate `.erl` lookup, `did_close`'s preload coverage
+    /// check, and per-root manifest / type-cache loading.
     workspace_roots: Mutex<Vec<PathBuf>>,
+    /// Serializes the root-loading sequences — the startup one in
+    /// `initialized` and each per-file package root `did_open` registers —
+    /// so their whole-session `set_root_packages` / `set_native_types` /
+    /// `set_diagnostics_overrides` writes cannot interleave and drop a root.
+    root_load_lock: tokio::sync::Mutex<()>,
     /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
     otp_lib_dir: Mutex<Option<PathBuf>>,
     /// ADR 0082 Phase 3: lazy-attached WebSocket client to the

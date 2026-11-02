@@ -161,6 +161,10 @@ impl Backend {
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
+            // Held for the whole startup sequence so a package root that
+            // `did_open` registers meanwhile (BT-4158) loads strictly after
+            // it, rather than racing its whole-session setter calls.
+            let root_load_guard = self.root_load_lock.lock().await;
             // mark preload in-flight so a didOpen/didChange racing
             // this sequence defers its own `publish_diagnostics` to the
             // self-healing republish below instead of racing it to be the
@@ -193,6 +197,7 @@ impl Backend {
                 let mut svc = self.service.lock().expect("service lock poisoned");
                 svc.set_preload_in_progress(false);
             }
+            drop(root_load_guard);
 
             // Re-publish diagnostics for every open file after preload
             // completes. If a file was opened via `did_open` before preload
@@ -260,8 +265,14 @@ impl Backend {
             }
             if uri.scheme() != "beamtalk-stdlib" {
                 // Stdlib files are pre-loaded at startup; skip re-indexing.
-                let mut svc = self.service.lock().expect("service lock poisoned");
-                svc.update_file(path, params.text_document.text);
+                {
+                    let mut svc = self.service.lock().expect("service lock poisoned");
+                    svc.update_file(path.clone(), params.text_document.text);
+                }
+                // BT-4158: resolve this file's own package root (nearest
+                // `beamtalk.toml`) — the workspace folder may be a parent
+                // of it, leaving its dependencies unloaded.
+                self.ensure_package_root_loaded(&path).await;
             }
             self.publish_diagnostics(&uri).await;
         }

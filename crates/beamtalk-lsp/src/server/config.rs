@@ -55,6 +55,46 @@ pub(in crate::server) fn workspace_roots(params: &InitializeParams) -> Vec<PathB
     roots.dedup();
     roots
 }
+/// The package root owning `path`: the ancestor
+/// [`beamtalk_project::discover_project_root`] stops at, provided it actually
+/// holds a `beamtalk.toml`.
+///
+/// [`workspace_roots`] resolves each workspace folder once at `initialize`,
+/// but an editor may open a *parent* of one or more packages (e.g. `~/source`
+/// holding several checkouts) whose own discovered root has no manifest.
+/// Resolving the root per open file lets `did_open` register the file's real
+/// package so its `[package]` name, sources and fetched dependencies load
+/// (BT-4158). A root found only via a `.git` or `.beamtalk` marker is not a
+/// package and yields `None`, as does a path with no on-disk file to start
+/// from.
+///
+/// A fetched dependency checkout (`<pkg>/_build/deps/<name>/`) carries its own
+/// manifest, but it is part of the package that fetched it — [`preload_covers`]
+/// and [`collect_preload_files`] reach it through that package — so a file in
+/// one resolves to the owning `<pkg>` instead.
+pub(in crate::server) fn package_root_for_file(path: &Path) -> Option<PathBuf> {
+    let root = beamtalk_project::discover_project_root(path);
+    if let Some(owner) = owning_package_of_dependency_checkout(&root) {
+        return package_root_for_file(owner);
+    }
+    root.join("beamtalk.toml").is_file().then_some(root)
+}
+/// `Some(<pkg>)` when `dir` is a fetched dependency checkout
+/// `<pkg>/_build/deps/<name>` (the layout [`dependency_src_dirs`] walks).
+fn owning_package_of_dependency_checkout(dir: &Path) -> Option<&Path> {
+    let deps = dir.parent()?;
+    let build = deps.parent()?;
+    (deps.file_name()? == "deps" && build.file_name()? == "_build")
+        .then(|| build.parent())
+        .flatten()
+}
+/// Whether any root has fetched package dependencies — the same signal
+/// [`PreloadedFiles::deps_present`] reports for the roots one preload walked.
+pub(in crate::server) fn any_dependency_src_dirs(roots: &[PathBuf]) -> bool {
+    roots
+        .iter()
+        .any(|root| !dependency_src_dirs(root).is_empty())
+}
 pub(in crate::server) fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
     params
         .initialization_options
