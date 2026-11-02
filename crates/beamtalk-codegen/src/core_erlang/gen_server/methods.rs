@@ -652,6 +652,8 @@ impl CoreErlangGenerator {
             ])),
             span,
         });
+        // BT-4369: every field write records itself for the loop checkout.
+        self.note_field_write(field_name, span);
         let _ = self.next_state_var();
         let target_version = self.state_version();
         stmts.push(ThreadedStmt::Bind {
@@ -1016,6 +1018,8 @@ impl CoreErlangGenerator {
                                     ],
                                     span,
                                 ));
+                                // BT-4369: every field write records itself.
+                                self.note_field_write(&field.name, span);
                                 // The real field mutation, as a real Bind —
                                 // `render_bind`'s `BindOp::Put` arm is the
                                 // single place the `maps:put` shape lives.
@@ -1110,6 +1114,8 @@ impl CoreErlangGenerator {
                                     ],
                                     span,
                                 ));
+                                // BT-4369: every field write records itself.
+                                self.note_field_write(&field.name, span);
                                 let _ = self.next_state_var();
                                 let target_version = self.state_version();
                                 stmts.push(ThreadedStmt::Bind {

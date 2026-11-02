@@ -548,6 +548,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// [`StateRestoreDefect::PreStateOverLiveCell`].
     StaleStateSeedInBracketedLoop { at: Span },
 
+    /// BT-4369 (ADR 0137 §4b): an actor field write was lowered in the body of
+    /// a loop that brackets guarded operators. Such a loop holds no whole
+    /// `State` (it keeps its variables in parameters), and the prose rule is
+    /// that mode selection never routes a body with a field write to it. The
+    /// rule matters because a `StateAcc` loop or fold nested in the region
+    /// seeds its accumulator from the cell (`take()`, not the `State` in scope):
+    /// a field write held only in a frame's threaded `State` has not reached the
+    /// cell, so that seed would silently drop it. Each field-write lowering
+    /// records the write on the innermost loop marker
+    /// (`CoreErlangGenerator::note_field_write`); the checkout that brackets
+    /// reports every one from its own decision, and a loop that does not
+    /// bracket hands them to the enclosing marker, so a write in a nested
+    /// non-bracketing loop is still seen by a bracketing ancestor. A write
+    /// inside an actor closure goes through the cell view and records nothing.
+    FieldWriteInBracketedLoop { at: Span },
+
     /// BT-4180 (ADR 0137 §4b): an actor-state read source emitted inside a
     /// **bracketed region** (the body and condition of a stateless loop
     /// whose checkout bracketed guarded operators, plus everything lowered

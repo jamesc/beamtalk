@@ -322,13 +322,36 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   (`CellBoundary::PreState`). A hybrid loop keeps `PreState`: its body runs
   no user code (an operator, self-send or user-code send, handler included,
   routes it to `StateAcc`), and it is never nested in a bracketing loop,
-  since no loop that brackets admits a field write in its body.
+  since no loop that brackets admits a field write in its body (BT-4369,
+  below).
 - A `StateAcc` loop or fold nested in a bracketing loop (a fold whose body
   holds a parenthesised conditional writing an outer local keeps the
   enclosing loop's direct parameters) seeds its accumulator from the cell
   (`take()`), like the loop's exit pack, not from the loop-entry `State`:
   every store the nested construct makes (a bracket, an `on:do:` boundary)
   would otherwise put that stale `State` back (BT-4179).
+- **No loop that brackets admits a field write in its body (BT-4369).** Mode
+  selection keeps a body with a field write off the stateless paths
+  (`select_direct_params` and `select_tuple_acc` require
+  `!has_state_effects()`), so such a loop is a `StateAcc` frame that holds a
+  whole `State` and never brackets around the write. The rule is also checked
+  independently of mode selection: every field-write lowering calls
+  `note_field_write` (`lower_simple_field_write_bind`,
+  `lower_hybrid_field_rebind`, the arm and method-body field `Put`s), which
+  records the write on the innermost loop marker; the checkout that brackets
+  reports each one as `FieldWriteInBracketedLoop`, and a loop that does not
+  bracket hands them to the enclosing marker, so a write in a nested loop is
+  seen by a bracketing ancestor. This is the rule the nested-`StateAcc` seed
+  below relies on: a field write a frame holds only in its threaded `State`
+  has not reached the cell, so a nested seed taken from the cell would drop
+  it. It holds for every scope kind: a direct-params, tuple-accumulator or
+  hybrid body, a `StateAcc` loop or fold nested in the region, a conditional
+  arm and an `on:do:` body all call the same hook. A write inside an actor
+  closure goes through the cell view (`cell_field_write_doc`), is never part of
+  the loop's frame and records nothing. `tests/field_write_sites.rs` counts the
+  field `Put` constructions and the hook's callers per file, so a new write
+  site cannot skip the record; `tests/guarded_op_loops.rs` shows the finding
+  fires under a test-only fault that turns mode selection's exclusion off.
 - Each marker records the loop-entry `State`, and each threaded-`State` use
   in its body (an `on:do:` `PreState` boundary, a `StateAcc` seed) is noted
   on the innermost marker. A loop whose checkout brackets reports a use of

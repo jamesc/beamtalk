@@ -298,6 +298,7 @@ mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
 mod field_assignment_value_position;
+mod field_write_sites;
 mod fold_locals_carried_corpus;
 mod fresh_temp_namespace;
 mod gen_server;

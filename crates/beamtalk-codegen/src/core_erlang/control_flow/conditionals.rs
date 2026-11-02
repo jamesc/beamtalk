@@ -192,6 +192,10 @@ impl CoreErlangGenerator {
             FieldWriteSite::ValueType => VersionPrefix::SelfVt,
             FieldWriteSite::Actor => VersionPrefix::State,
         };
+        if site == FieldWriteSite::Actor {
+            // BT-4369: a loop that brackets admits no field write (ADR 0137 §4b).
+            self.note_field_write(field_name, span);
+        }
         let val_var = self.fresh_temp_var("Val");
         // Capture the source version BEFORE generating the value expression —
         // the RHS may itself read the field being assigned (`self.x := self.x
@@ -2246,6 +2250,9 @@ impl CoreErlangGenerator {
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<String> {
+        // BT-4369: a hybrid loop never brackets, but one nested in a bracketing
+        // loop would be a field write in its body (ADR 0137 §4b).
+        self.note_field_write(field, span);
         let val_var = self.fresh_temp_var("Val");
         let ahead_scope = self.thread_ahead(value, stmts, frame)?;
         // `thread_ahead` above already committed any nested field
@@ -3066,6 +3073,8 @@ impl CoreErlangGenerator {
                             let thread_scope = self.thread_ahead(value, &mut stmts, frame)?;
                             let rhs_doc = self.expression_doc(value)?;
                             self.finish_precompiled_scope(thread_scope)?;
+                            // BT-4369: a field write in an arm of a loop body.
+                            self.note_field_write(&field.name, span);
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
                             let rhs_state = self.fresh_temp_var("CfState");

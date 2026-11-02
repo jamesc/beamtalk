@@ -109,6 +109,13 @@ thread_local! {
     /// before the fix, so the loop checkout can be shown to report both.
     pub(in crate::core_erlang) static FAULT_STALE_STATE_IN_BRACKETED_LOOP: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Test-only fault (BT-4369): mode selection ignores a body's field
+    /// writes, so a loop with a field write and a guarded operator is lowered
+    /// stateless (direct params or tuple accumulator) and brackets, as the
+    /// §4b prose says never happens. The loop checkout can then be shown to
+    /// report `FieldWriteInBracketedLoop` for it.
+    pub(in crate::core_erlang) static FAULT_STATELESS_FIELD_WRITES: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
     /// Test-only fault (BT-4180): the read choke point
     /// ([`CoreErlangGenerator::actor_state_read_source`]) ignores the
     /// take-reads decision while the loop still brackets, so every read site
@@ -116,6 +123,18 @@ thread_local! {
     /// checkout can be shown to report `StaleReadInBracketedLoop`.
     pub(in crate::core_erlang) static FAULT_ENTRY_STATE_READS: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+}
+
+/// BT-4369: whether a body's field writes keep it out of a stateless loop
+/// (direct fun parameters or a tuple accumulator), as mode selection requires.
+/// Always `true`; a test-only fault turns it off so the loop checkout's
+/// `FieldWriteInBracketedLoop` rule can be shown to fire.
+pub(in crate::core_erlang) fn field_writes_block_stateless_loops() -> bool {
+    #[cfg(test)]
+    if FAULT_STATELESS_FIELD_WRITES.with(std::cell::Cell::get) {
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -327,6 +346,15 @@ pub(in crate::core_erlang) enum StaleStateUseKind {
     /// A `StateAcc` loop or fold packs its accumulator from it
     /// (`ThreadingPlan::generate_pack_prefix`).
     StateAccSeed,
+    /// BT-4369 (ADR 0137 §4b): an actor field write lowered inside a loop,
+    /// noted by `note_field_write` from the field-write lowering. Not a use of
+    /// a `State` variable but of the *field*: a loop that brackets guarded
+    /// operators admits none in its body, because a write a `StateAcc` frame
+    /// holds only in its threaded `State` never reaches the cell, and a
+    /// nested `StateAcc` seed taken from the cell (the gate drops
+    /// `loop_holds_no_whole_state`) would then lose it. Stale under any
+    /// bracket, whatever the variable.
+    FieldWrite,
     /// BT-4180: an actor-state read at `site` takes the state map from it
     /// (or, for [`StaleReadDefect::PreExtractedParam`], reads a hybrid
     /// loop's pre-extracted field parameter), in a frame that holds no
@@ -349,7 +377,7 @@ impl StaleStateUseKind {
     fn is_stale_under_bracket(self, var: &str, entry_state: &str) -> bool {
         match self {
             Self::OnDoStore | Self::StateAccSeed => var == entry_state,
-            Self::Read { .. } => true,
+            Self::Read { .. } | Self::FieldWrite => true,
         }
     }
 
@@ -361,6 +389,7 @@ impl StaleStateUseKind {
                 at,
             },
             Self::StateAccSeed => VerifyError::StaleStateSeedInBracketedLoop { at },
+            Self::FieldWrite => VerifyError::FieldWriteInBracketedLoop { at },
             Self::Read {
                 site,
                 defect,
@@ -380,6 +409,7 @@ impl StaleStateUseKind {
         match self {
             Self::OnDoStore | Self::StateAccSeed => "stale-state",
             Self::Read { .. } => "stale-read",
+            Self::FieldWrite => "field-write",
         }
     }
 
@@ -388,6 +418,7 @@ impl StaleStateUseKind {
         match self {
             Self::OnDoStore => "on:do:",
             Self::StateAccSeed => "StateAcc seed",
+            Self::FieldWrite => "field write",
             Self::Read { site, .. } => site.label(),
         }
     }
@@ -1548,6 +1579,25 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4369: notes an actor field write to `field` at `at` on the innermost
+    /// loop marker, for its checkout to check
+    /// ([`Self::checkout_guarded_op_loop`]): a loop that brackets guarded
+    /// operators admits no field write in its body (ADR 0137 §4b), so the
+    /// checkout that brackets reports each one
+    /// ([`VerifyError::FieldWriteInBracketedLoop`]) and a loop that does not
+    /// hands them outward like its other threaded-`State` uses. The one hook
+    /// every field-write lowering calls (`lower_simple_field_write_bind`,
+    /// `lower_hybrid_field_rebind`); `tests/field_write_sites.rs` checks that
+    /// no site mints a field `Put` without it. A write inside an actor closure
+    /// goes through the cell view (`cell_field_write_doc`), is never part of
+    /// the loop's frame and records nothing.
+    pub(in crate::core_erlang) fn note_field_write(&self, field: &str, at: Span) {
+        if self.in_cell_closure() {
+            return;
+        }
+        self.note_threaded_state_use(StaleStateUseKind::FieldWrite, field, at);
+    }
+
     /// BT-4180: the one choke point every actor-state read site asks for its
     /// source (ADR 0137 §4b). Answers [`ActorStateSource::Cell`] inside a
     /// stateless loop that brackets guarded operators, or nested in one
@@ -1672,17 +1722,20 @@ impl CoreErlangGenerator {
     /// an ancestor's seed of it) and is stale under the bracket too. A
     /// `do:separatedBy:` in an actor loop nest seeded its accumulator from
     /// the method `State` and drew `StaleStateSeedInBracketedLoop`.
+    ///
+    /// BT-4369: dropping `loop_holds_no_whole_state` is sound only while no
+    /// frame in the region holds a field write the cell has not seen. Mode
+    /// selection guarantees it (a body with a field write is a `StateAcc`
+    /// frame, never a bracketing loop) and
+    /// [`VerifyError::FieldWriteInBracketedLoop`] checks it independently, so
+    /// this gate and [`Self::guarded_op_take_reads`] differ in that one
+    /// conjunct only, both built on [`Self::in_bracketed_region`].
     pub(in crate::core_erlang) fn nested_state_acc_seed_from_cell(&self) -> bool {
         #[cfg(test)]
         if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
             return false;
         }
-        self.synced
-            .guarded_op_loops
-            .borrow()
-            .iter()
-            .any(|m| m.will_bracket)
-            && !self.in_cell_closure()
+        self.in_bracketed_region()
     }
 
     /// The bracket decision of [`Self::checkout_guarded_op_loop`].
@@ -1829,12 +1882,24 @@ impl CoreErlangGenerator {
     /// the loop: its reads are already live-at-home through the cell view
     /// (and must stay capture-aware away from home).
     pub(in crate::core_erlang) fn guarded_op_take_reads(&self) -> bool {
+        self.in_bracketed_region() && self.loop_holds_no_whole_state()
+    }
+
+    /// BT-4369: whether the code being lowered sits inside, or is nested in, a
+    /// loop that will bracket guarded operators, and is not an actor closure
+    /// (which reads and writes through the cell view). Inside one the slow
+    /// paths write the cell past the loop-entry `State`. The one predicate
+    /// both cell-source gates build on: [`Self::guarded_op_take_reads`] adds
+    /// "this frame holds no whole `State`" (its own `State` is the source
+    /// otherwise), [`Self::nested_state_acc_seed_from_cell`] does not, and
+    /// rests instead on the `FieldWriteInBracketedLoop` rule: no frame in a
+    /// bracketed region holds a field write the cell has not seen.
+    fn in_bracketed_region(&self) -> bool {
         self.synced
             .guarded_op_loops
             .borrow()
             .iter()
             .any(|m| m.will_bracket)
-            && self.loop_holds_no_whole_state()
             && !self.in_cell_closure()
     }
 
