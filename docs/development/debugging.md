@@ -592,12 +592,12 @@ via `beamtalk_message_dispatch:send/3`. This is the dynamic-site report
 (BT-4292): each hint names the receiver's static type (class, kind and
 provenance, or `Dynamic`/union/negation) and the reason the send stayed
 dynamic. The word after `reason:` is a stable token for counting sites
-(`untyped`, `builtin`, `supervisor`, `abstract`, `actor`, `open`,
-`exception`, `binary-selector`, …); for a built-in receiver the rest names
+(`untyped`, `builtin`, `supervisor`, `abstract`, `root`, `actor`,
+`ambiguous`, `exception`, `binary-selector`, …); for a built-in receiver the rest names
 its row of the shared routing fixture
 (`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`).
 The reason is the gate of the same decision the guarded direct call is
-emitted from (`typed_sealed_send_target` in `dispatch_codegen.rs`), so the
+emitted from (`typed_tagged_send_target` in `dispatch_codegen.rs`), so the
 report cannot disagree with the generated code.
 
 Examples:

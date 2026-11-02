@@ -116,7 +116,7 @@ pub(in crate::core_erlang) struct ClassContext {
     /// package's module is not necessarily the one a dynamic send reaches.
     /// Read only through [`CoreErlangGenerator::is_shadowed_class`], which
     /// keeps these sends dynamic: typed sealed-Value instance sends
-    /// (`typed_sealed_value_target`, BT-4151) and sends to a class reference
+    /// (`typed_tagged_target`, BT-4151) and sends to a class reference
     /// that would direct-call its module — `class sealed` class methods,
     /// keyword constructors and nullary `new` (`class_reference_direct_call_info`,
     /// BT-4271). Own-class self-sends are unaffected (`self` is this module's

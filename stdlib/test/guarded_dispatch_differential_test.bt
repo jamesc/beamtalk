@@ -7,8 +7,8 @@
 // prove it reaches exactly what dynamic dispatch reaches, and a guard miss
 // falls back to the dynamic send. This fixture pins "exactly what dynamic
 // dispatch reaches" for every send shape the epic's children convert, before
-// they convert it — on main every typed send below is still dynamic, and the
-// fixture must stay green as BT-4293 (open tagged-map classes), BT-4294
+// they convert it, and must stay green as BT-4293 (open tagged-map classes,
+// now converted: see testOpenValueTypedSendsCompileToTheDirectShape), BT-4294
 // (built-in receivers) and BT-4295 (class references) turn them into guarded
 // direct calls.
 //
@@ -130,6 +130,23 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: GuardedDiffPoint | r boom]
       dynamic: [:r | r boom]
       on: p
+
+  // BT-4293: the open-Value typed rows above really take the guarded direct
+  // call. Only that shape names the fixture module's `dispatch/3` statically,
+  // so its entry in this module's BEAM import table proves it is emitted; if
+  // it stopped being emitted every open-Value row would silently compare
+  // dynamic with dynamic.
+  testOpenValueTypedSendsCompileToTheDirectShape =>
+    path := Erlang code which: #'bt@guarded_dispatch_differential_test'
+    // The FFI coerces charlist arguments to Strings, which `beam_lib`
+    // rejects, so the filename travels as an atom. The reply is
+    // `Result ok: {Module, [{imports, Imports}]}`.
+    reply := Erlang erlang
+      apply: #beam_lib
+      module: #chunks
+      args: #(Erlang erlang binary_to_atom: path, #(#imports))
+    imports := (reply value at: 2) first at: 2
+    self assert: (imports includes: {self pointModule, #dispatch, 3})
 
   // `perform:` and its family, including `perform:withArguments:timeout:`,
   // which `send/3` rewrites before it classifies the receiver.
