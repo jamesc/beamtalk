@@ -1672,7 +1672,7 @@ impl CoreErlangGenerator {
     /// an ancestor's seed of it) and is stale under the bracket too. A
     /// `do:separatedBy:` in an actor loop nest seeded its accumulator from
     /// the method `State` and drew `StaleStateSeedInBracketedLoop`.
-    pub(in crate::core_erlang) fn state_seed_seeds_from_cell(&self) -> bool {
+    pub(in crate::core_erlang) fn nested_state_acc_seed_from_cell(&self) -> bool {
         #[cfg(test)]
         if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
             return false;

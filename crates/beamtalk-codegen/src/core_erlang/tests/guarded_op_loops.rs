@@ -684,13 +684,6 @@ fn stateacc_producer_in_bracketed_loop_seeds_from_the_cell() {
     }
 }
 
-/// BT-3913: a `do:separatedBy:` nested in an actor loop nest packs its
-/// `StateAcc` accumulator from the cell, never from the loop-entry `State`.
-/// The middle loop brackets its guarded operators, so the entry is stale
-/// inside — even though the current frame holds a whole `State` (packed from
-/// the entry itself). Verifier-clean; under the pre-fix fault the checkout
-/// reports the stale seed. The 733-shape oracle pins the answer (`actor`
-/// loop-nest `dlocal` `dsb` cells).
 /// BT-3913: a field assignment in a conditional arm whose RHS is a
 /// local-threading producer (`self.n := #(1, 2) do: ...`) threads the RHS
 /// ahead and puts the unwrapped value — the pre-fix arm lowering compiled
@@ -710,6 +703,13 @@ fn arm_field_assignment_with_producer_rhs_threads_ahead() {
     );
 }
 
+/// BT-3913: a `do:separatedBy:` nested in an actor loop nest packs its
+/// `StateAcc` accumulator from the cell, never from the loop-entry `State`.
+/// The middle loop brackets its guarded operators, so the entry is stale
+/// inside — even though the current frame holds a whole `State` (packed from
+/// the entry itself). Verifier-clean; under the pre-fix fault the checkout
+/// reports the stale seed. The 733-shape oracle pins the answer (`actor`
+/// loop-nest `dlocal` `dsb` cells).
 #[test]
 fn separated_by_in_actor_loop_nest_seeds_from_the_cell() {
     let src = format!(
