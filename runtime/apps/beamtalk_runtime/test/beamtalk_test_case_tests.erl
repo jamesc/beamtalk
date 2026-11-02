@@ -354,3 +354,130 @@ ensure_test_context_appends_context_test() ->
     {HelperPos, _} = binary:match(Result, <<"A>>helper">>),
     {TestBarPos, _} = binary:match(Result, <<"A>>testBar">>),
     ?assert(HelperPos < TestBarPos).
+
+%%% ============================================================================
+%%% BT-4354: fallback locations and block disambiguation (no raw MFA)
+%%% ============================================================================
+
+%% Modules not registered as classes render under their module name, so the
+%% expectations below use the `bt@user@...` form.
+-define(TRACE_FIXTURE_MOD, 'bt@user@trace_fixture_test').
+
+%% Load a throwaway `bt@` module carrying a `beamtalk_source` attribute (as
+%% compiled Beamtalk modules do) and run `Fun` with its workspace-relative
+%% source path; the module is purged afterwards.
+with_trace_fixture(Fun) ->
+    {ok, Cwd} = file:get_cwd(),
+    AbsPath = filename:join([Cwd, "test", "trace_fixture_test.bt"]),
+    Forms = [
+        {attribute, 1, module, ?TRACE_FIXTURE_MOD},
+        {attribute, 2, beamtalk_source, [list_to_binary(AbsPath)]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [binary]),
+    {module, Mod} = code:load_binary(Mod, "trace_fixture_test.beam", Bin),
+    try
+        Fun(filename:join("test", "trace_fixture_test.bt"))
+    after
+        code:purge(Mod),
+        code:delete(Mod),
+        code:purge(Mod)
+    end.
+
+%% True when Bin contains a raw Erlang `module:function/arity`-style token.
+has_raw_mfa(Bin) ->
+    match =:=
+        re:run(Bin, "[a-z_@]+:[A-Za-z_'-]+/[0-9]+|/[0-9]+-(fun|anonymous)-", [
+            {capture, none}
+        ]).
+
+%% A frame with an empty BEAM location falls back to the module's
+%% `beamtalk_source` file, rendered `(file)` with the workspace-relative rule.
+format_stacktrace_bare_location_uses_beamtalk_source_test() ->
+    with_trace_fixture(fun(RelPath) ->
+        Result = beamtalk_test_case:format_stacktrace([
+            {?TRACE_FIXTURE_MOD, testFoo, 0, []}
+        ]),
+        Expected = iolist_to_binary(["\n  at bt@user@trace_fixture_test>>testFoo (", RelPath, ")"]),
+        ?assertEqual(Expected, Result),
+        ?assertNot(has_raw_mfa(Result))
+    end).
+
+%% A frame with a known line but no file keeps the line alongside the
+%% `beamtalk_source` fallback file.
+format_stacktrace_line_without_file_uses_beamtalk_source_test() ->
+    with_trace_fixture(fun(RelPath) ->
+        Result = beamtalk_test_case:format_stacktrace([
+            {?TRACE_FIXTURE_MOD, testFoo, 0, [{line, 12}]}
+        ]),
+        Expected = iolist_to_binary([
+            "\n  at bt@user@trace_fixture_test>>testFoo (", RelPath, ":12)"
+        ]),
+        ?assertEqual(Expected, Result)
+    end).
+
+%% Without any known source the bare `Class>>selector` form is kept.
+format_stacktrace_bare_location_unknown_source_test() ->
+    Result = beamtalk_test_case:format_stacktrace([
+        {'bt@user@NoSuchTraceModule', helper, 0, []}
+    ]),
+    ?assertEqual(<<"\n  at bt@user@NoSuchTraceModule>>helper">>, Result).
+
+%% A block (lifted fun) renders distinctly from its enclosing method, with no
+%% arity / fun index leaking through.
+format_stacktrace_block_distinct_from_method_test() ->
+    Frames = [
+        {'bt@user@Hpack', '-class_encode:headers:table:/4-fun-0-', 2, [
+            {file, "hpack.bt"}, {line, 40}
+        ]},
+        {'bt@user@Hpack', 'class_encode:headers:table:', 4, [{file, "hpack.bt"}, {line, 40}]}
+    ],
+    Result = beamtalk_test_case:format_stacktrace(Frames),
+    ?assertEqual(
+        <<
+            "\n  at bt@user@Hpack>>class_encode:headers:table: [block] (hpack.bt:40)"
+            "\n  at bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)"
+        >>,
+        Result
+    ),
+    ?assertNot(has_raw_mfa(Result)).
+
+%% Every lifted-fun naming form (lambda, Core Erlang anonymous, letrec loop)
+%% and selectors containing '/' decode to `selector [block]`.
+format_stacktrace_block_name_forms_test() ->
+    Render = fun(Fun) ->
+        beamtalk_test_case:format_stacktrace([{'bt@user@A', Fun, 0, []}])
+    end,
+    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-fun-3-')),
+    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-anonymous-1-')),
+    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-loop/1-0-')),
+    ?assertEqual(<<"\n  at A>>/ [block]">>, Render('-//2-fun-0-')),
+    ?assertEqual(<<"\n  at A>>// [block]">>, Render('-///2-fun-0-')),
+    ?assertEqual(<<"\n  at A>>timesRepeat:">>, Render('timesRepeat:')).
+
+%% Distinct frames that still render identically (recursive send with no
+%% line) collapse into one line with a repeat count.
+format_stacktrace_collapses_identical_adjacent_frames_test() ->
+    Frames = [
+        {'bt@user@A', 'timesRepeat:', 1, []},
+        {'bt@user@A', 'timesRepeat:', 1, []},
+        {'bt@user@A', testLoop, 0, [{file, "a.bt"}, {line, 3}]}
+    ],
+    ?assertEqual(
+        <<"\n  at A>>timesRepeat: [x2]\n  at A>>testLoop (a.bt:3)">>,
+        beamtalk_test_case:format_stacktrace(Frames)
+    ).
+
+%% The synthetic test-context line carries the test file via the same
+%% `beamtalk_source` lookup.
+ensure_test_context_includes_test_file_test() ->
+    with_trace_fixture(fun(RelPath) ->
+        FailMsg = <<"FAIL testBar: some error">>,
+        Result = beamtalk_test_case:ensure_test_context(
+            FailMsg, ?TRACE_FIXTURE_MOD, testBar, []
+        ),
+        Expected = iolist_to_binary([
+            FailMsg, "\n  at bt@user@trace_fixture_test>>testBar (", RelPath, ")"
+        ]),
+        ?assertEqual(Expected, Result),
+        ?assertNot(has_raw_mfa(Result))
+    end).

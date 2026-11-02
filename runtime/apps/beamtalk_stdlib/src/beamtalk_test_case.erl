@@ -491,9 +491,32 @@ format_stacktrace(Frames) ->
         [] ->
             <<>>;
         _ ->
-            Lines = [format_stackframe(F) || F <- Relevant],
+            Lines = collapse_repeats([
+                iolist_to_binary(format_stackframe(F))
+             || F <- Relevant
+            ]),
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
     end.
+
+-doc """
+Collapse adjacent identical rendered frame lines into one.
+
+Distinct frames that still render identically (a recursive send such as
+`Integer>>timesRepeat:` whose BEAM frames carry no line) would otherwise print
+the same `Class>>selector (file)` line twice. The repeat count is kept, in
+Beamtalk terms, as a trailing `[xN]` marker.
+""".
+-spec collapse_repeats([binary()]) -> [binary()].
+collapse_repeats([]) ->
+    [];
+collapse_repeats([Line | Rest]) ->
+    {Same, Others} = lists:splitwith(fun(L) -> L =:= Line end, Rest),
+    Rendered =
+        case Same of
+            [] -> Line;
+            _ -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, length(Same) + 1]))
+        end,
+    [Rendered | collapse_repeats(Others)].
 
 -doc """
 Format a single stacktrace frame for display using Beamtalk names.
@@ -502,6 +525,12 @@ Translates Erlang module names to Beamtalk class names where possible.
 Stdlib frames show just the basename (the absolute path baked at compile time
 won't exist on the user's machine). User code frames show workspace-relative
 paths for terminal clickability.
+
+When the BEAM frame carries no file (common for block entries, dispatch
+wrappers and recursive sends), the module's `beamtalk_source` attribute is used
+instead, rendered `(file)` — or `(file:line)` if a line is known. Frames with
+no recoverable source keep the bare `Class>>selector` form. Raw Erlang
+`module:function/arity` is never shown.
 """.
 -spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> iolist().
 format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
@@ -509,16 +538,35 @@ format_stackframe({Mod, Fun, ArityOrArgs, Loc}) ->
     DisplayFun = format_fun_name(Fun),
     %% arity not displayed — Beamtalk selectors encode it
     _ = ArityOrArgs,
-    File = proplists:get_value(file, Loc, ""),
     Line = proplists:get_value(line, Loc, 0),
-    case {File, Line} of
-        {"", 0} ->
+    case frame_file(Mod, Loc) of
+        nil ->
             io_lib:format("~s>>~s", [DisplayMod, DisplayFun]);
-        _ ->
-            DisplayFile = format_file_path(Mod, File),
+        File when Line =:= 0 ->
+            io_lib:format("~s>>~s (~s)", [DisplayMod, DisplayFun, format_file_path(Mod, File)]);
+        File ->
             io_lib:format("~s>>~s (~s:~p)", [
-                DisplayMod, DisplayFun, DisplayFile, Line
+                DisplayMod, DisplayFun, format_file_path(Mod, File), Line
             ])
+    end.
+
+-doc """
+Source file for a frame: the BEAM location's `file` when present, otherwise
+the module's `beamtalk_source` attribute (`nil` when neither is known).
+""".
+-spec frame_file(atom(), list()) -> string() | nil.
+frame_file(Mod, Loc) ->
+    case proplists:get_value(file, Loc, "") of
+        "" -> module_source_file(Mod);
+        File -> File
+    end.
+
+-doc "The module's `beamtalk_source` file as a string, or `nil` if unknown.".
+-spec module_source_file(atom()) -> string() | nil.
+module_source_file(Mod) ->
+    case beamtalk_reflection:source_file_from_module(Mod) of
+        nil -> nil;
+        Path -> unicode:characters_to_list(Path)
     end.
 
 -doc """
@@ -567,18 +615,22 @@ format_module(Mod) ->
 -doc """
 Clean up Erlang function names for display.
 
-Strips anonymous fun wrappers (e.g., '-sync_send/3-fun-1-' → 'sync_send')
-and returns the base function name as a string.
+A compiler-lifted local function — a block (`'-sel/N-fun-M-'`,
+`'-sel/N-anonymous-M-'`) or a loop body (`'-sel/N-name/K-M-'`) — is rendered
+as its enclosing selector plus a `[block]` marker (e.g.
+`'-sync_send/3-fun-1-'` → `"sync_send [block]"`), so a block frame never prints
+identically to the method frame that created it. The arity and fun index are
+never shown.
 """.
 -spec format_fun_name(atom()) -> string().
 format_fun_name(Fun) ->
     FunStr = atom_to_list(Fun),
-    case FunStr of
-        [$- | Rest] ->
-            %% Anonymous fun: '-base_name/N-fun-M-' → base_name
-            [BaseName | _] = string:split(Rest, "/"),
-            BaseName;
-        _ ->
+    %% The enclosing name is everything up to the first "/<arity>-"; the lazy
+    %% match keeps selectors that themselves contain '/' (e.g. `/`, `//`) intact.
+    case re:run(FunStr, "^-(.+?)/[0-9]+-", [{capture, all_but_first, list}, unicode]) of
+        {match, [BaseName]} ->
+            BaseName ++ " [block]";
+        nomatch ->
             FunStr
     end.
 
@@ -661,11 +713,11 @@ ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
         true ->
             FailMsg;
         false ->
-            ClassName = format_module(Module),
-            MethodStr = atom_to_list(MethodName),
-            Context = iolist_to_binary(
-                io_lib:format("\n  at ~s>>~s", [ClassName, MethodStr])
-            ),
+            %% Rendered through format_stackframe/1 with an empty location so
+            %% the synthetic line gets the same `beamtalk_source` file fallback
+            %% (and path rules) as any other frame.
+            Line = format_stackframe({Module, MethodName, 0, []}),
+            Context = iolist_to_binary(["\n  at ", Line]),
             inject_test_context(FailMsg, Context)
     end.
 
