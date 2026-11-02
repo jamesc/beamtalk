@@ -1179,7 +1179,7 @@ sealed typed Value subclass: Regex native: beamtalk_regex
     self delegate
 ```
 
-Document the flags once, on the canonical method, and point other methods that take the same alias at it with `@see` (for example `String>>matchesRegex:options:` has `@see Regex class>>from:options:`) rather than copying the bullets. When the flags are interpreted by native Erlang code, the runtime's accepted set must be tested against the alias members — `beamtalk_regex_tests` does this for `RegexOption` by reading the alias from the stdlib app's `type_aliases` metadata.
+Document the flags once, on the canonical method, and point other methods that take the same alias at it in prose (for example `String>>matchesRegex:options:` says "See `Regex class>>from:options:` for the option list") rather than copying the bullets. (Method-level `@see Class>>selector` is not parsed by the help/LSP/MCP surfaces, so don't use it for this.) When the flags are interpreted by native Erlang code, the runtime's accepted set must be tested against the alias members — `beamtalk_regex_tests` does this for `RegexOption` by reading the alias from the stdlib app's `type_aliases` metadata.
 
 This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the declared shape, the bullet list is the prose. The type checker does not yet check the *elements* of a list literal against `List(E)` — `options: #(#bogus)` compiles without a warning and fails only at runtime (tracked in BT-4385) — so the alias documents the accepted values and the native implementation must still validate them.
 

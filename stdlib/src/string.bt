@@ -574,7 +574,7 @@ sealed typed Binary subclass: String
   ///
   /// Unknown options raise `regex_error`.
   ///
-  /// @see Regex class>>from:options: (the option list and what each flag does)
+  /// See `Regex class>>from:options:` for the option list and what each flag does.
   ///
   /// ## Examples
   /// ```beamtalk
