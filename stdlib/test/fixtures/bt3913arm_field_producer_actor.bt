@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3913: `self.n := <loop or fold>` as a statement of a conditional arm in an
+// actor method. The arm threads the right-hand side ahead, then puts the
+// unwrapped value into the field, so both the field and the outer local the
+// loop wrote hold the loop's results afterwards. Asserted in
+// bt3913arm_field_producer_test.bt.
+
+Actor subclass: Bt3913ArmFieldProducerActor
+  state: n = 0
+
+  // A `do:` loop answers `nil`.
+  viaDo: c =>
+    t := 0
+    c ifTrue: [self.n := #(1, 2) do: [:e | t := t + e]]
+    #[t, self.n]
+
+  // A fold answers its accumulator.
+  viaInject: c =>
+    t := 0
+    c ifTrue: [self.n := #(1, 2) inject: 0 into: [:a :e | t := t + e. a + e]]
+    #[t, self.n]

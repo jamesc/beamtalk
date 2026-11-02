@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3913: an actor arm's `self.n := <loop or fold>` keeps both the loop's
+// outer-local write and the field. Pins the answer at runtime, which the
+// codegen test `arm_field_assignment_with_producer_rhs_threads_ahead` does
+// not. See fixtures/bt3913arm_field_producer_actor.bt.
+
+TestCase subclass: Bt3913ArmFieldProducerTest
+
+  testDoKeepsTheLocalAndStoresNil =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaDo: true) equals: #[3, nil]
+
+  testDoNotTakenLeavesBoth =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaDo: false) equals: #[0, 0]
+
+  testInjectKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaInject: true) equals: #[3, 3]
+
+  testInjectNotTakenLeavesBoth =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaInject: false) equals: #[0, 0]
