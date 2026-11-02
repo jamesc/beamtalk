@@ -45,7 +45,14 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 
 -ifdef(TEST).
 %% Exported for testing stack trace formatting
--export([format_stacktrace/1, format_stackframe/1, ensure_test_context/4]).
+-export([
+    format_stacktrace/1,
+    format_stackframe/1,
+    ensure_test_context/4,
+    stack_frames/1,
+    test_failure/4,
+    test_failure_untraced/4
+]).
 -endif.
 
 -doc """
@@ -275,6 +282,7 @@ Uses the BIF fallback path (safe outside gen_server); tests come from
                 class := atom(),
                 status := pass | fail | skip,
                 error => binary(),
+                frames => [map()],
                 reason => binary()
             }
         ]
@@ -302,6 +310,7 @@ run_all_structured(ClassName) ->
                 class := atom(),
                 status := pass | fail | skip,
                 error => binary(),
+                frames => [map()],
                 reason => binary()
             }
         ]
@@ -317,7 +326,15 @@ it. Returns `no_tests` when `all` finds no test methods.
 """.
 -spec run_class_tests(atom(), all | atom()) ->
     no_tests
-    | {[{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()}.
+    | {
+        [
+            {pass, atom()}
+            | {fail, atom(), binary()}
+            | {fail, atom(), binary(), [map()]}
+            | {skip, atom(), binary()}
+        ],
+        float()
+    }.
 run_class_tests(ClassName, Which) ->
     {AllTests, FlatMethods, Module} = class_test_plan(ClassName),
     TestMethods =
@@ -473,7 +490,8 @@ decode_beam_error(Other) ->
 -doc """
 Format a BEAM stacktrace for display in test failure messages.
 
-Filters out internal test runner and OTP frames; shows up to 3 user frames.
+Filters out internal test runner and OTP frames; shows up to 3 user frames
+(all of them with `beamtalk test --full-traces`).
 Error location (innermost frame) is shown first, with callers going outward.
 Returns an empty binary when no relevant frames exist.
 """.
@@ -485,18 +503,62 @@ format_stacktrace(Frames) ->
     %% Keep that order so the error location appears first in output.
     %% When more than 3 frames exist, show the 2 innermost plus the outermost
     %% (test method) so the caller with file/line info is preserved.
-    Filtered = filter_stackframes(Frames),
-    Relevant = select_frames(Filtered),
-    case Relevant of
+    case trace_entries(Frames) of
         [] ->
             <<>>;
-        _ ->
-            Lines = collapse_repeats([
-                iolist_to_binary(format_stackframe(F))
-             || F <- Relevant
-            ]),
+        Entries ->
+            Lines = [entry_line(E) || E <- Entries],
             iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
     end.
+
+-doc """
+The structured form of the frames `format_stacktrace/1` renders (BT-4355).
+
+One map per rendered line, innermost first, with Beamtalk terms only:
+`class`, `selector`, `block` (compiler-lifted block marker), `file` (display
+path or `nil`), `line` (`nil` when unknown) and `repeat` (adjacent identical
+frames collapsed into this one, the `[xN]` marker). Built from the same
+selection and `beamtalk_stack_frame:frame_parts/1` as the text, so the two
+cannot disagree. Raw Erlang module/function/arity are never included.
+""".
+-spec stack_frames(list()) -> [map()].
+stack_frames(Frames) ->
+    [entry_frame(E) || E <- trace_entries(Frames)].
+
+-doc """
+Whether the full filtered trace (not the 3-frame default) is wanted.
+Set by `beamtalk test --full-traces` through the `beamtalk_stdlib`
+application environment, so it reaches test worker processes.
+""".
+-spec full_traces() -> boolean().
+full_traces() ->
+    application:get_env(beamtalk_stdlib, full_traces, false) =:= true.
+
+-doc """
+Filtered, selected and repeat-collapsed frames as `{Line, Parts, Count}`,
+where Line is the rendered text of the frame.
+""".
+-spec trace_entries(list()) -> [{binary(), map(), pos_integer()}].
+trace_entries(Frames) ->
+    Relevant = select_frames(filter_stackframes(Frames)),
+    collapse_repeats([
+        begin
+            Wrapped = beamtalk_stack_frame:wrap_frame(F),
+            {
+                beamtalk_stack_frame:format_frame(Wrapped),
+                beamtalk_stack_frame:frame_parts(Wrapped),
+                1
+            }
+        end
+     || F <- Relevant
+    ]).
+
+-spec entry_line({binary(), map(), pos_integer()}) -> binary().
+entry_line({Line, _Parts, 1}) -> Line;
+entry_line({Line, _Parts, N}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+
+-spec entry_frame({binary(), map(), pos_integer()}) -> map().
+entry_frame({_Line, Parts, N}) -> Parts#{repeat => N}.
 
 -doc """
 Collapse adjacent identical rendered frame lines into one.
@@ -506,17 +568,13 @@ Distinct frames that still render identically (a recursive send such as
 the same `Class>>selector (file)` line twice. The repeat count is kept, in
 Beamtalk terms, as a trailing `[xN]` marker.
 """.
--spec collapse_repeats([binary()]) -> [binary()].
+-spec collapse_repeats([{binary(), map(), pos_integer()}]) ->
+    [{binary(), map(), pos_integer()}].
 collapse_repeats([]) ->
     [];
-collapse_repeats([Line | Rest]) ->
-    {Same, Others} = lists:splitwith(fun(L) -> L =:= Line end, Rest),
-    Rendered =
-        case Same of
-            [] -> Line;
-            _ -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, length(Same) + 1]))
-        end,
-    [Rendered | collapse_repeats(Others)].
+collapse_repeats([{Line, Parts, N} | Rest]) ->
+    {Same, Others} = lists:splitwith(fun({L, _, _}) -> L =:= Line end, Rest),
+    [{Line, Parts, N + length(Same)} | collapse_repeats(Others)].
 
 -doc """
 Format a single raw BEAM stacktrace frame for display. Delegates to the shared
@@ -552,11 +610,18 @@ When 3 or fewer frames exist, return all of them. When more than 3,
 keep the 2 innermost (error site) plus the outermost (test method)
 so the caller's file/line info is preserved rather than being truncated
 and replaced by a synthetic frame from ensure_test_context/4.
+With `--full-traces` (`full_traces/0`) every filtered frame is kept.
 """.
 -spec select_frames(list()) -> list().
-select_frames(Frames) when length(Frames) =< 3 ->
+select_frames(Frames) ->
+    select_frames(Frames, full_traces()).
+
+-spec select_frames(list(), boolean()) -> list().
+select_frames(Frames, true) ->
     Frames;
-select_frames([First, Second | _] = Frames) ->
+select_frames(Frames, false) when length(Frames) =< 3 ->
+    Frames;
+select_frames([First, Second | _] = Frames, false) ->
     [First, Second, lists:last(Frames)].
 
 -doc "Format a test failure message combining error description and stacktrace.".
@@ -592,20 +657,10 @@ always sees where the failing test is defined.
 """.
 -spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
 ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    %% Check the rendered frames (after filter + select), not the full stack.
-    %% A helper from the same module doesn't count — we need the actual
-    %% test method frame to be visible.
-    Rendered = select_frames(filter_stackframes(Stacktrace)),
-    HasTestFrame = lists:any(
-        fun({Mod, Fun, _Arity, _Loc}) ->
-            Mod =:= Module andalso Fun =:= MethodName
-        end,
-        Rendered
-    ),
-    case HasTestFrame of
-        true ->
-            FailMsg;
+    case lacks_test_frame(Module, MethodName, Stacktrace) of
         false ->
+            FailMsg;
+        true ->
             %% Rendered through format_stackframe/1 with an empty location so
             %% the synthetic line gets the same `beamtalk_source` file fallback
             %% (and path rules) as any other frame.
@@ -613,6 +668,61 @@ ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
             Context = iolist_to_binary(["\n  at ", Line]),
             inject_test_context(FailMsg, Context)
     end.
+
+-doc """
+True when the test method's own frame is not among the rendered frames.
+Checks the rendered frames (after filter + select), not the full stack: a
+helper from the same module doesn't count.
+""".
+-spec lacks_test_frame(atom(), atom(), list()) -> boolean().
+lacks_test_frame(Module, MethodName, Stacktrace) ->
+    Rendered = select_frames(filter_stackframes(Stacktrace)),
+    not lists:any(
+        fun({Mod, Fun, _Arity, _Loc}) ->
+            Mod =:= Module andalso Fun =:= MethodName
+        end,
+        Rendered
+    ).
+
+-doc """
+Build a failed-test result: the message with its test context line, plus the
+structured frames matching the rendered `at` lines (including the synthetic
+test-method frame when `ensure_test_context/4` adds one).
+""".
+-spec test_failure(atom(), binary(), atom(), list()) ->
+    {fail, atom(), binary(), [map()]}.
+test_failure(MethodName, FailMsg, Module, Stacktrace) ->
+    Msg = ensure_test_context(FailMsg, Module, MethodName, Stacktrace),
+    Frames0 = stack_frames(Stacktrace),
+    Frames =
+        case lacks_test_frame(Module, MethodName, Stacktrace) of
+            false -> Frames0;
+            true -> Frames0 ++ [synthetic_frame(Module, MethodName)]
+        end,
+    {fail, MethodName, Msg, Frames}.
+
+-doc """
+Like `test_failure/4` for failures whose message carries no rendered
+stacktrace (the `undef` / does-not-understand text): the only `at` line is the
+synthetic test-method one, so the structured frames hold at most that frame.
+Keeps `frames[i]` aligned with the i-th `at` line.
+""".
+-spec test_failure_untraced(atom(), binary(), atom(), list()) ->
+    {fail, atom(), binary(), [map()]}.
+test_failure_untraced(MethodName, FailMsg, Module, Stacktrace) ->
+    Msg = ensure_test_context(FailMsg, Module, MethodName, Stacktrace),
+    Frames =
+        case lacks_test_frame(Module, MethodName, Stacktrace) of
+            false -> [];
+            true -> [synthetic_frame(Module, MethodName)]
+        end,
+    {fail, MethodName, Msg, Frames}.
+
+-doc "Structured form of the synthetic test-method frame (empty location).".
+-spec synthetic_frame(atom(), atom()) -> map().
+synthetic_frame(Module, MethodName) ->
+    Synthetic = beamtalk_stack_frame:wrap_frame({Module, MethodName, 0, []}),
+    (beamtalk_stack_frame:frame_parts(Synthetic))#{repeat => 1}.
 
 -doc """
 Insert the test context line after existing stacktrace frames.
@@ -739,7 +849,10 @@ Creates fresh instance, runs lifecycle, returns pass/fail.
 tearDown always runs, even if the test fails.
 """.
 -spec run_test_method(atom(), atom(), atom(), map()) ->
-    {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
+    {pass, atom()}
+    | {fail, atom(), binary()}
+    | {fail, atom(), binary(), [map()]}
+    | {skip, atom(), binary()}.
 run_test_method(ClassName, Module, MethodName, FlatMethods) ->
     run_test_method(ClassName, Module, MethodName, FlatMethods, nil).
 
@@ -750,7 +863,10 @@ Like run_test_method/4 but injects `suiteFixture => SuiteFixture` into the
 instance map after setUp, so test methods can access `self.suiteFixture`.
 """.
 -spec run_test_method(atom(), atom(), atom(), map(), term()) ->
-    {pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}.
+    {pass, atom()}
+    | {fail, atom(), binary()}
+    | {fail, atom(), binary(), [map()]}
+    | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
     %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
     %% worker, no home entry
@@ -795,11 +911,11 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg}:TestST0 ->
                     ST0 = format_stacktrace(TestST0),
                     FailMsg0 = <<(beamtalk_text:to_binary(AssertMsg))/binary, ST0/binary>>,
-                    {fail, MethodName, ensure_test_context(FailMsg0, Module, MethodName, TestST0)};
+                    test_failure(MethodName, FailMsg0, Module, TestST0);
                 error:#beamtalk_error{message = ErrMsg}:TestST1 ->
                     ST1 = format_stacktrace(TestST1),
                     FailMsg1 = <<(beamtalk_text:to_binary(ErrMsg))/binary, ST1/binary>>,
-                    {fail, MethodName, ensure_test_context(FailMsg1, Module, MethodName, TestST1)};
+                    test_failure(MethodName, FailMsg1, Module, TestST1);
                 error:undef:TestST ->
                     #{error := #beamtalk_error{message = FailMsg}} =
                         beamtalk_exception_handler:ensure_wrapped(
@@ -807,16 +923,17 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                         ),
                     %% BT-4173: message is a tagged String — unwrap like the
                     %% sibling clauses (ensure_test_context renders bytes).
-                    {fail, MethodName,
-                        ensure_test_context(
-                            beamtalk_text:to_binary(FailMsg), Module, MethodName, TestST
-                        )};
+                    %% The DNU text has no rendered trace, so its structured
+                    %% frames must not carry one either (frames[i] <-> "at" line i).
+                    test_failure_untraced(
+                        MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
+                    );
                 error:TestReason:TestST ->
                     FailMsg = format_test_error(error, TestReason, TestST),
-                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)};
+                    test_failure(MethodName, FailMsg, Module, TestST);
                 TestClass:TestReason:TestST ->
                     FailMsg = format_test_error(TestClass, TestReason, TestST),
-                    {fail, MethodName, ensure_test_context(FailMsg, Module, MethodName, TestST)}
+                    test_failure(MethodName, FailMsg, Module, TestST)
             after
                 case HasTearDown of
                     true ->
@@ -909,9 +1026,21 @@ If setUpOnce fails, all test methods are failed with "setUpOnce failed: ..." mes
     atom(),
     map(),
     [atom()],
-    fun((term()) -> [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}])
+    fun(
+        (term()) -> [
+            {pass, atom()}
+            | {fail, atom(), binary()}
+            | {fail, atom(), binary(), [map()]}
+            | {skip, atom(), binary()}
+        ]
+    )
 ) ->
-    [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}].
+    [
+        {pass, atom()}
+        | {fail, atom(), binary()}
+        | {fail, atom(), binary(), [map()]}
+        | {skip, atom(), binary()}
+    ].
 run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
     {HasSetUpOnce, HasTearDownOnce} = check_suite_lifecycle_methods(Module, FlatMethods),
     case HasSetUpOnce orelse HasTearDownOnce of
@@ -967,7 +1096,13 @@ run_teardown_once(_Module, _Fixture, false) ->
 
 -doc "Format test results for REPL display.".
 -spec format_results(
-    [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
+    [
+        {pass, atom()}
+        | {fail, atom(), binary()}
+        | {fail, atom(), binary(), [map()]}
+        | {skip, atom(), binary()}
+    ],
+    float()
 ) -> binary().
 format_results(Results, Duration) ->
     Total = length(Results),
@@ -992,7 +1127,7 @@ format_results(Results, Duration) ->
                 ),
                 Failures = [
                     io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
-                 || {fail, M, Msg} <- Results
+                 || {M, Msg} <- failures(Results)
                 ],
                 [Summary, "\n\n" | Failures];
             _ ->
@@ -1002,15 +1137,34 @@ format_results(Results, Duration) ->
                 ),
                 Failures = [
                     io_lib:format("  FAIL: ~s\n    ~s\n", [M, Msg])
-                 || {fail, M, Msg} <- Results
+                 || {M, Msg} <- failures(Results)
                 ],
                 [Summary, "\n\n" | Failures]
         end,
     unicode:characters_to_binary(IoList).
 
+-doc "Failed results as `{Name, Message}`, whether or not they carry frames.".
+-spec failures(list()) -> [{atom(), binary()}].
+failures(Results) ->
+    lists:filtermap(
+        fun
+            ({fail, M, Msg}) -> {true, {M, Msg}};
+            ({fail, M, Msg, _Frames}) -> {true, {M, Msg}};
+            (_) -> false
+        end,
+        Results
+    ).
+
 -doc "Convert raw test results to structured map.".
 -spec structure_results(
-    atom(), [{pass, atom()} | {fail, atom(), binary()} | {skip, atom(), binary()}], float()
+    atom(),
+    [
+        {pass, atom()}
+        | {fail, atom(), binary()}
+        | {fail, atom(), binary(), [map()]}
+        | {skip, atom(), binary()}
+    ],
+    float()
 ) ->
     #{
         class := atom(),
@@ -1025,6 +1179,7 @@ format_results(Results, Duration) ->
                 class := atom(),
                 status := pass | fail | skip,
                 error => binary(),
+                frames => [map()],
                 reason => binary()
             }
         ]
@@ -1041,7 +1196,9 @@ structure_results(ClassName, Results, Duration) ->
             ({skip, Name, Reason}) ->
                 #{name => Name, class => ClassName, status => skip, reason => Reason};
             ({fail, Name, Msg}) ->
-                #{name => Name, class => ClassName, status => fail, error => Msg}
+                #{name => Name, class => ClassName, status => fail, error => Msg};
+            ({fail, Name, Msg, Frames}) ->
+                #{name => Name, class => ClassName, status => fail, error => Msg, frames => Frames}
         end,
         Results
     ),

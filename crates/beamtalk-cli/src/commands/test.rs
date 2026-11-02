@@ -988,6 +988,9 @@ struct TestPipeline {
     package_ebin_dirs: Vec<Utf8PathBuf>,
     /// Max concurrent test classes (0 = auto, 1 = sequential).
     jobs: usize,
+    /// BT-4355: render the complete filtered stack trace for each failure
+    /// instead of the 3-frame default (`beamtalk test --full-traces`).
+    full_traces: bool,
     /// ADR 0072: Hex dependency names that need OTP app startup before tests.
     hex_dep_names: Vec<String>,
     /// Native `EUnit` test module names (modules ending in `_test` or `_tests`).
@@ -1038,7 +1041,13 @@ impl TestPipeline {
 /// `jobs` controls test class concurrency: `0` = auto (scheduler count),
 /// `1` = sequential, `N` = up to N concurrent classes.
 #[instrument(skip_all)]
-pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize, quiet: bool) -> Result<()> {
+pub fn run_tests(
+    path: &str,
+    warnings_as_errors: bool,
+    jobs: usize,
+    quiet: bool,
+    full_traces: bool,
+) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
 
@@ -1068,6 +1077,7 @@ pub fn run_tests(path: &str, warnings_as_errors: bool, jobs: usize, quiet: bool)
         warnings_as_errors,
         jobs,
     )?;
+    pipeline.full_traces = full_traces;
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
 
@@ -1440,6 +1450,7 @@ fn initialize_pipeline(
         package_modules: Vec::new(),
         package_ebin_dirs: Vec::new(),
         jobs,
+        full_traces: false,
         hex_dep_names: Vec::new(),
         native_test_modules: Vec::new(),
     })
@@ -2173,6 +2184,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let eval_cmd = format!(
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         application:set_env(beamtalk_stdlib, full_traces, {full_traces}), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\
@@ -2181,7 +2193,8 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
          io:format(\"~s~n\", [JSON]), \
          {cover_epilogue}\
          init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
-        jobs = pipeline.jobs
+        jobs = pipeline.jobs,
+        full_traces = pipeline.full_traces
     );
 
     let mut cmd = build_beam_test_command(pipeline, &pa_args, &eval_cmd);
