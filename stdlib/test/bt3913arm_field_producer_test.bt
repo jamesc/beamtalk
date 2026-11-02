@@ -37,3 +37,7 @@ TestCase subclass: Bt3913ArmFieldProducerTest
     self assert: (Bt3913ArmFieldProducerActor spawn viaValue: false) equals: #[0, 0]
     self assert: (Bt3913ArmFieldProducerActor spawn viaOnDo: false) equals: #[0, 0]
     self assert: (Bt3913ArmFieldProducerActor spawn viaIf: false) equals: #[0, 0]
+
+  testInjectInALoopBodyArmKeepsTheLocalAndTheField =>
+    self assert: (Bt3913ArmFieldProducerActor spawn viaInjectInLoop: true) equals: #[6, 3]
+    self assert: (Bt3913ArmFieldProducerActor spawn viaInjectInLoop: false) equals: #[0, 0]
