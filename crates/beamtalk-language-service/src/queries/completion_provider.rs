@@ -2078,6 +2078,34 @@ mod tests {
         );
     }
     #[test]
+    fn erlang_bif_module_suggests_multi_arity_variants() {
+        // BT-4145: multi-arity BIFs must offer every real arity, not just /1.
+        let source = "Erlang erlang ";
+        let completions = completions_at(source, Position::new(0, 14));
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        for (selector, detail) in [
+            ("integer_to_binary:", "erlang:integer_to_binary/1"),
+            ("integer_to_binary:with:", "erlang:integer_to_binary/2"),
+            ("atom_to_binary:with:", "erlang:atom_to_binary/2"),
+            ("binary_to_atom:with:", "erlang:binary_to_atom/2"),
+            ("binary_to_list:with:with:", "erlang:binary_to_list/3"),
+            ("spawn:with:", "erlang:spawn/2"),
+            ("spawn:with:with:with:", "erlang:spawn/4"),
+        ] {
+            let c = completions.iter().find(|c| c.label == selector);
+            assert!(
+                c.is_some(),
+                "Should suggest '{selector}' from erlang. Got: {labels:?}"
+            );
+            assert_eq!(c.unwrap().detail.as_deref(), Some(detail));
+        }
+        // binary_to_list/2 does not exist in OTP (only /1 and /3).
+        assert!(
+            !labels.contains(&"binary_to_list:with:"),
+            "binary_to_list/2 is not a real export"
+        );
+    }
+    #[test]
     fn erlang_completions_deduplicate_overloaded_selectors() {
         // lists has both sort/1 and sort/2 — the selector "sort:" should appear,
         // and "sort:with:" should also appear, but no duplicate "sort:"

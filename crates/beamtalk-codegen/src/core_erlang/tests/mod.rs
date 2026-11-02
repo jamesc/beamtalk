@@ -123,7 +123,10 @@ pub(crate) fn corpus_files(root: &std::path::Path, dirs: &[&str]) -> Vec<std::pa
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     for dir in dirs {
         files.extend(
+            // Every `.bt`/`.btscript` file, whatever `.gitignore` says:
+            // what the corpus proofs cover must not depend on it (BT-4135).
             beamtalk_core::file_walker::FileWalker::format_files()
+                .respect_gitignore(false)
                 .walk_pathbuf(&root.join(dir))
                 .unwrap_or_else(|e| panic!("walking corpus dir {dir}: {e:?}")),
         );

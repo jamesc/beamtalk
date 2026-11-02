@@ -87,8 +87,9 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
+use beamtalk_core::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use beamtalk_core::semantic_analysis::block_facts::{
-    ClassVarAccesses, HasFieldProbe, class_var_accesses,
+    ClassVarAccesses, class_var_accesses, probe_clause,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -297,7 +298,7 @@ fn check_method_body(
         }
     };
 
-    let mut actors = actor_locals(body, ctx);
+    let mut actors = actor_locals(ctx.hierarchy, body);
     actors.extend(actor_typed_params(
         parameters,
         ctx.hierarchy,
@@ -508,27 +509,9 @@ impl ClassCtx<'_> {
                 receiver: inner,
                 selector: spawn,
                 ..
-            } => self.is_actor_spawn(inner, &spawn.name()).then(to_actor),
+            } => is_actor_spawn(self.hierarchy, inner, &spawn.name()).then(to_actor),
             _ => None,
         }
-    }
-
-    /// `ActorClass spawn` / `spawnWith:`: an instance of an actor. The named
-    /// (`spawnAs:`, ...) and remote (`spawnOn:`, ...) variants answer
-    /// `Result(Self, Error)`, not an actor (`actor.bt`,
-    /// `generated_builtins.rs`); an actor behind `unwrap`/`value` is missed
-    /// (see the module docs).
-    fn is_actor_spawn(&self, receiver: &Expression, selector: &str) -> bool {
-        selector.starts_with("spawn")
-            && !selector.contains("As:")
-            && !selector.contains("as:")
-            && !selector.contains("On:")
-            && !selector.contains("on:")
-            && matches!(
-                receiver.unwrap_parens(),
-                Expression::ClassReference { name, package, .. }
-                    if package.is_none() && self.hierarchy.is_actor_subclass(name.name.as_str())
-            )
     }
 
     /// Shape C: a class-side send that runs in the target class's process.
@@ -572,30 +555,6 @@ impl ClassCtx<'_> {
             }
         })
     }
-}
-
-/// Locals bound to an actor instance (`a := Worker spawn`) anywhere in `body`.
-fn actor_locals(body: &[ExpressionStatement], ctx: &ClassCtx<'_>) -> HashSet<String> {
-    let mut actors = HashSet::new();
-    for stmt in body {
-        walk_expression(&stmt.expression, &mut |e| {
-            let Expression::Assignment { target, value, .. } = e else {
-                return;
-            };
-            let Expression::Identifier(local) = &**target else {
-                return;
-            };
-            if let Expression::MessageSend {
-                receiver, selector, ..
-            } = value.unwrap_parens()
-            {
-                if ctx.is_actor_spawn(receiver, &selector.name()) {
-                    actors.insert(local.name.to_string());
-                }
-            }
-        });
-    }
-    actors
 }
 
 /// Blocks carried one level inside a collection-literal argument:
@@ -697,23 +656,6 @@ fn is_self(expr: &Expression) -> bool {
 /// Returns `true` if `expr` is `super`.
 fn is_super(expr: &Expression) -> bool {
     matches!(expr.unwrap_parens(), Expression::Super(_))
-}
-
-/// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
-/// symbol, `` `hasField:` ``.
-fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> String {
-    let symbols: Vec<String> = probes
-        .iter()
-        .filter_map(|p| match p {
-            HasFieldProbe::Symbol(name) => Some(format!("#{name}")),
-            HasFieldProbe::Computed => None,
-        })
-        .collect();
-    match symbols.as_slice() {
-        [] => "`hasField:`".to_string(),
-        [one] => format!("`hasField: {one}`"),
-        many => format!("`hasField:` ({})", many.join(", ")),
-    }
 }
 
 fn writes_diagnostic(

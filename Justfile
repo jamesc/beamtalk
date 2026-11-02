@@ -1343,6 +1343,22 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
+    # 2b. Verify the stdlib class beams (bt@*.beam) were installed, and all of
+    # them: they come from `build-stdlib`'s output dir, not rebar3's _build
+    # (scripts/install-otp-apps.sh, BT-4119). A source count of 0 means the
+    # stdlib build no longer writes where install-otp-apps.sh reads.
+    SRC_CLASS_COUNT=$(find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | wc -l)
+    INSTALLED_CLASS_COUNT=$(find "$STDLIB_DIR" -maxdepth 1 -name 'bt@*.beam' | wc -l)
+    if [ "$SRC_CLASS_COUNT" -eq 0 ]; then
+        echo "❌ No bt@*.beam in runtime/apps/beamtalk_stdlib/ebin after build-stdlib — has its output dir moved?"
+        exit 1
+    fi
+    if [ "$INSTALLED_CLASS_COUNT" -ne "$SRC_CLASS_COUNT" ]; then
+        echo "❌ Installed $INSTALLED_CLASS_COUNT stdlib class beams, expected $SRC_CLASS_COUNT"
+        exit 1
+    fi
+    echo "✅ All $INSTALLED_CLASS_COUNT stdlib class beams installed"
+
     # 3. Verify runtime include headers are present
     test -f "$TMPDIR/lib/beamtalk/lib/beamtalk_runtime/include/beamtalk.hrl"
     echo "✅ Runtime include headers present"
@@ -1350,9 +1366,21 @@ test-install: build-release build-stdlib
     # 4. Scaffold a project, add a class, and run it end-to-end
     (cd "$TMPDIR" && "$TMPDIR/bin/beamtalk" new smoke_project)
     echo "✅ beamtalk new smoke_project OK"
-    printf 'Object subclass: SmokeTest\n  class run => 21 + 21\n' > "$TMPDIR/smoke_project/src/SmokeTest.bt"
-    (cd "$TMPDIR/smoke_project" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
-    echo "✅ beamtalk run SmokeTest>>run OK"
+    # Dictionary, List (inject:into:) and Console are stdlib classes, loaded
+    # only from the installed bt@stdlib@* beams — not just `21 + 21`, which
+    # a stdlib-less install also runs.
+    printf '%s\n' \
+        'Object subclass: SmokeTest' \
+        '  class run =>' \
+        '    d := (Dictionary new at: #a put: 20) at: #b put: 22' \
+        '    Console printLine: "smoke=" ++ (d values inject: 0 into: [:acc :x | acc + x]) printString' \
+        > "$TMPDIR/smoke_project/src/SmokeTest.bt"
+    SMOKE_OUT=$(cd "$TMPDIR/smoke_project" && "$TMPDIR/bin/beamtalk" run SmokeTest run)
+    if ! grep -qx 'smoke=42' <<<"$SMOKE_OUT"; then
+        echo "❌ beamtalk run SmokeTest>>run printed '$SMOKE_OUT', expected 'smoke=42'"
+        exit 1
+    fi
+    echo "✅ beamtalk run SmokeTest>>run OK (stdlib classes load)"
 
     # 5. Verify native Erlang with -include_lib compiles in installed layout
     mkdir -p "$TMPDIR/smoke_project/native"
@@ -2325,29 +2353,9 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 target/release/beamtalk-mcp "${PREFIX}/bin/beamtalk-mcp"
     install -m 755 target/release/beamtalk-exec "${PREFIX}/bin/beamtalk-exec"
 
-    # OTP application directories (discovered from rebar3 build output)
-    OTP_APP_COUNT=0
-    for ebin_dir in runtime/_build/default/lib/*/ebin; do
-        app_dir="$(dirname "${ebin_dir}")"
-        app="$(basename "${app_dir}")"
-        if ! ls "${ebin_dir}"/*.beam 1>/dev/null 2>&1; then
-            continue
-        fi
-        install -d "${PREFIX}/lib/beamtalk/lib/${app}/ebin"
-        install -m 644 "${ebin_dir}"/*.beam "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
-        if ls "${ebin_dir}"/*.app 1>/dev/null 2>&1; then
-            install -m 644 "${ebin_dir}"/*.app "${PREFIX}/lib/beamtalk/lib/${app}/ebin/"
-        fi
-        # Copy priv/ directory if present (e.g. beamtalk_workspace browser UI)
-        if [ -d "${app_dir}/priv" ]; then
-            cp -rL "${app_dir}/priv" "${PREFIX}/lib/beamtalk/lib/${app}/priv"
-        fi
-        OTP_APP_COUNT=$((OTP_APP_COUNT + 1))
-    done
-    if [ "${OTP_APP_COUNT}" -eq 0 ]; then
-        echo "❌ No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."
-        exit 1
-    fi
+    # OTP application directories (rebar3 build output, plus the stdlib class
+    # beams from `build-stdlib`'s own output dir — see the script's header)
+    scripts/install-otp-apps.sh "${PREFIX}/lib/beamtalk/lib"
 
     # OTP application include directories (for native Erlang compilation)
     for app in beamtalk_runtime; do
@@ -2477,6 +2485,8 @@ dist: build-release build-stdlib
     echo "   VS Code extension: beamtalk-*.vsix"
 
 # Create a distributable install in dist/ (Windows)
+# Needs Git for Windows' `bash` on PATH (as the Windows release job has) for
+# scripts/install-otp-apps.sh, the one shared copy of the OTP-app install rule.
 [windows]
 dist: build-release build-stdlib
     @echo "📦 Creating distribution in dist/..."
@@ -2487,7 +2497,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-lsp.exe dist/bin/
     Copy-Item target/release/beamtalk-mcp.exe dist/bin/
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
-    $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; $appRoot = $ebinDir.Parent.FullName; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop; if (Get-ChildItem "$($ebinDir.FullName)/*.app" -ErrorAction SilentlyContinue) { Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop }; $privSrc = Join-Path $appRoot "priv"; if (Test-Path $privSrc) { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/priv" | Out-Null; Copy-Item "$privSrc/*" "dist/lib/beamtalk/lib/$app/priv/" -Recurse }; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
+    bash scripts/install-otp-apps.sh dist/lib/beamtalk/lib; if ($LASTEXITCODE -ne 0) { Write-Error "Installing OTP apps into dist/ failed."; exit 1 }
     if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
     if (Test-Path "stdlib/src") { $stdlibRoot = (Resolve-Path "stdlib/src").Path; foreach ($bt in (Get-ChildItem -Path "stdlib/src" -Recurse -File -Filter *.bt)) { $rel = $bt.FullName.Substring($stdlibRoot.Length).TrimStart('\', '/'); $dest = Join-Path "dist/share/beamtalk/stdlib/src" $rel; New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null; Copy-Item $bt.FullName $dest } }
     just dist-vscode
