@@ -45,9 +45,9 @@ serde_json.workspace = true
 # (non-fatal by design), matching the tracing usage already established in
 # `beamtalk-cli`/`beamtalk-lsp`.
 tracing.workspace = true
-# why: BT-4135 — `file_walker::FileWalker` honours `.gitignore` files so a
-# project walk (`beamtalk lint`/`build`/`fmt`/`test`, LSP preload) skips
-# ignored trees such as nested `.worktrees/` checkouts. Only the crate's
+# why: BT-4135 — `file_walker::FileWalker` can honour `.gitignore` files, so
+# `beamtalk lint`/`fmt` and MCP lint skip ignored trees such as nested
+# `.worktrees/` checkouts (build, test, doc and LSP preload deliberately don't). Only the crate's
 # `gitignore::Gitignore` matcher is used (the walk itself stays ours); every
 # transitive dependency (globset, regex-automata, walkdir, ...) was already
 # in the lockfile, so this adds a single crate rather than re-implementing
