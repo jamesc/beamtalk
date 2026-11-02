@@ -56,6 +56,89 @@ name or line 1 — as long as the compilation unit had a source path (any
 `.bt` file built via `beamtalk build`/`beamtalk test`; REPL-evaluated code
 with no backing file falls back to a bare line number, no file).
 
+## Reading Beamtalk Stack Traces
+
+Test failures and `Exception>>stackTrace` show Beamtalk-level frames only.
+Both go through one renderer, `beamtalk_stack_frame:format_frame/1`, so the
+same frame prints the same way in both places. Raw Erlang
+`module:function/arity` text is never emitted, and arity is never shown.
+
+```text
+FAIL testParse
+  Expected 3, got 4
+  at Parser>>readToken (parser.bt:42)
+  at Parser>>parse: [block] (parser.bt:31)
+  at Parser>>parse: (parser.bt:28)
+  at ParserTest>>testParse (parser_test.bt:12)
+```
+
+### Frame format
+
+Each frame is `Class>>selector [block] (file:line)`:
+
+- **Order is innermost-first.** The first line is where the error was raised;
+  each following line is its caller; the last is the outermost caller (for a
+  test failure, the test method).
+- **Class** is the Beamtalk class that owns the frame. If the module is not
+  mapped to a class, the module name is shown instead; `?` if neither is known.
+- **`[block]`** marks a compiler-lifted block (a closure body or loop body)
+  inside the named method, so `Parser>>parse: [block]` means "inside a block
+  in `parse:`", not a separate method.
+- **File** comes from the frame itself, falling back to the module's
+  `beamtalk_source` attribute (via `beamtalk_reflection:source_file_from_module/1`).
+  Stdlib frames show the file basename only. Other absolute paths are shown
+  relative to the current directory (basename if outside it).
+- **Line** is the `.bt` line of the function head or message-send call site.
+  Block and loop call sites carry real lines too (BT-4356).
+- **File with no line**, e.g. `Integer>>timesRepeat: (integer.bt)`: the file is
+  known but the frame has no usable line (unknown or 0). The frame still
+  identifies the class and selector; just don't expect a line to jump to.
+  Frames with neither file nor line print as `Class>>selector`.
+
+### Test failure traces
+
+Test failure output filters out runtime, OTP and test-runner frames and keeps
+only Beamtalk user and stdlib frames, then applies these rules:
+
+- **Default cap of 3 frames.** If more than 3 frames remain, the output keeps
+  the 2 innermost frames (the error site) plus the outermost frame (the test
+  method), so the caller's file and line are never truncated away. Frames in
+  between are dropped. With 3 or fewer, all are shown.
+- **`beamtalk test --full-traces`** disables the cap and prints the complete
+  filtered trace. Filtering of internal frames still applies.
+- **Repeats are collapsed.** Adjacent identical lines are merged with a
+  trailing `[xN]`, e.g. a recursive send whose frames render identically:
+
+  ```text
+    at Integer>>timesRepeat: [x2]
+    at CounterTest>>testLoop (counter_test.bt:3)
+  ```
+
+- **Synthetic test-method line.** The VM stacktrace depth is limited, so the
+  test method's own frame can be missing. When it is not among the rendered
+  frames, a final `at Class>>testMethod (file)` line is appended so you always
+  see where the failing test lives. This line has no line number (the file
+  comes from the `beamtalk_source` fallback).
+- **setUp failures carry no frames**, so there is no `--full-traces` detail
+  for them.
+
+The `beamtalk test` runner also builds a structured `frames` list in each
+failed `TestResult` JSON (`class`, `selector`, `block`, `file`, `line`,
+`repeat`), index-aligned with the `at` lines and built from the same parts as
+the text. Nothing consumes the `frames` key yet; the text output is the
+supported interface.
+
+### `Exception>>stackTrace`
+
+```beamtalk
+[1 / 0] on: Exception do: [:e | e stackTrace first printString]
+```
+
+`printString` on a `StackFrame` uses the same renderer, so it shows the same
+`Class>>selector [block] (file:line)` text as test failures. `stackTrace`
+returns the full frame list; it is not capped or collapsed. REPL-evaluated
+code with no backing file shows no file in its frames.
+
 ## Test Failures
 
 ```bash
