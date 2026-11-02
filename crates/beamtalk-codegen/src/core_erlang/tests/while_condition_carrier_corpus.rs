@@ -590,13 +590,13 @@ fn check_field_context(ctx: &Context) -> Vec<String> {
                 "{} / {}: broken: {e}\n{}",
                 ctx.name, case.name, case.source
             )),
-            // The Phase 0 check rejects outer-local writes a loop does not
-            // thread (a loop's in a position no construct threads,
-            // `DENY_SET`) and, in a class method, any assignment in a
-            // condition block (BT-3782: a class-method condition has no state
-            // effect, so its loop threads nothing out of it, class-variable
-            // writes included). An instance-side row that writes only the
-            // field is never one of them.
+            // The position check rejects outer-local writes a loop does not
+            // thread (a loop's in a position no producer lowers) and, in a
+            // class method, any assignment in a condition block (BT-3782: a
+            // class-method condition has no state effect, so its loop threads
+            // nothing out of it, class-variable writes included). An
+            // instance-side row that writes only the field is never one of
+            // them.
             (Ok(FieldCodegen::Phase0Rejected), _)
                 if !ctx.class_side && !case.source.contains("n := ") =>
             {

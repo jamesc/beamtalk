@@ -201,8 +201,8 @@ rejects". Enumerated from the §6 validator (`validators/local_threading.rs`
 - ADR 0131: the `LocalRebind`/`ConstructTuple`/`BranchArm`/`MethodBody`
   nodes, the `threaded_locals_of` recognizer and the §2 per-frame lowering
   rule are the only way an outer-local write reaches its frame. Its Phase 0
-  position diagnostic (`DENY_SET`/`ALLOW_SET`) is still in force (BT-3841);
-  552 of 733 measured statement shapes answer wrong with it bypassed.
+  position diagnostic (`DENY_SET`/`ALLOW_SET`) was retired by BT-3913; the
+  733-shape oracle reports zero silent drops.
 - Late binding: a `self` send that is late-bound today must stay late-bound
   whatever block it carries. A send that reaches a subclass override when
   the block is pure and the lexical method when the block writes a local is
@@ -445,11 +445,11 @@ value:   element(1, CT)
 The `LocalRebind`s are lowered by the enclosing frame under ADR 0131 §2's
 table, unchanged, so the send works wherever ADR 0131 lets a producer sit.
 ADR 0131 §1a's sibling-read rule applies: `t + (Twice twice: [t := t + 1])`
-reads `t` before the send's rebind. **The producer is gated by the same
-position allow-set as every other producer** (`ALLOW_SET`,
-`validators/local_threading.rs`) until BT-3841 retires it: a position the
-allow-set rejects for a loop is rejected for a threaded send too, so this
-ADR adds no position that ADR 0131's measurement has not shown right.
+reads `t` before the send's rebind. **The producer was gated by the same
+position check as every other producer** (`validators/local_threading.rs`)
+until BT-3913 retired it: a position the check rejects for a loop is
+rejected for a threaded send too, so this ADR adds no position that ADR
+0131's measurement has not shown right.
 
 The pack, per caller kind:
 

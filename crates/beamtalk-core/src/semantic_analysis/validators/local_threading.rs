@@ -30,18 +30,18 @@
 //!   `value`) is reported at the assignment, naming the shape ([`Escape`]),
 //!   in every context, the REPL root included (BT-3858). Reads of captured
 //!   variables and `^` inside an escaping block are unaffected.
-//! - **The Phase 0 allow-set** ([`DiagnosticCategory::UnmigratedLocalThreading`],
-//!   still needed: BT-3751 measured 552 of 733 rejected statement shapes still
-//!   dropping their writes silently and 43 failing erlc with it bypassed, so
-//!   BT-3841 retires it as producers land). A local-threading construct
-//!   ([`local_threading_construct`], of a family threaded today) whose
-//!   threaded set ([`construct_outer_local_writes`], the same recognizer and
-//!   set codegen's `threaded_locals_of` reads) is not empty
-//!   is accepted as a statement unless [`DENY_SET`] lists the statement
-//!   shape (BT-3753), and otherwise only in the
-//!   `(construct, position, context)` combinations listed in [`ALLOW_SET`]:
-//!   the ones that answer right today. Anywhere else it is an error naming the
-//!   construct, the position and BT-3743.
+//! - **The retired Phase 0 position check**
+//!   ([`DiagnosticCategory::UnmigratedLocalThreading`], retired by BT-3913:
+//!   ADR 0133 Phase 3 lowered every statement shape through frames, and the
+//!   733-shape oracle reports zero silent drops and zero `erlc` failures).
+//!   A local-threading construct ([`local_threading_construct`], of a family
+//!   threaded today) whose threaded set ([`construct_outer_local_writes`],
+//!   the same recognizer and set codegen's `threaded_locals_of` reads) is not
+//!   empty is accepted as a statement wherever it sits. At any other
+//!   (operand) position it is accepted only where a local-threading producer
+//!   lowers it — a method-root operand site, a frame site, or a REPL site
+//!   (checked below) — and anywhere else it is an error naming the construct,
+//!   the position and BT-3913.
 //!
 //! Two body-level checks run after the walk: the `ensure:` cleanup that would
 //! read a stale local after a `^` or an error ([`report_nlr_out_of_ensure`],
@@ -71,9 +71,6 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-
-/// The epic that removes the Phase 0 allow-set (ADR 0131).
-const EPIC: &str = "BT-3743";
 
 /// Which kind of method body a construct sits in. Codegen threads outer
 /// locals differently in each (ADR 0131 §2's frame modes), so each passes a
@@ -303,8 +300,7 @@ pub(crate) enum Position {
     /// block (`container` is the outermost): codegen lowers an arm inside a
     /// `do:` body differently from a `do:` inside an arm (BT-3841). `depth` is
     /// the number of enclosing blocks; with `container` and `inner` it names the
-    /// whole chain only up to depth 2, which is why [`RIGHT_STATEMENTS`] rows
-    /// match the depth exactly.
+    /// whole chain only up to depth 2.
     NestedStatement {
         container: Container,
         crosses: bool,
@@ -379,676 +375,7 @@ use ConstructKind::{
     AndOr, BlockValue, CountedLoop, DetectIfNone, DetectIfNoneSearch, Do, Enumeration, Exception,
     IfNil, IfTrue, KeyedDo, ListOp, Lookup, Loop, Satisfy, TryDo,
 };
-use Container::{
-    Arm, CountedLoopBody, DoBody, EvaluatedBlock, Handler, ListOpBody, LoopBody, ProtectedBody,
-};
 use MethodContext::{Actor, Class, Repl, ValueType};
-
-/// One allow-set row: every listed construct kind, in `position`, in every
-/// listed context.
-struct Allowed {
-    kinds: &'static [ConstructKind],
-    position: Position,
-    contexts: &'static [MethodContext],
-}
-
-/// ADR 0131 Phase 0: the `(construct, position, context)` combinations that
-/// thread outer-local writes correctly today, measured with the ADR's probe
-/// matrix (`stdlib/test/adr0131local_rebind_test.bt`,
-/// `tests/repl-protocol/cases/adr0131_local_rebind.btscript`) and the probes
-/// recorded on BT-3745. A statement is accepted unless [`DENY_SET`] lists it.
-/// Every other combination not listed here is a compile error
-/// ([`DiagnosticCategory::UnmigratedLocalThreading`]).
-///
-/// This is the one table: phases 2-4 of ADR 0131 (BT-3749, BT-3738, BT-3750)
-/// grew it as each producer landed. Phase 5a (BT-3751) could not delete the
-/// check (see [`DENY_SET`]); BT-3841 does, once the shapes it rejects are
-/// producers. Add a row only for a combination that answers right today.
-const ALLOW_SET: &[Allowed] = &[
-    // `r := <construct>` in the method body (s3, and the per-context passes of
-    // the ADR's second probe table). A conditional is not here since ADR 0131
-    // Phase 3 (BT-3738): in a class or value-type method it is accepted only as
-    // a local-threading producer (`root_producer_writes`), the one lowering.
-    Allowed {
-        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch],
-        position: Position::AssignValue { nested: false },
-        contexts: &[Class, ValueType],
-    },
-    Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            ListOp,
-            DetectIfNoneSearch,
-            Enumeration,
-            IfTrue,
-            IfNil,
-            AndOr,
-        ],
-        position: Position::AssignValue { nested: false },
-        contexts: &[Actor],
-    },
-    Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            Do,
-            KeyedDo,
-            ListOp,
-            DetectIfNoneSearch,
-            Satisfy,
-            DetectIfNone,
-            Enumeration,
-            IfTrue,
-            IfNil,
-            AndOr,
-            Exception,
-            BlockValue,
-        ],
-        position: Position::AssignValue { nested: false },
-        contexts: &[Repl],
-    },
-    // `r := <list op>` inside a conditional arm or loop body whose block
-    // writes a method-level local (BT-3425, BT-3428, BT-1329).
-    Allowed {
-        kinds: &[ListOp, DetectIfNoneSearch],
-        position: Position::AssignValue { nested: true },
-        contexts: &[Actor],
-    },
-    // `#(a, b) := <list op>` at the REPL (`destructuring.btscript`).
-    Allowed {
-        kinds: &[ListOp, DetectIfNoneSearch],
-        position: Position::DestructureValue,
-        contexts: &[Repl],
-    },
-    // `self.n := <construct>` in the method body (o5, o13).
-    Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            ListOp,
-            DetectIfNoneSearch,
-            Enumeration,
-            IfTrue,
-            IfNil,
-            AndOr,
-        ],
-        position: Position::FieldAssignValue { nested: false },
-        contexts: &[Actor],
-    },
-    // `^<construct>` as a method-body statement (the value only: the method
-    // ends, so its rebinds are dropped).
-    Allowed {
-        kinds: &[Loop, CountedLoop, ListOp, DetectIfNoneSearch, IfTrue],
-        position: Position::ReturnValue { nested: false },
-        contexts: &[Class],
-    },
-    Allowed {
-        kinds: &[
-            Loop,
-            CountedLoop,
-            ListOp,
-            DetectIfNoneSearch,
-            DetectIfNone,
-            Enumeration,
-            IfTrue,
-            IfNil,
-            AndOr,
-            BlockValue,
-        ],
-        position: Position::ReturnValue { nested: false },
-        contexts: &[Actor],
-    },
-    // `^<construct>` inside a block (a non-local return).
-    Allowed {
-        kinds: &[IfTrue, IfNil, AndOr],
-        position: Position::ReturnValue { nested: true },
-        contexts: &[Actor],
-    },
-    // BT-3813: `^xs do: [...]` (and the keyed `do:` forms, BT-3841) inside a
-    // block of a class or value-type method. `do:` is a producer (BT-3796)
-    // and its closed form answers the `{nil, StateAcc}` carrier; a `^` at a
-    // producer site of an arm or loop frame is sequenced by that frame, and
-    // every other `^` lowers its construct through the producer with the
-    // `Discard` tail (codegen's `nlr_return_construct_value`, the `^` ends
-    // the method), so the throw carries `nil`, never the carrier. The
-    // agreement test `every_nested_return_value_the_check_accepts_is_lowered_by_the_producer`
-    // pins that codegen lowers every construct this row accepts that the
-    // core rule (`operand_producer_writes`) names a producer.
-    Allowed {
-        kinds: &[Do, KeyedDo],
-        position: Position::ReturnValue { nested: true },
-        contexts: &[Class, ValueType],
-    },
-];
-
-/// One deny-set row: every listed construct kind, as a statement in every
-/// listed context, of the method body (`container: None`) or nested in a
-/// block whose [`Position::NestedStatement`] fields match (`None` matches
-/// either value). `inner` (the innermost enclosing block's role) is keyed only
-/// by the block-local rows ([`deny_block_local`]); [`deny`] leaves it `None`.
-struct Denied {
-    kinds: &'static [ConstructKind],
-    container: Option<Container>,
-    inner: Option<Container>,
-    crosses: Option<bool>,
-    last: Option<bool>,
-    deep: Option<bool>,
-    stateful: Option<bool>,
-    direct: Option<bool>,
-    contexts: &'static [MethodContext],
-}
-
-impl Denied {
-    fn denies(&self, kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-        let at = match position {
-            Position::Statement => self.container.is_none(),
-            Position::NestedStatement {
-                container,
-                crosses,
-                last,
-                deep,
-                stateful,
-                direct,
-                inner,
-                depth: _,
-            } => {
-                self.container == Some(container)
-                    && self.inner.is_none_or(|i| i == inner)
-                    && self.crosses.is_none_or(|c| c == crosses)
-                    && self.last.is_none_or(|l| l == last)
-                    && self.deep.is_none_or(|d| d == deep)
-                    && self.stateful.is_none_or(|s| s == stateful)
-                    && self.direct.is_none_or(|d| d == direct)
-            }
-            _ => false,
-        };
-        at && self.kinds.contains(&kind) && self.contexts.contains(&context)
-    }
-}
-
-/// Every construct kind.
-const ALL: &[ConstructKind] = &[
-    Loop,
-    CountedLoop,
-    Do,
-    KeyedDo,
-    ListOp,
-    DetectIfNoneSearch,
-    Satisfy,
-    DetectIfNone,
-    Enumeration,
-    IfTrue,
-    IfNil,
-    AndOr,
-    Exception,
-    BlockValue,
-];
-
-/// Every construct kind but the conditionals.
-const ALL_BUT_CONDITIONALS: &[ConstructKind] = &[
-    Loop,
-    CountedLoop,
-    Do,
-    KeyedDo,
-    ListOp,
-    DetectIfNoneSearch,
-    Satisfy,
-    DetectIfNone,
-    Enumeration,
-    Exception,
-    BlockValue,
-];
-
-/// Every construct kind but the conditionals and `on:do:`/`ensure:`.
-const ALL_BUT_CONDITIONALS_AND_HANDLERS: &[ConstructKind] = &[
-    Loop,
-    CountedLoop,
-    Do,
-    KeyedDo,
-    ListOp,
-    DetectIfNoneSearch,
-    Satisfy,
-    DetectIfNone,
-    Enumeration,
-    BlockValue,
-];
-
-/// A [`DENY_SET`] row.
-#[allow(clippy::too_many_arguments)] // one argument per key, so a row fits a line
-const fn deny(
-    container: Option<Container>,
-    crosses: Option<bool>,
-    last: Option<bool>,
-    deep: Option<bool>,
-    stateful: Option<bool>,
-    direct: Option<bool>,
-    contexts: &'static [MethodContext],
-    kinds: &'static [ConstructKind],
-) -> Denied {
-    Denied {
-        kinds,
-        container,
-        inner: None,
-        crosses,
-        last,
-        deep,
-        stateful,
-        direct,
-        contexts,
-    }
-}
-
-/// ADR 0131 Phase 0 (BT-3753): the statement positions that do *not* thread
-/// outer-local writes today. A construct in statement position is accepted
-/// unless a row here lists it; every other position is accepted only if
-/// [`ALLOW_SET`] lists it.
-///
-/// Measured on the real build (debug, BT-3753) with the probe matrix in
-/// `semantic_analysis/tests/adr0131_statement_probes.tsv`, pinned by
-/// `adr0131_statement_probe_pins`: one `t := 0` method per construct kind,
-/// per block role, per method context, per write target. A row lists the
-/// kinds whose probe answered wrong, raised, panicked codegen or failed erlc
-/// for its [`Position::NestedStatement`] facts. Most rows are constructs that
-/// write a local bound outside their innermost block (`crosses: true`); the
-/// [`deny_block_local`] rows at the end are the constructs that write only a
-/// local of that block (`crosses: false`) and still lose it (BT-3776, measured
-/// with every former `gap` line of the probe matrix). The same
-/// phases that grow [`ALLOW_SET`] shrink this table. Phase 5a (BT-3751)
-/// re-measured every `bad`/`over` line with the check bypassed (class, value
-/// and actor methods, run on a BEAM): 552 of the 733 answered wrong, 43 failed
-/// to compile and 138 answered right. BT-3841's first step carved the 138 out
-/// ([`RIGHT_STATEMENTS`]: 134 of them, as 95 position rows; twenty stay rejected, see the pin test's
-/// `KNOWN_OVER_REJECTED`); the 595 that answer wrong or fail stay rejected until
-/// they become producers. The measurement is a checked-in harness
-/// (`just measure-adr0131-statements`, `adr0131_statement_measured.tsv`) and
-/// `adr0131_phase0_agrees_with_measured_answers` asserts, in both directions,
-/// that this table rejects exactly the cells that do not answer right.
-/// Never add a row for a shape an existing test shows answering right.
-#[rustfmt::skip] // one row per line: a measured table
-const DENY_SET: &[Denied] = &[
-    deny(None, None, None, None, None, None, &[Class], &[Enumeration, IfNil, AndOr, BlockValue]),
-    deny(None, None, None, None, None, None, &[ValueType], &[Enumeration, IfNil, AndOr]),
-    deny(Some(Arm), Some(true), None, Some(true), None, None, &[Actor], ALL_BUT_CONDITIONALS),
-    deny(Some(Arm), Some(true), None, Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
-    deny(Some(Arm), Some(true), None, None, None, None, &[Class, ValueType], ALL),
-    deny(Some(Arm), Some(true), Some(false), None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(Arm), Some(true), Some(true), Some(true), None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[CountedLoop, Do, ListOp, Satisfy, Exception]),
-    deny(Some(Arm), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(false), &[Actor], &[Loop, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), Some(true), &[Actor], &[Loop, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Loop, Do, KeyedDo, ListOp, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(CountedLoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
-    deny(Some(DoBody), Some(true), None, Some(false), Some(false), Some(true), &[Actor], &[BlockValue]),
-    deny(Some(DoBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
-    deny(Some(DoBody), Some(true), None, Some(false), None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
-    deny(Some(DoBody), Some(true), None, Some(true), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
-    deny(Some(DoBody), Some(true), None, Some(false), None, Some(false), &[Class, ValueType], &[Loop, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(DoBody), Some(true), None, Some(true), None, Some(false), &[Class, ValueType], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(DoBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(DoBody), Some(true), None, Some(false), None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
-    deny(Some(DoBody), Some(true), None, Some(true), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
-    deny(Some(EvaluatedBlock), Some(true), None, None, None, Some(false), &[Actor], ALL_BUT_CONDITIONALS_AND_HANDLERS),
-    deny(Some(EvaluatedBlock), Some(true), None, None, None, None, &[Class, ValueType], ALL),
-    deny(Some(EvaluatedBlock), Some(true), None, None, None, None, &[Repl], &[Exception]),
-    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[BlockValue]),
-    deny(Some(Handler), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
-    deny(Some(Handler), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
-    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(false), &[Actor, ValueType], ALL_BUT_CONDITIONALS_AND_HANDLERS),
-    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(false), &[Class], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
-    deny(Some(Handler), Some(true), Some(true), Some(false), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
-    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Actor], &[BlockValue]),
-    deny(Some(ListOpBody), Some(true), None, None, None, Some(false), &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS_AND_HANDLERS),
-    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[Class], &[KeyedDo, DetectIfNone, BlockValue]),
-    deny(Some(ListOpBody), Some(true), None, None, None, Some(true), &[ValueType], &[KeyedDo, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, Some(false), Some(false), None, &[Actor], &[Loop, Do, KeyedDo, ListOp, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(false), &[Actor], ALL),
-    deny(Some(LoopBody), Some(true), None, Some(true), Some(false), Some(true), &[Actor], &[KeyedDo, Satisfy, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, None, Some(false), None, &[Class, ValueType], &[Do, KeyedDo, DetectIfNoneSearch, Satisfy, DetectIfNone, Enumeration, IfTrue, IfNil, AndOr, Exception, BlockValue]),
-    deny(Some(LoopBody), Some(true), None, None, None, None, &[Repl], ALL_BUT_CONDITIONALS),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Actor], &[Loop, KeyedDo, Enumeration, BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Actor], &[BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Actor, Class, ValueType], ALL_BUT_CONDITIONALS),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Class], &[Do, KeyedDo, DetectIfNone, BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Class, ValueType], &[Loop, Do, KeyedDo, DetectIfNoneSearch, DetectIfNone, Enumeration, BlockValue]),
-    deny(Some(ProtectedBody), Some(true), Some(false), None, None, None, &[Repl], ALL),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(true), None, None, &[Repl], ALL),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(false), &[Repl], &[IfTrue, IfNil, AndOr, Exception]),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[Repl], ALL),
-    deny(Some(ProtectedBody), Some(true), Some(true), Some(false), None, Some(true), &[ValueType], &[Do, KeyedDo, BlockValue]),
-];
-
-/// A statement shape (a construct kind at a [`Position::Statement`] or
-/// [`Position::NestedStatement`] position in a method context) that the
-/// BT-3841 measurement found answering right on a BEAM wherever the probe
-/// matrix draws it, though a coarser [`DENY_SET`] row covers it. A row names
-/// every fact of the position, the exact block depth and the outermost and
-/// innermost block roles included (the matrix nests at most two blocks, so
-/// those name the whole chain); a statement whose facts match no row, a
-/// deeper nesting among them, keeps the coarse rows' verdict, so this table
-/// narrows [`DENY_SET`] without widening it past a measurement. Generated from `adr0131_statement_measured.tsv`;
-/// `adr0131_phase0_agrees_with_measured_answers` keeps it honest in both
-/// directions: no cell that answers wrong or fails to compile is accepted,
-/// and every cell that answers right is accepted except the
-/// [`KNOWN_OVER_REJECTED`] ones.
-struct RightStatement {
-    kind: ConstructKind,
-    position: Position,
-    context: MethodContext,
-}
-
-/// A [`RIGHT_STATEMENTS`] row for a [`Position::NestedStatement`]; `flags` are
-/// `crosses`, `last`, `deep`, `stateful` and `direct`, in that order, and
-/// `depth` the exact number of enclosing blocks.
-const fn right(
-    kind: ConstructKind,
-    container: Container,
-    inner: Container,
-    flags: [bool; 5],
-    depth: usize,
-    context: MethodContext,
-) -> RightStatement {
-    RightStatement {
-        kind,
-        position: Position::NestedStatement {
-            container,
-            crosses: flags[0],
-            last: flags[1],
-            deep: flags[2],
-            stateful: flags[3],
-            direct: flags[4],
-            inner,
-            depth,
-        },
-        context,
-    }
-}
-
-/// The measured-right carve-outs of [`DENY_SET`] (see [`RightStatement`]).
-#[rustfmt::skip] // one row per line: a measured table
-const RIGHT_STATEMENTS: &[RightStatement] = &[
-    right(BlockValue, Arm, Arm, [true, false, false, false, false], 1, Actor),
-    right(BlockValue, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(BlockValue, Arm, Arm, [true, true, false, true, false], 1, Actor),
-    right(BlockValue, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
-    right(BlockValue, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
-    right(DetectIfNone, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNoneSearch, EvaluatedBlock, EvaluatedBlock, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNone, Arm, Arm, [true, false, false, false, false], 1, Actor),
-    right(DetectIfNone, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(DetectIfNone, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNone, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
-    right(DetectIfNoneSearch, Arm, Arm, [true, false, false, false, false], 1, Actor),
-    right(DetectIfNoneSearch, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(DetectIfNoneSearch, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNoneSearch, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
-    right(Enumeration, Arm, Arm, [true, false, false, false, false], 1, Actor),
-    right(Enumeration, Arm, Arm, [true, true, false, false, false], 1, Actor),
-    right(Enumeration, Arm, Arm, [true, true, false, true, false], 1, Actor),
-    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, Actor),
-    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, Actor),
-    right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Actor),
-    right(Enumeration, LoopBody, Arm, [true, true, true, false, true], 2, Actor),
-    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Actor),
-    right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, Class),
-    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, Class),
-    right(DetectIfNone, DoBody, Arm, [true, true, true, false, true], 2, Class),
-    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, Class),
-    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, true], 1, Class),
-    right(DetectIfNone, DoBody, DoBody, [true, true, true, false, false], 2, Class),
-    right(DetectIfNone, Handler, Handler, [true, true, false, false, false], 1, Class),
-    right(DetectIfNone, Handler, Handler, [true, true, false, false, true], 1, Class),
-    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
-    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, true], 1, Class),
-    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
-    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, true], 1, Class),
-    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, false], 2, Class),
-    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, Class),
-    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, false, false, false], 1, Class),
-    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, true, false, false], 2, Class),
-    right(DetectIfNoneSearch, Handler, Handler, [true, true, false, false, false], 1, Class),
-    right(DetectIfNoneSearch, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
-    right(DetectIfNoneSearch, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
-    right(Enumeration, Arm, DoBody, [true, true, true, false, false], 2, Class),
-    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, Class),
-    right(Enumeration, CountedLoopBody, CountedLoopBody, [true, true, false, true, false], 1, Class),
-    right(Enumeration, DoBody, DoBody, [true, true, false, false, false], 1, Class),
-    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, Class),
-    right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, Class),
-    right(Enumeration, Handler, Handler, [true, true, false, false, false], 1, Class),
-    right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, Class),
-    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, Class),
-    right(DetectIfNone, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(DetectIfNone, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
-    right(DetectIfNone, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
-    right(DetectIfNone, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(DetectIfNone, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
-    right(DetectIfNone, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
-    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(DetectIfNoneSearch, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
-    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
-    right(DetectIfNoneSearch, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(DetectIfNoneSearch, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
-    right(DetectIfNoneSearch, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
-    right(Enumeration, Arm, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(Enumeration, Arm, DoBody, [true, true, true, false, true], 2, ValueType),
-    right(Enumeration, CountedLoopBody, CountedLoopBody, [true, true, false, true, false], 1, ValueType),
-    right(Enumeration, DoBody, DoBody, [true, true, false, false, false], 1, ValueType),
-    right(Enumeration, DoBody, DoBody, [true, true, false, true, false], 1, ValueType),
-    right(Enumeration, DoBody, DoBody, [true, true, true, false, false], 2, ValueType),
-    right(Enumeration, ListOpBody, ListOpBody, [true, false, false, false, false], 1, ValueType),
-    right(Enumeration, ProtectedBody, ProtectedBody, [true, true, false, false, false], 1, ValueType),
-];
-
-/// Whether `ADR0131_MEASURE_BYPASS_PHASE0` bypasses the Phase 0 position
-/// check ([`DENY_SET`] and [`ALLOW_SET`]), so the measurement harness (`just
-/// measure-adr0131-statements`, BT-3841) can compile the shapes the check
-/// rejects and run them on a BEAM. Only a build with the `measure-bypass`
-/// feature reads it; no other build can turn the check off. It goes with the
-/// check (the last BT-3841 PR deletes both).
-#[cfg(feature = "measure-bypass")]
-fn position_check_bypassed() -> bool {
-    use crate::test_helpers::ADR0131_MEASURE_BYPASS_ENV;
-    static BYPASSED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *BYPASSED.get_or_init(|| std::env::var_os(ADR0131_MEASURE_BYPASS_ENV).is_some())
-}
-
-/// Without the `measure-bypass` feature the check cannot be bypassed.
-#[cfg(not(feature = "measure-bypass"))]
-const fn position_check_bypassed() -> bool {
-    false
-}
-
-/// The constructs that still fail somewhere in the statement matrix
-/// (the families of the probe matrix: `anySatisfy:`, `detect:ifNone:`, the
-/// enumerations, `keysAndValuesDo:` and a block `value`). They are rejected
-/// past two nested blocks in class, value-type and actor methods; no
-/// [`RIGHT_STATEMENTS`] row may name a deeper shape (a row keyed on the
-/// outermost and innermost roles would accept every unmeasured middle role,
-/// and `is_allowed` reads the rows before this gate). BT-3841: an arm in a
-/// protected body in a `do:` body raised in a value-type method while the
-/// coarse rows accepted it.
-const UNFINISHED_FAMILIES: &[ConstructKind] = &[
-    Satisfy,
-    DetectIfNone,
-    DetectIfNoneSearch,
-    Enumeration,
-    KeyedDo,
-    BlockValue,
-];
-
-/// The kinds lowered as local-threading producers wherever a producer frame
-/// holds them (BT-3841): `keysAndValuesDo:`/`doWithKey:` join `do:` in
-/// `producer_body_arg_index`. [`DENY_SET`] does not judge them any more, except
-/// in a `[...] value` body (still unfinished) or past two nested blocks, where
-/// the chain is unmeasured, and in the REPL.
-const LOWERED_KINDS: &[ConstructKind] = &[KeyedDo, Satisfy, Enumeration];
-
-/// The kinds lowered only where the fold is measured right: `detect:ifNone:`
-/// (its search block or its handler writing an outer local) in a class or
-/// value-type method. In an actor method the same folds still answer wrong or
-/// fail to compile in nested positions and stay with [`DENY_SET`].
-const LOWERED_CLASS_VALUE_KINDS: &[ConstructKind] = &[DetectIfNone, DetectIfNoneSearch];
-
-/// Whether `kind` is lowered as a producer in `context`.
-fn lowered_in(kind: ConstructKind, context: MethodContext) -> bool {
-    context != Repl
-        && (LOWERED_KINDS.contains(&kind)
-            || (matches!(context, Class | ValueType) && LOWERED_CLASS_VALUE_KINDS.contains(&kind)))
-}
-
-/// Whether the chain of blocks around a [`LOWERED_KINDS`] statement is fully
-/// described by the position and holds only frames the producer lowers: at
-/// most two nested blocks, none of them an evaluated block or a closure
-/// (`Container::Other`: a block value passed on or stored, whose write only the
-/// §6 check can judge).
-fn lowered_chain(position: Position) -> bool {
-    match position {
-        Position::Statement => true,
-        Position::NestedStatement {
-            container,
-            inner,
-            depth,
-            ..
-        } => {
-            depth <= 2
-                && ![container, inner]
-                    .iter()
-                    .any(|role| matches!(role, EvaluatedBlock | Container::Other))
-        }
-        _ => false,
-    }
-}
-
-/// What the coarse rows say about a statement, before the measured carve-outs.
-fn coarse_allows(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-    if lowered_in(kind, context) && lowered_chain(position) {
-        return true;
-    }
-    if let Position::NestedStatement { depth, .. } = position {
-        // The REPL rows are unmeasured past depth one and keep the coarse
-        // rows' verdict, which may accept unmeasured three-deep shapes; a
-        // construct at a REPL arm site never reaches them (it is a producer,
-        // BT-3823), and REPL loop bodies are BT-3876.
-        if depth >= 3 && context != Repl && UNFINISHED_FAMILIES.contains(&kind) {
-            return false;
-        }
-    }
-    !DENY_SET
-        .iter()
-        .any(|row| row.denies(kind, position, context))
-}
-
-/// A shape of [`RESIDUAL_DENY_SET`]: a residual of ADR 0131 that crashes or
-/// answers wrong today but that [`DENY_SET`] and [`ALLOW_SET`] cannot name,
-/// because its threaded set ([`construct_outer_local_writes`]) is empty (the
-/// block binds a local of its own, or writes only a field) or it is not a
-/// construct send at all (`match:`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Residual {
-    /// BT-3875: a `match:` arm (body or guard) that writes an outer local
-    /// drops the write unless the `match:` is a local-threading producer where
-    /// it sits. BT-3947 (BT-3912) lowers one that is, with each arm a
-    /// `BranchArm` frame ([`match_producer_writes`], and at the REPL
-    /// `is_repl_arm_construct`); what stays this error is a `match:` that is
-    /// not a producer there: a guard that writes, or a `match:` at no producer
-    /// site (the subject of another `match:`).
-    MatchArmWrite,
-}
-
-/// One [`RESIDUAL_DENY_SET`] row: `shape` is an error in `contexts`.
-struct ResidualDenied {
-    shape: Residual,
-    contexts: &'static [MethodContext],
-    /// The issue that recorded the shape.
-    issue: &'static str,
-    /// The ADR 0133 Phase 3 issue whose lowering fixes it, deleting the row
-    /// and flipping its `PIN-BUG` tests.
-    fixed_by: &'static str,
-}
-
-/// ADR 0133 Phase 3 (BT-3909): the residual shapes made loud before the IR
-/// consolidation lowers them, each a compile error in the contexts where it
-/// was measured crashing or answering wrong on a BEAM. The probe cells are the
-/// `cond`/`fresh` and `groupBy` lines of `adr0131_statement_probes.tsv` and
-/// the REPL `match` line; the `residual_*` tests in
-/// `semantic_analysis/tests/local_threading.rs` pin each repro. BT-3911
-/// deleted the `LoopConditionArmWrite` row, BT-3912 the `GroupByValue` row. The
-/// `MatchArmWrite` row (BT-3947, BT-3912) is narrowed to the `match:`s that are
-/// not producers where they sit; BT-3913 retires it with the other position
-/// rows. BT-3947 deleted the `InlineBlockLocalInLoop` row (BT-3948: an actor
-/// block applied in place that assigns its own local, in a loop body or
-/// condition): with BT-3912's closure frames and BT-3982's evaluated-block
-/// producer every shape it denied answers right on a BEAM
-/// (`bt3947inline_block_loop_test.bt`), and the codegen corpus
-/// `inline_block_local_in_loop_corpus.rs` compiles the generated grid.
-/// BT-4287 deleted the `StateFoldOperandInFold` row (BT-4003: an actor loop or
-/// fold that threads only `State`, as an operand inside a loop or fold body):
-/// codegen registers it as a producer site of every frame that lowers it
-/// (`is_family_only_fold_value_site`), so its `{Value, State}` carrier is
-/// bound and unpacked in that frame; measured right in
-/// `bt4003residuals_test.bt`, and the codegen corpus
-/// `arm_operand_carrier_corpus.rs` compiles the generated grid. BT-4310
-/// deleted the `StateFoldUnsequencedOperand` row (the same constructs at an
-/// operand the sequencing rule leaves to another lowering: a conditional's
-/// receiver, a lookup key, a cascade message's argument, an argument of a
-/// `super`, `error:`, block-invocation, cast or block-taking send): codegen
-/// registers every such construct as a producer site of the frame that lowers
-/// its statement, the method root included (`family_only_operand_site_exprs`),
-/// and each of those lowerings sequences the operand; measured right in
-/// `bt4003residuals_test.bt`, and `arm_operand_carrier_corpus.rs` compiles the
-/// generated grid. (A `match:` guard cannot hold one: a guard allows only
-/// comparisons and arithmetic.)
-const RESIDUAL_DENY_SET: &[ResidualDenied] = &[
-    // Class, value-type and actor methods since BT-3817; the REPL since
-    // BT-3909 (maintainer-approved REPL output change: the same input drew
-    // the BT-3864 value-position error before). BT-3947 (BT-3912) lowers a
-    // `match:` that is a producer; this is the rest.
-    ResidualDenied {
-        shape: Residual::MatchArmWrite,
-        contexts: &[Class, ValueType, Actor, Repl],
-        issue: "BT-3875",
-        fixed_by: "BT-3913",
-    },
-];
-
-/// The [`RESIDUAL_DENY_SET`] row that makes `shape` an error in `context`.
-fn residual_denied(shape: Residual, context: MethodContext) -> Option<&'static ResidualDenied> {
-    // (`match:` arms are not probe cells of the measurement harness, so
-    // BT-3817's error is never bypassed.)
-    RESIDUAL_DENY_SET
-        .iter()
-        .find(|row| row.shape == shape && row.contexts.contains(&context))
-}
-
-/// Whether the Phase 0 check accepts `kind` in `position` in `context`: a
-/// statement unless [`DENY_SET`] lists it, anything else only if
-/// [`ALLOW_SET`] does.
-pub(crate) fn is_allowed(kind: ConstructKind, position: Position, context: MethodContext) -> bool {
-    match position {
-        Position::Statement | Position::NestedStatement { .. } => {
-            position_check_bypassed()
-                || RIGHT_STATEMENTS
-                    .iter()
-                    .any(|r| r.kind == kind && r.position == position && r.context == context)
-                || coarse_allows(kind, position, context)
-        }
-        _ => {
-            position_check_bypassed()
-                || ALLOW_SET.iter().any(|row| {
-                    row.position == position
-                        && row.kinds.contains(&kind)
-                        && row.contexts.contains(&context)
-                })
-        }
-    }
-}
 
 /// Runs both ADR 0131 checks over every method body and module-level
 /// expression list in `module` (see the module docs).
@@ -2671,9 +1998,10 @@ impl<'d> Walker<'d> {
                     let (ids, _) =
                         crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                     self.scope.push(ids.into_iter().map(|id| id.name).collect());
-                    if let Some(row) = residual_denied(Residual::MatchArmWrite, self.context) {
-                        self.report_match_arm_writes(arm, row);
-                    }
+                    // BT-3913: a `match:` that is not a producer here keeps
+                    // the arm error (a guard write is never threaded, and a
+                    // `match:` at no producer site cannot return one either).
+                    self.report_match_arm_writes(arm);
                     if let Some(guard) = &arm.guard {
                         self.operand(guard, Position::MatchArm);
                     }
@@ -3017,8 +2345,9 @@ impl<'d> Walker<'d> {
             }
             return;
         }
-        // ADR 0131 Phase 2d (BT-3798): a lookup that is not a producer here has
-        // no allow-set row: the §6 check reports its handler's write.
+        // ADR 0131 Phase 2d (BT-3798): a lookup that is not a producer here
+        // is not a local-threading construct at this position: the §6 check
+        // reports its handler's write.
         if is_lookup {
             return;
         }
@@ -3029,15 +2358,51 @@ impl<'d> Walker<'d> {
                     if matches!(arguments.get(1), Some(Expression::Block(h)) if !self.writes_of(h).is_empty())
             );
         let kind = ConstructKind::of(&selector, handler_writes);
-        // BT-3841 PR 5: the REPL has no measured rows for the detect search,
-        // so a writing plain `detect:` that is not a producer here (one at a
-        // REPL arm site is, BT-3823) stays a generic list op, which the REPL
-        // rows deny.
-        let kind = if self.context == Repl && selector == "detect:" {
-            ListOp
-        } else {
-            kind
-        };
+        // BT-3813: a `^` of a `do:`-family loop in a block in a class or
+        // value-type method is lowered by codegen's producer with the
+        // Discard tail (`nlr_return_construct_value`): the `^` ends the
+        // method, so the carrier is thrown, never leaked. An actor method
+        // steps `State` through the throw instead, and the REPL threads its
+        // own bindings map; both keep their own rules below.
+        //
+        // BT-3913: this and the next two rules are the sound shapes the
+        // retired allow-set rows listed, stated structurally against the
+        // lowering that threads them.
+        if matches!(position, Position::ReturnValue { nested: true })
+            && matches!(self.context, Class | ValueType)
+            && matches!(kind, Do | KeyedDo)
+        {
+            return;
+        }
+        // An actor method's `^` of a conditional in a block: its `^` value
+        // goes through `threaded_expression`, which steps the `State`
+        // family the throw carries, so the carrier is never leaked. (A
+        // `do:`-family loop there keeps the error: its fold frame does not
+        // lower a value-bearing site, BT-3797.)
+        if matches!(position, Position::ReturnValue { nested: true })
+            && matches!(self.context, Actor)
+            && matches!(kind, IfTrue | IfNil | AndOr)
+            && !actor_value_site
+        {
+            return;
+        }
+        // The REPL assembler threads a loop or fold that is the whole value
+        // of an assignment (it unpacks the `{Value, Bindings}` tuple and
+        // adopts the bindings map, ADR 0041), and a destructured list-op
+        // value (`destructuring.btscript`); a `Result tryDo:` there is one
+        // when the core rule names it a producer (`repl_try_do_tier2_send`).
+        // A lookup is none of these: it keeps the §6 rejection above.
+        if self.context == Repl
+            && self.depth == 0
+            && (matches!(position, Position::AssignValue { nested: false })
+                || matches!(
+                    position,
+                    Position::DestructureValue if matches!(kind, ListOp | DetectIfNoneSearch)
+                ))
+            && (kind != TryDo || root_producer.is_some())
+        {
+            return;
+        }
         // An assignment inside a block whose construct only writes locals of
         // that same block is threaded in that block's own frame, exactly as
         // in a method body; only a write that crosses the block boundary
@@ -3068,26 +2433,41 @@ impl<'d> Walker<'d> {
             }
             other => other,
         };
-        // ADR 0131 Phase 2c (BT-3794): a handler-writing `detect:ifNone:` is
-        // only threaded through the producer shape — a literal search block
+        // ADR 0133 Phase 3 close-out (BT-3913): every statement shape is
+        // lowered — the 733-shape oracle reports zero silent drops and zero
+        // `erlc` failures — so a statement is accepted wherever it sits. (A
+        // statement in a `whileTrue:`/`whileFalse:` condition the loop does
+        // not thread is still rejected by that check, like an escaping block
+        // is by its own.)
+        //
+        // In an actor fold body a value-bearing site is not lowered by the
+        // producer at all (BT-3797), so it keeps the error even as a
+        // statement.
+        //
+        // ADR 0131 Phase 2c (BT-3794): a handler-writing `detect:ifNone:`
+        // keeps its producer-shape gate — only a literal search block
         // (`producer_body_block`), the one rule codegen's router and fold
-        // plan read. A parenthesised search block routes to the fold but is
-        // not packed, so the write would be dropped. The REPL threads its
-        // bindings map and is not shaped by it.
-        let producer_shape =
-            kind != DetectIfNone || self.context == Repl || producer_body_block(expr).is_some();
+        // plan read, packs the handler's writes. A stored search block
+        // routes to the fold but is not packed, so the write would be
+        // dropped. The REPL threads its bindings map and is not shaped by
+        // it.
+        let stored_search =
+            kind == DetectIfNone && self.context != Repl && producer_body_block(expr).is_none();
         if !actor_value_site
-            && producer_shape
-            && self.allowed_beyond_producers(kind, position, root_producer.is_some())
+            && !stored_search
+            && matches!(
+                position,
+                Position::Statement | Position::NestedStatement { .. }
+            )
         {
             return;
         }
-        let hint = self.construct_hint(&selector, kind, position, &first.name);
+        let hint = Self::construct_hint(&selector, position, &first.name);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
                     "`{selector}` writes outer local `{name}`, but as {position} in {context} \
-                     the write is not threaded back yet ({EPIC})",
+                     the write is not threaded back (BT-3913)",
                     name = first.name,
                     context = self.context,
                 ),
@@ -3100,42 +2480,14 @@ impl<'d> Walker<'d> {
             )
             .with_note(
                 format!(
-                    "ADR 0131 makes every {kind} thread outer locals in every position; until \
-                     then only the positions that work today are accepted"
+                    "a {kind} threads its writes only where a producer frame lowers it: as a \
+                     statement, or as the value of an assignment, a `^` value or an operand a \
+                     frame sequences"
                 ),
                 None,
             )
             .with_category(DiagnosticCategory::UnmigratedLocalThreading),
         );
-    }
-
-    /// Whether the allow-set accepts `kind` at `position` once the producer
-    /// checks of [`Self::check_construct`] have not (`root_producer`: the core
-    /// rule names it a producer at a method root or REPL site).
-    ///
-    /// `tryDo:` has no allow-set row and no statement position that works other
-    /// than as a producer (ADR 0131 Phase 4, BT-3750): a Tier 2 block reaching
-    /// the arity-0 native raises, so anything the producer checks did not
-    /// accept is rejected. The REPL root is the exception: it compiles a
-    /// `tryDo:` that is the statement or the whole value of an assignment to the
-    /// `{Value, Bindings}` tuple its assembler unpacks
-    /// (`repl_try_do_tier2_send`).
-    fn allowed_beyond_producers(
-        &self,
-        kind: ConstructKind,
-        position: Position,
-        root_producer: bool,
-    ) -> bool {
-        if kind != TryDo {
-            return is_allowed(kind, position, self.context);
-        }
-        root_producer
-            && self.context == Repl
-            && self.depth == 0
-            && matches!(
-                position,
-                Position::Statement | Position::AssignValue { nested: false }
-            )
     }
 
     /// Whether the receiver of the lookup send `expr` is statically known not
@@ -3150,23 +2502,15 @@ impl<'d> Walker<'d> {
         receiver_statically_not_dictionary(receiver, ty, facts.self_is_dictionary, facts.hierarchy)
     }
 
-    /// The help text for a construct the Phase 0 check rejects at
-    /// `position`: the nearest position that does thread `name` today.
-    fn construct_hint(
-        &self,
-        selector: &str,
-        kind: ConstructKind,
-        position: Position,
-        name: &str,
-    ) -> String {
-        let top_ok = is_allowed(kind, Position::Statement, self.context);
-        let rhs_ok = is_allowed(kind, Position::AssignValue { nested: false }, self.context);
+    /// The help text for a construct the position check rejects at
+    /// `position`: the nearest position that threads `name`.
+    fn construct_hint(selector: &str, position: Position, name: &str) -> String {
         match position {
-            Position::NestedStatement { container, .. } if top_ok => format!(
+            Position::NestedStatement { container, .. } => format!(
                 "evaluate the `{selector}` as a statement of the method body, not inside \
                  {container}, and read the locals it writes afterwards"
             ),
-            Position::Statement | Position::NestedStatement { .. } => format!(
+            Position::Statement => format!(
                 "compute the new value of `{name}` without writing it from the block, and \
                  assign it in a statement of the method body (`{name} := coll inject: {name} \
                  into: [:acc :x | ...]`)"
@@ -3175,13 +2519,9 @@ impl<'d> Walker<'d> {
                 "evaluate the `{selector}` as a statement of its own, at the level of the \
                  method body, and read the locals it writes afterwards"
             ),
-            _ if rhs_ok => format!(
+            _ => format!(
                 "assign the `{selector}` result to a local in a statement of its own \
                  (`v := ...`) and use `v` here"
-            ),
-            _ => format!(
-                "evaluate the `{selector}` as a statement of its own, at the level of the \
-                 method body, and read the locals it writes afterwards"
             ),
         }
     }
@@ -3358,15 +2698,14 @@ impl<'d> Walker<'d> {
     /// local-threading producer where it sits ([`Walker::is_match_producer`]:
     /// BT-3947 lowers one that is, each arm a `BranchArm` frame). No construct
     /// threads such a write back to the method (BT-3817): compiling it would
-    /// drop the write silently. The contexts are the
-    /// [`Residual::MatchArmWrite`] row's: the REPL was exempt (its arm
-    /// assignment drew only the value-position error, BT-3864) until BT-3909
-    /// gave it the same error as a method, pinned in
-    /// `adr0131_local_rebind.btscript`. Walks the whole
+    /// drop the write silently. This is a permanent error (BT-3913 retired the
+    /// residual row with the rest of the position check): a guard write is
+    /// never threaded, and neither is a body write of a `match:` at no
+    /// producer site. Pinned in `adr0131_local_rebind.btscript`. Walks the whole
     /// arm (guard and body) without entering a nested block literal, whose
     /// writes are the constructs' own business; the arm's pattern variables
     /// (the innermost scope frame, already pushed) are the arm's own.
-    fn report_match_arm_writes(&mut self, arm: &MatchArm, row: &ResidualDenied) {
+    fn report_match_arm_writes(&mut self, arm: &MatchArm) {
         let Some((own, outer)) = self.scope.split_last() else {
             return;
         };
@@ -3422,10 +2761,7 @@ impl<'d> Walker<'d> {
                 )
                 .with_hint(format!(
                     "bind the arm's value instead: `{name} := subject match: [pattern -> newValue; ...]`, \
-                     or use `ifTrue:`/`ifNil:` for a branch that writes `{name}` ({issue}, until \
-                     {fixed_by})",
-                    issue = row.issue,
-                    fixed_by = row.fixed_by,
+                     or use `ifTrue:`/`ifNil:` for a branch that writes `{name}` (BT-3875)"
                 ))
                 .with_category(DiagnosticCategory::UnmigratedLocalThreading),
             );
@@ -3660,62 +2996,4 @@ fn receiver_has_channel(selector: &str) -> bool {
     crate::state_threading_selectors::is_state_threaded_block_receiver(selector)
         || crate::state_threading_selectors::is_state_threading_unary_selector(selector)
         || matches!(selector, "whileTrue:" | "whileFalse:" | "repeat")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn allow_set_rows_are_non_empty_and_never_list_a_statement() {
-        for row in ALLOW_SET {
-            assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
-            assert!(
-                !matches!(
-                    row.position,
-                    Position::Statement | Position::NestedStatement { .. }
-                ),
-                "statements are accepted unless DENY_SET lists them"
-            );
-        }
-    }
-
-    #[test]
-    fn deny_set_rows_are_non_empty() {
-        for row in DENY_SET {
-            assert!(!row.kinds.is_empty() && !row.contexts.is_empty());
-        }
-    }
-
-    /// BT-3841 review: `is_allowed` reads `RIGHT_STATEMENTS` before the depth
-    /// gate, so a row past two blocks would silently reopen the hole.
-    #[test]
-    fn right_statements_name_at_most_two_nested_blocks() {
-        for row in RIGHT_STATEMENTS {
-            match row.position {
-                Position::NestedStatement { depth, .. } => {
-                    assert!(
-                        (1..=2).contains(&depth),
-                        "{:?} {:?}",
-                        row.kind,
-                        row.position
-                    );
-                }
-                other => panic!("a RIGHT_STATEMENTS row is nested: {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn statement_is_allowed_unless_denied() {
-        // `do:` as a method-body statement answers right everywhere (s8).
-        for context in [Class, ValueType, Actor, Repl] {
-            assert!(is_allowed(Do, Position::Statement, context));
-        }
-        // `detect:ifNone:` with a writing handler packs the write with its
-        // search block's, as a statement in every method context (BT-3794).
-        for context in [Class, ValueType, Actor] {
-            assert!(is_allowed(DetectIfNone, Position::Statement, context));
-        }
-    }
 }

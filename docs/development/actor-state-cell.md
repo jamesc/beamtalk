@@ -555,14 +555,15 @@ and `generate_discarding_self_dispatch` in method bodies (ADR 0118 owns it).
 actor loop frame (BT-3947 deleted it once the closure-body frames and the
 evaluated-block producer lowered every shape). The locals rules stay: the `WriteKind::Local` half of
 `Tier2BlockNoReturnChannel` with `Escape::Ffi` (BT-3917), `Passed` and
-`Cascade`; `ALLOW_SET`, the other `DENY_SET` rows, `RIGHT_STATEMENTS` and
-`MatchArmWrite`; `report_nlr_out_of_ensure` and `nlr_dropped_local` (BT-3910,
+`Cascade`; `report_nlr_out_of_ensure` and `nlr_dropped_local` (BT-3910,
 BT-3993); `reject_last_statement_block_value` (BT-3971) and
 `reject_loop_rebind_of_body_local` (BT-3939); the Tier 2
 `stateful_block_dispatch` sites in `intrinsics.rs`, `while_loops.rs` and
 `exception_handling.rs`; the locals half of
 `beamtalk_collection:refuse_writing_fold/3`; `ClassStateAbroad`; and the
-`Local` and `SelfVt` families.
+`Local` and `SelfVt` families. (`ALLOW_SET`, the other `DENY_SET` rows,
+`RIGHT_STATEMENTS` and `MatchArmWrite` were here too until BT-3913 retired
+the position check with the rest of ADR 0133 Phase 3.)
 
 ## 9. Phase detail
 

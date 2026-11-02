@@ -887,14 +887,17 @@ sealed typed Value subclass: Foo
 
     /// A threaded construct nested inside a discarded block does not hide the
     /// block's own loss: the write is dead, whatever runs it inline inside
-    /// the block.
+    /// the block. BT-3913: the `do:` is no longer rejected (a statement loop
+    /// is always a producer site), so its dead write to `y` warns alongside
+    /// `x` instead of hiding behind the old position-check error.
     #[test]
     fn threaded_construct_inside_discarded_block_warns() {
         let diags = lint(
             "x := 0.\ny := 0.\ntrue ifTrue: [[#(1, 2) do: [:e | y := y + e]. x := 0]. 0] ifFalse: [nil]",
         );
-        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
-        assert!(diags[0].message.contains("`x`"));
+        assert_eq!(diags.len(), 2, "Expected 2 lints, got: {diags:?}");
+        assert!(diags.iter().any(|d| d.message.contains("`x`")));
+        assert!(diags.iter().any(|d| d.message.contains("`y`")));
     }
 
     /// The whole family of loop / list-op selectors that codegen's

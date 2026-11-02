@@ -1,9 +1,10 @@
-# ADR 0131 Phase 0 measurement summary (BT-3841), generated from the two measured
-# tables by `adr0131_phase0_summary_is_checked_in`; regenerate with
+# ADR 0131 measurement summary (BT-3841; the check retired in BT-3913),
+# generated from the two measured tables by
+# `adr0131_phase0_summary_is_checked_in`; regenerate with
 # `ADR0131_BLESS=1 cargo test -p beamtalk-core --lib adr0131_phase0_summary`.
 # statement<TAB>family<TAB>context<TAB>right<TAB>wrong<TAB>erlc
 # statement-group<TAB>group<TAB>family<TAB>context<TAB>not-right cells
-# operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>phase0-accepts<TAB>phase0-rejects-right
+# operand<TAB>position<TAB>context<TAB>cells<TAB>right<TAB>wrong<TAB>erlc<TAB>accepts<TAB>rejects-right
 statement	block-value	actor	112	0	0
 statement	block-value	class	122	0	0
 statement	block-value	value	100	0	0
@@ -34,29 +35,29 @@ statement	satisfy	value	94	0	0
 statement-group	loop-condition	other	actor	6
 statement-group	loop-condition	other	class	6
 statement-group	loop-condition	other	value	6
-operand	arg	actor	57	41	3	13	38	3
+operand	arg	actor	57	38	0	19	38	0
 operand	arg	class	57	57	0	0	57	0
 operand	arg	value	57	57	0	0	57	0
-operand	assign	actor	57	44	0	13	38	6
+operand	assign	actor	57	38	0	19	38	0
 operand	assign	class	57	57	0	0	57	0
 operand	assign	value	57	57	0	0	57	0
-operand	cascade	actor	57	15	42	0	0	15
-operand	cascade	class	57	9	26	22	0	9
-operand	cascade	value	57	12	26	19	0	12
-operand	field	actor	57	41	3	13	38	3
+operand	cascade	actor	57	0	0	57	0	0
+operand	cascade	class	57	0	0	57	0	0
+operand	cascade	value	57	0	0	57	0	0
+operand	field	actor	57	38	0	19	38	0
 operand	field	class	57	57	0	0	57	0
-operand	interp	actor	57	15	42	0	0	15
-operand	interp	class	57	9	26	22	0	9
-operand	interp	value	57	12	26	19	0	12
-operand	literal	actor	57	41	3	13	38	3
+operand	interp	actor	57	0	0	57	0	0
+operand	interp	class	57	0	0	57	0	0
+operand	interp	value	57	0	0	57	0	0
+operand	literal	actor	57	38	0	19	38	0
 operand	literal	class	57	57	0	0	57	0
 operand	literal	value	57	57	0	0	57	0
-operand	match	actor	57	12	29	16	0	12
-operand	match	class	57	9	26	22	0	9
-operand	match	value	57	12	26	19	0	12
-operand	operand	actor	57	41	3	13	38	3
+operand	match	actor	57	0	0	57	0	0
+operand	match	class	57	0	0	57	0	0
+operand	match	value	57	0	0	57	0	0
+operand	operand	actor	57	38	0	19	38	0
 operand	operand	class	57	57	0	0	57	0
 operand	operand	value	57	57	0	0	57	0
-operand	recv	actor	57	41	3	13	38	3
+operand	recv	actor	57	38	0	19	38	0
 operand	recv	class	57	57	0	0	57	0
 operand	recv	value	57	57	0	0	57	0

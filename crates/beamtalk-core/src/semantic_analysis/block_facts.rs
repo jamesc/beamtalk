@@ -2941,13 +2941,19 @@ pub fn operand_loop_constructs_with_holders(
 ///
 /// The REPL threads a loop or fold that is the statement, or the whole value
 /// of an assignment, through its own lowering (the assembler unpacks the
-/// `{Value, Bindings}` tuple and adopts the bindings map, ADR 0041), and the
-/// Phase 0 check accepts those through its REPL allow-set rows. Only a loop or
-/// fold nested in an operand (`(xs collect: [...]) size`, `r := t + (...)`) had
-/// no lowering, so that is where the producer fires. A field write has no
-/// REPL meaning, so it keeps its diagnostic.
+/// `{Value, Bindings}` tuple and adopts the bindings map, ADR 0041). Only a
+/// loop or fold nested in an operand (`(xs collect: [...]) size`,
+/// `r := t + (...)`) had no lowering, so that is where the producer fires. A
+/// field write has no REPL meaning, so it keeps its diagnostic.
 ///
-/// The one rule the Phase 0 check and codegen's REPL producer both read.
+/// BT-3913: the `eachWithIndex:`/`do:separatedBy:` exclusion is gone. It
+/// dated from when those became producers for methods but the REPL root's
+/// fold frames were unmeasured (BT-3841): the desugared separator
+/// conditional failed the verifier there. The BT-4288 corpus proves those
+/// rows compile and answer like a method on a BEAM, so the REPL accepts
+/// them at operand sites like every other loop or fold.
+///
+/// The one rule the validator and codegen's REPL producer both read.
 #[must_use]
 pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     let inner = stmt.unwrap_parens();
@@ -2964,7 +2970,6 @@ pub fn repl_operand_sites(stmt: &Expression) -> Vec<&Expression> {
     sequenced_operand_sites(stmt)
         .into_iter()
         .filter(|site| Some(site.span()) != whole_value)
-        .filter(|site| !is_repl_unmeasured_enumeration(site))
         .collect()
 }
 
@@ -3099,21 +3104,6 @@ pub fn repl_arm_producer_sites(stmt: &Expression) -> Vec<&Expression> {
         sites.push(inner);
     }
     sites
-}
-
-/// BT-3841: `eachWithIndex:`/`do:separatedBy:` became producers for class,
-/// value-type and actor methods; the REPL's operand sites keep excluding them
-/// (they keep their statement and assignment lowering and the Phase 0 operand
-/// rows), because the REPL root's fold frames are unmeasured (BT-3876): the
-/// desugared fold's separator conditional fails the `ThreadedIr` verifier there.
-/// (In a REPL arm, [`repl_arm_producer_sites`], both are producers and answer
-/// right, BT-3823.)
-fn is_repl_unmeasured_enumeration(site: &Expression) -> bool {
-    matches!(
-        site.unwrap_parens(),
-        Expression::MessageSend { selector, .. }
-            if matches!(selector.name().as_str(), "eachWithIndex:" | "do:separatedBy:")
-    )
 }
 
 /// ADR 0131 Phase 2b (BT-3793): [`sequenced_operand_sites`] for a statement

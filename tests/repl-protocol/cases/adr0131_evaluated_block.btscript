@@ -16,22 +16,22 @@ t := 0
 t
 // => 1
 
-// A `do:` body whose only write is inside a nested `[...] value` keeps the
-// Phase 0 error in the REPL (a REPL loop body is not a producer frame yet,
-// BT-3876; its arms are since BT-3823).
+// A `do:` body whose only write is inside a nested `[...] value` threads the
+// write back in the REPL (BT-3913 retired the Phase 0 error: a REPL loop body
+// is a producer frame, and the nested `value` runs in place). The `do:`
+// itself answers `nil`; `t` accumulates across the elements.
 #(1, 2) do: [:x | [t := t + x] value]
-// => ERROR: `value` writes outer local `t`
+// => nil
 
 t
-// => 1
+// => 4
 
-// An arm holding one. (Behaviour identical with and without the analysis
-// change: checked against a build that does not propagate the block's writes.)
+// An arm holding one.
 true ifTrue: [[t := t + 10] value]
-// => 11
+// => 14
 
 t
-// => 11
+// => 14
 
 // BT-3982: an evaluated block whose only write is inside a nested arm, at the
 // REPL root and in an arm: the block answers the arm value and
