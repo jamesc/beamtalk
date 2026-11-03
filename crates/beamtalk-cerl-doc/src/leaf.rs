@@ -320,7 +320,7 @@ impl<'a> BtSpan<'a> {
 /// ```
 #[must_use]
 pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static> {
-    docvec![
+    Document::Annotated(Box::new(docvec![
         "( ",
         expr,
         " -| [",
@@ -328,7 +328,24 @@ pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static
         ", {'file', ",
         string_lit(span.file),
         "}] )"
-    ]
+    ]))
+}
+
+/// `( Expr -| [Line] )` — [`annotated`] for a node with no backing source file
+/// (compiling from a string): a bare line number, no `{'file', _}` entry.
+///
+/// ```text
+/// annotated_bare(var("X"), 42) => ( X -| [42] )
+/// ```
+#[must_use]
+pub fn annotated_bare(expr: Document<'static>, line: u32) -> Document<'static> {
+    Document::Annotated(Box::new(docvec![
+        "( ",
+        expr,
+        " -| [",
+        int_lit(i64::from(line)),
+        "] )"
+    ]))
 }
 
 /// `count` literal space characters — a run of pretty-printer indentation.
@@ -491,6 +508,34 @@ mod tests {
             doc.to_pretty_string(),
             "( X -| [42, {'file', \"foo.bt\"}] )"
         );
+    }
+
+    /// BT-4392: "already annotated" is a typed fact, not a leaf-layout guess:
+    /// it survives a `docvec!` built around an annotation and is false for a
+    /// look-alike plain document.
+    #[test]
+    fn annotated_is_a_typed_marker_not_a_text_shape() {
+        let span = BtSpan::new("foo.bt", 7);
+        assert!(annotated(var("X"), &span).is_annotated());
+        assert!(annotated_bare(var("X"), 7).is_annotated());
+        let inner = annotated(var("X"), &span);
+        let outer = annotated(docvec![inner.clone(), " + ", var("Y")], &span);
+        assert!(outer.is_annotated());
+        // An unannotated document with the same text is not an annotation.
+        let lookalike = docvec![
+            "( ",
+            var("X"),
+            " -| [",
+            int_lit(7),
+            ", {'file', \"foo.bt\"}] )"
+        ];
+        assert_eq!(
+            lookalike.to_pretty_string(),
+            annotated(var("X"), &span).to_pretty_string()
+        );
+        assert!(!lookalike.is_annotated());
+        // A sequence led by an annotation is not itself an annotation.
+        assert!(!docvec![inner, " in "].is_annotated());
     }
 
     #[test]

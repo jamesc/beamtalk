@@ -1460,9 +1460,10 @@ impl CoreErlangGenerator {
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
-            "> when 'true' -> 'nil' end in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            "> when 'true' -> 'nil' end in ",
+            // BT-4392: the loop's entry call carries the send's line, as in
+            // `generate_while_simple`.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let body_stateful_error = self.generate_stateful_block_dispatch_error(
@@ -1538,9 +1539,9 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
             " in apply ",
             leaf::fname(loop_fn.clone(), 0),
-            " () in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            " () in ",
+            // BT-4392: the loop's entry call carries the send's line.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let stateful_error = self.generate_stateful_block_dispatch_error(
