@@ -1306,10 +1306,11 @@ impl CoreErlangGenerator {
                 && self.is_supervisor_class(&name.name)
             {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
-                let module_name = self.compiled_module_name_qualified(&name.name, pkg);
+                let module_doc =
+                    self.class_reference_spawn_module_doc(&name.name, pkg, &selector_atom);
                 let doc = self.generate_supervisor_class_start(
                     leaf::atom(name.name.to_string()),
-                    leaf::atom(module_name),
+                    module_doc,
                     &selector_atom,
                     arguments,
                 )?;
@@ -1328,6 +1329,7 @@ impl CoreErlangGenerator {
                 let doc = self.generate_actor_spawn_qualified(
                     &name.name,
                     pkg,
+                    &selector.name(),
                     arguments.first(),
                     variant,
                 )?;
@@ -2228,6 +2230,51 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// Whether a spawn-family send to the class reference `class_name`
+    /// (optionally `package`-qualified) resolves the module it starts its
+    /// process from at call time rather than pinning it (BT-4278).
+    ///
+    /// Normally the module is the compile-time one
+    /// (`compiled_module_name_qualified`). An *unqualified* reference to a shadowed name
+    /// ([`Self::is_shadowed_class`]) is one last-wins runtime class, so the
+    /// compile-time package's module is not necessarily the one a dynamic
+    /// send reaches: the module is resolved at call time from the class
+    /// registry instead, exactly as the class-side `self spawn` family does
+    /// ([`Self::class_self_module_doc`]) —
+    ///
+    /// ```erlang
+    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'('Counter', 'spawn')
+    /// ```
+    ///
+    /// The spawn itself stays in the caller (a dynamic `class_send` would
+    /// start it inside the class `gen_server`, and has no monitored-spawn
+    /// clause). A package-qualified reference (`json@Counter spawn`) names
+    /// its module explicitly and keeps it.
+    fn spawn_module_resolved_at_runtime(&self, class_name: &str, package: Option<&str>) -> bool {
+        package.is_none() && self.is_shadowed_class(class_name)
+    }
+
+    /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is
+    /// looked up at call time rather than pinned.
+    fn class_reference_spawn_module_doc(
+        &self,
+        class_name: &str,
+        package: Option<&str>,
+        selector_atom: &str,
+    ) -> Document<'static> {
+        if self.spawn_module_resolved_at_runtime(class_name, package) {
+            docvec![
+                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                leaf::atom(class_name.to_string()),
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ")"
+            ]
+        } else {
+            leaf::atom(self.compiled_module_name_qualified(class_name, package))
+        }
+    }
+
     /// Lowers a spawn-family send on a supervisor class (ADR 0135 §1) to the
     /// runtime start helper, run in the caller's process — never class-method
     /// dispatch, which would run the whole tree start inside the class
@@ -3086,14 +3133,44 @@ impl CoreErlangGenerator {
     /// `SpawnVariant::Monitored` (BT-4104) calls `spawn_monitored/0,1`
     /// instead; its answer is `{ActorObject, MonRef}`, so the REPL arm takes
     /// the pid from the pair's actor.
+    ///
+    /// The module comes from [`Self::class_reference_spawn_module_doc`]: an
+    /// unqualified shadowed class name (BT-4278) resolves it at call time
+    /// into a `let`-bound temporary, so the spawn still runs in the caller.
     pub(super) fn generate_actor_spawn_qualified(
         &mut self,
         class_name: &str,
         package: Option<&str>,
+        selector_atom: &str,
         init_args: Option<&Expression>,
         variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let module_name = self.compiled_module_name_qualified(class_name, package);
+        let module_expr = self.class_reference_spawn_module_doc(class_name, package, selector_atom);
+        // An atom is used as-is; a runtime lookup is bound once, since the
+        // REPL arm names the module twice.
+        let (module_binding, module_doc): (Option<(String, Document<'static>)>, Document<'static>) =
+            if self.spawn_module_resolved_at_runtime(class_name, package) {
+                let var = self.fresh_temp_var("SpawnMod");
+                (Some((var.clone(), module_expr)), leaf::var(var))
+            } else {
+                (None, module_expr)
+            };
+        let body = self.generate_actor_spawn_call(class_name, &module_doc, init_args, variant)?;
+        Ok(match module_binding {
+            Some((var, lookup)) => docvec!["let ", leaf::var(var), " = ", lookup, " in ", body],
+            None => body,
+        })
+    }
+
+    /// Body of [`Self::generate_actor_spawn_qualified`] once the module
+    /// expression (`module_doc`, an atom or a bound variable) is known.
+    fn generate_actor_spawn_call(
+        &mut self,
+        class_name: &str,
+        module_doc: &Document<'static>,
+        init_args: Option<&Expression>,
+        variant: SpawnVariant,
+    ) -> Result<Document<'static>> {
         let in_repl_context = self.lookup_var("__bindings__").is_some();
         let function = leaf::atom(variant.function_name());
 
@@ -3110,13 +3187,13 @@ impl CoreErlangGenerator {
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
                 "<'undefined'> when 'true' -> call ",
-                leaf::atom(module_name.clone()),
+                module_doc.clone(),
                 ":",
                 function.clone(),
                 "(",
                 args_doc.clone(),
                 ") <RegistryPid> when 'true' -> let SpawnResult = call ",
-                leaf::atom(module_name.clone()),
+                module_doc.clone(),
                 ":",
                 function,
                 "(",
@@ -3128,7 +3205,7 @@ impl CoreErlangGenerator {
                 "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, ",
                 leaf::atom(class_name.to_string()),
                 ", ",
-                leaf::atom(module_name),
+                module_doc.clone(),
                 ") in ",
                 "SpawnResult ",
                 "end"
@@ -3137,7 +3214,7 @@ impl CoreErlangGenerator {
         } else {
             let doc = docvec![
                 "call ",
-                leaf::atom(module_name),
+                module_doc.clone(),
                 ":",
                 function,
                 "(",
