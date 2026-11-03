@@ -21,7 +21,7 @@ module 'stdlib_class_tuple' ['new'/0, 'new'/1, 'size'/1, 'at:'/2, 'isOk'/1, 'isE
 call 'erlang':'tuple_size'(Self)
 
 'at:'/2 = fun (Self, _index@1) ->
-call 'beamtalk_tuple':'at'(Self, _index@1)
+case _index@1 of <_> when call 'erlang':'and'(call 'erlang':'is_integer'(_index@1), call 'erlang':'and'(call 'erlang':'>='(_index@1, 1), call 'erlang':'=<'(_index@1, call 'erlang':'tuple_size'(Self)))) -> call 'erlang':'element'(_index@1, Self) <_> when 'true' -> call 'beamtalk_tuple':'at'(Self, _index@1) end
 
 'isOk'/1 = fun (Self) ->
 case Self of <{'ok', _Value}> when 'true' -> 'true' <_> when 'true' -> 'false' end
