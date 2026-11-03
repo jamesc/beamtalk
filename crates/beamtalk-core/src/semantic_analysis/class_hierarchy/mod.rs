@@ -448,11 +448,12 @@ impl ClassHierarchy {
     /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
     /// `class-method-process-resource`) and the local-threading escape
     /// analysis read this (for a class *reference* receiver, through
-    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing); codegen reads [`Self::is_direct_call_eligible`],
-    /// which adds only the own-method condition. Like every compile-time
-    /// verdict it describes the classes as compiled: a class-side extension or
-    /// ADR 0084 runtime fun sends the method back to the class process at run
-    /// time, which the guard of every static direct call re-checks.
+    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing);
+    /// codegen reads [`Self::is_direct_call_eligible`], which adds only the
+    /// own-method condition. Like every compile-time verdict it describes the
+    /// classes as compiled: a class-side extension or ADR 0084 runtime fun
+    /// sends the method back to the class process at run time, which the guard
+    /// of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
         !ClassInfo::is_process_bound_class_selector(selector)
