@@ -507,7 +507,7 @@ sealed typed Binary subclass: String
   /// Convert the string to an Erlang charlist: a `List` of Unicode code
   /// points, one `Integer` per code point.
   ///
-  /// This is the OTP charlist convention (`unicode:characters_to_list/1`)
+  /// This is the OTP charlist convention (`unicode:characters_to_list/2` with `utf8`)
   /// and the same conversion the FFI proxy applies when it retries a call
   /// with a `String` coerced to a charlist, so `"café" asCharlist` names
   /// the same file as passing `"café"` straight to `file:` or `filename:`.
