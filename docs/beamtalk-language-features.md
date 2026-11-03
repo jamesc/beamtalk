@@ -4753,7 +4753,7 @@ These segment rules are compile errors, with `erlc`'s wording: a negative litera
 
 An arm that can never match is a **warning**, as it is in `erlc`. Examples: a literal that does not fit its segment (`<<300>>` in the default 8 bits, or `<<-1:8>>` in an unsigned segment); an integer literal in a `binary`/`bits` segment; a float literal in a non-`float` segment; and a float size other than 16, 32 or 64 bits (size × unit). A non-ASCII character literal (U+0080 to U+00FF) in an 8-bit integer segment (the default size, or an explicit size × unit of 8 such as `$é:8`) also warns: `<<$é>>` matches the single byte 233 (its code point), not the UTF-8 bytes that `<<"é">>` matches, so write `"é"` or `$é/utf8` instead. To silence one of these warnings, use `@expect`. `--warnings-as-errors` turns them into errors.
 
-**Binary construction** (ADR 0143, BT-4346/4347/4348). `<<...>>` where an expression is expected builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<s:8/unit:2>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; an infix `<<` is still a binary send (`a << b`). Every pattern example above reads as construction, so build-then-match round-trips:
+**Binary construction** (ADR 0143, BT-4346/4347/4348). `<<...>>` where an expression is expected builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<s:8/unit:2>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; `<<` is not a binary operator, so an infix `a << b` is a parse error. Every pattern example above reads as construction, so build-then-match round-trips:
 
 ```beamtalk
 v := 4660
