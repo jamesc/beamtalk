@@ -50,7 +50,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module};
+use crate::ast::{
+    Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module, WellKnownSelector,
+};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
@@ -1508,18 +1510,18 @@ fn threading_constructs_note() -> String {
     )
 }
 
-/// The conditional selectors whose plain arm is a frame (BT-4367), each proven
-/// by the runtime differential in `stdlib/test/bt4367arm_local_grid_test.bt`.
-/// `and:`/`or:` are not in it (not exercised), and `ifFalse:ifTrue:` is not a
-/// Boolean selector.
-const PLAIN_ARM_SELECTORS: &[&str] = &[
-    "ifTrue:ifFalse:",
-    "ifTrue:",
-    "ifFalse:",
-    "ifNil:ifNotNil:",
-    "ifNotNil:ifNil:",
-    "ifNil:",
-    "ifNotNil:",
+/// The conditional selectors whose plain arm is a frame (BT-4367): the selectors
+/// the runtime grid `stdlib/test/bt4367arm_local_grid_test.bt` proves, which
+/// `plain_arm_selectors_are_all_in_the_runtime_grid` checks. `and:`/`or:` are
+/// not in it (not exercised).
+pub(crate) const PLAIN_ARM_SELECTORS: &[WellKnownSelector] = &[
+    WellKnownSelector::IfTrueIfFalse,
+    WellKnownSelector::IfTrue,
+    WellKnownSelector::IfFalse,
+    WellKnownSelector::IfNilIfNotNil,
+    WellKnownSelector::IfNotNilIfNil,
+    WellKnownSelector::IfNil,
+    WellKnownSelector::IfNotNil,
 ];
 
 /// The walk behind [`check_local_threading`] for one method body: tracks
@@ -2152,7 +2154,8 @@ impl<'d> Walker<'d> {
             && matches!(self.context, Actor | ValueType)
             && local_threading_construct(expr).is_some_and(|c| {
                 c.family == LocalThreadingFamily::Conditional
-                    && PLAIN_ARM_SELECTORS.contains(&c.selector.as_str())
+                    && WellKnownSelector::from_name(&c.selector)
+                        .is_some_and(|w| PLAIN_ARM_SELECTORS.contains(&w))
             })
             && conditional_arm_blocks(expr).is_some()
     }
@@ -2408,7 +2411,7 @@ impl<'d> Walker<'d> {
                 .and_then(Option::as_ref)
                 .is_some_and(|frame| frame.sites.contains(&expr.span()))
             && (operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
-                || (!self.in_plain_arm() && self.arm_frame_conditional_producer(expr)))
+                || self.arm_frame_conditional_producer(expr))
             // A plain arm lowers a loop or fold that is the statement or the
             // whole value of an assignment (BT-4367). One at an operand or
             // array-literal site of an actor `ifTrue:ifFalse:` arm compiles to

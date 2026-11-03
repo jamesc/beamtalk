@@ -59,6 +59,8 @@ pub(crate) use class_validators::{
 };
 pub(crate) use handleinfo_catch_all_validators::check_handle_info_catch_all;
 pub(crate) use late_slot_validators::check_late_slot_declarations;
+#[cfg(test)]
+pub(crate) use local_threading::PLAIN_ARM_SELECTORS;
 pub(crate) use local_threading::check_local_threading;
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.
