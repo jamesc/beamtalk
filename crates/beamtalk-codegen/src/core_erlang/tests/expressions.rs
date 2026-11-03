@@ -1837,6 +1837,60 @@ fn test_binary_pattern_float_literal_value() {
 }
 
 #[test]
+fn test_binary_pattern_integer_and_char_in_float_segment_lower_as_floats() {
+    // BT-4376: erlc rewrites <<1/float>> to #<1.0e0>(64,1,'float',…); an
+    // integer value in a float segment would be a never-matching clause.
+    let cases = [
+        (Literal::Integer(1), "#<1.0>(64,1,'float'"),
+        (Literal::Integer(-3), "#<-3.0>(64,1,'float'"),
+        (Literal::Character('A'), "#<65.0>(64,1,'float'"),
+    ];
+    for (lit, expected) in cases {
+        let mut generator = CoreErlangGenerator::new("test");
+        let seg = BinarySegment {
+            value: Pattern::Literal(lit.clone(), Span::new(0, 1)),
+            size: None,
+            segment_type: Some(BinarySegmentType::Float),
+            signedness: None,
+            endianness: None,
+            unit: None,
+            span: Span::new(0, 1),
+        };
+        let output = generator
+            .generate_binary_segment(&seg)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.starts_with(expected),
+            "{lit:?}: expected {expected}…, got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_binary_pattern_sizeless_binary_with_unit() {
+    // BT-4376: erlc accepts <<X/binary-unit:16>> — size 'all', unit 16.
+    let mut generator = CoreErlangGenerator::new("test");
+    let seg = BinarySegment {
+        value: Pattern::Variable(Identifier::new("x", Span::new(0, 1))),
+        size: None,
+        segment_type: Some(BinarySegmentType::Binary),
+        signedness: None,
+        endianness: None,
+        unit: Some(16),
+        span: Span::new(0, 1),
+    };
+    let output = generator
+        .generate_binary_segment(&seg)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains(">('all',16,'binary'"),
+        "Expected ('all',16,'binary' size/unit/type, got: {output}"
+    );
+}
+
+#[test]
 fn test_binary_pattern_string_literal_value_folds() {
     // BT-4143: <<"hi">> — the bytes fold to one big-endian integer, like
     // `erlc` (#<26729>(16,1,'integer',...)); a 12-byte string exercises the
