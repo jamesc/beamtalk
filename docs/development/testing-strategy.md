@@ -165,18 +165,29 @@ Coverage reports are saved to:
 
 **CI Integration:**
 
-Coverage metrics are automatically displayed in:
-- **GitHub Actions Summary** - View in the "Summary" tab of any workflow run
-- **PR Comments** - Sticky comment with coverage badges and details on all pull requests
+`ci.yml` measures coverage in two parallel legs, `coverage-rust` and
+`coverage-erlang`. They run on every push to `main`, on a manual
+`workflow_dispatch` of the CI workflow, and on any PR touching the `Justfile`
+(home of the `coverage-*` recipes) or `ci.yml` itself, so a coverage-recipe
+change is exercised before it merges. Each leg writes its report to the
+GitHub Actions job summary and uploads it as an artifact.
 
-No external services required - all coverage reporting is handled within GitHub Actions using `$GITHUB_STEP_SUMMARY` and PR comments.
+On a push to `main`, `publish-coverage` then updates the Rust and Erlang
+badges on the `badges` branch from whatever report each leg produced — even
+when a leg failed its threshold, in which case its badge goes red. A leg
+that produced no report at all leaves its badge unchanged. The failed leg
+job, not the badge, is what fails the run.
 
 **Coverage Thresholds:**
 
+The line-coverage floors are defined once, as `RUST_LINE_COVERAGE_MIN` and
+`ERLANG_LINE_COVERAGE_MIN` in `ci.yml`'s workflow `env`.
+
 | Metric | Minimum | Target | Action if Below Minimum |
 |--------|---------|--------|------------------------|
-| Overall Line Coverage | 70% | 80% | Fail CI build |
-| Branch Coverage | 80% | 90% | Fail CI build |
+| Rust Line Coverage | 70% | 80% | Fail the `coverage-rust` leg; red badge |
+| Erlang Line Coverage | 50% | — | Fail the `coverage-erlang` leg; red badge |
+| Branch Coverage (Rust 80%, Erlang 60%) | — | — | Warning in the job log |
 | Unit Test Coverage | 80% | 90% | Flag in PR review |
 
 **Current Coverage (as of BT-136):**

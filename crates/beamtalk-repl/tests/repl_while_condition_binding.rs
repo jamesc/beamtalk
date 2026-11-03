@@ -24,11 +24,13 @@
 //! verifier catching the pre-fix lowering is shown in `beamtalk-codegen`'s
 //! `while_condition_binding_corpus.rs`.
 
+mod common;
+
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_repl::codegen::generate_repl_expressions;
+use common::erlc_batched_in_temp_dir;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::process::Command;
 
 /// Conditions that write a binding (`CMP` is the loop's comparison): a plain
 /// statement, a value-position write in a statement and in the boolean tail,
@@ -129,50 +131,6 @@ fn generate(src: &str, module: &str) -> Result<Option<String>, String> {
     }
 }
 
-/// `Ok(())` when `erlc` accepts every module (or is not installed).
-///
-/// In batches: Windows caps a command line at ~32K characters, and this
-/// corpus is hundreds of modules, so one `erlc` call with every path
-/// overflows it (`Os { code: 206 }`, BT-4224). Batches of 32 keep every
-/// invocation to a few kilobytes on every platform.
-fn erlc(modules: &[(String, String)]) -> Result<(), String> {
-    const BATCH: usize = 32;
-    let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4015_repl");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    let mut files = Vec::new();
-    for (name, code) in modules {
-        let file = dir.join(format!("{name}.core"));
-        std::fs::write(&file, code).expect("write core");
-        files.push(file);
-    }
-    let mut result = Ok(());
-    for chunk in files.chunks(BATCH) {
-        let output = Command::new("erlc")
-            .arg("+from_core")
-            .arg("-o")
-            .arg(&dir)
-            .args(chunk)
-            .output();
-        match output {
-            Err(_) => {
-                let _ = std::fs::remove_dir_all(&dir);
-                return Ok(());
-            }
-            Ok(o) if o.status.success() => {}
-            Ok(o) => {
-                result = Err(format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&o.stdout),
-                    String::from_utf8_lossy(&o.stderr)
-                ));
-                break;
-            }
-        }
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-    result
-}
-
 /// Generates and `erlc`-compiles every input, bisecting to the failing rows.
 fn assert_inputs_compile(inputs: &[String], least: usize) {
     let mut failures = Vec::new();
@@ -194,9 +152,11 @@ fn assert_inputs_compile(inputs: &[String], least: usize) {
         .iter()
         .map(|(m, c, _)| (m.clone(), c.clone()))
         .collect();
-    if erlc(&modules).is_err() {
+    if erlc_batched_in_temp_dir("bt4015_repl", &modules).is_err() {
         for (module, code, src) in &compiled {
-            if let Err(e) = erlc(&[(module.clone(), code.clone())]) {
+            if let Err(e) =
+                erlc_batched_in_temp_dir("bt4015_repl", &[(module.clone(), code.clone())])
+            {
                 failures.push(format!("{src}\n: erlc: {e}"));
             }
         }
