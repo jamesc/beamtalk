@@ -44,7 +44,6 @@
     clippy::too_many_lines
 )]
 
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::AtomicU64;
@@ -361,7 +360,8 @@ fn stage_fixture(corpus_root: &Path, case: &CorpusCase) -> Result<StagedFixture,
         std::fs::remove_dir_all(&dst)
             .map_err(|e| format!("remove stale staging dir {}: {e}", dst.display()))?;
     }
-    beamtalk_workspace::copy_tree(&src, &dst).map_err(|e| format!("copy_tree {}: {e}", src.display()))?;
+    beamtalk_workspace::copy_tree(&src, &dst)
+        .map_err(|e| format!("copy_tree {}: {e}", src.display()))?;
 
     let lsp_target = dst.join(case.lsp_target);
     let lint_target = if case.lint_target.is_empty() {

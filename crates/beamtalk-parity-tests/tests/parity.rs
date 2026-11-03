@@ -9,7 +9,6 @@
 //! All `#[test]`s here are gated behind `#[ignore]` because they spawn real
 //! workspaces and child binaries. Invoke via `just test-parity`.
 
-
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
