@@ -22,7 +22,9 @@
 //! into a single cascade receiver.
 
 use crate::LintPass;
-use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
+use beamtalk_core::ast::{
+    BinarySegment, Block, Expression, ExpressionStatement, Identifier, Module,
+};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple
@@ -209,6 +211,11 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     recurse(e, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                recurse(e, diagnostics);
             }
         }
 

@@ -58,7 +58,7 @@
 //! Callers treat "no sites found" identically to "could not parse".
 
 use super::selector_span;
-use beamtalk_core::ast::{Expression, MessageSelector, Pattern, StringSegment};
+use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Pattern, StringSegment};
 use beamtalk_core::semantic_analysis::validators::{erlang_arity, erlang_function_name};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
@@ -267,6 +267,11 @@ fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines:
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_ffi_sites(inner, target, source, lines);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_ffi_sites(inner, target, source, lines);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

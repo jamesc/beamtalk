@@ -850,6 +850,12 @@ impl TypeChecker {
             Expression::StringInterpolation { segments, .. } => {
                 self.infer_string_interpolation(segments, hierarchy, env, in_abstract_method)
             }
+
+            // Binary construction (ADR 0143) — see
+            // `literals::infer_binary_construction`.
+            Expression::BinaryConstruction { segments, .. } => {
+                self.infer_binary_construction(segments, hierarchy, env, in_abstract_method)
+            }
             // Super — resolve to parent class type for method validation.
             //
             // Uses `super_receiver_type` so the parent

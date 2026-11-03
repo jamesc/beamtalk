@@ -11,7 +11,7 @@
 //! - Supports `--allow-primitives` escape hatch for advanced FFI use
 
 use crate::CompilerOptions;
-use crate::ast::{Expression, Module};
+use crate::ast::{BinarySegment, Expression, Module};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Known structural intrinsic names (ADR 0007).
@@ -232,6 +232,11 @@ fn validate_expr(
                 if let crate::ast::StringSegment::Interpolation(expr) = segment {
                     validate_expr(expr, is_stdlib, options, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                validate_expr(expr, is_stdlib, options, diagnostics);
             }
         }
     }

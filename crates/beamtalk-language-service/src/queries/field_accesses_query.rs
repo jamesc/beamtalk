@@ -48,7 +48,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no accesses found" identically to "could not parse".
 
-use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -251,6 +251,11 @@ fn collect_access_lines(
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_access_lines(inner, field_name, kind, source, lines);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_access_lines(inner, field_name, kind, source, lines);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

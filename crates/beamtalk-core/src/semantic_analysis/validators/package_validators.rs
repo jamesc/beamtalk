@@ -8,7 +8,7 @@
 //! Validates that package qualifiers in `ClassReference` nodes and
 //! `StandaloneMethodDefinition` targets reference declared dependencies.
 
-use crate::ast::{Expression, Module};
+use crate::ast::{BinarySegment, Expression, Module};
 use crate::source_analysis::Diagnostic;
 use std::collections::HashSet;
 
@@ -217,6 +217,11 @@ fn check_expression_packages(
                 if let crate::ast::StringSegment::Interpolation(inner) = segment {
                     check_expression_packages(inner, known_packages, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                check_expression_packages(inner, known_packages, diagnostics);
             }
         }
 

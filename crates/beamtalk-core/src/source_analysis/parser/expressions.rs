@@ -45,6 +45,21 @@ pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
     }
 }
 
+/// Converts a literal binary segment value parsed by the match side's
+/// literal parsers into a construction value (ADR 0143), so a literal reads
+/// the same in both directions. The parsers answer `Pattern::Literal`, or a
+/// `Pattern::Wildcard` after reporting an error (out-of-range number,
+/// missing digits), which becomes an `Expression::Error` node.
+fn binary_literal_value_to_expression(value: Pattern) -> Expression {
+    match value {
+        Pattern::Literal(lit, span) => Expression::Literal(lit, span),
+        other => Expression::Error {
+            message: "invalid literal in binary construction segment".into(),
+            span: other.span(),
+        },
+    }
+}
+
 /// Extracts an integer literal and its span, unwrapping parentheses.
 ///
 /// Used for binary segment sizes, which may be parenthesized (BT-4097).
@@ -790,6 +805,17 @@ impl Parser {
         // Parse the left-hand side (unary expression)
         let mut left = self.parse_unary_message();
 
+        // `<<` is not a binary operator: only a leading `<<` (in operand
+        // position) means anything, opening a binary construction (ADR
+        // 0143). One right after an operand on the same line is reported
+        // here rather than being read as a second statement that starts a
+        // construction. On a new line it does start the next statement.
+        if matches!(self.current_kind(), TokenKind::LtLt)
+            && !self.current_token().has_leading_newline()
+        {
+            left = self.report_infix_ltlt(&left);
+        }
+
         // Extract binary operator string from BinarySelector, Arrow (ADR 0047), or GtGt.
         // Arrow (`->`) is treated as the binary operator `"->"`.
         // GtGt (`>>`) is treated as the binary operator `">>"` (method lookup).
@@ -834,6 +860,23 @@ impl Parser {
         }
 
         left
+    }
+
+    /// Reports a `<<` that follows an operand (`a << b`) and consumes it with
+    /// its right operand, answering an error node spanning both sides.
+    fn report_infix_ltlt(&mut self, left: &Expression) -> Expression {
+        let op_span = self.advance().span(); // consume `<<`
+        let message: EcoString = "'<<' is not a binary operator".into();
+        self.diagnostics.push(
+            Diagnostic::error(message.clone(), op_span).with_hint(
+                "a leading '<<' opens a binary construction, as in <<v:8, rest/binary>>; to combine binaries use ++",
+            ),
+        );
+        let right = self.parse_unary_message();
+        Expression::Error {
+            message,
+            span: left.span().merge(right.span()),
+        }
     }
 
     /// Parses unary messages (highest message precedence).
@@ -910,6 +953,12 @@ impl Parser {
 
             // Tuple literal: `{a, b}` (ADR 0136)
             TokenKind::LeftBrace => self.parse_tuple_literal(),
+
+            // Binary construction: `<<16:8, payload/binary>>` (ADR 0143).
+            // Only a leading `<<` reaches here: `parse_primary` runs where an
+            // operand is expected, while an infix `<<` after an operand is
+            // seen by the binary-operator loop, never by this dispatch.
+            TokenKind::LtLt => self.parse_binary_construction(),
 
             // Primitive pragma: @primitive/@intrinsic 'name' or @primitive/@intrinsic intrinsicName
             TokenKind::AtPrimitive | TokenKind::AtIntrinsic => self.parse_primitive(),
@@ -2250,33 +2299,110 @@ impl Parser {
     /// a parenthesized expression (`v:(8 - p)`, BT-4097).
     fn parse_binary_pattern(&mut self) -> Pattern {
         let start = self.current_token().span();
+        let (segments, end) = self.parse_binary_segment_list("pattern", Self::parse_binary_segment);
+        let end = end.unwrap_or_else(|| {
+            self.error("Expected '>>' to close binary pattern");
+            start
+        });
+        Pattern::Binary {
+            segments,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses a binary construction: `<<seg, seg, ...>>` in operand position
+    /// (ADR 0143).
+    ///
+    /// The segment grammar is the match side's, through the same
+    /// [`Self::parse_binary_segment_with`]: only the value production
+    /// differs (see [`Self::parse_binary_construction_value`]).
+    fn parse_binary_construction(&mut self) -> Expression {
+        let start = self.current_token().span();
+        let (segments, end) =
+            self.parse_binary_segment_list("construction", Self::parse_binary_construction_segment);
+        let end = end.unwrap_or_else(|| self.recover_unclosed_binary_construction(start));
+        Expression::BinaryConstruction {
+            segments,
+            span: start.merge(end),
+        }
+    }
+
+    /// Reports a construction with no closing `>>` and skips to it, so the
+    /// rest of the segment list does not leak into the enclosing expression
+    /// as stray sends. The usual cause is an unparenthesised send as a
+    /// segment value (`<<x size:8>>` reads as segment `x` followed by the
+    /// keyword `size:`), so a name there gets the parenthesise hint (ADR
+    /// 0143 § Segment values). Skipping stops at the closing `>>`, or
+    /// without consuming at the end of the statement (`.`, a closing
+    /// bracket or parenthesis, a new line, end of input). Answers the span
+    /// to end the construction at.
+    fn recover_unclosed_binary_construction(&mut self, start: Span) -> Span {
+        let message = "Expected '>>' to close binary construction";
+        if matches!(
+            self.current_kind(),
+            TokenKind::Identifier(_) | TokenKind::Keyword(_)
+        ) {
+            let span = self.current_token().span();
+            self.diagnostics.push(
+                Diagnostic::error(message, span).with_hint(
+                    "a segment value other than a variable or a literal must be parenthesized: <<(x size):8>>",
+                ),
+            );
+        } else {
+            self.error(message);
+        }
+        let mut end = start;
+        loop {
+            match self.current_kind() {
+                TokenKind::GtGt => {
+                    end = self.advance().span();
+                    break;
+                }
+                TokenKind::Eof
+                | TokenKind::Period
+                | TokenKind::RightBracket
+                | TokenKind::RightParen
+                | TokenKind::RightBrace => break,
+                _ if self.current_token().has_leading_newline() => break,
+                _ => end = self.advance().span(),
+            }
+        }
+        end
+    }
+
+    /// Parses `<<seg, seg, ...>>` with `parse_segment` for each segment,
+    /// answering the segments and the closing `>>`'s span, or `None` when
+    /// it is missing (the caller reports that). `what` names the form in
+    /// diagnostics (`pattern` or `construction`).
+    fn parse_binary_segment_list<V>(
+        &mut self,
+        what: &str,
+        parse_segment: fn(&mut Self) -> BinarySegment<V>,
+    ) -> (Vec<BinarySegment<V>>, Option<Span>) {
         self.advance(); // consume `<<`
 
         let mut segments = Vec::new();
 
         if !matches!(self.current_kind(), TokenKind::GtGt) {
-            segments.push(self.parse_binary_segment());
+            segments.push(parse_segment(self));
             while self.match_binary_selector(",") {
                 if matches!(self.current_kind(), TokenKind::GtGt) {
-                    self.error("Trailing comma is not allowed before '>>' in binary pattern");
+                    self.error(format!(
+                        "Trailing comma is not allowed before '>>' in binary {what}"
+                    ));
                     break;
                 }
-                segments.push(self.parse_binary_segment());
+                segments.push(parse_segment(self));
             }
         }
 
         let end = if matches!(self.current_kind(), TokenKind::GtGt) {
-            let t = self.advance(); // consume `>>`
-            t.span()
+            Some(self.advance().span()) // consume `>>`
         } else {
-            self.error("Expected '>>' to close binary pattern");
-            start
+            None
         };
 
-        Pattern::Binary {
-            segments,
-            span: start.merge(end),
-        }
+        (segments, end)
     }
 
     /// Parses one segment of a binary pattern.
@@ -2312,8 +2438,61 @@ impl Parser {
     }
 
     fn parse_binary_segment(&mut self) -> BinarySegment {
+        let seg = self.parse_binary_segment_with(Self::parse_binary_pattern_value);
+        // Literal shape checks (review finding 3): mirror `erlc` — error
+        // where it errors, warn where it warns — so mistyped literals are
+        // diagnostics, never silently dead arms or invalid Core Erlang.
+        self.check_binary_literal_shapes(
+            &seg.value,
+            seg.size.as_deref(),
+            seg.segment_type,
+            seg.signedness,
+            seg.endianness,
+            seg.unit,
+        );
+        seg
+    }
+
+    /// Parses one segment of a binary construction (ADR 0143).
+    ///
+    /// The construction-side literal checks (ADR 0143 § Literal checks) are
+    /// Phase 2 (BT-4347), worded for construction ("truncated", "will
+    /// fail") rather than the match side's "can never match".
+    fn parse_binary_construction_segment(&mut self) -> BinarySegment<Expression> {
+        self.parse_binary_segment_with(Self::parse_binary_construction_value)
+    }
+
+    /// Parses one binary segment, in either direction: the value and its
+    /// optional `:size` via `parse_value`, then the shared
+    /// `/type-signedness-endianness-unit:N` specifiers.
+    fn parse_binary_segment_with<V>(
+        &mut self,
+        parse_value: fn(&mut Self) -> (V, Option<Box<Expression>>),
+    ) -> BinarySegment<V> {
         let start = self.current_token().span();
-        let (value, size) = match self.current_kind() {
+        let (value, size) = parse_value(self);
+
+        // Optional type/modifiers: `/type[-modifier]*` (BT-4143 adds
+        // `utf16`, `utf32`, and `unit:N` to the specifier set)
+        let (segment_type, signedness, endianness, unit) = self.parse_binary_segment_specifiers();
+
+        let end = self.tokens[self.current.saturating_sub(1)].span();
+        BinarySegment {
+            value,
+            size,
+            segment_type,
+            signedness,
+            endianness,
+            unit,
+            span: start.merge(end),
+        }
+    }
+
+    /// Parses a binary pattern segment's value and optional `:size`: a
+    /// variable, `_`, or an integer, float, string or character literal
+    /// (optionally negated).
+    fn parse_binary_pattern_value(&mut self) -> (Pattern, Option<Box<Expression>>) {
+        match self.current_kind() {
             // Wildcard: `_` or `_:size` (fixed-width skip segment)
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
@@ -2393,34 +2572,98 @@ impl Parser {
                 self.error("Expected variable name or literal value in binary segment");
                 (Pattern::Wildcard(span), None)
             }
-        };
-
-        // Optional type/modifiers: `/type[-modifier]*` (BT-4143 adds
-        // `utf16`, `utf32`, and `unit:N` to the specifier set)
-        let (segment_type, signedness, endianness, unit) = self.parse_binary_segment_specifiers();
-
-        // Literal shape checks (review finding 3): mirror `erlc` — error
-        // where it errors, warn where it warns — so mistyped literals are
-        // diagnostics, never silently dead arms or invalid Core Erlang.
-        self.check_binary_literal_shapes(
-            &value,
-            size.as_deref(),
-            segment_type,
-            signedness,
-            endianness,
-            unit,
-        );
-
-        let end = self.tokens[self.current.saturating_sub(1)].span();
-        BinarySegment {
-            value,
-            size,
-            segment_type,
-            signedness,
-            endianness,
-            unit,
-            span: start.merge(end),
         }
+    }
+
+    /// Parses a binary construction segment's value and optional `:size`
+    /// (ADR 0143 § Segment values): a variable, a literal (integer, float,
+    /// character or string, optionally negated), or a parenthesised
+    /// expression for anything else (`<<(payload size):16>>`).
+    ///
+    /// Literal values go through the match side's literal parsers, so a
+    /// literal reads identically in both directions.
+    fn parse_binary_construction_value(&mut self) -> (Expression, Option<Box<Expression>>) {
+        match self.current_kind() {
+            // `name:size` — the `:` attached to the name lexes as Keyword("name:")
+            TokenKind::Keyword(kw) => {
+                let kw = kw.clone();
+                let kw_span = self.advance().span();
+                let name: EcoString = kw.trim_end_matches(':').into();
+                let var_span = Span::new(kw_span.start(), kw_span.end().saturating_sub(1));
+                let value = self.binary_construction_variable(name, var_span);
+                let size = self.parse_binary_segment_size();
+                (value, size)
+            }
+
+            // `name` — variable, with optional explicit `:size` (Colon + size-token)
+            TokenKind::Identifier(name) => {
+                let name = name.clone();
+                let span = self.advance().span();
+                let value = self.binary_construction_variable(name, span);
+                let size = self.parse_binary_value_size_suffix();
+                (value, size)
+            }
+
+            // `(expr)` — any other value, parenthesised; optional `:size`
+            TokenKind::LeftParen => {
+                let value = self.parse_parenthesized();
+                let size = self.parse_binary_value_size_suffix();
+                (value, size)
+            }
+
+            TokenKind::Integer(_)
+            | TokenKind::Float(_)
+            | TokenKind::String(_)
+            | TokenKind::Character(_) => {
+                let (pattern, size) = self.parse_binary_pattern_value();
+                (binary_literal_value_to_expression(pattern), size)
+            }
+
+            // `-1:8`, `-1.5/float` — negative literal values
+            TokenKind::BinarySelector(op) if op.as_str() == "-" => {
+                let (pattern, size) = self.parse_binary_pattern_value();
+                (binary_literal_value_to_expression(pattern), size)
+            }
+
+            _ => {
+                let span = self.current_token().span();
+                // Consume the stray token (`<<#foo>>`) so the segment list
+                // goes on to its `>>`, unless it ends the statement.
+                if !matches!(
+                    self.current_kind(),
+                    TokenKind::Eof
+                        | TokenKind::Period
+                        | TokenKind::GtGt
+                        | TokenKind::RightBracket
+                        | TokenKind::RightParen
+                        | TokenKind::RightBrace
+                ) {
+                    self.advance();
+                }
+                let message: EcoString =
+                    "Expected a variable, a literal, or a parenthesized expression in binary construction segment"
+                        .into();
+                self.diagnostics.push(
+                    Diagnostic::error(message.clone(), span)
+                        .with_hint("wrap any other value in parentheses: <<(payload size):16>>"),
+                );
+                (Expression::Error { message, span }, None)
+            }
+        }
+    }
+
+    /// A construction segment's variable value. `_` matches anything in a
+    /// pattern but has no value to build with, so it is an error here.
+    fn binary_construction_variable(&mut self, name: EcoString, span: Span) -> Expression {
+        if name == "_" {
+            let message: EcoString =
+                "'_' cannot be a value in a binary construction; it only skips bits in a binary pattern"
+                    .into();
+            self.diagnostics
+                .push(Diagnostic::error(message.clone(), span));
+            return Expression::Error { message, span };
+        }
+        Expression::Identifier(Identifier::new(name, span))
     }
 
     /// Validates literal sizes and values against the segment type.

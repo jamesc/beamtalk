@@ -10,8 +10,8 @@
 
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement, MatchArm,
-    MessageSelector, MethodKind, ParameterDefinition,
+    BinarySegment, Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement,
+    MatchArm, MessageSelector, MethodKind, ParameterDefinition,
 };
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
@@ -671,6 +671,11 @@ fn analyze_expression(
                 if let crate::ast::StringSegment::Interpolation(expr) = segment {
                     analyze_expression(expr, analysis, ctx);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                analyze_expression(expr, analysis, ctx);
             }
         }
 
@@ -1537,6 +1542,11 @@ impl OuterWriteWalker<'_> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.expr(e);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
                 }
             }
             Expression::Literal(..)
@@ -2916,6 +2926,11 @@ pub fn operand_loop_constructs_with_holders(
                     }
                 }
             }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    walk(e, holders, out);
+                }
+            }
             Expression::FieldAccess { receiver, .. } => walk(receiver, holders, out),
             Expression::Assignment { value, .. }
             | Expression::DestructureAssignment { value, .. }
@@ -3871,6 +3886,11 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
                 crate::ast::StringSegment::Interpolation(e) => stored_block_var_uses(e, var_name),
                 crate::ast::StringSegment::Literal(_) => (false, false),
             })
+            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .map(|e| stored_block_var_uses(e, var_name))
             .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
     }
 }

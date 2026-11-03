@@ -15,7 +15,7 @@
 //! downward only; `beamtalk-lsp` may depend on `beamtalk-core`, never on
 //! `beamtalk-cli`).
 
-use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::ast::{BinarySegment, ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::ast_walker::expression_contains_block;
 use crate::semantic_analysis::stdlib_protocols::is_stdlib_package;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
@@ -1059,6 +1059,11 @@ fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDi
                 if let crate::ast::StringSegment::Interpolation(e) = seg {
                     collect_directives_from_expr(e, directives);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_directives_from_expr(e, directives);
             }
         }
         // Leaf nodes — nothing to recurse into.

@@ -18,6 +18,7 @@ fn parse_err(source: &str) -> Vec<Diagnostic> {
     diagnostics
 }
 
+mod binary_construction_tests;
 mod class_tests;
 mod expression_tests;
 mod literal_tests;

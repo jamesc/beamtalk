@@ -28,7 +28,7 @@
 //! Callers treat "no senders found" identically to "could not parse".
 
 use super::selector_span;
-use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -139,6 +139,11 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_send_lines(inner, selector_name, source, lines);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_send_lines(inner, selector_name, source, lines);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

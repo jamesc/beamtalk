@@ -23,7 +23,7 @@
 use crate::queries::type_of_parsed;
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
 use beamtalk_core::ast::normalize::canonical_operand;
-use beamtalk_core::ast::{ClassDefinition, Expression, MessageSelector, Module};
+use beamtalk_core::ast::{BinarySegment, ClassDefinition, Expression, MessageSelector, Module};
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -324,6 +324,12 @@ fn find_signature_in_expr(
                 None
             }
         }),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .find_map(|expr| {
+                find_signature_in_expr(expr, offset, context, hierarchy, type_map, native_types)
+            }),
         _ => None,
     }
 }

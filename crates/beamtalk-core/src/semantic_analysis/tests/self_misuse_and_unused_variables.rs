@@ -1081,3 +1081,41 @@ fn test_variable_used_via_closure_no_warning() {
     // x is used via closure in the block
     assert!(warnings.is_empty());
 }
+
+// --- Binary construction (ADR 0143, BT-4346) ---
+
+fn analyse_source(source: &str) -> Vec<Diagnostic> {
+    let (module, parse_diagnostics) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(source));
+    assert!(parse_diagnostics.is_empty(), "{parse_diagnostics:?}");
+    analyse(&module).diagnostics
+}
+
+#[test]
+fn binary_construction_segment_values_and_sizes_count_as_uses() {
+    // `v`, `len` and `p` are read only inside the construction (as a
+    // value, a size, and inside a parenthesised value): none is unused.
+    // `w` is the control: it is never read, so it alone is reported.
+    let diagnostics = analyse_source(
+        "Object subclass: Framer\n  frame: p => \n    v := 16\n    len := 8\n    w := 0\n    <<v:len, (p size):8, p/binary>>\n",
+    );
+    let unused: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("Unused variable"))
+        .collect();
+    assert_eq!(unused.len(), 1, "{unused:?}");
+    assert!(unused[0].message.contains("`w`"), "{unused:?}");
+}
+
+#[test]
+fn binary_construction_reports_undefined_segment_variables() {
+    let diagnostics = analyse_source("<<v:4, p:n/binary>>");
+    for name in ["v", "p", "n"] {
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains(&format!("Undefined variable: {name}"))),
+            "{name}: {diagnostics:?}"
+        );
+    }
+}

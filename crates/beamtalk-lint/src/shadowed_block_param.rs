@@ -27,7 +27,7 @@ use std::collections::HashSet;
 
 use crate::LintPass;
 use beamtalk_core::ast::{
-    Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
+    BinarySegment, Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
 use beamtalk_core::source_analysis::Diagnostic;
 
@@ -265,6 +265,11 @@ fn check_expr(expr: &Expression, scope: &mut LintScope, diagnostics: &mut Vec<Di
                 if let StringSegment::Interpolation(e) = seg {
                     check_expr(e, scope, diagnostics);
                 }
+            }
+        }
+        BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                check_expr(e, scope, diagnostics);
             }
         }
 

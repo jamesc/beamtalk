@@ -6,11 +6,11 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Covers `Expression::Literal`, `MapLiteral`, `ListLiteral`, `ArrayLiteral`,
-//! `TupleLiteral`, `StringInterpolation`, and the literal-index `Tuple at:` shortcut — the
+//! `TupleLiteral`, `StringInterpolation`, `BinaryConstruction`, and the literal-index `Tuple at:` shortcut — the
 //! leaves of `infer_expr`'s dispatch that construct a type from a literal's
 //! own shape rather than from message-send/receiver lookup.
 
-use crate::ast::{Expression, Literal, MapPair, StringSegment, WellKnownSelector};
+use crate::ast::{BinarySegment, Expression, Literal, MapPair, StringSegment, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker, TypeEnv};
@@ -246,5 +246,24 @@ impl TypeChecker {
             }
         }
         InferredType::known("String")
+    }
+
+    /// Infers a binary construction (`<<v:8, p/binary>>`, ADR 0143).
+    ///
+    /// Every segment value and size is inferred, so sends inside a
+    /// parenthesised value are still checked. The result class
+    /// (`Binary`/`Bitstring` by bit alignment, ADR 0143 § Result class) is
+    /// Phase 2 (BT-4347); until then the result is `Dynamic`.
+    pub(in crate::semantic_analysis::type_checker) fn infer_binary_construction(
+        &mut self,
+        segments: &[BinarySegment<Expression>],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        for inner_expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+            self.infer_expr(inner_expr, hierarchy, env, in_abstract_method);
+        }
+        InferredType::Dynamic(DynamicReason::Unknown)
     }
 }

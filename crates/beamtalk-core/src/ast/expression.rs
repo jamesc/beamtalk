@@ -10,7 +10,7 @@ use crate::span::Span;
 use ecow::{EcoString, eco_format};
 
 use super::ExpressionStatement;
-use super::pattern::{MatchArm, Pattern};
+use super::pattern::{BinarySegment, MatchArm, Pattern};
 
 /// The diagnostic category that an `@expect` directive suppresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,6 +419,21 @@ pub enum Expression {
         span: Span,
     },
 
+    /// A binary construction (ADR 0143): `<<16:8, len:24, payload/binary>>`.
+    ///
+    /// Parsed from a leading `<<` in operand position; the segments share the
+    /// match side's grammar and specifier vocabulary
+    /// ([`BinarySegment`], with an [`Expression`] value). A segment value is
+    /// a variable, a literal (integer, float, character or string, optionally
+    /// negated) or a parenthesised expression; a size is an integer literal,
+    /// a variable or a parenthesised expression.
+    BinaryConstruction {
+        /// The segments, in source order.
+        segments: Vec<BinarySegment<Expression>>,
+        /// Source location of the entire `<<...>>` expression.
+        span: Span,
+    },
+
     /// A diagnostic suppression directive (`@expect category` or
     /// `@expect category1, category2, ...`).
     ///
@@ -485,6 +500,7 @@ impl Expression {
             | Self::TupleLiteral { span, .. }
             | Self::Primitive { span, .. }
             | Self::StringInterpolation { span, .. }
+            | Self::BinaryConstruction { span, .. }
             | Self::ExpectDirective { span, .. }
             | Self::Spread { span, .. }
             | Self::Error { span, .. } => *span,
