@@ -1534,6 +1534,9 @@ fn arm_local_producer_at_an_operand_site_of_a_plain_arm_is_still_rejected() {
     for body in [
         "true ifTrue: [\n  m := 0\n  r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e])\n  r + m]",
         "true ifTrue: [\n  m := 0\n  arr := #[(#(1, 2) collect: [:e | m := m + e])]\n  m + arr size]",
+        // A chained assignment: the loop is the value of the inner assignment,
+        // which the runtime grid never runs.
+        "true ifTrue: [\n  m := 0\n  a := s := #(1, 2) inject: 0 into: [:acc :e | m := m + e. acc + e]\n  a + m + s]",
     ] {
         for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
             let diags = adr0131_diagnostics(&src);

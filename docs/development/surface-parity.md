@@ -712,7 +712,8 @@ reports the same message at the same span. No operation is surface-specific.
   loop or fold that writes a local of its own conditional arm (the conditional
   writes no outer local, so the arm is a plain `BranchArm` frame) is accepted
   as a statement or as the whole value of an assignment in that arm, in actor
-  and value-type methods on every surface, for an `ifTrue:` / `ifFalse:` /
+  and value-type method bodies (including ones loaded through the REPL; the
+  REPL's own input keeps its own arm lowering), for an `ifTrue:` / `ifFalse:` /
   `ifNil:` / `ifNotNil:` conditional at the method root (the selectors in
   `PLAIN_ARM_SELECTORS`, proven by `bt4367arm_local_grid_test.bt`). It keeps
   this error in a class method, at an operand or array-literal site of an arm,
