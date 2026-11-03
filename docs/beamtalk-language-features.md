@@ -4947,9 +4947,14 @@ Registry reset          // => 0
 `Point`'s own methods), compiles to a guarded direct call: when the receiver's
 class tag is exactly `Point` it calls `Point`'s compiled module, and any other
 receiver (a subclass instance, or a value the annotation lied about) takes the
-ordinary dynamic send. Abstract classes, `Object`, `Value`, actors, the
-supervisor and exception families and built-ins with their own representation
-always send dynamically. The result is always what a dynamic send answers
+ordinary dynamic send. A built-in receiver with its own representation
+(`n :: Integer`, `xs :: List`, `d :: Dictionary`, and likewise `Float`,
+`Symbol`, `True`, `False`, `UndefinedObject`, `Block`, `Tuple`, `Reference`,
+`Port`) compiles to a direct call guarded by the same representation test the
+dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
+`String`, `Binary`, `Pid`, `Boolean`, `Bitstring` and `Character` receivers,
+abstract classes, `Object`, `Value`, actors, and the supervisor and exception
+families always send dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
 (`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
 module all reach typed call sites at once, because they act inside that
@@ -4959,7 +4964,14 @@ recompiled, because the call site names the module the compiler saw:
 - redefining the class in the REPL so that it lands in a *different* module:
   stale typed call sites keep reaching the old module;
 - `removeFromSystem`: a stale typed call site raises a raw `undef` error
-  instead of `does_not_understand`.
+  instead of `does_not_understand`;
+- redefining the class under a different superclass that changes how it is
+  dispatched (for example, into the `Exception` family): stale typed call
+  sites keep calling the class module's `dispatch/3` directly.
+
+Built-in receivers have no such caveat: a stdlib class can be neither removed
+nor redefined into another module, and extensions on it act inside its
+module's `dispatch/3`.
 
 ### Saving live edits back to disk — `compile:source:`, ChangeLog, and `flush` (ADR 0082)
 

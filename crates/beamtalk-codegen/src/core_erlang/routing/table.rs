@@ -43,6 +43,9 @@ pub(super) static RESERVED_TUPLE_TAGS: &[ReservedTupleTag] = &[
     ReservedTupleTag { tag: "beamtalk_supervisor", size: 4 },
 ];
 
+/// Selectors the dynamic entry point rewrites before classifying the receiver.
+pub(super) static REWRITTEN_SELECTORS: &[&str] = &["perform:withArguments:timeout:"];
+
 /// The root of the exception family, which the runtime routes to
 /// `bt@stdlib@exception:dispatch` instead of the instance's own module.
 pub(in crate::core_erlang) const EXCEPTION_ROOT_CLASS: &str = "Exception";

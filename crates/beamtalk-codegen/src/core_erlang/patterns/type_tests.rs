@@ -10,7 +10,7 @@
 //! own doc comment for the full strategy breakdown — dispatched from
 //! `generate_match_chain` (`patterns::match_lowering`).
 
-use super::super::routing::{self, Guard};
+use super::super::routing::{self, Guard, SendGuard};
 use super::super::{CoreErlangGenerator, Result};
 use super::match_lowering::MatchThreading;
 use beamtalk_cerl_doc::Document;
@@ -239,6 +239,68 @@ impl CoreErlangGenerator {
             Guard::ExactAtom(atom) => self.wrap_single_atom_test(match_var, atom, success, rest),
             Guard::UntaggedMap => self.wrap_untagged_map_test(match_var, success, rest),
         }
+    }
+
+    /// Renders a typed send's [`SendGuard`] around its guarded direct call
+    /// (BT-4294): `success` when `var` passes, `rest` otherwise. An exact
+    /// guard reuses the type-pattern renderer of its fixture kind, so a
+    /// routing guard has one Core Erlang rendering however it is used.
+    pub(in crate::core_erlang) fn render_send_guard(
+        &mut self,
+        guard: SendGuard,
+        var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        match guard {
+            SendGuard::Exact(test) => self.render_type_test(test, var, success, rest),
+            SendGuard::TupleWithoutReservedHead => {
+                let test = self.tuple_without_reserved_head_test(var);
+                Self::branch_on_test(test, success, rest)
+            }
+        }
+    }
+
+    /// [`SendGuard::TupleWithoutReservedHead`], evaluating to
+    /// `'true'`/`'false'`: `is_tuple`, then an empty tuple passes (it has no
+    /// head; the dynamic path routes `{}` to `Tuple`), else `element(1)` must
+    /// be none of the reserved tags, whatever the size.
+    fn tuple_without_reserved_head_test(&mut self, var: &str) -> Document<'static> {
+        let v = leaf::var(var.to_string());
+        let mut tags: Vec<&'static str> = Vec::new();
+        for reserved in routing::reserved_tuple_tags() {
+            if !tags.contains(&reserved.tag) {
+                tags.push(reserved.tag);
+            }
+        }
+        let other_head = self.fresh_temp_var("Unreserved");
+        let mut clauses: Vec<Document<'static>> = Vec::with_capacity(tags.len() + 1);
+        for tag in tags {
+            clauses.push(docvec!["<", leaf::atom(tag), "> when 'true' -> 'false' "]);
+        }
+        clauses.push(docvec![
+            "<",
+            leaf::var(other_head),
+            "> when 'true' -> 'true'"
+        ]);
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 0) of ",
+            "<'true'> when 'true' -> 'true' ",
+            "<'false'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            Document::Vec(clauses),
+            " end ",
+            "end ",
+            "<'false'> when 'true' -> 'false' end"
+        ]
     }
 
     /// `case call 'erlang':'BIF'(_Match) of <'true'> -> success <'false'> ->
