@@ -68,7 +68,7 @@ fn builtin_receiver_reports_its_routing_row() {
     );
     assert!(
         hint.contains(
-            "reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string"
+            "reason: builtin — String: 'asBase64' and 8 other selectors are answered outside bt@stdlib@string"
         ),
         "{hint}"
     );

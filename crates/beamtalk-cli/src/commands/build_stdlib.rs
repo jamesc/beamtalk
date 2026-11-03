@@ -23,6 +23,7 @@ use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
+use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::fs;
 use std::time::SystemTime;
@@ -33,6 +34,19 @@ const STDLIB_SOURCE_DIR: &str = "stdlib/src";
 
 /// Default output path for compiled stdlib BEAM files (relative to project root).
 const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
+
+/// The `beamtalk_stdlib` OTP app's Erlang source directory (relative to
+/// project root): where the generated `.app.src` is written, and whose
+/// `*.erl` modules the generated `.app`'s `{modules, [...]}` lists alongside
+/// the class modules.
+const STDLIB_APP_SRC_DIR: &str = "runtime/apps/beamtalk_stdlib/src";
+
+/// The runtime root [`STDLIB_EBIN_DIR`] lives under, for resolving the
+/// dev-layout rebar3 output directory (see [`rebar3_stdlib_ebin`]).
+const RUNTIME_DIR: &str = "runtime";
+
+/// The generated `beamtalk_stdlib` app resource file's name.
+const STDLIB_APP_FILE: &str = "beamtalk_stdlib.app";
 
 /// Build the standard library.
 ///
@@ -73,6 +87,10 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
             discover_runtime_ebin_dirs().as_deref(),
         )
     {
+        // Even a skipped build re-syncs rebar3's copy of the app: a
+        // `rebar3 compile` since the last stdlib build (`just build-erlang`)
+        // re-copies the class beams and regenerates its own `.app`.
+        sync_rebar3_stdlib_ebin(&ebin_dir, &rebar3_stdlib_ebin())?;
         println!("Stdlib up to date (skipped)");
         return Ok(());
     }
@@ -187,6 +205,8 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         &protocol_file_names,
     )?;
 
+    sync_rebar3_stdlib_ebin(&ebin_dir, &rebar3_stdlib_ebin())?;
+
     println!("Built {} stdlib modules", source_files.len());
 
     Ok(())
@@ -214,15 +234,16 @@ fn write_stdlib_generated_outputs(
     // aliases back via `application:get_env(beamtalk_stdlib, type_aliases)`.
     let alias_metadata = build_alias_metadata(source_files);
 
+    let app_src_dir = Utf8PathBuf::from(STDLIB_APP_SRC_DIR);
     generate_app_file(
         ebin_dir,
         source_files,
+        &stdlib_erlang_modules(&app_src_dir)?,
         class_metadata,
         protocol_modules,
         &alias_metadata,
     )?;
     // Also update .app.src so rebar3 picks up the classes env
-    let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
     if app_src_dir.exists() {
         generate_app_src_file(
             &app_src_dir,
@@ -357,6 +378,91 @@ fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// rebar3's dev-layout output directory for the `beamtalk_stdlib` app
+/// (`runtime/_build/default/lib/beamtalk_stdlib/ebin`) — the same
+/// `stdlib_erlang_ebin` the dev runtime puts on its code path.
+fn rebar3_stdlib_ebin() -> std::path::PathBuf {
+    beamtalk_cli::repl_startup::beam_paths_for_layout(
+        std::path::Path::new(RUNTIME_DIR),
+        beamtalk_cli::repl_startup::RuntimeLayout::Dev,
+    )
+    .stdlib_erlang_ebin
+}
+
+/// Bring rebar3's copy of the `beamtalk_stdlib` app in line with this
+/// build's output (BT-4384).
+///
+/// `rebar3 compile` copies `ebin_dir` into its own
+/// `_build/default/lib/beamtalk_stdlib/ebin` and compiles `.app.src` to a
+/// `.app` there. `just build-erlang` runs it *before* `build-stdlib`, so
+/// both copies are one stdlib build behind: a class added since is missing
+/// from the `.app`'s `classes` env (never activated), a removed one is still
+/// listed (activation fails at startup), and stale class beams linger. The
+/// dev runtime puts this directory *ahead* of `ebin_dir` on the code path
+/// (`beam_pa_args`'s later `-pa` wins), so its `.app` and class beams are
+/// the ones loaded.
+///
+/// So, when that directory exists: delete every `bt@*.beam` in it (their
+/// one home is `ebin_dir`, which is also on the code path), and replace its
+/// `.app` with the one this build generated. A later `rebar3 compile`
+/// re-copies the beams and regenerates the `.app` from the (now current)
+/// `.app.src` — consistent with this build either way.
+fn sync_rebar3_stdlib_ebin(ebin_dir: &Utf8Path, rebar3_ebin: &std::path::Path) -> Result<()> {
+    if !rebar3_ebin.is_dir() {
+        return Ok(());
+    }
+    let entries = fs::read_dir(rebar3_ebin)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{}'", rebar3_ebin.display()))?;
+    for entry in entries {
+        let path = entry.into_diagnostic()?.path();
+        if is_class_beam(&path) {
+            fs::remove_file(&path)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to remove '{}'", path.display()))?;
+        }
+    }
+    let app_file = ebin_dir.join(STDLIB_APP_FILE);
+    if app_file.exists() {
+        let dest = rebar3_ebin.join(STDLIB_APP_FILE);
+        fs::copy(&app_file, &dest)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to copy '{app_file}' to '{}'", dest.display()))?;
+    }
+    Ok(())
+}
+
+/// Whether `path` is a Beamtalk-compiled class beam (`bt@*.beam`).
+fn is_class_beam(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "beam")
+        && path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("bt@"))
+}
+
+/// The `beamtalk_stdlib` app's Erlang modules: one per `*.erl` in its
+/// source directory (what rebar3 compiles into the app). Empty when the
+/// directory doesn't exist.
+fn stdlib_erlang_modules(src_dir: &Utf8Path) -> Result<Vec<String>> {
+    if !src_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut modules = Vec::new();
+    for entry in fs::read_dir(src_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{src_dir}'"))?
+    {
+        let path = entry.into_diagnostic()?.path();
+        if path.extension().is_some_and(|ext| ext == "erl") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                modules.push(stem.to_string());
+            }
+        }
+    }
+    Ok(modules)
+}
+
 /// Discover the runtime/stdlib-Erlang/workspace/compiler `ebin/` directories
 /// that `is_stdlib_up_to_date`'s final check treats as build inputs — a
 /// `.beam` file in any of them newer than the stdlib output means native
@@ -405,21 +511,40 @@ fn is_stdlib_up_to_date(
     let Ok(entries) = fs::read_dir(ebin_dir) else {
         return false;
     };
-    let beam_count = entries
+    let beam_modules: BTreeSet<String> = entries
         .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-        .count();
-    if beam_count == 0 {
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "beam"))
+        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(str::to_string))
+        .collect();
+    if beam_modules.is_empty() {
         return false;
     }
 
-    // Detect deleted/renamed source files: beam count should match source count
-    if beam_count != source_files.len() {
+    // Detect added/deleted/renamed source files: the beams must be exactly
+    // one per source module. A count alone misses a rename (`mv` keeps the
+    // source's mtime, so the checks below don't notice either), which would
+    // leave the old name's beam installed and the new one never built.
+    let Ok(source_modules) = source_files
+        .iter()
+        .map(|f| module_name_from_path(f))
+        .collect::<Result<BTreeSet<String>>>()
+    else {
+        return false;
+    };
+    if beam_modules != source_modules {
         info!(
-            beam_count,
-            source_count = source_files.len(),
-            "Beam/source count mismatch — forcing rebuild"
+            beam_count = beam_modules.len(),
+            source_count = source_modules.len(),
+            "Beam/source module set mismatch — forcing rebuild"
         );
+        return false;
+    }
+
+    // The generated `.app` is an output too — the one installed and the one
+    // dev mode loads (BT-4384) — so a missing one is never "up to date".
+    if !ebin_dir.join(STDLIB_APP_FILE).is_file() {
+        info!("Stdlib .app missing — forcing rebuild");
         return false;
     }
 
@@ -465,7 +590,11 @@ fn is_stdlib_up_to_date(
             continue;
         };
         for entry in entries.flatten() {
-            if entry.path().extension().is_some_and(|ext| ext == "beam") {
+            // Class beams (`bt@*`) are this build's own output, which
+            // `rebar3 compile` copies into the stdlib Erlang ebin — not a
+            // native-spec input.
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "beam") && !is_class_beam(&path) {
                 match entry.metadata().and_then(|m| m.modified()) {
                     Ok(t) if t > oldest_output => {
                         info!("Runtime .beam newer than stdlib output");
@@ -1503,7 +1632,11 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
 
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
 ///
-/// Lists all modules and embeds class hierarchy metadata in the `env` section.
+/// Lists all modules — the class modules *and* the app's Erlang modules
+/// (`erlang_modules`), so the file is a complete `.app` on its own: it is
+/// the one `scripts/install-otp-apps.sh` installs and the one dev mode loads
+/// (see [`sync_rebar3_stdlib_ebin`]) — and embeds class hierarchy metadata
+/// in the `env` section.
 /// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
 ///
 /// **`type_aliases` env key (ADR 0108 Phase 8):** mirrors
@@ -1518,14 +1651,16 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
 fn generate_app_file(
     ebin_dir: &Utf8Path,
     source_files: &[Utf8PathBuf],
+    erlang_modules: &[String],
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
     alias_metadata: &[app_file::AliasMetadata],
 ) -> Result<()> {
-    let module_names: Vec<String> = source_files
+    let mut module_names: Vec<String> = source_files
         .iter()
         .map(|f| module_name_from_path(f))
         .collect::<Result<_>>()?;
+    module_names.extend_from_slice(erlang_modules);
 
     let modules_list = format_sorted_atom_list(&module_names);
 
@@ -1555,7 +1690,7 @@ fn generate_app_file(
          ]}}.\n"
     );
 
-    let app_file = ebin_dir.join("beamtalk_stdlib.app");
+    let app_file = ebin_dir.join(STDLIB_APP_FILE);
     fs::write(&app_file, app_content)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write '{app_file}'"))?;
@@ -3052,23 +3187,29 @@ mod tests {
             Utf8PathBuf::from("lib/string.bt"),
         ];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &[], &[]).unwrap();
+        let erlang_modules = vec!["beamtalk_list".to_string()];
+
+        generate_app_file(&ebin_dir, &source_files, &erlang_modules, &[], &[], &[]).unwrap();
 
         let app_file = ebin_dir.join("beamtalk_stdlib.app");
         assert!(app_file.exists());
 
         let content = fs::read_to_string(app_file).unwrap();
         assert!(content.contains("beamtalk_stdlib"));
-        // ADR 0016: Module names use bt@stdlib@ prefix
-        assert!(content.contains("'bt@stdlib@integer'"));
-        assert!(content.contains("'bt@stdlib@string'"));
+        // ADR 0016: Module names use bt@stdlib@ prefix. The app's Erlang
+        // modules are listed too (BT-4384): this `.app` is the installed one.
+        assert!(
+            content
+                .contains("{modules, ['beamtalk_list', 'bt@stdlib@integer', 'bt@stdlib@string']}"),
+            "Got:\n{content}"
+        );
     }
 
     #[test]
     fn test_generate_app_file_empty() {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
-        generate_app_file(&ebin_dir, &[], &[], &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &[], &[], &[], &[], &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
@@ -3086,7 +3227,7 @@ mod tests {
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
-        let result = generate_app_file(&ebin_dir, &source_files, &[], &[], &[]);
+        let result = generate_app_file(&ebin_dir, &source_files, &[], &[], &[], &[]);
         assert!(result.is_err());
     }
 
@@ -3097,7 +3238,7 @@ mod tests {
         let source_files = vec![Utf8PathBuf::from("lib/integer.bt")];
         let protocol_modules = vec!["bt@stdlib@printable".to_string()];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules, &[]).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &protocol_modules, &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(
@@ -3119,7 +3260,7 @@ mod tests {
             internal: false,
         }];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &[], &alias_metadata).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &[], &alias_metadata).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(
@@ -3814,7 +3955,7 @@ mod tests {
     #[test]
     fn test_is_stdlib_up_to_date_beam_source_count_mismatch() {
         let (_temp, ebin) = temp_utf8_dir();
-        fs::write(ebin.join("a.beam"), "").unwrap();
+        fs::write(ebin.join("bt@stdlib@a.beam"), "").unwrap();
 
         let (_temp2, src_dir) = temp_utf8_dir();
         let src1 = src_dir.join("A.bt");
@@ -3830,7 +3971,8 @@ mod tests {
     #[test]
     fn test_is_stdlib_up_to_date_source_newer_than_output() {
         let (_temp, ebin) = temp_utf8_dir();
-        let beam = ebin.join("a.beam");
+        let beam = ebin.join("bt@stdlib@a.beam");
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         fs::write(&beam, "").unwrap();
         set_mtime(
             &beam,
@@ -3847,7 +3989,8 @@ mod tests {
     #[test]
     fn test_is_stdlib_up_to_date_missing_source_file_metadata() {
         let (_temp, ebin) = temp_utf8_dir();
-        fs::write(ebin.join("a.beam"), "").unwrap();
+        fs::write(ebin.join("bt@stdlib@gone.beam"), "").unwrap();
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
 
         let (_temp2, src_dir) = temp_utf8_dir();
         let gone = src_dir.join("Gone.bt"); // listed but never created
@@ -3858,7 +4001,8 @@ mod tests {
     #[test]
     fn test_is_stdlib_up_to_date_compiler_binary_newer_forces_rebuild() {
         let (_temp, ebin) = temp_utf8_dir();
-        let beam = ebin.join("a.beam");
+        let beam = ebin.join("bt@stdlib@a.beam");
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         fs::write(&beam, "").unwrap();
         // Far enough in the past (1970) that the real test binary — built
         // moments before this test ran — is deterministically newer.
@@ -3880,8 +4024,9 @@ mod tests {
     /// it.
     fn up_to_date_beam_and_source() -> (TempDir, Utf8PathBuf, TempDir, Utf8PathBuf, SystemTime) {
         let (ebin_temp, ebin) = temp_utf8_dir();
-        let beam = ebin.join("a.beam");
+        let beam = ebin.join("bt@stdlib@a.beam");
         fs::write(&beam, "").unwrap();
+        fs::write(ebin.join(STDLIB_APP_FILE), "").unwrap();
         let output_time = SystemTime::UNIX_EPOCH + Duration::from_secs(4_000_000_000);
         set_mtime(&beam, output_time);
 
@@ -3949,6 +4094,102 @@ mod tests {
             &[src],
             Some(&[missing_runtime_ebin.into_std_path_buf()]),
         ));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_renamed_source_forces_rebuild() {
+        // BT-4384: `A.bt` renamed to `B.bt` with its mtime kept (as `mv`
+        // does) — same beam count, nothing newer than the output. The old
+        // `bt@stdlib@a` beam must not survive as "up to date".
+        let (_ebin_temp, ebin, src_temp, old_src, _output_time) = up_to_date_beam_and_source();
+        let renamed = src_temp.path().join("B.bt");
+        fs::rename(old_src.as_std_path(), &renamed).unwrap();
+        let renamed = Utf8PathBuf::from_path_buf(renamed).unwrap();
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[renamed], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_missing_app_file_forces_rebuild() {
+        // The generated `.app` is what gets installed (BT-4384): beams
+        // without it must not count as an up-to-date build.
+        let (_ebin_temp, ebin, _src_temp, src, _output_time) = up_to_date_beam_and_source();
+        fs::remove_file(ebin.join(STDLIB_APP_FILE)).unwrap();
+
+        assert!(!is_stdlib_up_to_date(&ebin, &[src], Some(&[])));
+    }
+
+    #[test]
+    fn test_is_stdlib_up_to_date_ignores_newer_class_beam_copies() {
+        // `rebar3 compile` copies this build's own `bt@*` class beams into
+        // the stdlib Erlang ebin with fresh mtimes; they are not a runtime
+        // (native-spec) input and must not force a rebuild.
+        let (_ebin_temp, ebin, _src_temp, src, output_time) = up_to_date_beam_and_source();
+
+        let (_temp3, rebar3_ebin) = temp_utf8_dir();
+        let copy = rebar3_ebin.join("bt@stdlib@a.beam");
+        fs::write(&copy, "").unwrap();
+        set_mtime(&copy, output_time + Duration::from_secs(1));
+
+        assert!(is_stdlib_up_to_date(
+            &ebin,
+            &[src],
+            Some(&[rebar3_ebin.into_std_path_buf()]),
+        ));
+    }
+
+    #[test]
+    fn test_sync_rebar3_stdlib_ebin_replaces_app_and_drops_class_beams() {
+        let (_temp, ebin) = temp_utf8_dir();
+        fs::write(ebin.join(STDLIB_APP_FILE), "current").unwrap();
+        fs::write(ebin.join("bt@stdlib@a.beam"), "current").unwrap();
+
+        let (_temp2, rebar3_ebin) = temp_utf8_dir();
+        fs::write(rebar3_ebin.join(STDLIB_APP_FILE), "stale").unwrap();
+        fs::write(rebar3_ebin.join("bt@stdlib@a.beam"), "stale").unwrap();
+        fs::write(rebar3_ebin.join("bt@stdlib@removed.beam"), "stale").unwrap();
+        fs::write(rebar3_ebin.join("beamtalk_list.beam"), "erlang").unwrap();
+
+        sync_rebar3_stdlib_ebin(&ebin, rebar3_ebin.as_std_path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(rebar3_ebin.join(STDLIB_APP_FILE)).unwrap(),
+            "current"
+        );
+        assert!(!rebar3_ebin.join("bt@stdlib@a.beam").exists());
+        assert!(!rebar3_ebin.join("bt@stdlib@removed.beam").exists());
+        assert!(rebar3_ebin.join("beamtalk_list.beam").exists());
+        // The build's own output is untouched.
+        assert!(ebin.join("bt@stdlib@a.beam").exists());
+    }
+
+    #[test]
+    fn test_sync_rebar3_stdlib_ebin_without_rebar3_dir_is_noop() {
+        let (_temp, ebin) = temp_utf8_dir();
+        fs::write(ebin.join(STDLIB_APP_FILE), "current").unwrap();
+        let missing = ebin.join("no_build_dir");
+
+        sync_rebar3_stdlib_ebin(&ebin, missing.as_std_path()).unwrap();
+
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn test_stdlib_erlang_modules_lists_erl_stems_only() {
+        let (_temp, src_dir) = temp_utf8_dir();
+        fs::write(src_dir.join("beamtalk_list.erl"), "").unwrap();
+        fs::write(src_dir.join("beamtalk_set.erl"), "").unwrap();
+        fs::write(src_dir.join("beamtalk_stdlib.app.src"), "").unwrap();
+        fs::write(src_dir.join("beamtalk_internal.hrl"), "").unwrap();
+
+        let mut modules = stdlib_erlang_modules(&src_dir).unwrap();
+        modules.sort();
+        assert_eq!(modules, vec!["beamtalk_list", "beamtalk_set"]);
+        assert!(
+            stdlib_erlang_modules(&src_dir.join("missing"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -5,8 +5,9 @@
 //! runtime attachment, diagnostics publication, and the reload/flush
 //! listener lifecycle.
 
-use super::config::PreloadConfig;
-use super::config::collect_preload_files;
+use super::config::{
+    PRELOAD_MAX_FILES, PreloadConfig, PreloadedFiles, collect_preload_files_within,
+};
 use super::convert::{offset_to_position, path_to_stdlib_uri, path_to_uri, uri_to_path};
 use super::flush::flush_event_listener;
 use super::nav::{bt_locations_to_lsp, runtime_site_to_lsp_location};
@@ -14,7 +15,7 @@ use super::reload::{
     OpenPathsHandle, class_changed_listener, publish_diagnostics_impl, reload_check_listener,
     seed_reload_diagnostics,
 };
-use super::{Backend, FetchContentParams, FetchContentResult, NavCache};
+use super::{Backend, FetchContentParams, FetchContentResult, LoadedTypeCache, NavCache};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -48,6 +49,15 @@ impl Backend {
             stdlib_paths: Mutex::new(HashSet::new()),
             workspace_roots: Mutex::new(Vec::new()),
             root_load_lock: tokio::sync::Mutex::new(()),
+            type_cache: Mutex::new(LoadedTypeCache::default()),
+            preload_budget_remaining: Mutex::new(PRELOAD_MAX_FILES),
+            preload_coverage_partial: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            fail_next_root_walk: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            type_cache_extractions: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            type_cache_outcome: Mutex::new(None),
             otp_lib_dir: Mutex::new(None),
             runtime: tokio::sync::Mutex::new(None),
             flush_listener: tokio::sync::Mutex::new(None),
@@ -529,39 +539,105 @@ impl Backend {
     /// BT-4022: the same per-root walk also collects the project-known
     /// Erlang modules for the `unresolved_ffi` check (cheap directory
     /// scan, no BEAM node) and installs them via `set_known_erlang_modules`.
+    ///
+    /// BT-4383: incremental. Only roots not already extracted this session
+    /// are walked; their registries and modules are merged into the
+    /// accumulated [`LoadedTypeCache`] and the union is installed. Opening
+    /// a file in the Nth package root under a parent folder therefore
+    /// extracts that root alone (and may spawn at most one build-worker
+    /// node), not all N — as long as extraction succeeds. Callers may still
+    /// pass every known root. A root is marked loaded only once
+    /// `extract_type_specs` returned specs for it: a root whose extraction
+    /// returned `None` (e.g. opened before the runtime was built) or whose
+    /// extraction task failed is retried on the next call, as the
+    /// pre-incremental full re-extraction used to do. So while extraction
+    /// keeps failing for a machine-wide reason (no OTP type data, a build
+    /// worker that won't start), each new-root load re-attempts every root
+    /// that has not yet succeeded, which can spawn one node per such root.
     pub(in crate::server) async fn load_type_cache(&self, roots: &[PathBuf]) {
         use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
-        let roots_owned: Vec<PathBuf> = roots.to_vec();
-        let (registry, known_erlang_modules) = tokio::task::spawn_blocking(move || {
-            let mut registry = NativeTypeRegistry::new();
-            let mut known_erlang_modules = std::collections::HashSet::new();
-            for root in &roots_owned {
-                let Ok(root) = Utf8PathBuf::from_path_buf(root.clone()) else {
-                    continue;
-                };
-                let cache_dir = root.join("_build").join("type_cache");
-                let dependency_ebin_dirs =
-                    beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
-                if let Some(root_registry) = beamtalk_core::ffi_type_specs::extract_type_specs(
-                    &cache_dir,
-                    &dependency_ebin_dirs,
-                ) {
-                    registry.merge(root_registry);
+        let pending: Vec<PathBuf> = {
+            let cache = self.type_cache.lock().expect("type_cache lock poisoned");
+            let mut seen = HashSet::new();
+            roots
+                .iter()
+                .filter(|root| !cache.roots.contains(*root) && seen.insert((*root).clone()))
+                .cloned()
+                .collect()
+        };
+        if pending.is_empty() {
+            return;
+        }
+        #[cfg(test)]
+        self.type_cache_extractions
+            .lock()
+            .expect("type_cache_extractions lock poisoned")
+            .extend(pending.iter().cloned());
+
+        #[cfg(test)]
+        let outcome_override = *self
+            .type_cache_outcome
+            .lock()
+            .expect("type_cache_outcome lock poisoned");
+        #[cfg(not(test))]
+        let outcome_override: Option<bool> = None;
+
+        let pending_owned = pending.clone();
+        let Ok((registry, known_erlang_modules, extracted)) =
+            tokio::task::spawn_blocking(move || {
+                let mut registry = NativeTypeRegistry::new();
+                let mut known_erlang_modules = HashSet::new();
+                // Roots whose specs were extracted; only these are marked loaded.
+                let mut extracted = Vec::new();
+                for root_path in &pending_owned {
+                    let Ok(root) = Utf8PathBuf::from_path_buf(root_path.clone()) else {
+                        // A non-UTF-8 root can never be extracted; don't retry it.
+                        extracted.push(root_path.clone());
+                        continue;
+                    };
+                    let cache_dir = root.join("_build").join("type_cache");
+                    let dependency_ebin_dirs =
+                        beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
+                    let root_registry = match outcome_override {
+                        Some(true) => Some(NativeTypeRegistry::new()),
+                        Some(false) => None,
+                        None => beamtalk_core::ffi_type_specs::extract_type_specs(
+                            &cache_dir,
+                            &dependency_ebin_dirs,
+                        ),
+                    };
+                    if let Some(root_registry) = root_registry {
+                        registry.merge(root_registry);
+                        extracted.push(root_path.clone());
+                    }
+                    // BT-4022: project-known Erlang modules for the
+                    // `unresolved_ffi` check — same per-root walk, unioned
+                    // across roots (a whole-session simplification, like
+                    // `set_native_types` below — modules added by a later
+                    // `beamtalk build` need an LSP restart).
+                    known_erlang_modules.extend(
+                        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
+                    );
                 }
-                // BT-4022: project-known Erlang modules for the
-                // `unresolved_ffi` check — same per-root walk, unioned
-                // across roots (a whole-session simplification, like
-                // `set_native_types` above — modules added by a later
-                // `beamtalk build` need an LSP restart).
-                known_erlang_modules.extend(
-                    beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
-                );
-            }
-            (registry, known_erlang_modules)
-        })
-        .await
-        .unwrap_or_default();
+                (registry, known_erlang_modules, extracted)
+            })
+            .await
+        else {
+            tracing::warn!(
+                roots = ?pending,
+                "type-cache extraction task failed; will retry on the next root load"
+            );
+            return;
+        };
+
+        let (registry, known_erlang_modules) = {
+            let mut cache = self.type_cache.lock().expect("type_cache lock poisoned");
+            cache.roots.extend(extracted);
+            cache.registry.merge(registry);
+            cache.known_erlang_modules.extend(known_erlang_modules);
+            (cache.registry.clone(), cache.known_erlang_modules.clone())
+        };
 
         if registry.module_count() > 0 {
             debug!(
@@ -696,10 +772,31 @@ impl Backend {
         svc.set_root_packages(root_packages);
     }
 
+    /// Startup source-file preload over `config.roots` and the stdlib dirs.
+    ///
+    /// Draws from the session-wide preload budget (BT-4383) — whatever a
+    /// `did_open` root load that won `root_load_lock` first already spent is
+    /// not available here — and claims project completeness only if no
+    /// preload walk this session (this one or an earlier per-root load) was
+    /// partial.
     pub(in crate::server) async fn preload_workspace_source_files(&self, config: PreloadConfig) {
-        let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
-            .await
-            .unwrap_or_default();
+        let budget = self.preload_budget_remaining();
+        let loaded =
+            match tokio::task::spawn_blocking(move || collect_preload_files_within(config, budget))
+                .await
+            {
+                Ok(loaded) => loaded,
+                Err(e) => {
+                    // Nothing was indexed: that is partial coverage, never a
+                    // licence to claim completeness.
+                    tracing::warn!(%e, "startup preload walk task failed");
+                    PreloadedFiles {
+                        budget_exhausted: true,
+                        ..PreloadedFiles::default()
+                    }
+                }
+            };
+        self.spend_preload_budget(loaded.budget_used, loaded.budget_exhausted);
 
         // Register stdlib paths before indexing so they are available immediately.
         let stdlib_utf8: Vec<Utf8PathBuf> = loaded
@@ -723,7 +820,6 @@ impl Backend {
         let deps_present = loaded.deps_present
             || super::config::any_dependency_src_dirs(&self.workspace_roots_snapshot());
         let mut svc = self.service.lock().expect("service lock poisoned");
-        let budget_exhausted = loaded.budget_exhausted;
         for (path, content) in loaded.user_files {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
@@ -754,7 +850,11 @@ impl Backend {
         // when opened — same coverage the ProjectIndex has always had for
         // classes. Scope claims must stay tied to this walk; do not claim
         // completeness from any weaker signal.
-        svc.set_project_complete(!budget_exhausted);
+        //
+        // BT-4383: partial coverage is sticky — a `did_open` root load that
+        // ran first and exhausted the budget must not be overwritten to
+        // complete by this walk over `config.roots` alone.
+        svc.set_project_complete(!self.preload_coverage_is_partial());
         // Fetched deps mean dependency extensions may exist that the checker
         // cannot see. (Declared-but-unfetched deps are
         // invisible here — the LSP deliberately avoids parsing beamtalk.toml —
@@ -779,6 +879,20 @@ impl Backend {
     /// A no-op (beyond the ancestor walk) when `path` already lies under a
     /// known root's preloaded directories — the common package-root-opened
     /// case — or has no package root at all.
+    ///
+    /// BT-4383:
+    /// * The root's walk draws from the session-wide preload budget; a walk
+    ///   that exhausts it marks coverage partial for the rest of the session.
+    /// * Only the new root's type cache is extracted (see
+    ///   [`Self::load_type_cache`]).
+    /// * If the walk task fails, the root is unregistered again so the next
+    ///   `did_open` of one of its files retries the load.
+    /// * `did_open` awaits this inline. Spawning it would need `Backend` to
+    ///   be `'static`/`Arc`-shared, which tower-lsp's `LspService` ownership
+    ///   does not give us; with the incremental type cache the wait is one
+    ///   root's walk plus at most one root's type-cache extraction (plus any
+    ///   load already holding `root_load_lock`). The elapsed time is logged
+    ///   at debug level.
     pub(in crate::server) async fn ensure_package_root_loaded(&self, path: &Utf8PathBuf) {
         use super::config::{any_dependency_src_dirs, package_root_for_file, preload_covers};
 
@@ -806,6 +920,7 @@ impl Backend {
             roots.sort_unstable();
         }
         debug!(root = %root.display(), "Registering package root discovered from open file");
+        let started = std::time::Instant::now();
 
         let root_load_guard = self.root_load_lock.lock().await;
         {
@@ -815,14 +930,32 @@ impl Backend {
         let all_roots = self.workspace_roots_snapshot();
         self.load_root_packages(&all_roots).await;
 
-        let loaded = tokio::task::spawn_blocking(move || {
-            collect_preload_files(PreloadConfig {
-                roots: vec![root],
-                stdlib_dirs: Vec::new(),
-            })
-        })
-        .await
-        .unwrap_or_default();
+        let loaded = match self.walk_package_root(root.clone()).await {
+            Ok(loaded) => loaded,
+            Err(e) => {
+                // Unregister the root so the next `did_open` under it
+                // retries, rather than finding it "known" with nothing
+                // indexed. (Its `[package]` name stays registered — harmless,
+                // and re-set on the retry.)
+                tracing::warn!(
+                    %e,
+                    root = %root.display(),
+                    "package root preload walk failed; unregistering it for retry"
+                );
+                self.workspace_roots
+                    .lock()
+                    .expect("workspace_roots lock poisoned")
+                    .retain(|r| r != &root);
+                {
+                    let mut svc = self.service.lock().expect("service lock poisoned");
+                    svc.set_preload_in_progress(false);
+                }
+                drop(root_load_guard);
+                self.republish_open_diagnostics().await;
+                return;
+            }
+        };
+        self.spend_preload_budget(loaded.budget_used, loaded.budget_exhausted);
         {
             let stdlib_paths = self
                 .stdlib_paths
@@ -848,8 +981,9 @@ impl Backend {
                 }
             }
             // A partial walk of this root means the index can no longer
-            // claim project completeness; a full one leaves the startup
-            // verdict for the other roots untouched.
+            // claim project completeness (and, via the sticky flag, a later
+            // startup preload cannot reclaim it); a full one leaves the
+            // startup verdict for the other roots untouched.
             if loaded.budget_exhausted {
                 svc.set_project_complete(false);
             }
@@ -862,7 +996,76 @@ impl Backend {
             svc.set_preload_in_progress(false);
         }
         drop(root_load_guard);
+        debug!(
+            root = %root.display(),
+            elapsed_ms = started.elapsed().as_millis(),
+            files = loaded.budget_used,
+            "Loaded package root discovered from open file"
+        );
         self.republish_open_diagnostics().await;
+    }
+
+    /// Walks one package root's `src/`, `test/` and fetched-dependency
+    /// sources on a blocking task, within the session's remaining preload
+    /// budget. `Err` when the task fails (panics or is cancelled).
+    async fn walk_package_root(
+        &self,
+        root: PathBuf,
+    ) -> Result<PreloadedFiles, tokio::task::JoinError> {
+        let budget = self.preload_budget_remaining();
+        #[cfg(test)]
+        let inject_failure = self
+            .fail_next_root_walk
+            .swap(false, std::sync::atomic::Ordering::SeqCst);
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            assert!(!inject_failure, "injected per-root preload walk failure");
+            collect_preload_files_within(
+                PreloadConfig {
+                    roots: vec![root],
+                    stdlib_dirs: Vec::new(),
+                },
+                budget,
+            )
+        })
+        .await
+    }
+
+    /// The session-wide preload file budget still unspent (BT-4383).
+    ///
+    /// A walk reads this, runs, then [`Self::spend_preload_budget`]s what it
+    /// used — not atomic as a whole, so the server's two walkers (the
+    /// startup preload and [`Self::ensure_package_root_loaded`]) both do it
+    /// while holding `root_load_lock`.
+    pub(in crate::server) fn preload_budget_remaining(&self) -> usize {
+        *self
+            .preload_budget_remaining
+            .lock()
+            .expect("preload_budget_remaining lock poisoned")
+    }
+
+    /// Records a preload walk against the session-wide budget: subtracts the
+    /// files it drew and, if it ran out, marks coverage partial for the rest
+    /// of the session (BT-4383).
+    fn spend_preload_budget(&self, used: usize, exhausted: bool) {
+        {
+            let mut remaining = self
+                .preload_budget_remaining
+                .lock()
+                .expect("preload_budget_remaining lock poisoned");
+            *remaining = remaining.saturating_sub(used);
+        }
+        if exhausted {
+            self.preload_coverage_partial
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// Whether any preload walk this session had only partial coverage — the
+    /// sticky verdict that keeps `project_complete` false (BT-4383).
+    pub(in crate::server) fn preload_coverage_is_partial(&self) -> bool {
+        self.preload_coverage_partial
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Clones the current workspace root list (initial roots plus any

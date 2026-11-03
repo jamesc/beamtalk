@@ -158,7 +158,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 ### Binary (`stdlib/src/binary.bt`)
 
 **Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
-**Methods:** 23/23 implemented (100%)
+**Methods:** 22/22 implemented (100%)
 **Note:** Byte-level data and serialization. Parent of String. Maps to Erlang `binary()`.
 
 | Selector | Mechanism | Status | Notes |
@@ -181,7 +181,6 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `part:size:` | @primitive selector | ✅ | Zero-copy byte-level slice |
 | `concat:` | @primitive selector | ✅ | Byte concatenation |
 | `toBytes` | @primitive selector | ✅ | Byte list |
-| `asCharlist` | pure BT (delegates to `toBytes`) | ✅ | Erlang charlist (byte list) for FFI |
 | `asString` | @primitive selector | ✅ | Validate UTF-8 and return as String |
 | `asStringUnchecked` | @primitive selector | ✅ | Return as String without UTF-8 validation |
 | `asBase64` | pure BT (Erlang FFI) | ✅ | Standard (RFC 4648 §4) base64 encoding |
@@ -297,7 +296,7 @@ equivalent `raisedTo:` but no separate `**` operator.
 ### String (`stdlib/src/string.bt`)
 
 **Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
-**Methods:** 68/68 implemented (100%)
+**Methods:** 69/69 implemented (100%)
 **Correction (BT-2976):** the real selector for substring search is `includesSubstring:`, and the real selector
 for grapheme iteration is `do:` (`each:`/`includes:` were internal `@primitive` dispatch-table tag strings in
 the source, not the public Beamtalk selector — the previous revision of this table listed the internal tag as
@@ -356,6 +355,7 @@ if it were the callable method name).
 | `asFloat` | @primitive selector | ✅ | `String>>asFloat` |
 | `asAtom` | @primitive selector | ✅ | N/A (BEAM-specific) |
 | `asList` | @primitive selector | ✅ | `String>>asArray` |
+| `asCharlist` | @primitive selector | ✅ | N/A (BEAM-specific: Erlang charlist of code points for FFI) |
 | `do:` | @primitive selector | ✅ | `String>>do:` |
 | `collect:` | @primitive selector | ✅ | `String>>collect:` |
 | `select:` | @primitive selector | ✅ | `String>>select:` |
