@@ -31,6 +31,9 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::source_analysis::Span;
 
+/// One send of a cascade: selector, arguments and the send's own span (BT-4392).
+type CascadeSend<'a> = (&'a MessageSelector, &'a [Expression], Span);
+
 /// BT-4121: `maps:get(Field, take())` — a field read against the live cell
 /// for a stateless loop that brackets its guarded operators. Shared by the
 /// bare-identifier and `self.field` read paths so the two cannot drift.
@@ -1088,32 +1091,30 @@ impl CoreErlangGenerator {
         //
         // Normalize the cascade into (underlying_receiver, all_messages) so
         // both the MessageSend and non-MessageSend cases share one code path.
-        let (underlying_receiver, all_messages): (
-            &Expression,
-            Vec<(&MessageSelector, &[Expression])>,
-        ) = if let Expression::MessageSend {
-            receiver: inner,
-            selector: first_selector,
-            arguments: first_arguments,
-            ..
-        } = receiver
-        {
-            let mut all: Vec<(&MessageSelector, &[Expression])> =
-                Vec::with_capacity(messages.len() + 1);
-            all.push((first_selector, first_arguments.as_slice()));
-            for msg in messages {
-                all.push((&msg.selector, msg.arguments.as_slice()));
-            }
-            (inner.as_ref(), all)
-        } else {
-            // Fallback: receiver is not a MessageSend — send all cascade
-            // messages directly to it.
-            let all: Vec<(&MessageSelector, &[Expression])> = messages
-                .iter()
-                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
-                .collect();
-            (receiver, all)
-        };
+        let (underlying_receiver, all_messages): (&Expression, Vec<CascadeSend<'_>>) =
+            if let Expression::MessageSend {
+                receiver: inner,
+                selector: first_selector,
+                arguments: first_arguments,
+                span: first_span,
+                ..
+            } = receiver
+            {
+                let mut all: Vec<CascadeSend<'_>> = Vec::with_capacity(messages.len() + 1);
+                all.push((first_selector, first_arguments.as_slice(), *first_span));
+                for msg in messages {
+                    all.push((&msg.selector, msg.arguments.as_slice(), msg.span));
+                }
+                (inner.as_ref(), all)
+            } else {
+                // Fallback: receiver is not a MessageSend — send all cascade
+                // messages directly to it.
+                let all: Vec<CascadeSend<'_>> = messages
+                    .iter()
+                    .map(|msg| (&msg.selector, msg.arguments.as_slice(), msg.span))
+                    .collect();
+                (receiver, all)
+            };
 
         // ADR 0084: A `classBuilder … classMethods: #{…}; register`
         // cascade gets its `classMethods:` block-literal values lowered as
@@ -1143,7 +1144,7 @@ impl CoreErlangGenerator {
         ));
 
         let total_messages = all_messages.len();
-        for (index, (selector, arguments)) in all_messages.into_iter().enumerate() {
+        for (index, (selector, arguments, msg_span)) in all_messages.into_iter().enumerate() {
             let is_last = index == total_messages - 1;
 
             let selector_atom = selector.name().to_string();
@@ -1211,7 +1212,8 @@ impl CoreErlangGenerator {
             send.push(Document::Str("])"));
             // BT-4366: the send is bound by a `let` (or returned from the
             // cascade's `let` chain), so the call node carries its line.
-            let send = self.annotate_call_node_with_line(Document::Vec(send), recv_span);
+            // BT-4392: each message carries its own line, not the receiver's.
+            let send = self.annotate_call_node_with_line(Document::Vec(send), msg_span);
 
             if is_last {
                 return Ok((docs, send));
@@ -1219,7 +1221,7 @@ impl CoreErlangGenerator {
             // For all but the last message, discard the result
             docs.push(ThreadedStmt::Statement(
                 docvec!["let _ = ", send, " in "],
-                recv_span,
+                msg_span,
             ));
         }
 

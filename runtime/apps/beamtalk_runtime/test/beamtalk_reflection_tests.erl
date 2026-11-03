@@ -150,6 +150,26 @@ source_file_from_module_invalid_path_is_nil_test() ->
         unload_module(Mod)
     end.
 
+%% A binary `beamtalk_source` takes the same conversion as a list: valid UTF-8
+%% is returned as is, anything else is `nil` rather than a non-UTF-8 binary.
+source_file_from_module_binary_path_valid_utf8_test() ->
+    Mod = bt4370_bin_ok,
+    load_source_module(Mod, <<"/jos", 195, 169, ".bt">>),
+    try
+        ?assertEqual(<<"/jos", 195, 169, ".bt">>, beamtalk_reflection:source_file_from_module(Mod))
+    after
+        unload_module(Mod)
+    end.
+
+source_file_from_module_binary_path_invalid_utf8_is_nil_test() ->
+    Mod = bt4370_bin_bad,
+    load_source_module(Mod, <<"/jos", 233, ".bt">>),
+    try
+        ?assertEqual(nil, beamtalk_reflection:source_file_from_module(Mod))
+    after
+        unload_module(Mod)
+    end.
+
 stack_frame_non_ascii_file_is_utf8_test() ->
     Frame = {bt4370_nomod, f, 0, [{file, [8364, $a]}, {line, 1}]},
     #{file := File} = beamtalk_stack_frame:wrap_frame(Frame),
