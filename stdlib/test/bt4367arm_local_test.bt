@@ -47,3 +47,9 @@ TestCase subclass: Bt4367ArmLocalTest
     self assert: (v collectIn: false) equals: 0
     self assert: (v selectIn: false) equals: 0
     self assert: (v anySatisfyIn: false) equals: 0
+
+  testValueFoldInALoopInsideTheArm =>
+    v := Bt4367ArmLocalValue new
+    self assert: (v innerInjectIn: true) equals: 6
+    self assert: (v innerCollectIn: true) equals: 6
+    self assert: (v innerInjectIn: false) equals: 0

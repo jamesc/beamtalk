@@ -1526,6 +1526,44 @@ fn plain_arm_selectors_are_all_in_the_runtime_grid() {
     }
 }
 
+/// A fold assigned inside a loop that is itself inside a plain arm is judged by
+/// the ordinary loop-body frame rule, exactly as the same loop is at the method
+/// root: an actor method rejects it either way (an actor fold's value-bearing
+/// site is not lowered, BT-3797), a value-type method accepts it either way
+/// (`bt4367arm_local_test.bt` runs it on a BEAM). The plain arm adds nothing.
+#[test]
+fn fold_in_a_loop_inside_a_plain_arm_is_judged_as_at_the_method_root() {
+    let at_root =
+        "m := 0\n#(1, 2) do: [:x | s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. s]\nm";
+    let in_arm = "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:x | s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. s]\n  m] ifFalse: [0]";
+    let count = |src: String| {
+        of_category(
+            &adr0131_diagnostics(&src),
+            DiagnosticCategory::UnthreadedLocalWrite,
+        )
+        .len()
+    };
+    assert!(
+        count(in_actor(at_root)) > 0,
+        "an actor rejects it at the root"
+    );
+    assert_eq!(
+        count(in_actor(in_arm)) > 0,
+        count(in_actor(at_root)) > 0,
+        "an actor arm is judged as the root"
+    );
+    assert_eq!(
+        count(in_value(at_root)),
+        0,
+        "a value type accepts it at the root"
+    );
+    assert_eq!(
+        count(in_value(in_arm)),
+        0,
+        "a value-type arm is judged as the root"
+    );
+}
+
 /// A loop at an operand or array-literal site of a plain arm keeps the error:
 /// an actor `ifTrue:ifFalse:` arm lowers it to Core Erlang with an unbound
 /// arm-local.

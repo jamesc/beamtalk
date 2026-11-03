@@ -2417,6 +2417,13 @@ impl<'d> Walker<'d> {
             // array-literal site of an actor `ifTrue:ifFalse:` arm compiles to
             // Core Erlang with an unbound arm-local, so it keeps the position
             // error.
+            // `AssignValue { .. }` is any assignment in the arm (`nested` is
+            // always true inside a block). That the loop is the *whole* value,
+            // not an inner assignment of a chain (`a := s := xs inject: ...`),
+            // comes from site registration, not from this `matches!`: codegen's
+            // `loop_body_producer_sites` does not register the inner value, so
+            // the shared recognizer rejects the chain (pinned in
+            // `local_threading.rs`).
             && (!self.in_plain_arm()
                 || matches!(
                     position,

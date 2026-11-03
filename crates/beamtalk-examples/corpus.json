@@ -21816,13 +21816,14 @@
         "testActorUntaken",
         "testValueAnySatisfy",
         "testValueCollect",
+        "testValueFoldInALoopInsideTheArm",
         "testValueInject",
         "testValueSelect",
         "testValueUntaken",
         "transform",
         "where"
       ],
-      "source": "// BT-4367: a loop or fold that writes a local of its own conditional arm can\n// be the value of an assignment in that arm, in actor and value-type methods\n// (a class method's plain arm does not lower it and keeps the position error,\n// pinned in `local_threading.rs`). `inject:into:` answers 3 + 3, `collect:` answers 2 + 3,\n// `select:` answers 2 + 6 and `anySatisfy:` (never true) answers the sum 3;\n// an untaken arm answers 0. Fixtures: fixtures/bt4367arm_local_{actor,value}.bt.\n\nTestCase subclass: Bt4367ArmLocalTest\n\n  testActorInject =>\n    self assert: (Bt4367ArmLocalActor spawn injectIn: true) equals: 6\n\n  testActorCollect =>\n    self assert: (Bt4367ArmLocalActor spawn collectIn: true) equals: 5\n\n  testActorSelect =>\n    self assert: (Bt4367ArmLocalActor spawn selectIn: true) equals: 8\n\n  testActorAnySatisfy =>\n    self assert: (Bt4367ArmLocalActor spawn anySatisfyIn: true) equals: 3\n\n  testActorUntaken =>\n    a := Bt4367ArmLocalActor spawn\n    self assert: (a injectIn: false) equals: 0\n    self assert: (a collectIn: false) equals: 0\n    self assert: (a selectIn: false) equals: 0\n    self assert: (a anySatisfyIn: false) equals: 0\n\n  testValueInject =>\n    self assert: (Bt4367ArmLocalValue new injectIn: true) equals: 6\n\n  testValueCollect =>\n    self assert: (Bt4367ArmLocalValue new collectIn: true) equals: 5\n\n  testValueSelect =>\n    self assert: (Bt4367ArmLocalValue new selectIn: true) equals: 8\n\n  testValueAnySatisfy =>\n    self assert: (Bt4367ArmLocalValue new anySatisfyIn: true) equals: 3\n\n  testValueUntaken =>\n    v := Bt4367ArmLocalValue new\n    self assert: (v injectIn: false) equals: 0\n    self assert: (v collectIn: false) equals: 0\n    self assert: (v selectIn: false) equals: 0\n    self assert: (v anySatisfyIn: false) equals: 0",
+      "source": "// BT-4367: a loop or fold that writes a local of its own conditional arm can\n// be the value of an assignment in that arm, in actor and value-type methods\n// (a class method's plain arm does not lower it and keeps the position error,\n// pinned in `local_threading.rs`). `inject:into:` answers 3 + 3, `collect:` answers 2 + 3,\n// `select:` answers 2 + 6 and `anySatisfy:` (never true) answers the sum 3;\n// an untaken arm answers 0. Fixtures: fixtures/bt4367arm_local_{actor,value}.bt.\n\nTestCase subclass: Bt4367ArmLocalTest\n\n  testActorInject =>\n    self assert: (Bt4367ArmLocalActor spawn injectIn: true) equals: 6\n\n  testActorCollect =>\n    self assert: (Bt4367ArmLocalActor spawn collectIn: true) equals: 5\n\n  testActorSelect =>\n    self assert: (Bt4367ArmLocalActor spawn selectIn: true) equals: 8\n\n  testActorAnySatisfy =>\n    self assert: (Bt4367ArmLocalActor spawn anySatisfyIn: true) equals: 3\n\n  testActorUntaken =>\n    a := Bt4367ArmLocalActor spawn\n    self assert: (a injectIn: false) equals: 0\n    self assert: (a collectIn: false) equals: 0\n    self assert: (a selectIn: false) equals: 0\n    self assert: (a anySatisfyIn: false) equals: 0\n\n  testValueInject =>\n    self assert: (Bt4367ArmLocalValue new injectIn: true) equals: 6\n\n  testValueCollect =>\n    self assert: (Bt4367ArmLocalValue new collectIn: true) equals: 5\n\n  testValueSelect =>\n    self assert: (Bt4367ArmLocalValue new selectIn: true) equals: 8\n\n  testValueAnySatisfy =>\n    self assert: (Bt4367ArmLocalValue new anySatisfyIn: true) equals: 3\n\n  testValueUntaken =>\n    v := Bt4367ArmLocalValue new\n    self assert: (v injectIn: false) equals: 0\n    self assert: (v collectIn: false) equals: 0\n    self assert: (v selectIn: false) equals: 0\n    self assert: (v anySatisfyIn: false) equals: 0\n\n  testValueFoldInALoopInsideTheArm =>\n    v := Bt4367ArmLocalValue new\n    self assert: (v innerInjectIn: true) equals: 6\n    self assert: (v innerCollectIn: true) equals: 6\n    self assert: (v innerInjectIn: false) equals: 0",
       "explanation": "BT-4367: a loop or fold that writes a local of its own conditional arm can be the value of an assignment in that arm, in actor and value-type methods (a class method's plain arm does not lower it and keeps the position error, pinned in `local_threading.rs`). `inject:into:` answers 3 + 3, `collect:` answers 2 + 3, `select:` answers 2 + 6 and `anySatisfy:` (never true) answers the sum 3; an untaken arm answers 0. Fixtures: fixtures/bt4367arm_local_{actor,value}.bt."
     },
     {
@@ -42082,12 +42083,20 @@
         "field",
         "filter",
         "filtering",
+        "for each",
+        "for-each",
+        "forEach",
         "if",
         "if not",
         "inherit",
         "inheritance",
         "injectIn:",
+        "innerCollectIn:",
+        "innerInjectIn:",
         "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
         "map",
         "mapping",
         "member",
@@ -42103,7 +42112,7 @@
         "value",
         "where"
       ],
-      "source": "// BT-4367: a loop or fold that writes a local of its own conditional arm,\n// assigned in that arm. The conditional writes no outer local, so its arms\n// are plain `BranchArm` frames (BT-3911) in which a loop or fold is a\n// producer (BT-3949). Asserted in bt4367arm_local_test.bt (Value method).\n\nValue subclass: Bt4367ArmLocalValue\n  field: n = 0\n\n  injectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        s := #(1, 2)\n          inject: 0\n          into: [:a :e |\n            m := m + e\n            a + e\n          ]\n        m + s\n      ]\n      ifFalse: [0]\n\n  collectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        sq := #(1, 2) collect: [:e | m := m + e]\n        sq size + m\n      ]\n      ifFalse: [0]\n\n  selectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        sq := #(1, 2, 3)\n          select: [:e |\n            m := m + e\n            e > 1\n          ]\n        sq size + m\n      ]\n      ifFalse: [0]\n\n  anySatisfyIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        found := #(1, 2)\n          anySatisfy: [:e |\n            m := m + e\n            e > 5\n          ]\n        found ifTrue: [100] ifFalse: [m]\n      ]\n      ifFalse: [0]",
+      "source": "// BT-4367: a loop or fold that writes a local of its own conditional arm,\n// assigned in that arm. The conditional writes no outer local, so its arms\n// are plain `BranchArm` frames (BT-3911) in which a loop or fold is a\n// producer (BT-3949). Asserted in bt4367arm_local_test.bt (Value method).\n\nValue subclass: Bt4367ArmLocalValue\n  field: n = 0\n\n  injectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        s := #(1, 2)\n          inject: 0\n          into: [:a :e |\n            m := m + e\n            a + e\n          ]\n        m + s\n      ]\n      ifFalse: [0]\n\n  collectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        sq := #(1, 2) collect: [:e | m := m + e]\n        sq size + m\n      ]\n      ifFalse: [0]\n\n  selectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        sq := #(1, 2, 3)\n          select: [:e |\n            m := m + e\n            e > 1\n          ]\n        sq size + m\n      ]\n      ifFalse: [0]\n\n  anySatisfyIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        found := #(1, 2)\n          anySatisfy: [:e |\n            m := m + e\n            e > 5\n          ]\n        found ifTrue: [100] ifFalse: [m]\n      ]\n      ifFalse: [0]\n\n  innerInjectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        #(1, 2)\n          do: [:x |\n            s := #(1, 2)\n              inject: 0\n              into: [:a :e |\n                m := m + e\n                a + e\n              ]\n            s\n          ]\n        m\n      ]\n      ifFalse: [0]\n\n  innerCollectIn: c =>\n    c\n      ifTrue: [\n        m := 0\n        #(1, 2)\n          do: [:x |\n            sq := #(1, 2) collect: [:e | m := m + e]\n            sq size\n          ]\n        m\n      ]\n      ifFalse: [0]",
       "explanation": "BT-4367: a loop or fold that writes a local of its own conditional arm, assigned in that arm. The conditional writes no outer local, so its arms are plain `BranchArm` frames (BT-3911) in which a loop or fold is a producer (BT-3949). Asserted in bt4367arm_local_test.bt (Value method)."
     },
     {
