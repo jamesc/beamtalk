@@ -258,6 +258,12 @@ pub struct Backend {
     /// in order, so tests can assert each root is extracted once.
     #[cfg(test)]
     type_cache_extractions: Mutex<Vec<PathBuf>>,
+    /// Test seam (BT-4383): when set, overrides whether `load_type_cache`'s
+    /// per-root `extract_type_specs` call succeeds (`true`: an empty
+    /// registry; `false`: `None`, as with an uncompiled runtime), so tests
+    /// don't depend on the machine's OTP type data.
+    #[cfg(test)]
+    type_cache_outcome: Mutex<Option<bool>>,
     /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
     otp_lib_dir: Mutex<Option<PathBuf>>,
     /// ADR 0082 Phase 3: lazy-attached WebSocket client to the

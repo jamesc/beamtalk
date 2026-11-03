@@ -230,6 +230,13 @@ fn set_preload_budget(backend: &Backend, budget: usize) {
         .expect("budget lock poisoned") = budget;
 }
 
+fn set_type_cache_outcome(backend: &Backend, outcome: Option<bool>) {
+    *backend
+        .type_cache_outcome
+        .lock()
+        .expect("type_cache_outcome lock poisoned") = outcome;
+}
+
 fn type_cache_extractions(backend: &Backend) -> Vec<PathBuf> {
     backend
         .type_cache_extractions
@@ -303,6 +310,9 @@ async fn each_new_package_root_extracts_only_its_own_type_cache() {
     initialize_service(&mut service, &workspace).await;
     let backend: &Backend = service.inner();
     let drain = drain_socket(socket);
+    // Extraction succeeds for every root, whatever OTP type data this
+    // machine has, so each root counts as loaded after one extraction.
+    set_type_cache_outcome(backend, Some(true));
 
     for (i, (app, app_class)) in apps.iter().zip(app_classes).enumerate() {
         let before = type_cache_extractions(backend).len();
@@ -332,6 +342,69 @@ async fn each_new_package_root_extracts_only_its_own_type_cache() {
         unique.len(),
         log.len(),
         "every root is extracted exactly once, got {log:?}"
+    );
+
+    drain.abort();
+    let _ = fs::remove_dir_all(&temp);
+}
+
+/// BT-4383: a root whose `extract_type_specs` returned `None` (e.g. opened
+/// before the runtime was built) is not marked loaded, so the next root load
+/// extracts it again instead of leaving its FFI types empty for the session.
+#[tokio::test]
+async fn root_with_no_extracted_specs_is_retried_on_next_root_load() {
+    let temp = unique_temp_dir("beamtalk_lsp_type_cache_retry");
+    let workspace = temp.join("source");
+    let pkg_a = workspace.join("pkg_a");
+    let pkg_b = workspace.join("pkg_b");
+    let app_a = write_package_with_dep(&pkg_a, "pkg", "AppA", "Dep");
+    let app_b = write_package_with_dep(&pkg_b, "pkg", "AppB", "Dep");
+
+    let (mut service, socket) = tower_lsp::LspService::new(Backend::new);
+    initialize_service(&mut service, &workspace).await;
+    let backend: &Backend = service.inner();
+    let drain = drain_socket(socket);
+
+    set_type_cache_outcome(backend, Some(false));
+    real_did_open(
+        backend,
+        Url::from_file_path(&app_a).expect("path → uri"),
+        &app_source("AppA", "Dep"),
+    )
+    .await;
+    let before = type_cache_extractions(backend).len();
+    assert!(
+        type_cache_extractions(backend).contains(&pkg_a),
+        "opening AppA attempts pkg_a's extraction"
+    );
+
+    set_type_cache_outcome(backend, Some(true));
+    real_did_open(
+        backend,
+        Url::from_file_path(&app_b).expect("path → uri"),
+        &app_source("AppB", "Dep"),
+    )
+    .await;
+    let log = type_cache_extractions(backend);
+    let retried = &log[before..];
+    assert!(
+        retried.contains(&pkg_a),
+        "pkg_a, which extracted nothing, is retried on the next root load, got {retried:?}"
+    );
+    assert!(
+        retried.contains(&pkg_b),
+        "pkg_b is extracted, got {retried:?}"
+    );
+
+    // Both are now loaded: a further load extracts neither again.
+    let settled = type_cache_extractions(backend).len();
+    backend
+        .load_type_cache(&[pkg_a.clone(), pkg_b.clone()])
+        .await;
+    assert_eq!(
+        type_cache_extractions(backend).len(),
+        settled,
+        "roots with extracted specs are not extracted again"
     );
 
     drain.abort();

@@ -56,6 +56,8 @@ impl Backend {
             fail_next_root_walk: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             type_cache_extractions: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            type_cache_outcome: Mutex::new(None),
             otp_lib_dir: Mutex::new(None),
             runtime: tokio::sync::Mutex::new(None),
             flush_listener: tokio::sync::Mutex::new(None),
@@ -543,9 +545,11 @@ impl Backend {
     /// accumulated [`LoadedTypeCache`] and the union is installed. Opening
     /// a file in the Nth package root under a parent folder therefore
     /// extracts that root alone (and may spawn at most one build-worker
-    /// node), not all N. Callers may still pass every known root. A root
-    /// whose extraction task fails is not marked loaded, so the next call
-    /// retries it.
+    /// node), not all N. Callers may still pass every known root. A root is
+    /// marked loaded only once `extract_type_specs` returned specs for it:
+    /// a root whose extraction returned `None` (e.g. opened before the
+    /// runtime was built) or whose extraction task failed is retried on the
+    /// next call, as the pre-incremental full re-extraction used to do.
     pub(in crate::server) async fn load_type_cache(&self, roots: &[PathBuf]) {
         use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
@@ -567,46 +571,62 @@ impl Backend {
             .expect("type_cache_extractions lock poisoned")
             .extend(pending.iter().cloned());
 
-        let pending_owned = pending.clone();
-        let Ok((registry, known_erlang_modules)) = tokio::task::spawn_blocking(move || {
-            let mut registry = NativeTypeRegistry::new();
-            let mut known_erlang_modules = HashSet::new();
-            for root in &pending_owned {
-                let Ok(root) = Utf8PathBuf::from_path_buf(root.clone()) else {
-                    continue;
-                };
-                let cache_dir = root.join("_build").join("type_cache");
-                let dependency_ebin_dirs =
-                    beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
-                if let Some(root_registry) = beamtalk_core::ffi_type_specs::extract_type_specs(
-                    &cache_dir,
-                    &dependency_ebin_dirs,
-                ) {
-                    registry.merge(root_registry);
+        #[cfg(test)]
+        let outcome_override = *self
+            .type_cache_outcome
+            .lock()
+            .expect("type_cache_outcome lock poisoned");
+        #[cfg(not(test))]
+        let outcome_override: Option<bool> = None;
+
+        let pending_owned = pending;
+        let Ok((registry, known_erlang_modules, extracted)) =
+            tokio::task::spawn_blocking(move || {
+                let mut registry = NativeTypeRegistry::new();
+                let mut known_erlang_modules = HashSet::new();
+                // Roots whose specs were extracted; only these are marked loaded.
+                let mut extracted = Vec::new();
+                for root_path in &pending_owned {
+                    let Ok(root) = Utf8PathBuf::from_path_buf(root_path.clone()) else {
+                        // A non-UTF-8 root can never be extracted; don't retry it.
+                        extracted.push(root_path.clone());
+                        continue;
+                    };
+                    let cache_dir = root.join("_build").join("type_cache");
+                    let dependency_ebin_dirs =
+                        beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
+                    let root_registry = match outcome_override {
+                        Some(true) => Some(NativeTypeRegistry::new()),
+                        Some(false) => None,
+                        None => beamtalk_core::ffi_type_specs::extract_type_specs(
+                            &cache_dir,
+                            &dependency_ebin_dirs,
+                        ),
+                    };
+                    if let Some(root_registry) = root_registry {
+                        registry.merge(root_registry);
+                        extracted.push(root_path.clone());
+                    }
+                    // BT-4022: project-known Erlang modules for the
+                    // `unresolved_ffi` check — same per-root walk, unioned
+                    // across roots (a whole-session simplification, like
+                    // `set_native_types` below — modules added by a later
+                    // `beamtalk build` need an LSP restart).
+                    known_erlang_modules.extend(
+                        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
+                    );
                 }
-                // BT-4022: project-known Erlang modules for the
-                // `unresolved_ffi` check — same per-root walk, unioned
-                // across roots (a whole-session simplification, like
-                // `set_native_types` below — modules added by a later
-                // `beamtalk build` need an LSP restart).
-                known_erlang_modules.extend(
-                    beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
-                );
-            }
-            (registry, known_erlang_modules)
-        })
-        .await
+                (registry, known_erlang_modules, extracted)
+            })
+            .await
         else {
-            tracing::warn!(
-                roots = ?pending,
-                "type-cache extraction task failed; will retry on the next root load"
-            );
+            tracing::warn!("type-cache extraction task failed; will retry on the next root load");
             return;
         };
 
         let (registry, known_erlang_modules) = {
             let mut cache = self.type_cache.lock().expect("type_cache lock poisoned");
-            cache.roots.extend(pending);
+            cache.roots.extend(extracted);
             cache.registry.merge(registry);
             cache.known_erlang_modules.extend(known_erlang_modules);
             (cache.registry.clone(), cache.known_erlang_modules.clone())
