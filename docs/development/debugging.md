@@ -122,6 +122,12 @@ only Beamtalk user and stdlib frames, then applies these rules:
   frames, a final `at Class>>testMethod (file)` line is appended so you always
   see where the failing test lives. This line has no line number (the file
   comes from the `beamtalk_source` fallback).
+- **Source snippet at error site.** The innermost frame with a readable
+  source file and line is followed by a snippet: the failing line marked `>`
+  plus one line of context on either side. Snippet lines are context, not
+  frames — they never start with ` at `, so `frames[i]` still pairs with
+  the i-th `at` line. Missing, unreadable or out-of-range sources produce
+  no snippet.
 - **setUp failures carry no frames**, so there is no `--full-traces` detail
   for them.
 

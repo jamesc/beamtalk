@@ -197,16 +197,33 @@ fn runtime_dir() -> &'static Path {
 /// only `just build` (`build-stdlib`) produces. Running this crate's tier
 /// standalone (`just test-rust-crate beamtalk-cli`) without a preceding
 /// `just build` otherwise fails later with confusing
-/// `Class 'unknown' not found` subprocess errors. Call this at the start of
-/// run-mode tests so the tier names the missing prerequisite instead.
+/// `Class 'unknown' not found` subprocess errors; this names the missing
+/// prerequisite instead. Private: run-mode tests get it from
+/// [`beamtalk_run`], so a new run-mode test cannot forget it (BT-4379).
 #[allow(dead_code)] // some test binaries don't call every helper
-pub fn require_built_stdlib() {
+fn require_built_stdlib() {
     let sentinel = runtime_dir().join("apps/beamtalk_stdlib/ebin/bt@stdlib@console.beam");
     assert!(
         sentinel.is_file(),
         "stdlib beams missing ({} not found); run `just build` first, then re-run this test tier (BT-4331)",
         sentinel.display()
     );
+}
+
+/// `beamtalk run`, ready for its operands: [`beamtalk`] with `run` as the
+/// first argument, after asserting the stdlib beams `run` resolves classes
+/// against exist ([`require_built_stdlib`], BT-4331). Every run-mode test
+/// builds its command here, so the fail-fast guard is not opt-in (BT-4379).
+///
+/// # Panics
+///
+/// Panics if `just build` has not produced the stdlib beams.
+#[allow(dead_code)] // some test binaries don't call every helper
+pub fn beamtalk_run() -> Command {
+    require_built_stdlib();
+    let mut cmd = beamtalk();
+    cmd.arg("run");
+    cmd
 }
 
 /// Create a fresh temp directory holding a minimal Beamtalk library project.
