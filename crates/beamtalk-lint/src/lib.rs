@@ -88,6 +88,21 @@ pub(crate) fn hierarchy_for_lint(module: &Module) -> ClassHierarchy {
     hierarchy_result.expect("ClassHierarchy::build is infallible")
 }
 
+/// The fix hint for a synchronous send to the actor that should be an async
+/// cast, shared by the lints that flag one (`actor_state_abroad`,
+/// `sync_send_in_timer_block`).
+///
+/// `cast` is the concrete cast spelling (`self bump!`) when one exists: only a
+/// plain unary send has one — `!` terminates the full send, so the cast of
+/// `self update: 42` is `self update: 42!`, never `self update:!`, and a
+/// cascade message has no cast spelling. Without one the hint is generic.
+pub(crate) fn async_cast_hint(cast: Option<&str>) -> String {
+    cast.map_or_else(
+        || "Use an async cast (`!` after the full send) instead (ADR 0137)".to_string(),
+        |cast| format!("Use `{cast}` (async cast) instead (ADR 0137)"),
+    )
+}
+
 /// Construct the ordered list of all active lint passes.
 ///
 /// **To register a new pass:** append `Box::new(your_module::YourPass)` in
