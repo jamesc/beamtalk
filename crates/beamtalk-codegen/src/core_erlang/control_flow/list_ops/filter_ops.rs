@@ -75,17 +75,25 @@ impl CoreErlangGenerator {
             leaf::var(list_var.clone()),
             ") of <'true'> when 'true' -> let ",
             leaf::var(wrapper_var.clone()),
-            " = fun (X) -> call 'erlang':'not'(apply ",
-            leaf::var(body_var.clone()),
-            " (X)) in call 'lists':'filter'(",
+            " = fun (X) -> call 'erlang':'not'(",
+            // BT-4366: nested in the wrapper fun, so the apply carries the
+            // send's line itself.
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(body_var.clone()), " (X)"]),
+            ") in call 'lists':'filter'(",
             leaf::var(wrapper_var),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'reject:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'reject:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 

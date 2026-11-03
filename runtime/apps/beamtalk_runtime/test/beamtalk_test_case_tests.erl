@@ -318,6 +318,95 @@ format_stacktrace_selects_first_two_plus_last_test() ->
     ?assertEqual(nomatch, binary:match(Result, <<"m3">>)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
 
+%% BT-4355: --full-traces keeps every filtered frame (same per-frame format).
+format_stacktrace_full_traces_keeps_all_frames_test() ->
+    Frames = [
+        {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', m3, 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    Default = beamtalk_test_case:format_stacktrace(Frames),
+    application:set_env(beamtalk_stdlib, full_traces, true),
+    try
+        Full = beamtalk_test_case:format_stacktrace(Frames),
+        ?assertNotEqual(nomatch, binary:match(Full, <<"m3">>)),
+        ?assertEqual(4, length(binary:matches(Full, <<"\n  at ">>))),
+        ?assertEqual(3, length(binary:matches(Default, <<"\n  at ">>))),
+        %% Every default line appears verbatim in the full trace.
+        [_ | DefaultLines] = binary:split(Default, <<"\n  at ">>, [global]),
+        lists:foreach(
+            fun(L) -> ?assertNotEqual(nomatch, binary:match(Full, L)) end, DefaultLines
+        )
+    after
+        application:unset_env(beamtalk_stdlib, full_traces)
+    end.
+
+%% BT-4355: structured frames match the rendered lines and carry no MFA.
+stack_frames_match_rendered_text_test() ->
+    Frames = [
+        {'bt@user@A', 'm1', 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', '-m2/1-fun-0-', 1, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', 'm3', 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', 'm4', 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    Structured = beamtalk_test_case:stack_frames(Frames),
+    ?assertEqual(3, length(Structured)),
+    [F1, F2, F3] = Structured,
+    ?assertEqual(<<"m1">>, maps:get(selector, F1)),
+    ?assertEqual(false, maps:get(block, F1)),
+    ?assertEqual(1, maps:get(line, F1)),
+    ?assertEqual(<<"a.bt">>, maps:get(file, F1)),
+    ?assertEqual(<<"m2">>, maps:get(selector, F2)),
+    ?assertEqual(true, maps:get(block, F2)),
+    ?assertEqual(<<"m4">>, maps:get(selector, F3)),
+    ?assertEqual(
+        [block, class, file, line, repeat, selector],
+        lists:sort(maps:keys(F1))
+    ),
+    %% Each structured frame's selector and line appear in the rendered text.
+    Text = beamtalk_test_case:format_stacktrace(Frames),
+    lists:foreach(
+        fun(#{selector := Sel, line := Line}) ->
+            ?assertNotEqual(nomatch, binary:match(Text, Sel)),
+            ?assertNotEqual(
+                nomatch, binary:match(Text, <<"a.bt:", (integer_to_binary(Line))/binary>>)
+            )
+        end,
+        Structured
+    ).
+
+stack_frames_collapse_repeats_test() ->
+    Same = {'bt@user@A', m1, 0, []},
+    [F] = beamtalk_test_case:stack_frames([Same, Same]),
+    ?assertEqual(2, maps:get(repeat, F)),
+    ?assertEqual(nil, maps:get(line, F)).
+
+test_failure_includes_synthetic_test_frame_test() ->
+    Stack = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
+    Base = <<"boom", (beamtalk_test_case:format_stacktrace(Stack))/binary>>,
+    {fail, testFoo, Msg, Frames} =
+        beamtalk_test_case:test_failure(testFoo, Base, 'bt@user@A', Stack),
+    %% One rendered `at` line per structured frame, test method last.
+    ?assertEqual(length(binary:matches(Msg, <<"\n  at ">>)), length(Frames)),
+    ?assertEqual(<<"testFoo">>, maps:get(selector, lists:last(Frames))).
+
+%% The DNU (`undef`) message has no rendered trace, so its structured frames
+%% must line up with the `at` lines it does have: only the synthetic
+%% test-method line, or none when the test frame is already in the stack.
+test_failure_untraced_frames_match_text_test() ->
+    NoTestFrame = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
+    {fail, testFoo, Msg1, Frames1} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', NoTestFrame),
+    ?assertEqual(1, length(binary:matches(Msg1, <<"\n  at ">>))),
+    ?assertEqual(1, length(Frames1)),
+    ?assertEqual(<<"testFoo">>, maps:get(selector, hd(Frames1))),
+    WithTestFrame = [{'bt@user@A', testFoo, 0, [{file, "a.bt"}, {line, 3}]}],
+    {fail, testFoo, Msg2, Frames2} =
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', WithTestFrame),
+    ?assertEqual(0, length(binary:matches(Msg2, <<"\n  at ">>))),
+    ?assertEqual([], Frames2).
+
 %%% ============================================================================
 %%% ensure_test_context/4 Tests (frame ordering)
 %%% ============================================================================
@@ -507,4 +596,148 @@ ensure_test_context_includes_test_file_test() ->
         ]),
         ?assertEqual(Expected, Result),
         ?assertNot(has_raw_mfa(Result))
+    end).
+
+%%% ============================================================================
+%%% BT-4358: source snippet at the error site (no raw MFA)
+%%% ============================================================================
+
+%% Run Fun(AbsPath) with a throwaway source file holding Content.
+with_snippet_file(Content, Fun) ->
+    Path = iolist_to_binary(
+        filename:absname(
+            "bt4358_snippet_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".bt"
+        )
+    ),
+    ok = file:write_file(Path, Content),
+    try
+        Fun(Path)
+    after
+        file:delete(Path)
+    end.
+
+source_snippet_marks_failing_line_test() ->
+    with_snippet_file(<<"one\ntwo\nthree\nfour\n">>, fun(Path) ->
+        ?assertEqual(
+            <<"\n      1 | one\n    > 2 | two\n      3 | three">>,
+            beamtalk_test_case:source_snippet(Path, 2)
+        )
+    end).
+
+source_snippet_clamps_at_file_start_and_end_test() ->
+    with_snippet_file(<<"a\r\nb\nc">>, fun(Path) ->
+        ?assertEqual(
+            <<"\n    > 1 | a\n      2 | b">>, beamtalk_test_case:source_snippet(Path, 1)
+        ),
+        ?assertEqual(
+            <<"\n      2 | b\n    > 3 | c">>, beamtalk_test_case:source_snippet(Path, 3)
+        )
+    end).
+
+source_snippet_degrades_gracefully_test() ->
+    ?assertEqual(none, beamtalk_test_case:source_snippet(<<"/no/such/dir/x.bt">>, 3)),
+    ?assertEqual(none, beamtalk_test_case:source_snippet(<<"/">>, 3)),
+    with_snippet_file(<<"only\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 50)),
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 0))
+    end),
+    with_snippet_file(<<255, 254, "\nok\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 1))
+    end).
+
+source_snippet_caps_reads_and_line_length_test() ->
+    Long = binary:copy(<<"x">>, 1000),
+    with_snippet_file(<<Long/binary, "\n">>, fun(Path) ->
+        Snippet = beamtalk_test_case:source_snippet(Path, 1),
+        ?assert(byte_size(Snippet) < 250),
+        ?assertMatch({_, _}, binary:match(Snippet, <<"...">>))
+    end),
+    %% A line beyond the read cap is simply not shown.
+    Filler = binary:copy(<<"\n">>, 300000),
+    with_snippet_file(<<Filler/binary, "late\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 300001))
+    end).
+
+format_stacktrace_adds_snippet_for_readable_file_test() ->
+    with_snippet_file(<<"a\nb := x at: 1\nc\nd\n">>, fun(Path) ->
+        Frames = [
+            {'bt@user@A', helper, 0, [{file, binary_to_list(Path)}, {line, 2}]},
+            {'bt@user@A', testFoo, 0, [{file, binary_to_list(Path)}, {line, 4}]}
+        ],
+        Text = beamtalk_test_case:format_stacktrace(Frames),
+        %% Snippet only under the innermost frame, before the next `at` line.
+        [First, Second] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
+        ?assertNotEqual(nomatch, binary:match(First, <<"> 2 | b := x at: 1">>)),
+        ?assertEqual(nomatch, binary:match(Second, <<" | ">>)),
+        ?assertNot(has_raw_mfa(Text)),
+        %% frames[i] <-> i-th `at` line is unchanged.
+        ?assertEqual(
+            length(beamtalk_test_case:stack_frames(Frames)),
+            length(binary:matches(Text, <<"\n  at ">>))
+        )
+    end).
+
+format_stacktrace_skips_unreadable_to_next_frame_test() ->
+    with_snippet_file(<<"a\nb\nc\n">>, fun(Path) ->
+        Frames = [
+            {'bt@user@A', gone, 0, [{file, "no/such/file.bt"}, {line, 2}]},
+            {'bt@user@A', testFoo, 0, [{file, binary_to_list(Path)}, {line, 2}]}
+        ],
+        Text = beamtalk_test_case:format_stacktrace(Frames),
+        ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | b">>))
+    end),
+    Missing = beamtalk_test_case:format_stacktrace([
+        {'bt@user@A', gone, 0, [{file, "no/such/file.bt"}, {line, 2}]}
+    ]),
+    ?assertEqual(nomatch, binary:match(Missing, <<" | ">>)).
+
+%%% ============================================================================
+%%% BT-4388: prefer the user frame; last-row edge cases in the snippet reader
+%%% ============================================================================
+
+format_stacktrace_prefers_user_frame_over_stdlib_frame_test() ->
+    with_snippet_file(<<"s1\ns2 stdlib internals\ns3\n">>, fun(StdPath) ->
+        with_snippet_file(<<"u1\nu2 := d at: #missing\nu3\n">>, fun(UserPath) ->
+            Frames = [
+                {'bt@stdlib@dictionary', 'at:', 2, [{file, binary_to_list(StdPath)}, {line, 2}]},
+                {'bt@user@A', testFoo, 0, [{file, binary_to_list(UserPath)}, {line, 2}]}
+            ],
+            Text = beamtalk_test_case:format_stacktrace(Frames),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | u2 := d at: #missing">>)),
+            ?assertEqual(nomatch, binary:match(Text, <<"stdlib internals">>)),
+            %% Snippet sits under the user frame's `at` line, not the stdlib one.
+            [Std, User] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
+            ?assertEqual(nomatch, binary:match(Std, <<" | ">>)),
+            ?assertNotEqual(nomatch, binary:match(User, <<" | u2">>)),
+            ?assertNot(has_raw_mfa(Text)),
+            ?assertEqual(
+                length(beamtalk_test_case:stack_frames(Frames)),
+                length(binary:matches(Text, <<"\n  at ">>))
+            ),
+            %% Fallback: the stdlib frame is used when the user frame is unreadable.
+            Fallback = beamtalk_test_case:format_stacktrace([
+                {'bt@stdlib@dictionary', 'at:', 2, [{file, binary_to_list(StdPath)}, {line, 2}]},
+                {'bt@user@A', testFoo, 0, [{file, "no/such/file.bt"}, {line, 2}]}
+            ]),
+            ?assertNotEqual(nomatch, binary:match(Fallback, <<"> 2 | s2 stdlib internals">>))
+        end)
+    end).
+
+source_snippet_drops_cut_off_row_when_read_truncated_test() ->
+    %% 7 + 2*200000 bytes: the 256 KiB cap lands inside a two-byte character.
+    Tail = binary:copy(<<"é"/utf8>>, 200000),
+    with_snippet_file(<<"first\nx", Tail/binary>>, fun(Path) ->
+        %% The partial last row is dropped, not rendered as a split character.
+        ?assertEqual(<<"\n    > 1 | first">>, beamtalk_test_case:source_snippet(Path, 1)),
+        %% ...and is never shown as a (cut-off) failing line.
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 2))
+    end).
+
+source_snippet_none_one_past_end_of_newline_terminated_file_test() ->
+    with_snippet_file(<<"a\nb\nc\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 4)),
+        %% The last real line shows no empty trailing `>`/context row.
+        ?assertEqual(
+            <<"\n      2 | b\n    > 3 | c">>, beamtalk_test_case:source_snippet(Path, 3)
+        )
     end).

@@ -77,7 +77,7 @@ use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 use tracing::warn;
@@ -224,13 +224,25 @@ pub fn resolve_dependency_class_infos_with_sources(
 
     // Flatten in the compile order of the graph compile, each dependency
     // against its own protocols and then those of the dependencies before it
-    // (BT-3678), so the exports equal a cold build's (BT-3684).
-    let mut prior_protocol_defs: Vec<ProtocolDefinition> = Vec::new();
-    for dep in compile_order(scanned, &parsed.package.name) {
+    // that it reaches in the graph (BT-3678, BT-4375), so the exports equal a
+    // cold build's (BT-3684).
+    let dependencies: BTreeMap<String, Vec<String>> = scanned
+        .iter()
+        .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
+        .collect();
+    // Each dependency flattened so far, with its own protocol ASTs.
+    let mut flattened: Vec<(String, &[ProtocolDefinition])> = Vec::new();
+    let ordered = compile_order(scanned, &parsed.package.name);
+    for dep in &ordered {
+        let closure = crate::dep_order::dependency_closure(&dependencies, &dep.name);
+        let prior_protocol_defs = flattened
+            .iter()
+            .filter(|(name, _)| closure.contains(name))
+            .flat_map(|(_, defs)| defs.iter().cloned());
         let mut infos = dep.scan.class_infos.clone();
         dep.scan
             .trait_users
-            .flatten(&mut infos, prior_protocol_defs.iter().cloned(), None);
+            .flatten(&mut infos, prior_protocol_defs, None);
         class_infos.extend(infos);
         beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
             &mut protocol_sources,
@@ -238,7 +250,7 @@ pub fn resolve_dependency_class_infos_with_sources(
         );
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
-        prior_protocol_defs.extend(own_protocol_defs.iter().cloned());
+        flattened.push((dep.name.clone(), own_protocol_defs));
     }
 
     (

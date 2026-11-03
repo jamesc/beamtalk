@@ -604,7 +604,7 @@ build-stdlib: build-rust build-erlang
     @cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
     @echo "✅ Stdlib build complete"
 
-# Lean pre-build for the coverage jobs (main-only) and `dialyzer-specs`.
+# Lean pre-build for the coverage jobs and `dialyzer-specs`.
 # Unlike `build-stdlib` this skips `build-rust` (`cargo build --all-targets`):
 # nothing coverage-related executes dev-profile test/bench/example targets —
 # the Rust suites run instrumented under `cargo llvm-cov` (own target dir),
@@ -617,13 +617,29 @@ build-stdlib: build-rust build-erlang
 # (beamtalk_compiler_port.erl) and `beamtalk-exec` (beamtalk_exec_port.erl) —
 # and `resolve_sibling_binary` falls back there too. Building only the
 # `beamtalk` binary breaks every suite that boots a BEAM node (e2e, eunit
-# git tests) with "Compiler not available" / missing-binary errors.
+# git tests) with "Compiler not available" / missing-binary errors. The
+# existence check below enforces that (BT-4379): a regression to
+# `--bin beamtalk` fails here, in every job that runs this recipe (lint and
+# test-dialyzer via dialyzer-specs, both coverage legs), not deep inside a
+# BEAM suite. The `.exe` suffix covers a Unix-flavoured shell on Windows
+# (MSYS/Cygwin), the only way this `[unix]` recipe meets one.
 [unix]
 coverage-build: build-erlang
-    @echo "🔨 Building coverage prerequisites (Erlang runtime + binaries + stdlib)..."
-    @cargo build --bins --quiet
-    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
-    @echo "✅ Coverage prerequisites complete"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔨 Building coverage prerequisites (Erlang runtime + binaries + stdlib)..."
+    cargo build --bins --quiet
+    exe=""
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) exe=".exe" ;; esac
+    target_dir="${CARGO_TARGET_DIR:-target}"
+    for bin in beamtalk-compiler-port beamtalk-exec; do
+        if [ ! -x "$target_dir/debug/$bin$exe" ]; then
+            echo "❌ coverage-build: $target_dir/debug/$bin$exe missing — the BEAM port code needs it; build with --bins, not --bin beamtalk" >&2
+            exit 1
+        fi
+    done
+    cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
+    echo "✅ Coverage prerequisites complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)
 build-examples: build-stdlib

@@ -1125,10 +1125,10 @@ Doc comments flow from source → AST → compiled BEAM module → runtime. They
 
 #### Documenting Parameters (`## Arguments` / `## Options`)
 
-The signature carries the machine-checked shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
+The signature carries the declared shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
 
 - `## Arguments` — one bullet per parameter: name in backticks, type in parentheses, then what it means.
-- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style): one bullet per key, each with its type and default.
+- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style) or a flag list (a `List` of symbols): one bullet per key or flag, each with what it means (and, for a keyed option, its type and default).
 
 The recipe for an option list:
 
@@ -1159,7 +1159,29 @@ Object subclass: Fetcher
     opts isEmpty ifTrue: [url] ifFalse: [url]
 ```
 
-This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the machine-checked shape, the bullet list is the prose.
+**Flag lists.** When every option is a bare on/off flag, declare the alias as a union of symbol literals and type the parameter `List(Alias)`. Each bullet under `## Options` names one flag; there is no per-flag type or default. The parameter itself is still required — describe the empty case as "pass `#()` for none", never as a default, and offer a shorter selector without the list when callers commonly pass no flags. `Regex class>>from:options:` is the stdlib example:
+
+```beamtalk
+/// A single PCRE compile flag.
+type RegexOption = #caseless | #multiline | #dotall | #extended | #ungreedy
+
+sealed typed Value subclass: Regex native: beamtalk_regex
+  /// Compile a regex pattern with PCRE options (class method).
+  ///
+  /// ## Arguments
+  /// - `pattern` (String) — the PCRE pattern to compile.
+  /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
+  ///
+  /// ## Options
+  /// - `#caseless` — case-insensitive matching.
+  /// - `#multiline` — `^` and `$` match at line breaks.
+  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
+    self delegate
+```
+
+Document the flags once, on the canonical method, and point other methods that take the same alias at it in prose (for example `String>>matchesRegex:options:` says "See `Regex class>>from:options:` for the option list") rather than copying the bullets. (Method-level `@see Class>>selector` is not parsed by the help/LSP/MCP surfaces, so don't use it for this.) When the flags are interpreted by native Erlang code, the runtime's accepted set must be tested against the alias members — `beamtalk_regex_tests` does this for `RegexOption` by reading the alias from the stdlib app's `type_aliases` metadata.
+
+This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the declared shape, the bullet list is the prose. The type checker does not yet check the *elements* of a list literal against `List(E)` — `options: #(#bogus)` compiles without a warning and fails only at runtime (tracked in BT-4385) — so the alias documents the accepted values and the native implementation must still validate them.
 
 ### Method Category Dividers (`// === Name ===`)
 
@@ -4947,9 +4969,14 @@ Registry reset          // => 0
 `Point`'s own methods), compiles to a guarded direct call: when the receiver's
 class tag is exactly `Point` it calls `Point`'s compiled module, and any other
 receiver (a subclass instance, or a value the annotation lied about) takes the
-ordinary dynamic send. Abstract classes, `Object`, `Value`, actors, the
-supervisor and exception families and built-ins with their own representation
-always send dynamically. The result is always what a dynamic send answers
+ordinary dynamic send. A built-in receiver with its own representation
+(`n :: Integer`, `xs :: List`, `d :: Dictionary`, and likewise `Float`,
+`Symbol`, `True`, `False`, `UndefinedObject`, `Block`, `Tuple`, `Reference`,
+`Port`) compiles to a direct call guarded by the same representation test the
+dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
+`String`, `Binary`, `Pid`, `Boolean`, `Bitstring` and `Character` receivers,
+abstract classes, `Object`, `Value`, actors, and the supervisor and exception
+families always send dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
 (`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
 module all reach typed call sites at once, because they act inside that
@@ -4959,7 +4986,14 @@ recompiled, because the call site names the module the compiler saw:
 - redefining the class in the REPL so that it lands in a *different* module:
   stale typed call sites keep reaching the old module;
 - `removeFromSystem`: a stale typed call site raises a raw `undef` error
-  instead of `does_not_understand`.
+  instead of `does_not_understand`;
+- redefining the class under a different superclass that changes how it is
+  dispatched (for example, into the `Exception` family): stale typed call
+  sites keep calling the class module's `dispatch/3` directly.
+
+Built-in receivers have no such caveat: a stdlib class can be neither removed
+nor redefined into another module, and extensions on it act inside its
+module's `dispatch/3`.
 
 ### Saving live edits back to disk — `compile:source:`, ChangeLog, and `flush` (ADR 0082)
 

@@ -67,9 +67,9 @@ fn new_app_run_prints_greeting() {
         .assert()
         .success();
 
-    cli_common::beamtalk()
+    cli_common::beamtalk_run()
         .current_dir(dir.path().join("my_app"))
-        .args(["run", "Main", "run"])
+        .args(["Main", "run"])
         .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success()

@@ -378,6 +378,11 @@ enum Command {
         /// Suppress per-class output for passing tests
         #[arg(long, short)]
         quiet: bool,
+
+        /// Show the complete filtered stack trace for each failure instead of
+        /// the default 3 frames (innermost two plus the test method)
+        #[arg(long)]
+        full_traces: bool,
     },
 
     /// Check environment setup (Erlang, runtime, stdlib)
@@ -784,7 +789,8 @@ fn dispatch_command(command: Command) -> Result<()> {
             warnings_as_errors,
             jobs,
             quiet,
-        } => commands::test::run_tests(&path, warnings_as_errors, jobs, quiet),
+            full_traces,
+        } => commands::test::run_tests(&path, warnings_as_errors, jobs, quiet, full_traces),
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Version { args } => commands::version::run(&args),

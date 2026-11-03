@@ -777,6 +777,27 @@ impl CoreErlangGenerator {
         Self::annotate_with_line_in(self.source_path.as_deref(), doc, line_num)
     }
 
+    /// Whether `doc` is exactly one `( node -| [Line ...] )` annotation node, as
+    /// [`Self::annotate_with_line_in`] builds it: a sequence opening with `( `
+    /// and closing with the annotation's `] )`.
+    fn is_annotated_node(doc: &Document<'static>) -> bool {
+        let Document::Vec(parts) = doc else {
+            return false;
+        };
+        let text = |d: &Document<'static>| match d {
+            Document::Str(s) => Some((*s).to_string()),
+            Document::Owned(s) => Some(s.clone()),
+            _ => None,
+        };
+        let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
+        else {
+            return false;
+        };
+        first == "( "
+            && last.ends_with("] )")
+            && parts.iter().any(|p| text(p).as_deref() == Some(" -| ["))
+    }
+
     /// [`Self::annotate_with_line`] against an explicit `source_path` — for a
     /// caller that captured the path while a flattened method's protocol
     /// source was still in scope (see `MethodFrame`) but annotates after the
@@ -786,6 +807,13 @@ impl CoreErlangGenerator {
         doc: Document<'static>,
         line_num: u32,
     ) -> Document<'static> {
+        // BT-4366: Core Erlang cannot annotate an already-annotated node
+        // (`( ( X -| [..] ) -| [..] )` is a parse error), and a call node
+        // annotated by its lowering can reach the send's whole-document
+        // annotation unchanged. The inner (call-node) annotation wins.
+        if Self::is_annotated_node(&doc) {
+            return doc;
+        }
         match source_path {
             Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
             None => {

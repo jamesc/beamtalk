@@ -131,9 +131,17 @@ same scope as `build`.
 - `beamtalk lint` is the lint-severity gate by default. With
   `--warnings-as-errors` it additionally fails on the live-recheck set — the
   non-error `Dnu`/`Type` diagnostics the REPL whole-image recheck surfaces
-  (`relevant_image_diagnostic` in `beamtalk_recheck.erl`) plus any `Error` —
-  so CI fails the same sources a REPL load rejects. Run
-  `beamtalk lint --warnings-as-errors` as the CI parity gate.
+  (`relevant_image_diagnostic` in `beamtalk_recheck.erl`) plus any `Error`,
+  parse errors included — so it fails the same sources a REPL load rejects.
+  The package's `[diagnostics]` table is applied first, through the same
+  `apply_diagnostics_table` helper `build` and the REPL use, so a category
+  set to `off` passes here exactly as it loads clean in the REPL (BT-4377).
+  The severity × category → verdict rule is pinned on both sides by the
+  shared fixture
+  `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`.
+  `just ci` does not run this gate; add `beamtalk lint --warnings-as-errors`
+  to your own project's CI to get the REPL verdict there. The MCP `lint`
+  tool applies the same table but has no `--warnings-as-errors` flag.
 
 Intentionally surface-specific behaviour (not parity bugs):
 
@@ -1058,6 +1066,7 @@ By default, `beamtalk test` runs test classes concurrently using the BEAM schedu
 beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
+beamtalk test --full-traces  # Show full filtered stack traces (no 3-frame cap)
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

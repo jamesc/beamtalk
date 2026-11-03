@@ -528,64 +528,105 @@ pub struct PruneReport {
     pub removed: Vec<String>,
     /// Running workspaces left untouched. Never pruned, even with `--project`.
     pub skipped_running: usize,
-    /// Release rows left untouched. A stopped release's `port` file is its
-    /// only artifact; deleting it races a release that is starting up
-    /// (port file written, not yet accepting), so prune leaves releases
-    /// alone — use `workspace stop` for those.
+    /// Release rows within the `--project` filter, left untouched. A
+    /// stopped release's `port` file is its only artifact; deleting it races
+    /// a release that is starting up (port file written, not yet accepting),
+    /// so prune leaves releases alone — use `workspace stop` for those.
     pub skipped_releases: usize,
+    /// Workspaces prune tried and failed to remove, with the error. One
+    /// failure (e.g. `remove_dir_all` blocked by an open handle on Windows)
+    /// never stops the rest of the run, so `removed` stays an accurate
+    /// account of what was deleted.
+    pub failed: Vec<PruneFailure>,
+}
+
+/// One workspace [`prune_workspaces`] could not remove.
+#[derive(Debug, Clone, Serialize)]
+pub struct PruneFailure {
+    /// The workspace that was not (fully) removed.
+    pub workspace_id: String,
+    /// The rendered error.
+    pub error: String,
+}
+
+impl WorkspaceSummary {
+    /// Whether this row matches a `--project` filter: `needle` (already
+    /// lowercased) is a substring of the project path or the workspace ID.
+    pub(crate) fn matches_project_filter(&self, needle: &str) -> bool {
+        let path_hit = self
+            .project_path
+            .as_ref()
+            .is_some_and(|p| p.to_string_lossy().to_lowercase().contains(needle));
+        path_hit || self.workspace_id.to_lowercase().contains(needle)
+    }
 }
 
 /// Delete on-disk state for stopped dev workspaces.
 ///
 /// `stop` leaves the workspace directory behind, so stopped entries
 /// accumulate in `workspace list` forever. Prune removes the directory
-/// (metadata, cookie, logs, stale `node.info`) plus the workspace's `.lock`
-/// file for every stopped [`WorkspaceKind::Workspace`].
+/// (metadata, cookie, logs, stale `node.info`) for every stopped
+/// [`WorkspaceKind::Workspace`].
+///
+/// The workspace's zero-byte `.lock` file is deliberately left in place.
+/// Prune holds that lock while deleting, and unlinking a held `flock` file
+/// is the classic flock race: a `start` blocked on the old inode acquires
+/// it once prune lets go, while a later caller creates a fresh file at the
+/// same path and "exclusively" locks that too — two nodes for one
+/// workspace, the EPMD conflict the lock exists to prevent. Keeping the
+/// file keeps every contender on one inode.
 ///
 /// Safety: each candidate is re-probed under its workspace lock, so a node
 /// that started after listing is still never deleted. Running workspaces
 /// and releases are only counted, never touched. With `dry_run`, nothing
-/// is deleted and `removed` names what would be.
+/// is deleted and `removed` names what would be. A per-workspace failure
+/// is recorded in [`PruneReport::failed`] and the loop carries on.
 pub fn prune_workspaces(dry_run: bool, project_filter: Option<&str>) -> Result<PruneReport> {
     let needle = project_filter.map(str::to_lowercase);
     let mut report = PruneReport::default();
 
     for ws in list_workspaces()? {
+        if needle
+            .as_deref()
+            .is_some_and(|needle| !ws.matches_project_filter(needle))
+        {
+            continue;
+        }
         if ws.kind != WorkspaceKind::Workspace {
             report.skipped_releases += 1;
             continue;
         }
-        if let Some(needle) = &needle {
-            let path_hit = ws
-                .project_path
-                .as_ref()
-                .is_some_and(|p| p.to_string_lossy().to_lowercase().contains(needle));
-            if !path_hit && !ws.workspace_id.to_lowercase().contains(needle) {
-                continue;
-            }
-        }
 
-        // Serialize with a concurrent start: a node that comes up between
-        // listing and deletion re-probes as running here and is spared.
-        let _lock = acquire_workspace_lock(&ws.workspace_id)?;
-        let (status, _) = probe_node_status(&ws.workspace_id);
-        if status == WorkspaceStatus::Running {
-            report.skipped_running += 1;
-            continue;
+        match prune_one(&ws.workspace_id, dry_run) {
+            Ok(true) => report.removed.push(ws.workspace_id),
+            Ok(false) => report.skipped_running += 1,
+            Err(err) => report.failed.push(PruneFailure {
+                workspace_id: ws.workspace_id,
+                error: err.to_string(),
+            }),
         }
-
-        if !dry_run {
-            let dir = workspace_dir(&ws.workspace_id)?;
-            fs::remove_dir_all(&dir).into_diagnostic()?;
-            let lockfile = workspaces_base_dir()?.join(format!("{}.lock", ws.workspace_id));
-            // Best-effort: the lock file may never have been created.
-            let _ = fs::remove_file(&lockfile);
-        }
-        report.removed.push(ws.workspace_id);
     }
 
     report.removed.sort();
     Ok(report)
+}
+
+/// Prune one listed workspace under its lock: `Ok(true)` when removed (or,
+/// with `dry_run`, removable), `Ok(false)` when it re-probed as running.
+fn prune_one(workspace_id: &str, dry_run: bool) -> Result<bool> {
+    // Serialize with a concurrent start: a node that comes up between
+    // listing and deletion re-probes as running here and is spared.
+    let _lock = acquire_workspace_lock(workspace_id)?;
+    let (status, _) = probe_node_status(workspace_id);
+    if status == WorkspaceStatus::Running {
+        return Ok(false);
+    }
+    if !dry_run {
+        // The directory only: the `.lock` file beside it must survive (see
+        // `prune_workspaces`).
+        fs::remove_dir_all(workspace_dir(workspace_id)?).into_diagnostic()?;
+    }
+    Ok(true)
 }
 
 /// Detailed status information for a workspace.
@@ -1026,5 +1067,98 @@ mod tests {
              same directory, or a real running node under that id would be \
              orphaned"
         );
+    }
+
+    /// BT-4374: prune running concurrently with a lock holder must wait for
+    /// the lock, then leave the `.lock` file on its original inode. A
+    /// contender that opened the lockfile before prune (a `start` blocked in
+    /// `acquire_workspace_lock`) and a contender that opens it after must
+    /// still exclude each other. When prune unlinked the held file, the
+    /// early contender locked an orphaned inode while the late one created
+    /// a fresh file and locked that too: a double start.
+    #[test]
+    fn prune_waits_for_lock_holder_and_keeps_lockfile_inode() {
+        use fs2::FileExt;
+        use std::sync::mpsc;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = crate::commands::test_support::BeamtalkHomeOverride::new(tmp.path());
+        let ws_id = "prune-lock-race".to_string();
+        create_workspace_impl(&ws_id, tmp.path()).expect("seed stopped workspace");
+        let lock_path = workspaces_base_dir().unwrap().join(format!("{ws_id}.lock"));
+
+        // The holder (e.g. a concurrent `start` or `stop`) owns the lock.
+        let holder = acquire_workspace_lock(&ws_id).expect("holder lock");
+        // An early contender's handle, opened before prune runs.
+        let early = fs::OpenOptions::new()
+            .write(true)
+            .open(&lock_path)
+            .expect("early contender opens lockfile");
+
+        let (tx, rx) = mpsc::channel();
+        let pruner = std::thread::spawn(move || {
+            let report = prune_workspaces(false, Some("prune-lock-race"));
+            let _ = tx.send(());
+            report
+        });
+
+        // Prune must block on the held lock and delete nothing meanwhile.
+        assert!(
+            rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "prune must wait for the workspace lock holder"
+        );
+        assert!(
+            workspace_exists(&ws_id).unwrap(),
+            "prune must not delete while another process holds the lock"
+        );
+
+        drop(holder);
+        let report = pruner
+            .join()
+            .expect("prune thread")
+            .expect("prune succeeds");
+        assert_eq!(report.removed, vec![ws_id.clone()]);
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+        assert!(!workspace_exists(&ws_id).unwrap(), "workspace pruned");
+        assert!(lock_path.exists(), "prune must not unlink the lockfile");
+
+        // The early contender now takes the lock; a late contender opening
+        // the path afresh must be excluded — same inode, one lock.
+        early
+            .try_lock_exclusive()
+            .expect("early contender acquires the lock");
+        let late = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("late contender opens lockfile");
+        assert!(
+            late.try_lock_exclusive().is_err(),
+            "a late contender must not get a second exclusive lock"
+        );
+    }
+
+    /// BT-4374: `skipped_releases` counts only release rows inside the
+    /// `--project` filter.
+    #[test]
+    fn prune_counts_skipped_releases_after_project_filter() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = crate::commands::test_support::BeamtalkHomeOverride::new(tmp.path());
+        // A release row: a directory holding only a `port` file.
+        let release_dir = workspaces_base_dir().unwrap().join("prune-release-row");
+        fs::create_dir_all(&release_dir).unwrap();
+        fs::write(
+            release_dir.join("port"),
+            crate::commands::test_support::closed_port().to_string(),
+        )
+        .unwrap();
+
+        let report = prune_workspaces(true, Some("no-such-project")).unwrap();
+        assert_eq!(report.skipped_releases, 0, "release is outside the filter");
+
+        let report = prune_workspaces(true, Some("prune-release")).unwrap();
+        assert_eq!(report.skipped_releases, 1, "release is inside the filter");
+        assert!(report.removed.is_empty());
     }
 }

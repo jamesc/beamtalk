@@ -2017,9 +2017,11 @@ impl CoreErlangGenerator {
                     block_doc,
                     " in case ",
                     leaf::var(recv_var.clone()),
-                    " of <'nil'> when 'true' -> apply ",
-                    leaf::var(block_var),
-                    " () <_> when 'true' -> ",
+                    " of <'nil'> when 'true' -> ",
+                    // BT-4366: nested in the nil-test `case`, so the apply carries the
+                    // send's line itself.
+                    self.annotate_current_send_call(docvec!["apply ", leaf::var(block_var), " ()"]),
+                    " <_> when 'true' -> ",
                     leaf::var(recv_var),
                     " end",
                 ];
@@ -2061,7 +2063,11 @@ impl CoreErlangGenerator {
                 let block_doc = seq.next();
                 let recv_var = self.fresh_temp_var("Obj");
                 let block_var = self.fresh_temp_var("NotNilBlk");
-                let apply = not_nil_apply(&block_var, &recv_var, block_takes_arg);
+                let apply = self.annotate_current_send_call(not_nil_apply(
+                    &block_var,
+                    &recv_var,
+                    block_takes_arg,
+                ));
                 let call_doc = docvec![
                     "let ",
                     leaf::var(recv_var.clone()),
@@ -2116,7 +2122,11 @@ impl CoreErlangGenerator {
                 let recv_var = self.fresh_temp_var("Obj");
                 let nil_var = self.fresh_temp_var("NilBlk");
                 let not_nil_var = self.fresh_temp_var("NotNilBlk");
-                let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                let apply = self.annotate_current_send_call(not_nil_apply(
+                    &not_nil_var,
+                    &recv_var,
+                    block_takes_arg,
+                ));
                 let call_doc = docvec![
                     "let ",
                     leaf::var(recv_var.clone()),
@@ -2132,9 +2142,11 @@ impl CoreErlangGenerator {
                     not_nil_doc,
                     " in case ",
                     leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> apply ",
-                    leaf::var(nil_var),
-                    " () <_> when 'true' -> ",
+                    " of <'nil'> when 'true' -> ",
+                    // BT-4366: nested in the nil-test `case`, so the apply carries the
+                    // send's line itself.
+                    self.annotate_current_send_call(docvec!["apply ", leaf::var(nil_var), " ()"]),
+                    " <_> when 'true' -> ",
                     apply,
                     " end",
                 ];
@@ -2177,7 +2189,11 @@ impl CoreErlangGenerator {
                 let recv_var = self.fresh_temp_var("Obj");
                 let not_nil_var = self.fresh_temp_var("NotNilBlk");
                 let nil_var = self.fresh_temp_var("NilBlk");
-                let apply = not_nil_apply(&not_nil_var, &recv_var, block_takes_arg);
+                let apply = self.annotate_current_send_call(not_nil_apply(
+                    &not_nil_var,
+                    &recv_var,
+                    block_takes_arg,
+                ));
                 let call_doc = docvec![
                     "let ",
                     leaf::var(recv_var.clone()),
@@ -2193,9 +2209,11 @@ impl CoreErlangGenerator {
                     nil_doc,
                     " in case ",
                     leaf::var(recv_var),
-                    " of <'nil'> when 'true' -> apply ",
-                    leaf::var(nil_var),
-                    " () <_> when 'true' -> ",
+                    " of <'nil'> when 'true' -> ",
+                    // BT-4366: nested in the nil-test `case`, so the apply carries the
+                    // send's line itself.
+                    self.annotate_current_send_call(docvec!["apply ", leaf::var(nil_var), " ()"]),
+                    " <_> when 'true' -> ",
                     apply,
                     " end",
                 ];

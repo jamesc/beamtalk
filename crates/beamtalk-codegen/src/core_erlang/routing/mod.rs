@@ -20,6 +20,10 @@
 //! - [`is_non_tagged_map_class`]: the classes a class-tag guard must never
 //!   target (`dispatch_codegen::typed_tagged_target`);
 //! - [`reserved_tuple_tags`]: the tuple tags the `Tuple` test excludes;
+//! - [`builtin_send_route`]: the guard and module of a typed send's guarded
+//!   direct call to a built-in receiver (BT-4294), or why there is none;
+//! - [`rewritten_selectors`]: selectors the dynamic entry point rewrites
+//!   before it classifies the receiver, which no guarded call may claim;
 //! - [`row`]: a class's whole row, for the dynamic-site report's reason.
 //!
 //! To change a fact, edit the fixture and regenerate the table with
@@ -146,6 +150,102 @@ pub(in crate::core_erlang) fn non_tagged_map_classes() -> impl Iterator<Item = &
 /// The reserved tuple tags, in fixture order.
 pub(in crate::core_erlang) fn reserved_tuple_tags() -> &'static [ReservedTupleTag] {
     table::RESERVED_TUPLE_TAGS
+}
+
+/// Selectors `beamtalk_message_dispatch:send/3` rewrites before it classifies
+/// the receiver (`perform:withArguments:timeout:` becomes `send/4`), so no
+/// receiver's `dispatch/3` ever sees them through the dynamic path.
+pub(in crate::core_erlang) fn rewritten_selectors() -> &'static [&'static str] {
+    table::REWRITTEN_SELECTORS
+}
+
+/// The guard a typed send's guarded direct call to a built-in stands behind
+/// (BT-4294): a value passes it only if the dynamic path would route it to the
+/// row's `target_module` for every selector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) enum SendGuard {
+    /// The row's own representation test, which is exactly the dynamic
+    /// path's clause.
+    Exact(Guard),
+    /// Any tuple whose first element is none of [`reserved_tuple_tags`], at
+    /// **any** size. The dynamic path rejects some reserved tags at more than
+    /// one size (`beamtalk_primitive:send/3` hands every tuple of size two or
+    /// more headed `beamtalk_object` to `gen_server:call/2`), so the
+    /// size-specific type-pattern test would admit tuples it does not route
+    /// to `Tuple`. Rejecting a reserved head at every size is slightly
+    /// over-conservative, and a miss is always sound.
+    TupleWithoutReservedHead,
+}
+
+impl SendGuard {
+    /// The send guard of a row whose representation test is `guard`, or
+    /// `None` when that test admits values the dynamic path routes to more
+    /// than one module. An exhaustive match, so a new guard kind must decide.
+    fn of(guard: Guard) -> Option<Self> {
+        match guard {
+            Guard::Bif(_)
+            | Guard::StringTag
+            | Guard::UnalignedBitstring
+            | Guard::Symbol
+            | Guard::ExactAtom(_)
+            | Guard::UntaggedMap => Some(Self::Exact(guard)),
+            Guard::UnreservedTuple => Some(Self::TupleWithoutReservedHead),
+            // A bare binary routes to `Binary`, a `{beamtalk_string, _}` to
+            // `String`: the subclass-aware test spans two routes.
+            Guard::BinaryOrStringTag => None,
+        }
+    }
+}
+
+/// A typed send's guarded direct call to a built-in receiver (BT-4294): when
+/// the receiver passes `guard`, the dynamic path would call
+/// `target_module:dispatch/3`, so the call site may too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) struct BuiltinRoute {
+    pub(in crate::core_erlang) guard: SendGuard,
+    pub(in crate::core_erlang) target_module: &'static str,
+}
+
+/// Why a routing-fixture class has no [`BuiltinRoute`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NoBuiltinRoute {
+    /// The row's `dynamic_only` reason.
+    DynamicOnly(&'static str),
+    /// The row has no representation test or no single target module.
+    NoSingleRoute,
+    /// The dynamic path answers some selectors outside the target module, so
+    /// the module does not speak for the whole protocol.
+    SpecialSelectors,
+    /// The row's representation test admits values routed to another module
+    /// (`Binary`'s test admits a `String`).
+    GuardSpansRoutes,
+}
+
+/// The guarded direct route of a typed send to an instance of `class`, read
+/// from the routing fixture (BT-4294), or `None` when `class` has no row (it
+/// is a tagged-map class, `dispatch_codegen::typed_tagged_target`'s concern).
+pub(in crate::core_erlang) fn builtin_send_route(
+    class: &str,
+) -> Option<std::result::Result<BuiltinRoute, NoBuiltinRoute>> {
+    let row = row(class)?;
+    Some(route_of(row))
+}
+
+fn route_of(row: &RoutingRow) -> std::result::Result<BuiltinRoute, NoBuiltinRoute> {
+    if let Some(why) = row.dynamic_only {
+        return Err(NoBuiltinRoute::DynamicOnly(why));
+    }
+    let (Some(guard), Some(target_module)) = (row.guard, row.target_module) else {
+        return Err(NoBuiltinRoute::NoSingleRoute);
+    };
+    if !row.special_selectors.is_empty() {
+        return Err(NoBuiltinRoute::SpecialSelectors);
+    }
+    let guard = SendGuard::of(guard).ok_or(NoBuiltinRoute::GuardSpansRoutes)?;
+    Ok(BuiltinRoute {
+        guard,
+        target_module,
+    })
 }
 
 #[cfg(test)]

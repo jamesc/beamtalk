@@ -162,6 +162,11 @@ impl CoreErlangGenerator {
         let raw_str_var = self.fresh_temp_var("interpRaw");
         let str_var = self.fresh_temp_var("interpStr");
 
+        let display_string_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(interp_var.clone()),
+            ", 'displayString', [])"
+        ]);
         // Evaluate the expression
         let prefix = docvec![
             "let ",
@@ -173,9 +178,11 @@ impl CoreErlangGenerator {
             // (user-facing representation).
             "let ",
             leaf::var(raw_str_var.clone()),
-            " = call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(interp_var),
-            ", 'displayString', []) in ",
+            " = ",
+            // BT-4366: nested in the segment's `let` chain, so the call carries
+            // the enclosing send's line itself.
+            display_string_call,
+            " in ",
             // Convert to binary string via display_string, which
             // recursively awaits futures. This handles both direct
             // futures (actor displayString returns future) and
@@ -1202,7 +1209,9 @@ impl CoreErlangGenerator {
                 send.push(arg_doc);
             }
             send.push(Document::Str("])"));
-            let send = Document::Vec(send);
+            // BT-4366: the send is bound by a `let` (or returned from the
+            // cascade's `let` chain), so the call node carries its line.
+            let send = self.annotate_call_node_with_line(Document::Vec(send), recv_span);
 
             if is_last {
                 return Ok((docs, send));

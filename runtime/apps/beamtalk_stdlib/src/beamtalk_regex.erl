@@ -26,6 +26,7 @@ Regex objects are represented as tagged maps:
 -export(['from:'/1, 'from:options:'/2]).
 -export([from/1, from/2]).
 -export([source/1, 'printString'/1]).
+-export([valid_options/0]).
 -export([
     matches_regex/2,
     matches_regex_options/3,
@@ -420,28 +421,38 @@ compile_error(Class, Selector, Hint, {ErrStr, Pos}) ->
         #{reason => {ErrStr, Pos}}
     ).
 
+-doc """
+The PCRE compile flags `from:options:` and `matchesRegex:options:` accept.
+
+The single runtime source for the set: `translate_option/1` and its
+"Valid: …" hint both read it. `beamtalk_regex_tests` checks it equals both
+the `RegexOption` alias members in `stdlib/src/regex.bt` (via the stdlib
+app's `type_aliases` env) and the `regex_option()` type above, so none of
+the three can drift alone.
+
+Every member is also an `re:compile/2` option of the same name, which is why
+`translate_option/1` passes it through unchanged.
+""".
+-spec valid_options() -> [regex_option(), ...].
+valid_options() ->
+    [caseless, multiline, dotall, extended, ungreedy].
+
 -doc "Translate Beamtalk option atoms to Erlang re compile options.".
 -spec translate_options(list()) -> list().
 translate_options(Opts) ->
     [translate_option(O) || O <- Opts].
 
--spec translate_option(atom()) -> atom().
-translate_option(caseless) ->
-    caseless;
-translate_option(multiline) ->
-    multiline;
-translate_option(dotall) ->
-    dotall;
-translate_option(extended) ->
-    extended;
-translate_option(ungreedy) ->
-    ungreedy;
-translate_option(Other) ->
-    Error0 = beamtalk_error:new(regex_error, 'Regex'),
-    Hint = iolist_to_binary(
-        io_lib:format(
-            "Unknown option: ~p. Valid: caseless, multiline, dotall, extended, ungreedy", [Other]
-        )
-    ),
-    Error1 = beamtalk_error:with_hint(Error0, Hint),
-    beamtalk_error:raise(Error1).
+-spec translate_option(term()) -> regex_option().
+translate_option(Option) ->
+    case lists:member(Option, valid_options()) of
+        true ->
+            Option;
+        false ->
+            Error0 = beamtalk_error:new(regex_error, 'Regex'),
+            Valid = lists:join(", ", [atom_to_list(O) || O <- valid_options()]),
+            Hint = iolist_to_binary(
+                io_lib:format("Unknown option: ~p. Valid: ~s", [Option, Valid])
+            ),
+            Error1 = beamtalk_error:with_hint(Error0, Hint),
+            beamtalk_error:raise(Error1)
+    end.

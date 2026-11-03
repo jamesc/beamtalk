@@ -569,16 +569,12 @@ sealed typed Binary subclass: String
   ///
   /// ## Arguments
   /// - `pattern` (String) — the PCRE pattern to match against.
-  /// - `opts` (List(RegexOption), default `#()`) — compile flags.
-  ///
-  /// ## Options
-  /// - `#caseless` — case-insensitive matching.
-  /// - `#multiline` — `^` and `$` match at line breaks, not just the subject bounds.
-  /// - `#dotall` — `.` also matches newlines.
-  /// - `#extended` — ignore unescaped whitespace and `#` comments in the pattern.
-  /// - `#ungreedy` — quantifiers are lazy by default.
+  /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
+  ///   Use `matchesRegex:` when there are no flags.
   ///
   /// Unknown options raise `regex_error`.
+  ///
+  /// See `Regex class>>from:options:` for the option list and what each flag does.
   ///
   /// ## Examples
   /// ```beamtalk
