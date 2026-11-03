@@ -384,9 +384,8 @@ stack_frames_collapse_repeats_test() ->
 
 test_failure_includes_synthetic_test_frame_test() ->
     Stack = [{'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]}],
-    Base = <<"boom", (beamtalk_test_case:format_stacktrace(Stack))/binary>>,
     {fail, testFoo, Msg, Frames} =
-        beamtalk_test_case:test_failure(testFoo, Base, 'bt@user@A', Stack),
+        beamtalk_test_case:test_failure(testFoo, <<"boom">>, 'bt@user@A', Stack),
     %% One rendered `at` line per structured frame, test method last.
     ?assertEqual(length(binary:matches(Msg, <<"\n  at ">>)), length(Frames)),
     ?assertEqual(<<"testFoo">>, maps:get(selector, lists:last(Frames))).
@@ -406,6 +405,63 @@ test_failure_untraced_frames_match_text_test() ->
         beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', WithTestFrame),
     ?assertEqual(0, length(binary:matches(Msg2, <<"\n  at ">>))),
     ?assertEqual([], Frames2).
+
+%% BT-4402: the `at` text and the structured frames come from one entry list,
+%% so frames[i] pairs with the i-th `at` line whether or not the synthetic
+%% test-method frame is needed, and for the untraced (DNU) shape.
+at_lines_match_frames_test_() ->
+    Helper = {'bt@user@A', helper, 0, [{file, "a.bt"}, {line, 9}]},
+    TestFrame = {'bt@user@A', testFoo, 0, [{file, "a.bt"}, {line, 3}]},
+    Deep = [
+        {'bt@user@A', 'm1', 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', 'm2', 0, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', 'm3', 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', 'm4', 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    AtLines = fun(Msg) ->
+        [L || L <- binary:split(Msg, <<"\n">>, [global]), binary:match(L, <<"  at ">>) =:= {0, 5}]
+    end,
+    Check = fun(Fun, Stack) ->
+        {fail, testFoo, Msg, Frames} = Fun(Stack),
+        ?assertEqual(length(AtLines(Msg)), length(Frames)),
+        {Msg, Frames}
+    end,
+    Traced = fun(Stack) ->
+        beamtalk_test_case:test_failure(testFoo, <<"boom">>, 'bt@user@A', Stack)
+    end,
+    Untraced = fun(Stack) ->
+        beamtalk_test_case:test_failure_untraced(testFoo, <<"dnu">>, 'bt@user@A', Stack)
+    end,
+    [
+        ?_test(begin
+            %% Needs the synthetic frame: it is the last `at` line and frame.
+            {_, Frames} = Check(Traced, [Helper]),
+            ?assertEqual(2, length(Frames)),
+            ?assertEqual(<<"testFoo">>, maps:get(selector, lists:last(Frames)))
+        end),
+        ?_test(begin
+            %% Already has the test frame: no synthetic one.
+            {_, Frames} = Check(Traced, [Helper, TestFrame]),
+            ?assertEqual(2, length(Frames))
+        end),
+        ?_test(begin
+            %% Deep stack: 2 innermost + outermost, plus the synthetic frame.
+            {_, Frames} = Check(Traced, Deep),
+            ?assertEqual(4, length(Frames))
+        end),
+        ?_test(begin
+            {_, Frames} = Check(Traced, []),
+            ?assertEqual(1, length(Frames))
+        end),
+        ?_test(begin
+            {_, Frames} = Check(Untraced, [Helper]),
+            ?assertEqual(1, length(Frames))
+        end),
+        ?_test(begin
+            {_, Frames} = Check(Untraced, [Helper, TestFrame]),
+            ?assertEqual([], Frames)
+        end)
+    ].
 
 %%% ============================================================================
 %%% ensure_test_context/4 Tests (frame ordering)
