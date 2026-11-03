@@ -1,0 +1,17 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# BT-4378 fixture: a package that types its own native FFI only through the
+# project-local `stubs/` tier, under `[diagnostics] type = "error"`.
+# `beamtalk build` and the workspace `load_project` path (the compiler
+# port's `compile`) must give it the same verdict: accepted with the stub,
+# rejected for `Dynamic (untyped FFI)` without it.
+
+[package]
+name = "stubbed_ffi"
+version = "0.1.0"
+
+[dependencies]
+
+[diagnostics]
+type = "error"

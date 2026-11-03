@@ -903,14 +903,12 @@ fn collect_project_protocol_and_alias_infos(
             all_protocol_defs.push(protocol.clone());
         }
 
-        let mut infos =
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+        all_aliases.extend(
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
                 &module,
-            );
-        for info in &mut infos {
-            info.package = Some(pkg_name.into());
-        }
-        all_aliases.extend(infos);
+                Some(pkg_name),
+            ),
+        );
     }
     ProjectProtocolScan {
         protocol_infos: all_protocols,

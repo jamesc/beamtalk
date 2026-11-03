@@ -65,6 +65,34 @@ fn build_enforces_stub_declared_argument_types() {
         .stderr(contains("expects List").and(contains("got Integer")));
 }
 
+/// BT-4378 AC: the package that types its native FFI only through
+/// `stubs/*.bt`, under `[diagnostics] type = "error"`, gets the same verdict
+/// from `beamtalk build` as from the workspace `load_project` path — the
+/// compiler port's
+/// `load_project_parity::compile_file_types_ffi_through_project_stubs_like_build`
+/// compiles the same checked-in fixture: accepted with the stub, rejected
+/// for the untyped FFI call once the stub is gone.
+#[test]
+fn build_types_ffi_through_project_stubs_like_load_project() {
+    let project = cli_common::copied_fixture_project("tests/parity/projects/stubbed_ffi");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .success()
+        .stderr(contains("inferred as Dynamic").not());
+
+    // `--force`: the incremental cache does not key on the stub tier, so an
+    // unchanged source would otherwise be skipped (BT-4393).
+    std::fs::remove_dir_all(project.path().join("stubs")).expect("remove stubs/");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["build", "--force"])
+        .assert()
+        .failure()
+        .stderr(contains("inferred as Dynamic").and(contains("untyped")));
+}
+
 #[test]
 fn build_clean_project_produces_beam_artefacts() {
     let project = cli_common::fixture_project();

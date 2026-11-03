@@ -56,12 +56,17 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // walk-up). A session alias keeps its declaration over a same-named
     // project alias (REPL "current turn wins"); everything else appends
     // project-first, mirroring the build's merge order.
+    // BT-4378: a `load_project` tags its compiles with one `project_batch`
+    // token, so the project scope is verified once per batch, not per file.
     let project = if stdlib_mode {
         None
     } else {
+        let batch = map_get(request, "project_batch").and_then(term_to_string);
         map_get(request, "source_path")
             .and_then(term_to_string)
-            .and_then(|path| crate::project_context::project_context_for_source(&path))
+            .and_then(|path| {
+                crate::project_context::project_context_for_source(&path, batch.as_deref())
+            })
     };
     let pre_loaded_aliases = match project.as_ref() {
         Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),

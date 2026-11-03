@@ -234,7 +234,8 @@ pub fn resolve_dependency_class_infos_with_sources(
     let mut flattened: Vec<(String, &[ProtocolDefinition])> = Vec::new();
     let ordered = compile_order(scanned, &parsed.package.name);
     for dep in &ordered {
-        let closure = crate::dep_order::dependency_closure(&dependencies, &dep.name);
+        let closure =
+            beamtalk_core::compilation::dep_order::dependency_closure(&dependencies, &dep.name);
         let prior_protocol_defs = flattened
             .iter()
             .filter(|(name, _)| closure.contains(name))
@@ -270,7 +271,7 @@ struct DiscoveredDep {
 }
 
 /// `deps` in the order the graph compile (`beamtalk build`) compiles them
-/// ([`crate::dep_order::topological_order`]); in discovery order, with a
+/// ([`beamtalk_core::compilation::dep_order::topological_order`]); in discovery order, with a
 /// warning, if the graph has a cycle. Dependencies named only as an edge —
 /// whose checkout is not on disk — are not part of it.
 fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep> {
@@ -278,7 +279,7 @@ fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep
         .iter()
         .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
         .collect();
-    let order = match crate::dep_order::topological_order(&graph, root_name) {
+    let order = match beamtalk_core::compilation::dep_order::topological_order(&graph, root_name) {
         Ok(order) => order,
         Err(e) => {
             warn!(error = %e, "Dependency graph is not orderable; flattening in discovery order");

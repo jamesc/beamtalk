@@ -39,49 +39,21 @@
 //! provenance stamps, and follows the same "fail toward rebuild" rule: a
 //! missing, corrupt, or unrecognised-schema snapshot is a miss, so the first
 //! build after this ships re-resolves once and then records a baseline.
+//!
+//! The on-disk schema and its reader live in
+//! [`beamtalk_core::compilation::dep_graph`], which the compiler port also
+//! reads to learn a project's resolved dependency set (BT-4378).
 
+use beamtalk_core::compilation::dep_graph::{
+    DepGraphEntry, DepGraphSnapshot, read_dep_graph_snapshot,
+};
 use camino::Utf8Path;
-use serde::{Deserialize, Serialize};
-use std::fs;
 use tracing::{debug, warn};
 
 use crate::commands::util::write_atomic;
 
 use super::DiscoveredDep;
 use crate::commands::build_layout::BuildLayout;
-
-/// Current snapshot schema. Bump when the meaning of [`DepGraphEntry`]
-/// changes; an unrecognised schema is treated as a miss (re-resolve), so a
-/// newer toolchain's snapshot never lets an older binary reuse artifacts it
-/// cannot reason about.
-const SNAPSHOT_SCHEMA: u32 = 1;
-
-/// One dependency as it was declared the last time the graph resolved.
-///
-/// `source` is [`beamtalk_core::compilation::DependencySource`]'s `Display`
-/// form (`path: ../utils`, `git: <url> (tag: v1.0.0)`, `registry: 0.2.1`), so
-/// a type swap, a URL change, a tag bump, or a moved path all show up as a
-/// different string — and the file stays readable when debugging a rebuild.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct DepGraphEntry {
-    /// The dependency's package name.
-    name: String,
-    /// The chain of intermediate dependency names it was reached through
-    /// (empty for a dependency the root manifest declares directly).
-    #[serde(default)]
-    via: Vec<String>,
-    /// How the declaring manifest asked for it.
-    source: String,
-}
-
-/// On-disk snapshot of the effective dependency graph.
-#[derive(Debug, Serialize, Deserialize)]
-struct DepGraphSnapshot {
-    /// Snapshot schema version. An unrecognised value is a miss.
-    schema: u32,
-    /// Every dependency in the transitive graph, ordered by name.
-    deps: Vec<DepGraphEntry>,
-}
 
 /// Result of comparing the current dependency graph against the recorded one.
 pub(super) enum SnapshotStatus {
@@ -97,22 +69,19 @@ fn snapshot_path(project_root: &Utf8Path) -> camino::Utf8PathBuf {
     BuildLayout::new(project_root).dep_graph_path()
 }
 
-/// Project the discovered graph into its comparable form, ordered by name.
-///
-/// Dependency names are unique across the graph (`discover_all_dep_roots`
-/// de-duplicates by name), so sorting by name is a total order and makes the
-/// comparison independent of discovery order.
-fn entries_for(all_deps: &[DiscoveredDep]) -> Vec<DepGraphEntry> {
-    let mut entries: Vec<DepGraphEntry> = all_deps
-        .iter()
-        .map(|dep| DepGraphEntry {
-            name: dep.name.clone(),
-            via: dep.via_chain.clone(),
-            source: dep.source.to_string(),
-        })
-        .collect();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-    entries
+/// Project the discovered graph into its comparable form, ordered by name
+/// (see [`DepGraphSnapshot::new`]).
+fn snapshot_for(all_deps: &[DiscoveredDep]) -> DepGraphSnapshot {
+    DepGraphSnapshot::new(
+        all_deps
+            .iter()
+            .map(|dep| DepGraphEntry {
+                name: dep.name.clone(),
+                via: dep.via_chain.clone(),
+                source: dep.source.to_string(),
+            })
+            .collect(),
+    )
 }
 
 /// Compare the currently discovered graph against the recorded snapshot.
@@ -121,25 +90,12 @@ fn entries_for(all_deps: &[DiscoveredDep]) -> Vec<DepGraphEntry> {
 /// against — the same "fail toward rebuild" stance ADR 0098 takes for a
 /// missing provenance stamp.
 pub(super) fn check(project_root: &Utf8Path, all_deps: &[DiscoveredDep]) -> SnapshotStatus {
-    let path = snapshot_path(project_root);
-
-    let Ok(data) = fs::read_to_string(&path) else {
-        return SnapshotStatus::Stale("no dependency-graph snapshot".to_string());
+    let snapshot = match read_dep_graph_snapshot(snapshot_path(project_root).as_std_path()) {
+        Ok(snapshot) => snapshot,
+        Err(reason) => return SnapshotStatus::Stale(reason.to_string()),
     };
 
-    let snapshot: DepGraphSnapshot = match serde_json::from_str(&data) {
-        Ok(s) => s,
-        Err(_) => return SnapshotStatus::Stale("corrupt dependency-graph snapshot".to_string()),
-    };
-
-    if snapshot.schema != SNAPSHOT_SCHEMA {
-        return SnapshotStatus::Stale(format!(
-            "unrecognised dependency-graph schema {} (current {SNAPSHOT_SCHEMA})",
-            snapshot.schema
-        ));
-    }
-
-    let current = entries_for(all_deps);
+    let current = snapshot_for(all_deps).deps;
     if current == snapshot.deps {
         return SnapshotStatus::Fresh;
     }
@@ -186,10 +142,7 @@ fn describe_difference(recorded: &[DepGraphEntry], current: &[DepGraphEntry]) ->
 /// I/O or serialisation failure is logged but never fails the build (the next
 /// build simply sees a missing snapshot and re-resolves).
 pub(super) fn write(project_root: &Utf8Path, all_deps: &[DiscoveredDep]) {
-    let snapshot = DepGraphSnapshot {
-        schema: SNAPSHOT_SCHEMA,
-        deps: entries_for(all_deps),
-    };
+    let snapshot = snapshot_for(all_deps);
 
     let data = match serde_json::to_string_pretty(&snapshot) {
         Ok(d) => d,
