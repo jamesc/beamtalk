@@ -147,8 +147,9 @@ impl CoreErlangGenerator {
         let value_doc = match value {
             SegmentValue::Var(var) => leaf::var(var),
             // A bare string literal is its UTF-8 bytes (ADR 0143 § String
-            // values). A typed one is a parse error ("must not have a type
-            // or a size"); a `utf*` one was expanded per character.
+            // values). A typed one is rejected by the parser
+            // (`check_binary_literal_shapes`), and a `utf*` one was expanded
+            // per character, so a specifier here is a compiler bug.
             SegmentValue::Literal(Literal::String(s)) => {
                 let bare = seg.size.is_none()
                     && seg.segment_type.is_none()
@@ -156,10 +157,9 @@ impl CoreErlangGenerator {
                     && seg.endianness.is_none()
                     && seg.unit.is_none();
                 if !bare {
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: "a literal string in a binary construction must not have a type or a size".to_string(),
-                        span: Some(seg.span),
-                    });
+                    return Err(CodeGenError::Internal(
+                        "binary construction: typed string literal reached codegen".to_string(),
+                    ));
                 }
                 return Ok(if s.is_empty() {
                     Vec::new()
