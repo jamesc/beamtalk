@@ -4689,6 +4689,19 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // <<$A>> matches byte 65. With a utf type a string matches per
 // character instead: <<"hi"/utf16>> matches bytes #(0, 104, 0, 105).
 
+// Binary construction (ADR 0143): the same <<...>> in expression position
+// builds a binary, so a built value matches back with the same segments.
+payload := Binary fromBytes: #(104, 105)
+len := payload size
+frame := <<16:8, len:24, payload/binary>>
+frame toBytes
+// => #(16, 0, 0, 2, 104, 105)
+frame match: [
+  <<16:8, n:24, rest:n/binary>> -> rest toBytes;
+  _ -> #()
+]
+// => #(104, 105)
+
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
 value match: [
@@ -4739,6 +4752,29 @@ x match: [
 These segment rules are compile errors, with `erlc`'s wording: a negative literal size; a size or `unit:` on a `utf8`/`utf16`/`utf32` segment; a `unit:` without a size on an `integer` or `float` segment (a sizeless `binary` or `bits` segment may take one: `rest/binary-unit:16` matches a tail whose bit length is a multiple of 16); and a `unit:` that conflicts with the one the type implies. `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8, so `x:2/bits-unit:8` is "conflict in unit specification for bit field: '8' and '1'", while `bytes-unit:8` and `binary-unit:N` are accepted.
 
 An arm that can never match is a **warning**, as it is in `erlc`. Examples: a literal that does not fit its segment (`<<300>>` in the default 8 bits, or `<<-1:8>>` in an unsigned segment); an integer literal in a `binary`/`bits` segment; a float literal in a non-`float` segment; and a float size other than 16, 32 or 64 bits (size × unit). A non-ASCII character literal (U+0080 to U+00FF) in an 8-bit integer segment (the default size, or an explicit size × unit of 8 such as `$é:8`) also warns: `<<$é>>` matches the single byte 233 (its code point), not the UTF-8 bytes that `<<"é">>` matches, so write `"é"` or `$é/utf8` instead. To silence one of these warnings, use `@expect`. `--warnings-as-errors` turns them into errors.
+
+**Binary construction** (ADR 0143, BT-4346/4347/4348). `<<...>>` where an expression is expected builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<s:8/unit:2>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; an infix `<<` is still a binary send (`a << b`). Every pattern example above reads as construction, so build-then-match round-trips:
+
+```beamtalk
+v := 4660
+<<v:16/little>> toBytes                       // => #(52, 18)
+<<-2:16/signed>> toBytes                      // => #(255, 254)
+<<1.5:32/float>> toBytes                      // => #(63, 192, 0, 0)
+<<"é">> toBytes                               // => #(195, 169) (UTF-8 bytes)
+<<"hi"/utf16>> toBytes                        // => #(0, 104, 0, 105)
+name := "hé"
+<<name/binary>> toBytes                       // => #(104, 195, 169)
+<<(name size):8, name/binary>> toBytes        // => #(2, 104, 195, 169)
+<<1:3>> class                                 // => Bitstring
+(<<7:3, 10:5>> match: [<<f:3, w:5>> -> {f, w}; _ -> nil])   // => {7, 10}
+```
+
+- **Segment values.** A segment value is a variable, a literal (integer, optionally negative; float; character; string), or a **parenthesised expression** for anything else: `<<(payload size):16>>`, `<<(a + b):4>>`. A field access or send must be parenthesised too: `<<(self.len):8>>`, since `<<self.len:8>>` is a parse error with a "parenthesize" hint (`name:` lexes as a keyword, so `<<x size:8>>` would read as the send `x size: 8`). Sizes follow the pattern rule: an integer literal, a variable, or a parenthesised expression.
+- **Evaluation order.** Segment values and sizes are evaluated left to right, each value before its own size, before the binary is built. An assignment or a send with side effects in one segment is seen by the segments after it: with `t := 0`, `<<t:8, (t := t + 1):8, t:8>>` builds `#(0, 1, 1)`. This holds in actor methods and loops too (`<<(self next):8, (self next):8>>`).
+- **String values.** A string literal with no specifiers is its UTF-8 bytes, as in patterns (`<<"é">>` is `#(195, 169)`; in Erlang it would be the single byte 233); with `utf8`/`utf16`/`utf32` it is encoded one character at a time. A `String` held in a variable contributes its UTF-8 bytes in a `binary`/`bytes`/`bits` segment. A type or size on a string *literal* (`<<"hi"/binary>>`) is a **compile error**, "a literal string in a binary construction must not have a type or a size", because it can never build (`erlc` only warns and raises `badarg` at run time). Write `<<"hi">>`, or bind the string to a variable first.
+- **Literal checks.** The same checks as patterns, worded for construction. A literal that does not fit its segment warns and is truncated to its low bits, exactly as a variable holding that value would be (`<<(-1):4>>` warns "...is truncated to 15"). A float literal in a non-float segment, an integer literal in a `binary` segment, and a float size other than 16, 32 or 64 bits warn ("binary construction will fail"). The error rows (negative literal size, size or unit on `utf*`, `unit:` without a size on `integer`/`float`, conflicting `unit:`) are errors in both directions.
+- **Result type.** Construction always builds bytes, never text: the result is a `Binary` when the total bit size is a multiple of 8 and a [`Bitstring`](#bitstring--unaligned-bits) otherwise (`<<1:3>>`), never a `String` (use `asString` to decode). Statically the type checker answers `Binary` when every segment's size is known and the sum is a multiple of 8, `Bitstring` when the known sum is not, and `Bitstring | Binary` when a variable size or a `bits` value leaves alignment unknown. Narrow a union with a `:: Binary` arm: `bin match: [b :: Binary -> b toBytes; _ -> nil]`.
+- **Run-time failures.** A value of the wrong kind for its segment (a non-integer in an `integer` segment, a non-binary in a `binary` segment), a negative or non-integer variable size, or a `binary` size larger than the value raises the BEAM's `badarg`, which surfaces as an `argument_error` `#beamtalk_error{}`.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
@@ -7510,6 +7546,7 @@ dispatch follows the class.
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
 bin := Binary fromIolist: #("hello", " ", "world")
+bin := <<104, 101, 108, 108, 111>>   // bit syntax, see Binary construction (ADR 0143)
 
 // Byte access (1-based, Collection protocol) — elements are byte Integers
 bin := Binary fromBytes: #(104, 101, 108)

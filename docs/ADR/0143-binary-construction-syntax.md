@@ -1,11 +1,20 @@
 # ADR 0143: Binary Construction Syntax
 
 ## Status
-Accepted (2026-11-01). Amended 2026-11-03 (BT-4380) to match the
+Implemented (2026-11-03); accepted 2026-11-01. Epic BT-4138.
+Amended 2026-11-03 (BT-4380) to match the
 match-side semantics that shipped in BT-4143 (#4729) and BT-4376 (#4759),
 and to settle the design questions the first draft left open (§ Segment
 values, § Literal checks, § String values, § Result class, § Runtime
 failures).
+
+> **Implemented note (2026-11-03).** Shipped as described, except: the
+> run-time error does not yet name the failing segment (§ Runtime failures:
+> a construction `badarg` still surfaces as a generic `argument_error`;
+> tracked in BT-4406), and the `String` unwrap is not yet skipped for values
+> statically known to be `Binary` (§ String values; BT-4407). A
+> parenthesised string literal (`<<("hi")/binary>>`) is still a string
+> literal, so it gets the same compile error as `<<"hi"/binary>>`.
 
 ## Context
 
@@ -347,7 +356,7 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
 
 **Epic:** BT-4138
 **Issues:** BT-4346 (Phase 1: AST + parser + unparse) → BT-4347 (Phase 2: codegen, blocked by BT-4346) → BT-4348 (Phase 3: tests + e2e + docs, blocked by BT-4347)
-**Status:** Planned
+**Status:** Implemented — BT-4346 (#4782), BT-4347 (#4787), BT-4348; follow-ups BT-4406, BT-4407
 **Note:** BT-4142 (design + build monolith) retired as superseded by this split; BT-4143 (match-side parity) landed in #4729 and BT-4376 (`erlc` unit/float alignment) in #4759; BT-4380 amended this ADR to match them.
 
 ## References
