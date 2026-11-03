@@ -248,6 +248,19 @@ fn len_as_isize(len: usize) -> isize {
 }
 
 impl Document<'_> {
+    /// The literal text of a text leaf (`Str` or `Owned`), or `None` for any
+    /// structural node. Lets callers inspect emitted text without naming the
+    /// `Owned` variant, which only typed-leaf helpers may construct
+    /// (ADR 0089, enforced by `tests/owned_leaf_sites.rs`).
+    #[must_use]
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Document::Str(s) => Some(s),
+            Document::Owned(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
     /// Renders the document to a string using the default line width.
     ///
     /// Uses the Wadler-Lindig algorithm: `Group` nodes are rendered flat when
@@ -455,6 +468,14 @@ mod tests {
     fn owned_document() {
         let doc = Document::Owned("world".to_string());
         assert_eq!(doc.to_pretty_string(), "world");
+    }
+
+    #[test]
+    fn as_text_reads_text_leaves_only() {
+        assert_eq!(Document::Str("a").as_text(), Some("a"));
+        assert_eq!(Document::Owned("b".to_string()).as_text(), Some("b"));
+        assert_eq!(Document::Nil.as_text(), None);
+        assert_eq!(docvec!["x", "y"].as_text(), None);
     }
 
     #[test]

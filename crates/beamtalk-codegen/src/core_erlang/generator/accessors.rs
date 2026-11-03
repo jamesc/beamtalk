@@ -784,18 +784,13 @@ impl CoreErlangGenerator {
         let Document::Vec(parts) = doc else {
             return false;
         };
-        let text = |d: &Document<'static>| match d {
-            Document::Str(s) => Some((*s).to_string()),
-            Document::Owned(s) => Some(s.clone()),
-            _ => None,
-        };
-        let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
-        else {
+        let (Some(first), Some(last)) = (
+            parts.first().and_then(Document::as_text),
+            parts.last().and_then(Document::as_text),
+        ) else {
             return false;
         };
-        first == "( "
-            && last.ends_with("] )")
-            && parts.iter().any(|p| text(p).as_deref() == Some(" -| ["))
+        first == "( " && last.ends_with("] )") && parts.iter().any(|p| p.as_text() == Some(" -| ["))
     }
 
     /// [`Self::annotate_with_line`] against an explicit `source_path` — for a
