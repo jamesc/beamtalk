@@ -690,16 +690,18 @@ dynamic. The word after `reason:` is a stable token for counting sites
 receiver whose row of the shared routing fixture
 (`runtime/apps/beamtalk_runtime/test/fixtures/tagged_map_routing_conformance.json`)
 has a single route (`List`, `Dictionary`, `Integer`, …) is no longer a dynamic
-site (BT-4294); for the built-ins that stay dynamic the rest names the row's
-reason. The reason is the gate of the same decision the guarded direct call is
-emitted from (`typed_send_target` in `dispatch_codegen.rs`), so the
-report cannot disagree with the generated code.
+site (BT-4294), and neither is a `String` or `Pid` send of a selector outside
+the row's special selectors (BT-4390); for the built-ins and special selectors
+that stay dynamic the rest names the row's reason. The reason is the gate of
+the same decision the guarded direct call is emitted from (`typed_send_target`
+in `dispatch_codegen.rs`), so the report cannot disagree with the generated
+code.
 
 Examples:
 
 ```text
 Send 'foo:' at line 23: dynamic dispatch (receiver: Dynamic (unannotated parameter) [dynamic]; reason: untyped)
-Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 8 other selectors are answered outside bt@stdlib@string)
+Send 'whenResolved:' at line 12: dynamic dispatch (receiver: Pid [Object, declared]; reason: builtin — Pid: the dynamic path answers 'whenResolved:' outside bt@stdlib@pid)
 Send 'start' at line 40: dynamic dispatch (receiver: AppSupervisor [Object, declared]; reason: supervisor — AppSupervisor instances are Supervisor handles (beamtalk_supervisor tuples))
 ```
 

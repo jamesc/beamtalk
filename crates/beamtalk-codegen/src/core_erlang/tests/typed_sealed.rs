@@ -409,6 +409,14 @@ fn builtin_typed_params_send_direct_to_the_fixture_module() {
             "bt@stdlib@reference",
         ),
         ("Port", "call 'erlang':'is_port'(", "bt@stdlib@port"),
+        // BT-4390: `String` and `Pid` are routed for every selector outside
+        // their fixture `special_selectors` (`frobnicate` is one).
+        ("Pid", "call 'erlang':'is_pid'(", "bt@stdlib@pid"),
+        (
+            "String",
+            "<'beamtalk_string'> when 'true' -> call 'bt@stdlib@string'",
+            "bt@stdlib@string",
+        ),
         ("Symbol", ", 'nil')", "bt@stdlib@symbol"),
         (
             "True",
@@ -502,14 +510,74 @@ fn builtin_typed_keyword_send_binds_args_once() {
 }
 
 #[test]
+fn builtin_special_selectors_stay_dynamic() {
+    // BT-4390: every selector the fixture lists as special for a row (the
+    // `Pid` future protocol through `beamtalk_future`, the `String`
+    // byte-level selectors `module_for_value/2` sends to `bt@stdlib@binary`)
+    // stays a dynamic send, read from the routing table rather than a copy.
+    let routed = crate::core_erlang::routing::rows()
+        .iter()
+        .filter(|row| crate::core_erlang::routing::is_non_tagged_map_class(row.class));
+    for row in routed {
+        for special in row.special_selectors {
+            let arity = special.matches(':').count();
+            let send = if arity == 0 {
+                (*special).to_string()
+            } else {
+                special
+                    .split_terminator(':')
+                    .map(|part| format!("{part}: 1"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let code = codegen(&format!(
+                "Object subclass: Caller\n  useIt: r :: {} -> Object =>\n    r {send}\n",
+                row.class
+            ));
+            let module = row.target_module.expect("special rows have a module");
+            assert!(
+                !code.contains(&format!("call '{module}':'dispatch'('{special}'")),
+                "{}>>{special} must stay dynamic. Got:\n{code}",
+                row.class
+            );
+            // Unary `await`/`awaitForever` are claimed earlier, by the await
+            // intrinsics, which call `beamtalk_future` directly.
+            assert!(
+                code.contains("beamtalk_message_dispatch':'send'(")
+                    || code.contains("call 'beamtalk_future':"),
+                "{}>>{special} should be a dynamic send. Got:\n{code}",
+                row.class
+            );
+        }
+    }
+}
+
+#[test]
+fn builtin_typed_keyword_send_to_pid_and_string_is_routed() {
+    // BT-4390: a non-special keyword selector on each special-selector row.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  usePid: p :: Pid -> Object =>\n",
+        "    p frobnicate: 1\n",
+        "  useString: s :: String -> Object =>\n",
+        "    s frobnicate: 1\n",
+    ));
+    for module in ["bt@stdlib@pid", "bt@stdlib@string"] {
+        assert!(
+            code.contains(&format!("call '{module}':'dispatch'('frobnicate:', [")),
+            "keyword send should direct-call {module}. Got:\n{code}"
+        );
+    }
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
 fn builtins_without_a_single_route_stay_dynamic() {
-    // From the routing fixture: `String` and `Pid` answer some selectors
-    // outside their module, `Binary`'s test also admits a `String` (routed
-    // to `bt@stdlib@string`), and `Boolean`, `Bitstring`, `Character`,
-    // `Class`, `Metaclass` and `ErlangModule` carry a `dynamic_only` reason.
+    // From the routing fixture: `Binary`'s test also admits a `String`
+    // (routed to `bt@stdlib@string`), and `Boolean`, `Bitstring`,
+    // `Character`, `Class`, `Metaclass` and `ErlangModule` carry a
+    // `dynamic_only` reason.
     for ty in [
-        "String",
-        "Pid",
         "Binary",
         "Boolean",
         "Bitstring",
