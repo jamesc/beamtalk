@@ -690,3 +690,54 @@ format_stacktrace_skips_unreadable_to_next_frame_test() ->
         {'bt@user@A', gone, 0, [{file, "no/such/file.bt"}, {line, 2}]}
     ]),
     ?assertEqual(nomatch, binary:match(Missing, <<" | ">>)).
+
+%%% ============================================================================
+%%% BT-4388: prefer the user frame; last-row edge cases in the snippet reader
+%%% ============================================================================
+
+format_stacktrace_prefers_user_frame_over_stdlib_frame_test() ->
+    with_snippet_file(<<"s1\ns2 stdlib internals\ns3\n">>, fun(StdPath) ->
+        with_snippet_file(<<"u1\nu2 := d at: #missing\nu3\n">>, fun(UserPath) ->
+            Frames = [
+                {'bt@stdlib@dictionary', 'at:', 2, [{file, binary_to_list(StdPath)}, {line, 2}]},
+                {'bt@user@A', testFoo, 0, [{file, binary_to_list(UserPath)}, {line, 2}]}
+            ],
+            Text = beamtalk_test_case:format_stacktrace(Frames),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | u2 := d at: #missing">>)),
+            ?assertEqual(nomatch, binary:match(Text, <<"stdlib internals">>)),
+            %% Snippet sits under the user frame's `at` line, not the stdlib one.
+            [Std, User] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
+            ?assertEqual(nomatch, binary:match(Std, <<" | ">>)),
+            ?assertNotEqual(nomatch, binary:match(User, <<" | u2">>)),
+            ?assertNot(has_raw_mfa(Text)),
+            ?assertEqual(
+                length(beamtalk_test_case:stack_frames(Frames)),
+                length(binary:matches(Text, <<"\n  at ">>))
+            ),
+            %% Fallback: the stdlib frame is used when the user frame is unreadable.
+            Fallback = beamtalk_test_case:format_stacktrace([
+                {'bt@stdlib@dictionary', 'at:', 2, [{file, binary_to_list(StdPath)}, {line, 2}]},
+                {'bt@user@A', testFoo, 0, [{file, "no/such/file.bt"}, {line, 2}]}
+            ]),
+            ?assertNotEqual(nomatch, binary:match(Fallback, <<"> 2 | s2 stdlib internals">>))
+        end)
+    end).
+
+source_snippet_drops_cut_off_row_when_read_truncated_test() ->
+    %% 7 + 2*200000 bytes: the 256 KiB cap lands inside a two-byte character.
+    Tail = binary:copy(<<"é"/utf8>>, 200000),
+    with_snippet_file(<<"first\nx", Tail/binary>>, fun(Path) ->
+        %% The partial last row is dropped, not rendered as a split character.
+        ?assertEqual(<<"\n    > 1 | first">>, beamtalk_test_case:source_snippet(Path, 1)),
+        %% ...and is never shown as a (cut-off) failing line.
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 2))
+    end).
+
+source_snippet_none_one_past_end_of_newline_terminated_file_test() ->
+    with_snippet_file(<<"a\nb\nc\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 4)),
+        %% The last real line shows no empty trailing `>`/context row.
+        ?assertEqual(
+            <<"\n      2 | b\n    > 3 | c">>, beamtalk_test_case:source_snippet(Path, 3)
+        )
+    end).
