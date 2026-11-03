@@ -308,7 +308,7 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
     ///     let Self = case State of
-    ///         <~{'__class_mod__' := 'module'}~> when not is_map_key('$beamtalk_class', State) ->
+    ///         <~{'__class_mod__' := 'module'}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State)) ->
     ///             {'beamtalk_object', 'Class', 'module', call 'erlang':'self'()}
     ///         <_> when 'true' -> call 'beamtalk_actor':'make_self'(State)
     ///     end in
