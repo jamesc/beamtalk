@@ -816,14 +816,6 @@ impl CoreErlangGenerator {
     /// class from another package loaded *after* this unit compiled is not
     /// visible — the runtime's collision warning is then the only signal.
     ///
-    /// Known limitation (BT-4293): a class declared in another file of the
-    /// same build reaches here as a cross-file stub (`add_external_superclasses`)
-    /// that records only its name and superclass, so its `is_abstract` reads
-    /// `false`. A typed send to a cross-file abstract class therefore gets a
-    /// guard that never hits — the dynamic fallback still answers, so this
-    /// costs one map lookup, never correctness. The supervisor, exception and
-    /// actor gates walk the superclass chain, which stubs carry.
-    ///
     /// Known limitation (review A3, BT-4149; shared with `class sealed` direct calls):
     /// the target module is pinned at compile time, so if it is removed
     /// afterwards (`removeFromSystem`) a tag-matching send raises raw `undef`

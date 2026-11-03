@@ -293,6 +293,7 @@ mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
 mod control_flow;
+mod cross_file_abstract;
 mod dispatch;
 mod dynamic_site_report;
 mod evaluated_block_arg_local_producer;

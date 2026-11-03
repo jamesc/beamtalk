@@ -554,6 +554,11 @@ impl ClassHierarchy {
                         auto_ctors: None,
                         superclass: Some(EcoString::from(superclass_name.as_str())),
                         is_sealed: false,
+                        // Unknown for a stub. A class whose declaration is in
+                        // scope never becomes one: drivers hand its full
+                        // `ClassInfo` (with `is_abstract`) in first — Pass 1
+                        // infos in a build, BEAM metadata in the REPL — and
+                        // this backfill fills only vacant names (BT-4391).
                         is_abstract: false,
                         is_typed: false,
                         is_internal: false,
