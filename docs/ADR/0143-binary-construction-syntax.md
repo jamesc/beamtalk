@@ -50,10 +50,12 @@ from values in one place.
 ### Constraints
 
 - `<` is reserved as a binary message (parenthesis generics were chosen over
-  `Result<T, E>` for exactly this reason). `<<` already lexes as a binary
-  selector for sends (`a << b`) and as the pattern delimiter in match arms,
-  so any `<<...>>` expression form must disambiguate by position: leading
-  `<<` where an operand is expected opens construction; infix `<<` stays a send.
+  `Result<T, E>` for exactly this reason). `<<` lexes as its own token
+  (`LtLt`), the pattern delimiter in match arms; it is not a binary selector
+  (it has no binding power and cannot be declared as a method). So a
+  `<<...>>` expression form is decided by position: leading `<<` where an
+  operand is expected opens construction, and infix `<<` (`a << b`) is a
+  targeted parse error ("'<<' is not a binary operator"), never a construction.
 - The match and construction grammars should not drift into two dialects:
   one segment vocabulary to learn, one Core shape to lower.
 - Construction must compose with sizes computed from values
@@ -268,8 +270,8 @@ instead of the generic "invalid argument".
 - **Operator**: construction allocates one flat binary, as `<<...>>` does in
   Erlang; no iolist laziness.
 - **Tooling**: one segment vocabulary shared with patterns; unparse must
-  round-trip both. The leading-`<<` vs infix-`<<` disambiguation is a
-  parser-position rule, documented in Implementation.
+  round-trip both. Leading `<<` opening construction while infix `<<` is a
+  parse error is a parser-position rule, documented in Implementation.
 
 ## Steelman Analysis
 
@@ -319,8 +321,8 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
 - Core shapes already verified; lowering reuses the existing `#{...}#` path.
 
 ### Negative
-- Parser gains a position-dependent `<<` rule (leading vs infix); needs
-  precise diagnostics when a send was meant.
+- Parser gains a position-dependent `<<` rule: leading `<<` opens
+  construction, infix `<<` is a targeted error rather than a send.
 - New `Expression` variant plus type-checker/codegen/unparse threading (L).
 
 ### Neutral
@@ -336,10 +338,10 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
    blocks (class-process rule, ADR 0142): segments contain value expressions,
    not blocks into class methods.
 2. Parser: leading-`<<` in operand position parses construction; infix `<<`
-   stays a binary send. Same specifier parser and the same
-   `check_binary_literal_shapes` as patterns (§ Literal checks), with the
-   "can never match" wording reworded for construction ("will be
-   truncated", "will fail").
+   is a targeted parse error (`<<` was never a binary selector). Same
+   specifier parser and the same `check_binary_literal_shapes` as patterns
+   (§ Literal checks), with the "can never match" wording reworded for
+   construction ("will be truncated", "will fail").
 3. Codegen: emit `#{...}#` per the verified shapes; literal floats fold as
    `erlc` does; bare string literals emit their UTF-8 bytes; `String`
    values in byte segments are unwrapped (§ String values). Type checker:
