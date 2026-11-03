@@ -1508,6 +1508,20 @@ fn threading_constructs_note() -> String {
     )
 }
 
+/// The conditional selectors whose plain arm is a frame (BT-4367), each proven
+/// by the runtime differential in `stdlib/test/bt4367arm_local_grid_test.bt`.
+/// `and:`/`or:` are not in it (not exercised), and `ifFalse:ifTrue:` is not a
+/// Boolean selector.
+const PLAIN_ARM_SELECTORS: &[&str] = &[
+    "ifTrue:ifFalse:",
+    "ifTrue:",
+    "ifFalse:",
+    "ifNil:ifNotNil:",
+    "ifNotNil:ifNil:",
+    "ifNil:",
+    "ifNotNil:",
+];
+
 /// The walk behind [`check_local_threading`] for one method body: tracks
 /// scope (so a write can be told apart from a block-local definition) and the
 /// block nesting depth (a construct inside a block is in a nested frame).
@@ -2118,18 +2132,28 @@ impl<'d> Walker<'d> {
     /// Whether `expr` is a conditional with block-literal arms that is not a
     /// local-threading producer here, so its arms are *plain* `BranchArm`
     /// frames in which a loop or fold is a producer (`generate_plain_arm`,
-    /// BT-3911, BT-3949). Actor and value-type methods only (BT-4367): a loop
-    /// that writes an arm-local, assigned in such an arm, answers right there
-    /// (`stdlib/test/bt4367arm_local_test.bt`). A class method's plain arm
-    /// does not lower it (`Tuple does not understand 'plusFromNumber:'`, wrong
-    /// sums), so it keeps the position error, and the REPL keeps its own arm
-    /// lowering.
+    /// BT-3911, BT-3949). Restricted to what a runtime differential proves
+    /// (`stdlib/test/bt4367arm_local_grid_test.bt`: the arm against the same
+    /// body at the method root, over every selector in
+    /// [`PLAIN_ARM_SELECTORS`] x five positions x five body shapes x actor and
+    /// value-type methods, all equal):
+    ///
+    /// - actor and value-type methods only: a class method's plain arm does
+    ///   not lower the loop (`Tuple does not understand 'plusFromNumber:'`);
+    /// - a conditional at the method root only (`depth == 0`);
+    /// - the [`LocalThreadingFamily::Conditional`] family only: a `Dictionary`
+    ///   lookup handler (`at:ifAbsent:`) is a real closure, since only a
+    ///   producer lookup is inlined, and crashes the same way in an actor;
+    /// - the selectors in [`PLAIN_ARM_SELECTORS`]: `and:`/`or:` are not proven.
+    ///
+    /// The REPL keeps its own arm lowering.
     fn is_plain_arm_conditional(&self, expr: &Expression) -> bool {
-        // At the method root only: a conditional nested in a loop, fold or arm
-        // body is not covered by the runtime differential
-        // (`bt4367arm_local_diff_test.bt`), so it keeps the position error.
         self.depth == 0
             && matches!(self.context, Actor | ValueType)
+            && local_threading_construct(expr).is_some_and(|c| {
+                c.family == LocalThreadingFamily::Conditional
+                    && PLAIN_ARM_SELECTORS.contains(&c.selector.as_str())
+            })
             && conditional_arm_blocks(expr).is_some()
     }
 

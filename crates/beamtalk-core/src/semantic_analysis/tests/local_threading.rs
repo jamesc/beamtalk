@@ -1438,6 +1438,54 @@ fn arm_local_producer_nested_in_a_plain_arm_construct_is_still_rejected() {
     }
 }
 
+/// BT-4367 review: only the `Conditional` family with a proven selector has
+/// plain arms. A `Dictionary` lookup handler (`at:ifAbsent:` and the
+/// `ifPresent:` forms) is a real closure in codegen, since only a producer
+/// lookup is inlined, and a loop in it answered a crash in an actor method
+/// (`Tuple does not understand 'plusFromNumber:'`); `and:`/`or:` are not
+/// exercised by the runtime grid. Both keep the position error.
+#[test]
+fn arm_local_producer_in_a_lookup_handler_or_and_or_is_still_rejected() {
+    for body in [
+        "d := Dictionary new\nd at: #b ifAbsent: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "d := Dictionary new\nd at: #b ifPresent: [:v | 0] ifAbsent: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "true and: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s > 0]",
+        "false or: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s > 0]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
+/// Every proven selector accepts the assigned loop in its taken arm, in actor
+/// and value-type methods (the runtime grid runs each on a BEAM).
+#[test]
+fn arm_local_producer_is_accepted_for_every_proven_conditional_selector() {
+    let arm = "m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s";
+    for conditional in [
+        format!("true ifTrue: [\n  {arm}] ifFalse: [0]"),
+        format!("true ifTrue: [\n  {arm}]"),
+        format!("false ifFalse: [\n  {arm}]"),
+        format!("nil ifNil: [\n  {arm}] ifNotNil: [:x | x]"),
+        format!("1 ifNotNil: [:x | {arm}] ifNil: [0]"),
+        format!("nil ifNil: [\n  {arm}]"),
+        format!("1 ifNotNil: [:x | {arm}]"),
+    ] {
+        for (kind, src) in [
+            ("actor", in_actor(&conditional)),
+            ("value", in_value(&conditional)),
+        ] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{kind}: {conditional}: {diags:?}");
+        }
+    }
+}
+
 /// A loop at an operand or array-literal site of a plain arm keeps the error:
 /// an actor `ifTrue:ifFalse:` arm lowers it to Core Erlang with an unbound
 /// arm-local.
