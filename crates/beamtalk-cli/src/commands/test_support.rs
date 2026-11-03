@@ -198,6 +198,73 @@ impl Drop for WorkspaceFixture {
     }
 }
 
+/// Send `value` as one JSON text frame, ignoring a closed peer.
+pub(crate) fn send_json(ws: &mut WebSocket<std::net::TcpStream>, value: &serde_json::Value) {
+    let _ = ws.send(Message::Text(value.to_string().into()));
+}
+
+/// Server side of a fake workspace node's ADR 0020 handshake (BT-4382):
+/// `auth-required` -> read the client's `auth` -> `auth_ok` ->
+/// `session-started` (session `sess-test`).
+///
+/// Returns the `versions` map a version-matching node reports to the
+/// client's connect-time `describe` (BT-4327): the versions the client
+/// claimed in its `auth` frame, echoed back. `None` when the client's `auth`
+/// frame never arrives.
+pub(crate) fn fake_node_handshake(
+    ws: &mut WebSocket<std::net::TcpStream>,
+) -> Option<serde_json::Value> {
+    send_json(ws, &serde_json::json!({"op": "auth-required"}));
+    let Ok(Message::Text(text)) = ws.read() else {
+        return None;
+    };
+    let auth = serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default();
+    let claimed = |key: &str| auth.get(key).cloned().unwrap_or_default();
+    let versions = serde_json::json!({
+        "beamtalk": claimed("beamtalk_version"),
+        "protocol": claimed("protocol_version"),
+    });
+    send_json(ws, &serde_json::json!({"type": "auth_ok"}));
+    send_json(
+        ws,
+        &serde_json::json!({"op": "session-started", "session": "sess-test"}),
+    );
+    Some(versions)
+}
+
+/// The `versions` map a node built from an older toolchain reports.
+pub(crate) fn stale_versions() -> serde_json::Value {
+    serde_json::json!({"beamtalk": "0.0.0-stale", "protocol": "0.0"})
+}
+
+/// When `req` is a `describe`, answer it with `versions` (or with no
+/// `versions` map at all, like a node predating the version handshake, when
+/// `None`) and return `true`; otherwise send nothing and return `false`.
+pub(crate) fn answer_describe(
+    ws: &mut WebSocket<std::net::TcpStream>,
+    req: &serde_json::Value,
+    versions: Option<&serde_json::Value>,
+) -> bool {
+    if req.get("op").and_then(serde_json::Value::as_str) != Some("describe") {
+        return false;
+    }
+    let mut reply = serde_json::json!({"id": req.get("id"), "status": ["done"], "ops": {}});
+    if let Some(versions) = versions {
+        reply["versions"] = versions.clone();
+    }
+    send_json(ws, &reply);
+    true
+}
+
+/// Read the next text frame as JSON; `None` once the peer is gone. A frame
+/// that is not JSON reads as `Value::Null`.
+pub(crate) fn read_json(ws: &mut WebSocket<std::net::TcpStream>) -> Option<serde_json::Value> {
+    match ws.read() {
+        Ok(Message::Text(text)) => Some(serde_json::from_str(&text).unwrap_or_default()),
+        _ => None,
+    }
+}
+
 /// Spawn a minimal fake workspace backend on an OS-assigned port.
 ///
 /// Accepts connections in a loop (one background thread per connection,
@@ -219,55 +286,15 @@ pub(crate) fn spawn_auth_ok_server(
                 let Ok(mut ws) = tungstenite::accept(stream) else {
                     return;
                 };
-                let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
-                    let _ = ws.send(Message::Text(v.to_string().into()));
+                // This fake models a version-matching node (BT-4327).
+                let Some(versions) = fake_node_handshake(&mut ws) else {
+                    return;
                 };
-                send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                // Capture the client's claimed versions: this fake models a
-                // version-matching node (BT-4327), so a connect-time
-                // `describe` is answered by echoing them back.
-                let mut beamtalk_version = serde_json::Value::Null;
-                let mut protocol_version = serde_json::Value::Null;
-                match ws.read() {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                            beamtalk_version = auth
-                                .get("beamtalk_version")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
-                            protocol_version = auth
-                                .get("protocol_version")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
-                        }
-                    }
-                    _ => return,
-                }
-                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                send(
-                    &mut ws,
-                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                );
-                while let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                        // Answer every connect-time `describe` version check
-                        // in the fake itself — the per-test `handler` only
-                        // models the operation under test.
-                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                            send(
-                                &mut ws,
-                                serde_json::json!({
-                                    "id": req.get("id"),
-                                    "status": ["done"],
-                                    "ops": {},
-                                    "versions": {
-                                        "beamtalk": beamtalk_version,
-                                        "protocol": protocol_version,
-                                    },
-                                }),
-                            );
-                            continue;
-                        }
+                while let Some(req) = read_json(&mut ws) {
+                    // Answer every connect-time `describe` version check in
+                    // the fake itself — the per-test `handler` only models
+                    // the operation under test.
+                    if !answer_describe(&mut ws, &req, Some(&versions)) {
                         handler(req, &mut ws);
                     }
                 }

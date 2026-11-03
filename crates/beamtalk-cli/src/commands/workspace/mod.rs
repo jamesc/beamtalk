@@ -126,7 +126,7 @@ mod tests {
     use super::storage::{
         NodeInfo, WorkspaceMetadata, generate_cookie, read_port_file, read_workspace_cookie,
         save_node_info, save_workspace_cookie, save_workspace_metadata, validate_workspace_name,
-        workspace_dir, workspace_id_for, workspaces_base_dir,
+        workspace_dir, workspace_id_for, workspace_lockfile_path,
     };
     use super::*;
     use serial_test::serial;
@@ -158,7 +158,7 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(self.dir());
             // Clean up lockfile created by acquire_workspace_lock
-            if let Ok(lock) = storage::workspace_lockfile_path(&self.id) {
+            if let Ok(lock) = workspace_lockfile_path(&self.id) {
                 let _ = fs::remove_file(lock);
             }
         }

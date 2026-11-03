@@ -623,7 +623,8 @@ mod tests {
 
         use super::super::ProtocolClient;
         use crate::commands::test_support::{
-            closed_port, spawn_auth_error_server, spawn_auth_ok_server,
+            answer_describe, closed_port, fake_node_handshake, read_json, send_json,
+            spawn_auth_error_server, spawn_auth_ok_server, stale_versions,
         };
 
         #[test]
@@ -672,50 +673,12 @@ mod tests {
             let server = std::thread::spawn(move || {
                 let (stream, _) = listener.accept().expect("accept");
                 let mut ws = tungstenite::accept(stream).expect("accept ws");
-                let _ = ws.send(Message::Text(
-                    serde_json::json!({"op": "auth-required"})
-                        .to_string()
-                        .into(),
-                ));
-                // Capture the client's claimed versions from the `auth`
-                // frame (BT-4327) to echo back for the connect-time
-                // `describe` version check below.
-                let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
-                if let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                        versions["beamtalk"] = auth
-                            .get("beamtalk_version")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null);
-                        versions["protocol"] = auth
-                            .get("protocol_version")
-                            .cloned()
-                            .unwrap_or(serde_json::Value::Null);
-                    }
-                }
-                let _ = ws.send(Message::Text(
-                    serde_json::json!({"type": "auth_ok"}).to_string().into(),
-                ));
-                let _ = ws.send(Message::Text(
-                    serde_json::json!({"op": "session-started", "session": "sess-test"})
-                        .to_string()
-                        .into(),
-                ));
                 // Answer the connect-time `describe` version check (BT-4327)
                 // so `connect` succeeds; the test then points the client at
                 // a closed port for the actual reconnect assertion.
-                if let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                        let _ = ws.send(Message::Text(
-                            serde_json::json!({
-                                "id": req.get("id"),
-                                "status": ["done"],
-                                "ops": {},
-                                "versions": versions,
-                            })
-                            .to_string()
-                            .into(),
-                        ));
+                if let Some(versions) = fake_node_handshake(&mut ws) {
+                    if let Some(req) = read_json(&mut ws) {
+                        answer_describe(&mut ws, &req, Some(&versions));
                     }
                 }
             });
@@ -746,36 +709,11 @@ mod tests {
             std::thread::spawn(move || {
                 let (stream, _) = listener.accept().expect("accept");
                 let mut ws = tungstenite::accept(stream).expect("accept ws");
-                let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
-                            v: serde_json::Value| {
-                    let _ = ws.send(Message::Text(v.to_string().into()));
-                };
-                send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                if ws.read().is_err() {
+                if fake_node_handshake(&mut ws).is_none() {
                     return;
                 }
-                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                send(
-                    &mut ws,
-                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                );
-                while let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                            send(
-                                &mut ws,
-                                serde_json::json!({
-                                    "id": req.get("id"),
-                                    "status": ["done"],
-                                    "ops": {},
-                                    "versions": {
-                                        "beamtalk": "0.0.0-stale",
-                                        "protocol": "0.0",
-                                    },
-                                }),
-                            );
-                        }
-                    }
+                while let Some(req) = read_json(&mut ws) {
+                    answer_describe(&mut ws, &req, Some(&stale_versions()));
                 }
             });
             let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
@@ -817,75 +755,26 @@ mod tests {
                         let Ok(mut ws) = tungstenite::accept(stream) else {
                             return;
                         };
-                        let _ = ws.send(Message::Text(
-                            serde_json::json!({"op": "auth-required"})
-                                .to_string()
-                                .into(),
-                        ));
-                        // Capture the client's claimed versions from the
-                        // `auth` frame (BT-4327) to echo back for the
-                        // connect-time `describe` version check.
-                        let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
-                        if let Ok(Message::Text(text)) = ws.read() {
-                            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                                versions["beamtalk"] = auth
-                                    .get("beamtalk_version")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                versions["protocol"] = auth
-                                    .get("protocol_version")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                            }
-                        } else {
+                        let Some(versions) = fake_node_handshake(&mut ws) else {
                             return;
-                        }
-                        let answer_describe =
-                            |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
-                             req: &serde_json::Value| {
-                                let _ = ws.send(Message::Text(
-                                    serde_json::json!({
-                                        "id": req.get("id"),
-                                        "status": ["done"],
-                                        "ops": {},
-                                        "versions": versions,
-                                    })
-                                    .to_string()
-                                    .into(),
-                                ));
-                            };
-                        let _ = ws.send(Message::Text(
-                            serde_json::json!({"type": "auth_ok"}).to_string().into(),
-                        ));
-                        let _ = ws.send(Message::Text(
-                            serde_json::json!({"op": "session-started", "session": "sess-test"})
-                                .to_string()
-                                .into(),
-                        ));
+                        };
                         if i == 0 {
                             // Answer the connect-time `describe` version
                             // check, then read (and discard) the ping and
                             // close without ever replying to it — the
                             // client's `send_request` sees this as a
                             // transport failure and retries.
-                            if let Ok(Message::Text(text)) = ws.read() {
-                                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    answer_describe(&mut ws, &req);
-                                }
+                            if let Some(req) = read_json(&mut ws) {
+                                answer_describe(&mut ws, &req, Some(&versions));
                             }
                             let _ = ws.read();
                             let _ = ws.close(None);
                         } else {
-                            while let Ok(Message::Text(text)) = ws.read() {
-                                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                                    if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                                        answer_describe(&mut ws, &req);
-                                    } else if req.get("op").and_then(|v| v.as_str()) == Some("ping")
-                                    {
-                                        let _ = ws.send(Message::Text(
-                                            serde_json::json!({"pong": true}).to_string().into(),
-                                        ));
-                                    }
+                            while let Some(req) = read_json(&mut ws) {
+                                if !answer_describe(&mut ws, &req, Some(&versions))
+                                    && req.get("op").and_then(|v| v.as_str()) == Some("ping")
+                                {
+                                    send_json(&mut ws, &serde_json::json!({"pong": true}));
                                 }
                             }
                         }
@@ -915,54 +804,17 @@ mod tests {
                 for (i, stream) in listener.incoming().flatten().enumerate() {
                     std::thread::spawn(move || {
                         let mut ws = tungstenite::accept(stream).expect("accept ws");
-                        let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
-                                    v: serde_json::Value| {
-                            let _ = ws.send(Message::Text(v.to_string().into()));
-                        };
-                        send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                        let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
-                        if let Ok(Message::Text(text)) = ws.read() {
-                            if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                                versions["beamtalk"] = auth
-                                    .get("beamtalk_version")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                                versions["protocol"] = auth
-                                    .get("protocol_version")
-                                    .cloned()
-                                    .unwrap_or(serde_json::Value::Null);
-                            }
-                        } else {
+                        let Some(mut versions) = fake_node_handshake(&mut ws) else {
                             return;
-                        }
+                        };
                         // Second connection: the restarted node is stale.
                         if i == 1 {
-                            versions = serde_json::json!({
-                                "beamtalk": "0.0.0-stale",
-                                "protocol": "0.0",
-                            });
+                            versions = stale_versions();
                         }
-                        send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                        send(
-                            &mut ws,
-                            serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                        );
                         // Answer the connect-time `describe` (echo on the
                         // first connection, stale on the second).
-                        if let Ok(Message::Text(text)) = ws.read() {
-                            if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                                if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                                    send(
-                                        &mut ws,
-                                        serde_json::json!({
-                                            "id": req.get("id"),
-                                            "status": ["done"],
-                                            "ops": {},
-                                            "versions": versions,
-                                        }),
-                                    );
-                                }
-                            }
+                        if let Some(req) = read_json(&mut ws) {
+                            answer_describe(&mut ws, &req, Some(&versions));
                         }
                         if i == 0 {
                             // Drop the ping without replying: forces the
@@ -998,30 +850,11 @@ mod tests {
             std::thread::spawn(move || {
                 let (stream, _) = listener.accept().expect("accept");
                 let mut ws = tungstenite::accept(stream).expect("accept ws");
-                let send = |ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
-                            v: serde_json::Value| {
-                    let _ = ws.send(Message::Text(v.to_string().into()));
-                };
-                send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                let _ = ws.read();
-                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                send(
-                    &mut ws,
-                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                );
-                while let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                            send(
-                                &mut ws,
-                                serde_json::json!({
-                                    "id": req.get("id"),
-                                    "status": ["done"],
-                                    "ops": {},
-                                }),
-                            );
-                        }
-                    }
+                if fake_node_handshake(&mut ws).is_none() {
+                    return;
+                }
+                while let Some(req) = read_json(&mut ws) {
+                    answer_describe(&mut ws, &req, None);
                 }
             });
             let Err(err) = ProtocolClient::connect("127.0.0.1", port, "cookie", None) else {
