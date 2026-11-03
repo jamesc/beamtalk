@@ -27,6 +27,10 @@ use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 const ROWS: &[(&str, &str)] = &[
     ("operand", "x := (t := t + 1) + 1\n#[t, x]"),
     ("literal element", "#[t, (t := 7), t]"),
+    (
+        "binary segment",
+        "b := <<t:8, (t := t + 1):8, t:(t + 7)>>\n#[t, b]",
+    ),
     ("assignment value", "x := t := 7\n#[t, x]"),
     (
         "conditional receiver",
@@ -118,7 +122,10 @@ fn the_unthreaded_assignment_check_fails_every_repro_row_when_the_producer_is_of
 
 #[test]
 fn a_value_position_assignment_is_a_sibling_rebind() {
-    for (context, src) in sources("#[t, (t := 7), t]") {
+    for (context, src) in sources("#[t, (t := 7), t]")
+        .into_iter()
+        .chain(sources("<<t:8, (t := 7):8, t:8>>"))
+    {
         assert_eq!(verifier_report(&src, None), None, "{context}");
         match verifier_report(&src, Some(LocalRebindFault::SkipSiblingSnapshot)) {
             Some(report) if report.contains("LocalReadAfterSiblingRebind") => {}

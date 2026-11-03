@@ -16,7 +16,7 @@
 
 use proptest::prelude::*;
 
-use crate::ast::{Expression, Module};
+use crate::ast::{BinarySegment, Expression, Module};
 use crate::source_analysis::{lex_with_eof, parse};
 
 // ============================================================================
@@ -202,6 +202,10 @@ fn has_error_node(expr: &Expression) -> bool {
                 false
             }
         }),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .any(has_error_node),
         // Leaf nodes
         Expression::Literal(..)
         | Expression::Identifier(..)

@@ -192,6 +192,10 @@ impl CoreErlangGenerator {
             FieldWriteSite::ValueType => VersionPrefix::SelfVt,
             FieldWriteSite::Actor => VersionPrefix::State,
         };
+        if site == FieldWriteSite::Actor {
+            // BT-4369: a loop that brackets admits no field write (ADR 0137 §4b).
+            self.note_field_write(field_name, span);
+        }
         let val_var = self.fresh_temp_var("Val");
         // Capture the source version BEFORE generating the value expression —
         // the RHS may itself read the field being assigned (`self.x := self.x
@@ -1768,11 +1772,7 @@ impl CoreErlangGenerator {
         self.decline_pure_boolean_inline = prev;
         let new_warnings = self.codegen_warnings.split_off(warn_len);
         self.dedup_append_codegen_warnings(new_warnings);
-        Ok(Self::runtime_send_call(
-            leaf::var(cond_var.to_string()),
-            selector_atom,
-            closures?,
-        ))
+        Ok(self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?))
     }
 
     /// BT-4244: one block argument of [`Self::boolean_fallback_send`]: the
@@ -1998,6 +1998,17 @@ impl CoreErlangGenerator {
         tail: ProducerTail,
     ) -> Result<Option<ThreadedValue>> {
         let expr = expr.unwrap_parens();
+        // BT-4366: the construct's nested call nodes carry its line.
+        self.with_current_span(expr.span(), |this| {
+            this.inline_control_flow_producer_inner(expr, tail)
+        })
+    }
+
+    fn inline_control_flow_producer_inner(
+        &mut self,
+        expr: &Expression,
+        tail: ProducerTail,
+    ) -> Result<Option<ThreadedValue>> {
         let root_producer_locals = if self.is_producer_frame_for(self.current_frame(), expr) {
             self.conditional_producer_locals(expr)
         } else {
@@ -2246,6 +2257,9 @@ impl CoreErlangGenerator {
         span: Span,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<String> {
+        // BT-4369: a hybrid loop never brackets, but one nested in a bracketing
+        // loop would be a field write in its body (ADR 0137 §4b).
+        self.note_field_write(field, span);
         let val_var = self.fresh_temp_var("Val");
         let ahead_scope = self.thread_ahead(value, stmts, frame)?;
         // `thread_ahead` above already committed any nested field
@@ -3066,6 +3080,8 @@ impl CoreErlangGenerator {
                             let thread_scope = self.thread_ahead(value, &mut stmts, frame)?;
                             let rhs_doc = self.expression_doc(value)?;
                             self.finish_precompiled_scope(thread_scope)?;
+                            // BT-4369: a field write in an arm of a loop body.
+                            self.note_field_write(&field.name, span);
                             let tuple_var = self.fresh_temp_var("CfTuple");
                             let val_var = self.fresh_temp_var("CfVal");
                             let rhs_state = self.fresh_temp_var("CfState");
@@ -3126,6 +3142,8 @@ impl CoreErlangGenerator {
                 // name ⇒ §Dynamic-field-puts option 1 (Direct, not Put).
                 BodyExprKind::SelfFieldAtPut => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        // BT-4369: a dynamic-key field write records itself for the loop checkout.
+                        self.note_field_write("<dynamic>", span);
                         // BT-4310: the name and value are sequenced ahead of
                         // the put, so the `State` read below is the one after
                         // the value: a value's own change (a self-send, a
@@ -3183,6 +3201,8 @@ impl CoreErlangGenerator {
                 // than a written value.
                 BodyExprKind::SelfClearField => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        // BT-4369: a dynamic-key field write records itself for the loop checkout.
+                        self.note_field_write("<dynamic>", span);
                         let scope = self.thread_send_arguments(expr, frame, &mut stmts)?;
                         let name_var = self.fresh_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
@@ -3221,6 +3241,8 @@ impl CoreErlangGenerator {
                 // C8 — self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        // BT-4369: a dynamic-key field write records itself for the loop checkout.
+                        self.note_field_write("<dynamic>", span);
                         let name_var = self.fresh_temp_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
                         let tuple_var = self.fresh_temp_var("CfTuple");

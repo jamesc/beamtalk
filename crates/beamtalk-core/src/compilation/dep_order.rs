@@ -10,12 +10,17 @@
 //! of the dependencies *before* it in this order (BT-3678), so every path that
 //! exports a dependency's flattened `ClassInfo`s — the graph compile, the
 //! fresh-deps fast path and the offline MCP scan — must walk the graph in the
-//! same order to produce the same exports (BT-3684). It lives in the library
-//! crate so the offline scan, which cannot call into the binary-only
-//! `commands::deps`, shares it.
+//! same order to produce the same exports (BT-3684). It lives in
+//! `beamtalk-core` so the offline scan (which cannot call into the CLI's
+//! binary-only `commands::deps`) and the compiler port's project scope
+//! (which reads the resolved dependency set, BT-4378) share it.
+//!
+//! It also defines which of those earlier dependencies a dependency compiles
+//! against: only its own transitive closure ([`dependency_closure`]), never an
+//! unrelated sibling that happens to come before it in the order (BT-4375).
 
 use miette::Result;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Orders the packages of a dependency graph for compilation with Kahn's
 /// algorithm: leaves first, ties broken by name (largest first), so the order
@@ -100,6 +105,35 @@ pub fn topological_order(
     Ok(result)
 }
 
+/// The packages `name` depends on, directly or transitively — the only
+/// dependencies whose classes, protocols and type specs its compile may see
+/// (BT-4375).
+///
+/// A class name may repeat across unrelated packages, and the class hierarchy
+/// a dependency compiles against is first-wins, so seeding it with every
+/// dependency compiled earlier would let an unrelated sibling's same-named
+/// class shadow the one the dependency actually inherits from.
+///
+/// `dependencies` maps each package to the names of its direct dependencies,
+/// as for [`topological_order`]; an edge to a name that is not a key is
+/// followed no further. `name` itself is never part of the result, even
+/// through a cycle.
+pub fn dependency_closure(
+    dependencies: &BTreeMap<String, Vec<String>>,
+    name: &str,
+) -> BTreeSet<String> {
+    let mut closure = BTreeSet::new();
+    let mut pending: Vec<&str> = vec![name];
+    while let Some(current) = pending.pop() {
+        for dep in dependencies.get(current).into_iter().flatten() {
+            if dep != name && closure.insert(dep.clone()) {
+                pending.push(dep);
+            }
+        }
+    }
+    closure
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +187,29 @@ mod tests {
             err.contains("Circular dependency detected among: a, b"),
             "{err}"
         );
+    }
+
+    fn names(set: &BTreeSet<String>) -> Vec<&str> {
+        set.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn closure_holds_direct_and_transitive_dependencies_only() {
+        // `my_app -> {alpha, zeta}`, `zeta -> beta -> core`: `zeta` sees
+        // `beta` and `core`, never its unrelated sibling `alpha`.
+        let deps = graph(&[
+            ("alpha", &[]),
+            ("zeta", &["beta"]),
+            ("beta", &["core"]),
+            ("core", &[]),
+        ]);
+        assert_eq!(names(&dependency_closure(&deps, "zeta")), ["beta", "core"]);
+        assert!(dependency_closure(&deps, "alpha").is_empty());
+    }
+
+    #[test]
+    fn closure_excludes_the_package_itself_and_tolerates_unknown_edges() {
+        let deps = graph(&[("a", &["b", "missing"]), ("b", &["a"])]);
+        assert_eq!(names(&dependency_closure(&deps, "a")), ["b", "missing"]);
     }
 }

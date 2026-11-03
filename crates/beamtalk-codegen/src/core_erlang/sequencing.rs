@@ -23,7 +23,7 @@
 //! parent's ordinary AST-directed compile substitutes that value instead of
 //! compiling (and, for a self-send, dispatching) the child a second time.
 
-use super::threaded_ir::{ThreadedStmt, VerifyError};
+use super::threaded_ir::{CallSiteLine, ThreadedStmt, VerifyError};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -275,6 +275,47 @@ impl CoreErlangGenerator {
             Some(line_num) => self.annotate_with_line(call, line_num),
             None => call,
         }
+    }
+
+    /// BT-4366: runs `lower` with [`CoreErlangGenerator::current_send_span`]
+    /// set to `span`, restoring the enclosing span on every exit. For an
+    /// entry point reached without passing through `generate_expression`
+    /// (a statement-level or producer lowering of an expression).
+    pub(super) fn with_current_span<T>(
+        &mut self,
+        span: Span,
+        lower: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let outer = self.current_send_span.replace(span);
+        let result = lower(self);
+        self.current_send_span = outer;
+        result
+    }
+
+    /// BT-4366: [`Self::annotate_call_node_with_line`] for a lowering that has
+    /// no `Span` of its own in scope — annotates the `call`/`apply` node with
+    /// the line of the innermost send being lowered
+    /// ([`CoreErlangGenerator::current_send_span`]), and leaves it bare when
+    /// there is none (generated infrastructure outside any method).
+    pub(super) fn annotate_current_send_call(&self, call: Document<'static>) -> Document<'static> {
+        // Outside any expression (a primitive-bodied method), the method's own
+        // line is the best the frame can name.
+        match self.current_send_span.or(self.current_method_span) {
+            Some(span) => self.annotate_call_node_with_line(call, span),
+            None => call,
+        }
+    }
+
+    /// BT-4401: the [`CallSiteLine`] that [`Self::annotate_current_send_call`]
+    /// would annotate with, resolved now so a `ThreadedIr` node can carry it
+    /// to the emitter (which has no access to `current_send_span`). `None`
+    /// exactly where that method leaves the call bare.
+    pub(super) fn current_send_call_site_line(&self) -> Option<CallSiteLine> {
+        let span = self.current_send_span.or(self.current_method_span)?;
+        Some(CallSiteLine {
+            source_path: self.source_path.clone(),
+            line: self.span_to_line(span)?,
+        })
     }
 
     /// Removes every entry `scope` registered, once the parent compile
@@ -545,6 +586,10 @@ impl CoreErlangGenerator {
         }
         let prelude_doc = self.threaded_prelude_doc(prelude);
         let result_var = self.fresh_temp_var(result_prefix);
+        // BT-4366: with a prelude the call is no longer the send's outermost
+        // node — it sits in the `let` below, out of reach of the send's
+        // whole-document annotation — so it carries the send's line itself.
+        let call_doc = self.annotate_current_send_call(call_doc);
         docvec![
             prelude_doc,
             "let ",

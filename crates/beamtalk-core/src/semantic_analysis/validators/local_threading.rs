@@ -50,7 +50,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module};
+use crate::ast::{
+    BinarySegment, Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module,
+    WellKnownSelector,
+};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
@@ -323,7 +326,8 @@ pub(crate) enum Position {
     Argument,
     /// Part of a cascade.
     Cascade,
-    /// An element of a literal (array, list, map).
+    /// An element of a literal (array, list, map, tuple), or a segment value
+    /// or size of a binary construction (ADR 0143).
     LiteralElement,
     /// The subject of `match:`.
     MatchSubject,
@@ -788,6 +792,11 @@ impl StaleReturnScan<'_> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.expr(e);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
                 }
             }
             Expression::Identifier(_)
@@ -1323,6 +1332,14 @@ impl RaiseScan<'_> {
                 }
                 self.may_raise();
             }
+            // Construction raises `badarg` on a mistyped or mis-sized value
+            // (ADR 0143 § Runtime failures).
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
+                }
+                self.may_raise();
+            }
             Expression::Primitive { .. } => self.may_raise(),
             // A block literal here is a closure: creating it runs nothing.
             Expression::Block(_)
@@ -1508,6 +1525,20 @@ fn threading_constructs_note() -> String {
     )
 }
 
+/// The conditional selectors whose plain arm is a frame (BT-4367): the selectors
+/// the runtime grid `stdlib/test/bt4367arm_local_grid_test.bt` proves, which
+/// `plain_arm_selectors_are_all_in_the_runtime_grid` checks. `and:`/`or:` are
+/// not in it (not exercised).
+pub(crate) const PLAIN_ARM_SELECTORS: &[WellKnownSelector] = &[
+    WellKnownSelector::IfTrueIfFalse,
+    WellKnownSelector::IfTrue,
+    WellKnownSelector::IfFalse,
+    WellKnownSelector::IfNilIfNotNil,
+    WellKnownSelector::IfNotNilIfNil,
+    WellKnownSelector::IfNil,
+    WellKnownSelector::IfNotNil,
+];
+
 /// The walk behind [`check_local_threading`] for one method body: tracks
 /// scope (so a write can be told apart from a block-local definition) and the
 /// block nesting depth (a construct inside a block is in a nested frame).
@@ -1524,6 +1555,12 @@ struct FrameSites {
     /// Whether the frame is an arm of a conditional that is a local-threading
     /// producer (ADR 0131 Phase 3): a `BranchArm`, not a loop or fold body.
     arm: bool,
+    /// Whether the arm is a *plain* arm: an arm of a conditional that is not
+    /// a producer (it writes no outer local), a `BranchArm` frame that codegen
+    /// registers loop and fold producer sites in (`generate_plain_arm`,
+    /// BT-3949). Only a loop or fold is a producer there; a nested
+    /// conditional, `on:do:` or `match:` keeps its own lowering.
+    plain: bool,
 }
 
 /// What kind of threaded frame body a block operand is about to be walked as
@@ -1534,6 +1571,8 @@ struct FrameBody {
     fold: bool,
     /// An arm of a conditional producer (ADR 0131 Phase 3).
     arm: bool,
+    /// An arm of a conditional that is not a producer ([`FrameSites::plain`]).
+    plain: bool,
 }
 
 #[allow(clippy::struct_excessive_bools)] // independent one-shot walk flags, each documented
@@ -1774,6 +1813,7 @@ impl<'d> Walker<'d> {
         self.frame_sites.push(frame_body.map(|body| FrameSites {
             fold: body.fold,
             arm: body.arm,
+            plain: body.plain,
             ..FrameSites::default()
         }));
         self.block_in_frame(block, container);
@@ -1894,6 +1934,7 @@ impl<'d> Walker<'d> {
                 // protected body (the receiver block), handler and cleanup of an
                 // `on:do:`/`ensure:` producer.
                 let arm_frames = self.is_arm_frame_conditional(expr, position);
+                let plain_arm_frames = !arm_frames && self.is_plain_arm_conditional(expr);
                 self.pending_frame_body = match receiver.as_ref() {
                     // The receiver block of an `on:do:`/`ensure:` (the protected
                     // body) or of an evaluated literal block (`[...] value`, the
@@ -1907,6 +1948,7 @@ impl<'d> Walker<'d> {
                         Some(FrameBody {
                             fold: false,
                             arm: true,
+                            plain: false,
                         })
                     }
                     _ => None,
@@ -1920,11 +1962,21 @@ impl<'d> Walker<'d> {
                             Some(FrameBody {
                                 fold: is_fold_frame_body(expr, b),
                                 arm: false,
+                                plain: false,
                             })
                         }
                         Expression::Block(_) if arm_frames => Some(FrameBody {
                             fold: false,
                             arm: true,
+                            plain: false,
+                        }),
+                        // The arms of a conditional that is not a producer are
+                        // plain `BranchArm` frames in codegen (BT-3911), where a
+                        // loop or fold is a producer (BT-3949).
+                        Expression::Block(_) if plain_arm_frames => Some(FrameBody {
+                            fold: false,
+                            arm: true,
+                            plain: true,
                         }),
                         _ => None,
                     };
@@ -1985,6 +2037,7 @@ impl<'d> Walker<'d> {
                         self.pending_frame_body = Some(FrameBody {
                             fold: false,
                             arm: true,
+                            plain: false,
                         });
                         if let Some(guard) = &arm.guard {
                             self.operand(guard, Position::MatchArm);
@@ -2034,6 +2087,11 @@ impl<'d> Walker<'d> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.operand(e, Position::Interpolation);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.operand(e, Position::LiteralElement);
                 }
             }
             // A local bound to a writing block was reported where it was bound
@@ -2091,6 +2149,35 @@ impl<'d> Walker<'d> {
         // A conditional nested in an arm frame is a producer there, so its own
         // arms are frames too.
         producer.is_some() && self.arm_frame_conditional_producer(expr)
+    }
+
+    /// Whether `expr` is a conditional with block-literal arms that is not a
+    /// local-threading producer here, so its arms are *plain* `BranchArm`
+    /// frames in which a loop or fold is a producer (`generate_plain_arm`,
+    /// BT-3911, BT-3949). Restricted to what a runtime differential proves
+    /// (`stdlib/test/bt4367arm_local_grid_test.bt`: the arm against the same
+    /// body at the method root, over every selector in
+    /// [`PLAIN_ARM_SELECTORS`] x five positions x five body shapes x actor and
+    /// value-type methods, all equal):
+    ///
+    /// - actor and value-type methods only: a class method's plain arm does
+    ///   not lower the loop (`Tuple does not understand 'plusFromNumber:'`);
+    /// - a conditional at the method root only (`depth == 0`);
+    /// - the [`LocalThreadingFamily::Conditional`] family only: a `Dictionary`
+    ///   lookup handler (`at:ifAbsent:`) is a real closure, since only a
+    ///   producer lookup is inlined, and crashes the same way in an actor;
+    /// - the selectors in [`PLAIN_ARM_SELECTORS`]: `and:`/`or:` are not proven.
+    ///
+    /// The REPL keeps its own arm lowering.
+    fn is_plain_arm_conditional(&self, expr: &Expression) -> bool {
+        self.depth == 0
+            && matches!(self.context, Actor | ValueType)
+            && local_threading_construct(expr).is_some_and(|c| {
+                c.family == LocalThreadingFamily::Conditional
+                    && WellKnownSelector::from_name(&c.selector)
+                        .is_some_and(|w| PLAIN_ARM_SELECTORS.contains(&w))
+            })
+            && conditional_arm_blocks(expr).is_some()
     }
 
     /// BT-3947: whether `expr`, a `match:`, is a local-threading producer at
@@ -2165,6 +2252,14 @@ impl<'d> Walker<'d> {
         self.at_repl_arm_site(inner)
     }
 
+    /// Whether the innermost frame is a plain arm ([`FrameSites::plain`]).
+    fn in_plain_arm(&self) -> bool {
+        self.frame_sites
+            .last()
+            .and_then(Option::as_ref)
+            .is_some_and(|frame| frame.plain)
+    }
+
     /// BT-3823: whether every enclosing block is a REPL arm and `expr` is one
     /// of the current arm statement's [`repl_arm_producer_sites`].
     fn at_repl_arm_site(&self, expr: &Expression) -> bool {
@@ -2188,6 +2283,14 @@ impl<'d> Walker<'d> {
     /// body included (ADR 0131 Phase 3b and 3c, BT-3817/BT-3822), at one of the
     /// statement's sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
+        // A plain arm registers only loop and fold sites in codegen
+        // (`with_plain_arm_producer_sites`): a conditional, `on:do:` or
+        // `match:` nested in one keeps its own lowering and is not a producer
+        // there, however it writes the arm's locals. Letting it count made a
+        // loop in a nested `on:do:` body silently drop its write (BT-4367).
+        if self.in_plain_arm() {
+            return false;
+        }
         let Some(kind) = self.root_method_kind() else {
             return false;
         };
@@ -2328,7 +2431,24 @@ impl<'d> Walker<'d> {
                 .and_then(Option::as_ref)
                 .is_some_and(|frame| frame.sites.contains(&expr.span()))
             && (operand_producer_writes(expr, &|name| self.is_bound(name)).is_some()
-                || self.arm_frame_conditional_producer(expr));
+                || self.arm_frame_conditional_producer(expr))
+            // A plain arm lowers a loop or fold that is the statement or the
+            // whole value of an assignment (BT-4367). One at an operand or
+            // array-literal site of an actor `ifTrue:ifFalse:` arm compiles to
+            // Core Erlang with an unbound arm-local, so it keeps the position
+            // error.
+            // `AssignValue { .. }` is any assignment in the arm (`nested` is
+            // always true inside a block). That the loop is the *whole* value,
+            // not an inner assignment of a chain (`a := s := xs inject: ...`),
+            // comes from site registration, not from this `matches!`: codegen's
+            // `loop_body_producer_sites` does not register the inner value, so
+            // the shared recognizer rejects the chain (pinned in
+            // `local_threading.rs`).
+            && (!self.in_plain_arm()
+                || matches!(
+                    position,
+                    Position::Statement | Position::AssignValue { .. }
+                ));
         // BT-3823 (ADR 0131 §2, `MethodBody (REPL)` row): in a REPL arm — every
         // enclosing block an arm of a REPL construct inlined over the bindings
         // map (`is_repl_arm_construct`) — a construct at one of the statement's
@@ -2669,24 +2789,26 @@ impl<'d> Walker<'d> {
     /// How a block argument of an ordinary send of `selector` to `receiver`
     /// escapes: to a class method that runs in the class's process (a class
     /// reference receiver, or `self` in a class method, unless the method runs
-    /// in the caller, `ClassHierarchy::runs_class_method_in_caller`, ADR 0142),
-    /// or to any other method.
+    /// in the caller, ADR 0142: `ClassHierarchy::class_reference_send_runs_in_caller`
+    /// for a class reference, which a shadowed name never does (BT-4283), and
+    /// `ClassHierarchy::runs_class_method_in_caller` for `self`, the running
+    /// class itself), or to any other method.
     fn passed_escape(&self, receiver: &Expression, selector: &EcoString) -> Escape {
         let receivers = self.receivers.as_ref();
-        let class = match receiver {
-            Expression::ClassReference { name, .. } => Some(name.name.clone()),
-            Expression::Identifier(id) if id.name == "self" && self.context == Class => {
-                receivers.map(|r| r.class_name.clone())
-            }
+        let runs_in_caller = match receiver {
+            Expression::ClassReference { name, .. } => Some(receivers.is_some_and(|r| {
+                r.hierarchy
+                    .class_reference_send_runs_in_caller(&name.name, selector)
+            })),
+            Expression::Identifier(id) if id.name == "self" && self.context == Class => receivers
+                .map(|r| {
+                    r.hierarchy
+                        .runs_class_method_in_caller(&r.class_name, selector)
+                }),
             _ => None,
         };
-        match class {
-            Some(class)
-                if !receivers
-                    .is_some_and(|r| r.hierarchy.runs_class_method_in_caller(&class, selector)) =>
-            {
-                Escape::ClassMethod(selector.clone())
-            }
+        match runs_in_caller {
+            Some(false) => Escape::ClassMethod(selector.clone()),
             _ if crate::state_threading_selectors::is_dictionary_inline_lookup(selector) => {
                 Escape::Lookup(selector.clone())
             }

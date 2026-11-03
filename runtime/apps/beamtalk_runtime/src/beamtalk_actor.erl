@@ -251,6 +251,35 @@ handle_getValue([], State) ->
     (S =:= 'continueWith:' orelse S =:= 'continueWith:withArguments:')
 ).
 
+%% The `perform:` forms restricted_target/2 unwraps, and (BT-4265) every
+%% selector restricted_target/2 can answer other than `none` for — the
+%% continuation selectors, `deferReply`, and a `perform:` naming either.
+-define(IS_PERFORM_SELECTOR(S),
+    (S =:= 'perform:' orelse S =:= 'perform:withArguments:' orelse
+        S =:= 'perform:withArguments:timeout:')
+).
+-define(IS_RESTRICTED_OR_PERFORM_SELECTOR(S),
+    (?IS_CONTINUATION_SELECTOR(S) orelse S =:= deferReply orelse ?IS_PERFORM_SELECTOR(S))
+).
+
+%% BT-4265: the helpers an actor send (caller side) and a received message
+%% (actor side) run every time are inlined, so a send pays for the work, not
+%% for a chain of local calls to reach it.
+-compile(
+    {inline, [
+        self_send_kind/1,
+        sync_send_remote/4,
+        resolve_class/2,
+        get_sync_propagated_ctx/0,
+        get_propagated_ctx/0,
+        get_otel_ctx/0,
+        check_call_stack/2,
+        wire_sync_call/5,
+        local_call/3,
+        clear_trace_context_if_set/0
+    ]}
+).
+
 %% ADR 0126 §3: timeout for the `erpc:call/5` a remote spawn/lookup/list
 %% makes to the target node — matches `gen_server:call/2`'s own 5000ms
 %% default so a stuck remote op fails on the same order of magnitude as a
@@ -2122,20 +2151,24 @@ check_call_stack(ActorPid, Selector) ->
                 false ->
                     ok;
                 true ->
-                    Class = lookup_class(ActorPid),
-                    Error = beamtalk_error:new(
-                        deadlock_detected,
-                        Class,
-                        Selector,
-                        <<"Sync send would deadlock: target actor is already in the call chain">>
-                    ),
-                    Error1 = beamtalk_error:with_details(Error, #{
-                        call_stack => CallStack,
-                        target_pid => ActorPid
-                    }),
-                    beamtalk_exception_handler:reraise(Error1)
+                    raise_call_cycle(ActorPid, Selector, CallStack)
             end
     end.
+
+-spec raise_call_cycle(pid(), atom(), [pid()]) -> no_return().
+raise_call_cycle(ActorPid, Selector, CallStack) ->
+    Class = lookup_class(ActorPid),
+    Error = beamtalk_error:new(
+        deadlock_detected,
+        Class,
+        Selector,
+        <<"Sync send would deadlock: target actor is already in the call chain">>
+    ),
+    Error1 = beamtalk_error:with_details(Error, #{
+        call_stack => CallStack,
+        target_pid => ActorPid
+    }),
+    beamtalk_exception_handler:reraise(Error1).
 
 -doc """
 Raise a structured actor_dead error as an Erlang exception.
@@ -2706,6 +2739,12 @@ handle_call/handle_cast entry rejects it here instead. Returns `ok`, or
 a rejected cast has no caller to tell).
 """.
 -spec mailbox_continuation_check(atom(), term()) -> ok | {error, #beamtalk_error{}}.
+mailbox_continuation_check(Selector, _Args) when
+    not ?IS_RESTRICTED_OR_PERFORM_SELECTOR(Selector)
+->
+    %% BT-4265: an ordinary selector names no restricted target — answered
+    %% from the guard, without the restricted_target/2 walk.
+    ok;
 mailbox_continuation_check(Selector, Args) ->
     case restricted_target(Selector, Args) of
         none -> ok;
@@ -2724,11 +2763,7 @@ restricted_target(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
     Selector;
 restricted_target(deferReply, _Args) ->
     deferReply;
-restricted_target(Selector, [Target | Rest]) when
-    Selector =:= 'perform:';
-    Selector =:= 'perform:withArguments:';
-    Selector =:= 'perform:withArguments:timeout:'
-->
+restricted_target(Selector, [Target | Rest]) when ?IS_PERFORM_SELECTOR(Selector) ->
     InnerArgs =
         case Rest of
             [ArgList | _] when is_list(ArgList) -> ArgList;
@@ -3957,6 +3992,11 @@ pays only that read — the `changed_state_keys/2` diff runs only for a watched
 actor.
 """.
 -spec notify_state_change(map(), map()) -> ok.
+notify_state_change(State, State) ->
+    %% BT-4265: an unchanged state (a read) has no changed keys to publish,
+    %% so the watch lookup is skipped: `maybe_publish_state_change/2`
+    %% publishes nothing for an empty diff either way.
+    ok;
 notify_state_change(OldState, NewState) ->
     case beamtalk_object_watch:is_watched(self()) of
         true ->

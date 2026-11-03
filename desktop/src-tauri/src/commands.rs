@@ -7,7 +7,7 @@
 //!
 //! Every command here is `#[tauri::command(async)]`, even though none of
 //! their bodies are themselves `async fn` (they do plain blocking I/O:
-//! `spawn_front_with_port_retry`, `wait_ready`'s polling loop,
+//! `launch_front`, `wait_ready`'s polling loop,
 //! `Command::output()` in `cli_ops`, `Child::kill()+wait()`). This is
 //! deliberate, not a mismatch: a *plain* `#[tauri::command]` (no `async`)
 //! runs its body inline, synchronously, on whatever thread delivered the
@@ -29,7 +29,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 use beamtalk_desktop_broker::monitor::{self, Monitor};
 use beamtalk_desktop_broker::readiness::{self, ProbeTimeouts, ReadinessState};
-use beamtalk_desktop_broker::spawn::SpawnAttemptConfig;
+use beamtalk_desktop_broker::spawn::LaunchConfig;
 use beamtalk_desktop_broker::{cli_ops, discovery, reap};
 use beamtalk_desktop_shell::attach::{AttachDecision, AttachedFront, window_label};
 
@@ -41,19 +41,12 @@ use crate::state::AppState;
 
 /// Overall timeout for the `wait_ready` readiness-polling phase only —
 /// generous headroom above a healthy boot, not a measured requirement. It
-/// does **not** bound `spawn_front_with_port_retry` above, which runs first
-/// and can itself block synchronously for up to
-/// `port::DEFAULT_MAX_ATTEMPTS * spawn::DEFAULT_BIND_FAILURE_GRACE`
-/// (currently up to 50s in the pathological worst case — every candidate
-/// port conflicting) before `wait_ready` is ever called; `attach`'s true
-/// worst-case latency is that plus this timeout, not just this timeout. In
-/// practice each candidate is a fresh, distinct OS-assigned ephemeral port
-/// (not the same port retried), so an all-conflict run is far less likely
-/// than the single-attempt TOCTOU race `beamtalk_desktop_broker::port`'s
-/// module docs describe — noted here rather than acted on, since bounding
-/// the combined worst case is a product-judgment call (drop
-/// `max_port_attempts` for this caller? wrap both phases in one timeout?)
-/// beyond what BT-3004's calibration pass itself changed.
+/// does **not** bound `launch_front` above, which runs first and waits up to
+/// `port::DEFAULT_PORT_REPORT_TIMEOUT` for a still-running front to report
+/// the port it bound (a front that crashes during boot is reported as soon
+/// as its exit is seen) — `attach`'s true worst-case latency is that plus
+/// this timeout, not just this timeout. In practice a healthy front reports
+/// its port within a second, as soon as its endpoint is listening.
 ///
 /// Originally sized against an assumption that a bad-cookie `/readiness`
 /// blocks for Erlang's ~7s `net_setuptime` — measured wrong on loopback
@@ -165,15 +158,14 @@ fn attach_and_open_window(
     tracing::info!(workspace_id, "spawning front");
 
     let launcher = state.launcher.clone();
-    let spawn_config = SpawnAttemptConfig::new(launcher, workspace_id.to_string());
-    let (child, port) =
-        match beamtalk_desktop_broker::spawn::spawn_front_with_port_retry(&spawn_config) {
-            Ok(result) => result,
-            Err(err) => {
-                tracing::error!(workspace_id, %err, "spawn failed");
-                return Err(err.to_string());
-            }
-        };
+    let launch_config = LaunchConfig::new(launcher, workspace_id.to_string());
+    let (child, port) = match beamtalk_desktop_broker::spawn::launch_front(&launch_config) {
+        Ok(result) => result,
+        Err(err) => {
+            tracing::error!(workspace_id, %err, "spawn failed");
+            return Err(err.to_string());
+        }
+    };
     let pid = child.id();
     tracing::info!(workspace_id, port, pid, "front spawned");
 
@@ -197,7 +189,7 @@ fn attach_and_open_window(
     // `kill_and_untrack` (which also clears both of the above) rather than
     // a local `child.kill()` — the child is no longer this function's to
     // kill directly once it's in the shared map.
-    persist_front_record(workspace_id, port, pid);
+    persist_front_record(workspace_id, port, pid, child.instance_id());
     locked(&state.children).insert(workspace_id.to_string(), child);
 
     emit_progress(app, workspace_id, "probing");
@@ -616,7 +608,7 @@ fn initial_node_name(workspace_id: &str, pid: u32) -> String {
     }
 }
 
-fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
+fn persist_front_record(workspace_id: &str, port: u16, pid: u32, instance_id: &str) {
     let Ok(dir) = reap::state_dir() else {
         return;
     };
@@ -626,6 +618,7 @@ fn persist_front_record(workspace_id: &str, port: u16, pid: u32) {
         pid,
         node_name: initial_node_name(workspace_id, pid),
         start_time: reap::proc_start_time(pid),
+        instance_id: instance_id.to_string(),
     };
     let _ = reap::save_record(&dir, &record);
 }

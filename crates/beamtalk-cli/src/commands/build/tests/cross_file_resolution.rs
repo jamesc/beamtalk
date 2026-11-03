@@ -211,6 +211,71 @@ fn test_cross_file_inheritance_no_false_dnu_warning() {
     assert!(core_file.exists());
 }
 
+/// Compile `src/caller.bt` (a typed send `s area` to `Shape`) against `Shape`
+/// declared in `src/shape.bt` through the package build's Pass 1 indexes, and
+/// return the caller's Core Erlang.
+fn compile_caller_against_shape(shape_src: &str) -> String {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_path = project_path.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+    write_test_file(&src_path.join("shape.bt"), shape_src);
+    write_test_file(
+        &src_path.join("caller.bt"),
+        "Object subclass: Caller\n  run: s :: Shape => s area\n",
+    );
+    let build_dir = project_path.join("_build/dev/ebin");
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let source_files = vec![src_path.join("shape.bt"), src_path.join("caller.bt")];
+    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+        build_class_module_index(&source_files, Some(&src_path), "xf").unwrap();
+    let core_file = build_dir.join("bt@xf@caller.core");
+    compile_file(
+        &src_path.join("caller.bt"),
+        "bt@xf@caller",
+        &core_file,
+        &default_options(),
+        &CompileContext {
+            hierarchy: ClassHierarchyContext {
+                class_module_index,
+                class_superclass_index,
+                pre_loaded_classes: all_class_infos,
+                ..ClassHierarchyContext::default()
+            },
+            ..CompileContext::default()
+        },
+        None,
+    )
+    .expect("caller should compile");
+    fs::read_to_string(&core_file).unwrap()
+}
+
+/// BT-4391: a typed send to an `abstract` class declared in another file
+/// stays dynamic — no class-tag guard (no instance carries an abstract
+/// class's tag) — because Pass 1's cross-file `ClassInfo` carries
+/// `is_abstract`. A concrete class from the same inputs takes the guarded
+/// direct call, so the abstract case is not passing for another reason.
+#[test]
+fn test_cross_file_abstract_class_typed_send_stays_dynamic() {
+    let abstract_core =
+        compile_caller_against_shape("abstract Value subclass: Shape\n  area => 0\n");
+    assert!(
+        !abstract_core.contains("'bt@xf@shape':'dispatch'"),
+        "abstract cross-file class must not get a direct call:\n{abstract_core}"
+    );
+    assert!(
+        !abstract_core.contains("_TTaggedRecv"),
+        "abstract cross-file class must not get a class-tag guard:\n{abstract_core}"
+    );
+
+    let concrete_core = compile_caller_against_shape("Value subclass: Shape\n  area => 0\n");
+    assert!(
+        concrete_core.contains("'bt@xf@shape':'dispatch'('area'"),
+        "concrete cross-file class takes the guarded direct call:\n{concrete_core}"
+    );
+}
+
 /// Cross-file/package type-alias resolution for a manifest-based
 /// package build's Pass 1.
 ///

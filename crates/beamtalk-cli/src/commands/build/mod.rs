@@ -93,6 +93,9 @@ struct BuildPassesResult {
     file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)>,
     /// Class hierarchy context used for post-processing (app file generation, etc.).
     hierarchy: ClassHierarchyContext,
+    /// The project's own classes (no dependency's), for the `.app` class
+    /// list and `class_corpus.json` (BT-4387).
+    own_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Native compilation result, if native Erlang sources were compiled.
     native_result: Option<Rebar3Result>,
     /// Diagnostic summary aggregated from all compiled files.
@@ -122,16 +125,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // a manifest-less directory build skips Pass 1 entirely — both keep the
     // conservative `ModuleOnly` default.
     let mut options = options.clone();
-    if Utf8Path::new(path).is_dir() && env.full_manifest.is_some() {
-        options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
+    // Pre-WS3 guard (`has_package_dependencies`): dependency extension
+    // contributions are not loaded until WS3 (ADR 0070 amendment), so
+    // declaring dependencies means no receiver's method surface is provably
+    // complete. Both flags come from the rule `lint`/`test` share.
+    let scope =
+        beamtalk_cli::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
+    options.has_package_dependencies = scope.has_package_dependencies;
+    if Utf8Path::new(path).is_dir() {
+        options.knowledge_scope = scope.knowledge_scope;
     }
-    // Pre-WS3 guard: dependency extension contributions are not
-    // loaded until WS3 (ADR 0070 amendment), so declaring dependencies means
-    // no receiver's method surface is provably complete.
-    options.has_package_dependencies = env
-        .full_manifest
-        .as_ref()
-        .is_some_and(|m| !m.dependencies.is_empty());
     // Set the current package so E0401/E0402 visibility checks
     // (`check_class_visibility`/`check_alias_leaked_visibility`) actually run
     // — they're gated on `current_package: Some(_)` and silently emit zero
@@ -447,6 +450,7 @@ fn execute_build_passes(
         module_names,
         file_module_pairs,
         hierarchy: compile_ctx.hierarchy,
+        own_class_infos: index.own_class_infos,
         native_result,
         diagnostic_summary,
     })
@@ -559,6 +563,7 @@ fn post_process_package_artifacts(
             bt_dep_names: &bt_dep_names,
             hex_dep_names: &hex_dep_names,
             source_files: &env.source_files,
+            own_class_infos: &passes.own_class_infos,
         },
     )?;
 

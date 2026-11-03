@@ -107,7 +107,7 @@ The summary is suppressed when `--no-warnings` is passed.
 
 `beamtalk lint` prints the same summary at end of run. In `--format json` mode, a `summary` JSON object is emitted as the last line with `totals_by_severity`, `totals_by_category`, `files_checked`, and `total` fields for CI diffing.
 
-When walking a directory, `beamtalk lint` — like `fmt` and MCP lint — skips paths ignored by `.gitignore` (BT-4135): the `.gitignore` files in and below the walked directory, plus, inside a git repository, those between the repository root and the walked directory. A gitignored `.worktrees/` directory holding nested checkouts is therefore not linted twice. Neither the per-clone `.git/info/exclude` nor the global `core.excludesFile` is consulted, so every clone sees the same files, and a directory passed explicitly is always walked even if an ancestor rule ignores it. `build`, `test`, `doc` and the LSP workspace preload do **not** consult `.gitignore`: what gets compiled never depends on it, so a generated, uncommitted `.bt` source under `src/` still builds, and the LSP indexes exactly what builds.
+When walking a directory, `beamtalk lint` — like `fmt` and MCP lint — skips paths ignored by `.gitignore` (BT-4135): the `.gitignore` files in and below the walked directory, plus, inside a git repository, those between the repository root and the walked directory. A gitignored `.worktrees/` directory holding nested checkouts is therefore not linted twice. As in git, a nested repository (a subdirectory containing `.git`, such as a submodule) is governed only by its own `.gitignore` files: the outer repository's rules decide whether it is walked, but not which files inside it are skipped. Neither the per-clone `.git/info/exclude` nor the global `core.excludesFile` is consulted, so every clone sees the same files, and a directory passed explicitly is always walked even if an ancestor rule ignores it. `build`, `test`, `doc` and the LSP workspace preload do **not** consult `.gitignore`: what gets compiled never depends on it, so a generated, uncommitted `.bt` source under `src/` still builds, and the LSP indexes exactly what builds.
 
 `beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes and against the producing compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — if the underlying module has been recompiled since the cache was written, or the entry was written by a `beamtalk` build with different type-mapping logic, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
 
@@ -131,9 +131,17 @@ same scope as `build`.
 - `beamtalk lint` is the lint-severity gate by default. With
   `--warnings-as-errors` it additionally fails on the live-recheck set — the
   non-error `Dnu`/`Type` diagnostics the REPL whole-image recheck surfaces
-  (`relevant_image_diagnostic` in `beamtalk_recheck.erl`) plus any `Error` —
-  so CI fails the same sources a REPL load rejects. Run
-  `beamtalk lint --warnings-as-errors` as the CI parity gate.
+  (`relevant_image_diagnostic` in `beamtalk_recheck.erl`) plus any `Error`,
+  parse errors included — so it fails the same sources a REPL load rejects.
+  The package's `[diagnostics]` table is applied first, through the same
+  `apply_diagnostics_table` helper `build` and the REPL use, so a category
+  set to `off` passes here exactly as it loads clean in the REPL (BT-4377).
+  The severity × category → verdict rule is pinned on both sides by the
+  shared fixture
+  `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`.
+  `just ci` does not run this gate; add `beamtalk lint --warnings-as-errors`
+  to your own project's CI to get the REPL verdict there. The MCP `lint`
+  tool applies the same table but has no `--warnings-as-errors` flag.
 
 Intentionally surface-specific behaviour (not parity bugs):
 
@@ -1058,6 +1066,7 @@ By default, `beamtalk test` runs test classes concurrently using the BEAM schedu
 beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
+beamtalk test --full-traces  # Show full filtered stack traces (no 3-frame cap)
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

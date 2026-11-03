@@ -101,54 +101,58 @@ impl LintPass for ActorStateAbroadPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
         // See `hierarchy_for_lint` doc comment for why this is needed
         // instead of `class.class_kind`.
-        let hierarchy = hierarchy_for_lint(module);
-        for class in &module.classes {
-            let class_name = class.name.name.as_str();
-            let Some(fields) = actor_state_fields(module, &hierarchy, class_name) else {
-                continue;
-            };
-            let ctx = ClassCtx {
-                class_name,
-                fields,
-                actor_fields: actor_typed_fields(module, &hierarchy, class_name),
-                hierarchy: &hierarchy,
-            };
-            for method in class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-            {
-                check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
-            }
+        check_module(module, &hierarchy_for_lint(module), diagnostics);
+    }
+}
+
+/// The pass over `module`, against `hierarchy`.
+fn check_module(module: &Module, hierarchy: &ClassHierarchy, diagnostics: &mut Vec<Diagnostic>) {
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        let Some(fields) = actor_state_fields(module, hierarchy, class_name) else {
+            continue;
+        };
+        let ctx = ClassCtx {
+            class_name,
+            fields,
+            actor_fields: actor_typed_fields(module, hierarchy, class_name),
+            hierarchy,
+        };
+        for method in class
+            .methods
+            .iter()
+            .filter(|m| m.kind == MethodKind::Primary)
+        {
+            check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
         }
-        // Standalone `Counter >> tick => ...` definitions are instance methods
-        // of `Counter` too. Package-qualified extensions are left alone: their
-        // class is resolved by package, which the simple-name hierarchy lookup
-        // does not model.
-        for standalone in &module.method_definitions {
-            if standalone.is_class_method
-                || standalone.package.is_some()
-                || standalone.method.kind != MethodKind::Primary
-            {
-                continue;
-            }
-            let class_name = standalone.class_name.name.as_str();
-            let Some(fields) = actor_state_fields(module, &hierarchy, class_name) else {
-                continue;
-            };
-            let ctx = ClassCtx {
-                class_name,
-                fields,
-                actor_fields: actor_typed_fields(module, &hierarchy, class_name),
-                hierarchy: &hierarchy,
-            };
-            check_method_body(
-                &standalone.method.body,
-                &standalone.method.parameters,
-                &ctx,
-                diagnostics,
-            );
+    }
+    // Standalone `Counter >> tick => ...` definitions are instance methods
+    // of `Counter` too. Package-qualified extensions are left alone: their
+    // class is resolved by package, which the simple-name hierarchy lookup
+    // does not model.
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method
+            || standalone.package.is_some()
+            || standalone.method.kind != MethodKind::Primary
+        {
+            continue;
         }
+        let class_name = standalone.class_name.name.as_str();
+        let Some(fields) = actor_state_fields(module, hierarchy, class_name) else {
+            continue;
+        };
+        let ctx = ClassCtx {
+            class_name,
+            fields,
+            actor_fields: actor_typed_fields(module, hierarchy, class_name),
+            hierarchy,
+        };
+        check_method_body(
+            &standalone.method.body,
+            &standalone.method.parameters,
+            &ctx,
+            diagnostics,
+        );
     }
 }
 
@@ -521,10 +525,18 @@ impl ClassCtx<'_> {
     /// as a class reference or through `self class` / `super class`. A
     /// stdlib class is stateless and its blocks run at home (`Result tryDo:`,
     /// `Array`, ...; `Timer` and `Parallel` are Shape A, not this shape).
+    ///
+    /// A class reference asks `ClassHierarchy::class_reference_send_runs_in_caller`,
+    /// which a shadowed name never satisfies (BT-4283): one last-wins runtime
+    /// class that a reference reaches through the class registry, qualified
+    /// or not, so this hierarchy's single entry cannot say the block stays
+    /// home. `self class` is the running class itself.
     fn class_side_shape(&self, receiver: &Expression, selector: &str) -> Option<AbroadShape> {
-        let target = match receiver.unwrap_parens() {
-            Expression::ClassReference { name, package, .. } if package.is_none() => {
-                name.name.as_str()
+        let (target, is_reference) = match receiver.unwrap_parens() {
+            Expression::ClassReference { name, package, .. }
+                if package.is_none() || self.hierarchy.is_shadowed_class(&name.name) =>
+            {
+                (name.name.as_str(), true)
             }
             Expression::MessageSend {
                 receiver: inner,
@@ -535,24 +547,32 @@ impl ClassCtx<'_> {
                 && arguments.is_empty()
                 && (is_self(inner) || is_super(inner)) =>
             {
-                self.class_name
+                (self.class_name, false)
             }
             _ => return None,
         };
         if ClassHierarchy::is_builtin_class(target) {
             return None;
         }
-        let method = self.hierarchy.find_class_method(target, selector)?;
-        if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
-            return None;
+        // A shadowed name's entry is only one of its rivals: whether it
+        // defines the method says nothing about the class that answers.
+        if !(is_reference && self.hierarchy.is_shadowed_class(target)) {
+            let method = self.hierarchy.find_class_method(target, selector)?;
+            if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
+                return None;
+            }
         }
         // Runs in the caller (ADR 0142 §1, the one rule): the block stays home.
         // Anything else runs in `target`'s process.
-        (!self.hierarchy.runs_class_method_in_caller(target, selector)).then(|| {
-            AbroadShape::ClassMethod {
-                target: target.to_string(),
-                selector: selector.to_string(),
-            }
+        let runs_in_caller = if is_reference {
+            self.hierarchy
+                .class_reference_send_runs_in_caller(target, selector)
+        } else {
+            self.hierarchy.runs_class_method_in_caller(target, selector)
+        };
+        (!runs_in_caller).then(|| AbroadShape::ClassMethod {
+            target: target.to_string(),
+            selector: selector.to_string(),
         })
     }
 }
@@ -1439,6 +1459,60 @@ Actor subclass: Counter
         // runs its class methods in the caller, `class sealed` or not.
         let d = only("  viaOpen => OpenLib each: [self.n := 1]\n");
         assert!(d.is_empty(), "{d:?}");
+    }
+
+    /// `body` appended to `Counter`, linted against this module's hierarchy
+    /// with `shadowed` declared by more than one package in scope.
+    fn only_with_shadowed(body: &str, shadowed: &[&str]) -> Vec<Diagnostic> {
+        let (module, parse_diags) = parse(lex_with_eof(&format!("{HEADER}{body}")));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let mut hierarchy = crate::hierarchy_for_lint(&module);
+        hierarchy.set_shadowed_class_names(shadowed.iter().map(|&n| n.into()).collect());
+        let mut diagnostics = Vec::new();
+        super::check_module(&module, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn shadowed_stateless_class_method_warns() {
+        // BT-4283: a name another package in scope also declares is one
+        // last-wins runtime class, sent dynamically; the stateless `OpenLib`
+        // this module declares need not be the class that answers, qualified
+        // or not. The unshadowed control is `open_stateless_class_method_quiet`.
+        for send in ["OpenLib", "dep@OpenLib"] {
+            let d = only_with_shadowed(
+                &format!("  viaOpen => {send} each: [self.n := 1]\n"),
+                &["OpenLib"],
+            );
+            assert_eq!(d.len(), 1, "{send}: {d:?}");
+            assert!(
+                d[0].message.contains("passed to 'OpenLib each:'"),
+                "{}",
+                d[0].message
+            );
+        }
+        let d = only_with_shadowed("  viaOpen => dep@OpenLib each: [self.n := 1]\n", &[]);
+        assert!(d.is_empty(), "unshadowed qualified control: {d:?}");
+    }
+
+    #[test]
+    fn shadowing_leaves_self_class_alone() {
+        // `self class` is the running class itself, whatever its name: a
+        // stateless actor's `self class each:` stays quiet when shadowed, as
+        // in `self_class_direct_called_quiet`.
+        let src = "sealed Actor subclass: SealedCounter
+  state: n = 0
+
+  class sealed each: aBlock => aBlock value
+
+  viaSelf => self class each: [self.n := 1]
+";
+        let (module, _) = parse(lex_with_eof(src));
+        let mut hierarchy = crate::hierarchy_for_lint(&module);
+        hierarchy.set_shadowed_class_names(std::iter::once("SealedCounter".into()).collect());
+        let mut diagnostics = Vec::new();
+        super::check_module(&module, &hierarchy, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

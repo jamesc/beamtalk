@@ -118,6 +118,13 @@ pub fn workspace_dir(workspace_id: &str) -> Result<PathBuf> {
     beamtalk_workspace::workspace_dir(workspace_id)
 }
 
+/// Path of a workspace's advisory lockfile:
+/// `~/.beamtalk/workspaces/{workspace_id}.lock`, beside (not inside) the
+/// workspace directory, so pruning the directory never unlinks a held lock.
+pub(crate) fn workspace_lockfile_path(workspace_id: &str) -> Result<PathBuf> {
+    Ok(workspaces_base_dir()?.join(format!("{workspace_id}.lock")))
+}
+
 /// Check if a workspace exists.
 pub fn workspace_exists(workspace_id: &str) -> Result<bool> {
     let dir = workspace_dir(workspace_id)?;
@@ -329,12 +336,11 @@ pub fn cleanup_stale_node_info(workspace_id: &str) -> Result<()> {
 /// Acquire an exclusive advisory lock for workspace creation.
 ///
 /// Returns a locked `File` handle. The lock is released when the file is dropped.
-/// The lockfile is created at `~/.beamtalk/workspaces/{workspace_id}.lock`.
+/// The lockfile is created at [`workspace_lockfile_path`].
 pub(super) fn acquire_workspace_lock(workspace_id: &str) -> Result<fs::File> {
-    let base = workspaces_base_dir()?;
-    fs::create_dir_all(&base).into_diagnostic()?;
+    let lockfile_path = workspace_lockfile_path(workspace_id)?;
+    fs::create_dir_all(workspaces_base_dir()?).into_diagnostic()?;
 
-    let lockfile_path = base.join(format!("{workspace_id}.lock"));
     let lockfile = fs::OpenOptions::new()
         .create(true)
         .write(true)

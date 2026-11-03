@@ -221,6 +221,10 @@ just-edited protocol's full source into each of its users' own recompiles,
 so `uses:` flattening sees the new provisions rather than nothing (a
 cross-file protocol otherwise only resolves via the ambient, signature-only
 `protocol_registry` cache below, which cannot flatten method bodies).
+`project_batch => binary()' (BT-4378) tags every compile of one
+`load_project' with the same token, so the port verifies the file's
+project scope (aliases, FFI registry) once per batch instead of re-statting
+the whole project for each file.
 Returns `{ok, #{core_erlang, module_name, classes, warnings}}',
 `{ok, protocol_definition, #{core_erlang, module_name, protocols, warnings}}',
 or `{error, Diagnostics}'.
@@ -1538,10 +1542,17 @@ do_compile(Port, Source, Options) ->
     %% instead of failing loudly the way `pre_loaded_protocol_defs` currently
     %% does when it is simply absent.
     ProtocolSources = maps:get(protocol_sources, Options, #{}),
-    RequestFinal =
+    Request8 =
         case map_size(ProtocolSources) of
             0 -> Request7;
             _ -> Request7#{protocol_sources => ProtocolSources}
+        end,
+    %% BT-4378: one token per `load_project' batch, so the port verifies the
+    %% project scope once per batch rather than once per file.
+    RequestFinal =
+        case maps:get(project_batch, Options, undefined) of
+            ProjectBatch when is_binary(ProjectBatch) -> Request8#{project_batch => ProjectBatch};
+            _ -> Request8
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->

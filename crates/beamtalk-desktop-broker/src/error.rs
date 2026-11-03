@@ -5,31 +5,15 @@
 //!
 //! **DDD Context:** Desktop Shell
 
-use std::fmt;
-
-/// Display wrapper for [`BrokerError::PortsExhausted`]'s `last_exit_status`.
-///
-/// Renders `" — last launcher exit: <status>"` when a diagnostic is present,
-/// or an empty string when `None` (the original message shape, unchanged
-/// when there's nothing more to say).
-struct DisplayLastExitStatus<'a>(&'a Option<String>);
-
-impl fmt::Display for DisplayLastExitStatus<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            Some(status) => write!(f, " — last launcher exit: {status}"),
-            None => Ok(()),
-        }
-    }
-}
+use std::time::Duration;
 
 /// Errors the broker core can produce.
 ///
 /// Kept as a concrete enum (rather than `miette::Report`, which the CLI/
 /// workspace crates use for terminal-formatted diagnostics) because a future
 /// Tauri shell needs to match on *why* an operation failed to pick
-/// a UI treatment (e.g. `OidcConfigured` shows setup instructions, `PortsExhausted`
-/// just retries) rather than only display a formatted string.
+/// a UI treatment (e.g. `OidcConfigured` shows setup instructions,
+/// `FrontExitedBeforeReportingPort` points at `attach.log`) rather than only display a formatted string.
 #[derive(Debug, thiserror::Error)]
 pub enum BrokerError {
     /// `~/.beamtalk/ide.toml` or a `BT_OIDC_*` env var is present. Spawning a
@@ -70,28 +54,28 @@ pub enum BrokerError {
     )]
     MissingNodeName(String),
 
-    /// Ran out of port-allocation attempts (see [`crate::port::allocate_port_with_retry`]).
-    ///
-    /// `last_exit_status`, when available, is the most recent spawn attempt's
-    /// launcher process exit status (`std::process::ExitStatus`'s own
-    /// `Display` — e.g. `"exit status: 1"` on Unix or `"exit code:
-    /// 0xc0000135"` on Windows), threaded through from
-    /// [`crate::port::SpawnAttempt::PortTaken`]. Carrying it matters because
-    /// [`crate::spawn::spawn_front_with_port_retry`]'s retry signal is a
-    /// heuristic (any early process exit looks like a port conflict — see its
-    /// doc comment), not a proof: a genuine launcher failure unrelated to
-    /// port conflicts (a crash, a missing DLL, `bin\bt_attach.bat` rejecting
-    /// its `start` invocation for some Windows-specific reason) would
-    /// otherwise report only a bare attempt count here, reading as "every
-    /// candidate port really was taken" even when that was never true.
+    /// The spawned front exited before reporting the HTTP port it bound
+    /// (see [`crate::port`]) — it crashed or refused during boot (bad
+    /// release, config error, a port it couldn't bind). `exit_status` is the
+    /// launcher process's `std::process::ExitStatus` `Display` output; the
+    /// front's own explanation is in `~/.beamtalk/workspaces/<id>/attach.log`.
     #[error(
-        "failed to allocate a free port after {attempts} attempt(s){}",
-        DisplayLastExitStatus(.last_exit_status)
+        "the front exited ({exit_status}) before reporting its HTTP port — \
+         see ~/.beamtalk/workspaces/<id>/attach.log"
     )]
-    PortsExhausted {
-        attempts: u32,
-        last_exit_status: Option<String>,
-    },
+    FrontExitedBeforeReportingPort { exit_status: String },
+
+    /// The spawned front is still running but did not report its HTTP port
+    /// within the configured timeout (see
+    /// [`crate::port::DEFAULT_PORT_REPORT_TIMEOUT`]).
+    #[error("the front did not report its HTTP port within {timeout:?}")]
+    PortReportTimedOut { timeout: Duration },
+
+    /// The front's port file exists but doesn't hold a single non-zero port
+    /// number. The front writes it atomically, so this means a foreign or
+    /// incompatible writer, never a half-written file.
+    #[error("invalid front port file {path}: {content:?}")]
+    InvalidPortFile { path: String, content: String },
 
     /// The installed `beamtalk` CLI could not be located (checked `PATH` and
     /// the configured fallback locations). GUI apps launched from a dock/
@@ -128,9 +112,9 @@ pub enum BrokerError {
     /// cheap extension check in `spawn::build_launch_command` *before*
     /// `Command::spawn`, so the failure is this named error rather than an
     /// opaque OS error (`os error 193` — "not a valid Win32 application" —
-    /// when Windows tries to exec a shebang script) or a confusing
-    /// `PortsExhausted` from `spawn_front_with_port_retry`'s bind-failure
-    /// heuristic misreading every immediate exit as a port conflict.
+    /// when Windows tries to exec a shebang script) or a less specific
+    /// [`BrokerError::FrontExitedBeforeReportingPort`] once the wrong
+    /// launcher exits immediately.
     #[error("launcher path '{0}' does not look like a valid entry point for this platform — {1}")]
     LauncherPlatformMismatch(String, &'static str),
 

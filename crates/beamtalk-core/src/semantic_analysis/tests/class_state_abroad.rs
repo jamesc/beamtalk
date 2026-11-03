@@ -773,3 +773,77 @@ fn first_write_is_named_in_source_order() {
         d[0].message
     );
 }
+
+// ---- shadowed class names (BT-4283) ---------------------------------------
+//
+// A name more than one package in scope declares is one last-wins runtime
+// class: codegen never direct-calls it, and a reference to it (qualified or
+// not) reaches whichever package's class won the load. So a writing block
+// passed to it may run in that class's process, whatever this hierarchy's
+// single entry says. Each case has an unshadowed control.
+
+/// A stateless `Parser`: on its own, `Parser each:` runs in the caller.
+const STATELESS_PARSER: &str = "Object subclass: Parser\n  class each: aBlock => aBlock value\n";
+
+/// `src`'s `ClassStateAbroad` diagnostics, compiled as package `app` with
+/// `pre_loaded` (the other packages' declarations) in scope.
+fn abroad_in_scope(src: &str, pre_loaded: Vec<class_hierarchy::ClassInfo>) -> Vec<Diagnostic> {
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(pre_loaded);
+    analyse_full(&parse_module(src), ctx)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::ClassStateAbroad))
+        .collect()
+}
+
+const WRITES_VIA_QUALIFIED_PARSER: &str = "Object subclass: Counter\n  classState: n = 0\n\n  class a => json@Parser each: [self.n := 1]\n";
+
+#[test]
+fn writing_block_passed_to_a_qualified_shadowed_class_warns() {
+    let mut scope = declared_by("json", STATELESS_PARSER);
+    scope.extend(declared_by("xml", STATELESS_PARSER));
+    let d = abroad_in_scope(WRITES_VIA_QUALIFIED_PARSER, scope);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("class_state_unreachable") && d[0].message.contains("Parser each:"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn writing_block_passed_to_a_qualified_unshadowed_class_stays_home() {
+    let d = abroad_in_scope(
+        WRITES_VIA_QUALIFIED_PARSER,
+        declared_by("json", STATELESS_PARSER),
+    );
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// `app` declares `Parser` itself; a dependency may declare one too.
+fn own_parser_send() -> String {
+    format!(
+        "{STATELESS_PARSER}\nObject subclass: Counter\n  classState: n = 0\n\n  class a => Parser each: [self.n := 1]\n"
+    )
+}
+
+#[test]
+fn writing_block_passed_to_an_own_class_a_dependency_shadows_warns() {
+    let d = abroad_in_scope(&own_parser_send(), declared_by("json", STATELESS_PARSER));
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains("class_state_unreachable"),
+        "{}",
+        d[0].message
+    );
+}
+
+#[test]
+fn own_class_seen_from_outside_is_not_a_rival() {
+    // The unit's own `Parser` handed back in as a pre-loaded entry (its Pass 1
+    // info) is the same declaration, not a second package's.
+    let d = abroad_in_scope(&own_parser_send(), declared_by("app", STATELESS_PARSER));
+    assert!(d.is_empty(), "{d:?}");
+}

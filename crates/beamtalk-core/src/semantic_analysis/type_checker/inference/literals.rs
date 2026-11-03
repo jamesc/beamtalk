@@ -6,11 +6,14 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Covers `Expression::Literal`, `MapLiteral`, `ListLiteral`, `ArrayLiteral`,
-//! `TupleLiteral`, `StringInterpolation`, and the literal-index `Tuple at:` shortcut — the
+//! `TupleLiteral`, `StringInterpolation`, `BinaryConstruction`, and the literal-index `Tuple at:` shortcut — the
 //! leaves of `infer_expr`'s dispatch that construct a type from a literal's
 //! own shape rather than from message-send/receiver lookup.
 
-use crate::ast::{Expression, Literal, MapPair, StringSegment, WellKnownSelector};
+use crate::ast::{
+    BinarySegment, BinarySegmentType, BinarySegmentValue, Expression, Literal, MapPair,
+    StringSegment, WellKnownSelector,
+};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker, TypeEnv};
@@ -246,5 +249,69 @@ impl TypeChecker {
             }
         }
         InferredType::known("String")
+    }
+
+    /// Infers a binary construction (`<<v:8, p/binary>>`, ADR 0143).
+    ///
+    /// Every segment value and size is inferred, so sends inside a
+    /// parenthesised value are still checked. The result class follows the
+    /// bit alignment (ADR 0143 § Result class, [`binary_construction_type`]).
+    pub(in crate::semantic_analysis::type_checker) fn infer_binary_construction(
+        &mut self,
+        segments: &[BinarySegment<Expression>],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        for inner_expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+            self.infer_expr(inner_expr, hierarchy, env, in_abstract_method);
+        }
+        binary_construction_type(segments)
+    }
+}
+
+/// The class a binary construction builds (ADR 0143 § Result class): a
+/// `Binary` when its total bit size is a multiple of 8, a `Bitstring`
+/// otherwise, and `Bitstring | Binary` (what `Bitstring>>concat:` answers)
+/// when a segment leaves the alignment unknown.
+///
+/// A segment's bits are known from a literal size × unit and the default
+/// `integer`/`float` sizes; a bare string literal and `utf*` segments are
+/// whole bytes. Any other segment (a variable size, a sizeless `binary` or
+/// `bits` value) is a whole number of its units, so it keeps the alignment
+/// exactly when its unit is a multiple of 8 (`binary` defaults to 8, `bits`
+/// to 1).
+pub(in crate::semantic_analysis::type_checker) fn binary_construction_type(
+    segments: &[BinarySegment<Expression>],
+) -> InferredType {
+    let mut bits_mod_8: u64 = 0;
+    for seg in segments {
+        let utf = matches!(
+            seg.effective_type(),
+            BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32
+        );
+        let bare_string = seg.segment_type.is_none()
+            && matches!(seg.value.binary_literal(), Some((Literal::String(_), _)));
+        let segment_bits = if utf || bare_string {
+            Some(0)
+        } else if let Some(bits) = seg.literal_bit_size() {
+            Some(bits % 8)
+        } else {
+            seg.effective_unit().filter(|unit| unit % 8 == 0).map(|_| 0)
+        };
+        match segment_bits {
+            Some(bits) => bits_mod_8 = (bits_mod_8 + bits) % 8,
+            None => {
+                return InferredType::union_of(&[
+                    InferredType::known("Bitstring"),
+                    InferredType::known("Binary"),
+                ]);
+            }
+        }
+    }
+    if bits_mod_8 == 0 {
+        InferredType::known("Binary")
+    } else {
+        InferredType::known("Bitstring")
     }
 }

@@ -285,6 +285,7 @@
 - Fix: stale-`^` and `ensure:` diagnostics now say "conservatively" to reflect that the rejection is a conservative approximation (BT-4248, #4669)
 - **Class-method `self name`, `super name`, `super superclass` now work via the class-object protocol (BT-4252)** — inside a class method, `self name`, `super name` and `super superclass` used to raise `does_not_understand` because the class-method chain doesn't hold the Behaviour protocol. These sends now fall through to the `Class → Behaviour → Object` protocol, answering for the receiving class (#4653).
 - **Class-object protocol answers from inside the class process (BT-4262)** — `self doc`, `self printString`, `self name` and other `Class`/`Behaviour` protocol sends from inside a class method running in the class's own process now work. Class-mutating protocol (`removeFromSystem`, `renameTo:`, `reload`, `removeSelector:`, etc.) is refused up front with `dispatch_error` before any side effect (#4676).
+- **Fix: binary pattern integer/char literals in `/float` segments now match (BT-4376)** — `<<1/float>>` and `<<$A/float>>` are lowered to their float equivalents at codegen time, matching `erlc`; `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8 (a conflicting explicit `unit:` is an error); new warning on a non-ASCII character literal in a default 8-bit integer segment (#4759)
 
 ### Runtime
 
@@ -321,6 +322,10 @@
 - `Json` text leaves and object keys are now validated Strings instead of raw binaries (BT-4171, #4568)
 - `Binary printString` and `String printString` use the full ADR 0138 escape mapping — backslashes, braces, control characters render consistently across Beamtalk and Rust unparser output (BT-4164, BT-4176, BT-4188; #4556, #4567, #4584)
 - Trace store sweep: skip remote pids and reclaim orphan rows on dead-actor cleanup (BT-4197, #4576)
+- Fix non-ASCII (UTF-8) source file paths double-encoding in stack traces and reflection (BT-4370, #4745)
+- Guarded direct calls for typed sends to built-in receivers — `Integer`, `String`, `List`, `Dictionary` and other built-in-typed receivers now compile to a tag-guarded direct dispatch with a dynamic-send fallback (BT-4294, #4750)
+- Guarded direct calls for typed sends to open tagged-map classes — a send to a receiver whose static type is an open `Value`/`Object`-kind class now compiles to a tag-guarded direct dispatch (BT-4293, #4747)
+- Class references use compile-time registered names — class literals compile to `erlang:whereis('beamtalk_class_<Name>')` instead of a runtime `binary_to_atom` call; `on:do:` class-literal filters pass the name only (BT-4295, #4743)
 
 ### Internal
 
@@ -352,9 +357,16 @@
 - ADR 0133 Phase 2: remove the opaque-callable fold (ADR 0128) and the stored-block `value` producer (I5) — superseded infrastructure removed from codegen and the runtime dispatch path (BT-3908, #4400)
 - ADR 0133 Phase 2: remove the runtime floor (`send_threaded/4`, `call_threaded/3`, tier2 metadata, threaded lookups) — defunct Tier 2 threaded dispatch removed; modules compiled before the change still load (BT-3907, #4396)
 - Type annotations now apply the same `uses:` shadowing rule as provision resolution, so `x :: Enumerable` resolves consistently when a dependency defines a namesake protocol (BT-3941, #4421)
+- Dependency compilation scopes ClassInfos to each dependency's transitive closure, preventing same-named classes in unrelated packages from shadowing (BT-4375, #4757)
+- `FieldWriteInBracketedLoop` verifier error enforces the §4b invariant — a field write inside a bracketing loop is now caught by `ThreadedIr::verify()` (BT-4369, #4753)
+- Codegen line annotations on let-wrapped call nodes improve stack trace accuracy beyond block `value` sends (BT-4366, #4751)
+- Block and loop call sites carry real line info in stack traces (BT-4356, #4740)
+- Test and `StackFrame>>printString` trace rendering unified to one shared renderer (BT-4357, #4741)
+- ADR 0133 Phase 3: retire DENY_SET/ALLOW_SET; the 733-shape oracle reaches zero residual rows (BT-3913, #4735)
 
 ### Tooling
 
+- **Desktop broker: fronts pick their own port (BT-4398)** — the broker used to choose a front's port by binding `127.0.0.1:0`, closing it and passing the number on, so another process (or a second front spawned at the same moment) could take the port before the front bound it; a conflict was only noticed if it made the front exit, and a foreign server on the port could answer the readiness probe. The front is now started with `PORT=0` and `BT_ATTACH_PORT_FILE`, binds a free port itself and writes the port it got to that file (`BtAttach.PortReport`); the broker waits for the file and probes that port. `spawn_front_with_port_retry`/`SpawnAttemptConfig` are replaced by `launch_front`/`LaunchConfig`, `port::find_free_port`/`allocate_port_with_retry` and `BrokerError::PortsExhausted` are gone, and a front that dies during boot is reported at once as `FrontExitedBeforeReportingPort` (no retry, no 5 s grace period per attempt).
 - **Fix: dependencies compile with the package's FFI type registry (BT-4225, BT-4136)** — a dependency build now receives the FFI type specs from OTP and from its own prior dependencies only (not the root package's), so a clean build and a rebuild produce identical diagnostics. The OTP spec extraction is done once per resolution instead of once per dependency. (#4690, #4700)
 - Fix: `beamtalk fmt` no longer splices a comment that sits directly before a standalone method (`Foo class >> bar => …`) into the method below it — the comment stays above its target (BT-4253, #4651)
 - LSP hover and completion now match diagnostics after operand-paren normalisation — a parenthesised sub-expression shows the same type and completions as the bare form (BT-4238, BT-4237, #4642)
@@ -376,9 +388,20 @@
 - REPL displays Characters as `$X` (was indistinguishable from Integer), Strings quoted and escaped, Binaries as `<<hex>>`, class names bare (BT-4167, #4569)
 - Fix: nested strings in REPL display no longer double-escape (BT-4203, #4596)
 - `actor-state-abroad` lint now covers `Block>>fork` receiver blocks (BT-4198, #4585)
+- `beamtalk test --full-traces` shows the complete filtered stack trace instead of the default 3-frame cap; the test runner outputs structured JSON frames in each failed `TestResult` (BT-4355, #4748)
+- Test failure output shows a source snippet at the error site — the failing line marked `>` plus one line of context on either side (BT-4358, #4756)
+- Test traces use fallback locations and block disambiguation for clearer frame output (BT-4354, #4739)
+- LSP completions for multi-arity Erlang BIFs such as `integer_to_binary/2` and `spawn/2,3,4` (BT-4145, #4744)
+- `beamtalk lint`, `beamtalk fmt` and LSP preload now skip `.gitignore`d paths; `build`/`test` deliberately do not (BT-4135, #4744)
+- LSP resolves package roots per open file, loading `beamtalk.toml` from the nearest ancestor on `didOpen` (BT-4158, #4744)
+- `just install` no longer silently omits stdlib class beams from a clean checkout (BT-4119, #4744)
+- Fix: `beamtalk lint --warnings-as-errors` now applies the package's `[diagnostics]` table, matching the REPL and build verdicts (BT-4377, #4758)
+- Fix: `workspace prune` no longer deletes a held flock lockfile, preventing double workspace starts (BT-4374, #4749)
+- Fix: VS Code extension authentication after the version handshake change (BT-4373, #4746)
 
 ### Standard Library
 
+- **`File open:mode:` / `File open:mode:do:` take a `FileMode`** — the `mode` parameter narrows from `Symbol` to the new `FileMode` type alias (`#read | #write | #append | #readWrite`). Literal callers are unaffected; a typed caller that forwards a `Symbol`-typed variable now gets a type warning (a build failure under `--warnings-as-errors`) and needs to narrow the argument to `FileMode` (BT-4382, #4775).
 - **New: `List>>withoutDuplicatesBy:` for order-preserving dedupe by key (BT-4306)** — keeps the first element for each key that the block answers, in the original order, and compares keys with `=:=` (like `unique`). Unlike `unique`, the result is not sorted. `#(3, 1, 2, 1, 3) withoutDuplicatesBy: [:x | x]` answers `#(3, 1, 2)`. This is Elixir's `Enum.uniq_by/2`. (#4691)
 - **New: `Server>>onLinkedExit:reason:` — hook for linked process exits (BT-4052)** — overriding `onLinkedExit: pid reason: reason` on a `Server` subclass opts the server into trapping exits and routes every non-parent `EXIT` signal (normal and abnormal) to the hook, never also to `handleInfo:`. The default implementation is a no-op; overriding it (in the class or any ancestor other than `Server`) is the opt-in. Parent EXITs and plain Actors are unchanged. (#4615)
 - `Exception>>details` text values are now Strings, not raw binaries — `(File readAll: "x") error details at: #path` answers a `String` that equals `"x"`, instead of a `Binary` that doesn't. Every file path, text identifier and error-details text across File, FileHandle, the FFI proxy, Node, and Workspace is now wrapped as a String at the producer (BT-4229, #4628)
@@ -399,7 +422,7 @@
 - **`SupervisionSpec>>withShutdown:` — per-child shutdown timeout (BT-3965)** — `withShutdown:` accepts an Integer (milliseconds), `#infinity`, or `#brutalKill`. `DynamicSupervisor` gains a `childShutdown` instance method as the pool-wide default. Invalid values fail the start with the validator's hint (#4436)
 
 - **`Dictionary at:ifPresent:` and `at:ifPresent:ifAbsent:` (BT-3824)** — two new methods on `Dictionary`: `at:ifPresent:` evaluates a one-parameter block with the value when the key exists (answers `nil` otherwise), and `at:ifPresent:ifAbsent:` evaluates the present-handler or absent-handler. Both are local-threading producers like `at:ifAbsent:`, lowered inline behind a runtime `Dictionary` check; a non-`Dictionary` receiver raises `type_error` (#4319)
-- **New: `Binary>>asCharlist` for Erlang FFI charlists (BT-4324)** — answers the same bytes as `toBytes` (a `List` of `Integer` 0–255) under the name FFI call sites look for, so `(Erlang inet) parse_address: (bind asCharlist)` passes a proper charlist instead of a binary the proxy must coerce. `String` inherits it through `Binary`; multi-byte input answers individual UTF-8 bytes, not graphemes or code points. Also added to the String/Binary shared-selector fast path (routing fixture, `beamtalk_primitive:is_string_binary_shared_selector/1`).
+- **New: `String>>asCharlist` for Erlang FFI charlists (BT-4324, BT-4380)** — answers the string's Unicode code points as a `List` of `Integer` (`unicode:characters_to_list/2` with `utf8`, the OTP charlist convention), so `(Erlang inet) parse_address: (bind asCharlist)` passes a proper charlist instead of a binary the proxy must coerce. It matches the proxy's own String-to-charlist coercion, so `"café" asCharlist` names the same file as passing `"café"` to `file:` directly: `"é" asCharlist` is `#(233)`, not the UTF-8 bytes `#(195, 169)` (use `toBytes` for those). `String`-only: a `Binary`'s raw bytes are not text and have no charlist reading. **`Binary>>asCharlist` was removed**; use `toBytes` for a `Binary`'s bytes as a `List` of `Integer`. `String fromCodePoints:` is the exact inverse; `String fromIolist:` reads it back too.
 
 - **`Ets` iteration, snapshot and atomic operations (BT-3831)** — `Ets` now `uses: Enumerable(V)`, gaining `do:`, `select:`, `collect:`, `inject:into:`, `detect:ifNone:`, `anySatisfy:`, `count:` over a point-in-time snapshot of values. New methods: `values` / `elements` (snapshot as `List`), `keysAndValuesDo:` (iterate key/value pairs), `asDictionary` (snapshot to `Dictionary`), `at:ifPresent:` (evaluate a block with the value if the key exists), `isEmpty` / `isNotEmpty`, `includes:` (value scan), `at:increment:` (atomic integer add via `ets:update_counter`), `at:update:` (atomic read-modify-write CAS loop), and `removeAll` (#4292)
 - Fix `Ets` raw FFI results silently coercing stored `#ok`, `{ok, X}` and `{error, R}` values into `Result` — `Ets` now opts out of the FFI proxy's Result conversion so stored user data passes through unchanged. `at:ifAbsent:` fallback blocks now run through the shared `call_block` guard instead of triggering the proxy's charlist-retry logic on `badarg` (BT-3836, BT-3837, #4298)

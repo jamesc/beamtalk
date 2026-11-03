@@ -78,7 +78,7 @@ class-body reload path in run mode for this to guard).
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, enqueue/1, enqueue_leaf_change/1, enqueue_alias_change/1, sync/0]).
+-export([start_link/0, enqueue/1, enqueue_leaf_change/1, enqueue_alias_change/1, sync/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -147,10 +147,14 @@ started, e.g. run mode has no live class-body reload path) and
 store currently holds, exactly as before this call existed. Never call
 this from the worker process itself (a `call` to self deadlocks); it is
 only for processes outside this `gen_server`, which never re-enters it.
+
+`Timeout` (ms) is explicit (BT-4382): a caller on an interactive path
+picks a short bound, rather than inheriting `gen_server:call`'s 5 s
+default behind a long re-check backlog.
 """.
--spec sync() -> ok.
-sync() ->
-    gen_server:call(?MODULE, sync).
+-spec sync(timeout()) -> ok.
+sync(Timeout) ->
+    gen_server:call(?MODULE, sync, Timeout).
 
 %%====================================================================
 %% gen_server callbacks

@@ -48,7 +48,9 @@
 
 use super::synced_call_sites_corpus::{construct_sources, generated_sources_of, statement_sources};
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
-use beamtalk_core::ast::{ClassKind, Expression, ExpressionStatement, MessageSelector, Module};
+use beamtalk_core::ast::{
+    BinarySegment, ClassKind, Expression, ExpressionStatement, MessageSelector, Module,
+};
 use beamtalk_core::semantic_analysis::{
     AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
 };
@@ -133,6 +135,14 @@ fn walk_slots(expr: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = s {
                     walk_slots(e, f);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments
+                .iter_mut()
+                .flat_map(BinarySegment::sub_expressions_mut)
+            {
+                walk_slots(e, f);
             }
         }
         Expression::Literal(..)

@@ -270,6 +270,13 @@ pub struct CoreErlangGenerator {
         beamtalk_core::source_analysis::Span,
         sequencing::PrecompiledSubexpr,
     >,
+    /// BT-4366: the span of the innermost expression being lowered, set by
+    /// `generate_expression` (and by `threaded_expression` for a send lowered
+    /// as a producer), saved and restored around each, so a nested argument
+    /// never leaks its span outward. Lowerings that nest their
+    /// control-transferring `call`/`apply` inside a `let`/`case` annotate that
+    /// node with this line through `annotate_current_send_call`.
+    pub(in crate::core_erlang) current_send_span: Option<beamtalk_core::source_analysis::Span>,
     /// ADR 0131 Phase 2 (BT-3749): the paren-unwrapped spans of the
     /// current method body's sequenced operand sites
     /// (`beamtalk_core`'s `sequenced_operand_sites` over each statement) —
@@ -600,6 +607,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             current_class_var_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
+            current_send_span: None,
             local_producer_sites: std::collections::HashSet::new(),
             value_assign_sites: std::collections::HashSet::new(),
             tier2_evaluated_block_sites: std::collections::HashSet::new(),

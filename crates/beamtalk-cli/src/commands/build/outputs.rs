@@ -28,6 +28,12 @@ pub(crate) struct PackageBuildOutputs<'a> {
     pub(crate) hex_dep_names: &'a [String],
     /// All `.bt` source files in the package.
     pub(crate) source_files: &'a [Utf8PathBuf],
+    /// The package's own classes, without its dependencies' — what the `.app`
+    /// file and `class_corpus.json` list. `hierarchy.pre_loaded_classes` also
+    /// holds every dependency's classes, which their own corpora under
+    /// `_build/deps/` already list (BT-4387).
+    pub(crate) own_class_infos:
+        &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 }
 
 /// Generate OTP application artefacts for a package build.
@@ -48,6 +54,7 @@ pub(crate) fn generate_package_outputs(
 ) -> Result<()> {
     let class_metadata = build_class_metadata(
         &hierarchy.pre_loaded_classes,
+        outputs.own_class_infos,
         &hierarchy.class_module_index,
         &pkg.name,
     );
@@ -117,7 +124,7 @@ pub(crate) fn generate_package_outputs(
     generate_package_corpus(
         corpus_dir,
         &pkg.name,
-        &hierarchy.pre_loaded_classes,
+        outputs.own_class_infos,
         outputs.source_files,
     )?;
 
@@ -364,11 +371,16 @@ fn generate_otp_app_callback(
 /// that `generate_app_file` writes into `{env, [{classes, [...]}]}`.
 /// Only classes belonging to `package_name` are included.
 ///
-/// The `kind` field is resolved using a `ClassHierarchy` that includes both
-/// the user/dep classes and stdlib builtins, so `Server subclass: MyServer`
-/// correctly resolves to kind `"actor"`.
+/// The `kind` field is resolved using a `ClassHierarchy` of
+/// `hierarchy_class_infos` (the user/dep classes) over the stdlib builtins, so
+/// `Server subclass: MyServer` correctly resolves to kind `"actor"`, even
+/// through a superclass in another package. Only `listed_class_infos` are
+/// candidates for listing: a dependency passes just its own classes, so a
+/// same-named class in a package it compiled against is never listed under
+/// this package's module (BT-4375).
 pub(crate) fn build_class_metadata(
-    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    hierarchy_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    listed_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     class_module_index: &std::collections::HashMap<String, String>,
     package_name: &str,
 ) -> Vec<app_file::ClassMetadata> {
@@ -376,10 +388,10 @@ pub(crate) fn build_class_metadata(
     // the superclass chain can be resolved across all sources.
     let mut hierarchy =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(all_class_infos.to_vec());
+    hierarchy.add_from_beam_meta(hierarchy_class_infos.to_vec());
 
     let module_prefix = format!("bt@{package_name}@");
-    all_class_infos
+    listed_class_infos
         .iter()
         .filter(|ci| !ci.is_internal)
         .filter_map(|ci| {

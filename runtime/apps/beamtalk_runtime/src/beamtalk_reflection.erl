@@ -189,9 +189,12 @@ source_file_from_module(ModuleName) ->
     try erlang:get_module_info(ModuleName, attributes) of
         Attrs ->
             case lists:keyfind(beamtalk_source, 1, Attrs) of
-                {beamtalk_source, [Path]} when is_binary(Path) -> Path;
-                {beamtalk_source, [Path]} when is_list(Path) -> path_to_utf8(Path);
-                _ -> nil
+                %% Binary and list attributes take the same conversion, so a
+                %% binary that is not valid UTF-8 is `nil` here too (BT-4370).
+                {beamtalk_source, [Path]} when is_binary(Path); is_list(Path) ->
+                    path_to_utf8(Path);
+                _ ->
+                    nil
             end
     catch
         error:badarg -> nil

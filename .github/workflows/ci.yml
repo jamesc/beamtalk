@@ -19,6 +19,12 @@ on:
       - '!SECURITY.md'
       - '!.github/skills/**'
       - '!.devcontainer/**'
+  # Manual run (Actions tab or `gh workflow run ci.yml --ref <branch>`): the
+  # `changes` job treats any non-PR event like a push to main, so a dispatch
+  # runs the full Linux suite *including* both coverage legs (BT-4379) —
+  # the way to exercise a coverage-recipe change before it merges. Badges
+  # are only ever published from a push to main.
+  workflow_dispatch:
   pull_request:
     branches: [main]
     paths:
@@ -45,13 +51,19 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Line-coverage floors, read by the coverage legs (which fail below them)
+  # and by publish-coverage (which paints a below-floor badge red). One
+  # definition so the gate and the badge colour can't disagree.
+  RUST_LINE_COVERAGE_MIN: '70'
+  ERLANG_LINE_COVERAGE_MIN: '50'
 
 jobs:
   # ─── Path decisions, computed once (BT-4209) ───────────────────────────
   # Every "does this PR touch X?" decision lives here and nowhere else. Jobs
   # gate on these outputs with a job-level `if:`, so a job that has nothing to
   # do never takes a runner (it used to occupy one just to exit from a
-  # step-level filter). On a push to main every path gate is true: main runs
+  # step-level filter). On a push to main (or a workflow_dispatch) every path
+  # gate is true: main runs
   # the full Linux suite, for every OTP in the window. macOS, Windows and the
   # desktop tests are ci-platforms.yml's (schedule / workflow_dispatch / the
   # `ci:all-platforms` PR label); only the ubuntu desktop leg for a PR touching
@@ -79,6 +91,10 @@ jobs:
       learn: ${{ steps.filter.outputs.learn }}
       # runtime/ changed: test-dialyzer runs the (slow) `just dialyzer` step.
       runtime: ${{ steps.filter.outputs.runtime }}
+      # The Justfile (home of the coverage-* recipes) or this workflow
+      # changed: the coverage legs run on the PR too (BT-4379), so a broken
+      # coverage recipe fails before merge instead of on main.
+      coverage: ${{ steps.filter.outputs.coverage }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,10 +107,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            # push (main): the full Linux suite; no desktop (ci-platforms.yml's).
+            # push (main) / workflow_dispatch: the full Linux suite; no
+            # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in corpus codegen core_diff_modes learn runtime; do echo "$k=true"; done
+              for k in corpus codegen core_diff_modes learn runtime coverage; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -139,6 +156,8 @@ jobs:
 
           runtime=$(flag matches 'runtime/*')
 
+          coverage=$(flag matches Justfile .github/workflows/ci.yml)
+
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
@@ -154,6 +173,7 @@ jobs:
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
             echo "runtime=$runtime"
+            echo "coverage=$coverage"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -228,19 +248,29 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
-      # check-codegen-boundary used to be its own job; it needs only the Rust
-      # toolchain + Just (cargo metadata, no compilation), both already here —
-      # and unlike check-corpus it is not a required status check, so folding
-      # it in saves a runner spin-up per run for zero wall-clock cost (it
-      # takes seconds alongside clippy).
+      # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
+      # so beamtalk-lsp/beamtalk-lint (analysis only) stop compiling it; this
+      # guard fails a PR that adds a dependency edge back onto it, which would
+      # otherwise compile and pass every test while regressing the build-time
+      # win. It used to be its own job; it needs only the Rust toolchain +
+      # Just (cargo metadata, no compilation), both already here — and unlike
+      # check-corpus it is not a required status check, so folding it in
+      # saves a runner spin-up per run for zero wall-clock cost (it takes
+      # seconds alongside clippy).
       - name: Check codegen dependency boundary (BT-3371)
         run: just check-codegen-boundary
 
-      # dialyzer-specs used to run in test-dialyzer on every OTP matrix leg;
-      # the generated -spec attributes don't depend on the OTP version, so it
-      # runs once here instead. Needs the beamtalk binary + stdlib (built via
-      # coverage-build, no --all-targets) and escript — both available here.
+      # Generated -spec attributes are OTP-independent, but the Dialyzer that
+      # judges them is not (each OTP has its own built-in type set and spec
+      # checks). So a PR — whose test-dialyzer only runs when runtime/
+      # changed, while any codegen change can alter the specs — validates
+      # them once here on the .tool-versions OTP, and a push to main /
+      # workflow_dispatch validates them on every OTP in the window, in
+      # test-dialyzer (BT-4379), keeping this PR-critical job no longer on
+      # main than it needs to be. Needs the beamtalk binary + stdlib (built
+      # via coverage-build, no --all-targets) and escript — both available.
       - name: Dialyzer spec validation (generated -spec attributes)
+        if: github.event_name == 'pull_request'
         run: just dialyzer-specs
 
   # The fast Rust tier on Linux (everything but the corpus tier, which is the
@@ -416,13 +446,6 @@ jobs:
       - name: Check corpus.json is up to date
         run: just check-corpus
 
-  # ─── Codegen dependency boundary guard (BT-3371) ───────────────────────
-  # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
-  # specifically so beamtalk-lsp/beamtalk-lint (analysis only, never
-  # generation) stop compiling it. Nothing else re-checks that on every PR —
-  # a future dependency edge back onto beamtalk-codegen would compile and
-  # pass every existing test, silently regressing the build-time win. Rust-only
-  # (just resolves the dependency graph, no compilation needed), so it stays fast.
   # ─── Corpus .core diff harness (BT-3509, ADR 0122 Phase 0) ────────────
   # Informational: reports whether a PR touching crates/beamtalk-codegen/
   # changes generated Core Erlang for the stdlib + bootstrap-test corpus
@@ -827,9 +850,10 @@ jobs:
 
   test-dialyzer:
     needs: [changes, otp-matrix]
-    # No path-gated steps remain in this job (`dialyzer-specs` moved to the
-    # lint job, where it runs once instead of once per OTP leg), so the whole
-    # job only runs when runtime/ changed — on main that is always true.
+    # The whole job only runs when runtime/ changed — on main (and on a
+    # workflow_dispatch) that is always true. Its `dialyzer-specs` step runs
+    # only there, across the full OTP window; a PR validates the specs once
+    # in the lint job instead (see the comment there, BT-4379).
     if: needs.changes.outputs.runtime == 'true'
     strategy:
       fail-fast: false
@@ -898,6 +922,10 @@ jobs:
 
       - name: Dialyzer type checking (Erlang runtime)
         run: just dialyzer
+
+      - name: Dialyzer spec validation (generated -spec attributes)
+        if: github.event_name != 'pull_request'
+        run: just dialyzer-specs
 
   # ─── Learning-guide doctests (BT-3927) ─────────────────────────────────
   # `just test-learn` compiles every docs/learning/ fixture and runs the
@@ -1132,13 +1160,20 @@ jobs:
   #   (fast tier via nextest, then the serialized e2e/ignored suites).
   # - coverage-erlang: `just coverage-all` (eunit + E2E + stdlib + BUnit
   #   with cover), collecting its own E2E coverdata via `coverage-e2e`.
-  # - publish-coverage: pushes both badges once both legs are green.
+  # - publish-coverage: on a push to main, publishes each leg's badge from
+  #   whatever report that leg produced — even when the leg failed its
+  #   threshold (the badge goes red) — so a miss never freezes the badges
+  #   at the last passing value. The failed leg job stays the signal.
+  # The legs also run on workflow_dispatch and on PRs touching the Justfile
+  # or this workflow (the `coverage` path gate), so recipe changes are
+  # exercised before merge (BT-4379).
   # Pass 1 excludes the corpus_tests slow tier (see Justfile's
   # _coverage-rust-run-tests): that tier already runs sharded in
   # test-corpus on every main push, and re-running it instrumented here
   # cost ~17 min alone.
   coverage-rust:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-latest
     # Measured ~22 min (instrumented build ~10, fast tier ~6.5, serialized
     # e2e ~5); 40 leaves headroom for cold caches.
@@ -1290,11 +1325,11 @@ jobs:
           echo "rust_coverage=${rust_coverage}" >> "$GITHUB_OUTPUT"
           
           # Check thresholds using awk for portability (no bc dependency)
-          line_check=$(awk -v cov="$rust_coverage" 'BEGIN { if (cov < 70.0) print "FAIL"; else print "PASS" }')
+          line_check=$(awk -v cov="$rust_coverage" -v min="$RUST_LINE_COVERAGE_MIN" 'BEGIN { if (cov < min + 0) print "FAIL"; else print "PASS" }')
           branch_check=$(awk -v cov="$rust_branch" 'BEGIN { if (cov < 80.0) print "WARN"; else print "PASS" }')
           
           if [ "$line_check" = "FAIL" ]; then
-            echo "❌ FAILURE: Rust line coverage ${rust_coverage}% is below 70% threshold"
+            echo "❌ FAILURE: Rust line coverage ${rust_coverage}% is below ${RUST_LINE_COVERAGE_MIN}% threshold"
             exit 1
           fi
           
@@ -1312,7 +1347,8 @@ jobs:
           exit 1
 
   coverage-erlang:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-latest
     # Measured ~10.5 min (eunit + stdlib + BUnit with cover); 25 leaves
     # headroom for cold caches.
@@ -1444,11 +1480,11 @@ jobs:
           echo "Erlang Branch Coverage: ${erlang_branch}%"
           echo "erlang_coverage=${erlang_coverage}" >> "$GITHUB_OUTPUT"
           
-          line_check=$(awk -v cov="$erlang_coverage" 'BEGIN { if (cov < 50.0) print "FAIL"; else print "PASS" }')
+          line_check=$(awk -v cov="$erlang_coverage" -v min="$ERLANG_LINE_COVERAGE_MIN" 'BEGIN { if (cov < min + 0) print "FAIL"; else print "PASS" }')
           branch_check=$(awk -v cov="$erlang_branch" 'BEGIN { if (cov < 60.0) print "WARN"; else print "PASS" }')
           
           if [ "$line_check" = "FAIL" ]; then
-            echo "❌ FAILURE: Erlang line coverage ${erlang_coverage}% is below 50% threshold"
+            echo "❌ FAILURE: Erlang line coverage ${erlang_coverage}% is below ${ERLANG_LINE_COVERAGE_MIN}% threshold"
             exit 1
           fi
           
@@ -1466,7 +1502,16 @@ jobs:
           exit 1
 
   publish-coverage:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # `!cancelled()` (always(), minus a cancelled run): a leg that fails its
+    # threshold must not stop publishing, or the badges freeze at the last
+    # passing value and one leg's miss freezes the other leg's badge too
+    # (BT-4379). Each leg writes its percentage output *before* its
+    # threshold check exits non-zero, and a failed job's step outputs are
+    # still visible through `needs`, so a below-floor value arrives here and
+    # is published as a red badge. The failed leg job — not this one — stays
+    # the workflow's failure signal. Main pushes only: PR and dispatch runs
+    # measure coverage but never publish it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [coverage-rust, coverage-erlang]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1479,12 +1524,16 @@ jobs:
           persist-credentials: true
 
       - name: Publish coverage badges
+        env:
+          RUST_COV: ${{ needs.coverage-rust.outputs.rust_coverage }}
+          ERLANG_COV: ${{ needs.coverage-erlang.outputs.erlang_coverage }}
         run: |
-          # Determine badge colors based on coverage percentage
+          # Badge colour: red below the leg's own floor (the threshold the leg
+          # just failed), otherwise graded by percentage.
           badge_color() {
-            local cov=$1
-            awk -v c="$cov" 'BEGIN {
-              if (c >= 80) print "brightgreen"
+            awk -v c="$1" -v min="$2" 'BEGIN {
+              if (c < min + 0) print "red"
+              else if (c >= 80) print "brightgreen"
               else if (c >= 70) print "green"
               else if (c >= 60) print "yellowgreen"
               else if (c >= 50) print "yellow"
@@ -1492,29 +1541,27 @@ jobs:
             }'
           }
 
-          RUST_COV="${{ needs.coverage-rust.outputs.rust_coverage }}"
-          ERLANG_COV="${{ needs.coverage-erlang.outputs.erlang_coverage }}"
+          # A leg contributes its badge only when it produced a report (a
+          # numeric percentage). A leg that died before measuring anything
+          # (build/test failure, timeout) leaves its badge untouched rather
+          # than overwriting it with "unknown"; its failed job is the signal.
+          args=()
+          add_badge() { # <file> <label> <value> <floor>
+            if echo "$3" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
+              args+=("$1" "{\"schemaVersion\":1,\"label\":\"$2\",\"message\":\"$3%\",\"color\":\"$(badge_color "$3" "$4")\"}")
+            else
+              echo "::warning::$2: no report from its leg, badge left unchanged"
+            fi
+          }
+          add_badge rust-coverage.json "Rust coverage" "$RUST_COV" "$RUST_LINE_COVERAGE_MIN"
+          add_badge erlang-coverage.json "Erlang coverage" "$ERLANG_COV" "$ERLANG_LINE_COVERAGE_MIN"
 
-          # Guard against missing or non-numeric coverage values
-          RUST_MSG="unknown"
-          RUST_COLOR="lightgrey"
-          ERLANG_MSG="unknown"
-          ERLANG_COLOR="lightgrey"
-
-          if echo "$RUST_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
-            RUST_MSG="${RUST_COV}%"
-            RUST_COLOR=$(badge_color "$RUST_COV")
-          fi
-
-          if echo "$ERLANG_COV" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
-            ERLANG_MSG="${ERLANG_COV}%"
-            ERLANG_COLOR=$(badge_color "$ERLANG_COV")
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No coverage report from either leg; nothing to publish"
+            exit 0
           fi
 
           # Shared with liveview.yml's `coverage` job (elixir-coverage.json) —
           # see scripts/ci/publish-coverage-badge.sh for the retry/worktree
           # rationale (PR #3549 review: dedupe the two near-identical copies).
-          scripts/ci/publish-coverage-badge.sh \
-            "Update coverage badges [skip ci]" \
-            rust-coverage.json "{\"schemaVersion\":1,\"label\":\"Rust coverage\",\"message\":\"${RUST_MSG}\",\"color\":\"${RUST_COLOR}\"}" \
-            erlang-coverage.json "{\"schemaVersion\":1,\"label\":\"Erlang coverage\",\"message\":\"${ERLANG_MSG}\",\"color\":\"${ERLANG_COLOR}\"}"
+          scripts/ci/publish-coverage-badge.sh "Update coverage badges [skip ci]" "${args[@]}"

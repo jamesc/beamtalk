@@ -92,6 +92,10 @@ pub(crate) struct LintResult {
 /// `CompilerOptions::known_erlang_modules` (BT-4022): the package's
 /// hex-dep/native ebin modules plus own `native/*.erl`, so the
 /// `unresolved_ffi` check agrees with `build`/`lint`/LSP.
+///
+/// `diagnostics_overrides` is the package's `[diagnostics]` table
+/// (BT-4377), applied by the shared lint pipeline after `@expect` so MCP
+/// `lint` reports the same severities as `beamtalk lint`/`build`/the REPL.
 #[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
 pub(crate) fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
@@ -108,6 +112,7 @@ pub(crate) fn run_module_analysis(
     is_stub_file: bool,
     file_stem: Option<&str>,
     known_erlang_modules: &std::collections::HashSet<String>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -138,6 +143,7 @@ pub(crate) fn run_module_analysis(
             source,
             analysis_ctx,
             file_stem,
+            diagnostics_overrides,
             &mut diags,
         );
 
@@ -280,6 +286,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         has_package_dependencies,
         native_type_registry,
         known_erlang_modules,
+        diagnostics_overrides,
         pre_loaded_protocol_defs,
         protocol_sources,
     } = build_lint_analysis_context(
@@ -327,6 +334,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
                 .file_stem()
                 .and_then(std::ffi::OsStr::to_str),
             &known_erlang_modules,
+            &diagnostics_overrides,
         );
 
         let (provision_diags, file_diags) =
@@ -611,6 +619,8 @@ struct LintAnalysisContext {
     native_type_registry:
         Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
     known_erlang_modules: std::collections::HashSet<String>,
+    /// The package's `[diagnostics]` table (BT-4377); empty outside a package.
+    diagnostics_overrides: beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
 }
@@ -655,6 +665,17 @@ fn build_lint_analysis_context(
     let native_type_registry = build_native_type_registry(path);
     // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
     let known_erlang_modules = collect_known_erlang_modules(path);
+    // BT-4377: the same `[diagnostics]` loader the compiler port (REPL) and
+    // LSP use, so MCP `lint` applies the table `beamtalk lint`/`build` apply.
+    let diagnostics_overrides = beamtalk_project::package::find_package_root(std::path::Path::new(
+        path,
+    ))
+    .map_or_else(
+        beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new,
+        |root| {
+            beamtalk_core::compilation::diagnostics_policy::load_diagnostics_table_for_root(&root)
+        },
+    );
     let pre_loaded_protocol_defs =
         package_then_dependency_protocol_defs(trait_users, &all_protocol_defs);
     let protocol_sources =
@@ -664,6 +685,7 @@ fn build_lint_analysis_context(
         has_package_dependencies,
         native_type_registry,
         known_erlang_modules,
+        diagnostics_overrides,
         pre_loaded_protocol_defs,
         protocol_sources,
     }
@@ -778,6 +800,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         has_package_dependencies,
         native_type_registry,
         known_erlang_modules,
+        diagnostics_overrides,
         pre_loaded_protocol_defs,
         protocol_sources,
     } = build_lint_analysis_context(
@@ -824,6 +847,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             is_stub_file,
             file.file_stem().and_then(std::ffi::OsStr::to_str),
             &known_erlang_modules,
+            &diagnostics_overrides,
         );
 
         let (provision_diags, lint_diags) =

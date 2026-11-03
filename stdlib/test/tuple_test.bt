@@ -147,3 +147,50 @@ TestCase subclass: TupleTest
     a := 1
     b := 2
     self assert: "got { {a, b} }" equals: "got " ++ {a, b} printString
+
+  // BT-4400: `at:` reads an in-range element inline and leaves every other
+  // index to the runtime helper, which owns the errors. Cover both paths, and
+  // both a dynamic send and a typed (guarded direct) send.
+  tupleAt: t :: Tuple index: i => t at: i
+
+  testAtInRange =>
+    t := {#a, #b, #c}
+    self assert: (t at: 1) equals: #a
+    self assert: (t at: 3) equals: #c
+    self assert: (self tupleAt: t index: 2) equals: #b
+
+  testAtOutOfRangeRaises =>
+    t := {#a, #b, #c}
+    self should: [t at: 0] raise: #does_not_understand
+    self should: [t at: 4] raise: #does_not_understand
+    self should: [self tupleAt: t index: 4] raise: #does_not_understand
+    self should: [(Tuple new) at: 1] raise: #does_not_understand
+
+  testAtNonIntegerRaises =>
+    t := {#a, #b, #c}
+    // Untyped block parameters hide the index's type from the checker,
+    // which rejects a literal non-integer index at compile time.
+    dynamicAt := [:tup :i | tup at: i]
+    typedAt := [:tup :i | self tupleAt: tup index: i]
+    self should: [dynamicAt value: t value: 1.0] raise: #type_error
+    self should: [dynamicAt value: t value: #a] raise: #type_error
+    self should: [typedAt value: t value: 1.5] raise: #type_error
+
+  // BT-4400 conformance: the compiled `at:` inlines the first clause of
+  // `beamtalk_tuple:at/2` (the in-range rule) and leaves every other index to
+  // it. Run both over one index table and require the same outcome, so the
+  // Rust guard and the Erlang helper cannot drift apart unnoticed.
+  outcomeOf: aBlock => [aBlock value] on: Error do: [:e | {#error, e kind}]
+
+  testAtMatchesRuntimeHelper =>
+    viaMethod := [:tup :i | tup at: i]
+    viaHelper := [:tup :i | Erlang beamtalk_tuple at: tup idx: i]
+    #({#a, #b, #c}, {})
+      do: [:t |
+        #(-1, 0, 1, 2, 3, 4, 1.0, #a, nil)
+          do: [:i |
+            self assert: (self outcomeOf: [
+              viaMethod value: t value: i
+            ]) equals: (self outcomeOf: [viaHelper value: t value: i])
+          ]
+      ]

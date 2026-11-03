@@ -47,9 +47,8 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 %% Exported for testing stack trace formatting
 -export([
     format_stacktrace/1,
-    format_stackframe/1,
-    ensure_test_context/4,
     stack_frames/1,
+    source_snippet/2,
     test_failure/4,
     test_failure_untraced/4
 ]).
@@ -487,11 +486,22 @@ decode_beam_error(timeout) ->
 decode_beam_error(Other) ->
     beamtalk_primitive:print_string(Other).
 
+-type trace_entry() :: {
+    Rendered :: binary(),
+    Parts :: map(),
+    Count :: pos_integer(),
+    Src :: binary() | nil,
+    IsStdlib :: boolean()
+}.
+
 -doc """
 Format a BEAM stacktrace for display in test failure messages.
 
 Filters out internal test runner and OTP frames; shows up to 3 user frames
 (all of them with `beamtalk test --full-traces`).
+The innermost non-stdlib frame whose source file and line are readable (else
+the innermost readable stdlib frame) is followed by a source snippet
+(BT-4358, BT-4388); snippet lines are context, not extra frames.
 Error location (innermost frame) is shown first, with callers going outward.
 Returns an empty binary when no relevant frames exist.
 """.
@@ -503,14 +513,161 @@ format_stacktrace(Frames) ->
     %% Keep that order so the error location appears first in output.
     %% When more than 3 frames exist, show the 2 innermost plus the outermost
     %% (test method) so the caller with file/line info is preserved.
-    case trace_entries(Frames) of
-        [] ->
-            <<>>;
-        Entries ->
-            Lines = [entry_line(E) || E <- Entries],
-            iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)])
+    render_at(trace_entries(Frames)).
+
+-doc """
+Render entries as `\n  at ` lines (empty binary for no entries), with the
+source snippet after the entry it belongs to. The single renderer for the
+`at` text: every `at` line corresponds to exactly one entry, in order, and the
+structured `frames` are derived from the same list (`entry_frame/1`).
+""".
+-spec render_at([trace_entry()]) -> binary().
+render_at([]) ->
+    <<>>;
+render_at(Entries) ->
+    Snippet = first_snippet(Entries),
+    Lines = [
+        [entry_line(E), snippet_after(Idx, Snippet)]
+     || {Idx, E} <- lists:zip(lists:seq(1, length(Entries)), Entries)
+    ],
+    iolist_to_binary(["\n  at " | lists:join("\n  at ", Lines)]).
+
+%% Snippet lines follow the `at` line of the entry they belong to. They never
+%% start with `  at `, so the i-th `at` line still pairs with `frames[i]`.
+-spec snippet_after(pos_integer(), {pos_integer(), binary()} | none) -> iodata().
+snippet_after(Idx, {Idx, Snippet}) -> Snippet;
+snippet_after(_Idx, _) -> [].
+
+-doc """
+The source snippet for the innermost entry whose source file and line are
+readable, as `{Index, Snippet}` (1-based entry index), or `none` (BT-4358).
+
+A user (non-`bt@stdlib@`) entry is preferred over a stdlib one, so a failure
+raised inside a stdlib method shows the user's calling line rather than
+stdlib internals; a stdlib entry is used only when no user entry is
+readable (BT-4388).
+""".
+-spec first_snippet([trace_entry()]) -> {pos_integer(), binary()} | none.
+first_snippet(Entries) ->
+    Indexed = lists:zip(lists:seq(1, length(Entries)), Entries),
+    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Indexed),
+    case first_readable(User) of
+        none -> first_readable(Stdlib);
+        Found -> Found
     end.
 
+-spec first_readable([{pos_integer(), trace_entry()}]) -> {pos_integer(), binary()} | none.
+first_readable([]) ->
+    none;
+first_readable([{Idx, {_Text, #{line := Line}, _N, Src, _IsStdlib}} | Rest]) ->
+    case is_integer(Line) andalso is_binary(Src) andalso source_snippet(Src, Line) of
+        Snippet when is_binary(Snippet) -> {Idx, Snippet};
+        _ -> first_readable(Rest)
+    end.
+
+%% Caps on what a snippet reads and shows, so a huge or minified source file
+%% can neither stall a test run nor flood its output.
+-define(SNIPPET_MAX_READ_BYTES, 262144).
+-define(SNIPPET_MAX_LINE_CHARS, 160).
+-define(SNIPPET_CONTEXT, 1).
+
+-doc """
+Render the source around `Line` of the file `Path`: the failing line marked
+`>` with one line of context either side, as `"\n    12 | text"` lines.
+
+Returns `none` (never crashes) when the file is unreadable, `Line` is beyond
+the first 256 KiB or the end of the file, or the text is not valid UTF-8.
+Overlong lines are truncated with `...`.
+""".
+-spec source_snippet(binary(), pos_integer()) -> binary() | none.
+source_snippet(Path, Line) when is_binary(Path), is_integer(Line), Line > 0 ->
+    case read_head(Path) of
+        {ok, Data, Truncated} ->
+            Rows = complete_rows(Data, Truncated),
+            From = max(1, Line - ?SNIPPET_CONTEXT),
+            To = Line + ?SNIPPET_CONTEXT,
+            case Line =< length(Rows) of
+                true -> render_snippet(Rows, From, To, Line);
+                false -> none
+            end;
+        error ->
+            none
+    end;
+source_snippet(_, _) ->
+    none.
+
+%% Split into complete lines. The last element is dropped when it is not a
+%% whole line: a cut-off partial line when the read was truncated, or the
+%% empty tail after a final newline (BT-4388).
+-spec complete_rows(binary(), boolean()) -> [binary()].
+complete_rows(Data, Truncated) ->
+    Rows = binary:split(Data, <<"\n">>, [global]),
+    case Truncated orelse binary:last(Data) =:= $\n of
+        true -> lists:droplast(Rows);
+        false -> Rows
+    end.
+
+-spec read_head(binary()) -> {ok, binary(), boolean()} | error.
+read_head(Path) ->
+    try file:open(Path, [read, binary, raw]) of
+        {ok, Fd} ->
+            try file:read(Fd, ?SNIPPET_MAX_READ_BYTES) of
+                {ok, Data} when byte_size(Data) < ?SNIPPET_MAX_READ_BYTES ->
+                    {ok, Data, false};
+                {ok, Data} ->
+                    %% Cap reached: truncated unless the file ends exactly here.
+                    {ok, Data, file:read(Fd, 1) =/= eof};
+                _ ->
+                    error
+            after
+                file:close(Fd)
+            end;
+        _ ->
+            error
+    catch
+        _:_ -> error
+    end.
+
+-spec render_snippet([binary()], pos_integer(), pos_integer(), pos_integer()) -> binary() | none.
+render_snippet(Rows, From, To, Line) ->
+    Window = lists:sublist(Rows, From, To - From + 1),
+    Numbered = lists:zip(lists:seq(From, From + length(Window) - 1), Window),
+    Width = length(integer_to_list(From + length(Window) - 1)),
+    Rendered = [snippet_row(N, Text, Width, N =:= Line) || {N, Text} <- Numbered],
+    case lists:member(invalid, Rendered) of
+        true -> none;
+        false -> iolist_to_binary(Rendered)
+    end.
+
+-spec snippet_row(pos_integer(), binary(), pos_integer(), boolean()) -> iodata() | invalid.
+snippet_row(N, Raw, Width, IsFailing) ->
+    Text0 = string:trim(Raw, trailing, "\r"),
+    case unicode:characters_to_binary(Text0) of
+        Text when is_binary(Text) ->
+            Marker =
+                case IsFailing of
+                    true -> ">";
+                    false -> " "
+                end,
+            Num = string:pad(integer_to_list(N), Width, leading),
+            ["\n    ", Marker, " ", Num, " | ", truncate_line(Text)];
+        _ ->
+            invalid
+    end.
+
+-spec truncate_line(binary()) -> binary().
+truncate_line(Text) ->
+    case string:length(Text) > ?SNIPPET_MAX_LINE_CHARS of
+        true ->
+            <<
+                (unicode:characters_to_binary(string:slice(Text, 0, ?SNIPPET_MAX_LINE_CHARS)))/binary,
+                "..."
+            >>;
+        false ->
+            Text
+    end.
+
+-ifdef(TEST).
 -doc """
 The structured form of the frames `format_stacktrace/1` renders (BT-4355).
 
@@ -524,6 +681,7 @@ cannot disagree. Raw Erlang module/function/arity are never included.
 -spec stack_frames(list()) -> [map()].
 stack_frames(Frames) ->
     [entry_frame(E) || E <- trace_entries(Frames)].
+-endif.
 
 -doc """
 Whether the full filtered trace (not the 3-frame default) is wanted.
@@ -538,27 +696,56 @@ full_traces() ->
 Filtered, selected and repeat-collapsed frames as `{Line, Parts, Count}`,
 where Line is the rendered text of the frame.
 """.
--spec trace_entries(list()) -> [{binary(), map(), pos_integer()}].
+-spec trace_entries(list()) -> [trace_entry()].
 trace_entries(Frames) ->
-    Relevant = select_frames(filter_stackframes(Frames)),
-    collapse_repeats([
-        begin
-            Wrapped = beamtalk_stack_frame:wrap_frame(F),
-            {
-                beamtalk_stack_frame:format_frame(Wrapped),
-                beamtalk_stack_frame:frame_parts(Wrapped),
-                1
-            }
-        end
-     || F <- Relevant
-    ]).
+    collapse_repeats(frame_entries(select_frames(filter_stackframes(Frames)))).
 
--spec entry_line({binary(), map(), pos_integer()}) -> binary().
-entry_line({Line, _Parts, 1}) -> Line;
-entry_line({Line, _Parts, N}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+-spec frame_entries(list()) -> [trace_entry()].
+frame_entries(Frames) ->
+    [frame_entry(F) || F <- Frames].
 
--spec entry_frame({binary(), map(), pos_integer()}) -> map().
-entry_frame({_Line, Parts, N}) -> Parts#{repeat => N}.
+-spec frame_entry(term()) -> trace_entry().
+frame_entry(Frame) ->
+    Wrapped = beamtalk_stack_frame:wrap_frame(Frame),
+    {
+        beamtalk_stack_frame:format_frame(Wrapped),
+        beamtalk_stack_frame:frame_parts(Wrapped),
+        1,
+        beamtalk_stack_frame:frame_source_path(Wrapped),
+        is_stdlib_module(maps:get(module, Wrapped, undefined))
+    }.
+
+-doc """
+The one entry list a test failure is rendered from (BT-4402): the filtered,
+selected, repeat-collapsed entries of the stack, followed by a synthetic
+test-method entry when the test method's own frame is not among the selected
+frames (a helper from the same module does not count). Returned as
+`{Real, Synthetic}` (`Synthetic` is `[]` or one entry) so the untraced shape
+can render only the synthetic one; `Real ++ Synthetic` is what the `at` text
+and the structured `frames` both come from. The synthetic entry is built like
+any other frame, from an empty location, so it gets the same
+`beamtalk_source` file fallback and path rules.
+""".
+-spec build_trace(atom(), atom(), list()) -> {[trace_entry()], [trace_entry()]}.
+build_trace(Module, MethodName, Stacktrace) ->
+    Relevant = select_frames(filter_stackframes(Stacktrace)),
+    HasTestFrame = lists:any(
+        fun({Mod, Fun, _Arity, _Loc}) -> Mod =:= Module andalso Fun =:= MethodName end,
+        Relevant
+    ),
+    Synthetic =
+        case HasTestFrame of
+            true -> [];
+            false -> [frame_entry({Module, MethodName, 0, []})]
+        end,
+    {collapse_repeats(frame_entries(Relevant)), Synthetic}.
+
+-spec entry_line(trace_entry()) -> binary().
+entry_line({Line, _Parts, 1, _Src, _Std}) -> Line;
+entry_line({Line, _Parts, N, _Src, _Std}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+
+-spec entry_frame(trace_entry()) -> map().
+entry_frame({_Line, Parts, N, _Src, _Std}) -> Parts#{repeat => N}.
 
 -doc """
 Collapse adjacent identical rendered frame lines into one.
@@ -568,22 +755,18 @@ Distinct frames that still render identically (a recursive send such as
 the same `Class>>selector (file)` line twice. The repeat count is kept, in
 Beamtalk terms, as a trailing `[xN]` marker.
 """.
--spec collapse_repeats([{binary(), map(), pos_integer()}]) ->
-    [{binary(), map(), pos_integer()}].
+-spec collapse_repeats([trace_entry()]) -> [trace_entry()].
 collapse_repeats([]) ->
     [];
-collapse_repeats([{Line, Parts, N} | Rest]) ->
-    {Same, Others} = lists:splitwith(fun({L, _, _}) -> L =:= Line end, Rest),
-    [{Line, Parts, N + length(Same)} | collapse_repeats(Others)].
+collapse_repeats([{Line, Parts, N, Src, Std} | Rest]) ->
+    {Same, Others} = lists:splitwith(fun({L, _, _, _, _}) -> L =:= Line end, Rest),
+    [{Line, Parts, N + length(Same), Src, Std} | collapse_repeats(Others)].
 
--doc """
-Format a single raw BEAM stacktrace frame for display. Delegates to the shared
-renderer `beamtalk_stack_frame:format_frame/1`, so test failure output and
-`Exception>>stackTrace` print a frame byte-identically (BT-4357).
-""".
--spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> binary().
-format_stackframe(Frame) ->
-    beamtalk_stack_frame:format_frame(beamtalk_stack_frame:wrap_frame(Frame)).
+-spec is_stdlib_module(term()) -> boolean().
+is_stdlib_module(Module) when is_atom(Module) ->
+    lists:prefix("bt@stdlib@", atom_to_list(Module));
+is_stdlib_module(_) ->
+    false.
 
 -doc "Filter stacktrace frames, removing internal test runner and OTP frames.".
 -spec filter_stackframes(list()) -> list().
@@ -609,7 +792,7 @@ Select up to 3 representative frames from a filtered stacktrace.
 When 3 or fewer frames exist, return all of them. When more than 3,
 keep the 2 innermost (error site) plus the outermost (test method)
 so the caller's file/line info is preserved rather than being truncated
-and replaced by a synthetic frame from ensure_test_context/4.
+and replaced by a synthetic frame from build_trace/3.
 With `--full-traces` (`full_traces/0`) every filtered frame is kept.
 """.
 -spec select_frames(list()) -> list().
@@ -626,80 +809,40 @@ select_frames([First, Second | _] = Frames, false) ->
 
 -doc "Format a test failure message combining error description and stacktrace.".
 -spec format_test_error(atom(), term(), list()) -> binary().
-format_test_error(error, Reason, Stacktrace) ->
-    Msg = decode_beam_error(Reason),
+format_test_error(Class, Reason, Stacktrace) ->
     ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
-format_test_error(throw, Reason, Stacktrace) ->
-    Msg = iolist_to_binary([<<"throw: ">>, decode_beam_error(Reason)]),
-    ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
-format_test_error(exit, Reason, Stacktrace) ->
-    Msg = iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]),
-    ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>;
+    <<(error_head(Class, Reason))/binary, ST/binary>>.
+
+-doc "The message of a caught exception, without any stacktrace.".
+-spec error_head(atom(), term()) -> binary().
+error_head(error, Reason) ->
+    decode_beam_error(Reason);
+error_head(throw, Reason) ->
+    iolist_to_binary([<<"throw: ">>, decode_beam_error(Reason)]);
+error_head(exit, Reason) ->
+    iolist_to_binary([<<"exit: ">>, decode_beam_error(Reason)]);
 %% Erlang only supports error/throw/exit as exception classes, so this
 %% clause is never reached in practice — retained for exhaustiveness.
-format_test_error(Class, Reason, Stacktrace) ->
+error_head(Class, Reason) ->
     ClassBin = atom_to_binary(Class, utf8),
     ReasonBin = decode_beam_error(Reason),
-    Msg = <<ClassBin/binary, ": ", ReasonBin/binary>>,
-    ST = format_stacktrace(Stacktrace),
-    <<Msg/binary, ST/binary>>.
+    <<ClassBin/binary, ": ", ReasonBin/binary>>.
 
 -doc """
-Ensure the test method location appears in the failure message.
-
-When the BEAM stacktrace is truncated (default depth is 8), the test method
-frame can be lost. This function checks whether the test module appears in
-the filtered stacktrace; if not, it prepends a synthetic frame so the user
-always sees where the failing test is defined.
-""".
--spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
-ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    case lacks_test_frame(Module, MethodName, Stacktrace) of
-        false ->
-            FailMsg;
-        true ->
-            %% Rendered through format_stackframe/1 with an empty location so
-            %% the synthetic line gets the same `beamtalk_source` file fallback
-            %% (and path rules) as any other frame.
-            Line = format_stackframe({Module, MethodName, 0, []}),
-            Context = iolist_to_binary(["\n  at ", Line]),
-            inject_test_context(FailMsg, Context)
-    end.
-
--doc """
-True when the test method's own frame is not among the rendered frames.
-Checks the rendered frames (after filter + select), not the full stack: a
-helper from the same module doesn't count.
-""".
--spec lacks_test_frame(atom(), atom(), list()) -> boolean().
-lacks_test_frame(Module, MethodName, Stacktrace) ->
-    Rendered = select_frames(filter_stackframes(Stacktrace)),
-    not lists:any(
-        fun({Mod, Fun, _Arity, _Loc}) ->
-            Mod =:= Module andalso Fun =:= MethodName
-        end,
-        Rendered
-    ).
-
--doc """
-Build a failed-test result: the message with its test context line, plus the
-structured frames matching the rendered `at` lines (including the synthetic
-test-method frame when `ensure_test_context/4` adds one).
+Build a failed-test result from the message `Head` (no stacktrace) and the
+stack: the message with its `at` lines, plus the structured frames, both
+rendered from the single entry list of `build_trace/3` (BT-4402), so
+`frames[i]` is the i-th `at` line by construction.
 """.
 -spec test_failure(atom(), binary(), atom(), list()) ->
     {fail, atom(), binary(), [map()]}.
-test_failure(MethodName, FailMsg, Module, Stacktrace) ->
-    Msg = ensure_test_context(FailMsg, Module, MethodName, Stacktrace),
-    Frames0 = stack_frames(Stacktrace),
-    Frames =
-        case lacks_test_frame(Module, MethodName, Stacktrace) of
-            false -> Frames0;
-            true -> Frames0 ++ [synthetic_frame(Module, MethodName)]
-        end,
-    {fail, MethodName, Msg, Frames}.
+test_failure(MethodName, Head, Module, Stacktrace) ->
+    {Real, Synthetic} = build_trace(Module, MethodName, Stacktrace),
+    Entries = Real ++ Synthetic,
+    {fail, MethodName, <<Head/binary, (render_at(Entries))/binary>>, [
+        entry_frame(E)
+     || E <- Entries
+    ]}.
 
 -doc """
 Like `test_failure/4` for failures whose message carries no rendered
@@ -710,30 +853,11 @@ Keeps `frames[i]` aligned with the i-th `at` line.
 -spec test_failure_untraced(atom(), binary(), atom(), list()) ->
     {fail, atom(), binary(), [map()]}.
 test_failure_untraced(MethodName, FailMsg, Module, Stacktrace) ->
-    Msg = ensure_test_context(FailMsg, Module, MethodName, Stacktrace),
-    Frames =
-        case lacks_test_frame(Module, MethodName, Stacktrace) of
-            false -> [];
-            true -> [synthetic_frame(Module, MethodName)]
-        end,
-    {fail, MethodName, Msg, Frames}.
-
--doc "Structured form of the synthetic test-method frame (empty location).".
--spec synthetic_frame(atom(), atom()) -> map().
-synthetic_frame(Module, MethodName) ->
-    Synthetic = beamtalk_stack_frame:wrap_frame({Module, MethodName, 0, []}),
-    (beamtalk_stack_frame:frame_parts(Synthetic))#{repeat => 1}.
-
--doc """
-Insert the test context line after existing stacktrace frames.
-
-With innermost-first ordering, the synthetic test context (outermost
-caller) should appear after the existing frames, not before them.
-If no "\n  at " lines exist yet, appends directly.
-""".
--spec inject_test_context(binary(), binary()) -> binary().
-inject_test_context(FailMsg, Context) ->
-    <<FailMsg/binary, Context/binary>>.
+    {_Real, Synthetic} = build_trace(Module, MethodName, Stacktrace),
+    {fail, MethodName, <<FailMsg/binary, (render_at(Synthetic))/binary>>, [
+        entry_frame(E)
+     || E <- Synthetic
+    ]}.
 
 -doc """
 Kind of an exception after the `on:do:` normalisation (ADR 0015).
@@ -909,31 +1033,27 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                 %% below. These remain as a safety net for any path that raises
                 %% an unwrapped record directly.
                 error:#beamtalk_error{kind = assertion_failed, message = AssertMsg}:TestST0 ->
-                    ST0 = format_stacktrace(TestST0),
-                    FailMsg0 = <<(beamtalk_text:to_binary(AssertMsg))/binary, ST0/binary>>,
-                    test_failure(MethodName, FailMsg0, Module, TestST0);
+                    test_failure(
+                        MethodName, beamtalk_text:to_binary(AssertMsg), Module, TestST0
+                    );
                 error:#beamtalk_error{message = ErrMsg}:TestST1 ->
-                    ST1 = format_stacktrace(TestST1),
-                    FailMsg1 = <<(beamtalk_text:to_binary(ErrMsg))/binary, ST1/binary>>,
-                    test_failure(MethodName, FailMsg1, Module, TestST1);
+                    test_failure(MethodName, beamtalk_text:to_binary(ErrMsg), Module, TestST1);
                 error:undef:TestST ->
                     #{error := #beamtalk_error{message = FailMsg}} =
                         beamtalk_exception_handler:ensure_wrapped(
                             error, undef, TestST
                         ),
                     %% BT-4173: message is a tagged String — unwrap like the
-                    %% sibling clauses (ensure_test_context renders bytes).
+                    %% sibling clauses (the failure message is bytes).
                     %% The DNU text has no rendered trace, so its structured
                     %% frames must not carry one either (frames[i] <-> "at" line i).
                     test_failure_untraced(
                         MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
                     );
                 error:TestReason:TestST ->
-                    FailMsg = format_test_error(error, TestReason, TestST),
-                    test_failure(MethodName, FailMsg, Module, TestST);
+                    test_failure(MethodName, error_head(error, TestReason), Module, TestST);
                 TestClass:TestReason:TestST ->
-                    FailMsg = format_test_error(TestClass, TestReason, TestST),
-                    test_failure(MethodName, FailMsg, Module, TestST)
+                    test_failure(MethodName, error_head(TestClass, TestReason), Module, TestST)
             after
                 case HasTearDown of
                     true ->

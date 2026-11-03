@@ -113,6 +113,8 @@
 
 mod actor_codegen;
 mod actor_state_access;
+mod binary_construction;
+mod binary_segments;
 mod block_analysis;
 mod blocks;
 mod class_builder_source;
@@ -194,11 +196,21 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0018 Phase 3: Returns `Document<'static>` directly for composable
     /// code generation without string buffer intermediaries.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_expression(
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
+        // BT-4366: the innermost expression being lowered names the line of
+        // the call nodes it nests inside a `let`/`case` (see
+        // `current_send_span`); a `MessageSend` sets its own below.
+        let outer_span = self.current_send_span.replace(expr.span());
+        let result = self.generate_expression_inner(expr);
+        self.current_send_span = outer_span;
+        result
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn generate_expression_inner(&mut self, expr: &Expression) -> Result<Document<'static>> {
         // ADR 0118 phase 1a: a sub-expression the sequencing rule
         // already compiled ahead of this parent substitutes its value here
         // — see `precompiled_subexprs`.
@@ -496,6 +508,10 @@ impl CoreErlangGenerator {
             Expression::Match { value, arms, .. } => self.generate_match(value, arms),
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
+            }
+            // ADR 0143: `<<...>>` in expression position builds a binary.
+            Expression::BinaryConstruction { segments, .. } => {
+                self.generate_binary_construction(segments)
             }
             Expression::DestructureAssignment { span, .. } => {
                 // DestructureAssignment is only valid as a statement in a body context.

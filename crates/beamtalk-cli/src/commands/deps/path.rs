@@ -86,6 +86,42 @@ pub struct ResolvedDependency {
     pub stubs_dir: Option<Utf8PathBuf>,
 }
 
+/// Runs `f` over the dependencies in `resolved` that `dep_name` depends on,
+/// directly or transitively ([`beamtalk_core::compilation::dep_order::dependency_closure`]
+/// over `dependencies`), in their order in `resolved` — the `prior_deps` a
+/// dependency compiles and indexes against (BT-4375).
+///
+/// `resolved` holds every dependency compiled so far, in compile order, which
+/// includes unrelated siblings: their same-named classes would shadow the
+/// ancestors this dependency actually inherits from. Those entries are set
+/// aside for the call and restored, in the original order, afterwards.
+pub(crate) fn with_dependency_closure<R>(
+    resolved: &mut Vec<ResolvedDependency>,
+    dependencies: &std::collections::BTreeMap<String, Vec<String>>,
+    dep_name: &str,
+    f: impl FnOnce(&[ResolvedDependency]) -> R,
+) -> R {
+    let closure = beamtalk_core::compilation::dep_order::dependency_closure(dependencies, dep_name);
+    let in_closure: Vec<bool> = resolved
+        .iter()
+        .map(|dep| closure.contains(&dep.name))
+        .collect();
+    let (inside, outside): (Vec<_>, Vec<_>) = std::mem::take(resolved)
+        .into_iter()
+        .partition(|dep| closure.contains(&dep.name));
+    let result = f(&inside);
+    let mut inside = inside.into_iter();
+    let mut outside = outside.into_iter();
+    resolved.extend(in_closure.into_iter().filter_map(|is_inside| {
+        if is_inside {
+            inside.next()
+        } else {
+            outside.next()
+        }
+    }));
+    result
+}
+
 /// Resolve a dependency's own package-bundled stubs directory (ADR 0075
 /// layer 2) from its `beamtalk.toml` `[stubs] path`.
 ///
@@ -391,8 +427,23 @@ fn compile_dependency(
 }
 
 /// Class-hierarchy inputs for compiling one dependency: its own Pass 1
-/// indexes plus the full `ClassInfo`s of the dependencies compiled before
-/// it (BT-4328).
+/// indexes plus the full `ClassInfo`s of the dependencies it compiles
+/// against (BT-4328) — only those it reaches in the graph (BT-4375).
+struct DepCompileClassInputs {
+    /// This dependency's own class → module index.
+    own_class_module_index: HashMap<String, String>,
+    class_superclass_index: HashMap<String, String>,
+    /// This dependency's own classes, trait-flattened — what its corpus and
+    /// `.app` file list.
+    own_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// `own_class_infos` followed by the exported classes of `prior_deps` —
+    /// the hierarchy this dependency compiles against.
+    all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    cached_asts: HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
+}
+
+/// Builds [`DepCompileClassInputs`] for a dependency's `source_files`.
 ///
 /// A dependency compiles as its own package, but its superclass chain can
 /// reach into another package — without the ancestors' methods and
@@ -403,19 +454,17 @@ fn compile_dependency(
 /// `collect_all_class_infos(&[&source_class_infos, &dep_class_infos])`
 /// (own first, dependencies after), so dep-compiled codegen matches a root
 /// build of the same sources.
-#[allow(clippy::type_complexity)]
+///
+/// `prior_deps` must be this dependency's own transitive dependencies
+/// ([`with_dependency_closure`]): the hierarchy is first-wins, so an
+/// unrelated package's same-named class would otherwise shadow the real
+/// ancestor (BT-4375).
 fn dep_compile_class_inputs(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
     dep_name: &str,
     prior_deps: &[ResolvedDependency],
-) -> Result<(
-    HashMap<String, String>,
-    HashMap<String, String>,
-    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    beamtalk_core::compilation::extension_index::ExtensionIndex,
-    HashMap<Utf8PathBuf, crate::commands::build::CachedAst>,
-)> {
+) -> Result<DepCompileClassInputs> {
     let (
         own_class_module_index,
         class_superclass_index,
@@ -425,7 +474,7 @@ fn dep_compile_class_inputs(
     ) = crate::commands::build::build_class_module_index(source_files, source_root, dep_name)?;
     // Cross-file trait provisions flattened into the infos this dep's own
     // compile and its dependents see (BT-3673), against its own protocols
-    // first and then those of the dependencies compiled before it (BT-3678).
+    // first and then those of the dependencies it compiles against (BT-3678).
     crate::commands::build::flatten_package_class_infos(
         &mut own_class_infos,
         &cached_asts,
@@ -441,13 +490,14 @@ fn dep_compile_class_inputs(
     }
     let all_class_infos =
         crate::commands::build::collect_all_class_infos(&[&own_class_infos, &dep_class_infos]);
-    Ok((
+    Ok(DepCompileClassInputs {
         own_class_module_index,
         class_superclass_index,
+        own_class_infos,
         all_class_infos,
         extension_index,
         cached_asts,
-    ))
+    })
 }
 
 /// Compile a dependency with context from already-compiled dependencies.
@@ -496,17 +546,18 @@ fn compile_dependency_with_context(
         None
     };
 
-    let (
+    let DepCompileClassInputs {
         own_class_module_index,
         class_superclass_index,
+        own_class_infos,
         all_class_infos,
         extension_index,
         cached_asts,
-    ) = dep_compile_class_inputs(&source_files, source_root.as_deref(), dep_name, prior_deps)?;
+    } = dep_compile_class_inputs(&source_files, source_root.as_deref(), dep_name, prior_deps)?;
 
     // Build a compilation index that includes this dep's own classes plus
-    // classes from already-compiled dependencies, so cross-dependency class
-    // references resolve during compilation.  The *own* index is kept
+    // classes from the dependencies it compiles against, so cross-dependency
+    // class references resolve during compilation.  The *own* index is kept
     // separate so we only export this dep's classes to dependents — not
     // transitive imports that happen to be compiled earlier.
     let mut class_module_index = own_class_module_index.clone();
@@ -592,8 +643,11 @@ fn compile_dependency_with_context(
         dep_name,
         &ebin_path,
         &module_names,
-        &all_class_infos,
-        &own_class_module_index,
+        &DepAppClasses {
+            own: &own_class_infos,
+            hierarchy: &all_class_infos,
+            own_class_module_index: &own_class_module_index,
+        },
         &source_files,
     )?;
 
@@ -739,20 +793,30 @@ fn compile_sources_to_core(
     Ok((core_files, module_names))
 }
 
+/// The classes a compiled dependency's `.app` file and corpus describe.
+struct DepAppClasses<'a> {
+    /// This dependency's own classes — the only ones listed (BT-4375).
+    own: &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    /// `own` plus the classes it compiled against, so a class's kind
+    /// resolves through a cross-package superclass chain.
+    hierarchy: &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    own_class_module_index: &'a HashMap<String, String>,
+}
+
 /// Generate the `.app` file and MCP corpus for a compiled dependency.
 fn generate_dependency_app_file(
     dep_root: &Utf8Path,
     dep_name: &str,
     ebin_path: &Utf8PathBuf,
     module_names: &[String],
-    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
-    own_class_module_index: &HashMap<String, String>,
+    classes: &DepAppClasses<'_>,
     source_files: &[Utf8PathBuf],
 ) -> Result<()> {
     let dep_manifest = manifest::parse_manifest(&dep_root.join("beamtalk.toml"))?;
     let class_metadata = crate::commands::build::build_class_metadata(
-        all_class_infos,
-        own_class_module_index,
+        classes.hierarchy,
+        classes.own,
+        classes.own_class_module_index,
         dep_name,
     );
     // ADR 0108 Phase 8: a path dependency is itself a fully-built
@@ -796,7 +860,7 @@ fn generate_dependency_app_file(
     crate::commands::build::generate_package_corpus(
         corpus_dir,
         dep_name,
-        all_class_infos,
+        classes.own,
         source_files,
     )?;
 
@@ -896,14 +960,12 @@ fn extract_dep_protocol_alias_metadata(
                 Some(dep_name),
             ),
         );
-        let mut infos =
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+        alias_infos.extend(
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
                 module,
-            );
-        for info in &mut infos {
-            info.package = Some(dep_name.into());
-        }
-        alias_infos.extend(infos);
+                Some(dep_name),
+            ),
+        );
     }
 
     DepProtocolAliasMetadata {
@@ -1589,6 +1651,52 @@ dep_utils = { path = "dep_utils" }"#,
         assert!(!protocol_sources.contains_key("Plain"));
     }
 
+    fn named_dep(name: &str) -> ResolvedDependency {
+        ResolvedDependency {
+            name: name.to_string(),
+            root: Utf8PathBuf::from("/nonexistent"),
+            ebin_path: Utf8PathBuf::from("/nonexistent/ebin"),
+            class_module_index: HashMap::new(),
+            class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            protocol_defs: Vec::new(),
+            protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
+            alias_infos: Vec::new(),
+            is_direct: true,
+            via_chain: Vec::new(),
+            stubs_dir: None,
+        }
+    }
+
+    /// BT-4375: a dependency sees only the earlier dependencies in its own
+    /// transitive closure, in compile order, and every entry is restored to
+    /// its place afterwards.
+    #[test]
+    fn with_dependency_closure_passes_only_the_closure_and_restores_order() {
+        let mut resolved: Vec<ResolvedDependency> = ["zulu", "core", "alpha", "base"]
+            .into_iter()
+            .map(named_dep)
+            .collect();
+        let dependencies: std::collections::BTreeMap<String, Vec<String>> = [
+            ("zulu", vec![]),
+            ("core", vec![]),
+            ("alpha", vec![]),
+            ("base", vec!["core".to_string()]),
+            ("app_lib", vec!["base".to_string()]),
+        ]
+        .into_iter()
+        .map(|(name, deps)| (name.to_string(), deps))
+        .collect();
+
+        let seen = with_dependency_closure(&mut resolved, &dependencies, "app_lib", |prior| {
+            prior.iter().map(|d| d.name.clone()).collect::<Vec<_>>()
+        });
+
+        assert_eq!(seen, ["core", "base"]);
+        let after: Vec<&str> = resolved.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(after, ["zulu", "core", "alpha", "base"]);
+    }
+
     /// BT-4328: a dependency compiling against an already-compiled
     /// dependency sees the ancestor's full `ClassInfo` (methods and
     /// superclass links), not just its name→module mapping. A child
@@ -1650,7 +1758,9 @@ dep_utils = { path = "dep_utils" }"#,
         let source_root = child_root.join("src");
         assert!(source_root.exists(), "fixture must have a src/ dir");
 
-        let (_, _, all_class_infos, _, _) = dep_compile_class_inputs(
+        let DepCompileClassInputs {
+            all_class_infos, ..
+        } = dep_compile_class_inputs(
             &source_files,
             Some(source_root.as_path()),
             "dep_child",

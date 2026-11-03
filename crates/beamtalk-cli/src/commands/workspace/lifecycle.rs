@@ -624,9 +624,34 @@ fn prune_one(workspace_id: &str, dry_run: bool) -> Result<bool> {
     if !dry_run {
         // The directory only: the `.lock` file beside it must survive (see
         // `prune_workspaces`).
-        fs::remove_dir_all(workspace_dir(workspace_id)?).into_diagnostic()?;
+        remove_workspace_dir_metadata_last(&workspace_dir(workspace_id)?)?;
     }
     Ok(true)
+}
+
+/// Remove a workspace directory, deleting `metadata.json` only after
+/// everything else in it is gone.
+///
+/// `metadata.json` is what makes a directory a listed workspace. A plain
+/// `remove_dir_all` deletes entries in arbitrary order, so a failure part
+/// way through (an open log handle on Windows, a permission error) could
+/// leave a half-removed directory with no metadata: invisible to
+/// `workspace list`, so `prune` could never retry it. Removing the metadata
+/// last keeps a failed prune listed and retryable.
+fn remove_workspace_dir_metadata_last(dir: &Path) -> Result<()> {
+    let metadata = dir.join("metadata.json");
+    for entry in fs::read_dir(dir).into_diagnostic()? {
+        let path = entry.into_diagnostic()?.path();
+        if path == metadata {
+            continue;
+        }
+        if path.is_dir() {
+            fs::remove_dir_all(&path).into_diagnostic()?;
+        } else {
+            fs::remove_file(&path).into_diagnostic()?;
+        }
+    }
+    fs::remove_dir_all(dir).into_diagnostic()
 }
 
 /// Detailed status information for a workspace.
@@ -1085,7 +1110,7 @@ mod tests {
         let _home = crate::commands::test_support::BeamtalkHomeOverride::new(tmp.path());
         let ws_id = "prune-lock-race".to_string();
         create_workspace_impl(&ws_id, tmp.path()).expect("seed stopped workspace");
-        let lock_path = workspaces_base_dir().unwrap().join(format!("{ws_id}.lock"));
+        let lock_path = super::super::storage::workspace_lockfile_path(&ws_id).unwrap();
 
         // The holder (e.g. a concurrent `start` or `stop`) owns the lock.
         let holder = acquire_workspace_lock(&ws_id).expect("holder lock");
@@ -1137,6 +1162,49 @@ mod tests {
             late.try_lock_exclusive().is_err(),
             "a late contender must not get a second exclusive lock"
         );
+    }
+
+    /// BT-4382: a prune whose directory removal fails part way keeps
+    /// `metadata.json`, so the workspace stays listed and a later prune
+    /// retries it. A read-only subdirectory blocks the removal; root ignores
+    /// directory permissions, so the test skips itself there.
+    #[cfg(unix)]
+    #[test]
+    fn failed_prune_keeps_metadata_so_prune_can_retry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // SAFETY: `geteuid` has no preconditions and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipping: directory permissions do not bind root");
+            return;
+        }
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = crate::commands::test_support::BeamtalkHomeOverride::new(tmp.path());
+        let ws_id = "prune-partial-failure".to_string();
+        create_workspace_impl(&ws_id, tmp.path()).expect("seed stopped workspace");
+        let stuck = workspace_dir(&ws_id).unwrap().join("stuck");
+        fs::create_dir_all(&stuck).unwrap();
+        fs::write(stuck.join("held"), b"x").unwrap();
+        fs::set_permissions(&stuck, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let report = prune_workspaces(false, Some("prune-partial-failure")).unwrap();
+        assert_eq!(report.failed.len(), 1, "{report:?}");
+        assert!(
+            workspace_exists(&ws_id).unwrap(),
+            "metadata.json must survive a failed prune"
+        );
+        assert!(
+            list_workspaces()
+                .unwrap()
+                .iter()
+                .any(|ws| ws.workspace_id == ws_id),
+            "the half-pruned workspace must stay listed"
+        );
+
+        fs::set_permissions(&stuck, fs::Permissions::from_mode(0o700)).unwrap();
+        let report = prune_workspaces(false, Some("prune-partial-failure")).unwrap();
+        assert_eq!(report.removed, vec![ws_id.clone()], "{report:?}");
+        assert!(!workspace_dir(&ws_id).unwrap().exists(), "retry removes it");
     }
 
     /// BT-4374: `skipped_releases` counts only release rows inside the

@@ -6,9 +6,8 @@
 %% an O(byte_size) is_utf8/1 validating scan on every dynamic send to a bare
 %% binary, to decide whether it dispatches as String or Binary. That scan is
 %% wasted for selectors where String and Binary behave identically regardless
-%% of which one the receiver "really" is (byteAt:, byteSize, part:size:,
-%% concat:, toBytes, asCharlist, asStringUnchecked, asBase64, asBase64Url,
-%% asHex) — see
+%% of which one the receiver "really" is (byteAt:, part:size:, concat:,
+%% toBytes, asStringUnchecked, asBase64, asBase64Url, asHex, bitSize) — see
 %% is_string_binary_shared_selector/1. This benchmark measures the O(1)
 %% byte-level selector `byteAt:` sent dynamically, in a loop, to the *same*
 %% >=1 MB untyped binary receiver (the acceptance-criteria scenario: an

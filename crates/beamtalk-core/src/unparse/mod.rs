@@ -1488,6 +1488,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
+        Expression::BinaryConstruction { segments, .. } => {
+            unparse_binary_segments(segments, unparse_expression)
+        }
         Expression::ExpectDirective {
             categories, reason, ..
         } => {
@@ -1700,6 +1703,7 @@ impl<'e> OperandShape<'e> {
             | Expression::ArrayLiteral { .. }
             | Expression::TupleLiteral { .. }
             | Expression::StringInterpolation { .. }
+            | Expression::BinaryConstruction { .. }
             | Expression::Spread { .. }
             | Expression::Error { .. } => Self::Tight,
             Expression::MessageSend {
@@ -2139,12 +2143,7 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                 docvec!["[", joined, "]"]
             }
         }
-        Pattern::Binary { segments, .. } => {
-            let seg_docs: Vec<Document<'static>> =
-                segments.iter().map(unparse_binary_segment).collect();
-            let joined = join_docs(seg_docs, ", ");
-            docvec!["<<", joined, ">>"]
-        }
+        Pattern::Binary { segments, .. } => unparse_binary_segments(segments, unparse_pattern),
         Pattern::Array {
             elements,
             rest,
@@ -2192,8 +2191,27 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
     }
 }
 
-fn unparse_binary_segment(seg: &BinarySegment) -> Document<'static> {
-    let mut docs: Vec<Document<'static>> = vec![unparse_pattern(&seg.value)];
+/// `<<seg, seg, ...>>` for both directions (ADR 0143): a match pattern
+/// passes [`unparse_pattern`] for the segment values and a construction
+/// passes [`unparse_expression`]; sizes and specifiers are spelled by the one
+/// [`unparse_binary_segment`], so a segment reads the same either way.
+fn unparse_binary_segments<V>(
+    segments: &[BinarySegment<V>],
+    unparse_value: fn(&V) -> Document<'static>,
+) -> Document<'static> {
+    let seg_docs: Vec<Document<'static>> = segments
+        .iter()
+        .map(|seg| unparse_binary_segment(seg, unparse_value))
+        .collect();
+    let joined = join_docs(seg_docs, ", ");
+    docvec!["<<", joined, ">>"]
+}
+
+fn unparse_binary_segment<V>(
+    seg: &BinarySegment<V>,
+    unparse_value: fn(&V) -> Document<'static>,
+) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = vec![unparse_value(&seg.value)];
     if let Some(size) = &seg.size {
         docs.push(Document::Str(":"));
         docs.push(unparse_expression(size));

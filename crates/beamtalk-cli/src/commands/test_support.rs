@@ -33,20 +33,9 @@ use tungstenite::{Message, WebSocket};
 
 use super::workspace::storage::{NodeInfo, WorkspaceMetadata};
 
-/// A port that is guaranteed to refuse TCP connections for the life of the
-/// test process (BT-4058).
-///
-/// Never bind-then-drop `TcpListener::bind("127.0.0.1:0")` when a test needs
-/// "nothing listening": the freed ephemeral port can be rehanded to a
-/// parallel test's own listener before the probe runs, flipping the test
-/// down the node-is-running path. Every fake server in this binary binds via
-/// `"127.0.0.1:0"` (an OS-assigned ephemeral port), and OS ephemeral-port
-/// allocators never hand out ports below 1024 — while binding one ourselves
-/// would require root — so port 1 stays closed with no bind/drop window at
-/// all (same rationale as BT-3608's `client.port = 1` in `protocol.rs`).
-pub(crate) fn closed_port() -> u16 {
-    1
-}
+/// The shared "nothing is listening here" port (BT-4058, BT-4382); see
+/// [`beamtalk_repl_protocol::test_ports::closed_port`].
+pub(crate) use beamtalk_repl_protocol::test_ports::closed_port;
 
 /// Build a unique workspace ID per test so parallel `cargo test` threads
 /// never collide on the same on-disk directory or lockfile. `label` should
@@ -110,10 +99,37 @@ static BEAMTALK_HOME_LOCK: RwLock<()> = RwLock::new(());
 /// A poisoned lock (some other guarded test panicked while holding it) is
 /// still safe to read through here — the panic is that test's own
 /// assertion failure, not a corrupted directory.
+///
+/// # Panics
+///
+/// When the calling thread already holds a [`BeamtalkHomeOverride`]: the
+/// read side would wait forever on that thread's own write lock (BT-4382,
+/// the BT-4374 self-deadlock that hung `run_prune` tests). A test must use
+/// one or the other, never both.
 pub(crate) fn real_home_guard() -> RwLockReadGuard<'static, ()> {
+    assert_no_home_override_held("real_home_guard()");
     BEAMTALK_HOME_LOCK
         .read()
         .unwrap_or_else(PoisonError::into_inner)
+}
+
+std::thread_local! {
+    /// Whether this thread holds a [`BeamtalkHomeOverride`] (and so the
+    /// write side of [`BEAMTALK_HOME_LOCK`]).
+    static HOLDS_HOME_OVERRIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Panic with a clear message, instead of self-deadlocking on
+/// [`BEAMTALK_HOME_LOCK`], when this thread already holds a
+/// [`BeamtalkHomeOverride`].
+fn assert_no_home_override_held(acquirer: &str) {
+    assert!(
+        !HOLDS_HOME_OVERRIDE.with(std::cell::Cell::get),
+        "{acquirer} called on a thread that already holds a BeamtalkHomeOverride: \
+         BEAMTALK_HOME_LOCK is not reentrant, so this would deadlock. A test that \
+         overrides BEAMTALK_HOME must not also take the real-home guard (directly \
+         or via WorkspaceFixture)."
+    );
 }
 
 /// RAII guard that overrides `BEAMTALK_HOME` to `dir` for its lifetime,
@@ -129,9 +145,11 @@ pub(crate) struct BeamtalkHomeOverride {
 
 impl BeamtalkHomeOverride {
     pub(crate) fn new(dir: &Path) -> Self {
+        assert_no_home_override_held("BeamtalkHomeOverride::new()");
         let lock = BEAMTALK_HOME_LOCK
             .write()
             .unwrap_or_else(PoisonError::into_inner);
+        HOLDS_HOME_OVERRIDE.with(|held| held.set(true));
         let prev = std::env::var("BEAMTALK_HOME").ok();
         // SAFETY: the exclusive write lock above guarantees no other thread is
         // reading BEAMTALK_HOME or the directory it controls concurrently.
@@ -149,6 +167,7 @@ impl Drop for BeamtalkHomeOverride {
             // SAFETY: see above.
             None => unsafe { std::env::remove_var("BEAMTALK_HOME") },
         }
+        HOLDS_HOME_OVERRIDE.with(|held| held.set(false));
     }
 }
 
@@ -203,8 +222,79 @@ impl Drop for WorkspaceFixture {
         if let Ok(dir) = super::workspace::storage::workspace_dir(&self.id) {
             let _ = std::fs::remove_dir_all(dir);
         }
-        if let Ok(base) = super::workspace::storage::workspaces_base_dir() {
-            let _ = std::fs::remove_file(base.join(format!("{}.lock", self.id)));
+        if let Ok(lock) = super::workspace::storage::workspace_lockfile_path(&self.id) {
+            let _ = std::fs::remove_file(lock);
+        }
+    }
+}
+
+/// Send `value` as one JSON text frame, ignoring a closed peer.
+pub(crate) fn send_json(ws: &mut WebSocket<std::net::TcpStream>, value: &serde_json::Value) {
+    let _ = ws.send(Message::Text(value.to_string().into()));
+}
+
+/// Server side of a fake workspace node's ADR 0020 handshake (BT-4382):
+/// `auth-required` -> read the client's `auth` -> `auth_ok` ->
+/// `session-started` (session `sess-test`).
+///
+/// Returns the `versions` map a version-matching node reports to the
+/// client's connect-time `describe` (BT-4327): the versions the client
+/// claimed in its `auth` frame, echoed back. `None` when the client's `auth`
+/// frame never arrives.
+pub(crate) fn fake_node_handshake(
+    ws: &mut WebSocket<std::net::TcpStream>,
+) -> Option<serde_json::Value> {
+    send_json(ws, &serde_json::json!({"op": "auth-required"}));
+    let Ok(Message::Text(text)) = ws.read() else {
+        return None;
+    };
+    let auth = serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default();
+    let claimed = |key: &str| auth.get(key).cloned().unwrap_or_default();
+    let versions = serde_json::json!({
+        "beamtalk": claimed("beamtalk_version"),
+        "protocol": claimed("protocol_version"),
+    });
+    send_json(ws, &serde_json::json!({"type": "auth_ok"}));
+    send_json(
+        ws,
+        &serde_json::json!({"op": "session-started", "session": "sess-test"}),
+    );
+    Some(versions)
+}
+
+/// The `versions` map a node built from an older toolchain reports.
+pub(crate) fn stale_versions() -> serde_json::Value {
+    serde_json::json!({"beamtalk": "0.0.0-stale", "protocol": "0.0"})
+}
+
+/// When `req` is a `describe`, answer it with `versions` (or with no
+/// `versions` map at all, like a node predating the version handshake, when
+/// `None`) and return `true`; otherwise send nothing and return `false`.
+pub(crate) fn answer_describe(
+    ws: &mut WebSocket<std::net::TcpStream>,
+    req: &serde_json::Value,
+    versions: Option<&serde_json::Value>,
+) -> bool {
+    if req.get("op").and_then(serde_json::Value::as_str) != Some("describe") {
+        return false;
+    }
+    let mut reply = serde_json::json!({"id": req.get("id"), "status": ["done"], "ops": {}});
+    if let Some(versions) = versions {
+        reply["versions"] = versions.clone();
+    }
+    send_json(ws, &reply);
+    true
+}
+
+/// Read the next JSON text frame, skipping text frames that are not JSON;
+/// `None` once the peer is gone or sends a non-text frame.
+pub(crate) fn read_json(ws: &mut WebSocket<std::net::TcpStream>) -> Option<serde_json::Value> {
+    loop {
+        let Ok(Message::Text(text)) = ws.read() else {
+            return None;
+        };
+        if let Ok(value) = serde_json::from_str(&text) {
+            return Some(value);
         }
     }
 }
@@ -230,55 +320,15 @@ pub(crate) fn spawn_auth_ok_server(
                 let Ok(mut ws) = tungstenite::accept(stream) else {
                     return;
                 };
-                let send = |ws: &mut WebSocket<std::net::TcpStream>, v: serde_json::Value| {
-                    let _ = ws.send(Message::Text(v.to_string().into()));
+                // This fake models a version-matching node (BT-4327).
+                let Some(versions) = fake_node_handshake(&mut ws) else {
+                    return;
                 };
-                send(&mut ws, serde_json::json!({"op": "auth-required"}));
-                // Capture the client's claimed versions: this fake models a
-                // version-matching node (BT-4327), so a connect-time
-                // `describe` is answered by echoing them back.
-                let mut beamtalk_version = serde_json::Value::Null;
-                let mut protocol_version = serde_json::Value::Null;
-                match ws.read() {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                            beamtalk_version = auth
-                                .get("beamtalk_version")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
-                            protocol_version = auth
-                                .get("protocol_version")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
-                        }
-                    }
-                    _ => return,
-                }
-                send(&mut ws, serde_json::json!({"type": "auth_ok"}));
-                send(
-                    &mut ws,
-                    serde_json::json!({"op": "session-started", "session": "sess-test"}),
-                );
-                while let Ok(Message::Text(text)) = ws.read() {
-                    if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                        // Answer every connect-time `describe` version check
-                        // in the fake itself — the per-test `handler` only
-                        // models the operation under test.
-                        if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                            send(
-                                &mut ws,
-                                serde_json::json!({
-                                    "id": req.get("id"),
-                                    "status": ["done"],
-                                    "ops": {},
-                                    "versions": {
-                                        "beamtalk": beamtalk_version,
-                                        "protocol": protocol_version,
-                                    },
-                                }),
-                            );
-                            continue;
-                        }
+                while let Some(req) = read_json(&mut ws) {
+                    // Answer every connect-time `describe` version check in
+                    // the fake itself — the per-test `handler` only models
+                    // the operation under test.
+                    if !answer_describe(&mut ws, &req, Some(&versions)) {
                         handler(req, &mut ws);
                     }
                 }
@@ -318,4 +368,27 @@ pub(crate) fn spawn_auth_error_server(message: &'static str) -> u16 {
         }
     });
     port
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BeamtalkHomeOverride, real_home_guard};
+
+    /// BT-4382: taking the real-home guard while this thread holds an
+    /// override panics with a clear message instead of deadlocking.
+    #[test]
+    #[should_panic(expected = "already holds a BeamtalkHomeOverride")]
+    fn real_home_guard_panics_under_a_held_override() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+        let _guard = real_home_guard();
+    }
+
+    /// Once the override drops, the same thread may take the guard again.
+    #[test]
+    fn real_home_guard_works_after_the_override_drops() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        drop(BeamtalkHomeOverride::new(tmp.path()));
+        let _guard = real_home_guard();
+    }
 }

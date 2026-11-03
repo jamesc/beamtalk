@@ -198,6 +198,12 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
 
+        // BT-4366: the condition and body applies sit inside the loop's
+        // `letrec`, so each carries the send's line itself.
+        let cond_apply =
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(cond_var.clone()), " ()"]);
+        let body_apply =
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(body_var.clone()), " ()"]);
         let doc = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -205,23 +211,24 @@ impl CoreErlangGenerator {
             leaf::var(cond_var.clone()),
             " = ",
             cond_code,
-            " in case apply ",
-            leaf::var(cond_var),
-            " () of <",
+            " in case ",
+            cond_apply,
+            " of <",
             continue_atom,
             "> when 'true' -> let ",
             leaf::var(body_var.clone()),
             " = ",
             body_code,
-            " in let _ = apply ",
-            leaf::var(body_var),
-            " () in apply ",
+            " in let _ = ",
+            body_apply,
+            " in apply ",
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
-            "> when 'true' -> 'nil' end in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            "> when 'true' -> 'nil' end in ",
+            // The loop's entry call is the frame the method making the send
+            // reports (the body runs in the `letrec` fun).
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         Ok(doc)
@@ -392,9 +399,13 @@ impl CoreErlangGenerator {
                     cond_doc,
                     " in let ",
                     leaf::var(cond_pair_var.clone()),
-                    " = apply ",
-                    leaf::var(cond_var),
-                    " (StateAcc) in ",
+                    " = ",
+                    self.annotate_current_send_call(docvec![
+                        "apply ",
+                        leaf::var(cond_var),
+                        " (StateAcc)"
+                    ]),
+                    " in ",
                 ],
                 condition.span(),
             );
@@ -419,7 +430,12 @@ impl CoreErlangGenerator {
                 ],
                 condition.span(),
             );
-            let value = ValueRef::Doc(docvec!["apply ", leaf::var(cond_var), " (StateAcc)"]);
+            // BT-4366: the condition apply carries the send's line itself.
+            let value = ValueRef::Doc(self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cond_var),
+                " (StateAcc)"
+            ]));
             (vec![stmt], value)
         };
         let reunpack_docs = if cond_effects {
@@ -548,6 +564,7 @@ impl CoreErlangGenerator {
             // other entry.
             outer_args: Some(vec![leaf::var(init_state)]),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -977,13 +994,14 @@ impl CoreErlangGenerator {
             ],
             condition.span(),
         );
-        let condition_value = ValueRef::Doc(docvec![
+        // BT-4366: the condition apply carries the send's line itself.
+        let condition_value = ValueRef::Doc(self.annotate_current_send_call(docvec![
             "apply ",
             leaf::var(cond_var),
             " (",
             param_list_doc(),
             ")",
-        ]);
+        ]));
 
         let case_arm = if negate {
             "<'false'> when 'true' -> "
@@ -1035,6 +1053,7 @@ impl CoreErlangGenerator {
             produces,
             outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1139,13 +1158,14 @@ impl CoreErlangGenerator {
             ],
             condition.span(),
         );
-        let condition_value = ValueRef::Doc(docvec![
+        // BT-4366: the condition apply carries the send's line itself.
+        let condition_value = ValueRef::Doc(self.annotate_current_send_call(docvec![
             "apply ",
             leaf::var(cond_var),
             " (",
             param_list_doc(),
             ")",
-        ]);
+        ]));
 
         let case_arm = if negate {
             "<'false'> when 'true' -> "
@@ -1209,6 +1229,7 @@ impl CoreErlangGenerator {
                     .collect(),
             ),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1428,19 +1449,24 @@ impl CoreErlangGenerator {
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
-            " = fun () -> case apply ",
-            Document::Str(self_var),
-            " () of <",
+            " = fun () -> case ",
+            self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
+            " of <",
             continue_atom,
-            "> when 'true' -> let _ = apply ",
-            leaf::var(body_param.clone()),
-            " () in apply ",
+            "> when 'true' -> let _ = ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(body_param.clone()),
+                " ()"
+            ]),
+            " in apply ",
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
-            "> when 'true' -> 'nil' end in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            "> when 'true' -> 'nil' end in ",
+            // BT-4392: the loop's entry call carries the send's line, as in
+            // `generate_while_simple`.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let body_stateful_error = self.generate_stateful_block_dispatch_error(
@@ -1512,13 +1538,13 @@ impl CoreErlangGenerator {
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
-            " = fun () -> let _ = apply ",
-            Document::Str(self_var),
-            " () in apply ",
+            " = fun () -> let _ = ",
+            self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
+            " in apply ",
             leaf::fname(loop_fn.clone(), 0),
-            " () in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            " () in ",
+            // BT-4392: the loop's entry call carries the send's line.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let stateful_error = self.generate_stateful_block_dispatch_error(

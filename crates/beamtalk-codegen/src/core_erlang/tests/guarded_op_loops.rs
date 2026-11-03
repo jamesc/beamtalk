@@ -1264,3 +1264,148 @@ fn nested_loop_exit_in_a_bracketed_region_seeds_from_the_cell() {
         "loud stale-read finding:\n{report}"
     );
 }
+
+/// BT-4369: outer loop shapes for the field-write corpus. Each holds `{body}`
+/// and a guarded operator (`t := t + x`, unknown operand types), so the loop
+/// brackets whenever mode selection lowers it stateless.
+const FIELD_WRITE_LOOPS: &[(&str, &str)] = &[
+    ("do", "#(1, 2) do: [:x | {body} t := t + x]"),
+    ("to_do", "1 to: 2 do: [:x | {body} t := t + x]"),
+    (
+        "while",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. {body} t := t + m]",
+    ),
+    ("times_repeat", "2 timesRepeat: [{body} t := t + 1]"),
+    (
+        "inject",
+        "t := #(1, 2) inject: 0 into: [:a :x | {body} a + x]",
+    ),
+    ("collect", "#(1, 2) collect: [:x | {body} t := t + x. x]"),
+];
+
+/// Where the field write sits in the loop body.
+const FIELD_WRITE_BODIES: &[(&str, &str)] = &[
+    ("direct", "self.n := self.n + 1."),
+    (
+        "in_arm",
+        "c ifTrue: [self.n := self.n + 1] ifFalse: [t := t + 0].",
+    ),
+    (
+        "nested_do",
+        "#(1, 2) do: [:z | self.n := self.n + 1. t := t + z].",
+    ),
+    (
+        "nested_separated_by",
+        "#(1, 2) do: [:z | t := t + z] separatedBy: [self.n := self.n + 1].",
+    ),
+    (
+        "in_on_do",
+        "[self.n := self.n + 1] on: Error do: [:e | t := t + 0].",
+    ),
+];
+
+fn field_write_corpus() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (loop_name, loop_tpl) in FIELD_WRITE_LOOPS {
+        for (body_name, body) in FIELD_WRITE_BODIES {
+            let loop_src = loop_tpl.replace("{body}", body);
+            let src = format!(
+                "{ACTOR_PREAMBLE}  run: c =>\n    t := 0.\n    {loop_src}.\n    #[t, self.n]\n"
+            );
+            out.push((format!("{loop_name}/{body_name}"), src));
+        }
+    }
+    out
+}
+
+fn with_stateless_field_writes_fault<T>(f: impl FnOnce() -> T) -> T {
+    use crate::core_erlang::synced_call::FAULT_STATELESS_FIELD_WRITES;
+    FAULT_STATELESS_FIELD_WRITES.with(|flag| flag.set(true));
+    let result = f();
+    FAULT_STATELESS_FIELD_WRITES.with(|flag| flag.set(false));
+    result
+}
+
+/// Corpus shapes that stay on the `StateAcc` path even with the fault on,
+/// because of an independent mode-selection guard, so no bracketing loop ever
+/// holds their field write: a conditional write to a threaded local
+/// (`in_arm`), control-flow mutations (`in_on_do`, `nested_separated_by`) or
+/// no threaded local at all (`inject`, whose only local is the accumulator
+/// parameter).
+const FIELD_WRITE_STATEFUL_ANYWAY: &[&str] = &[
+    "do/in_arm",
+    "do/nested_separated_by",
+    "do/in_on_do",
+    "inject/direct",
+    "inject/in_arm",
+    "inject/nested_separated_by",
+    "inject/in_on_do",
+    "collect/in_arm",
+    "collect/nested_separated_by",
+    "collect/in_on_do",
+];
+
+/// A field write beside a guarded operator is verifier-clean in every loop
+/// shape: mode selection routes the body to a `StateAcc` frame, so the loop
+/// never brackets around the write (ADR 0137 §4b).
+#[test]
+fn field_write_corpus_is_verifier_clean() {
+    let corpus = field_write_corpus();
+    assert_eq!(
+        corpus.len(),
+        FIELD_WRITE_LOOPS.len() * FIELD_WRITE_BODIES.len()
+    );
+    for (name, src) in corpus {
+        assert_eq!(enforce_report(&src), None, "{name}:\n{src}");
+    }
+}
+
+/// BT-4369: the loop checkout reports a field write in a loop that brackets,
+/// from its own bracket decision, so the §4b rule ("no loop that brackets
+/// admits a field write in its body") holds even if mode selection regresses.
+/// With mode selection's field-write exclusion off, every shape it lowers
+/// stateless reports `FieldWriteInBracketedLoop` — a write directly in the body
+/// and one in a nested loop alike — and every other shape stays clean because
+/// an independent guard keeps it on the `StateAcc` path.
+#[test]
+fn checkout_reports_a_field_write_in_a_bracketing_loop() {
+    let mut reported = 0;
+    for (name, src) in field_write_corpus() {
+        let report = with_stateless_field_writes_fault(|| enforce_report(&src));
+        if FIELD_WRITE_STATEFUL_ANYWAY.contains(&name.as_str()) {
+            assert_eq!(report, None, "{name} stays on the StateAcc path:\n{src}");
+        } else {
+            let report =
+                report.unwrap_or_else(|| panic!("{name}: faulted compile should report:\n{src}"));
+            assert!(
+                report.contains("FieldWriteInBracketedLoop"),
+                "{name}: expected the field-write finding, got:\n{report}\n{src}"
+            );
+            reported += 1;
+        }
+    }
+    assert_eq!(
+        reported,
+        FIELD_WRITE_LOOPS.len() * FIELD_WRITE_BODIES.len() - FIELD_WRITE_STATEFUL_ANYWAY.len()
+    );
+}
+
+/// An actor closure created in a loop that holds a guarded operator writes
+/// through the cell view, is never part of the loop's frame, and records no
+/// field write: no finding, with the fault on or off.
+#[test]
+fn field_write_in_an_actor_closure_is_not_a_finding() {
+    for body in [
+        "#(1, 2) do: [:x | b := [self.n := self.n + 1]. b value. t := t + x]",
+        "m := 0. [m < 2] whileTrue: [m := m + 1. b := [self.n := self.n + 1]. b value. t := t + m]",
+    ] {
+        let src =
+            format!("{ACTOR_PREAMBLE}  run: c =>\n    t := 0.\n    {body}.\n    #[t, self.n]\n");
+        assert_eq!(enforce_report(&src), None, "{src}");
+        assert_eq!(
+            with_stateless_field_writes_fault(|| enforce_report(&src)),
+            None,
+            "faulted: {src}"
+        );
+    }
+}

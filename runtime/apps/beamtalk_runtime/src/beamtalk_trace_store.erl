@@ -66,6 +66,15 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 
 -include_lib("kernel/include/logger.hrl").
 
+%% The always-on aggregate runs in the sender of every actor send: inline its
+%% helpers so a sample costs the ETS read and the atomics ops, not a chain of
+%% local calls (BT-4265).
+-compile(
+    {inline, [
+        do_record_dispatch/6, maybe_add_sample/3, add_sample/4, ensure_class_slot/2, is_enabled/0
+    ]}
+).
+
 %% API
 -export([
     start_link/0,
@@ -307,9 +316,19 @@ add_sample(AtomicsRef, SlotBase, Duration, Outcome) ->
         cast -> atomics:add(AtomicsRef, SlotBase + ?SLOT_OK, 1);
         _ -> ok
     end,
-    %% Update min/max duration using lock-free CAS loops
-    cas_min(AtomicsRef, SlotBase + ?SLOT_MIN_DURATION, Duration),
-    cas_max(AtomicsRef, SlotBase + ?SLOT_MAX_DURATION, Duration),
+    %% Update min/max duration using lock-free CAS loops. The first read is
+    %% made here, so a sample that moves neither bound (nearly all of them
+    %% once a row is warm) never enters a loop (BT-4265).
+    MinIdx = SlotBase + ?SLOT_MIN_DURATION,
+    case Duration < atomics:get(AtomicsRef, MinIdx) of
+        true -> cas_min(AtomicsRef, MinIdx, Duration);
+        false -> ok
+    end,
+    MaxIdx = SlotBase + ?SLOT_MAX_DURATION,
+    case Duration > atomics:get(AtomicsRef, MaxIdx) of
+        true -> cas_max(AtomicsRef, MaxIdx, Duration);
+        false -> ok
+    end,
     ok.
 
 -doc """

@@ -12,7 +12,8 @@
 //! - Effect-free statements
 
 use crate::ast::{
-    Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
+    BinarySegment, Expression, Identifier, MessageSelector, Module, TypeAnnotation,
+    WellKnownSelector,
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
@@ -331,6 +332,11 @@ fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic
                 if let crate::ast::StringSegment::Interpolation(e) = seg {
                     walk_expr_for_effect_free(e, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_expr_for_effect_free(e, diagnostics);
             }
         }
         _ => {}

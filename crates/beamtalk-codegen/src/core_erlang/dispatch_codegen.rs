@@ -146,7 +146,8 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
 // BT-4294: a non-tagged-map row is not only an exclusion. When the fixture
 // gives it a representation test and a single target module
 // (`routing::builtin_send_route`), a typed send to it becomes a direct call
-// guarded by that test ([`TypedSendTarget::Builtin`]).
+// guarded by that test ([`TypedSendTarget::Builtin`]) — for every selector
+// outside the row's `special_selectors` (BT-4390).
 
 /// BT-4292: why a send whose receiver did not resolve to a
 /// [`TypedSendTarget`] stays dynamic — one variant per gate of
@@ -816,14 +817,6 @@ impl CoreErlangGenerator {
     /// class from another package loaded *after* this unit compiled is not
     /// visible — the runtime's collision warning is then the only signal.
     ///
-    /// Known limitation (BT-4293): a class declared in another file of the
-    /// same build reaches here as a cross-file stub (`add_external_superclasses`)
-    /// that records only its name and superclass, so its `is_abstract` reads
-    /// `false`. A typed send to a cross-file abstract class therefore gets a
-    /// guard that never hits — the dynamic fallback still answers, so this
-    /// costs one map lookup, never correctness. The supervisor, exception and
-    /// actor gates walk the superclass chain, which stubs carry.
-    ///
     /// Known limitation (review A3, BT-4149; shared with `class sealed` direct calls):
     /// the target module is pinned at compile time, so if it is removed
     /// afterwards (`removeFromSystem`) a tag-matching send raises raw `undef`
@@ -942,12 +935,14 @@ impl CoreErlangGenerator {
     /// takes to reach `target_module:dispatch/3`, which the runtime half of
     /// the routing fixture checks; a value outside it (a lying annotation, a
     /// reserved tuple, `nil` typed as `Symbol`) misses and takes the dynamic
-    /// send. Rows whose dynamic path answers some selectors elsewhere
-    /// (`String`, `Pid`), whose test spans two routes (`Binary`) or that
-    /// carry a `dynamic_only` reason (`Boolean`, `Bitstring`, `Character`,
-    /// the records, the proxy) stay dynamic. A stdlib built-in's module can
-    /// be neither removed nor redefined into another module, so the pinned
-    /// target never goes stale.
+    /// send. A selector the row's dynamic path answers elsewhere (`Pid`'s
+    /// future protocol, `String`'s shared byte-level selectors — the
+    /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
+    /// selector on those rows is routed. Rows whose test spans two routes
+    /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
+    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
+    /// stdlib built-in's module can be neither removed nor redefined into
+    /// another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
@@ -970,7 +965,7 @@ impl CoreErlangGenerator {
         }
         let class_name = self.trusted_static_class(receiver)?;
         if routing::is_non_tagged_map_class(class_name.as_str()) {
-            return match routing::builtin_send_route(class_name.as_str()) {
+            return match routing::builtin_send_route(class_name.as_str(), &selector.name()) {
                 Some(Ok(route)) => Ok(TypedSendTarget::Builtin(route)),
                 Some(Err(why)) => Err(StaysDynamic::RepresentationRouted(why)),
                 None => Err(StaysDynamic::RepresentationRouted(
@@ -1064,7 +1059,9 @@ impl CoreErlangGenerator {
             TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
             TypedSendTarget::Builtin(route) => route.target_module.to_string(),
         };
-        let direct_doc = docvec![
+        // BT-4366: both calls sit inside the type-test `case`, so each carries
+        // the send's line itself.
+        let direct_doc = self.annotate_current_send_call(docvec![
             "call ",
             leaf::atom(module_name),
             ":'dispatch'(",
@@ -1074,8 +1071,8 @@ impl CoreErlangGenerator {
             "], ",
             leaf::var(receiver_var.clone()),
             ")",
-        ];
-        let fallback_doc = docvec![
+        ]);
+        let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
             ", ",
@@ -1083,7 +1080,7 @@ impl CoreErlangGenerator {
             ", [",
             args_list_doc,
             "])",
-        ];
+        ]);
 
         let case_doc = match target {
             TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
@@ -1146,6 +1143,100 @@ impl CoreErlangGenerator {
             no_match_outer,
             " end",
         ]
+    }
+
+    /// `call 'beamtalk_primitive':'class_of_object'(Receiver)`: the dynamic
+    /// `obj class` — the protoobject `class` arm's plain lowering and the
+    /// miss arm of [`Self::generate_typed_class_of`].
+    pub(in crate::core_erlang) fn class_of_object_call_doc(
+        receiver_doc: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_primitive':'class_of_object'(",
+            receiver_doc,
+            ")",
+        ]
+    }
+
+    /// BT-4127: `obj class` for a receiver typed as a tagged-map class
+    /// ([`TypedSendTarget::Tagged`], decided by [`Self::typed_send_target`]):
+    /// the class object built inline behind [`Self::class_tag_guarded_doc`]'s
+    /// tag guard, instead of `class_of_object/1`'s derived-cache lookup.
+    ///
+    /// ```erlang
+    /// let R = <receiver> in
+    /// case call 'erlang':'is_map'(R) of
+    ///     <'true'> when 'true' ->
+    ///         case call 'maps':'get'('$beamtalk_class', R, 'undefined') of
+    ///             <'Pt'> when 'true' ->
+    ///                 case call 'erlang':'whereis'('beamtalk_class_Pt') of
+    ///                     <'undefined'> when 'true' ->
+    ///                         call 'beamtalk_primitive':'class_of_object'(R)
+    ///                     <Pid> when 'true' ->
+    ///                         {'beamtalk_object', 'Pt class', 'bt@pt', Pid}
+    ///                 end
+    ///             <NoMatch> when 'true' -> call 'beamtalk_primitive':'class_of_object'(R)
+    ///         end
+    ///     <'false'> when 'true' -> call 'beamtalk_primitive':'class_of_object'(R)
+    ///     ...
+    /// end
+    /// ```
+    ///
+    /// On a tag match this is the tuple `class_of_object_by_name/1` derives
+    /// (`resolve_class_object/1`): the tag is `metaclass_tag` of the class
+    /// name (pinned to `class_object_tag/1` by the shared conformance
+    /// fixture), the pid is looked up live on every evaluation (a restarted
+    /// class process is found), and the module is the compile-time pin of
+    /// BT-4069's direct `dispatch/3` with the same trust model (see
+    /// [`Self::typed_tagged_target`]): a same-module redefinition or reload
+    /// keeps it current. A removed class (`whereis` answers `'undefined'`)
+    /// and every guard miss take the dynamic call, so a lying annotation, a
+    /// subclass instance or a future changes nothing.
+    ///
+    /// Known limitation (BT-4200, shared with the direct `dispatch/3`): a class
+    /// redefined into a *different* module after this unit compiled leaves
+    /// the pin stale, and the answer then differs from the class reference
+    /// in its module field until the caller is recompiled.
+    pub(in crate::core_erlang) fn generate_typed_class_of(
+        &mut self,
+        receiver: &Expression,
+        target: &TypedTaggedTarget,
+    ) -> Result<Document<'static>> {
+        let mut seq = self.sequence_call(&[receiver], "Obj")?;
+        let receiver_doc = seq.next();
+        let receiver_var = self.fresh_temp_var("TClassRecv");
+        let pid_var = self.fresh_temp_var("TClassPid");
+        let fallback_doc = Self::class_of_object_call_doc(leaf::var(receiver_var.clone()));
+        let class_object_doc = docvec![
+            "case ",
+            Self::registered_class_pid_doc(&target.class_name),
+            " of <'undefined'> when 'true' -> ",
+            fallback_doc.clone(),
+            " <",
+            leaf::var(pid_var.clone()),
+            "> when 'true' -> {'beamtalk_object', ",
+            leaf::atom(super::util::metaclass_tag(&target.class_name)),
+            ", ",
+            leaf::atom(target.module_name.clone()),
+            ", ",
+            leaf::var(pid_var),
+            "} end",
+        ];
+        let case_doc = self.class_tag_guarded_doc(
+            &receiver_var,
+            &target.class_name,
+            class_object_doc,
+            fallback_doc,
+        );
+        let body = docvec![
+            "let ",
+            leaf::var(receiver_var),
+            " = ",
+            receiver_doc,
+            " in ",
+            case_doc
+        ];
+        Ok(seq.close(self, body, "ClassRes"))
     }
 
     /// Generates a cast (fire-and-forget) message send.
@@ -1219,12 +1310,16 @@ impl CoreErlangGenerator {
     /// is the precomputed `Cond` variable and whose closures compile where
     /// the arm is taken). The call is byte-identical however the operands
     /// were sourced; only the sourcing differs.
+    ///
+    /// BT-4366: the call carries the enclosing send's line itself — the
+    /// pure-conditional fallback arm nests it inside a `case`.
     pub(in crate::core_erlang) fn runtime_send_call(
+        &self,
         receiver_doc: Document<'static>,
         selector_atom: &str,
         arg_docs: Vec<Document<'static>>,
     ) -> Document<'static> {
-        docvec![
+        self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             receiver_doc,
             ", ",
@@ -1232,7 +1327,7 @@ impl CoreErlangGenerator {
             ", [",
             Self::join_docs_with_commas(arg_docs),
             "])"
-        ]
+        ])
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3`.
@@ -1281,7 +1376,7 @@ impl CoreErlangGenerator {
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
-        let call_doc = Self::runtime_send_call(actual_receiver, &selector_atom, seq.rest());
+        let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
 
         Ok(seq.close(self, call_doc, "DispRes"))
     }
@@ -1305,10 +1400,11 @@ impl CoreErlangGenerator {
                 && self.is_supervisor_class(&name.name)
             {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
-                let module_name = self.compiled_module_name_qualified(&name.name, pkg);
+                let module_doc =
+                    self.class_reference_spawn_module_doc(&name.name, pkg, &selector_atom);
                 let doc = self.generate_supervisor_class_start(
                     leaf::atom(name.name.to_string()),
-                    leaf::atom(module_name),
+                    module_doc,
                     &selector_atom,
                     arguments,
                 )?;
@@ -1327,6 +1423,7 @@ impl CoreErlangGenerator {
                 let doc = self.generate_actor_spawn_qualified(
                     &name.name,
                     pkg,
+                    &selector.name(),
                     arguments.first(),
                     variant,
                 )?;
@@ -2227,6 +2324,51 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// Whether a spawn-family send to the class reference `class_name`
+    /// (optionally `package`-qualified) resolves the module it starts its
+    /// process from at call time rather than pinning it (BT-4278).
+    ///
+    /// Normally the module is the compile-time one
+    /// (`compiled_module_name_qualified`). An *unqualified* reference to a shadowed name
+    /// ([`Self::is_shadowed_class`]) is one last-wins runtime class, so the
+    /// compile-time package's module is not necessarily the one a dynamic
+    /// send reaches: the module is resolved at call time from the class
+    /// registry instead, exactly as the class-side `self spawn` family does
+    /// ([`Self::class_self_module_doc`]) —
+    ///
+    /// ```erlang
+    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'('Counter', 'spawn')
+    /// ```
+    ///
+    /// The spawn itself stays in the caller (a dynamic `class_send` would
+    /// start it inside the class `gen_server`, and has no monitored-spawn
+    /// clause). A package-qualified reference (`json@Counter spawn`) names
+    /// its module explicitly and keeps it.
+    fn spawn_module_resolved_at_runtime(&self, class_name: &str, package: Option<&str>) -> bool {
+        package.is_none() && self.is_shadowed_class(class_name)
+    }
+
+    /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is
+    /// looked up at call time rather than pinned.
+    fn class_reference_spawn_module_doc(
+        &self,
+        class_name: &str,
+        package: Option<&str>,
+        selector_atom: &str,
+    ) -> Document<'static> {
+        if self.spawn_module_resolved_at_runtime(class_name, package) {
+            docvec![
+                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                leaf::atom(class_name.to_string()),
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ")"
+            ]
+        } else {
+            leaf::atom(self.compiled_module_name_qualified(class_name, package))
+        }
+    }
+
     /// Lowers a spawn-family send on a supervisor class (ADR 0135 §1) to the
     /// runtime start helper, run in the caller's process — never class-method
     /// dispatch, which would run the whole tree start inside the class
@@ -2836,6 +2978,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", expr.span());
             let name_var = self.fresh_var("Name");
             let val_var = self.fresh_temp_var("Val");
             let name_code = self.expression_doc(&arguments[0])?;
@@ -2896,6 +3040,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", expr.span());
             let name_var = self.fresh_var("Name");
             let name_code = self.expression_doc(&arguments[0])?;
             let current_state = self.current_state_var();
@@ -3081,14 +3227,44 @@ impl CoreErlangGenerator {
     /// `SpawnVariant::Monitored` (BT-4104) calls `spawn_monitored/0,1`
     /// instead; its answer is `{ActorObject, MonRef}`, so the REPL arm takes
     /// the pid from the pair's actor.
+    ///
+    /// The module comes from [`Self::class_reference_spawn_module_doc`]: an
+    /// unqualified shadowed class name (BT-4278) resolves it at call time
+    /// into a `let`-bound temporary, so the spawn still runs in the caller.
     pub(super) fn generate_actor_spawn_qualified(
         &mut self,
         class_name: &str,
         package: Option<&str>,
+        selector_atom: &str,
         init_args: Option<&Expression>,
         variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let module_name = self.compiled_module_name_qualified(class_name, package);
+        let module_expr = self.class_reference_spawn_module_doc(class_name, package, selector_atom);
+        // An atom is used as-is; a runtime lookup is bound once, since the
+        // REPL arm names the module twice.
+        let (module_binding, module_doc): (Option<(String, Document<'static>)>, Document<'static>) =
+            if self.spawn_module_resolved_at_runtime(class_name, package) {
+                let var = self.fresh_temp_var("SpawnMod");
+                (Some((var.clone(), module_expr)), leaf::var(var))
+            } else {
+                (None, module_expr)
+            };
+        let body = self.generate_actor_spawn_call(class_name, &module_doc, init_args, variant)?;
+        Ok(match module_binding {
+            Some((var, lookup)) => docvec!["let ", leaf::var(var), " = ", lookup, " in ", body],
+            None => body,
+        })
+    }
+
+    /// Body of [`Self::generate_actor_spawn_qualified`] once the module
+    /// expression (`module_doc`, an atom or a bound variable) is known.
+    fn generate_actor_spawn_call(
+        &mut self,
+        class_name: &str,
+        module_doc: &Document<'static>,
+        init_args: Option<&Expression>,
+        variant: SpawnVariant,
+    ) -> Result<Document<'static>> {
         let in_repl_context = self.lookup_var("__bindings__").is_some();
         let function = leaf::atom(variant.function_name());
 
@@ -3105,13 +3281,13 @@ impl CoreErlangGenerator {
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
                 "<'undefined'> when 'true' -> call ",
-                leaf::atom(module_name.clone()),
+                module_doc.clone(),
                 ":",
                 function.clone(),
                 "(",
                 args_doc.clone(),
                 ") <RegistryPid> when 'true' -> let SpawnResult = call ",
-                leaf::atom(module_name.clone()),
+                module_doc.clone(),
                 ":",
                 function,
                 "(",
@@ -3123,7 +3299,7 @@ impl CoreErlangGenerator {
                 "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, ",
                 leaf::atom(class_name.to_string()),
                 ", ",
-                leaf::atom(module_name),
+                module_doc.clone(),
                 ") in ",
                 "SpawnResult ",
                 "end"
@@ -3132,7 +3308,7 @@ impl CoreErlangGenerator {
         } else {
             let doc = docvec![
                 "call ",
-                leaf::atom(module_name),
+                module_doc.clone(),
                 ":",
                 function,
                 "(",
@@ -3362,7 +3538,7 @@ impl CoreErlangGenerator {
             " = ",
             Self::registered_class_pid_doc(class_name),
             " in ",
-            Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc),
+            self.class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
 
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
@@ -3420,7 +3596,25 @@ impl CoreErlangGenerator {
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let comma = if arg_count == 0 { "" } else { ", " };
-        let fallback = Self::class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
+        let fallback = self.class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
+        // BT-4366: the direct call sits inside the guard `case`, so it carries
+        // the send's line itself.
+        let direct_call = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::atom(module_name.clone()),
+            ":",
+            leaf::atom(safe_fn.clone()),
+            "({'beamtalk_object', ",
+            leaf::atom(tag.clone()),
+            ", ",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::var(class_pid_var.clone()),
+            "}",
+            comma,
+            args_doc,
+            ")"
+        ]);
         docvec![
             "let ",
             leaf::var(class_pid_var.clone()),
@@ -3433,25 +3627,14 @@ impl CoreErlangGenerator {
             ") of <'true'> when call 'erlang':'is_pid'(",
             leaf::var(class_pid_var.clone()),
             ") -> case call 'erlang':'function_exported'(",
-            leaf::atom(module_name.clone()),
-            ", ",
-            leaf::atom(safe_fn.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> call ",
-            leaf::atom(module_name.clone()),
-            ":",
-            leaf::atom(safe_fn),
-            "({'beamtalk_object', ",
-            leaf::atom(tag),
-            ", ",
             leaf::atom(module_name),
             ", ",
-            leaf::var(class_pid_var.clone()),
-            "}",
-            comma,
-            args_doc,
-            ") <_> when 'true' -> ",
+            leaf::atom(safe_fn),
+            ", ",
+            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            direct_call,
+            " <_> when 'true' -> ",
             fallback.clone(),
             " end <_> when 'true' -> ",
             fallback,
@@ -3476,7 +3659,7 @@ impl CoreErlangGenerator {
             " = ",
             Self::registered_class_pid_doc(class_name),
             " in ",
-            Self::class_send_call_doc(&class_pid_var, class_selector, args_doc),
+            self.class_send_call_doc(&class_pid_var, class_selector, args_doc),
         ]
     }
 
@@ -3484,12 +3667,18 @@ impl CoreErlangGenerator {
     /// 'beamtalk_object_class':'class_send'(ClassPid, Selector, [Args])`
     /// fragment — the runtime `gen_server` dispatch every class-send fallback
     /// eventually reaches, once a live `ClassPid` is in hand.
+    ///
+    /// BT-4366: every caller nests this call inside a `let` (the `ClassPid`
+    /// binding) or `case` (the direct-call guard), where the send's
+    /// whole-document line annotation never reaches the call node — so the
+    /// node carries the line itself.
     fn class_send_call_doc(
+        &self,
         class_pid_var: &str,
         selector_atom: String,
         args_doc: Document<'static>,
     ) -> Document<'static> {
-        docvec![
+        self.annotate_current_send_call(docvec![
             "call 'beamtalk_object_class':'class_send'(",
             leaf::var(class_pid_var.to_string()),
             ", ",
@@ -3497,7 +3686,7 @@ impl CoreErlangGenerator {
             ", [",
             args_doc,
             "])"
-        ]
+        ])
     }
 
     /// The `direct_call_eligible` entry a send to the class *reference*

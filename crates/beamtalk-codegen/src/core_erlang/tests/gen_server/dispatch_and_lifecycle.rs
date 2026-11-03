@@ -504,10 +504,20 @@ fn test_generate_safe_dispatch_structure() {
         output.contains("'safe_dispatch'/3 = fun (Selector, Args, State) ->"),
         "Should generate safe_dispatch/3 header. Got: {output}"
     );
-    // Self must be constructed via make_self before dispatch
+    // BT-4265: the module's own state builds Self inline from the class and
+    // module codegen knows, with no runtime call...
     assert!(
-        output.contains("call 'beamtalk_actor':'make_self'(State)"),
-        "Should construct Self via make_self/1. Got: {output}"
+        output.contains("<~{'__class_mod__' := 'my_counter'}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State))"),
+        "Should recognise this module's own state. Got: {output}"
+    );
+    assert!(
+        output.contains("{'beamtalk_object', 'MyCounter', 'my_counter', call 'erlang':'self'()}"),
+        "Should build Self inline for this module's own state. Got: {output}"
+    );
+    // ...and any other state still derives Self via make_self/1.
+    assert!(
+        output.contains("<_> when 'true' -> call 'beamtalk_actor':'make_self'(State)"),
+        "Should fall back to make_self/1. Got: {output}"
     );
     // The try must call the module's own dispatch function
     assert!(

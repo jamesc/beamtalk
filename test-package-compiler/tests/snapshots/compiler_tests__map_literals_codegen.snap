@@ -378,7 +378,11 @@ module 'map_literals' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_continu
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    let Self = call 'beamtalk_actor':'make_self'(State) in
+    let Self = case State of
+        <~{'__class_mod__' := 'map_literals'}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State)) ->
+            {'beamtalk_object', 'MapLiterals', 'map_literals', call 'erlang':'self'()}
+        <_> when 'true' -> call 'beamtalk_actor':'make_self'(State)
+    end in
     apply 'safe_dispatch'/4 (Selector, Args, Self, State)
 
 'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->

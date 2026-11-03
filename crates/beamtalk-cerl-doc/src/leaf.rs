@@ -28,12 +28,13 @@
 //! | [`string_lit`]   | `"escaped string"`         | `docvec!["\"", Document::String(e), "\""]`|
 //! | [`int_lit`]      | `42`                       | `Document::String(n.to_string())`         |
 //! | [`float_lit`]    | `3.14` / `5.0`             | the `Literal::Float` arm of codegen       |
+//! | [`bigint_lit`]   | `26729` (any width)        | the folded string value of a binary segment |
 //! | [`fname`]        | `'escaped_name'/arity`     | `docvec!["'", Document::String(f), "'/", …]` |
 //! | [`binary_lit`]   | `#{#<…>(…), …}#`            | `Document::String(Self::binary_string_literal(s))` |
 //! | [`annotated`]    | `( Expr -\| [Line, {'file', F}] )` | hand-rolled `-\|` annotation docvecs |
 
 use crate::Document;
-use crate::binary::{binary_byte_segments, binary_string_literal};
+use crate::binary::{binary_byte_segments, binary_string_literal, byte_segments};
 use crate::docvec;
 use crate::escape::{escape_atom_chars, escape_core_erlang_string};
 
@@ -136,6 +137,56 @@ pub fn float_lit(f: f64) -> Document<'static> {
     }
 }
 
+/// `26729` — the non-negative Core Erlang integer whose big-endian bytes are
+/// `be_bytes`, rendered in decimal at any width.
+///
+/// Core Erlang integers are bignums, so this is not bounded by `i64`/`u64`:
+/// a base-10^9 limb fold handles any number of bytes. Used for the folded
+/// value of a string literal in a binary pattern segment (`<<"hi">>` is
+/// `#<26729>(16,1,'integer',…)`). An empty slice renders `0`.
+///
+/// ```text
+/// bigint_lit(b"hi")                        => 26729
+/// bigint_lit(&[1, 0, 0, 0, 0, 0, 0, 0, 0]) => 18446744073709551616
+/// ```
+#[must_use]
+pub fn bigint_lit(be_bytes: &[u8]) -> Document<'static> {
+    use std::fmt::Write as _;
+    const BASE: u32 = 1_000_000_000;
+    // Little-endian base-10^9 limbs, each `< BASE`.
+    let mut limbs: Vec<u32> = vec![0];
+    for &b in be_bytes {
+        let mut carry = u64::from(b);
+        for limb in &mut limbs {
+            let cur = u64::from(*limb) * 256 + carry;
+            (*limb, carry) = split_limb(cur, BASE);
+        }
+        while carry > 0 {
+            let (low, high) = split_limb(carry, BASE);
+            limbs.push(low);
+            carry = high;
+        }
+    }
+    let mut out = String::new();
+    let mut limbs = limbs.iter().rev();
+    // The most significant limb renders unpadded; the rest are 9 digits each.
+    if let Some(top) = limbs.next() {
+        let _ = write!(out, "{top}");
+    }
+    for limb in limbs {
+        let _ = write!(out, "{limb:09}");
+    }
+    Document::Owned(out)
+}
+
+/// Splits `n` into `(n % base, n / base)`, the low part narrowed to `u32`
+/// (lossless: it is `< base`).
+fn split_limb(n: u64, base: u32) -> (u32, u64) {
+    let base = u64::from(base);
+    let low = u32::try_from(n % base).unwrap_or_default();
+    (low, n / base)
+}
+
 /// `'escaped_name'/arity` — a Core Erlang function name (atom plus arity).
 ///
 /// The function name is escaped exactly like [`atom`] and suffixed with
@@ -222,6 +273,15 @@ pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(binary_byte_segments(s.as_ref()))
 }
 
+/// `#<63>(8,1,'integer',['unsigned'|['big']]),#<248>(…)` — the *unwrapped*
+/// segments of raw `bytes`, one 8-bit segment each, like
+/// [`binary_segments`] but for bytes that need not be UTF-8 (a constant
+/// float folded to its encoding, as `erlc` folds it).
+#[must_use]
+pub fn byte_segments_lit(bytes: &[u8]) -> Document<'static> {
+    Document::Owned(byte_segments(bytes))
+}
+
 /// A `.bt` source position: the file it came from and its 1-based line number.
 ///
 /// Built by generator code from a byte-offset `Span` (via
@@ -269,7 +329,7 @@ impl<'a> BtSpan<'a> {
 /// ```
 #[must_use]
 pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static> {
-    docvec![
+    Document::Annotated(Box::new(docvec![
         "( ",
         expr,
         " -| [",
@@ -277,7 +337,24 @@ pub fn annotated(expr: Document<'static>, span: &BtSpan<'_>) -> Document<'static
         ", {'file', ",
         string_lit(span.file),
         "}] )"
-    ]
+    ]))
+}
+
+/// `( Expr -| [Line] )` — [`annotated`] for a node with no backing source file
+/// (compiling from a string): a bare line number, no `{'file', _}` entry.
+///
+/// ```text
+/// annotated_bare(var("X"), 42) => ( X -| [42] )
+/// ```
+#[must_use]
+pub fn annotated_bare(expr: Document<'static>, line: u32) -> Document<'static> {
+    Document::Annotated(Box::new(docvec![
+        "( ",
+        expr,
+        " -| [",
+        int_lit(i64::from(line)),
+        "] )"
+    ]))
 }
 
 /// `count` literal space characters — a run of pretty-printer indentation.
@@ -365,6 +442,37 @@ mod tests {
     }
 
     #[test]
+    fn bigint_lit_small_values() {
+        assert_eq!(bigint_lit(&[]).to_pretty_string(), "0");
+        assert_eq!(bigint_lit(&[0]).to_pretty_string(), "0");
+        assert_eq!(bigint_lit(b"hi").to_pretty_string(), "26729");
+        assert_eq!(bigint_lit(&[0xff, 0xff]).to_pretty_string(), "65535");
+    }
+
+    #[test]
+    fn bigint_lit_crosses_limb_and_u64_boundaries() {
+        // 10^9 exactly: the low limb must render zero-padded.
+        assert_eq!(
+            bigint_lit(&1_000_000_000u64.to_be_bytes()).to_pretty_string(),
+            "1000000000"
+        );
+        assert_eq!(
+            bigint_lit(&u64::MAX.to_be_bytes()).to_pretty_string(),
+            u64::MAX.to_string()
+        );
+        // 2^64 — one past the u64 ceiling.
+        assert_eq!(
+            bigint_lit(&[1, 0, 0, 0, 0, 0, 0, 0, 0]).to_pretty_string(),
+            "18446744073709551616"
+        );
+        let wide = u128::MAX - 12345;
+        assert_eq!(
+            bigint_lit(&wide.to_be_bytes()).to_pretty_string(),
+            wide.to_string()
+        );
+    }
+
+    #[test]
     fn fname_renders_name_and_arity() {
         assert_eq!(fname("foo", 2).to_pretty_string(), "'foo'/2");
         assert_eq!(fname("init", 1).to_pretty_string(), "'init'/1");
@@ -409,6 +517,34 @@ mod tests {
             doc.to_pretty_string(),
             "( X -| [42, {'file', \"foo.bt\"}] )"
         );
+    }
+
+    /// BT-4392: "already annotated" is a typed fact, not a leaf-layout guess:
+    /// it survives a `docvec!` built around an annotation and is false for a
+    /// look-alike plain document.
+    #[test]
+    fn annotated_is_a_typed_marker_not_a_text_shape() {
+        let span = BtSpan::new("foo.bt", 7);
+        assert!(annotated(var("X"), &span).is_annotated());
+        assert!(annotated_bare(var("X"), 7).is_annotated());
+        let inner = annotated(var("X"), &span);
+        let outer = annotated(docvec![inner.clone(), " + ", var("Y")], &span);
+        assert!(outer.is_annotated());
+        // An unannotated document with the same text is not an annotation.
+        let lookalike = docvec![
+            "( ",
+            var("X"),
+            " -| [",
+            int_lit(7),
+            ", {'file', \"foo.bt\"}] )"
+        ];
+        assert_eq!(
+            lookalike.to_pretty_string(),
+            annotated(var("X"), &span).to_pretty_string()
+        );
+        assert!(!lookalike.is_annotated());
+        // A sequence led by an annotation is not itself an annotation.
+        assert!(!docvec![inner, " in "].is_annotated());
     }
 
     #[test]

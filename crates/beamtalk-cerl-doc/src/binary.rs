@@ -28,8 +28,18 @@ pub fn binary_string_literal(s: &str) -> String {
 /// Produces: `#<byte1>(8,1,'integer',['unsigned'|['big']]),#<byte2>(...), ...`
 #[must_use]
 pub fn binary_byte_segments(s: &str) -> String {
+    byte_segments(s.as_bytes())
+}
+
+/// Returns Core Erlang binary segments for raw bytes, one 8-bit unsigned
+/// integer segment per byte, without `#{...}#` wrapping: the shape `erlc`
+/// folds constant segments to (a float literal's encoding, BT-4347).
+///
+/// Produces: `#<byte1>(8,1,'integer',['unsigned'|['big']]),#<byte2>(...), ...`
+#[must_use]
+pub fn byte_segments(bytes: &[u8]) -> String {
     let mut result = String::new();
-    for (i, byte) in s.bytes().enumerate() {
+    for (i, byte) in bytes.iter().enumerate() {
         if i > 0 {
             result.push(',');
         }

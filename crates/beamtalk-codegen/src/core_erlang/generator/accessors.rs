@@ -16,7 +16,6 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
-use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -308,7 +307,7 @@ impl CoreErlangGenerator {
     /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]).
     pub(in crate::core_erlang) fn set_shadowed_class_names(
         &mut self,
-        names: std::collections::HashSet<ecow::EcoString>,
+        names: beamtalk_core::semantic_analysis::ShadowedClassNames,
     ) {
         self.class_context_mut().shadowed_class_names = names;
     }
@@ -321,7 +320,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn is_shadowed_class(&self, class_name: &str) -> bool {
         self.class_context
             .as_ref()
-            .is_some_and(|ctx| ctx.shadowed_class_names.contains(class_name))
+            .is_some_and(|ctx| ctx.shadowed_class_names.is_shadowed(class_name))
     }
 
     /// Computes and installs the direct-call eligibility table from `hierarchy`.
@@ -786,18 +785,17 @@ impl CoreErlangGenerator {
         doc: Document<'static>,
         line_num: u32,
     ) -> Document<'static> {
+        // BT-4366: Core Erlang cannot annotate an already-annotated node
+        // (`( ( X -| [..] ) -| [..] )` is a parse error), and a call node
+        // annotated by its lowering can reach the send's whole-document
+        // annotation unchanged. The inner (call-node) annotation wins.
+        if doc.is_annotated() {
+            return doc;
+        }
         match source_path {
             Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
-            None => {
-                // No source path — use bare line number annotation
-                docvec![
-                    "( ",
-                    doc,
-                    " -| [",
-                    leaf::int_lit(i64::from(line_num)),
-                    "] )"
-                ]
-            }
+            // No source path — use bare line number annotation
+            None => leaf::annotated_bare(doc, line_num),
         }
     }
 }

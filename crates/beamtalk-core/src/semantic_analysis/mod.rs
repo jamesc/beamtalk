@@ -88,9 +88,9 @@ pub use class_module_registry::{
     RegistryEntry, relative_module_segments, validate_stdlib_module_name,
 };
 pub use collision_checker::{
-    DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
-    check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
-    shadowed_class_names,
+    DepInfo, DependencyRegistry, ShadowedClassNames, build_dependency_registry,
+    build_dependency_registry_with_graph, check_collision_at_use_sites, check_stdlib_reservation,
+    check_transitive_dep_usage, shadowed_class_names, shadowed_class_names_in_scope,
 };
 pub use definite_assignment::{
     admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,
@@ -896,6 +896,19 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     } else {
         pre_loaded_classes
     };
+
+    // BT-4283: before the pre-loaded entries are folded into the hierarchy
+    // (which keeps one entry per name), record which class names more than
+    // one package in scope declares — the same rule over the same kind of
+    // scope the codegen driver uses, so the block-escape validators ask
+    // `class_reference_send_runs_in_caller` with the shadowing codegen sees.
+    let shadowed = shadowed_class_names_in_scope(
+        &pre_loaded_classes,
+        module,
+        current_package,
+        &result.class_hierarchy,
+    );
+    result.class_hierarchy.set_shadowed_class_names(shadowed);
 
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
     if !pre_loaded_classes.is_empty() {

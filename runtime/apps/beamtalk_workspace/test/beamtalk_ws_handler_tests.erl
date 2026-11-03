@@ -302,8 +302,15 @@ auth_beamtalk_version_mismatch_rejected_test() ->
     Message = maps:get(<<"message">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(Message, <<"Version mismatch">>)),
     ?assertNotEqual(nomatch, binary:match(Message, <<"0.0.0-stale">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"just build">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"beamtalk workspace stop">>)),
     ?assert(lists:keymember(close, 1, Frames)).
+
+%% BT-4382: `just build` is suggested only when a side is a `-dev` build.
+auth_dev_version_mismatch_suggests_just_build_test() ->
+    Json = auth_json(#{<<"beamtalk_version">> => <<"0.0.0-dev+abc1234">>}),
+    {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    Message = maps:get(<<"message">>, first_text(Frames)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"just build">>)).
 
 auth_protocol_version_mismatch_rejected_test() ->
     %% Correct cookie, wrong wire protocol: same rejection path.

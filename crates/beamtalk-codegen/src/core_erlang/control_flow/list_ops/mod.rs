@@ -254,9 +254,11 @@ impl CoreErlangGenerator {
             self.non_literal_callable_doc(body, list_op_selector(operation), 1)?
         };
 
-        Ok(Self::generate_simple_list_op_footer(
-            list_var, recv_code, body_var, body_code, operation,
-        ))
+        Ok(
+            self.generate_simple_list_op_footer(
+                list_var, recv_code, body_var, body_code, operation,
+            ),
+        )
     }
 
     /// The callable argument of a list op that calls it with `arity`
@@ -372,6 +374,15 @@ impl CoreErlangGenerator {
         let mut apply_args: Vec<Document<'static>> =
             wrap_args.iter().map(|a| leaf::var(a.clone())).collect();
         apply_args.push(leaf::var(seed));
+        // BT-4366: the wrapper's apply is nested in a `let`, so it carries the
+        // list-op send's line itself.
+        let tier2_apply = self.annotate_current_send_call(docvec![
+            "apply ",
+            leaf::var(callable_var.clone()),
+            " (",
+            beamtalk_cerl_doc::join(apply_args, &Document::Str(", ")),
+            ")"
+        ]);
         let tier2_arm = docvec![
             "fun (",
             params,
@@ -379,11 +390,9 @@ impl CoreErlangGenerator {
             seed_preamble,
             "let ",
             leaf::var(wrap_tuple.clone()),
-            " = apply ",
-            leaf::var(callable_var.clone()),
-            " (",
-            beamtalk_cerl_doc::join(apply_args, &Document::Str(", ")),
-            ") in case ",
+            " = ",
+            tier2_apply,
+            " in case ",
             leaf::var(wrap_tuple),
             " of <{",
             leaf::var(wrap_res),
@@ -428,6 +437,7 @@ impl CoreErlangGenerator {
     /// ordinary message send (for a receiver that responds to the selector
     /// itself, e.g. a user-defined collection) when it is not.
     fn generate_simple_list_op_footer(
+        &self,
         list_var: String,
         recv_code: Document<'static>,
         body_var: String,
@@ -453,13 +463,19 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", ",
-            leaf::atom(selector.to_string()),
-            ", [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", ",
+                leaf::atom(selector.to_string()),
+                ", [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ]
     }
 

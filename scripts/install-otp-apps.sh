@@ -13,7 +13,8 @@
 # dist` recipe and scripts/ci/package-release.sh's Windows branch.
 #
 # Every app comes from rebar3's build output, runtime/_build/default/lib/*,
-# EXCEPT the Beamtalk-compiled stdlib class beams (`bt@*.beam`). Those are
+# EXCEPT the Beamtalk-compiled stdlib class beams (`bt@*.beam`) and
+# `beamtalk_stdlib.app`. Those are
 # written by `beamtalk build-stdlib` to runtime/apps/beamtalk_stdlib/ebin
 # (`STDLIB_EBIN_DIR` in crates/beamtalk-cli/src/commands/build_stdlib.rs; the
 # dev-layout `stdlib_ebin` in crates/beamtalk-core/src/ffi_type_specs.rs reads
@@ -22,10 +23,13 @@
 # stdlib build — never on a fresh checkout, where `build-erlang` runs before
 # `build-stdlib` — so taking them from _build shipped an install with no stdlib
 # classes (BT-4119), or stale ones from an earlier build. So for
-# beamtalk_stdlib: Erlang modules and the `.app` come from _build, `bt@*`
-# beams only from the stdlib build's own output directory. `just
-# test-install` fails if the two directories diverge (no `bt@*` beams there,
-# or a different count installed).
+# beamtalk_stdlib: Erlang modules come from _build, the `bt@*` beams AND the
+# `.app` only from the stdlib build's own output directory. `build-stdlib`
+# writes that `.app` complete (class + Erlang modules, `classes` env) in the
+# same run as the beams, whereas `build-erlang` compiles _build's copy from
+# `.app.src` before `build-stdlib` regenerates it, so its `classes` env is a
+# stdlib build behind (BT-4384). `just test-install` fails if the installed
+# `.app` and beams disagree.
 
 set -euo pipefail
 
@@ -80,6 +84,13 @@ for ebin_dir in "${BUILD_LIB_DIR}"/*/ebin; do
     fi
 
     apps=("${ebin_dir}"/*.app)
+    if [ "${app}" = "beamtalk_stdlib" ]; then
+        apps=("${STDLIB_CLASS_EBIN_DIR}/beamtalk_stdlib.app")
+        if [ ! -f "${apps[0]}" ]; then
+            echo "❌ No ${apps[0]}. Run 'just build-stdlib' first." >&2
+            exit 1
+        fi
+    fi
     if [ "${#apps[@]}" -gt 0 ]; then
         copy_files "${dest_ebin}" "${apps[@]}"
     fi

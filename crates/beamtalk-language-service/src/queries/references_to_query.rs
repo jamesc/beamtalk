@@ -40,7 +40,7 @@
 
 pub use beamtalk_core::method_source_walker::{ReferenceHit, find_all_references_in_source};
 
-use beamtalk_core::ast::{Expression, Pattern, StringSegment, TypeAnnotation};
+use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment, TypeAnnotation};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const PREFIX_LINES: u32 = 1;
@@ -174,6 +174,11 @@ fn collect_reference_lines(
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_reference_lines(inner, class_name, source, lines);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_reference_lines(inner, class_name, source, lines);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

@@ -1125,10 +1125,10 @@ Doc comments flow from source → AST → compiled BEAM module → runtime. They
 
 #### Documenting Parameters (`## Arguments` / `## Options`)
 
-The signature carries the machine-checked shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
+The signature carries the declared shape; the `///` comment carries the human-readable meaning. Parameter names are inferred from the signature — never repeat them with `@param`/`@returns` tags ([ADR 0008](ADR/0008-doc-comments-and-api-documentation.md), Resolved Question 3). Document parameters with conventional Markdown headings:
 
 - `## Arguments` — one bullet per parameter: name in backticks, type in parentheses, then what it means.
-- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style): one bullet per key, each with its type and default.
+- `## Options` — for a parameter that takes an option list (a `List` of tuples, in the Erlang style) or a flag list (a `List` of symbols): one bullet per key or flag, each with what it means (and, for a keyed option, its type and default).
 
 The recipe for an option list:
 
@@ -1159,7 +1159,29 @@ Object subclass: Fetcher
     opts isEmpty ifTrue: [url] ifFalse: [url]
 ```
 
-This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the machine-checked shape, the bullet list is the prose.
+**Flag lists.** When every option is a bare on/off flag, declare the alias as a union of symbol literals and type the parameter `List(Alias)`. Each bullet under `## Options` names one flag; there is no per-flag type or default. The parameter itself is still required — describe the empty case as "pass `#()` for none", never as a default, and offer a shorter selector without the list when callers commonly pass no flags. `Regex class>>from:options:` is the stdlib example:
+
+```beamtalk
+/// A single PCRE compile flag.
+type RegexOption = #caseless | #multiline | #dotall | #extended | #ungreedy
+
+sealed typed Value subclass: Regex native: beamtalk_regex
+  /// Compile a regex pattern with PCRE options (class method).
+  ///
+  /// ## Arguments
+  /// - `pattern` (String) — the PCRE pattern to compile.
+  /// - `opts` (List(RegexOption)) — compile flags; pass `#()` for none.
+  ///
+  /// ## Options
+  /// - `#caseless` — case-insensitive matching.
+  /// - `#multiline` — `^` and `$` match at line breaks.
+  class sealed from: pattern :: String options: opts :: List(RegexOption) -> Result(Regex, Error) =>
+    self delegate
+```
+
+Document the flags once, on the canonical method, and point other methods that take the same alias at it in prose (for example `String>>matchesRegex:options:` says "See `Regex class>>from:options:` for the option list") rather than copying the bullets. (Method-level `@see Class>>selector` is not parsed by the help/LSP/MCP surfaces, so don't use it for this.) When the flags are interpreted by native Erlang code, the runtime's accepted set must be tested against the alias members — `beamtalk_regex_tests` does this for `RegexOption` by reading the alias from the stdlib app's `type_aliases` metadata.
+
+This mirrors the Erlang (`-type` + `-doc`), Gleam (`///`), and Elixir (`## Options`) idiom: the type alias is the declared shape, the bullet list is the prose. The type checker does not yet check the *elements* of a list literal against `List(E)` — `options: #(#bogus)` compiles without a warning and fails only at runtime (tracked in BT-4385) — so the alias documents the accepted values and the native implementation must still validate them.
 
 ### Method Category Dividers (`// === Name ===`)
 
@@ -3208,7 +3230,7 @@ error: `detect:ifNone:` writes outer local `t`, but as a statement inside a cond
        the write is not threaded back (BT-3913)
 ```
 
-The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. What stays an error: a construct as a cascade part, a conditional's receiver, an interpolation or a `match:` subject (there is no statement boundary for the write to come back through); a statement inside a `whileTrue:`/`whileFalse:` condition block the loop does not thread; a `detect:ifNone:` with a stored search block; a `^` whose value is a loop or fold inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape); a value-bearing site in an actor fold body (the producer does not lower one, BT-3797); and a `match:` arm write where the `match:` is not a producer (a guard write, or a `match:` at no producer site). These are permanent restrictions, not gaps: the 733-shape oracle reports zero silent drops. One further shape is a current limit of the lowering rather than a designed restriction: a loop or fold that writes a local of its own conditional arm and is the value of an assignment in an actor method (`c ifTrue: [m := 0. s := xs inject: 0 into: [:a :e | m := m + e. a + e]. ...]`; the retired legacy arm lowering accepted it, BT-3913 rejects it, because the arm frame carries only method-level locals: hoist the writing loop to a statement and capture the pure fold value).
+The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. What stays an error: a construct as a cascade part, a conditional's receiver, an interpolation or a `match:` subject (there is no statement boundary for the write to come back through); a statement inside a `whileTrue:`/`whileFalse:` condition block the loop does not thread; a `detect:ifNone:` with a stored search block; a `^` whose value is a loop or fold inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape); a value-bearing site in an actor fold body (the producer does not lower one, BT-3797); and a `match:` arm write where the `match:` is not a producer (a guard write, or a `match:` at no producer site). These are permanent restrictions, not gaps: the 733-shape oracle reports zero silent drops. A loop or fold that writes a local of its own conditional arm (`c ifTrue: [m := 0. s := xs inject: 0 into: [:a :e | m := m + e. a + e]. ...]`) is accepted as a statement or as the whole value of an assignment in that arm, when the conditional is at the method root of an actor or value-type method and is an `ifTrue:` / `ifFalse:` / `ifNil:` / `ifNotNil:` conditional in any of their keyword combinations (BT-4367). Limits of the lowering remain, none a designed restriction: in a class method the same shape is rejected (the class-method arm does not lower it, and compiles to wrong answers if let through); the loop at an operand or array-literal site of an arm is rejected (`r := 1 + (xs inject: ...)`, `#[(xs collect: ...)]`); the arms of `and:` / `or:` and the handlers of a dictionary lookup (`at:ifAbsent:`, `at:ifPresent:ifAbsent:`) are rejected; and a conditional nested in a loop, a fold or another arm, or an `on:do:` or `match:` in such an arm, keeps its own rules. Hoist the writing loop to a statement and capture the pure fold value to get a rewrite that works everywhere.
 
 **Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, rebinds the local like any other assignment ([BT-3910](https://linear.app/beamtalk/issue/BT-3910), ADR 0131 §1). That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), and a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), in methods, in loop and fold bodies and in the REPL alike. The value of the assignment is the assigned value, and a sibling that is read before it sees the old value:
 
@@ -4667,6 +4689,19 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // <<$A>> matches byte 65. With a utf type a string matches per
 // character instead: <<"hi"/utf16>> matches bytes #(0, 104, 0, 105).
 
+// Binary construction (ADR 0143): the same <<...>> in expression position
+// builds a binary, so a built value matches back with the same segments.
+payload := Binary fromBytes: #(104, 105)
+len := payload size
+frame := <<16:8, len:24, payload/binary>>
+frame toBytes
+// => #(16, 0, 0, 2, 104, 105)
+frame match: [
+  <<16:8, n:24, rest:n/binary>> -> rest toBytes;
+  _ -> #()
+]
+// => #(104, 105)
+
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
 value match: [
@@ -4705,7 +4740,41 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). A `/bitstring` (`/bits`) segment binds whatever the bits are: a `Binary` when they are a whole number of bytes, otherwise a [`Bitstring`](#bitstring--unaligned-bits) (ADR 0141), which understands only bit-level messages (`bitSize`, `toBits`, `concat:`, `asBinary`). A type pattern `b :: Bitstring` matches exactly the unaligned values; `b :: Binary` never matches one. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `value`, `value:size`, `value/specifiers`, or `value:size/specifiers`. The specifiers are joined with `-` and name a type, `integer` (the default), `float`, `binary`/`bytes`, `bits`/`bitstring`, `utf8`, `utf16`, or `utf32`, plus `signed`/`unsigned`, `big`/`little`/`native`, and `unit:N` (1 to 256). A size is an integer literal, a variable, or a parenthesized expression. It counts units: the unit is 1 bit for `integer`, `float` and `bits`, and 8 bits for `binary`, so `v:2/unit:8` reads 16 bits and `p:3/binary` reads 3 bytes. Without a size, an integer is 8 bits, a float is 64, and a `binary`/`bits` segment takes the rest. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local. A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). A `/bitstring` (`/bits`) segment binds whatever the bits are: a `Binary` when they are a whole number of bytes, otherwise a [`Bitstring`](#bitstring--unaligned-bits) (ADR 0141), which understands only bit-level messages (`bitSize`, `toBits`, `concat:`, `asBinary`). A type pattern `b :: Bitstring` matches exactly the unaligned values; `b :: Binary` never matches one. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+
+**Binary segment values and checks** (BT-4097, BT-4143, BT-4376). Besides a variable or `_`, a segment value may be a literal, which must match exactly:
+
+- An **integer** literal, optionally negative (`<<0:1, v:7>>`, `<<-1:8/signed>>`).
+- A **float** literal (`<<1.5/float>>`). An integer or character literal in a `float` segment is read as a float, as `erlc` does: `<<1/float>>` matches `1.0`.
+- A **character** literal, which is its code point (`<<$A>>` matches byte 65; `<<c/utf8>>` binds a code point).
+- A **string** literal. With no specifiers it stands for its UTF-8 bytes (`<<"hi", rest/binary>>`; `<<"é">>` matches the two bytes `#(195, 169)`). Here Beamtalk differs from `erlc`, which turns each character into one byte, so in Erlang `<<"é">>` is the single byte 233. With `utf8`, `utf16` or `utf32` the string matches one encoded character at a time (`<<"hi"/utf16>>` matches `#(0, 104, 0, 105)`). Any other type, size, signedness, endianness or unit on a string literal is a compile error, as in `erlc` ("a literal string in a binary pattern must not have a type or a size").
+
+These segment rules are compile errors, with `erlc`'s wording: a negative literal size; a size or `unit:` on a `utf8`/`utf16`/`utf32` segment; a `unit:` without a size on an `integer` or `float` segment (a sizeless `binary` or `bits` segment may take one: `rest/binary-unit:16` matches a tail whose bit length is a multiple of 16); and a `unit:` that conflicts with the one the type implies. `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8, so `x:2/bits-unit:8` is "conflict in unit specification for bit field: '8' and '1'", while `bytes-unit:8` and `binary-unit:N` are accepted.
+
+An arm that can never match is a **warning**, as it is in `erlc`. Examples: a literal that does not fit its segment (`<<300>>` in the default 8 bits, or `<<-1:8>>` in an unsigned segment); an integer literal in a `binary`/`bits` segment; a float literal in a non-`float` segment; and a float size other than 16, 32 or 64 bits (size × unit). A non-ASCII character literal (U+0080 to U+00FF) in an 8-bit integer segment (the default size, or an explicit size × unit of 8 such as `$é:8`) also warns: `<<$é>>` matches the single byte 233 (its code point), not the UTF-8 bytes that `<<"é">>` matches, so write `"é"` or `$é/utf8` instead. To silence one of these warnings, use `@expect`. `--warnings-as-errors` turns them into errors.
+
+**Binary construction** (ADR 0143, BT-4346/4347/4348). `<<...>>` where an expression is expected builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<s:8/unit:2>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; `<<` is not a binary operator, so an infix `a << b` is a parse error. Every pattern example above reads as construction, so build-then-match round-trips:
+
+```beamtalk
+v := 4660
+<<v:16/little>> toBytes                       // => #(52, 18)
+<<-2:16/signed>> toBytes                      // => #(255, 254)
+<<1.5:32/float>> toBytes                      // => #(63, 192, 0, 0)
+<<"é">> toBytes                               // => #(195, 169) (UTF-8 bytes)
+<<"hi"/utf16>> toBytes                        // => #(0, 104, 0, 105)
+name := "hé"
+<<name/binary>> toBytes                       // => #(104, 195, 169)
+<<(name size):8, name/binary>> toBytes        // => #(2, 104, 195, 169)
+<<1:3>> class                                 // => Bitstring
+(<<7:3, 10:5>> match: [<<f:3, w:5>> -> {f, w}; _ -> nil])   // => {7, 10}
+```
+
+- **Segment values.** A segment value is a variable, a literal (integer, optionally negative; float; character; string), or a **parenthesised expression** for anything else: `<<(payload size):16>>`, `<<(a + b):4>>`. A field access or send must be parenthesised too: `<<(self.len):8>>`, since `<<self.len:8>>` is a parse error with a "parenthesize" hint (`name:` lexes as a keyword, so `<<x size:8>>` would read as the send `x size: 8`). Sizes follow the pattern rule: an integer literal, a variable, or a parenthesised expression.
+- **Evaluation order.** Segment values and sizes are evaluated left to right, each value before its own size, before the binary is built. An assignment or a send with side effects in one segment is seen by the segments after it: with `t := 0`, `<<t:8, (t := t + 1):8, t:8>>` builds `#(0, 1, 1)`. This holds in actor methods and loops too (`<<(self next):8, (self next):8>>`).
+- **String values.** A string literal with no specifiers is its UTF-8 bytes, as in patterns (`<<"é">>` is `#(195, 169)`; in Erlang it would be the single byte 233); with `utf8`/`utf16`/`utf32` it is encoded one character at a time. A `String` held in a variable contributes its UTF-8 bytes in a `binary`/`bytes`/`bits` segment. A type or size on a string *literal* (`<<"hi"/binary>>`) is a **compile error**, "a literal string in a binary construction must not have a type or a size", because it can never build (`erlc` only warns and raises `badarg` at run time). Write `<<"hi">>`, or bind the string to a variable first.
+- **Literal checks.** The same checks as patterns, worded for construction. A literal that does not fit its segment warns and is truncated to its low bits, exactly as a variable holding that value would be (`<<(-1):4>>` warns "...is truncated to 15"). A float literal in a non-float segment, an integer literal in a `binary` segment, and a float size other than 16, 32 or 64 bits warn ("binary construction will fail"). The error rows (negative literal size, size or unit on `utf*`, `unit:` without a size on `integer`/`float`, conflicting `unit:`) are errors in both directions.
+- **Result type.** Construction always builds bytes, never text: the result is a `Binary` when the total bit size is a multiple of 8 and a [`Bitstring`](#bitstring--unaligned-bits) otherwise (`<<1:3>>`), never a `String` (use `asString` to decode). Statically the type checker answers `Binary` when every segment's size is known and the sum is a multiple of 8, `Bitstring` when the known sum is not, and `Bitstring | Binary` when a variable size or a `bits` value leaves alignment unknown. Narrow a union with a `:: Binary` arm: `bin match: [b :: Binary -> b toBytes; _ -> nil]`.
+- **Run-time failures.** A value of the wrong kind for its segment (a non-integer in an `integer` segment, a non-binary in a `binary` segment), a negative or non-integer variable size, or a `binary` size larger than the value raises the BEAM's `badarg`, which surfaces as an `argument_error` `#beamtalk_error{}`.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
@@ -4755,7 +4824,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
-| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
+| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails; `utf8`/`utf16`/`utf32` and `unit:N`; integer, float, character and string literal values; a misfit literal warns (BT-663, BT-4096, BT-4097, BT-4143, BT-4376) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
 | Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only (plus the sealed `Binary`, subclass-aware) — see restrictions below (BT-2855, ADR 0107) |
 
@@ -4952,9 +5021,18 @@ ordinary dynamic send. A built-in receiver with its own representation
 `Symbol`, `True`, `False`, `UndefinedObject`, `Block`, `Tuple`, `Reference`,
 `Port`) compiles to a direct call guarded by the same representation test the
 dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
-`String`, `Binary`, `Pid`, `Boolean`, `Bitstring` and `Character` receivers,
-abstract classes, `Object`, `Value`, actors, and the supervisor and exception
-families always send dynamically. The result is always what a dynamic send answers
+`String` and `Pid` receivers do the same for every selector except the few the
+dynamic send answers outside their module, which stay dynamic: `Pid`'s future
+protocol (`await`, `whenResolved:`, …) and the byte-level selectors `String`
+shares with `Binary` (`byteAt:`, `asHex`, …). The exact lists are the
+`special_selectors` of the `String` and `Pid` rows in the routing fixture
+(`tagged_map_routing_conformance.json`), which the runtime conformance tests
+check against `beamtalk_primitive`. A `String`
+extension never moves any other selector: it is looked up inside `String`'s
+module, so a typed call site sees it at once. `Binary`, `Boolean`,
+`Bitstring` and `Character` receivers, abstract classes, `Object`, `Value`,
+actors, and the supervisor and exception families always send
+dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
 (`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
 module all reach typed call sites at once, because they act inside that
@@ -7468,6 +7546,7 @@ dispatch follows the class.
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
 bin := Binary fromIolist: #("hello", " ", "world")
+bin := <<104, 101, 108, 108, 111>>   // bit syntax, see Binary construction (ADR 0143)
 
 // Byte access (1-based, Collection protocol) — elements are byte Integers
 bin := Binary fromBytes: #(104, 101, 108)

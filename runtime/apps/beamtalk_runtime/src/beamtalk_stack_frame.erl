@@ -34,7 +34,8 @@ StackFrame objects are value types (tagged maps) with fields:
     module_to_class/1,
     wrap_frame/1,
     format_frame/1,
-    frame_parts/1
+    frame_parts/1,
+    frame_source_path/1
 ]).
 
 -doc """
@@ -341,9 +342,20 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
     #{class => ClassPart, selector => Selector, block => IsBlock, file => File, line => Line}.
 
 -doc """
-Source file for a frame: its own `file` when present, otherwise the module's
-`beamtalk_source` attribute (`nil` when neither is known).
+Source file for a frame as an unabbreviated path (not the display form that
+`frame_parts/1` shortens), so the file can be opened to show a snippet
+(BT-4358): the frame's own `file`, else the module's `beamtalk_source`
+attribute; `nil` when neither is known.
 """.
+-spec frame_source_path(map()) -> binary() | nil.
+frame_source_path(#{module := Module} = Frame) ->
+    case frame_file(Module, maps:get(file, Frame, nil)) of
+        nil -> nil;
+        Path -> unicode:characters_to_binary(Path)
+    end;
+frame_source_path(_) ->
+    nil.
+
 -spec frame_file(atom(), binary() | nil) -> string() | nil.
 frame_file(_Module, File) when is_binary(File), File =/= <<>> ->
     unicode:characters_to_list(File);

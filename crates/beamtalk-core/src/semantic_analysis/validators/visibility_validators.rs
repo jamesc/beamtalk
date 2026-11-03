@@ -22,7 +22,7 @@
 //! whose expansion transitively reaches an internal class or alias is a leak
 //! at its own declaration — see [`check_alias_leaked_visibility`].
 
-use crate::ast::{Expression, MethodDefinition, Module, TypeAnnotation};
+use crate::ast::{BinarySegment, Expression, MethodDefinition, Module, TypeAnnotation};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -355,6 +355,11 @@ fn check_expression_cross_package(
                 if let crate::ast::StringSegment::Interpolation(inner) = segment {
                     check_expression_cross_package(inner, current_pkg, hierarchy, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                check_expression_cross_package(inner, current_pkg, hierarchy, diagnostics);
             }
         }
 

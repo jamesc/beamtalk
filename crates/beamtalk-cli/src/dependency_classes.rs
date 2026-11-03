@@ -77,7 +77,7 @@ use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 use tracing::warn;
@@ -126,35 +126,20 @@ pub fn resolve_dependency_class_infos_with_sources(
     Vec<ProtocolDefinition>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) {
+    // The dependency flag follows the rule `build`/`lint`/`test` share
+    // (a malformed manifest conservatively assumes dependencies).
+    let read = manifest::find_manifest_full(project_root);
+    let has_package_dependencies =
+        manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
     let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let manifest_path = project_root.join("beamtalk.toml");
-    match manifest_path.try_exists() {
-        Ok(true) => {}
-        Ok(false) => return (false, Vec::new(), Vec::new(), protocol_sources),
-        Err(e) => {
-            warn!(
-                error = %e,
-                path = %manifest_path,
-                "Failed to check for beamtalk.toml for offline dependency class resolution; \
-                 assuming no manifest"
-            );
-            return (false, Vec::new(), Vec::new(), protocol_sources);
-        }
-    }
-
-    let parsed = match manifest::parse_manifest_full(&manifest_path) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Failed to parse beamtalk.toml for offline dependency class resolution; \
-                 conservatively assuming dependencies are declared"
-            );
-            return (true, Vec::new(), Vec::new(), protocol_sources);
-        }
+    let Ok(Some(parsed)) = read else {
+        return (
+            has_package_dependencies,
+            Vec::new(),
+            Vec::new(),
+            protocol_sources,
+        );
     };
-
-    let has_package_dependencies = !parsed.dependencies.is_empty();
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
@@ -224,13 +209,26 @@ pub fn resolve_dependency_class_infos_with_sources(
 
     // Flatten in the compile order of the graph compile, each dependency
     // against its own protocols and then those of the dependencies before it
-    // (BT-3678), so the exports equal a cold build's (BT-3684).
-    let mut prior_protocol_defs: Vec<ProtocolDefinition> = Vec::new();
-    for dep in compile_order(scanned, &parsed.package.name) {
+    // that it reaches in the graph (BT-3678, BT-4375), so the exports equal a
+    // cold build's (BT-3684).
+    let dependencies: BTreeMap<String, Vec<String>> = scanned
+        .iter()
+        .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
+        .collect();
+    // Each dependency flattened so far, with its own protocol ASTs.
+    let mut flattened: Vec<(String, &[ProtocolDefinition])> = Vec::new();
+    let ordered = compile_order(scanned, &parsed.package.name);
+    for dep in &ordered {
+        let closure =
+            beamtalk_core::compilation::dep_order::dependency_closure(&dependencies, &dep.name);
+        let prior_protocol_defs = flattened
+            .iter()
+            .filter(|(name, _)| closure.contains(name))
+            .flat_map(|(_, defs)| defs.iter().cloned());
         let mut infos = dep.scan.class_infos.clone();
         dep.scan
             .trait_users
-            .flatten(&mut infos, prior_protocol_defs.iter().cloned(), None);
+            .flatten(&mut infos, prior_protocol_defs, None);
         class_infos.extend(infos);
         beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
             &mut protocol_sources,
@@ -238,7 +236,7 @@ pub fn resolve_dependency_class_infos_with_sources(
         );
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
-        prior_protocol_defs.extend(own_protocol_defs.iter().cloned());
+        flattened.push((dep.name.clone(), own_protocol_defs));
     }
 
     (
@@ -258,7 +256,7 @@ struct DiscoveredDep {
 }
 
 /// `deps` in the order the graph compile (`beamtalk build`) compiles them
-/// ([`crate::dep_order::topological_order`]); in discovery order, with a
+/// ([`beamtalk_core::compilation::dep_order::topological_order`]); in discovery order, with a
 /// warning, if the graph has a cycle. Dependencies named only as an edge —
 /// whose checkout is not on disk — are not part of it.
 fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep> {
@@ -266,7 +264,7 @@ fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep
         .iter()
         .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
         .collect();
-    let order = match crate::dep_order::topological_order(&graph, root_name) {
+    let order = match beamtalk_core::compilation::dep_order::topological_order(&graph, root_name) {
         Ok(order) => order,
         Err(e) => {
             warn!(error = %e, "Dependency graph is not orderable; flattening in discovery order");

@@ -21,7 +21,8 @@
 //!   target (`dispatch_codegen::typed_tagged_target`);
 //! - [`reserved_tuple_tags`]: the tuple tags the `Tuple` test excludes;
 //! - [`builtin_send_route`]: the guard and module of a typed send's guarded
-//!   direct call to a built-in receiver (BT-4294), or why there is none;
+//!   direct call to a built-in receiver with a given selector (BT-4294,
+//!   BT-4390), or why there is none;
 //! - [`rewritten_selectors`]: selectors the dynamic entry point rewrites
 //!   before it classifies the receiver, which no guarded call may claim;
 //! - [`row`]: a class's whole row, for the dynamic-site report's reason.
@@ -161,7 +162,8 @@ pub(in crate::core_erlang) fn rewritten_selectors() -> &'static [&'static str] {
 
 /// The guard a typed send's guarded direct call to a built-in stands behind
 /// (BT-4294): a value passes it only if the dynamic path would route it to the
-/// row's `target_module` for every selector.
+/// row's `target_module` for every selector outside the row's
+/// `special_selectors`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::core_erlang) enum SendGuard {
     /// The row's own representation test, which is exactly the dynamic
@@ -213,33 +215,58 @@ pub(in crate::core_erlang) enum NoBuiltinRoute {
     DynamicOnly(&'static str),
     /// The row has no representation test or no single target module.
     NoSingleRoute,
-    /// The dynamic path answers some selectors outside the target module, so
-    /// the module does not speak for the whole protocol.
-    SpecialSelectors,
+    /// The send's selector is one of the row's `special_selectors`, which
+    /// the dynamic path answers without the target module (BT-4390): the
+    /// `Pid` row's future protocol (`beamtalk_future`), or the `String`
+    /// row's byte-level selectors shared with `Binary`, which go to
+    /// `bt@stdlib@binary` unless a `String` extension overrides them.
+    SpecialSelector(&'static str),
     /// The row's representation test admits values routed to another module
     /// (`Binary`'s test admits a `String`).
     GuardSpansRoutes,
 }
 
-/// The guarded direct route of a typed send to an instance of `class`, read
-/// from the routing fixture (BT-4294), or `None` when `class` has no row (it
-/// is a tagged-map class, `dispatch_codegen::typed_tagged_target`'s concern).
+/// The guarded direct route of a typed send of `selector` to an instance of
+/// `class`, read from the routing fixture (BT-4294), or `None` when `class`
+/// has no row (it is a tagged-map class,
+/// `dispatch_codegen::typed_tagged_target`'s concern).
+///
+/// Selector-aware (BT-4390): a row with `special_selectors` routes every
+/// *other* selector to its `target_module`, because the dynamic path only
+/// diverts the listed ones (`beamtalk_primitive:send_pid/3`'s future
+/// clauses, `module_for_value/2`'s `String`/`Binary` shared-selector fast
+/// path) and sends the rest to `target_module:dispatch/3`.
+///
+/// A `String` extension (ADR 0066) does not move a non-special selector:
+/// the runtime's `beamtalk_extensions:has('String', Sel)` check sits only
+/// inside the shared-selector fast path, so it can only move a *special*
+/// selector between `bt@stdlib@binary` and `bt@stdlib@string`. Every other
+/// `String` selector reaches `bt@stdlib@string:dispatch/3` whatever the
+/// extension registry holds, and that function consults the registry
+/// itself (its `beamtalk_extensions:lookup` fallthrough arm), so an
+/// extension added or replaced at run time is still honoured by the direct
+/// call.
 pub(in crate::core_erlang) fn builtin_send_route(
     class: &str,
+    selector: &str,
 ) -> Option<std::result::Result<BuiltinRoute, NoBuiltinRoute>> {
     let row = row(class)?;
-    Some(route_of(row))
+    Some(route_of(row, selector))
 }
 
-fn route_of(row: &RoutingRow) -> std::result::Result<BuiltinRoute, NoBuiltinRoute> {
+fn route_of(row: &RoutingRow, selector: &str) -> std::result::Result<BuiltinRoute, NoBuiltinRoute> {
     if let Some(why) = row.dynamic_only {
         return Err(NoBuiltinRoute::DynamicOnly(why));
     }
     let (Some(guard), Some(target_module)) = (row.guard, row.target_module) else {
         return Err(NoBuiltinRoute::NoSingleRoute);
     };
-    if !row.special_selectors.is_empty() {
-        return Err(NoBuiltinRoute::SpecialSelectors);
+    if let Some(special) = row
+        .special_selectors
+        .iter()
+        .find(|special| **special == selector)
+    {
+        return Err(NoBuiltinRoute::SpecialSelector(special));
     }
     let guard = SendGuard::of(guard).ok_or(NoBuiltinRoute::GuardSpansRoutes)?;
     Ok(BuiltinRoute {

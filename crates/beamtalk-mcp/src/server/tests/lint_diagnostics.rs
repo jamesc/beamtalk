@@ -188,6 +188,7 @@ fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
         false,
         None,
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     );
     let near_misses: Vec<_> = diags
         .iter()
@@ -228,6 +229,7 @@ fn run_module_analysis_reports_mismatched_file_name() {
         false,
         Some("event"),
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     );
     assert!(
         diags
@@ -256,6 +258,7 @@ fn run_module_analysis_does_not_report_matching_file_name() {
         false,
         Some("exdura_event"),
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     );
     assert!(
         !diags
@@ -389,6 +392,7 @@ fn run_module_analysis_reports_native_declaration_location_error() {
         false,
         None,
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     );
 
     assert!(

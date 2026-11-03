@@ -53,10 +53,7 @@ fn attach_with_port_but_no_cookie_errors() {
 
 #[test]
 fn attach_with_port_and_cookie_to_nothing_listening_errors() {
-    // Bind then immediately drop to get a port nothing is listening on.
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().expect("local_addr").port();
-    drop(listener);
+    let port = beamtalk_repl_protocol::test_ports::closed_port();
 
     let project = cli_common::fixture_project();
     cli_common::beamtalk()

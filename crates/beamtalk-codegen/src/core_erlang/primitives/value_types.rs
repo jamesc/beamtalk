@@ -20,11 +20,27 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
     match selector {
         "size" => Some(Document::Str("call 'erlang':'tuple_size'(Self)")),
         "at:" => {
+            // BT-4400: the in-range case reads the element inline, so a typed
+            // `t at: i` costs no more than any other direct call (no extra hop
+            // into the runtime helper). Every other index (non-integer, out of
+            // range) takes the helper, which raises the structured error — so
+            // the error behaviour is the helper's, unchanged.
             let p0 = params.first()?;
+            let idx = || leaf::var(p0.clone());
             Some(docvec![
-                "call 'beamtalk_tuple':'at'(Self, ",
-                leaf::var(p0.clone()),
-                ")"
+                "case ",
+                idx(),
+                " of <_> when call 'erlang':'and'(call 'erlang':'is_integer'(",
+                idx(),
+                "), call 'erlang':'and'(call 'erlang':'>='(",
+                idx(),
+                ", 1), call 'erlang':'=<'(",
+                idx(),
+                ", call 'erlang':'tuple_size'(Self)))) -> call 'erlang':'element'(",
+                idx(),
+                ", Self) <_> when 'true' -> call 'beamtalk_tuple':'at'(Self, ",
+                idx(),
+                ") end"
             ])
         }
         "isOk" => Some(Document::Str(
@@ -279,10 +295,19 @@ mod tests {
 
     #[test]
     fn test_tuple_at_with_param() {
-        let result = doc_to_string(generate_tuple_bif("at:", &["Idx".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'at'(Self, Idx)".to_string())
+        let result = doc_to_string(generate_tuple_bif("at:", &["Idx".to_string()]))
+            .expect("at: should produce code");
+        // BT-4400: an in-range integer index reads the element inline...
+        assert!(
+            result.contains(
+                "when call 'erlang':'and'(call 'erlang':'is_integer'(Idx), call 'erlang':'and'(call 'erlang':'>='(Idx, 1), call 'erlang':'=<'(Idx, call 'erlang':'tuple_size'(Self)))) -> call 'erlang':'element'(Idx, Self)"
+            ),
+            "{result}"
+        );
+        // ...and every other index keeps the helper, which owns the errors.
+        assert!(
+            result.contains("<_> when 'true' -> call 'beamtalk_tuple':'at'(Self, Idx)"),
+            "{result}"
         );
     }
 

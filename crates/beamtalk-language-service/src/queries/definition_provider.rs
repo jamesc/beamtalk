@@ -27,7 +27,7 @@
 
 use crate::{Location, ProjectIndex};
 use beamtalk_core::ast::normalize::canonical_operand;
-use beamtalk_core::ast::{Expression, MessageSelector, Module};
+use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use beamtalk_core::source_analysis::Span;
@@ -736,6 +736,10 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
                 None
             }
         }),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .find_map(|expr| find_selector_lookup_in_expr(expr, offset)),
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             elements
                 .iter()
@@ -1145,6 +1149,10 @@ fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> 
                 None
             }
         }),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .find_map(|expr| find_ffi_call_in_expr(expr, offset)),
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             elements
                 .iter()

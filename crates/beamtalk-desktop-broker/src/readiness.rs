@@ -316,9 +316,8 @@ struct ErrBody {
 /// budget below is therefore *far* more generous than actually needed on
 /// this broker's real (loopback-only) posture, but there is no evidence it
 /// causes harm, so it was left as a safety ceiling rather than tightened —
-/// unlike [`crate::spawn::DEFAULT_BIND_FAILURE_GRACE`], being *slower* than
-/// necessary here has no failure mode (it does not misclassify a state; it
-/// just leaves headroom no one so far has needed).
+/// being *slower* than necessary here has no failure mode (it does not
+/// misclassify a state; it just leaves headroom no one so far has needed).
 ///
 /// The two timeouts are still deliberately **separate**, not one shared
 /// duration, because a single timeout tuned for the cheap HTTP-up check
@@ -394,6 +393,8 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::thread;
+
+    use beamtalk_repl_protocol::test_ports::closed_port;
 
     /// Symmetric `ProbeTimeouts` for tests that don't care about the
     /// http_up-vs-readiness split — see `probe_timeouts_use_the_right_stage`
@@ -715,11 +716,7 @@ mod tests {
 
     #[test]
     fn http_get_errors_when_nothing_is_listening() {
-        // A closed loopback listener: bind then immediately drop, so the
-        // port is (almost certainly) refused rather than accidentally reused.
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let port = closed_port();
 
         let result = http_get("127.0.0.1", port, "/", Duration::from_millis(500));
         assert!(result.is_err());
@@ -759,9 +756,7 @@ mod tests {
 
     #[test]
     fn http_probe_reports_http_down_when_nothing_listening() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let port = closed_port();
 
         let mut probe = http_probe(
             "127.0.0.1",
