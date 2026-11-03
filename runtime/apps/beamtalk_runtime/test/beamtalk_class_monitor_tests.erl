@@ -355,7 +355,7 @@ restart_budget_exhausted_test_() ->
                 %% budget window as the first.
                 Dummy2 = spawn_dummy(),
                 ok = beamtalk_class_monitor:watch('BudgetClass', Dummy2),
-                %% watch/2 is a cast; this call is ordered after it.
+                %% watch/2 is a synchronous call here, so Dummy2 is already watched.
                 ?assert(is_watched(Dummy2)),
                 kill_and_wait(Dummy2, kill),
                 %% The 'DOWN' handler drops Dummy2 from `watched` in the same
