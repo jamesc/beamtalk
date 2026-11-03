@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4348: Actor fixture for binary construction (ADR 0143) inside actor
+// methods — field values, self-sends with side effects and loops as
+// segment values, evaluated left to right.
+
+Actor subclass: BinaryFrameActor
+  state: count = 0
+  state: len = 3
+
+  getCount => self.count
+
+  // Bumps the counter and answers its new value.
+  next =>
+    self.count := self.count + 1
+    self.count
+
+  // A field value must be parenthesised in a segment.
+  header => <<(self.len):8, 7:8>>
+
+  // Each self-send runs before the next segment is evaluated, so this
+  // builds #(1, 2, 2).
+  selfSendFrame => <<(self next):8, (self next):8, (self.count):8>>
+
+  // A field write in a segment is visible to the segments after it, so
+  // this builds #(0, 1, 1).
+  fieldWriteFrame =>
+    <<(self.count):8, (self.count := self.count + 1):8, (self.count):8>>
+
+  // A local reassigned in a segment, then read by the next one.
+  localFrame =>
+    t := 10
+    <<t:8, (t := t + 1):8, t:8>>
+
+  // Builds a running-total frame in a loop: each iteration appends one
+  // byte computed from a field write.
+  runningTotals: items :: List(Integer) -> Binary =>
+    acc := Binary fromBytes: #()
+    items do: [:k | acc := <<acc/binary, (self.count := self.count + k):8>>]
+    acc

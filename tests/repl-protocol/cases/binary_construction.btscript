@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for binary construction in the REPL context (ADR 0143, BT-4348)
+//
+// This file covers REPL-specific behavior only: construction from workspace
+// bindings across turns, how built values display, and compile diagnostics.
+// Segment semantics are tested exhaustively in
+// stdlib/test/binary_construction_test.bt (BUnit).
+
+// ===========================================================================
+// DISPLAY — a built value displays like any other Binary (bytes that are
+// valid UTF-8 render as text, others as <<AB CD>> hex) or Bitstring
+// ===========================================================================
+
+<<255:8, 0:8>>
+// => <<FF 00>>
+
+<<"hi">>
+// => "hi"
+
+<<"hi">> class
+// => Binary
+
+<<1:3>>
+// => <<1:3>>
+
+<<1:3>> class
+// => Bitstring
+
+// ===========================================================================
+// CROSS-TURN VARIABLE PERSISTENCE
+// ===========================================================================
+
+payload := Binary fromBytes: #(104, 105)
+// => "hi"
+
+len := payload size
+// => 2
+
+frame := <<16:8, len:24, payload/binary>>
+// => _
+
+frame asHex
+// => "100000026869"
+
+frame toBytes
+// => [16,0,0,2,104,105]
+
+// Build in one turn, match back in the next
+frame match: [<<16:8, n:24, rest:n/binary>> -> rest asHex; _ -> nil]
+// => "6869"
+
+// A String value contributes its UTF-8 bytes
+name := "hé"
+// => "hé"
+
+<<name/binary>> asHex
+// => "68c3a9"
+
+// ===========================================================================
+// EVALUATION ORDER — segments evaluate left to right
+// ===========================================================================
+
+t := 0
+// => 0
+
+<<t:8, (t := t + 1):8, t:8>> toBytes
+// => [0,1,1]
+
+t
+// => 1
+
+// ===========================================================================
+// DIAGNOSTICS
+// ===========================================================================
+
+// A type or size on a string literal can never build: compile error
+<<"hi"/binary>>
+// => ERROR: a literal string in a binary construction must not have a type or a size
+
+// A literal that does not fit its segment warns and is truncated
+<<(-1):4, 0:4>>
+// => WARNING: does not fit in an 'unsigned' binary segment of size 4 and is truncated to 15
+
+<<(-1):4, 0:4>> asHex
+// => "f0"

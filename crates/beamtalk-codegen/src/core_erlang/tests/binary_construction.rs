@@ -241,21 +241,88 @@ fn typed_string_literal_is_rejected_by_the_parser() {
 
 // --- Operand sequencing (ADR 0118 literal-container rule) ---
 
+/// Where the value a construction segment variable holds was produced:
+/// follows `let V = W in` aliases from `var` back to the first binding whose
+/// right-hand side is not a bare variable, and answers that binding's offset
+/// (bindings appear in evaluation order in the emitted text).
+fn value_origin(code: &str, var: &str) -> usize {
+    let mut var = var.to_string();
+    loop {
+        let binding = format!("let {var} = ");
+        let at = code
+            .find(&binding)
+            .unwrap_or_else(|| panic!("no binding of {var} in\n{code}"));
+        let rhs = &code[at + binding.len()..];
+        let alias: String = rhs
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '@')
+            .collect();
+        let is_bare_var = rhs[alias.len()..].starts_with(" in ")
+            && alias.starts_with(|c: char| c.is_ascii_uppercase() || c == '_');
+        if !is_bare_var {
+            return at;
+        }
+        var = alias;
+    }
+}
+
+/// The variables a construction's segments name, in segment order.
+fn segment_vars(construction: &str) -> Vec<&str> {
+    construction
+        .match_indices("#<")
+        .map(|(at, _)| {
+            let rest = &construction[at + 2..];
+            &rest[..rest.find('>').unwrap_or(rest.len())]
+        })
+        .collect()
+}
+
 #[test]
 fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
-    for (context, src) in [
+    // `<<t:8, (t := t + 1):8, t:8>>` builds bytes 0, 1, 1: the first segment
+    // reads `t` before the assignment, the last one reads the assigned value.
+    for (context, src, method) in [
         (
             "class",
             "Object subclass: Seq\n  class go =>\n    t := 0\n    b := <<t:8, (t := t + 1):8, t:8>>\n    #[t, b]\n",
+            "'class_go'/1 = fun",
         ),
         (
             "actor",
             "Actor subclass: Seq\n  state: n = 0\n\n  go =>\n    t := 0\n    b := <<t:8, (t := t + 1):8, t:8>>\n    #[t, b]\n",
+            "<'go'> when 'true' ->",
         ),
         (
             "actor field",
             "Actor subclass: Seq\n  state: n = 0\n\n  go =>\n    <<(self.n):8, (self.n := self.n + 1):8, (self.n):8>>\n",
+            "<'go'> when 'true' ->",
         ),
+    ] {
+        let code = compile(src);
+        let body_at = code
+            .find(method)
+            .unwrap_or_else(|| panic!("{context}: no {method} in\n{code}"));
+        let body = &code[body_at..];
+        let start = body
+            .find("#{#<")
+            .unwrap_or_else(|| panic!("{context}: no construction in\n{body}"));
+        let end = start + body[start..].find("}#").expect("closed construction");
+        let vars = segment_vars(&body[start..end]);
+        assert_eq!(vars.len(), 3, "{context}: {}", &body[start..end]);
+        let [first, assigned, last] = [vars[0], vars[1], vars[2]].map(|v| value_origin(body, v));
+        assert!(
+            first < assigned,
+            "{context}: the first segment must read its value before the assignment\n{body}"
+        );
+        assert!(
+            assigned <= last,
+            "{context}: the last segment must read the assigned value or later\n{body}"
+        );
+    }
+
+    // Other scope kinds: the construction compiles (through erlc when
+    // available) with its operands threaded.
+    for (context, src) in [
         (
             "value type",
             "Value subclass: Seq\n  go =>\n    t := 0\n    <<(t := t + 1):(t + 7)>>\n",
