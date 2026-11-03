@@ -3,12 +3,13 @@
 
 // BT-4367: a loop or fold that writes a local of its own conditional arm answers
 // what the same body answers at the method root, for every conditional selector
-// in `PLAIN_ARM_SELECTORS` at every position of the conditional, in actor and
-// value-type methods. This grid is the runtime evidence behind the validator's
-// plain-arm rule. A class method, a dictionary-lookup handler, `and:`/`or:`, a
-// conditional nested in a loop, fold or arm, and a loop at an operand or
-// array-literal site of an arm keep the position error (pinned in
-// `local_threading.rs`). Fixtures: fixtures/bt4367arm_local_grid_{actor,value}.bt.
+// in `PLAIN_ARM_SELECTORS` (in either arm of a two-arm selector) at every
+// position of the conditional, in actor and value-type methods. This grid is the
+// runtime evidence behind the validator's plain-arm rule. A class method, a
+// dictionary-lookup handler, `and:`/`or:`, a conditional nested in a loop, fold
+// or arm, and a loop at an operand or array-literal site of an arm keep the
+// position error (pinned in `local_threading.rs`). Fixtures:
+// fixtures/bt4367arm_local_grid_{actor,value}.bt.
 
 TestCase subclass: Bt4367ArmLocalGridTest
 
@@ -491,6 +492,294 @@ TestCase subclass: Bt4367ArmLocalGridTest
   test_actor_ifNotNil_ifNil_operand_early_return =>
     o := Bt4367ArmLocalGridActor spawn
     self assert: (o ifNotNil_ifNil_operand_early_returnArm: 1) equals: o ifNotNil_ifNil_operand_early_returnRoot
+
+  test_actor_ifTrue_ifFalseSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_last_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_last_assign_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_last_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_last_stmt_doRoot
+
+  test_actor_ifTrue_ifFalseSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_last_final_injectArm: false) equals: o ifTrue_ifFalseSecond_last_final_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_last_final_collectArm: false) equals: o ifTrue_ifFalseSecond_last_final_collectRoot
+
+  test_actor_ifTrue_ifFalseSecond_last_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_last_early_returnArm: false) equals: o ifTrue_ifFalseSecond_last_early_returnRoot
+
+  test_actor_ifTrue_ifFalseSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_nonlast_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_assign_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_nonlast_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_nonlast_stmt_doRoot
+
+  test_actor_ifTrue_ifFalseSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_nonlast_final_injectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_final_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_nonlast_final_collectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_final_collectRoot
+
+  test_actor_ifTrue_ifFalseSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_nonlast_early_returnArm: false) equals: o ifTrue_ifFalseSecond_nonlast_early_returnRoot
+
+  test_actor_ifTrue_ifFalseSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_assign_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_assign_assign_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_assign_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_assign_stmt_doRoot
+
+  test_actor_ifTrue_ifFalseSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_assign_final_injectArm: false) equals: o ifTrue_ifFalseSecond_assign_final_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_assign_final_collectArm: false) equals: o ifTrue_ifFalseSecond_assign_final_collectRoot
+
+  test_actor_ifTrue_ifFalseSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_assign_early_returnArm: false) equals: o ifTrue_ifFalseSecond_assign_early_returnRoot
+
+  test_actor_ifTrue_ifFalseSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_return_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_return_assign_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_return_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_return_stmt_doRoot
+
+  test_actor_ifTrue_ifFalseSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_return_final_injectArm: false) equals: o ifTrue_ifFalseSecond_return_final_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_return_final_collectArm: false) equals: o ifTrue_ifFalseSecond_return_final_collectRoot
+
+  test_actor_ifTrue_ifFalseSecond_return_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_return_early_returnArm: false) equals: o ifTrue_ifFalseSecond_return_early_returnRoot
+
+  test_actor_ifTrue_ifFalseSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_operand_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_operand_assign_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_operand_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_operand_stmt_doRoot
+
+  test_actor_ifTrue_ifFalseSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_operand_final_injectArm: false) equals: o ifTrue_ifFalseSecond_operand_final_injectRoot
+
+  test_actor_ifTrue_ifFalseSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifTrue_ifFalseSecond_operand_early_returnArm: false) equals: o ifTrue_ifFalseSecond_operand_early_returnRoot
+
+  test_actor_ifNil_ifNotNilSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_last_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_last_assign_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_last_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_last_stmt_doRoot
+
+  test_actor_ifNil_ifNotNilSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_last_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_last_final_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_last_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_last_final_collectRoot
+
+  test_actor_ifNil_ifNotNilSecond_last_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_last_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_last_early_returnRoot
+
+  test_actor_ifNil_ifNotNilSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_nonlast_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_assign_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_nonlast_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_stmt_doRoot
+
+  test_actor_ifNil_ifNotNilSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_nonlast_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_final_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_nonlast_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_final_collectRoot
+
+  test_actor_ifNil_ifNotNilSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_nonlast_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_early_returnRoot
+
+  test_actor_ifNil_ifNotNilSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_assign_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_assign_assign_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_assign_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_assign_stmt_doRoot
+
+  test_actor_ifNil_ifNotNilSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_assign_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_assign_final_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_assign_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_assign_final_collectRoot
+
+  test_actor_ifNil_ifNotNilSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_assign_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_assign_early_returnRoot
+
+  test_actor_ifNil_ifNotNilSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_return_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_return_assign_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_return_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_return_stmt_doRoot
+
+  test_actor_ifNil_ifNotNilSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_return_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_return_final_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_return_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_return_final_collectRoot
+
+  test_actor_ifNil_ifNotNilSecond_return_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_return_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_return_early_returnRoot
+
+  test_actor_ifNil_ifNotNilSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_operand_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_operand_assign_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_operand_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_operand_stmt_doRoot
+
+  test_actor_ifNil_ifNotNilSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_operand_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_operand_final_injectRoot
+
+  test_actor_ifNil_ifNotNilSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNil_ifNotNilSecond_operand_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_operand_early_returnRoot
+
+  test_actor_ifNotNil_ifNilSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_last_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_last_assign_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_last_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_last_stmt_doRoot
+
+  test_actor_ifNotNil_ifNilSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_last_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_last_final_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_last_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_last_final_collectRoot
+
+  test_actor_ifNotNil_ifNilSecond_last_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_last_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_last_early_returnRoot
+
+  test_actor_ifNotNil_ifNilSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_nonlast_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_assign_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_nonlast_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_stmt_doRoot
+
+  test_actor_ifNotNil_ifNilSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_nonlast_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_final_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_nonlast_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_final_collectRoot
+
+  test_actor_ifNotNil_ifNilSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_nonlast_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_early_returnRoot
+
+  test_actor_ifNotNil_ifNilSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_assign_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_assign_assign_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_assign_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_assign_stmt_doRoot
+
+  test_actor_ifNotNil_ifNilSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_assign_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_assign_final_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_assign_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_assign_final_collectRoot
+
+  test_actor_ifNotNil_ifNilSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_assign_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_assign_early_returnRoot
+
+  test_actor_ifNotNil_ifNilSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_return_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_return_assign_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_return_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_return_stmt_doRoot
+
+  test_actor_ifNotNil_ifNilSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_return_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_return_final_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_return_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_return_final_collectRoot
+
+  test_actor_ifNotNil_ifNilSecond_return_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_return_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_return_early_returnRoot
+
+  test_actor_ifNotNil_ifNilSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_operand_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_operand_assign_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_operand_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_operand_stmt_doRoot
+
+  test_actor_ifNotNil_ifNilSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_operand_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_operand_final_injectRoot
+
+  test_actor_ifNotNil_ifNilSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridActor spawn
+    self assert: (o ifNotNil_ifNilSecond_operand_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_operand_early_returnRoot
 
   test_actor_ifNil_last_assign_inject =>
     o := Bt4367ArmLocalGridActor spawn
@@ -1163,6 +1452,294 @@ TestCase subclass: Bt4367ArmLocalGridTest
   test_value_ifNotNil_ifNil_operand_early_return =>
     o := Bt4367ArmLocalGridValue new
     self assert: (o ifNotNil_ifNil_operand_early_returnArm: 1) equals: o ifNotNil_ifNil_operand_early_returnRoot
+
+  test_value_ifTrue_ifFalseSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_last_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_last_assign_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_last_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_last_stmt_doRoot
+
+  test_value_ifTrue_ifFalseSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_last_final_injectArm: false) equals: o ifTrue_ifFalseSecond_last_final_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_last_final_collectArm: false) equals: o ifTrue_ifFalseSecond_last_final_collectRoot
+
+  test_value_ifTrue_ifFalseSecond_last_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_last_early_returnArm: false) equals: o ifTrue_ifFalseSecond_last_early_returnRoot
+
+  test_value_ifTrue_ifFalseSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_nonlast_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_assign_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_nonlast_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_nonlast_stmt_doRoot
+
+  test_value_ifTrue_ifFalseSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_nonlast_final_injectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_final_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_nonlast_final_collectArm: false) equals: o ifTrue_ifFalseSecond_nonlast_final_collectRoot
+
+  test_value_ifTrue_ifFalseSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_nonlast_early_returnArm: false) equals: o ifTrue_ifFalseSecond_nonlast_early_returnRoot
+
+  test_value_ifTrue_ifFalseSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_assign_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_assign_assign_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_assign_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_assign_stmt_doRoot
+
+  test_value_ifTrue_ifFalseSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_assign_final_injectArm: false) equals: o ifTrue_ifFalseSecond_assign_final_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_assign_final_collectArm: false) equals: o ifTrue_ifFalseSecond_assign_final_collectRoot
+
+  test_value_ifTrue_ifFalseSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_assign_early_returnArm: false) equals: o ifTrue_ifFalseSecond_assign_early_returnRoot
+
+  test_value_ifTrue_ifFalseSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_return_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_return_assign_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_return_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_return_stmt_doRoot
+
+  test_value_ifTrue_ifFalseSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_return_final_injectArm: false) equals: o ifTrue_ifFalseSecond_return_final_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_return_final_collectArm: false) equals: o ifTrue_ifFalseSecond_return_final_collectRoot
+
+  test_value_ifTrue_ifFalseSecond_return_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_return_early_returnArm: false) equals: o ifTrue_ifFalseSecond_return_early_returnRoot
+
+  test_value_ifTrue_ifFalseSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_operand_assign_injectArm: false) equals: o ifTrue_ifFalseSecond_operand_assign_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_operand_stmt_doArm: false) equals: o ifTrue_ifFalseSecond_operand_stmt_doRoot
+
+  test_value_ifTrue_ifFalseSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_operand_final_injectArm: false) equals: o ifTrue_ifFalseSecond_operand_final_injectRoot
+
+  test_value_ifTrue_ifFalseSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifTrue_ifFalseSecond_operand_early_returnArm: false) equals: o ifTrue_ifFalseSecond_operand_early_returnRoot
+
+  test_value_ifNil_ifNotNilSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_last_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_last_assign_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_last_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_last_stmt_doRoot
+
+  test_value_ifNil_ifNotNilSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_last_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_last_final_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_last_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_last_final_collectRoot
+
+  test_value_ifNil_ifNotNilSecond_last_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_last_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_last_early_returnRoot
+
+  test_value_ifNil_ifNotNilSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_nonlast_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_assign_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_nonlast_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_stmt_doRoot
+
+  test_value_ifNil_ifNotNilSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_nonlast_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_final_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_nonlast_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_final_collectRoot
+
+  test_value_ifNil_ifNotNilSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_nonlast_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_nonlast_early_returnRoot
+
+  test_value_ifNil_ifNotNilSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_assign_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_assign_assign_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_assign_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_assign_stmt_doRoot
+
+  test_value_ifNil_ifNotNilSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_assign_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_assign_final_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_assign_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_assign_final_collectRoot
+
+  test_value_ifNil_ifNotNilSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_assign_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_assign_early_returnRoot
+
+  test_value_ifNil_ifNotNilSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_return_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_return_assign_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_return_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_return_stmt_doRoot
+
+  test_value_ifNil_ifNotNilSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_return_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_return_final_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_return_final_collectArm: 1) equals: o ifNil_ifNotNilSecond_return_final_collectRoot
+
+  test_value_ifNil_ifNotNilSecond_return_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_return_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_return_early_returnRoot
+
+  test_value_ifNil_ifNotNilSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_operand_assign_injectArm: 1) equals: o ifNil_ifNotNilSecond_operand_assign_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_operand_stmt_doArm: 1) equals: o ifNil_ifNotNilSecond_operand_stmt_doRoot
+
+  test_value_ifNil_ifNotNilSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_operand_final_injectArm: 1) equals: o ifNil_ifNotNilSecond_operand_final_injectRoot
+
+  test_value_ifNil_ifNotNilSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNil_ifNotNilSecond_operand_early_returnArm: 1) equals: o ifNil_ifNotNilSecond_operand_early_returnRoot
+
+  test_value_ifNotNil_ifNilSecond_last_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_last_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_last_assign_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_last_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_last_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_last_stmt_doRoot
+
+  test_value_ifNotNil_ifNilSecond_last_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_last_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_last_final_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_last_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_last_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_last_final_collectRoot
+
+  test_value_ifNotNil_ifNilSecond_last_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_last_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_last_early_returnRoot
+
+  test_value_ifNotNil_ifNilSecond_nonlast_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_nonlast_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_assign_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_nonlast_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_nonlast_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_stmt_doRoot
+
+  test_value_ifNotNil_ifNilSecond_nonlast_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_nonlast_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_final_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_nonlast_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_nonlast_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_final_collectRoot
+
+  test_value_ifNotNil_ifNilSecond_nonlast_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_nonlast_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_nonlast_early_returnRoot
+
+  test_value_ifNotNil_ifNilSecond_assign_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_assign_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_assign_assign_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_assign_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_assign_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_assign_stmt_doRoot
+
+  test_value_ifNotNil_ifNilSecond_assign_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_assign_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_assign_final_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_assign_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_assign_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_assign_final_collectRoot
+
+  test_value_ifNotNil_ifNilSecond_assign_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_assign_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_assign_early_returnRoot
+
+  test_value_ifNotNil_ifNilSecond_return_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_return_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_return_assign_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_return_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_return_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_return_stmt_doRoot
+
+  test_value_ifNotNil_ifNilSecond_return_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_return_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_return_final_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_return_final_collect =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_return_final_collectArm: nil) equals: o ifNotNil_ifNilSecond_return_final_collectRoot
+
+  test_value_ifNotNil_ifNilSecond_return_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_return_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_return_early_returnRoot
+
+  test_value_ifNotNil_ifNilSecond_operand_assign_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_operand_assign_injectArm: nil) equals: o ifNotNil_ifNilSecond_operand_assign_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_operand_stmt_do =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_operand_stmt_doArm: nil) equals: o ifNotNil_ifNilSecond_operand_stmt_doRoot
+
+  test_value_ifNotNil_ifNilSecond_operand_final_inject =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_operand_final_injectArm: nil) equals: o ifNotNil_ifNilSecond_operand_final_injectRoot
+
+  test_value_ifNotNil_ifNilSecond_operand_early_return =>
+    o := Bt4367ArmLocalGridValue new
+    self assert: (o ifNotNil_ifNilSecond_operand_early_returnArm: nil) equals: o ifNotNil_ifNilSecond_operand_early_returnRoot
 
   test_value_ifNil_last_assign_inject =>
     o := Bt4367ArmLocalGridValue new
