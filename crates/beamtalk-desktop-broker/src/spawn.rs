@@ -309,7 +309,13 @@ impl std::ops::DerefMut for SpawnedFront {
 /// if `config.launcher` looks right for this platform but no file
 /// actually exists there — the common unpackaged-dev-build failure mode,
 /// checked explicitly rather than left to surface as a generic `Io` error
-/// out of `Command::spawn` below.
+/// out of `Command::spawn` below. Resolving the front's port file
+/// ([`crate::port::port_file_path`]) can return [`BrokerError::Workspace`]
+/// (no home directory).
+///
+/// The front reports the port it binds through [`SpawnedFront::port_file`];
+/// [`launch_front`] waits for it — call that rather than this unless you
+/// handle the port report yourself.
 pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));

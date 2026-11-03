@@ -46,8 +46,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::error::{BrokerError, Result};
 
-/// Env var naming the file the front writes its bound port to. Must match
-/// `BtAttach.PortReport.env_var/0` (`editors/liveview/lib/bt_attach/port_report.ex`).
+/// Env var naming the file the front writes its bound port to — the front
+/// reads the same name (`BtAttach.PortReport`,
+/// `editors/liveview/lib/bt_attach/port_report.ex`); the
+/// `port_file_env_matches_the_front` test enforces that.
 pub const PORT_FILE_ENV: &str = "BT_ATTACH_PORT_FILE";
 
 /// Default upper bound on how long [`wait_for_reported_port`] waits for a
@@ -175,6 +177,25 @@ fn poll_for_port(child: &mut Child, port_file: &Path, timeout: Duration) -> Resu
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// The env var crosses the Rust/Elixir boundary: read the front's own
+    /// source and require it to name the same variable, so renaming either
+    /// side fails here instead of silently breaking every desktop attach.
+    /// (`BtAttach.PortReportTest` pins the Elixir side's value too.)
+    #[test]
+    fn port_file_env_matches_the_front() {
+        let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../editors/liveview/lib/bt_attach/port_report.ex");
+        let source = std::fs::read_to_string(&source_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", source_path.display()));
+        let declaration = format!("@env_var \"{PORT_FILE_ENV}\"");
+        assert!(
+            source.contains(&declaration),
+            "{} should declare `{declaration}` — the front and the broker disagree on the \
+             port-file env var",
+            source_path.display()
+        );
+    }
 
     #[test]
     fn new_instance_id_is_unique_across_calls() {
