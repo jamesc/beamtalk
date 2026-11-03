@@ -948,9 +948,9 @@ impl CoreErlangGenerator {
     /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
     /// selector on those rows is routed. Rows whose test spans two routes
     /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
-    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A stdlib built-in's module can
-    /// be neither removed nor redefined into another module, so the pinned
-    /// target never goes stale.
+    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
+    /// stdlib built-in's module can be neither removed nor redefined into
+    /// another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
