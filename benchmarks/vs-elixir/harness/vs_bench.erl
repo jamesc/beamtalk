@@ -530,8 +530,8 @@ compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode pr
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
-compiles_to("14a") -> "send(T, 'at:', [1]) -> Tuple:dispatch/3 (typed built-in stays dynamic until BT-4294)";
-compiles_to("14b") -> "class reference built per use (whereis_class), BT-4295";
+compiles_to("14a") -> "is_tuple-guarded direct Tuple:dispatch/3 (BT-4294); 'at:' reads an in-range element inline (BT-4400)";
+compiles_to("14b") -> "class reference per use: whereis of the compile-time registered name + module_name_safe (BT-4295)";
 compiles_to(_) -> "".
 
 %%====================================================================

@@ -28,6 +28,10 @@ See: ADR 0007
 %%% Public API
 %%% ============================================================================
 
+%% BT-4400: the compiled `Tuple>>at:` (`generate_tuple_bif` in
+%% crates/beamtalk-codegen/src/core_erlang/primitives/value_types.rs) inlines
+%% this first clause and calls at/2 only for other indexes.
+%% `TupleTest>>testAtMatchesRuntimeHelper` checks the two agree.
 -doc "Element at index (1-based) with bounds and type checking.".
 -spec at(tuple(), integer()) -> term().
 at(Tuple, Idx) when is_integer(Idx), Idx >= 1, Idx =< tuple_size(Tuple) ->
