@@ -76,13 +76,18 @@ pub struct DepGraphSnapshot {
 }
 
 impl DepGraphSnapshot {
-    /// A current-schema snapshot of `deps`, ordered by name.
+    /// A current-schema snapshot of `deps`, ordered by name, each entry's
+    /// [`dependencies`](DepGraphEntry::dependencies) sorted and deduplicated.
     ///
     /// Dependency names are unique across a resolved graph, so sorting by
     /// name is a total order and makes comparison independent of discovery
-    /// order.
+    /// order (and of manifest key order, for each entry's edges).
     #[must_use]
     pub fn new(mut deps: Vec<DepGraphEntry>) -> Self {
+        for entry in &mut deps {
+            entry.dependencies.sort();
+            entry.dependencies.dedup();
+        }
         deps.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             schema: DEP_GRAPH_SNAPSHOT_SCHEMA,
@@ -309,6 +314,13 @@ mod tests {
         let read = read_dep_graph_snapshot(&path).unwrap();
         assert_eq!(read, snapshot);
         assert_eq!(read.deps[0].name, "a", "entries are ordered by name");
+
+        let unordered = DepGraphSnapshot::new(vec![entry("a", &["z", "b", "z"])]);
+        assert_eq!(
+            unordered.deps[0].dependencies,
+            ["b", "z"],
+            "edges are sorted and deduplicated"
+        );
 
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(

@@ -76,16 +76,11 @@ fn snapshot_for(all_deps: &[DiscoveredDep]) -> DepGraphSnapshot {
     DepGraphSnapshot::new(
         all_deps
             .iter()
-            .map(|dep| {
-                let mut dependencies = dep.deps.clone();
-                dependencies.sort();
-                dependencies.dedup();
-                DepGraphEntry {
-                    name: dep.name.clone(),
-                    via: dep.via_chain.clone(),
-                    dependencies,
-                    source: dep.source.to_string(),
-                }
+            .map(|dep| DepGraphEntry {
+                name: dep.name.clone(),
+                via: dep.via_chain.clone(),
+                dependencies: dep.deps.clone(),
+                source: dep.source.to_string(),
             })
             .collect(),
     )
