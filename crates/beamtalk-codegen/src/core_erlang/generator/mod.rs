@@ -30,10 +30,10 @@ pub(in crate::core_erlang) use context::{
 };
 
 use crate::core_erlang::control_flow::LoopMode;
+use crate::core_erlang::erlang_types::ModuleName;
 use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
 use crate::core_erlang::sequencing;
 use crate::core_erlang::threaded_ir::VersionCounter;
-use crate::core_erlang::erlang_types::ModuleName;
 use crate::core_erlang::variable_context::VariableContext;
 use beamtalk_cerl_doc::{Document, INDENT, docvec, leaf, line, nest};
 use beamtalk_core::source_analysis::Diagnostic;
