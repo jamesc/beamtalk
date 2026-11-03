@@ -56,6 +56,7 @@ Extracted from beamtalk_repl_eval.
     trigger_hot_reload/2,
     reload_class_file/1,
     reload_class_file/2,
+    reload_class_file/3,
     is_stdlib_path/1,
     to_snake_case/1,
     verify_class_present/3,
@@ -701,12 +702,26 @@ to avoid a compile-time dependency from beamtalk_runtime to beamtalk_workspace.
 """.
 -spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path) ->
-    reload_class_file_impl(Path, undefined).
+    reload_class_file_impl(Path, undefined, #{}).
 
 %% ExpectedClassName (atom) is verified against the compiled class list.
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
-    reload_class_file_impl(Path, ExpectedClassName).
+    reload_class_file_impl(Path, ExpectedClassName, #{}).
+
+-doc """
+`reload_class_file/2` as one file of a `load_project` batch (BT-4394).
+
+`BatchOpts` is the batch's `#{project_batch => binary()}` compile option
+(or `#{}`), merged into every compile this reload issues — the file's own
+compile and, for a protocol file, each fan-out user's recompile — so the
+compiler port verifies the project scope once per batch. Without it a
+fan-out compile mid-batch carries no token, resets the port's verified
+batch, and the next file of the batch re-stats the whole project.
+""".
+-spec reload_class_file(string(), atom() | undefined, map()) -> {ok, [map()]} | {error, term()}.
+reload_class_file(Path, ExpectedClassName, BatchOpts) ->
+    reload_class_file_impl(Path, ExpectedClassName, BatchOpts).
 
 -doc "Check if a file path refers to a stdlib file (under stdlib/src/ directory).".
 -spec is_stdlib_path(string()) -> boolean().
@@ -1474,8 +1489,10 @@ safe_list_to_atom(List) ->
     end.
 
 %% Reload a class file without REPL session state.
--spec reload_class_file_impl(string(), atom() | undefined) -> {ok, [map()]} | {error, term()}.
-reload_class_file_impl(Path, ExpectedClassName) ->
+%% `BatchOpts` is `reload_class_file/3`'s batch compile option (or `#{}`).
+-spec reload_class_file_impl(string(), atom() | undefined, map()) ->
+    {ok, [map()]} | {error, term()}.
+reload_class_file_impl(Path, ExpectedClassName, BatchOpts) ->
     case filelib:is_file(Path) of
         false ->
             {error, {file_not_found, Path}};
@@ -1486,7 +1503,9 @@ reload_class_file_impl(Path, ExpectedClassName) ->
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
                     ModuleNameOverride = compute_package_module_name(Path),
-                    reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName)
+                    reload_compile_and_load(
+                        Source, Path, ModuleNameOverride, ExpectedClassName, BatchOpts
+                    )
             end
     end.
 
@@ -1506,6 +1525,15 @@ reload_class_file_impl(Path, ExpectedClassName) ->
     string(), string(), binary() | undefined, atom() | undefined
 ) -> {ok, [map()]} | {error, term()}.
 reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
+    reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName, #{}).
+
+%% `reload_compile_and_load/4` inside a `load_project` batch: `BatchOpts`
+%% (`reload_class_file/3`'s `#{project_batch => _}`, or `#{}`) rides every
+%% compile this reload issues, fan-out included (BT-4394).
+-spec reload_compile_and_load(
+    string(), string(), binary() | undefined, atom() | undefined, map()
+) -> {ok, [map()]} | {error, term()}.
+reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName, BatchOpts) ->
     %% ADR 0127 §11 / BT-3593: a protocol file's reload can never install
     %% just the protocol module the way a class file's reload installs just
     %% that class — every loaded user's flattened body is baked from the
@@ -1527,13 +1555,13 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     %% protocol's users (see that arity's doc); this reuses it for every
     %% caller instead of only that one.
     PrebuiltIndexes = with_ambient_protocol_sources(
-        beamtalk_repl_compiler:build_class_indexes()
+        maps:merge(beamtalk_repl_compiler:build_class_indexes(), BatchOpts)
     ),
     case
         compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes)
     of
         {ok, protocol_definition, _ProtocolInfo} = ProtocolResult ->
-            reload_protocol_fanout(ProtocolResult, Path, Source);
+            reload_protocol_fanout(ProtocolResult, Path, Source, BatchOpts);
         {ok, _Tag, _, _, _} = CompiledResult ->
             install_reload_result(CompiledResult, Path);
         {error, _} = Err ->
@@ -1745,7 +1773,18 @@ replaces, not a breaking return-shape change.
 """.
 -spec reload_protocol_fanout({ok, protocol_definition, map()}, string(), string()) ->
     {ok, [map()]} | {error, #beamtalk_error{}}.
-reload_protocol_fanout({ok, protocol_definition, ProtocolInfo} = ProtocolResult, Path, Source) ->
+reload_protocol_fanout(ProtocolResult, Path, Source) ->
+    reload_protocol_fanout(ProtocolResult, Path, Source, #{}).
+
+%% `reload_protocol_fanout/3` inside a `load_project` batch: `BatchOpts`
+%% rides each user's stage-1 recompile (BT-4394). The rollback recompile
+%% stays untagged: it runs only on a failed install, where re-verifying the
+%% project scope on the next file costs nothing that matters.
+-spec reload_protocol_fanout({ok, protocol_definition, map()}, string(), string(), map()) ->
+    {ok, [map()]} | {error, #beamtalk_error{}}.
+reload_protocol_fanout(
+    {ok, protocol_definition, ProtocolInfo} = ProtocolResult, Path, Source, BatchOpts
+) ->
     case is_stdlib_path(Path) of
         true ->
             {error, stdlib_protocol_reload_read_only_error(ProtocolInfo)};
@@ -1764,7 +1803,7 @@ reload_protocol_fanout({ok, protocol_definition, ProtocolInfo} = ProtocolResult,
                 build_protocol_sources_map(ProtocolAtoms, Source)
             ),
             warn_skipped_fanout_users(ProtocolAtoms, SkippedNameBins),
-            case compile_fanout_users(TargetAtoms, ProtocolSources) of
+            case compile_fanout_users(TargetAtoms, ProtocolSources, BatchOpts) of
                 {ok, CompiledUsers} ->
                     install_protocol_fanout(ProtocolResult, Path, Source, CompiledUsers);
                 {error, Failures} ->
@@ -1846,12 +1885,13 @@ warn_skipped_fanout_users(ProtocolAtoms, SkippedNameBins) ->
 %% tracked source, with `protocol_sources` context. All-or-nothing — a
 %% single user's compile failure rejects the whole batch, mirroring
 %% `validate_rewrite_groups/1`'s identical shape for the multi-site rewrite
-%% protocol.
--spec compile_fanout_users([atom()], #{binary() => binary()}) ->
+%% protocol. `BatchOpts` is the `load_project` batch's compile option (or
+%% `#{}`), merged into every recompile — see `reload_class_file/3`.
+-spec compile_fanout_users([atom()], #{binary() => binary()}, map()) ->
     {ok, [{atom(), string(), term()}]} | {error, [{atom(), term()}]}.
-compile_fanout_users(TargetAtoms, ProtocolSources) ->
+compile_fanout_users(TargetAtoms, ProtocolSources, BatchOpts) ->
     Results = [
-        {ClassAtom, compile_fanout_user(ClassAtom, ProtocolSources)}
+        {ClassAtom, compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts)}
      || ClassAtom <- TargetAtoms
     ],
     case [{ClassAtom, Reason} || {ClassAtom, {_Path, {error, Reason}}} <- Results] of
@@ -1862,9 +1902,9 @@ compile_fanout_users(TargetAtoms, ProtocolSources) ->
 %% Recompile one fan-out target from its OWN tracked source (never the just-
 %% edited protocol's) — the class's own body did not change; only what its
 %% `uses:` line flattens in did.
--spec compile_fanout_user(atom(), #{binary() => binary()}) ->
+-spec compile_fanout_user(atom(), #{binary() => binary()}, map()) ->
     {string(), {ok, compiled, binary(), [map()], atom()} | {error, term()}}.
-compile_fanout_user(ClassAtom, ProtocolSources) ->
+compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts) ->
     ClassNameBin = normalize_class_source_key(ClassAtom),
     %% Present by construction: `discover_fanout_targets/1` only lists a
     %% class here after confirming `get_class_source/1` returns a value.
@@ -1878,7 +1918,7 @@ compile_fanout_user(ClassAtom, ProtocolSources) ->
     ModuleNameOverride = compute_package_module_name(Path),
     PrebuiltIndexes = maps:merge(
         beamtalk_repl_compiler:build_class_indexes(),
-        #{protocol_sources => ProtocolSources}
+        BatchOpts#{protocol_sources => ProtocolSources}
     ),
     Compiled = compile_reload_source(
         Source, Path, ModuleNameOverride, ClassAtom, PrebuiltIndexes

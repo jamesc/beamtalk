@@ -75,6 +75,35 @@ pub fn hex_encode(bytes: &[u8]) -> String {
         })
 }
 
+/// Recursively copy the directory tree at `src` into `dst` (created if
+/// absent; existing files are overwritten).
+///
+/// The shared leaf under every "copy a checked-in fixture project into a
+/// tempdir" need in the test helpers of `beamtalk-cli`,
+/// `beamtalk-compiler-port` and `beamtalk-parity-tests`, which must not each
+/// carry their own copy (see `docs/development/architecture-principles.md`
+/// § Duplication & the Shared-Leaf-Module Pattern). Symlinks are followed,
+/// which suits source fixtures; a tree whose symlinks must survive (an ERTS
+/// copy) needs `beamtalk-cli`'s release-assembly copy instead.
+///
+/// # Errors
+///
+/// Returns the first I/O error from reading `src` or writing `dst`.
+pub fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_tree(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
 /// Resolve `<name>` (or `<name>.exe` on Windows) as a sibling `[[bin]]`
 /// artifact next to the calling test binary.
 ///

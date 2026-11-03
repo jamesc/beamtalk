@@ -122,17 +122,27 @@ fn write_parity_project() -> (tempfile::TempDir, std::path::PathBuf) {
     (dir, state_path)
 }
 
-/// Record `deps` (all direct) as the project's resolved dependency graph,
-/// in the schema `beamtalk build` writes after a resolve.
+/// Record `deps` (each with no dependencies of its own) as the project's
+/// resolved dependency graph, in the schema `beamtalk build` writes after a
+/// resolve.
 fn write_dep_graph_snapshot(root: &std::path::Path, deps: &[&str]) {
+    let graph: Vec<(&str, &[&str])> = deps.iter().map(|name| (*name, &[][..])).collect();
+    write_dep_graph_snapshot_with_edges(root, &graph);
+}
+
+/// Record `graph` — each dependency with its own direct dependencies — as
+/// the project's resolved dependency graph.
+fn write_dep_graph_snapshot_with_edges(root: &std::path::Path, graph: &[(&str, &[&str])]) {
     use beamtalk_core::compilation::dep_graph::{
         DEP_GRAPH_SNAPSHOT_FILE, DepGraphEntry, DepGraphSnapshot,
     };
     let snapshot = DepGraphSnapshot::new(
-        deps.iter()
-            .map(|name| DepGraphEntry {
+        graph
+            .iter()
+            .map(|(name, dependencies)| DepGraphEntry {
                 name: (*name).to_string(),
                 via: Vec::new(),
+                dependencies: dependencies.iter().map(|d| (*d).to_string()).collect(),
                 source: format!("git: https://example.test/{name} (tag: v0.1.0)"),
             })
             .collect(),
@@ -450,22 +460,12 @@ fn edited_alias_file_resolves_on_next_compile() {
 /// package `cli_build`'s BT-4378 test builds — into a fresh tempdir, so a
 /// test can edit it (and the port's per-root memo sees a new root).
 fn stubbed_ffi_project() -> tempfile::TempDir {
-    fn copy_dir(src: &std::path::Path, dest: &std::path::Path) {
-        fs::create_dir_all(dest).expect("fixture dir");
-        for entry in fs::read_dir(src).expect("read fixture dir").flatten() {
-            let target = dest.join(entry.file_name());
-            if entry.path().is_dir() {
-                copy_dir(&entry.path(), &target);
-            } else {
-                fs::copy(entry.path(), &target).expect("copy fixture file");
-            }
-        }
-    }
     let dir = tempfile::tempdir().expect("tempdir for stubbed_ffi project");
-    copy_dir(
+    beamtalk_workspace::copy_tree(
         &beamtalk_workspace::cargo_workspace_root!().join("tests/parity/projects/stubbed_ffi"),
         dir.path(),
-    );
+    )
+    .expect("copy stubbed_ffi fixture");
     dir
 }
 
@@ -587,8 +587,7 @@ fn missing_snapshot_still_resolves_declared_dependencies() {
     );
 }
 
-/// An unreadable (corrupt or unknown-schema) snapshot behaves like a
-/// missing one.
+/// A corrupt snapshot behaves like a missing one.
 #[test]
 fn corrupt_snapshot_still_resolves_declared_dependencies() {
     let (dir, state_path) = write_parity_project();
@@ -600,6 +599,111 @@ fn corrupt_snapshot_still_resolves_declared_dependencies() {
         response_status(&response).as_deref(),
         Some("ok"),
         "a declared dependency must resolve with a corrupt snapshot: {response:?}"
+    );
+}
+
+/// An unknown-schema snapshot (a newer or older toolchain's) behaves like a
+/// missing one.
+#[test]
+fn unknown_schema_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::write(
+        dir.path().join("_build/deps/.dep-graph.json"),
+        r#"{"schema": 99, "deps": []}"#,
+    )
+    .expect("write an unknown-schema dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve with an unknown-schema snapshot: {response:?}"
+    );
+}
+
+/// Adds a transitive dependency to the parity project — `fakedep` declares
+/// `transdep`, whose checkout defines `type TransAddr` — plus a project file
+/// using that alias under `type = "error"`. Returns the new file's path.
+fn add_transitive_dependency(root: &std::path::Path) -> std::path::PathBuf {
+    fs::create_dir_all(root.join("_build/deps/transdep/src")).expect("fixture transdep src/");
+    fs::write(
+        root.join("_build/deps/fakedep/beamtalk.toml"),
+        "[package]\nname = \"fakedep\"\nversion = \"0.1.0\"\n\n[dependencies]\ntransdep = { git = \"https://example.test/transdep\", tag = \"v0.1.0\" }\n",
+    )
+    .expect("fixture dep beamtalk.toml");
+    fs::write(
+        root.join("_build/deps/transdep/beamtalk.toml"),
+        "[package]\nname = \"transdep\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("fixture transdep beamtalk.toml");
+    fs::write(
+        root.join("_build/deps/transdep/src/trans_types.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         type TransAddr = #near | #far\n\
+         \n\
+         Value subclass: TransTypes\n\
+         \x20 defaultAddr -> Symbol => #near\n",
+    )
+    .expect("fixture trans_types.bt");
+    let path = root.join("src/parity_trans.bt");
+    fs::write(
+        &path,
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: ParityTrans\n\
+         \x20 field: addr :: TransAddr = #near\n",
+    )
+    .expect("fixture parity_trans.bt");
+    path
+}
+
+/// BT-4394: with a usable snapshot, a transitive dependency resolves through
+/// the edge its parent's entry records.
+#[test]
+fn transitive_dependency_aliases_resolve_through_recorded_edges() {
+    let (dir, _) = write_parity_project();
+    let trans_path = add_transitive_dependency(dir.path());
+    let source = fs::read_to_string(&trans_path).expect("read fixture trans file");
+
+    // The fixture's snapshot records `fakedep` with no edges, so the
+    // `transdep` checkout sits outside the resolved graph.
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("error"),
+        "a checkout outside the recorded graph must not resolve: {response:?}"
+    );
+
+    write_dep_graph_snapshot_with_edges(
+        dir.path(),
+        &[("fakedep", &["transdep"]), ("transdep", &[])],
+    );
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a transitive dependency's alias must resolve: {response:?}"
+    );
+}
+
+/// BT-4394: an unusable snapshot (here, missing) still resolves transitive
+/// dependencies — the fallback scans `_build/deps/` checkouts with a
+/// manifest, not only the directly declared names.
+#[test]
+fn missing_snapshot_still_resolves_transitive_dependencies() {
+    let (dir, _) = write_parity_project();
+    let trans_path = add_transitive_dependency(dir.path());
+    fs::remove_file(dir.path().join("_build/deps/.dep-graph.json"))
+        .expect("remove the dep-graph snapshot");
+    let source = fs::read_to_string(&trans_path).expect("read fixture trans file");
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a transitive dependency's alias must resolve without a snapshot: {response:?}"
     );
 }
 

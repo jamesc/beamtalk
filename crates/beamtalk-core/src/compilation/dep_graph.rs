@@ -7,7 +7,8 @@
 //!
 //! After every successful dependency resolve, `beamtalk build` records the
 //! effective dependency graph — every discovered dependency's name, the chain
-//! of dependencies it was reached through, and how it was declared — as
+//! of dependencies it was reached through, its own direct dependencies, and
+//! how it was declared — as
 //! `_build/deps/.dep-graph.json`. The build compares it against the next
 //! resolve to notice structural graph changes (the CLI's `deps::snapshot`).
 //!
@@ -32,7 +33,11 @@ pub const DEP_GRAPH_SNAPSHOT_FILE: &str = ".dep-graph.json";
 /// changes; an unrecognised schema is treated as a miss, so a newer
 /// toolchain's snapshot never lets an older binary reuse artifacts it cannot
 /// reason about.
-pub const DEP_GRAPH_SNAPSHOT_SCHEMA: u32 = 1;
+///
+/// Schema 2 (BT-4394) added [`DepGraphEntry::dependencies`]. A schema-1
+/// snapshot knows only the first `via` chain that reached each dependency,
+/// which loses edges in a diamond, so it is rejected rather than read.
+pub const DEP_GRAPH_SNAPSHOT_SCHEMA: u32 = 2;
 
 /// One dependency as it was declared the last time the graph resolved.
 ///
@@ -48,6 +53,15 @@ pub struct DepGraphEntry {
     /// (empty for a dependency the root manifest declares directly).
     #[serde(default)]
     pub via: Vec<String>,
+    /// The names this dependency's own manifest declares as its direct
+    /// dependencies, sorted: the graph's dependency-to-dependency edges.
+    /// Every edge is recorded, unlike `via`, which keeps only the first
+    /// chain that reached the dependency.
+    ///
+    /// Defaulted on read only so an older-schema file still parses far
+    /// enough to report [`DepGraphSnapshotError::UnrecognisedSchema`].
+    #[serde(default)]
+    pub dependencies: Vec<String>,
     /// How the declaring manifest asked for it.
     pub source: String,
 }
@@ -62,13 +76,18 @@ pub struct DepGraphSnapshot {
 }
 
 impl DepGraphSnapshot {
-    /// A current-schema snapshot of `deps`, ordered by name.
+    /// A current-schema snapshot of `deps`, ordered by name, each entry's
+    /// [`dependencies`](DepGraphEntry::dependencies) sorted and deduplicated.
     ///
     /// Dependency names are unique across a resolved graph, so sorting by
     /// name is a total order and makes comparison independent of discovery
-    /// order.
+    /// order (and of manifest key order, for each entry's edges).
     #[must_use]
     pub fn new(mut deps: Vec<DepGraphEntry>) -> Self {
+        for entry in &mut deps {
+            entry.dependencies.sort();
+            entry.dependencies.dedup();
+        }
         deps.sort_by(|a, b| a.name.cmp(&b.name));
         Self {
             schema: DEP_GRAPH_SNAPSHOT_SCHEMA,
@@ -144,15 +163,11 @@ pub fn declared_dependency_names_from_manifest_toml(manifest_toml: &str) -> Vec<
 /// The snapshot is the build's resolved graph, but it is only rewritten by
 /// the next resolve, so a dependency since deleted from `beamtalk.toml` is
 /// still in it. The root's own edges therefore come from the manifest as it
-/// is now, and only the dependency-to-dependency edges (each entry's `via`
-/// chain) from the snapshot: a removed direct dependency drops out together
-/// with everything only it pulled in, without waiting for a rebuild.
-///
-/// Limitation (BT-4394): the snapshot records only the *first* `via` chain
-/// that reached each dependency, so in a diamond (`root → {a, b}`,
-/// `a → c`, `b → c`, recorded as `c via [a]`) removing `a` also drops `c`
-/// until the next resolve rewrites the snapshot, even though `b` still
-/// needs it.
+/// is now, and only the dependency-to-dependency edges (each entry's
+/// recorded [`dependencies`](DepGraphEntry::dependencies)) from the
+/// snapshot: a removed direct dependency drops out together with everything
+/// only it pulled in, without waiting for a rebuild, while a dependency that
+/// another remaining dependency still declares stays.
 ///
 /// A name declared but absent from the snapshot (added since the last
 /// resolve) is still returned; the caller finds nothing on disk for it.
@@ -167,16 +182,10 @@ pub fn resolved_dependency_names(
     let mut edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
     edges.insert(ROOT.to_string(), declared_direct.to_vec());
     for entry in &snapshot.deps {
-        // `via` is the chain from a direct dependency down to `entry`; its
-        // first hop is a root edge, which comes from the manifest instead.
-        let mut chain = entry.via.iter().chain(std::iter::once(&entry.name));
-        let Some(mut parent) = chain.next() else {
-            continue;
-        };
-        for child in chain {
-            edges.entry(parent.clone()).or_default().push(child.clone());
-            parent = child;
-        }
+        edges
+            .entry(entry.name.clone())
+            .or_default()
+            .extend(entry.dependencies.iter().cloned());
     }
     dependency_closure(&edges, ROOT)
 }
@@ -185,10 +194,11 @@ pub fn resolved_dependency_names(
 mod tests {
     use super::*;
 
-    fn entry(name: &str, via: &[&str]) -> DepGraphEntry {
+    fn entry(name: &str, dependencies: &[&str]) -> DepGraphEntry {
         DepGraphEntry {
             name: name.to_string(),
-            via: via.iter().map(|v| (*v).to_string()).collect(),
+            via: Vec::new(),
+            dependencies: dependencies.iter().map(|d| (*d).to_string()).collect(),
             source: format!("path: ../{name}"),
         }
     }
@@ -202,13 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn resolved_set_follows_recorded_chains_from_declared_roots() {
+    fn resolved_set_follows_recorded_edges_from_declared_roots() {
         // my_app -> {utils, json}; utils -> yaml -> core.
         let snapshot = DepGraphSnapshot::new(vec![
-            entry("utils", &[]),
+            entry("utils", &["yaml"]),
             entry("json", &[]),
-            entry("yaml", &["utils"]),
-            entry("core", &["utils", "yaml"]),
+            entry("yaml", &["core"]),
+            entry("core", &[]),
         ]);
         assert_eq!(
             names(&resolved_dependency_names(
@@ -224,13 +234,43 @@ mod tests {
         // The snapshot still records `utils` (and what it pulled in), but the
         // manifest no longer declares it.
         let snapshot = DepGraphSnapshot::new(vec![
-            entry("utils", &[]),
+            entry("utils", &["yaml"]),
             entry("json", &[]),
-            entry("yaml", &["utils"]),
+            entry("yaml", &[]),
         ]);
         assert_eq!(
             names(&resolved_dependency_names(&snapshot, &declared(&["json"]))),
             ["json"]
+        );
+    }
+
+    #[test]
+    fn a_diamond_keeps_a_shared_dependency_another_parent_still_needs() {
+        // root -> {a, b}; a -> c; b -> c. Discovery reached `c` through `a`
+        // first (`via: [a]`), but the snapshot records both edges, so
+        // dropping `a` from the manifest keeps `c` (BT-4394).
+        let snapshot = DepGraphSnapshot::new(vec![
+            DepGraphEntry {
+                via: vec!["a".to_string()],
+                ..entry("c", &[])
+            },
+            entry("a", &["c"]),
+            entry("b", &["c"]),
+        ]);
+        assert_eq!(
+            names(&resolved_dependency_names(
+                &snapshot,
+                &declared(&["a", "b"])
+            )),
+            ["a", "b", "c"]
+        );
+        assert_eq!(
+            names(&resolved_dependency_names(&snapshot, &declared(&["b"]))),
+            ["b", "c"]
+        );
+        assert_eq!(
+            names(&resolved_dependency_names(&snapshot, &declared(&["a"]))),
+            ["a", "c"]
         );
     }
 
@@ -269,11 +309,18 @@ mod tests {
             Err(DepGraphSnapshotError::Missing)
         );
 
-        let snapshot = DepGraphSnapshot::new(vec![entry("b", &["a"]), entry("a", &[])]);
+        let snapshot = DepGraphSnapshot::new(vec![entry("b", &[]), entry("a", &["b"])]);
         std::fs::write(&path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
         let read = read_dep_graph_snapshot(&path).unwrap();
         assert_eq!(read, snapshot);
         assert_eq!(read.deps[0].name, "a", "entries are ordered by name");
+
+        let unordered = DepGraphSnapshot::new(vec![entry("a", &["z", "b", "z"])]);
+        assert_eq!(
+            unordered.deps[0].dependencies,
+            ["b", "z"],
+            "edges are sorted and deduplicated"
+        );
 
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(
@@ -285,6 +332,18 @@ mod tests {
         assert_eq!(
             read_dep_graph_snapshot(&path),
             Err(DepGraphSnapshotError::UnrecognisedSchema(99))
+        );
+
+        // A schema-1 snapshot (no `dependencies`, BT-4394) parses far enough
+        // to be reported as an old schema rather than as corrupt.
+        std::fs::write(
+            &path,
+            r#"{"schema": 1, "deps": [{"name": "c", "via": ["a"], "source": "path: ../c"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_dep_graph_snapshot(&path),
+            Err(DepGraphSnapshotError::UnrecognisedSchema(1))
         );
     }
 }

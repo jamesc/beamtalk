@@ -215,19 +215,9 @@ fn require_built_stdlib() {
 /// without touching the source tree.
 #[allow(dead_code)] // some test binaries don't call every helper
 pub fn copied_fixture_project(relative: &str) -> TempDir {
-    fn copy_dir(src: &Path, dest: &Path) {
-        std::fs::create_dir_all(dest).expect("create fixture dir");
-        for entry in std::fs::read_dir(src).expect("read fixture dir").flatten() {
-            let target = dest.join(entry.file_name());
-            if entry.path().is_dir() {
-                copy_dir(&entry.path(), &target);
-            } else {
-                std::fs::copy(entry.path(), &target).expect("copy fixture file");
-            }
-        }
-    }
     let dir = tempfile::tempdir().expect("create tempdir");
-    copy_dir(&project_root().join(relative), dir.path());
+    beamtalk_workspace::copy_tree(&project_root().join(relative), dir.path())
+        .expect("copy fixture project");
     dir
 }
 
