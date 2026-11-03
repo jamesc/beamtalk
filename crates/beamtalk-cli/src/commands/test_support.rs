@@ -256,12 +256,16 @@ pub(crate) fn answer_describe(
     true
 }
 
-/// Read the next text frame as JSON; `None` once the peer is gone. A frame
-/// that is not JSON reads as `Value::Null`.
+/// Read the next JSON text frame, skipping text frames that are not JSON;
+/// `None` once the peer is gone or sends a non-text frame.
 pub(crate) fn read_json(ws: &mut WebSocket<std::net::TcpStream>) -> Option<serde_json::Value> {
-    match ws.read() {
-        Ok(Message::Text(text)) => Some(serde_json::from_str(&text).unwrap_or_default()),
-        _ => None,
+    loop {
+        let Ok(Message::Text(text)) = ws.read() else {
+            return None;
+        };
+        if let Ok(value) = serde_json::from_str(&text) {
+            return Some(value);
+        }
     }
 }
 

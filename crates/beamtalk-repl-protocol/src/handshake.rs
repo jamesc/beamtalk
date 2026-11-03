@@ -369,6 +369,74 @@ mod tests {
         assert!(err.contains("beamtalk workspace stop <id>"), "{err}");
     }
 
+    /// In-memory transport for [`verify_server_versions_via_describe`]: the
+    /// frames the "node" will answer with, and the frames the client sent.
+    struct ScriptedIo {
+        replies: std::collections::VecDeque<String>,
+        sent: Vec<Value>,
+    }
+
+    /// Run the shared describe check against `reply_for(describe_id)`'s
+    /// frames, in order.
+    fn run_describe_check(reply_for: impl Fn(&str) -> Vec<Value>) -> Result<(), String> {
+        let mut io = ScriptedIo {
+            replies: std::collections::VecDeque::new(),
+            sent: Vec::new(),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        runtime.block_on(verify_server_versions_via_describe(
+            &mut io,
+            std::time::Duration::from_secs(5),
+            async |io: &mut ScriptedIo, text: String| {
+                let sent: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                let id = sent["id"].as_str().unwrap_or_default().to_string();
+                io.replies
+                    .extend(reply_for(&id).iter().map(Value::to_string));
+                io.sent.push(sent);
+                Ok(())
+            },
+            async |io: &mut ScriptedIo, _remaining| {
+                io.replies
+                    .pop_front()
+                    .ok_or_else(|| "stream ended".to_string())
+            },
+        ))
+    }
+
+    /// BT-4382: the one shared describe loop (MCP and LSP) skips push frames
+    /// queued ahead of the reply and checks the reply echoing its own id.
+    #[test]
+    fn verify_server_versions_via_describe_skips_pushes_and_checks_the_reply() {
+        let matching = serde_json::json!({
+            "beamtalk": beamtalk_version(),
+            "protocol": PROTOCOL_VERSION,
+        });
+        let result = run_describe_check(|id| {
+            vec![
+                serde_json::json!({"push": "actors", "id": "someone-else"}),
+                serde_json::json!({"id": id, "status": ["done"], "versions": matching}),
+            ]
+        });
+        assert_eq!(result, Ok(()));
+
+        let result = run_describe_check(|id| {
+            vec![serde_json::json!({
+                "id": id,
+                "status": ["done"],
+                "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
+            })]
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("0.0.0-stale"), "{err}");
+
+        // No reply ever arrives: the transport's own error surfaces.
+        let err = run_describe_check(|_| Vec::new()).unwrap_err();
+        assert_eq!(err, "stream ended");
+    }
+
     /// BT-4382: `just build` is a source-checkout remedy — suggested only
     /// when either side is a `-dev` build, never between two releases.
     #[test]

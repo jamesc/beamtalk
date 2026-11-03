@@ -606,13 +606,17 @@ is_dev_vsn(_) -> false.
 
 -doc """
 This node's workspace id for the `workspace stop` hint, or `<id>` when the
-node has no workspace metadata (`beamtalk workspace list` shows it).
+node has no workspace metadata (`beamtalk workspace list` shows it). Best
+effort: a slow or crashed metadata server only degrades the hint, never the
+auth rejection itself.
 """.
 -spec this_workspace_id() -> binary().
 this_workspace_id() ->
-    case beamtalk_workspace_meta:get_metadata() of
+    try beamtalk_workspace_meta:get_metadata() of
         {ok, #{workspace_id := Id}} when is_binary(Id), Id =/= <<>> -> Id;
         _ -> <<"<id>">>
+    catch
+        exit:_ -> <<"<id>">>
     end.
 
 -doc """
