@@ -260,7 +260,9 @@ over Elixir from the table.
   (class name through `class_name_from_mod`), the mailbox-continuation check,
   actor-state install/uninstall, the call-`From` cell, the watch check in
   `notify_state_change`, `encode_reply_for_tagged` and the pending-action
-  reads.
+  reads. BT-4265 then took the sync call to 89 reductions / 142 words (+52 /
+  +86 over Elixir) and the cast to 68 / 73 (+50 / +61); see the in-flight PR
+  list below. What is left after it is in `results/profile-bt4265-after.md`.
 - **`self hasField:` inside an actor (7d, BT-4071)**: the selector is not in
   the class module, so it falls through to the runtime method resolver, which
   builds `CompiledMethod`s with xref provenance and copies the xref table: +812
@@ -297,7 +299,7 @@ weighted by how often each appears on the path:
 
 | # | Cost | Excess per occurrence | Rows | Kind | Fixable? |
 |---|---|---|---|---|---|
-| 1 | Actor dispatch hooks (trace-store aggregates, send wrapper chain, `make_self`, mailbox/pending-action checks; telemetry spans opt-in since BT-4113) | +103 red, +89 words per sync send; +91 red, +68 words per cast (BT-4113; was +174 / +256 and +175 / +230) | 7a-7c | machinery | Partly: the aggregates are a product decision (BT-4103); the rest is not needed for the send itself. The gen_server round trip (37 red, 56 words) is the structural floor. |
+| 1 | Actor dispatch hooks (trace-store aggregates, send wrapper chain, actor-state/`From`/pending-action cells; telemetry spans opt-in since BT-4113) | +52 red, +86 words per sync send; +50 red, +61 words per cast (BT-4265; was +103 / +89 and +91 / +68 after BT-4113, +174 / +256 and +175 / +230 before it) | 7a-7c | machinery | Partly: the aggregates are a product decision (BT-4103); the rest is not needed for the send itself. The gen_server round trip (37 red, 56 words) is the structural floor. |
 | 2 | Class-side sends through the class process (non-`class sealed` class methods, Value keyword constructors, `Result ok:`, class objects in `on:do:` and `isKindOf:`) | +143 to +415 red, +444 to +1,358 words, 1-7 µs, and a node-wide serialization point | 3b, 3c, 2b, 9a, 8a, 12b | dispatch + machinery | Yes for sealed stateless classes and constructors (direct call); BT-4065 covers class objects, `isKindOf:` and `Result`. Classes with `classState:` structurally need their process for writes. |
 | 3 | Dynamic sends to Value instances, regardless of static type | +27 to +29 red, +28 words, about 160 ns per send; a self-send is a second one | 1a-1c, 4a-4c, 5a, 5b, 9b, 10a, 10b | dispatch + allocation | Yes for sealed receivers (BT-4069). For open classes, late binding is structural, but its cost is not: a guarded direct call costs a map-key match. |
 | 4 | Non-inlined conditionals and loops | +14 red, +4 words per conditional; +26 red, +10 words per loop step | 11d, 0b | dispatch + allocation | Yes: compile to `case` and `letrec` with a fallback send for non-Booleans. |
@@ -404,3 +406,25 @@ side, main → PR. Rows not listed did not move.
   `classify_receiver` class-object check, the send wrapper chain, the
   always-on aggregate atomics and the mailbox/`From`/watch/reply checks
   (BT-4265).
+- **BT-4265** removes most of what BT-4113 left on the actor send path
+  without changing behaviour: the per-send helpers in the caller
+  (`classify_receiver`, the `sync_send_remote`/`resolve_class`/context/
+  call-stack/`wire_sync_call` chain, `dispatch_span`'s events-off path, the
+  aggregate's slot lookup and sample) are inlined; the aggregate's min/max
+  CAS loops are entered only when a sample moves a bound; the class-object
+  test is one `atom_to_binary` and a guard; and in the actor the generated
+  `safe_dispatch/3` builds `Self` from the class and module codegen knows
+  (no `make_self`/`class_of`/`function_exported`/`class_name()`), an
+  ordinary selector passes the mailbox-continuation check from a guard, and
+  an unchanged state skips the watch lookup (3 rounds before, 7 after, the
+  dev build, an idle 4-scheduler Linux container;
+  `results/bench-bt4265-before.md` = main 9f59cb5,
+  `results/bench-bt4265-after.md` = this branch; profiles in
+  `results/profile-bt4265-{before,after}.md`). Beamtalk side, before →
+  after: 7a 140 red / 149 w → **89 / 142**; 7b 140 / 155 → **92 / 148**;
+  7c 110 / 80 → **68 / 73**; 7d 193 / 226 → **142 / 219** (Elixir
+  `GenServer.call` 37 / 56, cast 18.4 / 12). Calls per op: 96 → 63 (sync),
+  81 → 55 (cast). What remains is the gen_server round trip itself, the
+  always-on aggregate (an ETS read, three `atomics:add`s and two
+  `atomics:get`s), the actor-state/`From`/pending-action process-dictionary
+  cells and the receiver's context restore.
