@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4127: `obj class` on a receiver typed as a tagged-map class compiles to
+// an inline class object — a tag guard, one `erlang:whereis/1` and a tuple
+// carrying the compile-time module pin — instead of
+// `beamtalk_primitive:class_of_object/1`. The pin is the BT-4069 trust model:
+// the answer stays `==` to the class reference while the class keeps its
+// module. A same-module redefinition and a live patch both keep it, which
+// needs a live workspace (they recompile the class), so this half lives here;
+// stdlib/test/typed_class_inline_test.bt holds the rest.
+//
+// `Bt4127TypedProbe>>classOf:` takes the inline path (its parameter is typed);
+// `Bt4127DynamicProbe>>classOf:` is its untyped twin.
+
+sealed Value subclass: Bt4127Pt
+  field: x :: Integer = 0
+// => "Bt4127Pt"
+
+Value subclass: Bt4127TypedProbe
+  classOf: p :: Bt4127Pt => p class
+// => "Bt4127TypedProbe"
+
+Value subclass: Bt4127DynamicProbe
+  classOf: p => p class
+// => "Bt4127DynamicProbe"
+
+p := Bt4127Pt new
+// => _
+
+typedProbe := Bt4127TypedProbe new
+// => _
+
+dynamicProbe := Bt4127DynamicProbe new
+// => _
+
+(typedProbe classOf: p) == Bt4127Pt
+// => true
+
+(typedProbe classOf: p) == (dynamicProbe classOf: p)
+// => true
+
+(typedProbe classOf: p) == (Beamtalk classNamed: #Bt4127Pt)
+// => true
+
+(typedProbe classOf: p) class == Bt4127Pt class
+// => true
+
+// A same-module redefinition reloads the class: the pinned module still names
+// it, so the inline answer is still the class.
+sealed Value subclass: Bt4127Pt
+  field: x :: Integer = 0
+  doubled -> Integer => self.x * 2
+// => "Bt4127Pt"
+
+(typedProbe classOf: p) == Bt4127Pt
+// => true
+
+(typedProbe classOf: p) == (dynamicProbe classOf: p)
+// => true
+
+(typedProbe classOf: p) == (Beamtalk classNamed: #Bt4127Pt)
+// => true
+
+(typedProbe classOf: p) class == Bt4127Pt class
+// => true
+
+// A live patch recompiles the class body in place.
+Bt4127Pt >> tripled => self.x * 3
+// => "Bt4127Pt>>tripled"
+
+(typedProbe classOf: p) == Bt4127Pt
+// => true
+
+(typedProbe classOf: p) == (dynamicProbe classOf: p)
+// => true
+
+// A non-matching value takes the dynamic fallback.
+typedProbe classOf: 42
+// => Integer

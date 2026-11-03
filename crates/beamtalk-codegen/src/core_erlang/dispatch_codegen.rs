@@ -1145,6 +1145,100 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// `call 'beamtalk_primitive':'class_of_object'(Receiver)`: the dynamic
+    /// `obj class` — the protoobject `class` arm's plain lowering and the
+    /// miss arm of [`Self::generate_typed_class_of`].
+    pub(in crate::core_erlang) fn class_of_object_call_doc(
+        receiver_doc: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_primitive':'class_of_object'(",
+            receiver_doc,
+            ")",
+        ]
+    }
+
+    /// BT-4127: `obj class` for a receiver typed as a tagged-map class
+    /// ([`TypedSendTarget::Tagged`], decided by [`Self::typed_send_target`]):
+    /// the class object built inline behind [`Self::class_tag_guarded_doc`]'s
+    /// tag guard, instead of `class_of_object/1`'s derived-cache lookup.
+    ///
+    /// ```erlang
+    /// let R = <receiver> in
+    /// case call 'erlang':'is_map'(R) of
+    ///     <'true'> when 'true' ->
+    ///         case call 'maps':'get'('$beamtalk_class', R, 'undefined') of
+    ///             <'Pt'> when 'true' ->
+    ///                 case call 'erlang':'whereis'('beamtalk_class_Pt') of
+    ///                     <'undefined'> when 'true' ->
+    ///                         call 'beamtalk_primitive':'class_of_object'(R)
+    ///                     <Pid> when 'true' ->
+    ///                         {'beamtalk_object', 'Pt class', 'bt@pt', Pid}
+    ///                 end
+    ///             <NoMatch> when 'true' -> call 'beamtalk_primitive':'class_of_object'(R)
+    ///         end
+    ///     <'false'> when 'true' -> call 'beamtalk_primitive':'class_of_object'(R)
+    ///     ...
+    /// end
+    /// ```
+    ///
+    /// On a tag match this is the tuple `class_of_object_by_name/1` derives
+    /// (`resolve_class_object/1`): the tag is `metaclass_tag` of the class
+    /// name (pinned to `class_object_tag/1` by the shared conformance
+    /// fixture), the pid is looked up live on every evaluation (a restarted
+    /// class process is found), and the module is the compile-time pin of
+    /// BT-4069's direct `dispatch/3` with the same trust model (see
+    /// [`Self::typed_tagged_target`]): a same-module redefinition or reload
+    /// keeps it current. A removed class (`whereis` answers `'undefined'`)
+    /// and every guard miss take the dynamic call, so a lying annotation, a
+    /// subclass instance or a future changes nothing.
+    ///
+    /// Known limitation (shared with the direct `dispatch/3`): a class
+    /// redefined into a *different* module after this unit compiled leaves
+    /// the pin stale, and the answer then differs from the class reference
+    /// in its module field until the caller is recompiled.
+    pub(in crate::core_erlang) fn generate_typed_class_of(
+        &mut self,
+        receiver: &Expression,
+        target: &TypedTaggedTarget,
+    ) -> Result<Document<'static>> {
+        let mut seq = self.sequence_call(&[receiver], "Obj")?;
+        let receiver_doc = seq.next();
+        let receiver_var = self.fresh_temp_var("TClassRecv");
+        let pid_var = self.fresh_temp_var("TClassPid");
+        let fallback_doc = Self::class_of_object_call_doc(leaf::var(receiver_var.clone()));
+        let class_object_doc = docvec![
+            "case ",
+            Self::registered_class_pid_doc(&target.class_name),
+            " of <'undefined'> when 'true' -> ",
+            fallback_doc.clone(),
+            " <",
+            leaf::var(pid_var.clone()),
+            "> when 'true' -> {'beamtalk_object', ",
+            leaf::atom(super::util::metaclass_tag(&target.class_name)),
+            ", ",
+            leaf::atom(target.module_name.clone()),
+            ", ",
+            leaf::var(pid_var),
+            "} end",
+        ];
+        let case_doc = self.class_tag_guarded_doc(
+            &receiver_var,
+            &target.class_name,
+            class_object_doc,
+            fallback_doc,
+        );
+        let body = docvec![
+            "let ",
+            leaf::var(receiver_var),
+            " = ",
+            receiver_doc,
+            " in ",
+            case_doc
+        ];
+        Ok(seq.close(self, body, "ClassRes"))
+    }
+
     /// Generates a cast (fire-and-forget) message send.
     ///
     /// Called when the AST `MessageSend` node has `is_cast: true` (the `!` suffix).
