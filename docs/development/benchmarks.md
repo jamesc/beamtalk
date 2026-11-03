@@ -1018,7 +1018,9 @@ or ~40% of the open actor send, getting it to about the sealed actor's cost); th
 
 Every actor module now exports `safe_dispatch/4 (Selector, Args, Self, State)`, which holds the try/catch.
 `safe_dispatch/3` (used by `handle_call`/`handle_cast`/`handle_info`/`init`, which only have `State`) builds
-`Self` with `make_self/1` and delegates to `/4`. The open self-send call site passes its in-scope `Self`:
+`Self` and delegates to `/4`. Since BT-4265 it builds `Self` inline from the class and module codegen knows
+when `State` is the module's own (its `__class_mod__`, no `$beamtalk_class` tag), and calls `make_self/1` only
+for any other state. The open self-send call site passes its in-scope `Self`:
 
 ```erlang
 let _SDArgs = [Args] in
