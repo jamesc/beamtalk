@@ -34,7 +34,7 @@
 //! | [`annotated`]    | `( Expr -\| [Line, {'file', F}] )` | hand-rolled `-\|` annotation docvecs |
 
 use crate::Document;
-use crate::binary::{binary_byte_segments, binary_string_literal};
+use crate::binary::{binary_byte_segments, binary_string_literal, byte_segments};
 use crate::docvec;
 use crate::escape::{escape_atom_chars, escape_core_erlang_string};
 
@@ -271,6 +271,15 @@ pub fn tag_string(binary: Document<'static>) -> Document<'static> {
 #[must_use]
 pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(binary_byte_segments(s.as_ref()))
+}
+
+/// `#<63>(8,1,'integer',['unsigned'|['big']]),#<248>(…)` — the *unwrapped*
+/// segments of raw `bytes`, one 8-bit segment each, like
+/// [`binary_segments`] but for bytes that need not be UTF-8 (a constant
+/// float folded to its encoding, as `erlc` folds it).
+#[must_use]
+pub fn byte_segments_lit(bytes: &[u8]) -> Document<'static> {
+    Document::Owned(byte_segments(bytes))
 }
 
 /// A `.bt` source position: the file it came from and its 1-based line number.
