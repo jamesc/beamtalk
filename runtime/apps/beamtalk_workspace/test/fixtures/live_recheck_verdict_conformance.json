@@ -1,0 +1,22 @@
+[
+  {"severity": "error", "category": "Dnu", "verdict": "compile_error"},
+  {"severity": "error", "category": "Type", "verdict": "compile_error"},
+  {"severity": "error", "category": "UnresolvedClass", "verdict": "compile_error"},
+  {"severity": "error", "category": "Lint", "verdict": "compile_error"},
+  {"severity": "error", "category": null, "verdict": "compile_error"},
+  {"severity": "warning", "category": "Dnu", "verdict": "finding"},
+  {"severity": "warning", "category": "Type", "verdict": "finding"},
+  {"severity": "warning", "category": "UnresolvedClass", "verdict": "pass"},
+  {"severity": "warning", "category": "Lint", "verdict": "pass"},
+  {"severity": "warning", "category": null, "verdict": "pass"},
+  {"severity": "hint", "category": "Dnu", "verdict": "finding"},
+  {"severity": "hint", "category": "Type", "verdict": "finding"},
+  {"severity": "hint", "category": "UnresolvedClass", "verdict": "pass"},
+  {"severity": "hint", "category": "Lint", "verdict": "pass"},
+  {"severity": "hint", "category": null, "verdict": "pass"},
+  {"severity": "lint", "category": "Dnu", "verdict": "finding"},
+  {"severity": "lint", "category": "Type", "verdict": "finding"},
+  {"severity": "lint", "category": "UnresolvedClass", "verdict": "pass"},
+  {"severity": "lint", "category": "Lint", "verdict": "pass"},
+  {"severity": "lint", "category": null, "verdict": "pass"}
+]

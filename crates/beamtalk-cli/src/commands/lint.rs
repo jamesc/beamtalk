@@ -17,8 +17,10 @@
 //! the only command that surfaces them.
 //!
 //! With `--warnings-as-errors`, the command additionally fails on the
-//! live-recheck set (non-error `Dnu`/`Type` diagnostics plus any `Error`),
-//! matching a REPL `load-project` verdict (BT-4334).
+//! live-recheck set (non-error `Dnu`/`Type` diagnostics plus any `Error`,
+//! including parse errors), matching a REPL `load-project` verdict
+//! (BT-4334). The package's `[diagnostics]` table is applied first, as in
+//! `build` and the REPL (BT-4377).
 
 use crate::commands::OutputFormat;
 use crate::commands::erlang_lint;
@@ -71,6 +73,10 @@ use tracing::warn;
 /// the same file-name/class-name mismatch `beamtalk build`/the LSP do (via
 /// `ProjectDiagnosticContext::source_file_stem`) — `None` for callers with
 /// no real file backing the module skips the check.
+///
+/// `diagnostics_overrides` is the package's `[diagnostics]` table, applied
+/// by the shared pipeline after `@expect` — the same helper `build` and the
+/// REPL use (BT-4377). Pass an empty table outside a package.
 #[allow(clippy::too_many_arguments)] // pre_loaded_protocols/pre_loaded_protocol_defs/pre_loaded_aliases are separate params; each is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
@@ -91,12 +97,15 @@ fn collect_diagnostics(
     file_stem: Option<&str>,
     stdlib_mode: bool,
     known_erlang_modules: &std::collections::HashSet<String>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
-    // Collect parser-level lint diagnostics (e.g. unnecessary `.`)
-    // plus AST-level lint passes.
+    // Collect parser-level lint diagnostics (e.g. unnecessary `.`) and
+    // parse errors, plus AST-level lint passes. Parse errors are kept so a
+    // file with a syntax error — which fails `build` and a REPL load — is
+    // reported here too and fails the `--warnings-as-errors` gate (BT-4377).
     let mut lint_diags: Vec<_> = parse_diags
         .into_iter()
-        .filter(|d| d.severity == Severity::Lint)
+        .filter(|d| matches!(d.severity, Severity::Lint | Severity::Error))
         .collect();
     lint_diags.extend(beamtalk_lint::run_lint_passes(module));
 
@@ -140,6 +149,7 @@ fn collect_diagnostics(
         source,
         analysis_ctx,
         file_stem,
+        diagnostics_overrides,
         &mut lint_diags,
     );
 
@@ -178,28 +188,61 @@ fn dedup_pre_loaded_alias_collision(
     }
 }
 
-/// Whether a lint-pipeline diagnostic is a live-recheck failure (BT-4334).
+/// What a REPL `load-project` does with one diagnostic (BT-4334, BT-4377).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveRecheckVerdict {
+    /// `Error` severity: the compile itself fails, before any recheck.
+    CompileError,
+    /// A non-error `Dnu`/`Type` diagnostic: the whole-image recheck reports
+    /// it as a finding (`relevant_image_diagnostic/1` answers `true`).
+    Finding,
+    /// Neither: the load succeeds as far as this diagnostic is concerned.
+    Pass,
+}
+
+impl LiveRecheckVerdict {
+    /// The fixture spelling (`live_recheck_verdict_conformance.json`).
+    #[cfg(test)]
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompileError => "compile_error",
+            Self::Finding => "finding",
+            Self::Pass => "pass",
+        }
+    }
+}
+
+/// Classifies a lint-pipeline diagnostic the way a REPL `load-project`
+/// would (BT-4334).
 ///
-/// Mirrors `relevant_image_diagnostic/1` in
-/// `runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`: the REPL
-/// whole-image recheck surfaces non-`error` `Dnu`/`Type` diagnostics as
-/// findings that fail `load-project`. `beamtalk lint` collects the same
-/// diagnostics (via `run_post_analysis_lint_pipeline`'s `category.is_some()`
-/// filter) but only counts `Severity::Lint` toward its failure threshold, so
-/// the same source passes CLI and fails REPL. With `warnings_as_errors`,
-/// these categories fail the command too, giving CI the same verdict as a
-/// REPL load. Any `Error` diagnostic also fails under the flag (lint
-/// otherwise never fails on errors by design — it is the lint-severity gate).
-fn is_live_recheck_failure(diag: &beamtalk_core::source_analysis::Diagnostic) -> bool {
+/// The `Finding` arm is the Rust side of `relevant_image_diagnostic/1` in
+/// `runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`: any non-error
+/// `Dnu`/`Type` diagnostic. The `CompileError` arm is the compile step that
+/// runs before the recheck (and that `relevant_image_diagnostic/1` therefore
+/// drops). Both sides are pinned to the shared fixture
+/// `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`
+/// (Rust: `live_recheck_verdict_matches_shared_corpus`; Erlang:
+/// `beamtalk_recheck_tests:relevant_image_diagnostic_matches_shared_corpus_test/0`).
+fn live_recheck_verdict(diag: &beamtalk_core::source_analysis::Diagnostic) -> LiveRecheckVerdict {
     use beamtalk_core::source_analysis::DiagnosticCategory;
     if diag.severity == Severity::Error {
-        return true;
+        LiveRecheckVerdict::CompileError
+    } else if matches!(
+        diag.category,
+        Some(DiagnosticCategory::Dnu | DiagnosticCategory::Type)
+    ) {
+        LiveRecheckVerdict::Finding
+    } else {
+        LiveRecheckVerdict::Pass
     }
-    matches!(diag.severity, Severity::Warning | Severity::Hint)
-        && matches!(
-            diag.category,
-            Some(DiagnosticCategory::Dnu | DiagnosticCategory::Type)
-        )
+}
+
+/// Whether a diagnostic fails the `--warnings-as-errors` gate: anything a
+/// REPL `load-project` would reject (see [`live_recheck_verdict`]). Plain
+/// `lint` only counts `Severity::Lint`, so the same source would otherwise
+/// pass CLI and fail REPL.
+fn is_live_recheck_failure(diag: &beamtalk_core::source_analysis::Diagnostic) -> bool {
+    live_recheck_verdict(diag) != LiveRecheckVerdict::Pass
 }
 
 /// Run lint passes on the given path (file or directory).
@@ -364,6 +407,18 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
         beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules,
     );
 
+    // BT-4377: the package's `[diagnostics]` table, via the same loader the
+    // compiler port (REPL) and LSP use, so a category the package turns
+    // `off` or re-levels gets the same verdict here as in a REPL load.
+    let diagnostics_overrides = package_root.as_deref().map_or_else(
+        beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new,
+        |root| {
+            beamtalk_core::compilation::diagnostics_policy::load_diagnostics_table_for_root(
+                root.as_std_path(),
+            )
+        },
+    );
+
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
     // BT-4334: live-recheck failures surfaced only under --warnings-as-errors.
@@ -432,6 +487,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
             file.file_stem(),
             stdlib_mode,
             &known_erlang_modules,
+            &diagnostics_overrides,
         );
 
         // Drop repeat sightings of a pre-loaded alias collision —
@@ -563,7 +619,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     if total_recheck_count > 0 {
         let plural = if total_recheck_count == 1 { "" } else { "s" };
         miette::bail!(
-            "{total_recheck_count} type/DNU diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
+            "{total_recheck_count} type/DNU/error diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
         );
     }
 
@@ -984,6 +1040,7 @@ fn collect_lint_diagnostics_with_stub_flag(
         None,
         false,
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     )
 }
 
@@ -1014,6 +1071,7 @@ fn collect_lint_diagnostics_with_file_stem(
         file_stem,
         false,
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     )
 }
 
@@ -1045,6 +1103,7 @@ fn collect_lint_diagnostics_with_stdlib_flag(
         None,
         stdlib_mode,
         &std::collections::HashSet::new(),
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
     )
 }
 
@@ -1317,6 +1376,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -1556,6 +1616,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
 
         let unresolved: Vec<_> = diags
@@ -1769,6 +1830,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
 
         let unresolved_names: Vec<String> = diags
@@ -2003,6 +2065,7 @@ mod tests {
                 None,
                 false,
                 &std::collections::HashSet::new(),
+                &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -2131,6 +2194,7 @@ mod tests {
                 None,
                 false,
                 &std::collections::HashSet::new(),
+                &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             )
             .into_iter()
             .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
@@ -2298,6 +2362,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -2353,6 +2418,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -2423,6 +2489,7 @@ mod tests {
             None,
             false,
             &std::collections::HashSet::new(),
+            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -2828,37 +2895,112 @@ mod tests {
         );
     }
 
-    /// BT-4334: the `--warnings-as-errors` gate must mirror the REPL
-    /// whole-image recheck (`relevant_image_diagnostic/1` in
-    /// `beamtalk_recheck.erl`): non-error `Dnu`/`Type` plus any `Error`.
+    /// BT-4377: the `--warnings-as-errors` verdict and the REPL whole-image
+    /// recheck (`relevant_image_diagnostic/1` in `beamtalk_recheck.erl`) are
+    /// both pinned to one shared severity × category → verdict corpus. The
+    /// Erlang half is
+    /// `beamtalk_recheck_tests:relevant_image_diagnostic_matches_shared_corpus_test/0`.
     #[test]
-    fn live_recheck_failure_matches_repl_image_categories() {
-        use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+    fn live_recheck_verdict_matches_shared_corpus() {
+        use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span, category_name};
 
-        // The three buccaneer shapes: DNU hint, Type warning, hard error.
-        let dnu_hint = Diagnostic::hint("Integer does not understand 'foo'", Span::default())
-            .with_category(DiagnosticCategory::Dnu);
-        assert!(is_live_recheck_failure(&dnu_hint));
-        let type_warning = Diagnostic::warning(
-            "expression inferred as Dynamic in typed class `Exchange`",
-            Span::default(),
+        let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&corpus).expect("read verdict corpus");
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("JSON array");
+        assert!(!rows.is_empty());
+
+        let severities = [
+            Severity::Error,
+            Severity::Warning,
+            Severity::Hint,
+            Severity::Lint,
+        ];
+        let categories = [
+            DiagnosticCategory::Dnu,
+            DiagnosticCategory::Type,
+            DiagnosticCategory::UnresolvedClass,
+            DiagnosticCategory::Lint,
+        ];
+        for row in &rows {
+            let sev_str = row["severity"].as_str().expect("row.severity");
+            let severity = *severities
+                .iter()
+                .find(|s| s.as_str() == sev_str)
+                .unwrap_or_else(|| panic!("unknown severity {sev_str:?}"));
+            let category = row["category"].as_str().map(|name| {
+                *categories
+                    .iter()
+                    .find(|c| category_name(**c) == name)
+                    .unwrap_or_else(|| panic!("unknown category {name:?}"))
+            });
+            let mut diag = Diagnostic::hint("corpus row", Span::default());
+            diag.severity = severity;
+            diag.category = category;
+            let expected = row["verdict"].as_str().expect("row.verdict");
+            assert_eq!(
+                live_recheck_verdict(&diag).as_str(),
+                expected,
+                "verdict for {row}"
+            );
+            assert_eq!(
+                is_live_recheck_failure(&diag),
+                expected != "pass",
+                "gate for {row}"
+            );
+        }
+    }
+
+    /// Writes a one-file package under a temp dir and returns (dir, path).
+    fn write_probe_package(manifest_extra: &str, source: &str) -> (tempfile::TempDir, String) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            format!("[package]\nname = \"recheck_probe\"\nversion = \"0.1.0\"\n{manifest_extra}"),
         )
-        .with_category(DiagnosticCategory::Type);
-        assert!(is_live_recheck_failure(&type_warning));
-        let hard_error = Diagnostic::error("expected expression, found =>", Span::default());
-        assert!(is_live_recheck_failure(&hard_error));
+        .unwrap();
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("recheck_probe.bt"), source).unwrap();
+        let path = root.to_str().unwrap().to_string();
+        (temp, path)
+    }
 
-        // Everything else stays a display-only diagnostic under the flag:
-        // lint-severity findings, stale-`@expect` warnings (no category),
-        // and categories outside the recheck's Dnu/Type remit.
-        let lint_diag = Diagnostic::hint("unnecessary '.'", Span::default())
-            .with_category(DiagnosticCategory::Lint);
-        assert!(!is_live_recheck_failure(&lint_diag));
-        let stale_expect = Diagnostic::warning("stale @expect directive", Span::default());
-        assert!(!is_live_recheck_failure(&stale_expect));
-        let unrelated = Diagnostic::warning("unresolved class `Foo`", Span::default())
-            .with_category(DiagnosticCategory::UnresolvedClass);
-        assert!(!is_live_recheck_failure(&unrelated));
+    /// BT-4377: a package whose `[diagnostics]` table turns `dnu` off loads
+    /// clean in the REPL, so the gate must pass the same source.
+    #[test]
+    fn lint_warnings_as_errors_applies_diagnostics_table() {
+        let source = "Value subclass: RecheckProbe\n\n  probe => 42 foo\n";
+        let (_temp, path) = write_probe_package("\n[diagnostics]\ndnu = \"off\"\n", source);
+        let strict = run_lint(&path, OutputFormat::Text, true);
+        assert!(
+            strict.is_ok(),
+            "`dnu = \"off\"` must silence the DNU under the gate: {strict:?}"
+        );
+
+        // Control: without the table entry the same source fails the gate.
+        let (_temp, path) = write_probe_package("", source);
+        assert!(run_lint(&path, OutputFormat::Text, true).is_err());
+    }
+
+    /// BT-4377: a syntax error fails `build` and a REPL load, so it must
+    /// fail the gate too (it used to be dropped as a non-lint parse diag).
+    #[test]
+    fn lint_warnings_as_errors_fails_on_syntax_error() {
+        let (_temp, path) =
+            write_probe_package("", "Value subclass: RecheckProbe\n\n  probe => 42 +\n");
+        let strict = run_lint(&path, OutputFormat::Text, true);
+        assert!(
+            strict.is_err(),
+            "lint --warnings-as-errors must fail on a syntax error"
+        );
+        let msg = format!("{:?}", strict.unwrap_err());
+        assert!(
+            msg.contains("type/DNU/error"),
+            "failure must name the parity gate, got: {msg}"
+        );
     }
 
     /// BT-4334 regression: a fixture carrying a REPL-only diagnostic today
