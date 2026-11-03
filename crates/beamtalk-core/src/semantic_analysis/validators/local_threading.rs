@@ -2125,7 +2125,12 @@ impl<'d> Walker<'d> {
     /// sums), so it keeps the position error, and the REPL keeps its own arm
     /// lowering.
     fn is_plain_arm_conditional(&self, expr: &Expression) -> bool {
-        matches!(self.context, Actor | ValueType) && conditional_arm_blocks(expr).is_some()
+        // At the method root only: a conditional nested in a loop, fold or arm
+        // body is not covered by the runtime differential
+        // (`bt4367arm_local_diff_test.bt`), so it keeps the position error.
+        self.depth == 0
+            && matches!(self.context, Actor | ValueType)
+            && conditional_arm_blocks(expr).is_some()
     }
 
     /// BT-3947: whether `expr`, a `match:`, is a local-threading producer at
@@ -2231,6 +2236,14 @@ impl<'d> Walker<'d> {
     /// body included (ADR 0131 Phase 3b and 3c, BT-3817/BT-3822), at one of the
     /// statement's sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
+        // A plain arm registers only loop and fold sites in codegen
+        // (`with_plain_arm_producer_sites`): a conditional, `on:do:` or
+        // `match:` nested in one keeps its own lowering and is not a producer
+        // there, however it writes the arm's locals. Letting it count made a
+        // loop in a nested `on:do:` body silently drop its write (BT-4367).
+        if self.in_plain_arm() {
+            return false;
+        }
         let Some(kind) = self.root_method_kind() else {
             return false;
         };

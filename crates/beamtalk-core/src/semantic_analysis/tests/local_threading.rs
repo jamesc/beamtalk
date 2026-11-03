@@ -1408,6 +1408,55 @@ fn arm_local_producer_as_assign_value_is_accepted_in_actor_and_value_methods() {
     }
 }
 
+/// BT-4367 review: a plain arm registers only loop and fold sites in codegen,
+/// so a conditional, `on:do:` or `match:` nested in one is not a producer
+/// there. A loop inside such a nested construct keeps the position error; it
+/// used to be accepted and then silently dropped its write (a loop in a nested
+/// `on:do:` body answered 0 instead of 3). A conditional that is not at the
+/// method root (a plain arm inside a loop or fold body) is not covered by the
+/// runtime differential either, so it keeps the error too.
+#[test]
+fn arm_local_producer_nested_in_a_plain_arm_construct_is_still_rejected() {
+    for body in [
+        // In a nested conditional's arm, as an operand and as an assigned value.
+        "true ifTrue: [\n  m := 0\n  true ifTrue: [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r] ifFalse: [0]\n  m]",
+        "true ifTrue: [\n  m := 0\n  true ifTrue: [r := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. r] ifFalse: [0]\n  m]",
+        // In the protected body of an `on:do:`.
+        "true ifTrue: [\n  m := 0\n  [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r] on: Error do: [:e | 0]\n  m]",
+        // In an arm of a `match:`.
+        "true ifTrue: [\n  m := 0\n  3 match: [_ -> [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r]]\n  m]",
+        // A plain arm inside a loop body.
+        "#(1, 2) do: [:x |\n  true ifTrue: [\n    m := 0\n    s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n    m + s]]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
+/// A loop at an operand or array-literal site of a plain arm keeps the error:
+/// an actor `ifTrue:ifFalse:` arm lowers it to Core Erlang with an unbound
+/// arm-local.
+#[test]
+fn arm_local_producer_at_an_operand_site_of_a_plain_arm_is_still_rejected() {
+    for body in [
+        "true ifTrue: [\n  m := 0\n  r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e])\n  r + m]",
+        "true ifTrue: [\n  m := 0\n  arr := #[(#(1, 2) collect: [:e | m := m + e])]\n  m + arr size]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn arm_local_producer_as_assign_value_is_still_rejected_in_a_class_method() {
     for body in [

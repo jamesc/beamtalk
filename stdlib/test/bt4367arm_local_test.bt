@@ -44,4 +44,6 @@ TestCase subclass: Bt4367ArmLocalTest
   testValueUntaken =>
     v := Bt4367ArmLocalValue new
     self assert: (v injectIn: false) equals: 0
+    self assert: (v collectIn: false) equals: 0
     self assert: (v selectIn: false) equals: 0
+    self assert: (v anySatisfyIn: false) equals: 0
