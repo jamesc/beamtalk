@@ -148,6 +148,12 @@ pub fn declared_dependency_names_from_manifest_toml(manifest_toml: &str) -> Vec<
 /// chain) from the snapshot: a removed direct dependency drops out together
 /// with everything only it pulled in, without waiting for a rebuild.
 ///
+/// Limitation (BT-4394): the snapshot records only the *first* `via` chain
+/// that reached each dependency, so in a diamond (`root → {a, b}`,
+/// `a → c`, `b → c`, recorded as `c via [a]`) removing `a` also drops `c`
+/// until the next resolve rewrites the snapshot, even though `b` still
+/// needs it.
+///
 /// A name declared but absent from the snapshot (added since the last
 /// resolve) is still returned; the caller finds nothing on disk for it.
 #[must_use]

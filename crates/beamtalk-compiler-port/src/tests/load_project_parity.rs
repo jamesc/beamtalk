@@ -569,6 +569,40 @@ fn leftover_checkout_aliases_do_not_resolve() {
     );
 }
 
+/// A missing dep-graph snapshot (never written, older toolchain, or a
+/// best-effort write that failed) must not drop the directly declared
+/// dependency: its `_build/deps/` checkout still supplies its aliases, as
+/// `beamtalk build` sees them.
+#[test]
+fn missing_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::remove_file(dir.path().join("_build/deps/.dep-graph.json"))
+        .expect("remove the dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve without a snapshot: {response:?}"
+    );
+}
+
+/// An unreadable (corrupt or unknown-schema) snapshot behaves like a
+/// missing one.
+#[test]
+fn corrupt_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::write(dir.path().join("_build/deps/.dep-graph.json"), "{ not json")
+        .expect("corrupt the dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve with a corrupt snapshot: {response:?}"
+    );
+}
+
 /// BT-4378: requests sharing a `project_batch` token verify the project
 /// scope once — an edit made mid-batch is not seen until the next batch (or
 /// an untagged request), which re-verifies.

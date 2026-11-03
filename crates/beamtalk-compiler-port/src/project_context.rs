@@ -63,8 +63,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use beamtalk_core::compilation::dep_graph::{
-    DEP_GRAPH_SNAPSHOT_FILE, declared_dependency_names_from_manifest_toml, read_dep_graph_snapshot,
-    resolved_dependency_names,
+    DEP_GRAPH_SNAPSHOT_FILE, DepGraphSnapshot, declared_dependency_names_from_manifest_toml,
+    read_dep_graph_snapshot, resolved_dependency_names,
 };
 use beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable;
 use beamtalk_core::compilation::ffi_stubs::{PROJECT_STUBS_DIR, load_project_stub_registry};
@@ -282,15 +282,17 @@ fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, Syst
 /// pruned to what `manifest_toml`'s `[dependencies]` still declares
 /// ([`resolved_dependency_names`]) — not a listing of `_build/deps/`, which
 /// keeps the checkout of a dependency since removed from `beamtalk.toml`.
-/// A project with no usable snapshot (never resolved, or an unknown schema)
-/// has no resolved dependencies.
+/// A missing or unusable snapshot (never written, written by an older
+/// toolchain, a best-effort write that failed, or an unknown schema) is
+/// treated as empty rather than as "no dependencies": the manifest's
+/// directly declared dependencies still resolve from their `_build/deps/`
+/// checkouts, as they did before the snapshot existed, so the REPL does not
+/// reject code `beamtalk build` accepts. Only transitive dependencies need
+/// the snapshot's edges.
 fn dependency_roots(root: &Utf8Path, manifest_toml: &str) -> Vec<(Utf8PathBuf, String)> {
     let deps_dir = root.join("_build/deps");
-    let Ok(snapshot) =
-        read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path())
-    else {
-        return Vec::new();
-    };
+    let snapshot = read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path())
+        .unwrap_or_else(|_| DepGraphSnapshot::new(Vec::new()));
     let declared = declared_dependency_names_from_manifest_toml(manifest_toml);
     resolved_dependency_names(&snapshot, &declared)
         .into_iter()
