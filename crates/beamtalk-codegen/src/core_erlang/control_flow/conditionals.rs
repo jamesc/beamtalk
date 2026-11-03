@@ -1768,11 +1768,7 @@ impl CoreErlangGenerator {
         self.decline_pure_boolean_inline = prev;
         let new_warnings = self.codegen_warnings.split_off(warn_len);
         self.dedup_append_codegen_warnings(new_warnings);
-        Ok(Self::runtime_send_call(
-            leaf::var(cond_var.to_string()),
-            selector_atom,
-            closures?,
-        ))
+        Ok(self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?))
     }
 
     /// BT-4244: one block argument of [`Self::boolean_fallback_send`]: the
@@ -1998,6 +1994,17 @@ impl CoreErlangGenerator {
         tail: ProducerTail,
     ) -> Result<Option<ThreadedValue>> {
         let expr = expr.unwrap_parens();
+        // BT-4366: the construct's nested call nodes carry its line.
+        self.with_current_span(expr.span(), |this| {
+            this.inline_control_flow_producer_inner(expr, tail)
+        })
+    }
+
+    fn inline_control_flow_producer_inner(
+        &mut self,
+        expr: &Expression,
+        tail: ProducerTail,
+    ) -> Result<Option<ThreadedValue>> {
         let root_producer_locals = if self.is_producer_frame_for(self.current_frame(), expr) {
             self.conditional_producer_locals(expr)
         } else {

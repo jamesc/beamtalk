@@ -134,6 +134,23 @@ impl CoreErlangGenerator {
         indent: &'static str,
         terminator: &'static str,
     ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
+        // BT-4366: the element extractions are calls nested in the let chain;
+        // they carry the destructuring statement's line.
+        let outer_span = self.current_send_span.replace(value.span());
+        let result =
+            self.generate_destructure_extractions_inner(pattern, value, indent, terminator);
+        self.current_send_span = outer_span;
+        result
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn generate_destructure_extractions_inner(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        indent: &'static str,
+        terminator: &'static str,
+    ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
         let rhs_prefix = match pattern {
             Pattern::Array { .. } => "Arr",
             Pattern::Tuple { .. } => "Tup",
@@ -192,11 +209,15 @@ impl CoreErlangGenerator {
                             docs.push(docvec![
                                 indent,
                                 leaf::var(core_var.clone()),
-                                " = call 'beamtalk_message_dispatch':'send'(",
-                                leaf::var(rhs_var.to_string()),
-                                ", 'at:', [",
-                                one_based,
-                                "])",
+                                " = ",
+                                // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
+                                self.annotate_current_send_call(docvec![
+                                    "call 'beamtalk_message_dispatch':'send'(",
+                                    leaf::var(rhs_var.to_string()),
+                                    ", 'at:', [",
+                                    one_based,
+                                    "])"
+                                ]),
                                 terminator,
                             ]);
                             bound_pairs.push((id.name.to_string(), core_var));
@@ -212,11 +233,15 @@ impl CoreErlangGenerator {
                             docs.push(docvec![
                                 indent,
                                 leaf::var(elem_var.clone()),
-                                " = call 'beamtalk_message_dispatch':'send'(",
-                                leaf::var(rhs_var.to_string()),
-                                ", 'at:', [",
-                                one_based,
-                                "])",
+                                " = ",
+                                // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
+                                self.annotate_current_send_call(docvec![
+                                    "call 'beamtalk_message_dispatch':'send'(",
+                                    leaf::var(rhs_var.to_string()),
+                                    ", 'at:', [",
+                                    one_based,
+                                    "])"
+                                ]),
                                 terminator,
                             ]);
                             let mismatch_raise = self.pattern_mismatch_raise_doc(
