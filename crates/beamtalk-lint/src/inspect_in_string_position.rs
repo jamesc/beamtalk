@@ -25,7 +25,7 @@
 //! ```
 
 use crate::LintPass;
-use beamtalk_core::ast::{Expression, MessageSelector, Module, StringSegment};
+use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module, StringSegment};
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on `inspect` sends used directly in string position
@@ -111,6 +111,13 @@ fn walk(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                     }
                     walk(e, diagnostics);
                 }
+            }
+        }
+        // A binary construction segment is not a string position: only
+        // descend for nested `++`/interpolation uses.
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk(e, diagnostics);
             }
         }
 

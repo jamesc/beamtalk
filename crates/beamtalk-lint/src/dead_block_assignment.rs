@@ -63,7 +63,8 @@ use std::collections::HashSet;
 
 use crate::{LintPass, hierarchy_for_lint};
 use beamtalk_core::ast::{
-    Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
+    BinarySegment, Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module,
+    StringSegment,
 };
 use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
 use beamtalk_core::semantic_analysis::{
@@ -318,6 +319,11 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
                 if let StringSegment::Interpolation(e) = seg {
                     walk_expr(e, scope, out);
                 }
+            }
+        }
+        BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_expr(e, scope, out);
             }
         }
 

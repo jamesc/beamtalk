@@ -86,7 +86,8 @@ pub use value_objects::{
 };
 
 use beamtalk_core::ast::{
-    Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern, TypeAnnotation,
+    BinarySegment, Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern,
+    TypeAnnotation,
 };
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::source_analysis::{Lexer, Span, Token, TokenKind};
@@ -1554,6 +1555,10 @@ impl SimpleLanguageService {
                     None
                 }
             }),
+            Expression::BinaryConstruction { segments, .. } => segments
+                .iter()
+                .flat_map(BinarySegment::sub_expressions)
+                .find_map(|expr| Self::find_identifier_in_expr(expr, offset)),
             Expression::ArrayLiteral { elements, .. }
             | Expression::TupleLiteral { elements, .. } => elements
                 .iter()
@@ -1702,6 +1707,11 @@ impl SimpleLanguageService {
                     if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                         Self::collect_identifiers(expr, name, results);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    Self::collect_identifiers(expr, name, results);
                 }
             }
             _ => {}

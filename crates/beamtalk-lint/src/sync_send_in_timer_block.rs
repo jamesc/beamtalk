@@ -20,7 +20,7 @@
 //! ```
 
 use crate::LintPass;
-use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector, Module};
+use beamtalk_core::ast::{BinarySegment, Block, Expression, Identifier, MessageSelector, Module};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on synchronous `self` sends inside `Timer every:do:`
@@ -240,6 +240,11 @@ fn walk_for_timer_sends(
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     walk_for_timer_sends(e, in_timer_block, diagnostics);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_for_timer_sends(e, in_timer_block, diagnostics);
             }
         }
 

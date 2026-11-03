@@ -51,7 +51,8 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module, WellKnownSelector,
+    BinarySegment, Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Module,
+    WellKnownSelector,
 };
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
@@ -325,7 +326,8 @@ pub(crate) enum Position {
     Argument,
     /// Part of a cascade.
     Cascade,
-    /// An element of a literal (array, list, map).
+    /// An element of a literal (array, list, map, tuple), or a segment value
+    /// or size of a binary construction (ADR 0143).
     LiteralElement,
     /// The subject of `match:`.
     MatchSubject,
@@ -790,6 +792,11 @@ impl StaleReturnScan<'_> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.expr(e);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
                 }
             }
             Expression::Identifier(_)
@@ -1322,6 +1329,14 @@ impl RaiseScan<'_> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.expr(e);
                     }
+                }
+                self.may_raise();
+            }
+            // Construction raises `badarg` on a mistyped or mis-sized value
+            // (ADR 0143 § Runtime failures).
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
                 }
                 self.may_raise();
             }
@@ -2072,6 +2087,11 @@ impl<'d> Walker<'d> {
                     if let crate::ast::StringSegment::Interpolation(e) = segment {
                         self.operand(e, Position::Interpolation);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.operand(e, Position::LiteralElement);
                 }
             }
             // A local bound to a writing block was reported where it was bound

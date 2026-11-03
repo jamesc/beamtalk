@@ -153,6 +153,14 @@ pub(crate) fn walk_expr<'ast, V: Visitor<'ast>>(v: &mut V, expr: &'ast Expressio
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments
+                .iter()
+                .flat_map(crate::ast::BinarySegment::sub_expressions)
+            {
+                v.visit_expr(e);
+            }
+        }
         // Leaf nodes — nothing to recurse into. Listed explicitly (no `_`
         // arm) so that adding a new variant is a compile error here.
         Expression::Literal(..)

@@ -32,8 +32,8 @@
 
 use crate::Location;
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
+    BinarySegment, ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition,
+    Pattern, ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
 use beamtalk_core::source_analysis::Span;
@@ -396,6 +396,11 @@ fn collect_class_refs(
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_class_refs(expr, class_name, file_path, results);
+            }
+        }
         Expression::ListLiteral { elements, tail, .. } => {
             for element in elements {
                 collect_class_refs(element, class_name, file_path, results);
@@ -742,6 +747,11 @@ fn collect_selector_refs(
                 if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                     collect_selector_refs(expr, selector_name, file_path, results);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_selector_refs(expr, selector_name, file_path, results);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

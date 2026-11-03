@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Module, TypeAnnotation};
+use crate::ast::{BinarySegment, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -209,6 +209,11 @@ impl TypeChecker {
                     if let crate::ast::StringSegment::Interpolation(expr) = seg {
                         self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
                     }
+                }
+            }
+            Expression::BinaryConstruction { segments, .. } => {
+                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
                 }
             }
             Expression::ArrayLiteral { elements, .. }

@@ -48,8 +48,8 @@ use crate::commands::test_stdlib::{
 };
 use crate::commands::util;
 use beamtalk_core::ast::{
-    Block, Expression, ExpressionStatement, Identifier, MatchArm, MessageSelector, Module, Pattern,
-    StringSegment,
+    BinarySegment, Block, Expression, ExpressionStatement, Identifier, MatchArm, MessageSelector,
+    Module, Pattern, StringSegment,
 };
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::unparse::unparse_module;
@@ -340,6 +340,11 @@ fn walk_names_ref(expr: &Expression, on_name: &mut dyn FnMut(&EcoString, NameKin
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_names_ref(e, on_name);
+            }
+        }
     }
 }
 
@@ -471,6 +476,14 @@ fn rename_names_mut(
                 if let StringSegment::Interpolation(e) = seg {
                     rename_names_mut(e, mapping, scope);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments
+                .iter_mut()
+                .flat_map(BinarySegment::sub_expressions_mut)
+            {
+                rename_names_mut(e, mapping, scope);
             }
         }
     }

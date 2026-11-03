@@ -231,13 +231,21 @@ pub struct MapPatternPair {
     pub span: Span,
 }
 
-/// A segment in a binary pattern.
+/// A segment in a binary pattern or a binary construction.
 ///
 /// Example: In `<<version:8, data/binary>>`, `version:8` and `data/binary` are segments.
+///
+/// One segment shape serves both directions (ADR 0143): the value is a
+/// [`Pattern`] in a match arm (the default, `BinarySegment`) and an
+/// [`Expression`] in a construction (`BinarySegment<Expression>`, held by
+/// [`Expression::BinaryConstruction`](crate::ast::Expression::BinaryConstruction)).
+/// The size and the `/type-signedness-endianness-unit:N` specifiers are the
+/// same fields, so there is one specifier vocabulary, not two.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BinarySegment {
-    /// The value or variable.
-    pub value: Pattern,
+pub struct BinarySegment<V = Pattern> {
+    /// The value or variable: a [`Pattern`] when matching, an
+    /// [`Expression`] when constructing.
+    pub value: V,
     /// Size specifier (e.g., `8`, `16`).
     pub size: Option<Box<Expression>>,
     /// Type specifier (e.g., `binary`, `integer`, `float`).
@@ -252,6 +260,22 @@ pub struct BinarySegment {
     pub unit: Option<usize>,
     /// Source location.
     pub span: Span,
+}
+
+impl BinarySegment<Expression> {
+    /// A construction segment's sub-expressions in evaluation order: the
+    /// value, then the size (when present).
+    ///
+    /// The single place that enumerates a construction segment's children,
+    /// so every walker visits the same expressions.
+    pub fn sub_expressions(&self) -> impl Iterator<Item = &Expression> {
+        std::iter::once(&self.value).chain(self.size.as_deref())
+    }
+
+    /// Mutable counterpart of [`Self::sub_expressions`].
+    pub fn sub_expressions_mut(&mut self) -> impl Iterator<Item = &mut Expression> {
+        std::iter::once(&mut self.value).chain(self.size.as_deref_mut())
+    }
 }
 
 /// Type specifier for binary segments.

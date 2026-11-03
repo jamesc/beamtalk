@@ -284,6 +284,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
 mod analysis_handoff;
 mod arm_local_slot_verifier_corpus;
 mod arm_operand_carrier_corpus;
+mod binary_construction;
 mod block_value_arity_agreement;
 mod branch_context;
 mod call_site_lines;

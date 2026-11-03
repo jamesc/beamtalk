@@ -30,8 +30,8 @@ use crate::queries::{enrich_hierarchy_with_inferred_returns_and_aliases, type_of
 use crate::{HoverInfo, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module, Pattern,
-    SlotKind, StateDeclaration, declared_shape_migrations,
+    BinarySegment, ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
+    Pattern, SlotKind, StateDeclaration, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
@@ -1372,6 +1372,27 @@ fn find_hover_in_expr(
                     }
                 }
                 Some(HoverInfo::new("Interpolated string".to_string(), *span))
+            } else {
+                None
+            }
+        }
+        Expression::BinaryConstruction { segments, span } => {
+            if offset >= span.start() && offset < span.end() {
+                // Check segment values and sizes for hover targets
+                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    if let Some(info) = find_hover_in_expr(
+                        expr,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
+                        return Some(info);
+                    }
+                }
+                Some(HoverInfo::new("Binary construction".to_string(), *span))
             } else {
                 None
             }

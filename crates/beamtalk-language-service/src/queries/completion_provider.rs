@@ -30,7 +30,8 @@ use crate::queries::{enrich_hierarchy_with_inferred_returns, type_of_parsed};
 use crate::{Completion, CompletionKind, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
+    BinarySegment, ClassDefinition, ClassKind, Expression, MethodDefinition, Module,
+    declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
@@ -868,6 +869,11 @@ fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<Ec
                 if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
                     collect_identifiers_from_expr(expr, identifiers);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_identifiers_from_expr(expr, identifiers);
             }
         }
         _ => {}

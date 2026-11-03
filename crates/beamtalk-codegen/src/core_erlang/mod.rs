@@ -507,6 +507,15 @@ impl CoreErlangGenerator {
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
             }
+            // ADR 0143 Phase 1 (BT-4346) parses and unparses `<<...>>` in
+            // expression position; lowering to `#{...}#` is Phase 2
+            // (BT-4347). Until then a construction is a reported compile
+            // error, never a panic or silently wrong Core Erlang.
+            Expression::BinaryConstruction { span, .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: "binary construction `<<...>>` is not yet implemented (BT-4347)"
+                    .to_string(),
+                span: Some(*span),
+            }),
             Expression::DestructureAssignment { span, .. } => {
                 // DestructureAssignment is only valid as a statement in a body context.
                 // All statement-body generators handle it explicitly. Reaching here means
