@@ -22,8 +22,8 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
-    CascadeMessage, ClassDefinition, Expression, ExpressionStatement, MessageSelector, Module,
-    SlotKind, StateDeclaration, StringSegment,
+    BinarySegment, CascadeMessage, ClassDefinition, Expression, ExpressionStatement,
+    MessageSelector, Module, SlotKind, StateDeclaration, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -751,12 +751,16 @@ impl CoreErlangGenerator {
     /// The children of a literal-container parent the sequencing rule
     /// applies to, in evaluation order: `ListLiteral` elements then an
     /// optional tail, `ArrayLiteral`/`TupleLiteral` elements, `MapLiteral` keys and
-    /// values (key before value, pair by pair). `None` for anything else.
+    /// values (key before value, pair by pair), and `BinaryConstruction`
+    /// segment values and sizes (value before size, segment by segment,
+    /// ADR 0143). `None` for anything else.
     /// Safe to treat like [`Self::sequenced_send_children`]'s children
     /// (no interleaved effect between compiling one and the next): each
     /// of these parents' own codegen
     /// ([`Self::generate_list_literal`]/[`Self::generate_array_literal`]/[`Self::generate_tuple_literal`]/
-    /// [`Self::generate_map_literal`]) compiles every element through
+    /// [`Self::generate_map_literal`]/[`Self::generate_binary_construction`],
+    /// whose literal values and sizes are trivial children no sequencing
+    /// registers) compiles every element through
     /// `capture_subexpr_sequence` → `expression_doc`, which is exactly
     /// the route [`Self::register_precompiled_subexpr`]'s substitution
     /// reaches.
@@ -779,6 +783,12 @@ impl CoreErlangGenerator {
                 }
                 Some(children)
             }
+            Expression::BinaryConstruction { segments, .. } => Some(
+                segments
+                    .iter()
+                    .flat_map(BinarySegment::sub_expressions)
+                    .collect(),
+            ),
             _ => None,
         }
     }

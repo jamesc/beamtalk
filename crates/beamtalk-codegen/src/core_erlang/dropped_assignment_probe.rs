@@ -68,6 +68,9 @@ const POSITIONS: &[&str] = &[
     "x := #[(@A)]",
     "#{#k => (@A)}",
     "x := \"v{(@A)}\"",
+    // A binary construction's segment value and size (ADR 0143).
+    "x := <<t:8, (@A):8, t:8>>",
+    "<<(@A):(t + 8)>>",
     // A conditional's, a cascade's and a `match:`'s receiver, and an arm.
     "(@A) > 0 ifTrue: [u := 9]",
     "(@A) > 0 ifTrue: [u := 9] ifFalse: [u := 1]",

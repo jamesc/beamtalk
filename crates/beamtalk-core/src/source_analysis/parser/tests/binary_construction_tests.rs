@@ -469,3 +469,277 @@ fn invalid_size_is_an_error() {
         "{diagnostics:?}"
     );
 }
+
+#[test]
+fn missing_close_span_covers_the_consumed_segments() {
+    // Without `>>` the construction still spans every token it consumed,
+    // so its children lie inside it.
+    let source = "<<v:8, w";
+    let (module, diagnostics) = parse(lex_with_eof(source));
+    assert!(!diagnostics.is_empty());
+    let Expression::BinaryConstruction { segments, span } = &module.expressions[0].expression
+    else {
+        panic!("expected a construction: {module:?}");
+    };
+    assert_eq!(*span, Span::new(0, 8));
+    for seg in segments {
+        assert!(span.start() <= seg.span.start() && seg.span.end() <= span.end());
+    }
+}
+
+// --- Field access as a segment value (ADR 0143 § Segment values) ---
+
+/// Parses `source`, answering its statements' expressions and diagnostics.
+fn parse_statements(source: &str) -> (Vec<Expression>, Vec<Diagnostic>) {
+    let (module, diagnostics) = parse(lex_with_eof(source));
+    (
+        module
+            .expressions
+            .into_iter()
+            .map(|s| s.expression)
+            .collect(),
+        diagnostics,
+    )
+}
+
+#[test]
+fn unparenthesized_field_access_with_size_is_an_error_with_a_hint() {
+    let source = "<<self.len:8>>";
+    let (expressions, diagnostics) = parse_statements(source);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(
+        diagnostics[0].message,
+        "a field access in a binary construction segment must be parenthesized"
+    );
+    assert!(
+        diagnostics[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("<<(self.len):8>>")),
+        "{diagnostics:?}"
+    );
+    assert_eq!(diagnostics[0].span, Span::new(2, 10));
+    // One statement: `len:8>>` does not spill into a second one, and the
+    // construction spans the whole source.
+    assert_eq!(expressions.len(), 1, "{expressions:?}");
+    let Expression::BinaryConstruction { segments, span } = &expressions[0] else {
+        panic!("expected a construction: {expressions:?}");
+    };
+    assert_eq!(*span, Span::new(0, 14));
+    assert_eq!(segments.len(), 1);
+    let Expression::FieldAccess {
+        receiver, field, ..
+    } = &segments[0].value
+    else {
+        panic!("expected a field access: {:?}", segments[0].value);
+    };
+    assert!(matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self"));
+    assert_eq!(field.name, "len");
+    assert_eq!(field.span, Span::new(7, 10));
+    assert_int(segments[0].size.as_deref(), 8);
+}
+
+#[test]
+fn unparenthesized_field_access_without_size_is_an_error() {
+    let (expressions, diagnostics) = parse_statements("<<x.y>>");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].message.contains("must be parenthesized"));
+    assert_eq!(expressions.len(), 1, "{expressions:?}");
+    let Expression::BinaryConstruction { segments, span } = &expressions[0] else {
+        panic!("expected a construction: {expressions:?}");
+    };
+    assert_eq!(*span, Span::new(0, 7));
+    assert!(matches!(
+        &segments[0].value,
+        Expression::FieldAccess { field, .. } if field.name == "y"
+    ));
+    assert!(segments[0].size.is_none());
+}
+
+#[test]
+fn unparenthesized_field_access_keeps_later_segments() {
+    let (expressions, diagnostics) = parse_statements("<<x.y/binary, 1:8>>");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let Expression::BinaryConstruction { segments, .. } = &expressions[0] else {
+        panic!("expected a construction: {expressions:?}");
+    };
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].segment_type, Some(BinarySegmentType::Binary));
+}
+
+#[test]
+fn parenthesized_field_access_is_accepted() {
+    let seg = single_segment("<<(self.len):8>>");
+    assert!(matches!(
+        seg.value.unwrap_parens(),
+        Expression::FieldAccess { .. }
+    ));
+}
+
+#[test]
+fn period_with_space_still_ends_the_statement() {
+    // `x. y` is a statement separator, not a field access.
+    let (expressions, diagnostics) = parse_statements("<<x>>. y");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(expressions.len(), 2);
+}
+
+// --- Names as segment values build what the operand path builds ---
+
+#[test]
+fn uppercase_name_is_a_class_reference() {
+    for source in ["<<Foo>>", "<<Foo:8>>"] {
+        let seg = single_segment(source);
+        assert!(
+            matches!(&seg.value, Expression::ClassReference { name, .. } if name.name == "Foo"),
+            "{source}: {:?}",
+            seg.value
+        );
+    }
+}
+
+#[test]
+fn super_is_super() {
+    for source in ["<<super>>", "<<super:8>>"] {
+        let seg = single_segment(source);
+        assert!(
+            matches!(seg.value, Expression::Super(_)),
+            "{source}: {:?}",
+            seg.value
+        );
+    }
+}
+
+// --- Literal checks (ADR 0143 § Literal checks), worded for construction ---
+
+/// The diagnostics of `source` with their severity.
+fn diagnostics_of(source: &str) -> Vec<(Severity, String)> {
+    parse_err(source)
+        .into_iter()
+        .map(|d| (d.severity, d.message.to_string()))
+        .collect()
+}
+
+fn assert_one(source: &str, severity: Severity, message: &str) {
+    let diagnostics = diagnostics_of(source);
+    assert_eq!(
+        diagnostics,
+        vec![(severity, message.to_string())],
+        "{source}"
+    );
+}
+
+#[test]
+fn typed_string_literal_is_an_error() {
+    for source in [
+        "<<\"hi\"/binary>>",
+        "<<\"hi\":16>>",
+        "<<\"hi\"/signed>>",
+        "<<(\"hi\")/binary>>",
+    ] {
+        assert_one(
+            source,
+            Severity::Error,
+            "a literal string in a binary construction must not have a type or a size",
+        );
+    }
+}
+
+#[test]
+fn bare_and_utf_typed_string_literals_are_clean() {
+    for source in ["<<\"hi\">>", "<<\"hi\"/utf16>>", "<<\"hé\"/utf8>>"] {
+        assert!(diagnostics_of(source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn out_of_range_integer_literal_warns_with_its_truncated_value() {
+    assert_one(
+        "<<(-1):4>>",
+        Severity::Warning,
+        "the value -1 does not fit in an 'unsigned' binary segment of size 4 and is truncated to 15",
+    );
+    assert_one(
+        "<<300>>",
+        Severity::Warning,
+        "the value 300 does not fit in an 'unsigned' binary segment of size 8 and is truncated to 44",
+    );
+    assert_one(
+        "<<200:8/signed>>",
+        Severity::Warning,
+        "the value 200 does not fit in an 'signed' binary segment of size 8 and is truncated to -56",
+    );
+    // size × unit: 2 × 4 = 8 bits.
+    assert_one(
+        "<<256:2/unit:4>>",
+        Severity::Warning,
+        "the value 256 does not fit in an 'unsigned' binary segment of size 8 and is truncated to 0",
+    );
+}
+
+#[test]
+fn fitting_integer_literals_are_clean() {
+    for source in [
+        "<<255>>",
+        "<<-1:8/signed>>",
+        "<<4660:2/unit:8>>",
+        "<<15:4>>",
+        "<<0:0>>",
+    ] {
+        assert!(diagnostics_of(source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn wrong_type_literals_warn_that_construction_will_fail() {
+    assert_one(
+        "<<1.5>>",
+        Severity::Warning,
+        "binary construction will fail because '1.5' is not of the expected type 'integer'",
+    );
+    assert_one(
+        "<<5/binary>>",
+        Severity::Warning,
+        "binary construction will fail because '5' is not of the expected type 'binary'",
+    );
+}
+
+#[test]
+fn float_size_times_unit_is_checked() {
+    assert_one(
+        "<<1.5:24/float>>",
+        Severity::Warning,
+        "bad float bit size: float segments must be 16, 32, or 64 bits, got 24",
+    );
+    assert!(diagnostics_of("<<1:4/unit:8-float>>").is_empty());
+    assert!(diagnostics_of("<<1.5:16/float>>").is_empty());
+}
+
+#[test]
+fn non_ascii_character_warns_it_builds_one_byte() {
+    assert_one(
+        "<<$é>>",
+        Severity::Warning,
+        "character literal $é builds the single byte 233 (its code point), not its UTF-8 encoding; use \"é\" or $é/utf8 to build the UTF-8 bytes",
+    );
+    assert!(diagnostics_of("<<$é/utf8>>").is_empty());
+}
+
+#[test]
+fn shape_errors_match_the_pattern_side() {
+    assert_one(
+        "<<v/unit:8>>",
+        Severity::Error,
+        "a bit unit size must not be specified unless a size is specified too",
+    );
+    assert_one(
+        "<<v:8/utf8>>",
+        Severity::Error,
+        "size must not be given for segments of type utf8",
+    );
+    assert_one(
+        "<<v:(-1)>>",
+        Severity::Error,
+        "binary segment sizes must be non-negative, got -1",
+    );
+}

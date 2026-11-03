@@ -262,6 +262,103 @@ pub struct BinarySegment<V = Pattern> {
     pub span: Span,
 }
 
+/// A binary segment's value as the literal checks and the lowering see it,
+/// in either direction (ADR 0143 § Literal checks): one view, so a literal
+/// reads the same in a pattern and in a construction.
+pub trait BinarySegmentValue {
+    /// The literal this value is, with its span: a `Pattern::Literal`, or an
+    /// `Expression::Literal` through any parentheses (`<<(-1):4>>`).
+    fn binary_literal(&self) -> Option<(&Literal, Span)>;
+
+    /// The value's source span.
+    fn binary_value_span(&self) -> Span;
+}
+
+impl BinarySegmentValue for Pattern {
+    fn binary_literal(&self) -> Option<(&Literal, Span)> {
+        match self {
+            Pattern::Literal(lit, span) => Some((lit, *span)),
+            _ => None,
+        }
+    }
+
+    fn binary_value_span(&self) -> Span {
+        self.span()
+    }
+}
+
+impl BinarySegmentValue for Expression {
+    fn binary_literal(&self) -> Option<(&Literal, Span)> {
+        match self.unwrap_parens() {
+            Expression::Literal(lit, span) => Some((lit, *span)),
+            _ => None,
+        }
+    }
+
+    fn binary_value_span(&self) -> Span {
+        self.span()
+    }
+}
+
+/// An integer literal size and its span, through any parentheses
+/// (`<<v:(8)>>`, BT-4097). `None` for any other size expression.
+#[must_use]
+pub fn binary_literal_size(size: &Expression) -> Option<(i64, Span)> {
+    match size.unwrap_parens() {
+        Expression::Literal(Literal::Integer(n), span) => Some((*n, *span)),
+        _ => None,
+    }
+}
+
+impl<V> BinarySegment<V> {
+    /// The segment's type: the explicit one, or `integer` (the default).
+    #[must_use]
+    pub fn effective_type(&self) -> BinarySegmentType {
+        self.segment_type.unwrap_or(BinarySegmentType::Integer)
+    }
+
+    /// The segment's unit: the explicit `unit:N`, or its type's default (8
+    /// for `binary`, 1 for `integer`/`float`/`bits`, none for `utf*`).
+    #[must_use]
+    pub fn effective_unit(&self) -> Option<u64> {
+        match (self.unit, self.effective_type()) {
+            (Some(unit), _) => u64::try_from(unit).ok(),
+            (
+                None,
+                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32,
+            ) => None,
+            (None, BinarySegmentType::Binary) => Some(8),
+            (
+                None,
+                BinarySegmentType::Integer
+                | BinarySegmentType::Float
+                | BinarySegmentType::Bitstring,
+            ) => Some(1),
+        }
+    }
+
+    /// The segment's bit size when the source fixes it: a literal size ×
+    /// the unit, or the default size of an `integer` (8) or `float` (64)
+    /// segment with no size. `None` for a variable or computed size, a
+    /// sizeless `binary`/`bits` segment (its value's size) and `utf*`
+    /// segments (the character's encoding), and for a negative size (an
+    /// error the parser reports).
+    #[must_use]
+    pub fn literal_bit_size(&self) -> Option<u64> {
+        match &self.size {
+            Some(size) => {
+                let (n, _) = binary_literal_size(size)?;
+                u64::try_from(n).ok()?.checked_mul(self.effective_unit()?)
+            }
+            None => match self.effective_type() {
+                BinarySegmentType::Integer => Some(8),
+                BinarySegmentType::Float => Some(64),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl BinarySegment<Expression> {
     /// A construction segment's sub-expressions in evaluation order: the
     /// value, then the size (when present).
