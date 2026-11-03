@@ -27,6 +27,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-compile({inline, [has_class_suffix/1]}).
+
 -export([
     whereis_class/1,
     all_classes/0,
@@ -800,12 +802,22 @@ is_class_object(_) ->
 -doc "Check if a class name (atom or binary) represents a class object (ends with \" class\").".
 -spec is_class_name(atom() | binary()) -> boolean().
 is_class_name(ClassName) when is_atom(ClassName) ->
-    is_class_name(atom_to_binary(ClassName, utf8));
+    %% On every actor send (beamtalk_message_dispatch:classify_receiver/1),
+    %% so one BIF and a guard test, no recursion or `binary:part/3` call (BT-4265).
+    has_class_suffix(atom_to_binary(ClassName, utf8));
 is_class_name(ClassName) when is_binary(ClassName) ->
-    Size = byte_size(ClassName) - 6,
-    Size >= 0 andalso binary:part(ClassName, Size, 6) =:= <<" class">>;
+    has_class_suffix(ClassName);
 is_class_name(_) ->
     false.
+
+%% A guard `binary_part/3` rather than a binary match: the match would
+%% allocate a match context on every send.
+has_class_suffix(Name) ->
+    Size = byte_size(Name) - 6,
+    if
+        Size >= 0, binary_part(Name, Size, 6) =:= <<" class">> -> true;
+        true -> false
+    end.
 
 -doc """
 Strip " class" suffix from a class object name to get the display name.

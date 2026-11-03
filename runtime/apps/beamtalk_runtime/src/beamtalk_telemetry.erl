@@ -84,6 +84,10 @@ raises (and logs it).
 
 -include("beamtalk.hrl").
 
+%% `dispatch_span/5` wraps every actor send: inline its events-off path so it
+%% costs no local calls of its own (BT-4265).
+-compile({inline, [dispatch_events_enabled/0, run_recorded/5]}).
+
 -type span_exit() :: {stop | exception, map(), integer()}.
 
 -export([

@@ -307,7 +307,11 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    ///     let Self = call 'beamtalk_actor':'make_self'(State) in
+    ///     let Self = case State of
+    ///         <~{'__class_mod__' := 'module'}~> when not is_map_key('$beamtalk_class', State) ->
+    ///             {'beamtalk_object', 'Class', 'module', call 'erlang':'self'()}
+    ///         <_> when 'true' -> call 'beamtalk_actor':'make_self'(State)
+    ///     end in
     ///     apply 'safe_dispatch'/4(Selector, Args, Self, State)
     ///
     /// 'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->
@@ -328,14 +332,44 @@ impl CoreErlangGenerator {
         let nlr_value_var = self.fresh_var("SDNlrVal");
         let nlr_state_var = self.fresh_var("SDNlrSt");
 
+        let class_name = self.class_name();
+
         let doc = docvec![
             "'safe_dispatch'/3 = fun (Selector, Args, State) ->",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    // Construct Self object reference using beamtalk_actor:make_self/1
-                    "let Self = call 'beamtalk_actor':'make_self'(State) in",
+                    // BT-4265: this module's own state (its `__class_mod__`, no
+                    // runtime `$beamtalk_class` tag) is the common case, and
+                    // codegen knows its class and module: build Self here.
+                    // Anything else falls back to beamtalk_actor:make_self/1,
+                    // which derives both from the state.
+                    "let Self = case State of",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "<~{'__class_mod__' := ",
+                            leaf::atom(module_name.clone()),
+                            "}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State)) ->",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "{'beamtalk_object', ",
+                                    leaf::atom(class_name),
+                                    ", ",
+                                    leaf::atom(module_name.clone()),
+                                    ", call 'erlang':'self'()}",
+                                ]
+                            ),
+                            line(),
+                            "<_> when 'true' -> call 'beamtalk_actor':'make_self'(State)",
+                        ]
+                    ),
+                    line(),
+                    "end in",
                     line(),
                     "apply 'safe_dispatch'/4 (Selector, Args, Self, State)",
                 ]

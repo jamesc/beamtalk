@@ -89,6 +89,17 @@ is_class_name_binary_false_test() ->
 is_class_name_unsupported_type_test() ->
     ?assertEqual(false, beamtalk_class_registry:is_class_name(42)).
 
+%% BT-4265: the suffix test is a guard on the binary's last six bytes — pin
+%% the boundaries (the suffix alone, one byte short, the suffix mid-name).
+is_class_name_boundaries_test() ->
+    ?assertEqual(true, beamtalk_class_registry:is_class_name(' class')),
+    ?assertEqual(false, beamtalk_class_registry:is_class_name('class')),
+    ?assertEqual(false, beamtalk_class_registry:is_class_name('Foo classy')),
+    ?assertEqual(false, beamtalk_class_registry:is_class_name('Metaclass')),
+    ?assertEqual(false, beamtalk_class_registry:is_class_name('')),
+    ?assertEqual(true, beamtalk_class_registry:is_class_name(<<" class">>)),
+    ?assertEqual(false, beamtalk_class_registry:is_class_name(<<>>)).
+
 is_class_name_object_class_test() ->
     ?assertEqual(true, beamtalk_class_registry:is_class_name('Object class')).
 
