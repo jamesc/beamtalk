@@ -262,7 +262,7 @@ fn test_generate_super_send_value_context_uses_super_value() {
 fn test_generate_actor_spawn_non_repl() {
     let mut generator = CoreErlangGenerator::new("test");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
+        .generate_actor_spawn_qualified("Counter", None, "spawn", None, SpawnVariant::Plain)
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -281,7 +281,13 @@ fn test_generate_actor_spawn_monitored_non_repl() {
     // `spawn_monitored/0` in the sender's process.
     let mut generator = CoreErlangGenerator::new("test");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .generate_actor_spawn_qualified(
+            "Counter",
+            None,
+            "spawnMonitored",
+            None,
+            SpawnVariant::Monitored,
+        )
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -301,7 +307,13 @@ fn test_generate_actor_spawn_monitored_repl_registers_pair_actor() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.bind_var("__bindings__", "Bindings");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Monitored)
+        .generate_actor_spawn_qualified(
+            "Counter",
+            None,
+            "spawnMonitored",
+            None,
+            SpawnVariant::Monitored,
+        )
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -325,7 +337,7 @@ fn test_generate_actor_spawn_repl_registers_plain_result() {
     let mut generator = CoreErlangGenerator::new("test");
     generator.bind_var("__bindings__", "Bindings");
     let doc = generator
-        .generate_actor_spawn_qualified("Counter", None, None, SpawnVariant::Plain)
+        .generate_actor_spawn_qualified("Counter", None, "spawn", None, SpawnVariant::Plain)
         .unwrap();
     let output = doc.to_pretty_string();
     assert!(
