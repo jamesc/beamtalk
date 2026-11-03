@@ -171,29 +171,6 @@ impl Drop for BeamtalkHomeOverride {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{BeamtalkHomeOverride, real_home_guard};
-
-    /// BT-4382: taking the real-home guard while this thread holds an
-    /// override panics with a clear message instead of deadlocking.
-    #[test]
-    #[should_panic(expected = "already holds a BeamtalkHomeOverride")]
-    fn real_home_guard_panics_under_a_held_override() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let _home = BeamtalkHomeOverride::new(tmp.path());
-        let _guard = real_home_guard();
-    }
-
-    /// Once the override drops, the same thread may take the guard again.
-    #[test]
-    fn real_home_guard_works_after_the_override_drops() {
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        drop(BeamtalkHomeOverride::new(tmp.path()));
-        let _guard = real_home_guard();
-    }
-}
-
 /// RAII guard owning a real (but uniquely-named) workspace directory under
 /// `~/.beamtalk/workspaces/`, matching the pattern already used by
 /// `storage.rs`'s and `node_state.rs`'s own tests. Holds the shared
@@ -391,4 +368,27 @@ pub(crate) fn spawn_auth_error_server(message: &'static str) -> u16 {
         }
     });
     port
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BeamtalkHomeOverride, real_home_guard};
+
+    /// BT-4382: taking the real-home guard while this thread holds an
+    /// override panics with a clear message instead of deadlocking.
+    #[test]
+    #[should_panic(expected = "already holds a BeamtalkHomeOverride")]
+    fn real_home_guard_panics_under_a_held_override() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+        let _guard = real_home_guard();
+    }
+
+    /// Once the override drops, the same thread may take the guard again.
+    #[test]
+    fn real_home_guard_works_after_the_override_drops() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        drop(BeamtalkHomeOverride::new(tmp.path()));
+        let _guard = real_home_guard();
+    }
 }
