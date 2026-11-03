@@ -60,6 +60,10 @@ See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messagi
 """.
 -export([send/3, send/4, cast/3, send_number_coercion/4]).
 
+%% Every send classifies its receiver: inline the classification so an actor
+%% send pays no local calls for it (BT-4265).
+-compile({inline, [classify_receiver/1, is_actor/1, is_actor_ref/1]}).
+
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
 % elp:fixme W0048 intentional suppression for dynamic dispatch
@@ -271,7 +275,11 @@ classify_receiver(Receiver) ->
                 'Metaclass' ->
                     metaclass;
                 ClassName ->
-                    case beamtalk_class_registry:is_class_object(Receiver) of
+                    %% `is_class_object/1`'s test, on the class field the
+                    %% record match above already read (BT-4265).
+                    case
+                        is_atom(ClassName) andalso beamtalk_class_registry:is_class_name(ClassName)
+                    of
                         true ->
                             {class, element(4, Receiver)};
                         false ->

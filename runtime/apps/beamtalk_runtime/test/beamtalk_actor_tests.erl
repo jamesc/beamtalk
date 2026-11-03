@@ -4370,6 +4370,33 @@ local_temp_not_published_as_changed_slot_test_() ->
         end)
     end}.
 
+%% BT-4265: an unchanged state (a read) publishes nothing, even for a watched
+%% actor — the same-state clause skips the watch lookup, and the diff it skips
+%% would have been empty.
+unchanged_state_publishes_nothing_test_() ->
+    {setup, fun bt2717_watch_setup/0, fun bt2717_watch_teardown/1, fun(_) ->
+        ?_test(begin
+            Self = self(),
+            ok = beamtalk_object_watch:subscribe(Self, Self),
+            _ = sys:get_state(beamtalk_object_watch),
+            ?assert(beamtalk_object_watch:is_watched(Self)),
+            State = #{'__class_mod__' => some_mod, total => 3},
+            ok = beamtalk_actor:notify_state_change(State, State),
+            ?assertEqual(ok, beamtalk_actor:notify_state_change(State, State#{total => 3})),
+            receive
+                {object_changed, Self, Unexpected} -> ?assertEqual([], Unexpected)
+            after 100 -> ok
+            end,
+            %% A real change on the same watched actor still publishes.
+            ok = beamtalk_actor:notify_state_change(State, State#{total => 4}),
+            receive
+                {object_changed, Self, Slots} -> ?assertEqual([total], Slots)
+            after 1000 -> ?assert(false)
+            end,
+            beamtalk_object_watch:unsubscribe(Self, Self)
+        end)
+    end}.
+
 bt2717_watch_setup() ->
     case whereis(beamtalk_object_watch) of
         undefined -> {ok, _} = beamtalk_object_watch:start_link();
