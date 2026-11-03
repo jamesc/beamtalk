@@ -175,3 +175,22 @@ TestCase subclass: TupleTest
     self should: [dynamicAt value: t value: 1.0] raise: #type_error
     self should: [dynamicAt value: t value: #a] raise: #type_error
     self should: [typedAt value: t value: 1.5] raise: #type_error
+
+  // BT-4400 conformance: the compiled `at:` inlines the first clause of
+  // `beamtalk_tuple:at/2` (the in-range rule) and leaves every other index to
+  // it. Run both over one index table and require the same outcome, so the
+  // Rust guard and the Erlang helper cannot drift apart unnoticed.
+  outcomeOf: aBlock => [aBlock value] on: Error do: [:e | {#error, e kind}]
+
+  testAtMatchesRuntimeHelper =>
+    viaMethod := [:tup :i | tup at: i]
+    viaHelper := [:tup :i | Erlang beamtalk_tuple at: tup idx: i]
+    #({#a, #b, #c}, {})
+      do: [:t |
+        #(-1, 0, 1, 2, 3, 4, 1.0, #a, nil)
+          do: [:i |
+            self assert: (self outcomeOf: [
+              viaMethod value: t value: i
+            ]) equals: (self outcomeOf: [viaHelper value: t value: i])
+          ]
+      ]
