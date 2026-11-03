@@ -889,6 +889,11 @@ there is no changed selector to match against, so this is simply "a
 non-`error` `Dnu` or `Type` diagnostic" — the same two categories `trigger/4`
 treats as reload-relevant, minus the selector-name/classification narrowing
 that only makes sense relative to one specific change.
+
+`beamtalk lint --warnings-as-errors` reproduces this verdict in Rust
+(`live_recheck_verdict` in `crates/beamtalk-cli/src/commands/lint.rs`); both
+are pinned to `test/fixtures/live_recheck_verdict_conformance.json`
+(BT-4377), so change the fixture, not just one side.
 """.
 -spec relevant_image_diagnostic(map()) -> boolean().
 relevant_image_diagnostic(#{severity := <<"error">>}) ->

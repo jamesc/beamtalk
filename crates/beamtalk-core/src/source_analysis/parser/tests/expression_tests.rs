@@ -1330,6 +1330,99 @@ fn parse_binary_pattern_unit_errors() {
 }
 
 #[test]
+fn parse_binary_pattern_unit_rules_match_erlc() {
+    // BT-4376: verified against `erlc`. A size is required for a unit only
+    // on integer and float segments; `bits`/`bitstring` imply unit 1 and
+    // `bytes` unit 8, so a different explicit unit conflicts (named
+    // later-first, as `erlc` does); `binary` implies no unit.
+    use crate::source_analysis::Severity;
+    for (source, needle) in [
+        (
+            "x match: [<<v/integer-unit:8, rest/binary>> -> v]",
+            "unless a size is specified too",
+        ),
+        (
+            "x match: [<<v/float-unit:8, rest/binary>> -> v]",
+            "unless a size is specified too",
+        ),
+        (
+            "x match: [<<v:2/bits-unit:8>> -> v]",
+            "conflict in unit specification for bit field: '8' and '1'",
+        ),
+        (
+            "x match: [<<v:2/bitstring-unit:8>> -> v]",
+            "conflict in unit specification for bit field: '8' and '1'",
+        ),
+        (
+            "x match: [<<v:2/bytes-unit:16>> -> v]",
+            "conflict in unit specification for bit field: '16' and '8'",
+        ),
+        (
+            "x match: [<<v/bitstring-unit:4>> -> v]",
+            "conflict in unit specification for bit field: '4' and '1'",
+        ),
+        (
+            "x match: [<<v/unit:8-bits>> -> v]",
+            "conflict in unit specification for bit field: '1' and '8'",
+        ),
+    ] {
+        let diagnostics = parse_err(source);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|d| d.message.contains(needle)),
+            "expected '{needle}' error for {source}, got: {errors:?}"
+        );
+    }
+    for source in [
+        "x match: [<<v/binary-unit:16>> -> v]",
+        "x match: [<<v:2/binary-unit:16>> -> v]",
+        "x match: [<<v/bits-unit:1>> -> v]",
+        "x match: [<<v:2/bytes-unit:8>> -> v]",
+        "x match: [<<v/bytes-unit:8>> -> v]",
+        "x match: [<<v/unit:8-bytes>> -> v]",
+    ] {
+        let diagnostics = parse_err(source);
+        assert!(
+            diagnostics.is_empty(),
+            "expected a clean parse for {source}, got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_binary_pattern_non_ascii_character_warns() {
+    // BT-4376: `<<$é>>` matches byte 233 (its code point, like `erlc`),
+    // which disagrees with `<<"é">>` (UTF-8 bytes) — warn on the default
+    // 8-bit size only.
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("x match: [<<$é, rest/binary>> -> rest]");
+    let warnings: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .collect();
+    assert_eq!(warnings.len(), 1, "got: {diagnostics:?}");
+    assert!(
+        warnings[0].message.contains("not its UTF-8 encoding"),
+        "got: {}",
+        warnings[0].message
+    );
+    for source in [
+        "x match: [<<$A, rest/binary>> -> rest]",
+        "x match: [<<$é:16, rest/binary>> -> rest]",
+        "x match: [<<$é/utf8, rest/binary>> -> rest]",
+    ] {
+        let diagnostics = parse_err(source);
+        assert!(
+            diagnostics.is_empty(),
+            "expected a clean parse for {source}, got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn parse_binary_pattern_float_literal_value() {
     // BT-4143: <<1.5/float>> and <<-1.5/float>> — float literal values
     use crate::ast::Pattern;

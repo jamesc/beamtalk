@@ -333,12 +333,19 @@ pub use beamtalk_core::compilation::diagnostics_policy::{
 ///
 /// Given an already-constructed `AnalysisContext` (callers build this differently — the CLI
 /// and MCP each pass a different set of pre-loaded protocols, aliases, and extensions), this
-/// function runs the four shared steps that both surfaces need:
+/// function runs the five shared steps that both surfaces need:
 ///
-/// 1. `analyse_full` → filter results by `category.is_some()` → extend `diags`
+/// 1. `analyse_full` → keep categorised diagnostics plus every `Error` (an
+///    uncategorised structural error fails `build` and a REPL load, so a lint
+///    gate that dropped it would pass a file neither accepts — BT-4377) →
+///    extend `diags`
 /// 2. `check_class_file_name_agreement` → extend `diags`
 /// 3. `apply_expect_directives` → suppress matching `@expect` annotations
 /// 4. `check_near_miss_dividers` → append near-miss section-divider diagnostics
+/// 5. `apply_diagnostics_table` → apply the package's `[diagnostics]` severity
+///    overrides (ADR 0100 Rule 3) after `@expect` — the same helper, in the
+///    same order, as `build`, the LSP and the REPL (BT-4377). An empty table
+///    (no manifest) is a no-op.
 ///
 /// Returns the `ClassHierarchy` from step 1 for callers that need it (e.g. MCP's type-coverage
 /// computation). Callers that don't need it can discard it.
@@ -351,16 +358,14 @@ pub fn run_post_analysis_lint_pipeline(
     source: &str,
     analysis_ctx: beamtalk_core::semantic_analysis::AnalysisContext,
     file_stem: Option<&str>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     diags: &mut Vec<beamtalk_core::source_analysis::Diagnostic>,
 ) -> beamtalk_core::semantic_analysis::ClassHierarchy {
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     let class_hierarchy = analysis_result.class_hierarchy;
-    diags.extend(
-        analysis_result
-            .diagnostics
-            .into_iter()
-            .filter(|d| d.category.is_some()),
-    );
+    diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
+        d.category.is_some() || d.severity == beamtalk_core::source_analysis::Severity::Error
+    }));
     diags.extend(
         beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
             module, file_stem,
@@ -368,6 +373,10 @@ pub fn run_post_analysis_lint_pipeline(
     );
     apply_expect_directives(module, diags);
     beamtalk_core::near_miss_divider::check_near_miss_dividers(source, diags);
+    *diags = beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
+        std::mem::take(diags),
+        diagnostics_overrides,
+    );
     class_hierarchy
 }
 

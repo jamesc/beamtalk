@@ -19,7 +19,6 @@
 //! [`super::destructure`].
 
 use std::collections::HashSet;
-use std::fmt::Write as _;
 
 use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
@@ -1976,13 +1975,22 @@ impl CoreErlangGenerator {
         // ASCII (see `binary_string_folded_value` for the UTF-8 decision);
         // characters and floats lower through the ordinary literal path
         // (codepoint integer and float literal, respectively).
-        let value_doc = match &seg.value {
-            Pattern::Literal(Literal::String(s), _) => binary_string_folded_value(s),
+        //
+        // An integer or character literal in a `float` segment lowers as a
+        // float literal (BT-4376): `erlc` rewrites `<<1/float>>` to
+        // `#<1.0e0>(64,1,'float',…)`, while an integer value there is a
+        // clause that can never match.
+        let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
+        let value_doc = match (&seg.value, seg_type) {
+            (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
+            (Pattern::Literal(Literal::Integer(v), _), BinarySegmentType::Float) => {
+                leaf::float_lit(int_to_f64(*v))
+            }
+            (Pattern::Literal(Literal::Character(c), _), BinarySegmentType::Float) => {
+                leaf::float_lit(f64::from(u32::from(*c)))
+            }
             _ => self.generate_pattern(&seg.value)?,
         };
-
-        // Resolve type (default: integer)
-        let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
 
         // Size: explicit, or default based on type
         let size_doc = if let Some(size_expr) = &seg.size {
@@ -1996,7 +2004,7 @@ impl CoreErlangGenerator {
                 BinarySegmentType::Integer => {
                     // A folded string literal spans its bytes (8 bits each).
                     if let Pattern::Literal(Literal::String(s), _) = &seg.value {
-                        Document::Owned((s.len() * 8).to_string())
+                        index_lit(s.len().saturating_mul(8))
                     } else {
                         Document::Str("8")
                     }
@@ -2009,7 +2017,7 @@ impl CoreErlangGenerator {
         // BT-4096) or the type default — 8 for binary, 1 for bitstring
         // (bits) and integer/float, 'undefined' for utf8/utf16/utf32.
         let unit_doc = match seg.unit {
-            Some(unit) => Document::Owned(unit.to_string()),
+            Some(unit) => index_lit(unit),
             None => match seg_type {
                 BinarySegmentType::Binary => Document::Str("8"),
                 BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32 => {
@@ -2258,34 +2266,21 @@ fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
 /// rendered decimal. The fold runs over UTF-8 bytes — Beamtalk source is
 /// UTF-8, so this matches the literal's runtime bytes exactly (this is a
 /// deliberate divergence from `erlc`, which folds the source file's raw
-/// encoding bytes instead). Core Erlang integers are bignums, so a
-/// base-10^9 limb fold handles strings of any length — no `i64`/`u64`
+/// encoding bytes instead). Core Erlang integers are bignums, so
+/// [`leaf::bigint_lit`] renders strings of any length — no `i64`/`u64`
 /// ceiling at 8 bytes.
 fn binary_string_folded_value(s: &str) -> Document<'static> {
-    const BASE: u64 = 1_000_000_000;
-    let mut limbs: Vec<u32> = vec![0];
-    for &b in s.as_bytes() {
-        let mut carry = u64::from(b);
-        for limb in &mut limbs {
-            let cur = u64::from(*limb) * 256 + carry;
-            *limb = (cur % BASE) as u32;
-            carry = cur / BASE;
-        }
-        while carry > 0 {
-            limbs.push((carry % BASE) as u32);
-            carry /= BASE;
-        }
-    }
-    let mut out = String::new();
-    let mut limbs = limbs.iter().rev();
-    // The most significant limb renders unpadded; the rest are 9 digits each.
-    if let Some(top) = limbs.next() {
-        out.push_str(&top.to_string());
-    }
-    for limb in limbs {
-        let _ = write!(out, "{limb:09}");
-    }
-    Document::Owned(out)
+    leaf::bigint_lit(s.as_bytes())
+}
+
+/// The float an integer literal in a `float` segment denotes — `erlc`
+/// applies `float/1` to it (BT-4376).
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "matches erlc's float/1 conversion: the nearest f64, exactly like the runtime value"
+)]
+fn int_to_f64(v: i64) -> f64 {
+    v as f64
 }
 
 /// True for sizes that emit inline: literals and variables, with any
