@@ -234,8 +234,9 @@ fn routing_table_rows_without_a_direct_route_say_why() {
     }
 }
 
-/// BT-4294: the built-in rows a typed send may direct-call, as derived from
-/// the fixture by `builtin_send_route`. Pins the derivation, not the facts
+/// BT-4294, BT-4390: the built-in rows a typed send of an ordinary selector
+/// (one no row lists as special) may direct-call, as derived from the
+/// fixture by `builtin_send_route`. Pins the derivation, not the facts
 /// (those live in the fixture): a fixture change that adds or drops a direct
 /// route fails here, so its author re-checks the guard against the dynamic
 /// path's clause and updates the differential test's rows.
@@ -244,7 +245,7 @@ fn builtin_send_routes_are_the_closed_table() {
     use super::{BuiltinRoute, SendGuard, builtin_send_route};
     let routed: Vec<(&str, BuiltinRoute)> = table::ROUTING_ROWS
         .iter()
-        .filter_map(|row| match builtin_send_route(row.class) {
+        .filter_map(|row| match builtin_send_route(row.class, "frobnicate") {
             Some(Ok(route)) => Some((row.class, route)),
             _ => None,
         })
@@ -266,6 +267,10 @@ fn builtin_send_routes_are_the_closed_table() {
             (
                 "Float",
                 route(SendGuard::Exact(Guard::Bif("is_float")), "bt@stdlib@float")
+            ),
+            (
+                "String",
+                route(SendGuard::Exact(Guard::StringTag), "bt@stdlib@string")
             ),
             (
                 "Symbol",
@@ -305,6 +310,10 @@ fn builtin_send_routes_are_the_closed_table() {
                 route(SendGuard::Exact(Guard::Bif("is_list")), "bt@stdlib@list")
             ),
             (
+                "Pid",
+                route(SendGuard::Exact(Guard::Bif("is_pid")), "bt@stdlib@pid")
+            ),
+            (
                 "Port",
                 route(SendGuard::Exact(Guard::Bif("is_port")), "bt@stdlib@port")
             ),
@@ -323,20 +332,46 @@ fn builtin_send_routes_are_the_closed_table() {
     );
 }
 
+/// BT-4390: every special selector of a built-in row stays dynamic, naming
+/// itself, read from the fixture rather than a copied list. Among the rows a
+/// typed send can route (the supervisor rows' `isAlive`/`stop` belong to
+/// the supervisor family, which never routes), only `String` and `Pid` have
+/// any, and both are routed for every other selector.
+#[test]
+fn special_selectors_stay_dynamic_one_by_one() {
+    use super::{NoBuiltinRoute, builtin_send_route, is_non_tagged_map_class};
+    let routable = || {
+        table::ROUTING_ROWS
+            .iter()
+            .filter(|row| is_non_tagged_map_class(row.class))
+    };
+    let with_specials: Vec<&str> = routable()
+        .filter(|row| !row.special_selectors.is_empty())
+        .map(|row| row.class)
+        .collect();
+    assert_eq!(with_specials, vec!["String", "Pid"]);
+    for row in routable() {
+        for special in row.special_selectors {
+            assert_eq!(
+                builtin_send_route(row.class, special),
+                Some(Err(NoBuiltinRoute::SpecialSelector(special))),
+                "{}>>{special} must stay dynamic",
+                row.class
+            );
+        }
+    }
+    // Another row's special selector is ordinary here: `await` on a String
+    // reaches bt@stdlib@string like any other selector.
+    assert!(matches!(builtin_send_route("String", "await"), Some(Ok(_))));
+    assert!(matches!(builtin_send_route("Pid", "asBase64"), Some(Ok(_))));
+}
+
 /// BT-4294: why each built-in row without a direct route stays dynamic.
 #[test]
 fn builtins_without_a_send_route_say_why() {
     use super::{NoBuiltinRoute, builtin_send_route};
     assert_eq!(
-        builtin_send_route("String"),
-        Some(Err(NoBuiltinRoute::SpecialSelectors))
-    );
-    assert_eq!(
-        builtin_send_route("Pid"),
-        Some(Err(NoBuiltinRoute::SpecialSelectors))
-    );
-    assert_eq!(
-        builtin_send_route("Binary"),
+        builtin_send_route("Binary", "frobnicate"),
         Some(Err(NoBuiltinRoute::GuardSpansRoutes))
     );
     for class in [
@@ -349,11 +384,11 @@ fn builtins_without_a_send_route_say_why() {
     ] {
         assert!(
             matches!(
-                builtin_send_route(class),
+                builtin_send_route(class, "frobnicate"),
                 Some(Err(NoBuiltinRoute::DynamicOnly(_)))
             ),
             "{class} must stay dynamic for its dynamic_only reason"
         );
     }
-    assert_eq!(builtin_send_route("Point"), None);
+    assert_eq!(builtin_send_route("Point", "frobnicate"), None);
 }

@@ -146,7 +146,8 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
 // BT-4294: a non-tagged-map row is not only an exclusion. When the fixture
 // gives it a representation test and a single target module
 // (`routing::builtin_send_route`), a typed send to it becomes a direct call
-// guarded by that test ([`TypedSendTarget::Builtin`]).
+// guarded by that test ([`TypedSendTarget::Builtin`]) — for every selector
+// outside the row's `special_selectors` (BT-4390).
 
 /// BT-4292: why a send whose receiver did not resolve to a
 /// [`TypedSendTarget`] stays dynamic — one variant per gate of
@@ -934,12 +935,14 @@ impl CoreErlangGenerator {
     /// takes to reach `target_module:dispatch/3`, which the runtime half of
     /// the routing fixture checks; a value outside it (a lying annotation, a
     /// reserved tuple, `nil` typed as `Symbol`) misses and takes the dynamic
-    /// send. Rows whose dynamic path answers some selectors elsewhere
-    /// (`String`, `Pid`), whose test spans two routes (`Binary`) or that
-    /// carry a `dynamic_only` reason (`Boolean`, `Bitstring`, `Character`,
-    /// the records, the proxy) stay dynamic. A stdlib built-in's module can
-    /// be neither removed nor redefined into another module, so the pinned
-    /// target never goes stale.
+    /// send. A selector the row's dynamic path answers elsewhere (`Pid`'s
+    /// future protocol, `String`'s shared byte-level selectors — the
+    /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
+    /// selector on those rows is routed. Rows whose test spans two routes
+    /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
+    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
+    /// stdlib built-in's module can be neither removed nor redefined into
+    /// another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
@@ -962,7 +965,7 @@ impl CoreErlangGenerator {
         }
         let class_name = self.trusted_static_class(receiver)?;
         if routing::is_non_tagged_map_class(class_name.as_str()) {
-            return match routing::builtin_send_route(class_name.as_str()) {
+            return match routing::builtin_send_route(class_name.as_str(), &selector.name()) {
                 Some(Ok(route)) => Ok(TypedSendTarget::Builtin(route)),
                 Some(Err(why)) => Err(StaysDynamic::RepresentationRouted(why)),
                 None => Err(StaysDynamic::RepresentationRouted(
