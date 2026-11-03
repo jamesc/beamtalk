@@ -1489,7 +1489,10 @@ fn arm_local_producer_is_accepted_for_every_proven_conditional_selector() {
 /// `PLAIN_ARM_SELECTORS` claims each selector is proven by the runtime grid; this
 /// is the check that backs the claim (no keep-in-sync comment without a test).
 /// The grid names each test `test_<context>_<selector>_<position>_<body>` with the
-/// selector's colons turned into underscores, in both contexts.
+/// selector's colons turned into underscores. The prefix is anchored on the
+/// position token so a single-keyword selector is not satisfied by a longer
+/// one's tests (`test_actor_ifTrue_` is a prefix of `test_actor_ifTrue_ifFalse_...`),
+/// and every position is required, in both contexts.
 #[test]
 fn plain_arm_selectors_are_all_in_the_runtime_grid() {
     let grid = include_str!("../../../../../stdlib/test/bt4367arm_local_grid_test.bt");
@@ -1500,12 +1503,14 @@ fn plain_arm_selectors_are_all_in_the_runtime_grid() {
     for selector in crate::semantic_analysis::validators::PLAIN_ARM_SELECTORS {
         let token = selector.as_str().trim_end_matches(':').replace(':', "_");
         for context in ["actor", "value"] {
-            let prefix = format!("test_{context}_{token}_");
-            assert!(
-                grid.contains(&prefix),
-                "`{}` is in PLAIN_ARM_SELECTORS but the runtime grid has no `{prefix}...` test",
-                selector.as_str()
-            );
+            for position in ["last", "nonlast", "assign", "return", "operand"] {
+                let prefix = format!("test_{context}_{token}_{position}_");
+                assert!(
+                    grid.contains(&prefix),
+                    "`{}` is in PLAIN_ARM_SELECTORS but the runtime grid has no `{prefix}...` test",
+                    selector.as_str()
+                );
+            }
         }
     }
 }
