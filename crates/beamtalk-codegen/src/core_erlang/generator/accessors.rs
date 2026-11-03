@@ -16,7 +16,6 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
-use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -777,27 +776,6 @@ impl CoreErlangGenerator {
         Self::annotate_with_line_in(self.source_path.as_deref(), doc, line_num)
     }
 
-    /// Whether `doc` is exactly one `( node -| [Line ...] )` annotation node, as
-    /// [`Self::annotate_with_line_in`] builds it: a sequence opening with `( `
-    /// and closing with the annotation's `] )`.
-    fn is_annotated_node(doc: &Document<'static>) -> bool {
-        let Document::Vec(parts) = doc else {
-            return false;
-        };
-        let text = |d: &Document<'static>| match d {
-            Document::Str(s) => Some((*s).to_string()),
-            Document::Owned(s) => Some(s.clone()),
-            _ => None,
-        };
-        let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
-        else {
-            return false;
-        };
-        first == "( "
-            && last.ends_with("] )")
-            && parts.iter().any(|p| text(p).as_deref() == Some(" -| ["))
-    }
-
     /// [`Self::annotate_with_line`] against an explicit `source_path` — for a
     /// caller that captured the path while a flattened method's protocol
     /// source was still in scope (see `MethodFrame`) but annotates after the
@@ -811,21 +789,13 @@ impl CoreErlangGenerator {
         // (`( ( X -| [..] ) -| [..] )` is a parse error), and a call node
         // annotated by its lowering can reach the send's whole-document
         // annotation unchanged. The inner (call-node) annotation wins.
-        if Self::is_annotated_node(&doc) {
+        if doc.is_annotated() {
             return doc;
         }
         match source_path {
             Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
-            None => {
-                // No source path — use bare line number annotation
-                docvec![
-                    "( ",
-                    doc,
-                    " -| [",
-                    leaf::int_lit(i64::from(line_num)),
-                    "] )"
-                ]
-            }
+            // No source path — use bare line number annotation
+            None => leaf::annotated_bare(doc, line_num),
         }
     }
 }
