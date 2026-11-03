@@ -525,27 +525,13 @@ fn generate_core_file(
 /// without it `test` would emit diagnostics `build` suppresses (and vice
 /// versa), reopening the CLI/REPL verdict split this helper closes.
 ///
-/// Returns `(knowledge_scope, has_package_dependencies)`.
+/// Returns `(knowledge_scope, has_package_dependencies)`, by the shared
+/// [`manifest::package_checker_scope`] rule.
 fn test_compile_scope(
     source_path: &Utf8Path,
 ) -> (beamtalk_core::semantic_analysis::KnowledgeScope, bool) {
-    let scope = |root: &Utf8Path| {
-        let has_deps = manifest::find_manifest_full(root)
-            .ok()
-            .flatten()
-            .is_some_and(|m| !m.dependencies.is_empty());
-        (
-            beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-            has_deps,
-        )
-    };
-    find_package_root(source_path).map_or(
-        (
-            beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
-            false,
-        ),
-        |root| scope(&root),
-    )
+    let scope = manifest::package_checker_scope(find_package_root(source_path).as_deref());
+    (scope.knowledge_scope, scope.has_package_dependencies)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

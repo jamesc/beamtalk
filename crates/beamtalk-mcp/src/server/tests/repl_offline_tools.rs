@@ -349,7 +349,7 @@ async fn connect_refuses_node_with_stale_toolchain_version() {
         .expect_err("connect against a stale node should fail");
     assert!(err.contains("version mismatch"), "got: {err}");
     assert!(err.contains("0.0.0-stale"), "got: {err}");
-    assert!(err.contains("just build"), "got: {err}");
+    assert!(err.contains("beamtalk workspace stop"), "got: {err}");
 }
 
 #[tokio::test]

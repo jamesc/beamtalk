@@ -269,33 +269,17 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
 
-    // Parses beamtalk.toml exactly once, deriving both
-    // `current_package` (E0401/E0402 gating, see `check_class_visibility`)
-    // and `has_package_dependencies` from the same read — two independent
-    // re-parses would risk inconsistent error handling: a malformed manifest
-    // could silently disable visibility checks (`.ok()`) while only
-    // `has_package_dependencies` warns on the same parse failure.
-    // `package_root` (when `Some`) is only ever produced by `find_package_root`
-    // finding a `beamtalk.toml`, so the manifest is known to exist here; the
-    // only outcome left to distinguish is "parses" vs "malformed".
-    let (current_package, has_package_dependencies) = match package_root.as_deref() {
-        Some(root) => match super::manifest::find_manifest_full(root) {
-            Ok(Some(m)) => {
-                let has_deps = !m.dependencies.is_empty();
-                (Some(m.package.name), has_deps)
-            }
-            Ok(None) => (None, false),
-            Err(e) => {
-                warn!(
-                    error = %e,
-                    "Failed to parse beamtalk.toml for lint; E0401/E0402 visibility \
-                     checks disabled and dependencies conservatively assumed present"
-                );
-                (None, true)
-            }
-        },
-        None => (None, false),
-    };
+    // One manifest read derives the knowledge scope, `current_package`
+    // (E0401/E0402 gating, see `check_class_visibility`) and
+    // `has_package_dependencies`, by the rule `build`/`test` share. With a
+    // package root, Pass 1 walks the full package source set, so the
+    // injected knowledge is project-complete; a bare file outside any
+    // package keeps the conservative `ModuleOnly` default.
+    let super::manifest::PackageCheckerScope {
+        knowledge_scope,
+        has_package_dependencies,
+        package_name: current_package,
+    } = super::manifest::package_checker_scope(package_root.as_deref());
 
     // Resolved before extraction so cross-file `ClassInfo` can be
     // package-stamped too (see `parse_and_extract_class_infos`'s
@@ -441,16 +425,6 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
         String,
         beamtalk_core::source_analysis::Span,
     )> = std::collections::HashSet::new();
-
-    // With a package root, Pass 1 walked the full package source set,
-    // so the injected knowledge is project-complete. Without one
-    // (a bare file outside any package), only the targeted files were parsed
-    // — keep the conservative `ModuleOnly` default.
-    let knowledge_scope = if package_root.is_some() {
-        beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete
-    } else {
-        beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly
-    };
 
     for (file, source, module, parse_diags) in parsed_files {
         let cross_file_classes =

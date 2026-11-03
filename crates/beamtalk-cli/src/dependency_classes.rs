@@ -126,35 +126,20 @@ pub fn resolve_dependency_class_infos_with_sources(
     Vec<ProtocolDefinition>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
 ) {
+    // The dependency flag follows the rule `build`/`lint`/`test` share
+    // (a malformed manifest conservatively assumes dependencies).
+    let read = manifest::find_manifest_full(project_root);
+    let has_package_dependencies =
+        manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
     let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let manifest_path = project_root.join("beamtalk.toml");
-    match manifest_path.try_exists() {
-        Ok(true) => {}
-        Ok(false) => return (false, Vec::new(), Vec::new(), protocol_sources),
-        Err(e) => {
-            warn!(
-                error = %e,
-                path = %manifest_path,
-                "Failed to check for beamtalk.toml for offline dependency class resolution; \
-                 assuming no manifest"
-            );
-            return (false, Vec::new(), Vec::new(), protocol_sources);
-        }
-    }
-
-    let parsed = match manifest::parse_manifest_full(&manifest_path) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Failed to parse beamtalk.toml for offline dependency class resolution; \
-                 conservatively assuming dependencies are declared"
-            );
-            return (true, Vec::new(), Vec::new(), protocol_sources);
-        }
+    let Ok(Some(parsed)) = read else {
+        return (
+            has_package_dependencies,
+            Vec::new(),
+            Vec::new(),
+            protocol_sources,
+        );
     };
-
-    let has_package_dependencies = !parsed.dependencies.is_empty();
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();

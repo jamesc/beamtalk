@@ -410,7 +410,8 @@ impl ReplClient {
 mod tests {
     use super::*;
     use crate::commands::test_support::{
-        closed_port, spawn_auth_error_server, spawn_auth_ok_server,
+        answer_describe, closed_port, fake_node_handshake, read_json, spawn_auth_error_server,
+        spawn_auth_ok_server,
     };
     use std::net::TcpListener;
     use tungstenite::Message;
@@ -509,49 +510,12 @@ mod tests {
         let accepted = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
             let mut ws = tungstenite::accept(stream).expect("accept ws");
-            let _ = ws.send(Message::Text(
-                serde_json::json!({"op": "auth-required"})
-                    .to_string()
-                    .into(),
-            ));
-            // Capture the client's claimed versions from the `auth` frame
-            // (BT-4327) to echo back for the connect-time `describe`.
-            let mut versions = serde_json::json!({"beamtalk": null, "protocol": null});
-            if let Ok(Message::Text(text)) = ws.read() {
-                if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&text) {
-                    versions["beamtalk"] = auth
-                        .get("beamtalk_version")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                    versions["protocol"] = auth
-                        .get("protocol_version")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Null);
-                }
-            }
-            let _ = ws.send(Message::Text(
-                serde_json::json!({"type": "auth_ok"}).to_string().into(),
-            ));
-            let _ = ws.send(Message::Text(
-                serde_json::json!({"op": "session-started", "session": "sess-test"})
-                    .to_string()
-                    .into(),
-            ));
             // Answer the connect-time `describe` version check so the
             // initial `connect` succeeds, then drop the connection and
             // stop listening entirely.
-            if let Ok(Message::Text(text)) = ws.read() {
-                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                    let _ = ws.send(Message::Text(
-                        serde_json::json!({
-                            "id": req.get("id"),
-                            "status": ["done"],
-                            "ops": {},
-                            "versions": versions,
-                        })
-                        .to_string()
-                        .into(),
-                    ));
+            if let Some(versions) = fake_node_handshake(&mut ws) {
+                if let Some(req) = read_json(&mut ws) {
+                    answer_describe(&mut ws, &req, Some(&versions));
                 }
             }
         });
