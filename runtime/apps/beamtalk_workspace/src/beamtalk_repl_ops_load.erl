@@ -1895,13 +1895,19 @@ were compiled before their fixture dependencies were visible in the index.
 """.
 -spec load_files_sequential([string()], pid()) -> {[map()], [map()]}.
 load_files_sequential(Files, SessionPid) ->
-    Indexes0 = beamtalk_repl_compiler:build_class_indexes(),
+    %% BT-4378: every compile of this batch carries the same `project_batch'
+    %% token (merged into the compile options with the indexes), so the
+    %% compiler port verifies the project scope once per load, not per file.
+    Batch = #{project_batch => integer_to_binary(erlang:unique_integer([positive]))},
+    Indexes0 = maps:merge(beamtalk_repl_compiler:build_class_indexes(), Batch),
     {RevClasses, RevErrors, _} =
         lists:foldl(
             fun(Path, {ClassesAcc, ErrorsAcc, Indexes}) ->
                 case beamtalk_repl_shell:load_file(SessionPid, Path, Indexes) of
                     {ok, Classes} ->
-                        NewIndexes = beamtalk_repl_compiler:build_class_indexes(),
+                        NewIndexes = maps:merge(
+                            beamtalk_repl_compiler:build_class_indexes(), Batch
+                        ),
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc, NewIndexes};
                     {error, Reason} ->
                         ErrMaps = structured_file_errors(Path, Reason),

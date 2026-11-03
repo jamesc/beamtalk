@@ -10,9 +10,10 @@
 //! of the dependencies *before* it in this order (BT-3678), so every path that
 //! exports a dependency's flattened `ClassInfo`s — the graph compile, the
 //! fresh-deps fast path and the offline MCP scan — must walk the graph in the
-//! same order to produce the same exports (BT-3684). It lives in the library
-//! crate so the offline scan, which cannot call into the binary-only
-//! `commands::deps`, shares it.
+//! same order to produce the same exports (BT-3684). It lives in
+//! `beamtalk-core` so the offline scan (which cannot call into the CLI's
+//! binary-only `commands::deps`) and the compiler port's project scope
+//! (which reads the resolved dependency set, BT-4378) share it.
 //!
 //! It also defines which of those earlier dependencies a dependency compiles
 //! against: only its own transitive closure ([`dependency_closure`]), never an

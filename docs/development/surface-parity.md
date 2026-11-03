@@ -975,7 +975,7 @@ flattening implementation):
   and the offline dependency scan also resolve the protocols of the *other*
   dependencies (BT-3678): the dependency's own protocols first, then those of
   the dependencies compiled before it. **All three paths walk the graph in the
-  same compile order** (`beamtalk_cli::dep_order::topological_order`, BT-3684),
+  same compile order** (`beamtalk_core::compilation::dep_order::topological_order`, BT-3684),
   so a cold build, the fresh-deps fast path and the offline scan export
   identical flattened `class_infos` (the offline scan leaves
   `ClassInfo::package` unstamped, so it matches by trait-provided surface). So

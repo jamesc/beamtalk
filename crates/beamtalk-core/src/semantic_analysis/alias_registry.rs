@@ -433,6 +433,26 @@ impl AliasRegistry {
             .collect()
     }
 
+    /// [`Self::extract_alias_infos`], with each entry's
+    /// [`AliasInfo::package`] stamped as `package` (left `None` when
+    /// `package` is `None`).
+    ///
+    /// The one "extract then stamp the owning package" step every package
+    /// scan shares — the build's project and dependency scans, `beamtalk
+    /// lint`, and the compiler port's project scope (BT-4378) — so the
+    /// `uses:`/`internal` seeding boundary in [`Self::add_pre_loaded`] sees
+    /// the same package on every surface.
+    #[must_use]
+    pub fn extract_package_alias_infos(module: &Module, package: Option<&str>) -> Vec<AliasInfo> {
+        let mut infos = Self::extract_alias_infos(module);
+        if let Some(package) = package {
+            for info in &mut infos {
+                info.package = Some(package.into());
+            }
+        }
+        infos
+    }
+
     /// Reconstructs a single [`AliasInfo`] from a standalone declaration
     /// string (e.g. `"type RestartStrategy = #temporary | #transient |
     /// #permanent"` or `"internal type Foo = Integer"`).

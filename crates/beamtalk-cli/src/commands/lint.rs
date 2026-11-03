@@ -896,16 +896,12 @@ fn parse_and_extract_class_infos(
         {
             all_protocol_defs.push(protocol.clone());
         }
-        let mut alias_infos =
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+        all_alias_infos.extend(
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
                 &module,
-            );
-        if let Some(pkg) = current_package {
-            for info in &mut alias_infos {
-                info.package = Some(pkg.into());
-            }
-        }
-        all_alias_infos.extend(alias_infos);
+                current_package,
+            ),
+        );
 
         if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));

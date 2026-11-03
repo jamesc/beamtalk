@@ -282,7 +282,7 @@ fn discover_all_dep_roots(
 /// Discovers the full transitive graph so that transitive deps are not lost.
 ///
 /// Dependencies are visited in the compile order of the graph compile
-/// ([`beamtalk_cli::dep_order::topological_order`]) and each is indexed against
+/// ([`beamtalk_core::compilation::dep_order::topological_order`]) and each is indexed against
 /// the dependencies before it that it reaches in the graph
 /// ([`path::with_dependency_closure`], BT-4375), exactly as
 /// `compile_dependency_at` does, so the exported (flattened) `class_infos` are
@@ -297,8 +297,10 @@ fn collect_fresh_deps(
         .iter()
         .map(|dep| (dep.name.clone(), dep.deps.clone()))
         .collect();
-    let compile_order =
-        beamtalk_cli::dep_order::topological_order(&dependencies, &parsed.package.name)?;
+    let compile_order = beamtalk_core::compilation::dep_order::topological_order(
+        &dependencies,
+        &parsed.package.name,
+    )?;
     let mut resolved: Vec<path::ResolvedDependency> = Vec::new();
 
     for name in compile_order {
