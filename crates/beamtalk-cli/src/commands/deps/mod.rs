@@ -283,8 +283,10 @@ fn discover_all_dep_roots(
 ///
 /// Dependencies are visited in the compile order of the graph compile
 /// ([`beamtalk_cli::dep_order::topological_order`]) and each is indexed against
-/// the dependencies before it, exactly as `compile_dependency_at` does, so the
-/// exported (flattened) `class_infos` are identical to a cold build's (BT-3684).
+/// the dependencies before it that it reaches in the graph
+/// ([`path::with_dependency_closure`], BT-4375), exactly as
+/// `compile_dependency_at` does, so the exported (flattened) `class_infos` are
+/// identical to a cold build's (BT-3684).
 fn collect_fresh_deps(
     project_root: &Utf8Path,
     parsed: &manifest::ParsedManifest,
@@ -313,7 +315,9 @@ fn collect_fresh_deps(
             protocol_defs,
             alias_infos,
             protocol_sources,
-        ) = path::build_dep_class_index(&dep.root, &dep.name, &resolved)?;
+        ) = path::with_dependency_closure(&mut resolved, &dependencies, &dep.name, |prior| {
+            path::build_dep_class_index(&dep.root, &dep.name, prior)
+        })?;
 
         debug!(
             dep = %dep.name,
