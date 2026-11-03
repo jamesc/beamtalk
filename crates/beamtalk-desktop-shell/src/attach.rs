@@ -245,8 +245,9 @@ impl AttachManager {
     ///
     /// Keyed on `generation` (assigned by [`Self::decide_and_claim`], never
     /// reused), not `port`: `port` alone is not a reliable discriminator
-    /// here, because `find_free_port`'s ephemeral-port allocation can — rare
-    /// but not impossible — hand the same port back to a fresh spawn shortly
+    /// here, because the OS's ephemeral-port allocation (each front binds
+    /// port 0 and reports what it got — `beamtalk_desktop_broker::port`) can
+    /// — rare but not impossible — hand the same port back to a fresh spawn shortly
     /// after the workspace that used it was detached, at which point a
     /// stale monitor and the fresh one would become indistinguishable by
     /// `(workspace_id, port)` alone and both would run forever, polling the

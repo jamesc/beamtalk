@@ -7,10 +7,10 @@
 //! [`beamtalk_desktop_broker`] is built entirely against the ADR
 //! 0097 / spike contract; without a built `dist-liveview` release available
 //! in every development sandbox, `sname::predict_node_name`'s pid assumption,
-//! `readiness::ProbeTimeouts::default_local`'s timeout budget, and
-//! `spawn::DEFAULT_BIND_FAILURE_GRACE`'s bind-failure heuristic were all
-//! reasoned from the ADR/OTP defaults rather than measured. This suite
-//! re-runs those three checks against a real release, so the module doc
+//! `readiness::ProbeTimeouts::default_local`'s timeout budget, and the
+//! `PORT=0` + `BT_ATTACH_PORT_FILE` port handoff (`port`'s module docs) were
+//! all reasoned from the ADR/OTP defaults rather than measured. This suite
+//! re-runs those checks against a real release, so the module doc
 //! comments' calibrated numbers can be reproduced (and re-calibrated, if a
 //! future front/OTP/Phoenix upgrade changes the timings).
 //!
@@ -34,10 +34,11 @@
 //!   cargo test -p beamtalk-desktop-broker --test live_front -- --ignored --test-threads=1
 //! ```
 //!
-//! `--test-threads=1` matters: these tests bind real loopback ports and race
-//! real processes against each other, so running them concurrently would
-//! reintroduce the exact TOCTOU port race [`beamtalk_desktop_broker::port`]'s
-//! module doc describes and its retry logic is meant to absorb.
+//! `--test-threads=1` keeps the epmd assertions readable: several tests
+//! register fronts under the same workspace suffix and check epmd's name
+//! list, which concurrent tests would muddy. No test here picks a port
+//! itself — every front binds port 0 and reports the port it got (see
+//! [`beamtalk_desktop_broker::port`]), so there is no port race to avoid.
 //!
 //! ## Full attach/detach lifecycle + dead-workspace negative path
 //!
@@ -47,7 +48,7 @@
 //! with a dead workspace surfaces the failure taxonomy rather than hanging or
 //! crashing" clauses, exercised against the exact production call shape
 //! `desktop/src-tauri/src/commands.rs`'s `attach`/`detach` commands use
-//! (`spawn_front_with_port_retry` → `wait_ready` → kill+wait). The browser/UI
+//! (`launch_front` → `wait_ready` → kill+wait). The browser/UI
 //! half (an eval actually round-tripping through the LiveView page
 //! a workspace window loads, and the picker showing that failure) lives in
 //! `desktop/e2e/` — see that directory's README for why it is a separate,
@@ -75,10 +76,11 @@
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use beamtalk_desktop_broker::port;
 use beamtalk_desktop_broker::readiness::{self, ProbeTimeouts, ReadinessState};
 use beamtalk_desktop_broker::sname::predict_short_name;
-use beamtalk_desktop_broker::spawn::{self, DEFAULT_BIND_FAILURE_GRACE, SpawnConfig, SpawnedFront};
-use beamtalk_desktop_broker::{SpawnAttemptConfig, spawn_front_with_port_retry};
+use beamtalk_desktop_broker::spawn::SpawnedFront;
+use beamtalk_desktop_broker::{LaunchConfig, launch_front};
 
 /// A wrapped front value that can be killed and reaped on drop —
 /// implemented for both a plain [`Child`] (the bad-cookie test below spawns
@@ -174,11 +176,9 @@ fn drive_to_terminal(port: u16, timeouts: ProbeTimeouts) -> ReadinessState {
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
 fn predict_node_name_matches_a_live_epmd_registration() {
     let ws = workspace_id();
-    let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
-    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+    let config = LaunchConfig::new(launcher(), ws.clone());
 
-    let (child, port) =
-        spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
+    let (child, port) = launch_front(&config).expect("live front should spawn and report a port");
     let pid = child.id();
     let _guard = KillOnDrop(child);
 
@@ -210,11 +210,9 @@ fn predict_node_name_matches_a_live_epmd_registration() {
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
 fn resolve_registered_node_name_matches_a_live_epmd_registration() {
     let ws = workspace_id();
-    let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
-    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+    let config = LaunchConfig::new(launcher(), ws.clone());
 
-    let (child, port) =
-        spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
+    let (child, port) = launch_front(&config).expect("live front should spawn and report a port");
     let _guard = KillOnDrop(child);
 
     // Force distribution to actually start (lazy, first-/readiness-call).
@@ -245,25 +243,31 @@ fn resolve_registered_node_name_matches_a_live_epmd_registration() {
 /// the workspace's real on-disk cookie (see its doc comment), so producing a
 /// bad-cookie scenario means invoking the launcher directly with an
 /// overridden `BT_WORKSPACE_COOKIE`, the same shape the spike used for its
-/// own negative-path tests.
+/// own negative-path tests. It still uses the production port handoff
+/// (`PORT=0` + `BT_ATTACH_PORT_FILE`, then
+/// `port::wait_for_reported_port`) rather than choosing a port itself.
 #[test]
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
 fn bad_cookie_readiness_resolves_within_the_default_budget() {
     let ws = workspace_id();
     let node_name = format!("beamtalk_workspace_{ws}@localhost");
-    let port = beamtalk_desktop_broker::port::find_free_port().expect("free port");
+    let port_file = port::port_file_path(&ws, &port::new_instance_id()).expect("port file path");
 
     let mut cmd = Command::new(launcher());
     cmd.env("BT_WORKSPACE_NODE", &node_name);
     cmd.env("BT_WORKSPACE_COOKIE", "bt3004-deliberately-wrong-cookie");
-    cmd.env("PORT", port.to_string());
+    cmd.env("PORT", "0");
+    cmd.env(port::PORT_FILE_ENV, &port_file);
     cmd.env("BT_ATTACH_BIND_IP", "127.0.0.1");
     cmd.env("BT_ATTACH_NODE_SUFFIX", "bt3004_bad_cookie_probe");
     cmd.env("RELEASE_DISTRIBUTION", "none");
     let child = cmd
         .spawn()
         .expect("front should spawn even with a bad cookie");
-    let _guard = KillOnDrop(child);
+    let mut guard = KillOnDrop(child);
+    let port =
+        port::wait_for_reported_port(&mut guard.0, &port_file, port::DEFAULT_PORT_REPORT_TIMEOUT)
+            .expect("front should report its port even with a bad cookie");
 
     let timeouts = ProbeTimeouts::default_local();
     let start = Instant::now();
@@ -288,62 +292,47 @@ fn bad_cookie_readiness_resolves_within_the_default_budget() {
     );
 }
 
-/// Race two spawns on the same port and
-/// measure how long the losing front takes to actually exit, to calibrate
-/// `spawn::DEFAULT_BIND_FAILURE_GRACE`. A grace window shorter than this
-/// measured exit latency would misclassify a real port conflict as
-/// `SpawnAttempt::Bound` (see `DEFAULT_BIND_FAILURE_GRACE`'s doc comment).
+/// Launch two fronts for the same workspace at once and confirm each
+/// reports its own, distinct port and that each port really is that
+/// front's: both reach `Ready`, and each port is still held (a fresh bind on
+/// it fails). This is the race the old bind-then-drop handoff lost (BT-4398):
+/// two near-simultaneous spawns could be handed the same just-freed port.
 #[test]
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
-fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
+fn concurrent_launches_each_report_their_own_port() {
     let ws = workspace_id();
-    let port = beamtalk_desktop_broker::port::find_free_port().expect("free port");
+    let launches: Vec<_> = (0..2)
+        .map(|_| {
+            let config = LaunchConfig::new(launcher(), ws.clone());
+            std::thread::spawn(move || launch_front(&config))
+        })
+        .collect();
+    let fronts: Vec<(KillOnDrop<SpawnedFront>, u16)> = launches
+        .into_iter()
+        .map(|handle| {
+            let (child, port) = handle
+                .join()
+                .expect("launch thread should not panic")
+                .expect("each live front should spawn and report a port");
+            (KillOnDrop(child), port)
+        })
+        .collect();
 
-    // Front A: binds and holds the port.
-    let winner_config = SpawnConfig::new(launcher(), ws.clone(), port);
-    let mut winner = KillOnDrop(spawn::spawn_front(&winner_config).expect("winner should spawn"));
-    // Give it a real chance to actually bind before racing the loser —
-    // measured healthy boots reach HTTP-up in under 1s (see
-    // DEFAULT_BIND_FAILURE_GRACE's doc comment).
-    std::thread::sleep(Duration::from_secs(2));
-    assert_eq!(
-        winner.0.try_wait().expect("try_wait should succeed"),
-        None,
-        "winner should still be running (holding the port) before the race"
+    assert_ne!(
+        fronts[0].1, fronts[1].1,
+        "two concurrent fronts must never be handed the same port"
     );
-
-    // Front B: loses the eaddrinuse race for the same port. Guarded too: if
-    // the 30s assert below ever fires, the loser genuinely never crashed and
-    // would otherwise leak a process holding this port.
-    let loser_config = SpawnConfig::new(launcher(), ws, port);
-    let mut loser = KillOnDrop(
-        spawn::spawn_front(&loser_config).expect("loser should spawn (exec succeeds, bind fails)"),
-    );
-
-    let start = Instant::now();
-    let exit_status = loop {
-        if let Some(status) = loser.0.try_wait().expect("try_wait should succeed") {
-            break status;
-        }
+    for (_front, port) in &fronts {
+        let state = drive_to_terminal(*port, ProbeTimeouts::default_local());
         assert!(
-            start.elapsed() < Duration::from_secs(30),
-            "loser never exited within 30s — a real conflict should surface as a crash"
+            matches!(state, ReadinessState::Ready(_)),
+            "front on port {port} should reach Ready, got {state:?}"
         );
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let elapsed = start.elapsed();
-
-    assert!(
-        !exit_status.success(),
-        "the losing front should exit non-zero (eaddrinuse crash), got {exit_status}"
-    );
-    assert!(
-        elapsed <= DEFAULT_BIND_FAILURE_GRACE,
-        "a real :eaddrinuse crash took {elapsed:?} to surface, which exceeds \
-         spawn::DEFAULT_BIND_FAILURE_GRACE ({DEFAULT_BIND_FAILURE_GRACE:?}) — the grace \
-         period would misclassify this conflict as SpawnAttempt::Bound and needs \
-         recalibrating (see that constant's doc comment for the measurement methodology)"
-    );
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", *port)).is_err(),
+            "port {port} should be held by the front that reported it"
+        );
+    }
 }
 
 /// The positive-path half: the full
@@ -361,11 +350,10 @@ fn a_real_port_conflict_exits_within_the_calibrated_grace_period() {
 #[ignore = "needs a live dist-liveview release + running workspace — see module doc comment"]
 fn detach_kills_the_front_and_it_exits_cleanly() {
     let ws = workspace_id();
-    let mut config = SpawnAttemptConfig::new(launcher(), ws.clone());
-    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+    let config = LaunchConfig::new(launcher(), ws.clone());
 
     let (mut child, port) =
-        spawn_front_with_port_retry(&config).expect("live front should spawn and bind");
+        launch_front(&config).expect("live front should spawn and report a port");
     let pid = child.id();
 
     let state = drive_to_terminal(port, ProbeTimeouts::default_local());
@@ -438,11 +426,10 @@ fn detach_kills_the_front_and_it_exits_cleanly() {
 #[ignore = "needs a live dist-liveview release + a STOPPED (but not deleted) workspace — see module doc comment"]
 fn dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang() {
     let ws = dead_workspace_id();
-    let mut config = SpawnAttemptConfig::new(launcher(), ws);
-    config.bind_failure_grace = Duration::from_millis(300); // fast path, not under test here
+    let config = LaunchConfig::new(launcher(), ws);
 
-    let (child, port) = spawn_front_with_port_retry(&config)
-        .expect("front should spawn and bind HTTP even though the workspace is dead");
+    let (child, port) = launch_front(&config)
+        .expect("front should spawn and report its port even though the workspace is dead");
     let _guard = KillOnDrop(child);
 
     let timeouts = ProbeTimeouts::default_local();

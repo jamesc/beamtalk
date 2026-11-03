@@ -146,6 +146,13 @@ pub struct FrontRecord {
     /// equivalent, or if it couldn't be read). Used to detect PID reuse —
     /// see the module docs.
     pub start_time: Option<u64>,
+    /// The front's spawn instance id ([`crate::spawn::SpawnedFront::instance_id`]),
+    /// which keys its per-front `RELEASE_TMP` directory on Windows —
+    /// [`remove_record`] reads it back to find that directory. Defaults to
+    /// empty for records written before it existed, which then skip that
+    /// cleanup.
+    #[serde(default)]
+    pub instance_id: String,
 }
 
 /// Directory the broker keeps its own state in — deliberately separate from
@@ -291,11 +298,22 @@ pub fn update_record_node_name(
 /// Returns an error if the record file exists but can't be removed
 /// (anything other than "already gone").
 pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
+    let path = record_path(dir, workspace_id, port);
+    let _guard = locked_record_ops();
+
+    // The `RELEASE_TMP` directory is keyed by the record's instance id (the
+    // port isn't known until after `RELEASE_TMP` must be set — see
+    // `crate::spawn::release_tmp_dir`), so read it back before deleting.
     #[cfg(windows)]
+    if let Some(instance_id) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<FrontRecord>(&content).ok())
+        .map(|record| record.instance_id)
+        .filter(|instance_id| !instance_id.is_empty())
     {
         let workspace_id = workspace_id.to_string();
         let handle = std::thread::spawn(move || {
-            remove_release_tmp_dir_with_retry(&workspace_id, port);
+            remove_release_tmp_dir_with_retry(&workspace_id, &instance_id);
         });
         let mut pending = pending_release_tmp_cleanups()
             .lock()
@@ -309,8 +327,6 @@ pub fn remove_record(dir: &Path, workspace_id: &str, port: u16) -> Result<()> {
         pending.push(handle);
     }
 
-    let path = record_path(dir, workspace_id, port);
-    let _guard = locked_record_ops();
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
@@ -419,8 +435,8 @@ const RELEASE_TMP_REMOVE_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// separately — backgrounding this (rather than the retry loop itself) is
 /// what keeps that up-to-~1s cost off `remove_record`'s synchronous callers.
 #[cfg(windows)]
-fn remove_release_tmp_dir_with_retry(workspace_id: &str, port: u16) {
-    let release_tmp = crate::spawn::release_tmp_dir(workspace_id, port);
+fn remove_release_tmp_dir_with_retry(workspace_id: &str, instance_id: &str) {
+    let release_tmp = crate::spawn::release_tmp_dir(workspace_id, instance_id);
     let mut last_err = None;
     for attempt in 0..RELEASE_TMP_REMOVE_ATTEMPTS {
         match std::fs::remove_dir_all(&release_tmp) {
@@ -437,7 +453,7 @@ fn remove_release_tmp_dir_with_retry(workspace_id: &str, port: u16) {
     if let Some(e) = last_err {
         tracing::warn!(
             workspace = %workspace_id,
-            port,
+            instance_id,
             path = %release_tmp.display(),
             error = %e,
             "remove_record: failed to remove per-front RELEASE_TMP directory after retrying"
@@ -711,7 +727,24 @@ mod tests {
             pid,
             node_name: "bt_attach_abc123_4242@localhost".to_string(),
             start_time,
+            instance_id: "test-instance".to_string(),
         }
+    }
+
+    /// Records written before `instance_id` existed must still load (and be
+    /// swept) rather than be skipped as corrupt.
+    #[test]
+    fn a_record_without_an_instance_id_still_loads() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("abc123.4567.json"),
+            r#"{"workspace_id":"abc123","port":4567,"pid":4242,
+                "node_name":"bt_attach_abc123_4242@localhost","start_time":null}"#,
+        )
+        .unwrap();
+        let loaded = load_all_records(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].instance_id, "");
     }
 
     // ── pure classification ─────────────────────────────────────────────
@@ -944,7 +977,7 @@ mod tests {
         // this module uses. That sharing is harmless for the FrontRecord
         // JSON file (isolated per test via its own `tmp` TempDir), but
         // `crate::spawn::release_tmp_dir` is a real, absolute path keyed
-        // only on `(workspace_id, port)` — not scoped to `tmp` at all. Now
+        // only on `(workspace_id, instance_id)` — not scoped to `tmp` at all. Now
         // that `remove_record` backgrounds a *retrying* (up to ~1s)
         // `remove_dir_all` against that path on every call, reusing the
         // shared pair here would race this test's own create/write below
@@ -954,7 +987,8 @@ mod tests {
         let mut rec = record(4242, Some(555));
         "bt3059_release_tmp_test".clone_into(&mut rec.workspace_id);
         rec.port = 32100;
-        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, rec.port);
+        "bt3059_release_tmp_instance".clone_into(&mut rec.instance_id);
+        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, &rec.instance_id);
         std::fs::create_dir_all(&release_tmp).unwrap();
         std::fs::write(release_tmp.join("sys.config"), b"secrets").unwrap();
 
@@ -1012,7 +1046,8 @@ mod tests {
         let mut rec = record(4243, Some(556));
         "bt3059_wait_test".clone_into(&mut rec.workspace_id);
         rec.port = 32101;
-        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, rec.port);
+        "bt3059_wait_instance".clone_into(&mut rec.instance_id);
+        let release_tmp = crate::spawn::release_tmp_dir(&rec.workspace_id, &rec.instance_id);
         std::fs::create_dir_all(&release_tmp).unwrap();
         std::fs::write(release_tmp.join("sys.config"), b"secrets").unwrap();
 

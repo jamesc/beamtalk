@@ -49,6 +49,10 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # PORT=0 is valid: the desktop broker passes it so the OS picks a free port
+  # inside the listener's own bind, and reads the bound port back from
+  # BT_ATTACH_PORT_FILE (BtAttach.PortReport, BT-4398). Generated absolute
+  # URLs then carry port 0; nothing on that local lane builds them.
   port = String.to_integer(System.get_env("PORT") || "4000")
 
   # The advertised URL (boot banner + generated absolute URLs) must match how
