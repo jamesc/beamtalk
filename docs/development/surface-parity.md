@@ -709,7 +709,17 @@ reports the same message at the same span. No operation is surface-specific.
   local-threading construct whose blocks write an outer local sits in an
   operand position no producer lowers. A `detect:ifNone:` with a stored
   search block, a lookup that is not a producer and an arm write of a
-  `match:` that is not a producer keep their own variants of it.
+  `match:` that is not a producer keep their own variants of it. BT-4367: a
+  loop or fold that writes a local of its own conditional arm (the conditional
+  writes no outer local, so the arm is a plain `BranchArm` frame) is accepted
+  as a statement or as the whole value of an assignment in that arm, in actor
+  and value-type method bodies (including ones loaded through the REPL; the
+  REPL's own input keeps its own arm lowering), for an `ifTrue:` / `ifFalse:` /
+  `ifNil:` / `ifNotNil:` conditional at the method root (the selectors in
+  `PLAIN_ARM_SELECTORS`, proven by `bt4367arm_local_grid_test.bt`). It keeps
+  this error in a class method, at an operand or array-literal site of an arm,
+  in the arms of `and:` / `or:`, in a dictionary lookup handler, and in a
+  conditional nested in a loop, fold or arm.
 - **A local assignment in value position is a producer (BT-3910; the BT-3864
   `ValuePositionLocalAssignment` error is gone).** An operand, a literal or
   interpolated element, another assignment's or `^`'s value or a receiver that is a local assignment rebinds the local in class,

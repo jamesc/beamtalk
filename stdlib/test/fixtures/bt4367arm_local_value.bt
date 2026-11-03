@@ -1,0 +1,90 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4367: a loop or fold that writes a local of its own conditional arm,
+// assigned in that arm. The conditional writes no outer local, so its arms
+// are plain `BranchArm` frames (BT-3911) in which a loop or fold is a
+// producer (BT-3949). Asserted in bt4367arm_local_test.bt (Value method).
+
+Value subclass: Bt4367ArmLocalValue
+  field: n = 0
+
+  injectIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:a :e |
+            m := m + e
+            a + e
+          ]
+        m + s
+      ]
+      ifFalse: [0]
+
+  collectIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        sq := #(1, 2) collect: [:e | m := m + e]
+        sq size + m
+      ]
+      ifFalse: [0]
+
+  selectIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        sq := #(1, 2, 3)
+          select: [:e |
+            m := m + e
+            e > 1
+          ]
+        sq size + m
+      ]
+      ifFalse: [0]
+
+  anySatisfyIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        found := #(1, 2)
+          anySatisfy: [:e |
+            m := m + e
+            e > 5
+          ]
+        found ifTrue: [100] ifFalse: [m]
+      ]
+      ifFalse: [0]
+
+  innerInjectIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          do: [:x |
+            s := #(1, 2)
+              inject: 0
+              into: [:a :e |
+                m := m + e
+                a + e
+              ]
+            s
+          ]
+        m
+      ]
+      ifFalse: [0]
+
+  innerCollectIn: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          do: [:x |
+            sq := #(1, 2) collect: [:e | m := m + e]
+            sq size
+          ]
+        m
+      ]
+      ifFalse: [0]
