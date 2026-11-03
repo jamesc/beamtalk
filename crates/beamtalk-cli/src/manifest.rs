@@ -1024,6 +1024,84 @@ pub fn find_manifest_full(project_root: &Utf8Path) -> Result<Option<ParsedManife
     }
 }
 
+/// How the semantic checker treats one compilation unit's package
+/// (BT-4334, BT-4382) — the one rule `build`, `lint`, `test` and the
+/// offline dependency-class resolver (MCP/LSP) share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageCheckerScope {
+    /// `ProjectComplete` inside a package (every project source file is
+    /// walked before per-file analysis), `ModuleOnly` otherwise.
+    pub knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
+    /// The pre-WS3 guard: dependency extension contributions are not loaded
+    /// yet, so a package that declares dependencies has no provably complete
+    /// receiver surface.
+    pub has_package_dependencies: bool,
+    /// The package name, for E0401/E0402 visibility checks; `None` outside a
+    /// package or when the manifest does not parse.
+    pub package_name: Option<String>,
+}
+
+impl PackageCheckerScope {
+    /// The scope for a file outside any package.
+    #[must_use]
+    pub fn module_only() -> Self {
+        Self {
+            knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
+            has_package_dependencies: false,
+            package_name: None,
+        }
+    }
+
+    /// The scope for an already-parsed manifest (`None`: no manifest, so
+    /// not a package).
+    #[must_use]
+    pub fn for_manifest(manifest: Option<&ParsedManifest>) -> Self {
+        manifest.map_or_else(Self::module_only, |manifest| Self {
+            knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+            has_package_dependencies: !manifest.dependencies.is_empty(),
+            package_name: Some(manifest.package.name.clone()),
+        })
+    }
+
+    /// The scope implied by one read of a package root's manifest
+    /// ([`find_manifest_full`]).
+    ///
+    /// A manifest that fails to parse still marks a package (the root was
+    /// found by its `beamtalk.toml`), so it stays `ProjectComplete`, with
+    /// dependencies conservatively assumed present (fewer diagnostics, never
+    /// spurious ones) and no package name (visibility checks off). A warning
+    /// is logged; the surface that reads the manifest for real (`build`)
+    /// reports the parse error itself.
+    #[must_use]
+    pub fn from_manifest_read(read: &Result<Option<ParsedManifest>>) -> Self {
+        match read {
+            Ok(manifest) => Self::for_manifest(manifest.as_ref()),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to parse beamtalk.toml; E0401/E0402 visibility checks disabled \
+                     and dependencies conservatively assumed present"
+                );
+                Self {
+                    knowledge_scope:
+                        beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+                    has_package_dependencies: true,
+                    package_name: None,
+                }
+            }
+        }
+    }
+}
+
+/// The checker scope for a compilation unit whose package root is
+/// `package_root` (`None` outside any package); see [`PackageCheckerScope`].
+#[must_use]
+pub fn package_checker_scope(package_root: Option<&Utf8Path>) -> PackageCheckerScope {
+    package_root.map_or_else(PackageCheckerScope::module_only, |root| {
+        PackageCheckerScope::from_manifest_read(&find_manifest_full(root))
+    })
+}
+
 /// Look for `beamtalk.toml` in the given directory and return the `[application]` config if present.
 ///
 /// Returns `None` if no manifest file exists or no `[application]` section is present.
@@ -1250,6 +1328,50 @@ mod tests {
         let path = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
         fs::write(path.join("beamtalk.toml"), content).unwrap();
         path
+    }
+
+    /// BT-4382: one checker-scope rule for every surface, including the
+    /// malformed-manifest case the four former copies disagreed on.
+    #[test]
+    fn package_checker_scope_covers_every_manifest_state() {
+        use beamtalk_core::semantic_analysis::KnowledgeScope;
+
+        assert_eq!(
+            package_checker_scope(None),
+            PackageCheckerScope::module_only()
+        );
+
+        let dir = TempDir::new().unwrap();
+        let root = write_manifest(&dir, "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n");
+        let scope = package_checker_scope(Some(&root));
+        assert_eq!(scope.knowledge_scope, KnowledgeScope::ProjectComplete);
+        assert!(!scope.has_package_dependencies);
+        assert_eq!(scope.package_name.as_deref(), Some("my_pkg"));
+
+        let dir = TempDir::new().unwrap();
+        let root = write_manifest(
+            &dir,
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n\n[dependencies]\nfoo = { path = \"../foo\" }\n",
+        );
+        assert!(package_checker_scope(Some(&root)).has_package_dependencies);
+
+        let dir = TempDir::new().unwrap();
+        let root = write_manifest(&dir, "[package\nnot toml");
+        let scope = package_checker_scope(Some(&root));
+        assert_eq!(scope.knowledge_scope, KnowledgeScope::ProjectComplete);
+        assert!(
+            scope.has_package_dependencies,
+            "a malformed manifest conservatively assumes dependencies"
+        );
+        assert_eq!(scope.package_name, None);
+
+        let dir = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        assert_eq!(
+            package_checker_scope(Some(&root)),
+            PackageCheckerScope::module_only(),
+            "a root with no manifest is not a package"
+        );
     }
 
     #[test]

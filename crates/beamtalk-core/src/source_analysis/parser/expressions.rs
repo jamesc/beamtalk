@@ -63,6 +63,17 @@ fn unit_multiplier(unit: Option<usize>) -> i64 {
     unit.map_or(1, |u| i64::try_from(u).unwrap_or(1))
 }
 
+/// Whether an integer segment is 8 bits wide: the default size (no size
+/// given), or an explicit literal size × unit of 8 (`$é:8`, `$é:1/unit:8`).
+/// A non-literal size is not known statically, so it is not.
+fn is_eight_bits_wide(
+    size_is_default: bool,
+    size_lit: Option<(i64, crate::source_analysis::Span)>,
+    unit: Option<usize>,
+) -> bool {
+    size_is_default || size_lit.is_some_and(|(n, _)| n.saturating_mul(unit_multiplier(unit)) == 8)
+}
+
 /// The unit a binary segment type name implies, verified against `erlc`
 /// (BT-4376): `bits`/`bitstring` imply 1 and `bytes` implies 8, so a
 /// different explicit `unit:` is a conflict. `binary` and the other types
@@ -2512,8 +2523,8 @@ impl Parser {
                 _ => None,
             };
             if let Some(v) = int_value {
-                if let Literal::Character(c) = lit {
-                    if seg_type == BinarySegmentType::Integer && size.is_none() {
+                if let (Literal::Character(c), BinarySegmentType::Integer) = (lit, seg_type) {
+                    if is_eight_bits_wide(size.is_none(), size_lit, unit) {
                         self.warn_non_ascii_byte_character(*c, *value_span);
                     }
                 }

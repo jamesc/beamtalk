@@ -128,7 +128,8 @@ impl BuildLayout {
     /// only accepts `<entry>/ebin`. The leading dot is convention, not what
     /// makes it safe — a dotless name would be equally well protected.
     pub fn dep_graph_path(&self) -> Utf8PathBuf {
-        self.deps_dir().join(".dep-graph.json")
+        self.deps_dir()
+            .join(beamtalk_core::compilation::dep_graph::DEP_GRAPH_SNAPSHOT_FILE)
     }
 
     /// `_build/deps/<name>/` — checkout directory for a single dependency.

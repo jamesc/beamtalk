@@ -435,12 +435,17 @@ normalize_diagnostic(D) when is_map(D) ->
         end,
     % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, D) of
-        %% BT-4332: compiler hints may be Beamtalk Strings — unwrap them.
-        %% Any other non-binary is still omitted (pinned by
+        %% BT-4332/BT-4382: a hint is text — a binary or a Beamtalk String —
+        %% unwrapped by the same `beamtalk_text:to_binary/1` as `message`.
+        %% Any other term is omitted rather than `~p`-formatted (pinned by
         %% normalize_diagnostic_map_non_binary_hint_omitted_test).
-        {ok, {beamtalk_string, Bin}} when is_binary(Bin) -> Base1#{hint => Bin};
-        {ok, Hint} when is_binary(Hint) -> Base1#{hint => Hint};
-        _ -> Base1
+        {ok, Hint} when
+            is_binary(Hint);
+            element(1, Hint) =:= beamtalk_string, is_binary(element(2, Hint))
+        ->
+            Base1#{hint => beamtalk_text:to_binary(Hint)};
+        _ ->
+            Base1
     end;
 normalize_diagnostic(D) when is_binary(D) ->
     #{message => D};

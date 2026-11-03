@@ -248,11 +248,15 @@ jobs:
         # docs/development/surface-parity.md. Fails fast on inventory drift.
         run: just check-surface-drift
 
-      # check-codegen-boundary used to be its own job; it needs only the Rust
-      # toolchain + Just (cargo metadata, no compilation), both already here —
-      # and unlike check-corpus it is not a required status check, so folding
-      # it in saves a runner spin-up per run for zero wall-clock cost (it
-      # takes seconds alongside clippy).
+      # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
+      # so beamtalk-lsp/beamtalk-lint (analysis only) stop compiling it; this
+      # guard fails a PR that adds a dependency edge back onto it, which would
+      # otherwise compile and pass every test while regressing the build-time
+      # win. It used to be its own job; it needs only the Rust toolchain +
+      # Just (cargo metadata, no compilation), both already here — and unlike
+      # check-corpus it is not a required status check, so folding it in
+      # saves a runner spin-up per run for zero wall-clock cost (it takes
+      # seconds alongside clippy).
       - name: Check codegen dependency boundary (BT-3371)
         run: just check-codegen-boundary
 
@@ -442,13 +446,6 @@ jobs:
       - name: Check corpus.json is up to date
         run: just check-corpus
 
-  # ─── Codegen dependency boundary guard (BT-3371) ───────────────────────
-  # BT-3362 split `codegen` out of `beamtalk-core` into `beamtalk-codegen`
-  # specifically so beamtalk-lsp/beamtalk-lint (analysis only, never
-  # generation) stop compiling it. Nothing else re-checks that on every PR —
-  # a future dependency edge back onto beamtalk-codegen would compile and
-  # pass every existing test, silently regressing the build-time win. Rust-only
-  # (just resolves the dependency graph, no compilation needed), so it stays fast.
   # ─── Corpus .core diff harness (BT-3509, ADR 0122 Phase 0) ────────────
   # Informational: reports whether a PR touching crates/beamtalk-codegen/
   # changes generated Core Erlang for the stdlib + bootstrap-test corpus

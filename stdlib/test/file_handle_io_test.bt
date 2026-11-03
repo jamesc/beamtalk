@@ -40,6 +40,9 @@ TestCase subclass: FileHandleIoTest
     self assert: (result error printString includesSubstring: "file not found")
 
   testOpenModeDoUnknownMode =>
+    // `#sideways` is not a `FileMode`: the type checker flags it statically,
+    // and the runtime still rejects it with a structured error.
+    @expect type
     result := File
       open: "target/bt-test-tmp/handle_badmode.txt"
       mode: #sideways

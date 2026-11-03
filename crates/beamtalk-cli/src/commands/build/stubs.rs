@@ -7,13 +7,10 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::HashMap;
-use std::fs;
 use tracing::warn;
 
 use crate::commands::OutputFormat;
 use crate::commands::build_layout::BuildLayout;
-
-use super::sources::collect_source_files_from_dir;
 
 /// ADR 0075 Phase 1: Extract type specs from OTP and dependency `.beam` files
 /// and cache them.
@@ -169,7 +166,11 @@ pub(crate) fn load_project_stub_registry(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
 )> {
-    load_stub_registry_from_dir(&project_root.join("stubs"), auto_extract, echo)
+    load_stub_registry_from_dir(
+        &project_root.join(beamtalk_core::compilation::ffi_stubs::PROJECT_STUBS_DIR),
+        auto_extract,
+        echo,
+    )
 }
 
 /// Load and merge the package-bundled (ADR 0075 layer 2) and distribution
@@ -321,11 +322,12 @@ fn warn_on_package_stub_collisions(
     collisions
 }
 
-/// Parse and merge every `declare native:` stub file directly inside `stubs_dir`
-/// into a single [`NativeTypeRegistry`], checking each against `auto_extract`
-/// for version drift. Shared by every stub-resolution-chain layer
-/// (project-local, package-bundled, distribution) — each layer is just a
-/// different directory.
+/// Load one stub-tier directory with the shared core loader
+/// ([`beamtalk_core::compilation::ffi_stubs::load_stub_registry_from_dir`],
+/// also used by the compiler port's project scope) and render each file's
+/// diagnostics against that file's own source. Shared by every
+/// stub-resolution-chain layer (project-local, package-bundled,
+/// distribution) — each layer is just a different directory.
 ///
 /// Returns `None` if `stubs_dir` does not exist or contains no `.bt` files.
 fn load_stub_registry_from_dir(
@@ -336,105 +338,44 @@ fn load_stub_registry_from_dir(
     beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     Vec<beamtalk_core::source_analysis::Diagnostic>,
 )> {
-    if !stubs_dir.exists() {
-        return None;
+    let load = beamtalk_core::compilation::ffi_stubs::load_stub_registry_from_dir(
+        stubs_dir,
+        auto_extract,
+    )?;
+    for file in &load.files {
+        render_stub_file_diagnostics(file, echo);
     }
-    let stub_files = match collect_source_files_from_dir(stubs_dir) {
-        Ok(files) => files,
-        Err(e) => {
-            warn!(dir = %stubs_dir, error = %e, "Cannot read stubs/ directory; skipping stub resolution");
-            return None;
+    Some(load.into_parts())
+}
+
+/// Render one stub file's diagnostics against its own source, mirroring
+/// `compile_source_with_bindings`'s rendering for src/ files — without it, a
+/// drift or skipped-signature warning would only ever show up as an
+/// anonymous count in the build summary. Respects `echo` so `lint
+/// --format=json` gets these as JSON lines too (see
+/// [`load_project_stub_registry`]'s doc).
+fn render_stub_file_diagnostics(
+    file: &beamtalk_core::compilation::ffi_stubs::StubFileLoad,
+    echo: Option<OutputFormat>,
+) {
+    for diagnostic in &file.diagnostics {
+        if diagnostic.severity == beamtalk_core::source_analysis::Severity::Lint {
+            continue;
         }
-    };
-    if stub_files.is_empty() {
-        return None;
-    }
-
-    let mut registry = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
-    let mut all_diagnostics = Vec::new();
-
-    for file in &stub_files {
-        let source = match fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(file = %file, error = %e, "Cannot read stub file; skipping");
-                continue;
-            }
-        };
-        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, mut file_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-
-        // This file's own declarations, checked for drift against
-        // `auto_extract` *before* merging into the accumulating `registry` —
-        // scoping the check to one file's functions lets each warning render
-        // against that file's own source (below), rather than losing track
-        // of which stub file a merged function came from.
-        let mut file_registry =
-            beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
-        file_diagnostics.extend(
-            beamtalk_core::semantic_analysis::type_checker::load_native_declarations(
-                &module.native_declarations,
-                &mut file_registry,
-            ),
-        );
-        if let Some(auto_extract) = auto_extract {
-            for (module_name, sig) in auto_extract.detect_stub_drift(&file_registry) {
-                let span = match sig.provenance {
-                    beamtalk_core::semantic_analysis::type_checker::TypeProvenance::Declared(s) => {
-                        s
-                    }
-                    _ => beamtalk_core::source_analysis::Span::default(),
-                };
-                file_diagnostics.push(
-                    beamtalk_core::source_analysis::Diagnostic::warning(
-                        format!(
-                            "Stub declares `{module_name}:{}/{}`, which was not found in the \
-                             compiled `{module_name}.beam` exports — the stub may be out of date",
-                            sig.name, sig.arity
-                        ),
-                        span,
-                    )
-                    .with_hint(
-                        "Regenerate this stub with `beamtalk generate stubs`, or remove the \
-                         stale declaration.",
-                    ),
+        match echo {
+            None => {}
+            Some(OutputFormat::Text) => {
+                let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
+                    diagnostic,
+                    file.path.as_str(),
+                    &file.source,
                 );
+                eprintln!("{:?}", miette::Report::new(compile_diag));
+            }
+            Some(OutputFormat::Json) => {
+                let json = crate::diagnostic::diagnostic_to_json(file.path.as_str(), diagnostic);
+                println!("{json}");
             }
         }
-        // Per-function upsert (not `merge`'s whole-module keep-on-collision):
-        // two stub files declaring the same Erlang module must combine, with
-        // the later file's function/arity winning on overlap.
-        registry.apply_overrides(file_registry);
-
-        // Render immediately against this file's own source, mirroring
-        // `compile_source_with_bindings`'s rendering for src/ files —
-        // without it, a drift or skipped-signature warning would only ever
-        // show up as an anonymous count in the build summary. Respects
-        // `echo` so `lint --format=json` gets these as JSON lines too
-        // (see this function's doc).
-        for diagnostic in &file_diagnostics {
-            if diagnostic.severity == beamtalk_core::source_analysis::Severity::Lint {
-                continue;
-            }
-            match echo {
-                None => {}
-                Some(OutputFormat::Text) => {
-                    let compile_diag = crate::diagnostic::CompileDiagnostic::from_core_diagnostic(
-                        diagnostic,
-                        file.as_str(),
-                        &source,
-                    );
-                    eprintln!("{:?}", miette::Report::new(compile_diag));
-                }
-                Some(OutputFormat::Json) => {
-                    let json = crate::diagnostic::diagnostic_to_json(file.as_str(), diagnostic);
-                    println!("{json}");
-                }
-            }
-        }
-
-        all_diagnostics.extend(file_diagnostics);
     }
-
-    Some((registry, all_diagnostics))
 }

@@ -278,6 +278,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `registry site` | -- | -- | `surface-specific: static registry-index site generator` (BT-2990). Read-only rendering layer over the registry index (`deps::registry`, BT-2978) — mirrors `doc --site`'s hand-rolled HTML/CSS, no server. `--index` accepts the same kind of value `BEAMTALK_REGISTRY`/`[registry] url` do (a local directory or a git URL); `--output` is the site directory. Distinct from `deps`, which *consumes* a registry dependency, and from `publish`, which *writes* to the index — this only reads and renders it. |
 | `type-coverage` | -- | -- | `surface-specific: type inference coverage stats`. **BT-2867:** now builds and passes a `NativeTypeRegistry` the same way `beamtalk lint` does (`find_package_root` → `BuildLayout` → `extract_type_specs`, falling back to `extract_stdlib_type_specs()` for a manifest-less tree such as `stdlib/src`), so calls to well-specced Erlang FFI functions — and expressions downstream of them — are no longer misreported as `Dynamic(UntypedFfi)`. Before the fix, `type-coverage`'s parse+infer-only path never built a registry at all; `beamtalk build`/`beamtalk lint` diagnostics already used the correct registry-threaded path and were unaffected. The same gap existed in the LSP's `hover_provider.rs`/`signature_help_provider.rs`/`completion_provider.rs`: each already received a live `native_types` registry for its own FFI-call-site special case, but never threaded it into the shared `enrich_hierarchy_with_inferred_returns`/`infer_types` call that builds the general `TypeMap` — so hovering the FFI call site itself showed the right type, but hovering anything built from its result still showed `Dynamic`. Both surfaces now share one registry-consumption path. |
 | `workspace list` | -- | -- | `surface-specific: workspace management` |
+| `workspace prune` | -- | -- | `surface-specific: workspace management` — deletes stopped dev workspaces' on-disk state (`--dry-run`, `--project`); running workspaces and releases are never touched |
 | `workspace stop` | -- | -- | Maps to `shutdown` REPL op (see Server Operations) |
 | `workspace status` | -- | -- | `surface-specific: workspace management` |
 | `workspace attach` | -- | -- | `surface-specific: attaches REPL to existing workspace` |
@@ -708,7 +709,17 @@ reports the same message at the same span. No operation is surface-specific.
   local-threading construct whose blocks write an outer local sits in an
   operand position no producer lowers. A `detect:ifNone:` with a stored
   search block, a lookup that is not a producer and an arm write of a
-  `match:` that is not a producer keep their own variants of it.
+  `match:` that is not a producer keep their own variants of it. BT-4367: a
+  loop or fold that writes a local of its own conditional arm (the conditional
+  writes no outer local, so the arm is a plain `BranchArm` frame) is accepted
+  as a statement or as the whole value of an assignment in that arm, in actor
+  and value-type method bodies (including ones loaded through the REPL; the
+  REPL's own input keeps its own arm lowering), for an `ifTrue:` / `ifFalse:` /
+  `ifNil:` / `ifNotNil:` conditional at the method root (the selectors in
+  `PLAIN_ARM_SELECTORS`, proven by `bt4367arm_local_grid_test.bt`). It keeps
+  this error in a class method, at an operand or array-literal site of an arm,
+  in the arms of `and:` / `or:`, in a dictionary lookup handler, and in a
+  conditional nested in a loop, fold or arm.
 - **A local assignment in value position is a producer (BT-3910; the BT-3864
   `ValuePositionLocalAssignment` error is gone).** An operand, a literal or
   interpolated element, another assignment's or `^`'s value or a receiver that is a local assignment rebinds the local in class,
@@ -975,7 +986,7 @@ flattening implementation):
   and the offline dependency scan also resolve the protocols of the *other*
   dependencies (BT-3678): the dependency's own protocols first, then those of
   the dependencies compiled before it. **All three paths walk the graph in the
-  same compile order** (`beamtalk_cli::dep_order::topological_order`, BT-3684),
+  same compile order** (`beamtalk_core::compilation::dep_order::topological_order`, BT-3684),
   so a cold build, the fresh-deps fast path and the offline scan export
   identical flattened `class_infos` (the offline scan leaves
   `ClassInfo::package` unstamped, so it matches by trait-provided surface). So

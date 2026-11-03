@@ -1,0 +1,4781 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4367: differential fixture (value method). Every shape is written twice: at
+// the method root (`...Root`, the proven producer path) and inside the arm of a
+// conditional that writes no outer local (`...Arm:`, a plain `BranchArm` frame,
+// BT-3911), where a loop or fold writes a local of the arm. The two must answer
+// the same. The grid is conditional selector (for a two-arm selector, the loop in
+// the first arm and, as `...Second`, in the second arm) x position of the
+// conditional (last statement, non-last statement, assigned value, `^`, operand)
+// x body shape (an assigned `inject:into:`, a `do:` statement, an `inject:into:`
+// or `collect:` as the arm's value, an early `^`). A collection as an operand is
+// a type error at the root too, so it is left out. Asserted in
+// bt4367arm_local_grid_test.bt.
+
+Value subclass: Bt4367ArmLocalGridValue
+  field: n = 0
+
+  ifTrue_ifFalse_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifTrue_ifFalse_last_assign_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifTrue_ifFalse_last_stmt_doArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_ifFalse_last_final_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_ifFalse_last_final_collectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_last_early_returnArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifTrue_ifFalse_nonlast_assign_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifFalse: [0]
+    7
+
+  ifTrue_ifFalse_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifTrue_ifFalse_nonlast_stmt_doArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifFalse: [0]
+    7
+
+  ifTrue_ifFalse_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifTrue_ifFalse_nonlast_final_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifFalse: [0]
+    7
+
+  ifTrue_ifFalse_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifTrue_ifFalse_nonlast_final_collectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifFalse: [0]
+    7
+
+  ifTrue_ifFalse_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_nonlast_early_returnArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifFalse: [0]
+    7
+
+  ifTrue_ifFalse_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifTrue_ifFalse_assign_assign_injectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifFalse: [0]
+    r
+
+  ifTrue_ifFalse_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifTrue_ifFalse_assign_stmt_doArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifFalse: [0]
+    r
+
+  ifTrue_ifFalse_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifTrue_ifFalse_assign_final_injectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifFalse: [0]
+    r
+
+  ifTrue_ifFalse_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifTrue_ifFalse_assign_final_collectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifFalse: [0]
+    r
+
+  ifTrue_ifFalse_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_assign_early_returnArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifFalse: [0]
+    r
+
+  ifTrue_ifFalse_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_return_assign_injectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifTrue_ifFalse_return_stmt_doArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_ifFalse_return_final_injectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_ifFalse_return_final_collectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_return_early_returnArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifFalse: [0]
+
+  ifTrue_ifFalse_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifTrue_ifFalse_operand_assign_injectArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifFalse: [0])
+
+  ifTrue_ifFalse_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifTrue_ifFalse_operand_stmt_doArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifFalse: [0])
+
+  ifTrue_ifFalse_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifTrue_ifFalse_operand_final_injectArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifFalse: [0])
+
+  ifTrue_ifFalse_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalse_operand_early_returnArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifFalse: [0])
+
+  ifTrue_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifTrue_last_assign_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifTrue_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifTrue_last_stmt_doArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifTrue_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_last_final_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifTrue_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_last_final_collectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifTrue_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_last_early_returnArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifTrue_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifTrue_nonlast_assign_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifTrue_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifTrue_nonlast_stmt_doArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifTrue_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifTrue_nonlast_final_injectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifTrue_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifTrue_nonlast_final_collectArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifTrue_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_nonlast_early_returnArm: c =>
+    c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifTrue_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifTrue_assign_assign_injectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifTrue_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifTrue_assign_stmt_doArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifTrue_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifTrue_assign_final_injectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifTrue_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifTrue_assign_final_collectArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifTrue_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_assign_early_returnArm: c =>
+    r := c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifTrue_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_return_assign_injectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifTrue_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifTrue_return_stmt_doArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifTrue_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_return_final_injectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifTrue_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_return_final_collectArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifTrue_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_return_early_returnArm: c =>
+    ^c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifTrue_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifTrue_operand_assign_injectArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifTrue_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifTrue_operand_stmt_doArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifTrue_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifTrue_operand_final_injectArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifTrue_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_operand_early_returnArm: c =>
+    1 + (c
+      ifTrue: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifFalse_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifFalse_last_assign_injectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifFalse_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifFalse_last_stmt_doArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifFalse_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifFalse_last_final_injectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifFalse_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifFalse_last_final_collectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifFalse_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_last_early_returnArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifFalse_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifFalse_nonlast_assign_injectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifFalse_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifFalse_nonlast_stmt_doArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifFalse_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifFalse_nonlast_final_injectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifFalse_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifFalse_nonlast_final_collectArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifFalse_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_nonlast_early_returnArm: c =>
+    c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifFalse_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifFalse_assign_assign_injectArm: c =>
+    r := c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifFalse_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifFalse_assign_stmt_doArm: c =>
+    r := c
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifFalse_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifFalse_assign_final_injectArm: c =>
+    r := c
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifFalse_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifFalse_assign_final_collectArm: c =>
+    r := c
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifFalse_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_assign_early_returnArm: c =>
+    r := c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifFalse_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_return_assign_injectArm: c =>
+    ^c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifFalse_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifFalse_return_stmt_doArm: c =>
+    ^c
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifFalse_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifFalse_return_final_injectArm: c =>
+    ^c
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifFalse_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifFalse_return_final_collectArm: c =>
+    ^c
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifFalse_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_return_early_returnArm: c =>
+    ^c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifFalse_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifFalse_operand_assign_injectArm: c =>
+    1 + (c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifFalse_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifFalse_operand_stmt_doArm: c =>
+    1 + (c
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifFalse_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifFalse_operand_final_injectArm: c =>
+    1 + (c
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifFalse_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifFalse_operand_early_returnArm: c =>
+    1 + (c
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifNil_ifNotNil_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNil_ifNotNil_last_assign_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNil_ifNotNil_last_stmt_doArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_ifNotNil_last_final_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNil_ifNotNil_last_final_collectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_last_early_returnArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNil_ifNotNil_nonlast_assign_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNotNil: [:_x | 0]
+    7
+
+  ifNil_ifNotNil_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNil_ifNotNil_nonlast_stmt_doArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNotNil: [:_x | 0]
+    7
+
+  ifNil_ifNotNil_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNil_ifNotNil_nonlast_final_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNotNil: [:_x | 0]
+    7
+
+  ifNil_ifNotNil_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNil_ifNotNil_nonlast_final_collectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNotNil: [:_x | 0]
+    7
+
+  ifNil_ifNotNil_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_nonlast_early_returnArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNotNil: [:_x | 0]
+    7
+
+  ifNil_ifNotNil_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNil_ifNotNil_assign_assign_injectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNotNil: [:_x | 0]
+    r
+
+  ifNil_ifNotNil_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNil_ifNotNil_assign_stmt_doArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNotNil: [:_x | 0]
+    r
+
+  ifNil_ifNotNil_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNil_ifNotNil_assign_final_injectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNotNil: [:_x | 0]
+    r
+
+  ifNil_ifNotNil_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNil_ifNotNil_assign_final_collectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNotNil: [:_x | 0]
+    r
+
+  ifNil_ifNotNil_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_assign_early_returnArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNotNil: [:_x | 0]
+    r
+
+  ifNil_ifNotNil_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_return_assign_injectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNil_ifNotNil_return_stmt_doArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_ifNotNil_return_final_injectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNil_ifNotNil_return_final_collectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_return_early_returnArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNotNil: [:_x | 0]
+
+  ifNil_ifNotNil_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNil_ifNotNil_operand_assign_injectArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNotNil: [:_x | 0])
+
+  ifNil_ifNotNil_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNil_ifNotNil_operand_stmt_doArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNotNil: [:_x | 0])
+
+  ifNil_ifNotNil_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNil_ifNotNil_operand_final_injectArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNotNil: [:_x | 0])
+
+  ifNil_ifNotNil_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNil_operand_early_returnArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNotNil: [:_x | 0])
+
+  ifNotNil_ifNil_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNotNil_ifNil_last_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNotNil_ifNil_last_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_ifNil_last_final_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_ifNil_last_final_collectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_last_early_returnArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNotNil_ifNil_nonlast_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNil: [0]
+    7
+
+  ifNotNil_ifNil_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNotNil_ifNil_nonlast_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNil: [0]
+    7
+
+  ifNotNil_ifNil_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNotNil_ifNil_nonlast_final_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNil: [0]
+    7
+
+  ifNotNil_ifNil_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNotNil_ifNil_nonlast_final_collectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNil: [0]
+    7
+
+  ifNotNil_ifNil_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_nonlast_early_returnArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNil: [0]
+    7
+
+  ifNotNil_ifNil_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNotNil_ifNil_assign_assign_injectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNil: [0]
+    r
+
+  ifNotNil_ifNil_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNotNil_ifNil_assign_stmt_doArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNil: [0]
+    r
+
+  ifNotNil_ifNil_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNotNil_ifNil_assign_final_injectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNil: [0]
+    r
+
+  ifNotNil_ifNil_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNotNil_ifNil_assign_final_collectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNil: [0]
+    r
+
+  ifNotNil_ifNil_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_assign_early_returnArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNil: [0]
+    r
+
+  ifNotNil_ifNil_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_return_assign_injectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNotNil_ifNil_return_stmt_doArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_ifNil_return_final_injectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_ifNil_return_final_collectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_return_early_returnArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNil: [0]
+
+  ifNotNil_ifNil_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNotNil_ifNil_operand_assign_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+      ifNil: [0])
+
+  ifNotNil_ifNil_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNotNil_ifNil_operand_stmt_doArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+      ifNil: [0])
+
+  ifNotNil_ifNil_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNotNil_ifNil_operand_final_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+      ifNil: [0])
+
+  ifNotNil_ifNil_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNil_operand_early_returnArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+      ifNil: [0])
+
+  ifTrue_ifFalseSecond_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifTrue_ifFalseSecond_last_assign_injectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifTrue_ifFalseSecond_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifTrue_ifFalseSecond_last_stmt_doArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifTrue_ifFalseSecond_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_ifFalseSecond_last_final_injectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifTrue_ifFalseSecond_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_ifFalseSecond_last_final_collectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifTrue_ifFalseSecond_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_last_early_returnArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifTrue_ifFalseSecond_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifTrue_ifFalseSecond_nonlast_assign_injectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifTrue_ifFalseSecond_nonlast_stmt_doArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_final_injectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_final_collectArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifTrue_ifFalseSecond_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_nonlast_early_returnArm: c =>
+    c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifTrue_ifFalseSecond_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifTrue_ifFalseSecond_assign_assign_injectArm: c =>
+    r := c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifTrue_ifFalseSecond_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifTrue_ifFalseSecond_assign_stmt_doArm: c =>
+    r := c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifTrue_ifFalseSecond_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifTrue_ifFalseSecond_assign_final_injectArm: c =>
+    r := c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifTrue_ifFalseSecond_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifTrue_ifFalseSecond_assign_final_collectArm: c =>
+    r := c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifTrue_ifFalseSecond_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_assign_early_returnArm: c =>
+    r := c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifTrue_ifFalseSecond_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_return_assign_injectArm: c =>
+    ^c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifTrue_ifFalseSecond_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifTrue_ifFalseSecond_return_stmt_doArm: c =>
+    ^c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifTrue_ifFalseSecond_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifTrue_ifFalseSecond_return_final_injectArm: c =>
+    ^c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifTrue_ifFalseSecond_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifTrue_ifFalseSecond_return_final_collectArm: c =>
+    ^c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifTrue_ifFalseSecond_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_return_early_returnArm: c =>
+    ^c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifTrue_ifFalseSecond_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifTrue_ifFalseSecond_operand_assign_injectArm: c =>
+    1 + (c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifTrue_ifFalseSecond_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifTrue_ifFalseSecond_operand_stmt_doArm: c =>
+    1 + (c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifTrue_ifFalseSecond_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifTrue_ifFalseSecond_operand_final_injectArm: c =>
+    1 + (c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifTrue_ifFalseSecond_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifTrue_ifFalseSecond_operand_early_returnArm: c =>
+    1 + (c
+      ifTrue: [0]
+      ifFalse: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifNil_ifNotNilSecond_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNil_ifNotNilSecond_last_assign_injectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNil_ifNotNilSecond_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNil_ifNotNilSecond_last_stmt_doArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNil_ifNotNilSecond_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_ifNotNilSecond_last_final_injectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNil_ifNotNilSecond_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNil_ifNotNilSecond_last_final_collectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNil_ifNotNilSecond_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_last_early_returnArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNil_ifNotNilSecond_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNil_ifNotNilSecond_nonlast_assign_injectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNil_ifNotNilSecond_nonlast_stmt_doArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_final_injectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_final_collectArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifNil_ifNotNilSecond_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_nonlast_early_returnArm: c =>
+    c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifNil_ifNotNilSecond_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNil_ifNotNilSecond_assign_assign_injectArm: c =>
+    r := c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifNil_ifNotNilSecond_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNil_ifNotNilSecond_assign_stmt_doArm: c =>
+    r := c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifNil_ifNotNilSecond_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNil_ifNotNilSecond_assign_final_injectArm: c =>
+    r := c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifNil_ifNotNilSecond_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNil_ifNotNilSecond_assign_final_collectArm: c =>
+    r := c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifNil_ifNotNilSecond_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_assign_early_returnArm: c =>
+    r := c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifNil_ifNotNilSecond_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_return_assign_injectArm: c =>
+    ^c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNil_ifNotNilSecond_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNil_ifNotNilSecond_return_stmt_doArm: c =>
+    ^c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNil_ifNotNilSecond_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_ifNotNilSecond_return_final_injectArm: c =>
+    ^c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNil_ifNotNilSecond_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNil_ifNotNilSecond_return_final_collectArm: c =>
+    ^c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNil_ifNotNilSecond_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_return_early_returnArm: c =>
+    ^c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNil_ifNotNilSecond_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNil_ifNotNilSecond_operand_assign_injectArm: c =>
+    1 + (c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifNil_ifNotNilSecond_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNil_ifNotNilSecond_operand_stmt_doArm: c =>
+    1 + (c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifNil_ifNotNilSecond_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNil_ifNotNilSecond_operand_final_injectArm: c =>
+    1 + (c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifNil_ifNotNilSecond_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_ifNotNilSecond_operand_early_returnArm: c =>
+    1 + (c
+      ifNil: [0]
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifNotNil_ifNilSecond_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNotNil_ifNilSecond_last_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNotNil_ifNilSecond_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNotNil_ifNilSecond_last_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNotNil_ifNilSecond_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_ifNilSecond_last_final_injectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNotNil_ifNilSecond_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_ifNilSecond_last_final_collectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNotNil_ifNilSecond_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_last_early_returnArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNotNil_ifNilSecond_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNotNil_ifNilSecond_nonlast_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNotNil_ifNilSecond_nonlast_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_final_injectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_final_collectArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifNotNil_ifNilSecond_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_nonlast_early_returnArm: c =>
+    c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifNotNil_ifNilSecond_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNotNil_ifNilSecond_assign_assign_injectArm: c =>
+    r := c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifNotNil_ifNilSecond_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNotNil_ifNilSecond_assign_stmt_doArm: c =>
+    r := c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifNotNil_ifNilSecond_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNotNil_ifNilSecond_assign_final_injectArm: c =>
+    r := c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifNotNil_ifNilSecond_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNotNil_ifNilSecond_assign_final_collectArm: c =>
+    r := c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifNotNil_ifNilSecond_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_assign_early_returnArm: c =>
+    r := c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifNotNil_ifNilSecond_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_return_assign_injectArm: c =>
+    ^c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNotNil_ifNilSecond_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNotNil_ifNilSecond_return_stmt_doArm: c =>
+    ^c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNotNil_ifNilSecond_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_ifNilSecond_return_final_injectArm: c =>
+    ^c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNotNil_ifNilSecond_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_ifNilSecond_return_final_collectArm: c =>
+    ^c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNotNil_ifNilSecond_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_return_early_returnArm: c =>
+    ^c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNotNil_ifNilSecond_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNotNil_ifNilSecond_operand_assign_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifNotNil_ifNilSecond_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNotNil_ifNilSecond_operand_stmt_doArm: c =>
+    1 + (c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifNotNil_ifNilSecond_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNotNil_ifNilSecond_operand_final_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifNotNil_ifNilSecond_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_ifNilSecond_operand_early_returnArm: c =>
+    1 + (c
+      ifNotNil: [:_x | 0]
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifNil_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNil_last_assign_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNil_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNil_last_stmt_doArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNil_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_last_final_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNil_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNil_last_final_collectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNil_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_last_early_returnArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNil_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNil_nonlast_assign_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifNil_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNil_nonlast_stmt_doArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifNil_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNil_nonlast_final_injectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifNil_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNil_nonlast_final_collectArm: c =>
+    c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifNil_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_nonlast_early_returnArm: c =>
+    c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifNil_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNil_assign_assign_injectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifNil_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNil_assign_stmt_doArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifNil_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNil_assign_final_injectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifNil_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNil_assign_final_collectArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifNil_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_assign_early_returnArm: c =>
+    r := c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifNil_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_return_assign_injectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNil_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNil_return_stmt_doArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNil_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNil_return_final_injectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNil_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNil_return_final_collectArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNil_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_return_early_returnArm: c =>
+    ^c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNil_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNil_operand_assign_injectArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifNil_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNil_operand_stmt_doArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifNil_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNil_operand_final_injectArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifNil_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNil_operand_early_returnArm: c =>
+    1 + (c
+      ifNil: [
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])
+
+  ifNotNil_last_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+
+  ifNotNil_last_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNotNil_last_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+
+  ifNotNil_last_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNotNil_last_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_last_final_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNotNil_last_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_last_final_collectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNotNil_last_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_last_early_returnArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNotNil_nonlast_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    m + s
+    7
+
+  ifNotNil_nonlast_assign_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    7
+
+  ifNotNil_nonlast_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    m
+    7
+
+  ifNotNil_nonlast_stmt_doArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    7
+
+  ifNotNil_nonlast_final_injectRoot =>
+    m := 0
+    #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    7
+
+  ifNotNil_nonlast_final_injectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    7
+
+  ifNotNil_nonlast_final_collectRoot =>
+    m := 0
+    #(1, 2) collect: [:e | m := m + e]
+    7
+
+  ifNotNil_nonlast_final_collectArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    7
+
+  ifNotNil_nonlast_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_nonlast_early_returnArm: c =>
+    c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    7
+
+  ifNotNil_assign_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r := m + s
+    r
+
+  ifNotNil_assign_assign_injectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+    r
+
+  ifNotNil_assign_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    r := m
+    r
+
+  ifNotNil_assign_stmt_doArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+    r
+
+  ifNotNil_assign_final_injectRoot =>
+    m := 0
+    r := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    r
+
+  ifNotNil_assign_final_injectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+    r
+
+  ifNotNil_assign_final_collectRoot =>
+    m := 0
+    r := #(1, 2) collect: [:e | m := m + e]
+    r
+
+  ifNotNil_assign_final_collectArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+    r
+
+  ifNotNil_assign_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_assign_early_returnArm: c =>
+    r := c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+    r
+
+  ifNotNil_return_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_return_assign_injectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ]
+
+  ifNotNil_return_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    ^m
+
+  ifNotNil_return_stmt_doArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ]
+
+  ifNotNil_return_final_injectRoot =>
+    m := 0
+    ^#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+
+  ifNotNil_return_final_injectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ]
+
+  ifNotNil_return_final_collectRoot =>
+    m := 0
+    ^#(1, 2) collect: [:e | m := m + e]
+
+  ifNotNil_return_final_collectArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) collect: [:e | m := m + e]
+      ]
+
+  ifNotNil_return_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_return_early_returnArm: c =>
+    ^c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ]
+
+  ifNotNil_operand_assign_injectRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    1 + (m + s)
+
+  ifNotNil_operand_assign_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        m + s
+      ])
+
+  ifNotNil_operand_stmt_doRoot =>
+    m := 0
+    #(1, 2) do: [:e | m := m + e]
+    1 + (m)
+
+  ifNotNil_operand_stmt_doArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2) do: [:e | m := m + e]
+        m
+      ])
+
+  ifNotNil_operand_final_injectRoot =>
+    m := 0
+    1 + (#(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ])
+
+  ifNotNil_operand_final_injectArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+      ])
+
+  ifNotNil_operand_early_returnRoot =>
+    m := 0
+    s := #(1, 2)
+      inject: 0
+      into: [:acc :e |
+        m := m + e
+        acc + e
+      ]
+    ^m + s
+
+  ifNotNil_operand_early_returnArm: c =>
+    1 + (c
+      ifNotNil: [:_x |
+        m := 0
+        s := #(1, 2)
+          inject: 0
+          into: [:acc :e |
+            m := m + e
+            acc + e
+          ]
+        ^m + s
+      ])

@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// The modes `File open:mode:` and `File open:mode:do:` accept.
+type FileMode = #read | #write | #append | #readWrite
 /// File — File system operations.
 ///
 /// Provides file I/O operations and lazy file streaming using Erlang's
@@ -164,7 +166,7 @@ sealed typed Object subclass: File native: beamtalk_file
   /// handle sync.
   /// handle close.
   /// ```
-  class sealed open: path :: String mode: mode :: Symbol -> Result(FileHandle, Error) =>
+  class sealed open: path :: String mode: mode :: FileMode -> Result(FileHandle, Error) =>
     self delegate
 
   /// Block-scoped handle in the given mode, closed however the block exits
@@ -188,7 +190,7 @@ sealed typed Object subclass: File native: beamtalk_file
   ///   handle sync
   /// ]) unwrap
   /// ```
-  class sealed open: path :: String mode: mode :: Symbol do: block :: Block(FileHandle, R) -> Result(R, Error) =>
+  class sealed open: path :: String mode: mode :: FileMode do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     self delegate
 
   // === Metadata ===

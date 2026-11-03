@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BT-4378 fixture: a typed FFI call whose only type source is the
+/// project-local stub in `stubs/stubbed_ffi_native.bt`.
+typed Value subclass: StubbedAnswer
+  answer -> Integer => Erlang stubbed_ffi_native answer
