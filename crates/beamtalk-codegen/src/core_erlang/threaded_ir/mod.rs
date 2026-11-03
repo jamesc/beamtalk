@@ -93,6 +93,7 @@ pub(super) use emit::{
     RenderCtx, cell_put_call, cell_take_call, render, render_value, take_cell_store_emitted,
 };
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
+pub(super) use ir::CallSiteLine;
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId, LoopCounter,

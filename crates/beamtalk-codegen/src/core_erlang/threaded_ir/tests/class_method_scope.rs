@@ -30,6 +30,7 @@ fn locals_less_state_acc_loop(reason: StateAccFallbackReason) -> Vec<ThreadedStm
         produces: vec![VersionedVar::new(VersionPrefix::State, 0, frame)],
         outer_args: Some(vec![leaf::var("State".to_string())]),
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }]
 }

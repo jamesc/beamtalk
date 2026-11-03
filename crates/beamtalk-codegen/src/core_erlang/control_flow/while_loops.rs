@@ -564,6 +564,7 @@ impl CoreErlangGenerator {
             // other entry.
             outer_args: Some(vec![leaf::var(init_state)]),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1052,6 +1053,7 @@ impl CoreErlangGenerator {
             produces,
             outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1227,6 +1229,7 @@ impl CoreErlangGenerator {
                     .collect(),
             ),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
