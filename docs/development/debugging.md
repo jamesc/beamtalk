@@ -687,8 +687,9 @@ has a single route (`List`, `Dictionary`, `Integer`, …) is no longer a dynamic
 site (BT-4294), and neither is a `String` or `Pid` send of a selector outside
 the row's special selectors (BT-4390); for the built-ins and special selectors
 that stay dynamic the rest names the row's reason. The reason is the gate of
-the same decision the guarded direct call is emitted from (`typed_send_target` in `dispatch_codegen.rs`), so the
-report cannot disagree with the generated code.
+the same decision the guarded direct call is emitted from (`typed_send_target`
+in `dispatch_codegen.rs`), so the report cannot disagree with the generated
+code.
 
 Examples:
 
