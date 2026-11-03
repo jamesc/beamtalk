@@ -93,6 +93,9 @@ struct BuildPassesResult {
     file_module_pairs: Vec<(Utf8PathBuf, String, Utf8PathBuf)>,
     /// Class hierarchy context used for post-processing (app file generation, etc.).
     hierarchy: ClassHierarchyContext,
+    /// The project's own classes (no dependency's), for the `.app` class
+    /// list and `class_corpus.json` (BT-4387).
+    own_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Native compilation result, if native Erlang sources were compiled.
     native_result: Option<Rebar3Result>,
     /// Diagnostic summary aggregated from all compiled files.
@@ -447,6 +450,7 @@ fn execute_build_passes(
         module_names,
         file_module_pairs,
         hierarchy: compile_ctx.hierarchy,
+        own_class_infos: index.own_class_infos,
         native_result,
         diagnostic_summary,
     })
@@ -559,6 +563,7 @@ fn post_process_package_artifacts(
             bt_dep_names: &bt_dep_names,
             hex_dep_names: &hex_dep_names,
             source_files: &env.source_files,
+            own_class_infos: &passes.own_class_infos,
         },
     )?;
 

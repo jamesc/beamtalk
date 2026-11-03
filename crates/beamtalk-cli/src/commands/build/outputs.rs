@@ -28,6 +28,12 @@ pub(crate) struct PackageBuildOutputs<'a> {
     pub(crate) hex_dep_names: &'a [String],
     /// All `.bt` source files in the package.
     pub(crate) source_files: &'a [Utf8PathBuf],
+    /// The package's own classes, without its dependencies' — what the `.app`
+    /// file and `class_corpus.json` list. `hierarchy.pre_loaded_classes` also
+    /// holds every dependency's classes, which their own corpora under
+    /// `_build/deps/` already list (BT-4387).
+    pub(crate) own_class_infos:
+        &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
 }
 
 /// Generate OTP application artefacts for a package build.
@@ -48,7 +54,7 @@ pub(crate) fn generate_package_outputs(
 ) -> Result<()> {
     let class_metadata = build_class_metadata(
         &hierarchy.pre_loaded_classes,
-        &hierarchy.pre_loaded_classes,
+        outputs.own_class_infos,
         &hierarchy.class_module_index,
         &pkg.name,
     );
@@ -118,7 +124,7 @@ pub(crate) fn generate_package_outputs(
     generate_package_corpus(
         corpus_dir,
         &pkg.name,
-        &hierarchy.pre_loaded_classes,
+        outputs.own_class_infos,
         outputs.source_files,
     )?;
 
