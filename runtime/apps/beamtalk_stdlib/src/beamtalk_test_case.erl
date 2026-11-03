@@ -489,7 +489,11 @@ decode_beam_error(Other) ->
     beamtalk_primitive:print_string(Other).
 
 -type trace_entry() :: {
-    Rendered :: binary(), Parts :: map(), Count :: pos_integer(), Src :: binary() | nil
+    Rendered :: binary(),
+    Parts :: map(),
+    Count :: pos_integer(),
+    Src :: binary() | nil,
+    IsStdlib :: boolean()
 }.
 
 -doc """
@@ -497,8 +501,9 @@ Format a BEAM stacktrace for display in test failure messages.
 
 Filters out internal test runner and OTP frames; shows up to 3 user frames
 (all of them with `beamtalk test --full-traces`).
-The innermost frame whose source file and line are readable is followed by a
-source snippet (BT-4358); snippet lines are context, not extra frames.
+The innermost non-stdlib frame whose source file and line are readable (else
+the innermost readable stdlib frame) is followed by a source snippet
+(BT-4358, BT-4388); snippet lines are context, not extra frames.
 Error location (innermost frame) is shown first, with callers going outward.
 Returns an empty binary when no relevant frames exist.
 """.
@@ -531,18 +536,28 @@ snippet_after(_Idx, _) -> [].
 -doc """
 The source snippet for the innermost entry whose source file and line are
 readable, as `{Index, Snippet}` (1-based entry index), or `none` (BT-4358).
+
+A user (non-`bt@stdlib@`) entry is preferred over a stdlib one, so a failure
+raised inside a stdlib method shows the user's calling line rather than
+stdlib internals; a stdlib entry is used only when no user entry is
+readable (BT-4388).
 """.
 -spec first_snippet([trace_entry()]) -> {pos_integer(), binary()} | none.
 first_snippet(Entries) ->
-    first_snippet(Entries, 1).
+    Indexed = lists:zip(lists:seq(1, length(Entries)), Entries),
+    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Indexed),
+    case first_readable(User) of
+        none -> first_readable(Stdlib);
+        Found -> Found
+    end.
 
--spec first_snippet([trace_entry()], pos_integer()) -> {pos_integer(), binary()} | none.
-first_snippet([], _Idx) ->
+-spec first_readable([{pos_integer(), trace_entry()}]) -> {pos_integer(), binary()} | none.
+first_readable([]) ->
     none;
-first_snippet([{_Text, #{line := Line}, _N, Src} | Rest], Idx) ->
+first_readable([{Idx, {_Text, #{line := Line}, _N, Src, _IsStdlib}} | Rest]) ->
     case is_integer(Line) andalso is_binary(Src) andalso source_snippet(Src, Line) of
         Snippet when is_binary(Snippet) -> {Idx, Snippet};
-        _ -> first_snippet(Rest, Idx + 1)
+        _ -> first_readable(Rest)
     end.
 
 %% Caps on what a snippet reads and shows, so a huge or minified source file
@@ -562,8 +577,8 @@ Overlong lines are truncated with `...`.
 -spec source_snippet(binary(), pos_integer()) -> binary() | none.
 source_snippet(Path, Line) when is_binary(Path), is_integer(Line), Line > 0 ->
     case read_head(Path) of
-        {ok, Data} ->
-            Rows = binary:split(Data, <<"\n">>, [global]),
+        {ok, Data, Truncated} ->
+            Rows = complete_rows(Data, Truncated),
             From = max(1, Line - ?SNIPPET_CONTEXT),
             To = Line + ?SNIPPET_CONTEXT,
             case Line =< length(Rows) of
@@ -576,13 +591,29 @@ source_snippet(Path, Line) when is_binary(Path), is_integer(Line), Line > 0 ->
 source_snippet(_, _) ->
     none.
 
--spec read_head(binary()) -> {ok, binary()} | error.
+%% Split into complete lines. The last element is dropped when it is not a
+%% whole line: a cut-off partial line when the read was truncated, or the
+%% empty tail after a final newline (BT-4388).
+-spec complete_rows(binary(), boolean()) -> [binary()].
+complete_rows(Data, Truncated) ->
+    Rows = binary:split(Data, <<"\n">>, [global]),
+    case Truncated orelse binary:last(Data) =:= $\n of
+        true -> lists:droplast(Rows);
+        false -> Rows
+    end.
+
+-spec read_head(binary()) -> {ok, binary(), boolean()} | error.
 read_head(Path) ->
     try file:open(Path, [read, binary, raw]) of
         {ok, Fd} ->
             try file:read(Fd, ?SNIPPET_MAX_READ_BYTES) of
-                {ok, Data} -> {ok, Data};
-                _ -> error
+                {ok, Data} when byte_size(Data) < ?SNIPPET_MAX_READ_BYTES ->
+                    {ok, Data, false};
+                {ok, Data} ->
+                    %% Cap reached: truncated unless the file ends exactly here.
+                    {ok, Data, file:read(Fd, 1) =/= eof};
+                _ ->
+                    error
             after
                 file:close(Fd)
             end;
@@ -668,18 +699,19 @@ trace_entries(Frames) ->
                 beamtalk_stack_frame:format_frame(Wrapped),
                 beamtalk_stack_frame:frame_parts(Wrapped),
                 1,
-                beamtalk_stack_frame:frame_source_path(Wrapped)
+                beamtalk_stack_frame:frame_source_path(Wrapped),
+                is_stdlib_module(maps:get(module, Wrapped, undefined))
             }
         end
      || F <- Relevant
     ]).
 
 -spec entry_line(trace_entry()) -> binary().
-entry_line({Line, _Parts, 1, _Src}) -> Line;
-entry_line({Line, _Parts, N, _Src}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+entry_line({Line, _Parts, 1, _Src, _Std}) -> Line;
+entry_line({Line, _Parts, N, _Src, _Std}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
 
 -spec entry_frame(trace_entry()) -> map().
-entry_frame({_Line, Parts, N, _Src}) -> Parts#{repeat => N}.
+entry_frame({_Line, Parts, N, _Src, _Std}) -> Parts#{repeat => N}.
 
 -doc """
 Collapse adjacent identical rendered frame lines into one.
@@ -692,9 +724,15 @@ Beamtalk terms, as a trailing `[xN]` marker.
 -spec collapse_repeats([trace_entry()]) -> [trace_entry()].
 collapse_repeats([]) ->
     [];
-collapse_repeats([{Line, Parts, N, Src} | Rest]) ->
-    {Same, Others} = lists:splitwith(fun({L, _, _, _}) -> L =:= Line end, Rest),
-    [{Line, Parts, N + length(Same), Src} | collapse_repeats(Others)].
+collapse_repeats([{Line, Parts, N, Src, Std} | Rest]) ->
+    {Same, Others} = lists:splitwith(fun({L, _, _, _, _}) -> L =:= Line end, Rest),
+    [{Line, Parts, N + length(Same), Src, Std} | collapse_repeats(Others)].
+
+-spec is_stdlib_module(term()) -> boolean().
+is_stdlib_module(Module) when is_atom(Module) ->
+    lists:prefix("bt@stdlib@", atom_to_list(Module));
+is_stdlib_module(_) ->
+    false.
 
 -doc """
 Format a single raw BEAM stacktrace frame for display. Delegates to the shared

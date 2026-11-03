@@ -285,6 +285,7 @@
 - Fix: stale-`^` and `ensure:` diagnostics now say "conservatively" to reflect that the rejection is a conservative approximation (BT-4248, #4669)
 - **Class-method `self name`, `super name`, `super superclass` now work via the class-object protocol (BT-4252)** — inside a class method, `self name`, `super name` and `super superclass` used to raise `does_not_understand` because the class-method chain doesn't hold the Behaviour protocol. These sends now fall through to the `Class → Behaviour → Object` protocol, answering for the receiving class (#4653).
 - **Class-object protocol answers from inside the class process (BT-4262)** — `self doc`, `self printString`, `self name` and other `Class`/`Behaviour` protocol sends from inside a class method running in the class's own process now work. Class-mutating protocol (`removeFromSystem`, `renameTo:`, `reload`, `removeSelector:`, etc.) is refused up front with `dispatch_error` before any side effect (#4676).
+- **Fix: binary pattern integer/char literals in `/float` segments now match (BT-4376)** — `<<1/float>>` and `<<$A/float>>` are lowered to their float equivalents at codegen time, matching `erlc`; `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8 (a conflicting explicit `unit:` is an error); new warning on a non-ASCII character literal in a default 8-bit integer segment (#4759)
 
 ### Runtime
 
@@ -321,6 +322,10 @@
 - `Json` text leaves and object keys are now validated Strings instead of raw binaries (BT-4171, #4568)
 - `Binary printString` and `String printString` use the full ADR 0138 escape mapping — backslashes, braces, control characters render consistently across Beamtalk and Rust unparser output (BT-4164, BT-4176, BT-4188; #4556, #4567, #4584)
 - Trace store sweep: skip remote pids and reclaim orphan rows on dead-actor cleanup (BT-4197, #4576)
+- Fix non-ASCII (UTF-8) source file paths double-encoding in stack traces and reflection (BT-4370, #4745)
+- Guarded direct calls for typed sends to built-in receivers — `Integer`, `String`, `List`, `Dictionary` and other built-in-typed receivers now compile to a tag-guarded direct dispatch with a dynamic-send fallback (BT-4294, #4750)
+- Guarded direct calls for typed sends to open tagged-map classes — a send to a receiver whose static type is an open `Value`/`Object`-kind class now compiles to a tag-guarded direct dispatch (BT-4293, #4747)
+- Class references use compile-time registered names — class literals compile to `erlang:whereis('beamtalk_class_<Name>')` instead of a runtime `binary_to_atom` call; `on:do:` class-literal filters pass the name only (BT-4295, #4743)
 
 ### Internal
 
@@ -352,6 +357,12 @@
 - ADR 0133 Phase 2: remove the opaque-callable fold (ADR 0128) and the stored-block `value` producer (I5) — superseded infrastructure removed from codegen and the runtime dispatch path (BT-3908, #4400)
 - ADR 0133 Phase 2: remove the runtime floor (`send_threaded/4`, `call_threaded/3`, tier2 metadata, threaded lookups) — defunct Tier 2 threaded dispatch removed; modules compiled before the change still load (BT-3907, #4396)
 - Type annotations now apply the same `uses:` shadowing rule as provision resolution, so `x :: Enumerable` resolves consistently when a dependency defines a namesake protocol (BT-3941, #4421)
+- Dependency compilation scopes ClassInfos to each dependency's transitive closure, preventing same-named classes in unrelated packages from shadowing (BT-4375, #4757)
+- `FieldWriteInBracketedLoop` verifier error enforces the §4b invariant — a field write inside a bracketing loop is now caught by `ThreadedIr::verify()` (BT-4369, #4753)
+- Codegen line annotations on let-wrapped call nodes improve stack trace accuracy beyond block `value` sends (BT-4366, #4751)
+- Block and loop call sites carry real line info in stack traces (BT-4356, #4740)
+- Test and `StackFrame>>printString` trace rendering unified to one shared renderer (BT-4357, #4741)
+- ADR 0133 Phase 3: retire DENY_SET/ALLOW_SET; the 733-shape oracle reaches zero residual rows (BT-3913, #4735)
 
 ### Tooling
 
@@ -376,6 +387,16 @@
 - REPL displays Characters as `$X` (was indistinguishable from Integer), Strings quoted and escaped, Binaries as `<<hex>>`, class names bare (BT-4167, #4569)
 - Fix: nested strings in REPL display no longer double-escape (BT-4203, #4596)
 - `actor-state-abroad` lint now covers `Block>>fork` receiver blocks (BT-4198, #4585)
+- `beamtalk test --full-traces` shows the complete filtered stack trace instead of the default 3-frame cap; the test runner outputs structured JSON frames in each failed `TestResult` (BT-4355, #4748)
+- Test failure output shows a source snippet at the error site — the failing line marked `>` plus one line of context on either side (BT-4358, #4756)
+- Test traces use fallback locations and block disambiguation for clearer frame output (BT-4354, #4739)
+- LSP completions for multi-arity Erlang BIFs such as `integer_to_binary/2` and `spawn/2,3,4` (BT-4145, #4744)
+- `beamtalk lint`, `beamtalk fmt` and LSP preload now skip `.gitignore`d paths; `build`/`test` deliberately do not (BT-4135, #4744)
+- LSP resolves package roots per open file, loading `beamtalk.toml` from the nearest ancestor on `didOpen` (BT-4158, #4744)
+- `just install` no longer silently omits stdlib class beams from a clean checkout (BT-4119, #4744)
+- Fix: `beamtalk lint --warnings-as-errors` now applies the package's `[diagnostics]` table, matching the REPL and build verdicts (BT-4377, #4758)
+- Fix: `workspace prune` no longer deletes a held flock lockfile, preventing double workspace starts (BT-4374, #4749)
+- Fix: VS Code extension authentication after the version handshake change (BT-4373, #4746)
 
 ### Standard Library
 

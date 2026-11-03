@@ -144,12 +144,33 @@ fn annotated_block_sends_compile_through_erlc() {
 
 /// Prefixes of the nodes that transfer control for a send: the class-side
 /// and instance-side runtime dispatch, and an `apply` of a variable (a block,
-/// handler, cleanup or other user fun).
+/// handler, cleanup or other user fun). A `letrec` loop's entry
+/// `apply '_LoopN'/0` is covered separately by [`loop_entry_applies`].
 const DISPATCH_CALL_PREFIXES: [&str; 3] = [
     "call 'beamtalk_object_class':'class_send'(",
     "call 'beamtalk_message_dispatch':'send'(",
     "apply _",
 ];
+
+/// Byte offsets of each `letrec` loop's entry `apply '_LoopN'/0` (BT-4392).
+///
+/// A loop's recursive back-edge `apply '_LoopN'/0 ()` sits in the loop fun's
+/// own body and stays bare: it is a tail call, and the frame it would name
+/// is the loop's own. Only the entry call, the one frame the method making
+/// the send reports, carries the send's line. Loop names are unique within a
+/// module and the `letrec` binding (with its back-edges) precedes the entry
+/// in the text, so a name's last `apply` is its entry.
+fn loop_entry_applies(code: &str) -> Vec<usize> {
+    const LOOP_APPLY: &str = "apply '_Loop";
+    let mut last: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (at, _) in code.match_indices(LOOP_APPLY) {
+        let name_len = code[at..].find("'/").unwrap_or(0);
+        last.insert(&code[at..at + name_len], at);
+    }
+    let mut entries: Vec<usize> = last.into_values().collect();
+    entries.sort_unstable();
+    entries
+}
 
 /// Advances `i` past a quoted atom/string or character literal starting at
 /// `bytes[i]`, returning the index of its last byte; `i` unchanged otherwise.
@@ -216,21 +237,23 @@ fn unannotated_dispatch_calls(code: &str) -> Vec<(usize, String)> {
     let ranges = annotated_ranges(code);
     let starts: std::collections::HashSet<usize> = ranges.iter().map(|r| r.0).collect();
     let mut found = Vec::new();
-    for prefix in DISPATCH_CALL_PREFIXES {
-        for (at, _) in code.match_indices(prefix) {
-            let own = at >= 2 && &code[at - 2..at] == "( " && starts.contains(&(at - 2));
-            if own {
-                continue;
-            }
-            // A method's own `( fun (..) -> .. -| [Line] )` annotation names the
-            // method's line, not a send: a call in a fixed-shape primitive body
-            // (`perform:withArguments:timeout:`) has no send to annotate.
-            let inside_a_send =
-                |&&(s, e): &&(usize, usize)| s < at && at < e && !code[s..].starts_with("( fun (");
-            if ranges.iter().any(|r| inside_a_send(&r)) {
-                let snippet: String = code[at..].chars().take(60).collect();
-                found.push((at, snippet));
-            }
+    let sites = DISPATCH_CALL_PREFIXES
+        .iter()
+        .flat_map(|prefix| code.match_indices(prefix).map(|(at, _)| at))
+        .chain(loop_entry_applies(code));
+    for at in sites {
+        let own = at >= 2 && &code[at - 2..at] == "( " && starts.contains(&(at - 2));
+        if own {
+            continue;
+        }
+        // A method's own `( fun (..) -> .. -| [Line] )` annotation names the
+        // method's line, not a send: a call in a fixed-shape primitive body
+        // (`perform:withArguments:timeout:`) has no send to annotate.
+        let inside_a_send =
+            |&&(s, e): &&(usize, usize)| s < at && at < e && !code[s..].starts_with("( fun (");
+        if ranges.iter().any(|r| inside_a_send(&r)) {
+            let snippet: String = code[at..].chars().take(60).collect();
+            found.push((at, snippet));
         }
     }
     found.sort();
@@ -250,6 +273,10 @@ fn the_scanner_flags_a_call_whose_annotation_sits_on_a_let() {
 /// The invariant over the real corpus: no lowering leaves a dispatch call
 /// without its own line inside an annotated send, so a new lowering that
 /// nests its call in a `let`/`case` cannot silently regress stack traces.
+///
+/// BT-4392: measured at ~13s in a debug build (full codegen over the corpus,
+/// in parallel with the other fast-tier tests), well inside the fast tier's
+/// budget, so it stays there rather than moving to the slow tier.
 #[test]
 fn no_dispatch_call_is_unannotated_inside_an_annotated_send_over_the_corpus() {
     let root = super::repo_root();
@@ -383,4 +410,71 @@ fn a_while_true_send_annotates_its_apply_nodes() {
 #[test]
 fn annotated_audited_lowerings_compile_through_erlc() {
     assert_compiles_through_erlc("runner", &codegen_with_lines(AUDITED_LOWERINGS));
+}
+
+/// BT-4392: each message of a multi-line cascade carries its own line, not
+/// the receiver's.
+#[test]
+fn each_cascade_message_carries_its_own_line() {
+    let src = concat!(
+        "Object subclass: Runner\n",
+        "  run: x =>\n",
+        "    x foo;\n",
+        "      bar;\n",
+        "      baz\n",
+    );
+    let code = codegen_with_lines(src);
+    for (selector, line) in [("foo", 3), ("bar", 4), ("baz", 5)] {
+        let needle = format!(", '{selector}', [])");
+        let at = code
+            .find(&needle)
+            .unwrap_or_else(|| panic!("no `{selector}` send in:\n{code}"));
+        let rest = &code[at + needle.len()..];
+        assert!(
+            rest.starts_with(&line_anno(line)),
+            "`{selector}` should carry line {line}, got `{}`:\n{code}",
+            &rest[..rest.len().min(40)]
+        );
+    }
+    assert_compiles_through_erlc("runner", &code);
+}
+
+/// BT-4392: the loop-entry `apply '_LoopN'/0` of the generic `whileTrue:` and
+/// `repeat` fallbacks carries the send's line, as the condition/body applies.
+#[test]
+fn generic_loop_fallbacks_annotate_their_entry_apply() {
+    let while_src = concat!(
+        "Object subclass: Runner\n",
+        "  run: c body: b =>\n",
+        "    c whileTrue: b\n",
+        "    nil\n",
+    );
+    let repeat_src = concat!(
+        "Object subclass: Runner\n",
+        "  run: b =>\n",
+        "    b repeat\n",
+        "    nil\n",
+    );
+    for src in [while_src, repeat_src] {
+        let code = codegen_with_lines(src);
+        let entries = loop_entry_applies(&code);
+        assert!(!entries.is_empty(), "expected a loop in:\n{code}");
+        assert!(
+            unannotated_dispatch_calls(&code).is_empty(),
+            "loop entry apply left unannotated:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn the_scanner_flags_an_unannotated_loop_entry_but_not_back_edges() {
+    let anno = "-| [3, {'file', \"a.bt\"}]";
+    let bad = format!(
+        "( letrec '_Loop1'/0 = fun () -> apply '_Loop1'/0 () in apply '_Loop1'/0 () {anno} )"
+    );
+    assert_eq!(unannotated_dispatch_calls(&bad).len(), 1);
+    let good = format!(
+        "( letrec '_Loop1'/0 = fun () -> apply '_Loop1'/0 () in ( apply '_Loop1'/0 () {anno} ) {anno} )"
+    );
+    assert!(unannotated_dispatch_calls(&good).is_empty());
 }

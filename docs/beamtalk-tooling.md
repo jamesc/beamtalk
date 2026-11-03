@@ -1066,6 +1066,7 @@ By default, `beamtalk test` runs test classes concurrently using the BEAM schedu
 beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
+beamtalk test --full-traces  # Show full filtered stack traces (no 3-frame cap)
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).
