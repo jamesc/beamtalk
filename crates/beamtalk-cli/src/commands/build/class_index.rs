@@ -29,6 +29,11 @@ pub(crate) struct ClassIndexResult {
     pub(crate) class_superclass_index: HashMap<String, String>,
     /// Unified collection of all `ClassInfo` from source and dependency classes.
     pub(crate) all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// The project's own classes, trait-flattened — the leading entries of
+    /// `all_class_infos`, without any dependency's. What the root package's
+    /// `class_corpus.json` and `.app` file list; each dependency's classes are
+    /// listed by its own corpus under `_build/deps/` (BT-4387).
+    pub(crate) own_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Type alias declarations (`type Name = ...`) collected from
     /// every project source file, for cross-file/package alias resolution
     /// during Pass 2. See `collect_project_alias_infos`'s doc for why this
@@ -203,6 +208,8 @@ pub(crate) fn build_class_index(
 
     // Single unified collection of all ClassInfo from all sources.
     // To add a new .bt source location, add its ClassInfo slice here.
+    // The project's own classes come first (`own_class_count` of them).
+    let own_class_count = source_class_infos.len();
     let mut all_class_infos = collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
 
     // ADR 0070 Phase 3: Eagerly check stdlib reservation violations.
@@ -286,10 +293,15 @@ pub(crate) fn build_class_index(
             crate::commands::util::class_surface_hash(&all_class_infos, &flattened, pkg);
     }
 
+    // Taken after trait flattening, which rewrites only project classes'
+    // entries in place, so the own prefix carries the flattened provisions.
+    let own_class_infos = all_class_infos[..own_class_count].to_vec();
+
     Ok(ClassIndexResult {
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        own_class_infos,
         all_alias_infos,
         all_protocol_infos,
         all_protocol_defs,

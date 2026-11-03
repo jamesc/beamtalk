@@ -550,6 +550,73 @@ fn build_does_not_show_a_dependencys_warnings() {
         .stderr(contains("definitely_unknown_xyz").not());
 }
 
+/// BT-4387: the root package's `class_corpus.json` lists only the root's own
+/// classes. MCP loads it alongside every `_build/deps/*/class_corpus.json`,
+/// so a dependency class listed by the root too would appear twice.
+#[test]
+fn build_root_class_corpus_lists_only_its_own_classes() {
+    let root = tempfile::tempdir().expect("create tempdir");
+
+    let dep_dir = root.path().join("helperdep");
+    std::fs::create_dir_all(dep_dir.join("src")).unwrap();
+    std::fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"helperdep\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep_dir.join("src/helper.bt"),
+        "Object subclass: Helper\n  assist => 1\n",
+    )
+    .unwrap();
+
+    let consumer_dir = root.path().join("consumer");
+    std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+    std::fs::write(
+        consumer_dir.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\n\
+         helperdep = { path = \"../helperdep\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        consumer_dir.join("src/main.bt"),
+        "Helper subclass: Main\n  run => self assist\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(&consumer_dir)
+        .arg("build")
+        .assert()
+        .success();
+
+    let corpus_classes = |path: std::path::PathBuf| -> Vec<String> {
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        json.as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let build = consumer_dir.join("_build");
+    let root_classes = corpus_classes(build.join("dev/class_corpus.json"));
+    let dep_classes = corpus_classes(build.join("deps/helperdep/class_corpus.json"));
+    assert_eq!(root_classes, ["Main"], "root corpus: {root_classes:?}");
+    assert_eq!(
+        dep_classes,
+        ["Helper"],
+        "dependency corpus: {dep_classes:?}"
+    );
+
+    // What MCP loads: the root corpus, then every dependency's.
+    let all: Vec<&String> = root_classes.iter().chain(&dep_classes).collect();
+    let unique: std::collections::BTreeSet<&&String> = all.iter().collect();
+    assert_eq!(unique.len(), all.len(), "duplicate corpus entries: {all:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
