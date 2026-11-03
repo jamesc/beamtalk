@@ -545,11 +545,15 @@ impl Backend {
     /// accumulated [`LoadedTypeCache`] and the union is installed. Opening
     /// a file in the Nth package root under a parent folder therefore
     /// extracts that root alone (and may spawn at most one build-worker
-    /// node), not all N. Callers may still pass every known root. A root is
-    /// marked loaded only once `extract_type_specs` returned specs for it:
-    /// a root whose extraction returned `None` (e.g. opened before the
-    /// runtime was built) or whose extraction task failed is retried on the
-    /// next call, as the pre-incremental full re-extraction used to do.
+    /// node), not all N — as long as extraction succeeds. Callers may still
+    /// pass every known root. A root is marked loaded only once
+    /// `extract_type_specs` returned specs for it: a root whose extraction
+    /// returned `None` (e.g. opened before the runtime was built) or whose
+    /// extraction task failed is retried on the next call, as the
+    /// pre-incremental full re-extraction used to do. So while extraction
+    /// keeps failing for a machine-wide reason (no OTP type data, a build
+    /// worker that won't start), each new-root load re-attempts every root
+    /// that has not yet succeeded, which can spawn one node per such root.
     pub(in crate::server) async fn load_type_cache(&self, roots: &[PathBuf]) {
         use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
@@ -579,7 +583,7 @@ impl Backend {
         #[cfg(not(test))]
         let outcome_override: Option<bool> = None;
 
-        let pending_owned = pending;
+        let pending_owned = pending.clone();
         let Ok((registry, known_erlang_modules, extracted)) =
             tokio::task::spawn_blocking(move || {
                 let mut registry = NativeTypeRegistry::new();
@@ -620,7 +624,10 @@ impl Backend {
             })
             .await
         else {
-            tracing::warn!("type-cache extraction task failed; will retry on the next root load");
+            tracing::warn!(
+                roots = ?pending,
+                "type-cache extraction task failed; will retry on the next root load"
+            );
             return;
         };
 
