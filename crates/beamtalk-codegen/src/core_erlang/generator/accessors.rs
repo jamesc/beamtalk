@@ -784,10 +784,14 @@ impl CoreErlangGenerator {
         let Document::Vec(parts) = doc else {
             return false;
         };
+        // Only text leaves carry a marker. The owned-text leaf is matched by
+        // exclusion (the catch-all below) so this read never names the variant
+        // the ADR 0089 leaf-site lint (`owned_leaf_sites`) reserves for leaf
+        // constructors.
         let text = |d: &Document<'static>| match d {
             Document::Str(s) => Some((*s).to_string()),
-            Document::Owned(s) => Some(s.clone()),
-            _ => None,
+            Document::Line | Document::Nest(..) | Document::Vec(_) | Document::Group(_) => None,
+            leaf => Some(leaf.to_pretty_string()),
         };
         let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
         else {
