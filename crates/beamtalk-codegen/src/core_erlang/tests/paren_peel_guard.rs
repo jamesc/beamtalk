@@ -30,6 +30,10 @@
 //!   several of those positions at once;
 //! - a `(super)` receiver or argument, which the pass keeps whole because
 //!   `(super) foo` is not a super send;
+//! - a binary construction segment's value or size (ADR 0143), which the
+//!   pass never reaches (it peels send operands only) and where parentheses
+//!   are the grammar's way to write any value that is not a variable or a
+//!   literal (`<<(-1):4>>`, `<<v:(8)>>`);
 //! - a cascade's folded first send or its shared receiver
 //!   (`ast_walker::cascade_shared_receiver`, a `SendRef` receiver from
 //!   `walk_sends`/`cascade_sends`, or the dispatch receiver the type checker's
@@ -119,6 +123,10 @@ const CEILINGS: &[(&str, usize)] = &[
     ("beamtalk-codegen/src/core_erlang/value_type_codegen.rs", 11),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     ("beamtalk-core/src/ast/expression.rs", 1),
+    // Binary segment values and sizes (ADR 0143): `BinarySegmentValue for
+    // Expression` and `binary_literal_size` read a literal through the
+    // parentheses the segment grammar requires (`<<(-1):4>>`, `<<v:(8)>>`).
+    ("beamtalk-core/src/ast/pattern.rs", 2),
     // A cascade shared receiver: `erlang_module_of_receiver` is handed
     // `(Erlang lists)` as the shared receiver of `(Erlang lists); f: x`.
     ("beamtalk-core/src/ffi_receiver.rs", 1),

@@ -3628,9 +3628,12 @@ pub fn unsequenced_operand_holder(expr: &Expression) -> Option<UnsequencedOperan
         Expression::Assignment { .. } => Some(UnsequencedOperand::Assignment),
         Expression::DestructureAssignment { .. } => Some(UnsequencedOperand::Destructure),
         Expression::Match { .. } => Some(UnsequencedOperand::MatchSubject),
-        // A literal collection's elements are walked. Nothing else holds an
-        // operand the walks reach that can be a loop or fold (a field access's
-        // receiver is an identifier: the parser forms one only after it).
+        // A literal collection's elements are walked, and so are a binary
+        // construction's segment values and sizes (ADR 0143): codegen
+        // sequences them as literal-container children, left to right.
+        // Nothing else holds an operand the walks reach that can be a loop or
+        // fold (a field access's receiver is an identifier: the parser forms
+        // one only after it).
         _ => None,
     }
 }
