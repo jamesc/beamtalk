@@ -29,7 +29,8 @@
 //! compiled from a source that is no longer declared anywhere.
 //!
 //! The fix is direction (b) from the issue — record the *effective dependency
-//! graph* (every discovered dep's name, declaring chain, and declared source)
+//! graph* (every discovered dep's name, declaring chain, own direct
+//! dependencies, and declared source)
 //! after each successful resolve, and compare the current graph against it on
 //! the next build. That is generic: it catches source-type swaps, a path dep's
 //! declared path moving, and any add/remove/restructure anywhere in the
@@ -75,10 +76,16 @@ fn snapshot_for(all_deps: &[DiscoveredDep]) -> DepGraphSnapshot {
     DepGraphSnapshot::new(
         all_deps
             .iter()
-            .map(|dep| DepGraphEntry {
-                name: dep.name.clone(),
-                via: dep.via_chain.clone(),
-                source: dep.source.to_string(),
+            .map(|dep| {
+                let mut dependencies = dep.deps.clone();
+                dependencies.sort();
+                dependencies.dedup();
+                DepGraphEntry {
+                    name: dep.name.clone(),
+                    via: dep.via_chain.clone(),
+                    dependencies,
+                    source: dep.source.to_string(),
+                }
             })
             .collect(),
     )
@@ -117,6 +124,12 @@ fn describe_difference(recorded: &[DepGraphEntry], current: &[DepGraphEntry]) ->
             Some(previous) if previous.via != entry.via => {
                 return format!(
                     "dependency '{}' is now reached through a different chain",
+                    entry.name
+                );
+            }
+            Some(previous) if previous.dependencies != entry.dependencies => {
+                return format!(
+                    "dependency '{}' now declares different dependencies",
                     entry.name
                 );
             }
@@ -167,8 +180,22 @@ mod tests {
         DepGraphEntry {
             name: name.to_string(),
             via: Vec::new(),
+            dependencies: Vec::new(),
             source: source.to_string(),
         }
+    }
+
+    #[test]
+    fn test_describe_difference_reports_changed_dependencies() {
+        // A diamond edge (`b` now also declares `c`, already reached through
+        // `a`) changes no `via` chain, only `b`'s recorded edges (BT-4394).
+        let recorded = vec![entry("b", "path: ../b")];
+        let current = vec![DepGraphEntry {
+            dependencies: vec!["c".to_string()],
+            ..entry("b", "path: ../b")
+        }];
+
+        assert!(describe_difference(&recorded, &current).contains("different dependencies"));
     }
 
     #[test]
@@ -202,9 +229,8 @@ mod tests {
     #[test]
     fn test_describe_difference_reports_changed_chain() {
         let recorded = vec![DepGraphEntry {
-            name: "yaml".to_string(),
             via: vec!["utils".to_string()],
-            source: "path: ../yaml".to_string(),
+            ..entry("yaml", "path: ../yaml")
         }];
         let current = vec![entry("yaml", "path: ../yaml")];
 

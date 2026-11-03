@@ -30,7 +30,6 @@
     clippy::too_many_lines
 )]
 
-mod common;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -335,7 +334,7 @@ fn stage_widget_project() -> Result<PathBuf, String> {
     if dst.exists() {
         std::fs::remove_dir_all(&dst).map_err(|e| format!("remove stale staging dir: {e}"))?;
     }
-    common::copy_tree(&src, &dst).map_err(|e| format!("copy_tree: {e}"))?;
+    beamtalk_workspace::copy_tree(&src, &dst).map_err(|e| format!("copy_tree: {e}"))?;
     Ok(dst)
 }
 

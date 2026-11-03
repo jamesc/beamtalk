@@ -35,8 +35,10 @@
 //!   `extract_dep_protocol_alias_metadata` for dependencies). The dependency
 //!   set is the build's resolved graph (`_build/deps/.dep-graph.json`)
 //!   pruned to what `beamtalk.toml` still declares
-//!   ([`resolved_dependency_names`]), never a listing of `_build/deps/`,
-//!   which keeps the checkouts of removed dependencies (BT-4378).
+//!   ([`resolved_dependency_names`]), not a listing of `_build/deps/`,
+//!   which keeps the checkouts of removed dependencies (BT-4378). The
+//!   listing is used only when the snapshot is missing or unusable
+//!   (BT-4394).
 //!
 //! The alias scan and the registry are memoized per project root (exact
 //! path→mtime fingerprints, so any source, stub, manifest or cache change
@@ -57,13 +59,13 @@
 //! BT-4326) and the editor `diagnostics/3` entry point, which keeps legacy
 //! behaviour on the keystroke path (see BT-4325).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use beamtalk_core::compilation::dep_graph::{
-    DEP_GRAPH_SNAPSHOT_FILE, DepGraphSnapshot, declared_dependency_names_from_manifest_toml,
+    DEP_GRAPH_SNAPSHOT_FILE, DepGraphSnapshotError, declared_dependency_names_from_manifest_toml,
     read_dep_graph_snapshot, resolved_dependency_names,
 };
 use beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable;
@@ -117,7 +119,7 @@ pub(crate) fn merge_aliases(
 /// added/removed/modified file re-resolves on the next verified compile.
 struct CachedProject {
     alias_files: Vec<(PathBuf, Option<SystemTime>)>,
-    registry_files: Vec<(PathBuf, SystemTime)>,
+    registry_files: Vec<(PathBuf, Option<SystemTime>)>,
     /// The scope last resolved for this root.
     context: FileProjectContext,
     /// The `project_batch` whose request last verified the fingerprints
@@ -221,16 +223,17 @@ fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, Option<SystemTime>)> {
     entries
 }
 
-/// Fingerprint of a directory's immediate files: paths plus mtimes.
-fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, SystemTime)> {
+/// Fingerprint of a directory's immediate entries: paths plus mtimes, with
+/// an unstatable entry carried as `None` (see [`fingerprint`]).
+fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, Option<SystemTime>)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<(PathBuf, SystemTime)> = entries
+    let mut files: Vec<(PathBuf, Option<SystemTime>)> = entries
         .flatten()
-        .filter_map(|e| {
-            let mtime = e.metadata().ok()?.modified().ok()?;
-            Some((e.path(), mtime))
+        .map(|e| {
+            let mtime = e.metadata().ok().and_then(|m| m.modified().ok());
+            (e.path(), mtime)
         })
         .collect();
     files.sort();
@@ -239,8 +242,9 @@ fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, SystemTime)> {
 
 /// Fingerprint of the project-local stub tier: every stub file the shared
 /// loader reads (it walks `stubs/` recursively), so adding, editing or
-/// deleting a stub re-resolves the registry.
-fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, SystemTime)> {
+/// deleting a stub re-resolves the registry. Like [`fingerprint`], a stub
+/// whose mtime cannot be read is carried as `None`, not dropped.
+fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, Option<SystemTime>)> {
     let stubs_dir = root.join(PROJECT_STUBS_DIR);
     if !stubs_dir.is_dir() {
         return Vec::new();
@@ -249,9 +253,6 @@ fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, SystemTime)> {
         .walk(&stubs_dir)
         .unwrap_or_default();
     fingerprint(&files)
-        .into_iter()
-        .filter_map(|(path, mtime)| Some((path, mtime?)))
-        .collect()
 }
 
 /// Fingerprint for the memoized registry: the type-cache entries, the
@@ -262,7 +263,7 @@ fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, SystemTime)> {
 /// too: otherwise a dependency rebuild without a fresh `beamtalk build`
 /// would keep serving the old specs until the port restarts. (An OTP upgrade
 /// mid-session is the accepted residual — it warrants a restart anyway.)
-fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, SystemTime)> {
+fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, Option<SystemTime>)> {
     let mut entries = dir_file_fingerprint(cache_dir);
     for ebin in beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(root) {
         entries.extend(dir_file_fingerprint(ebin.as_std_path()));
@@ -282,23 +283,60 @@ fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, Syst
 /// pruned to what `manifest_toml`'s `[dependencies]` still declares
 /// ([`resolved_dependency_names`]) — not a listing of `_build/deps/`, which
 /// keeps the checkout of a dependency since removed from `beamtalk.toml`.
+///
 /// A missing or unusable snapshot (never written, written by an older
-/// toolchain, a best-effort write that failed, or an unknown schema) is
-/// treated as empty rather than as "no dependencies": the manifest's
-/// directly declared dependencies still resolve from their `_build/deps/`
-/// checkouts, as they did before the snapshot existed, so the REPL does not
-/// reject code `beamtalk build` accepts. Only transitive dependencies need
-/// the snapshot's edges.
+/// toolchain or schema, a best-effort write that failed, or corrupt) falls
+/// back to the manifest's directly declared dependencies plus every
+/// `_build/deps/` checkout that has a manifest
+/// ([`unresolved_graph_dependency_names`]), so the REPL does not reject code
+/// `beamtalk build` accepts — transitive dependencies included — until the
+/// next build rewrites the snapshot. The listing is only a fallback: with a
+/// usable snapshot, a checkout outside the resolved graph never contributes.
 fn dependency_roots(root: &Utf8Path, manifest_toml: &str) -> Vec<(Utf8PathBuf, String)> {
     let deps_dir = root.join("_build/deps");
-    let snapshot = read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path())
-        .unwrap_or_else(|_| DepGraphSnapshot::new(Vec::new()));
     let declared = declared_dependency_names_from_manifest_toml(manifest_toml);
-    resolved_dependency_names(&snapshot, &declared)
+    let names = match read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path())
+    {
+        Ok(snapshot) => resolved_dependency_names(&snapshot, &declared),
+        Err(reason) => {
+            if reason != DepGraphSnapshotError::Missing {
+                tracing::debug!(
+                    root = %root,
+                    %reason,
+                    "dependency-graph snapshot unusable; falling back to _build/deps/ checkouts"
+                );
+            }
+            unresolved_graph_dependency_names(&deps_dir, declared)
+        }
+    };
+    names
         .into_iter()
         .map(|name| (deps_dir.join(&name), name))
         .filter(|(dep_root, _)| dep_root.join("beamtalk.toml").is_file())
         .collect()
+}
+
+/// The dependency set when there is no usable resolved graph: the directly
+/// declared names plus every `_build/deps/` checkout directory holding a
+/// `beamtalk.toml`. A checkout left over from a removed dependency is
+/// included too; without the snapshot nothing tells it apart from a
+/// transitive dependency, and over-including only risks accepting an alias
+/// the build would reject, while under-including rejects code the build
+/// accepts.
+fn unresolved_graph_dependency_names(
+    deps_dir: &Utf8Path,
+    declared: Vec<String>,
+) -> BTreeSet<String> {
+    let mut names: BTreeSet<String> = declared.into_iter().collect();
+    if let Ok(entries) = deps_dir.read_dir_utf8() {
+        names.extend(
+            entries
+                .flatten()
+                .filter(|entry| entry.path().join("beamtalk.toml").is_file())
+                .map(|entry| entry.file_name().to_string()),
+        );
+    }
+    names
 }
 
 /// The project's FFI registry: its `_build/type_cache/` replay with the
