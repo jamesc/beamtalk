@@ -27,7 +27,11 @@
 //!   passed there stays home) when no class in the receiving class's chain
 //!   declares class variables and its selector is not process-bound
 //!   ([`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1, the rule
-//!   codegen's direct-call table builds on), sealed or not.
+//!   codegen's direct-call table builds on), sealed or not. A class name more
+//!   than one package in scope declares never does
+//!   ([`ClassHierarchy::class_reference_send_runs_in_caller`], BT-4283): it is
+//!   one last-wins runtime class, so a send to it, qualified or not, may reach
+//!   another package's class process.
 //!
 //! This is a lint, not a guarantee: a block passed through a variable or an
 //! instance method is only caught at run time, and only for writes. A block
@@ -265,13 +269,20 @@ impl ClassCtx<'_> {
 
     /// The class a class-side send reaches when its receiver is statically
     /// *another* user-defined class whose method runs in that class's process
-    /// (see `ClassHierarchy::runs_class_method_in_caller`).
+    /// (see `ClassHierarchy::class_reference_send_runs_in_caller`).
+    ///
+    /// A shadowed name (`ClassHierarchy::is_shadowed_class`, BT-4283) is one
+    /// last-wins runtime class that a reference reaches through the class
+    /// registry, qualified (`json@Parser`) or not: whichever package's class
+    /// won the load answers, so neither this hierarchy's single entry nor the
+    /// qualifier can say the block stays home.
     fn foreign_class_send_target(&self, receiver: &Expression, selector: &str) -> Option<String> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
         };
         let target = name.name.as_str();
-        if package.is_some() || target == self.class_name {
+        let shadowed = self.hierarchy.is_shadowed_class(target);
+        if (package.is_some() && !shadowed) || target == self.class_name {
             return None;
         }
         // A stdlib class is stateless and its blocks run at home (`Result
@@ -279,13 +290,18 @@ impl ClassCtx<'_> {
         if ClassHierarchy::is_builtin_class(target) {
             return None;
         }
-        let method = self.hierarchy.find_class_method(target, selector)?;
-        if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
-            return None;
+        if !shadowed {
+            let method = self.hierarchy.find_class_method(target, selector)?;
+            if ClassHierarchy::is_builtin_class(method.defined_in.as_str()) {
+                return None;
+            }
         }
         // Runs in the caller (ADR 0142 §1, the one rule): the block stays home.
         // Anything else runs in `target`'s process.
-        (!self.hierarchy.runs_class_method_in_caller(target, selector)).then(|| target.to_string())
+        (!self
+            .hierarchy
+            .class_reference_send_runs_in_caller(target, selector))
+        .then(|| target.to_string())
     }
 
     /// The first class-variable write `block` makes, in source order: a

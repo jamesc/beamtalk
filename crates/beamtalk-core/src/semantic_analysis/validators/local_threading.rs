@@ -2789,24 +2789,26 @@ impl<'d> Walker<'d> {
     /// How a block argument of an ordinary send of `selector` to `receiver`
     /// escapes: to a class method that runs in the class's process (a class
     /// reference receiver, or `self` in a class method, unless the method runs
-    /// in the caller, `ClassHierarchy::runs_class_method_in_caller`, ADR 0142),
-    /// or to any other method.
+    /// in the caller, ADR 0142: `ClassHierarchy::class_reference_send_runs_in_caller`
+    /// for a class reference, which a shadowed name never does (BT-4283), and
+    /// `ClassHierarchy::runs_class_method_in_caller` for `self`, the running
+    /// class itself), or to any other method.
     fn passed_escape(&self, receiver: &Expression, selector: &EcoString) -> Escape {
         let receivers = self.receivers.as_ref();
-        let class = match receiver {
-            Expression::ClassReference { name, .. } => Some(name.name.clone()),
-            Expression::Identifier(id) if id.name == "self" && self.context == Class => {
-                receivers.map(|r| r.class_name.clone())
-            }
+        let runs_in_caller = match receiver {
+            Expression::ClassReference { name, .. } => Some(receivers.is_some_and(|r| {
+                r.hierarchy
+                    .class_reference_send_runs_in_caller(&name.name, selector)
+            })),
+            Expression::Identifier(id) if id.name == "self" && self.context == Class => receivers
+                .map(|r| {
+                    r.hierarchy
+                        .runs_class_method_in_caller(&r.class_name, selector)
+                }),
             _ => None,
         };
-        match class {
-            Some(class)
-                if !receivers
-                    .is_some_and(|r| r.hierarchy.runs_class_method_in_caller(&class, selector)) =>
-            {
-                Escape::ClassMethod(selector.clone())
-            }
+        match runs_in_caller {
+            Some(false) => Escape::ClassMethod(selector.clone()),
             _ if crate::state_threading_selectors::is_dictionary_inline_lookup(selector) => {
                 Escape::Lookup(selector.clone())
             }

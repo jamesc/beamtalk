@@ -307,7 +307,7 @@ impl CoreErlangGenerator {
     /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]).
     pub(in crate::core_erlang) fn set_shadowed_class_names(
         &mut self,
-        names: std::collections::HashSet<ecow::EcoString>,
+        names: beamtalk_core::semantic_analysis::ShadowedClassNames,
     ) {
         self.class_context_mut().shadowed_class_names = names;
     }
@@ -320,7 +320,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn is_shadowed_class(&self, class_name: &str) -> bool {
         self.class_context
             .as_ref()
-            .is_some_and(|ctx| ctx.shadowed_class_names.contains(class_name))
+            .is_some_and(|ctx| ctx.shadowed_class_names.is_shadowed(class_name))
     }
 
     /// Computes and installs the direct-call eligibility table from `hierarchy`.

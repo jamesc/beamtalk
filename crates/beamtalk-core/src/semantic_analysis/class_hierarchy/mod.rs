@@ -93,6 +93,11 @@ pub struct ClassHierarchy {
     /// complete. When true (and the scope is `ProjectComplete`), the
     /// receiver-knowledge classifier keeps every receiver `Open`.
     dependency_extensions_unknown: bool,
+    /// The class names more than one package in this compilation's scope
+    /// declares (BT-4151/BT-4283), installed by `analyse_full` and the
+    /// codegen driver from [`crate::semantic_analysis::shadowed_class_names_in_scope`].
+    /// Read only through [`Self::is_shadowed_class`].
+    shadowed_class_names: crate::semantic_analysis::ShadowedClassNames,
 }
 impl ClassHierarchy {
     /// Returns true if the given class name is a built-in class.
@@ -300,6 +305,7 @@ impl ClassHierarchy {
                     knowledge_scope:
                         crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
                     dependency_extensions_unknown: false,
+                    shadowed_class_names: crate::semantic_analysis::ShadowedClassNames::default(),
                 }
             })
             .clone()
@@ -384,6 +390,27 @@ impl ClassHierarchy {
         self.dependency_extensions_unknown = unknown;
     }
 
+    /// Installs the class names declared by more than one package in this
+    /// compilation's scope (BT-4283; see
+    /// [`crate::semantic_analysis::shadowed_class_names_in_scope`]).
+    pub fn set_shadowed_class_names(
+        &mut self,
+        names: crate::semantic_analysis::ShadowedClassNames,
+    ) {
+        self.shadowed_class_names = names;
+    }
+
+    /// Whether `class_name` is declared by more than one package in this
+    /// compilation's scope, so the runtime class a reference to it reaches is
+    /// a last-wins collision this hierarchy's single entry need not describe
+    /// (BT-4151). Answers through
+    /// [`crate::semantic_analysis::ShadowedClassNames::is_shadowed`], the
+    /// predicate codegen's `is_shadowed_class` gate also reads.
+    #[must_use]
+    pub fn is_shadowed_class(&self, class_name: &str) -> bool {
+        self.shadowed_class_names.is_shadowed(class_name)
+    }
+
     /// Mark the classes defined in `module` as having a possibly-incomplete
     /// method surface (parse-error guard).
     ///
@@ -420,7 +447,8 @@ impl ClassHierarchy {
     /// (BT-4300). The lints that ask where a class method runs
     /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
     /// `class-method-process-resource`) and the local-threading escape
-    /// analysis read this; codegen reads [`Self::is_direct_call_eligible`],
+    /// analysis read this (for a class *reference* receiver, through
+    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing); codegen reads [`Self::is_direct_call_eligible`],
     /// which adds only the own-method condition. Like every compile-time
     /// verdict it describes the classes as compiled: a class-side extension or
     /// ADR 0084 runtime fun sends the method back to the class process at run
@@ -430,6 +458,23 @@ impl ClassHierarchy {
         !ClassInfo::is_process_bound_class_selector(selector)
             && !ClassInfo::is_class_var_reflection_selector(selector)
             && !self.chain_has_class_variables(class_name)
+    }
+
+    /// Whether a send of the class-side `selector` to the class *reference*
+    /// `class_name` (`Parser parse: ...`, `json@Parser parse: ...`) is known to
+    /// run in the caller: [`Self::runs_class_method_in_caller`], unless the
+    /// name is shadowed ([`Self::is_shadowed_class`], BT-4283). A shadowed
+    /// name is one last-wins runtime class, so this hierarchy's entry need not
+    /// be the class the send reaches, and codegen sends it dynamically: a
+    /// block passed to it may run in that class's process. The block-escape
+    /// validators (`class-state-abroad`, local threading's passed-block
+    /// escape) and the `actor-state-abroad` lint ask this for a class
+    /// reference receiver; a `self class` receiver is the running class
+    /// itself and asks [`Self::runs_class_method_in_caller`] directly.
+    #[must_use]
+    pub fn class_reference_send_runs_in_caller(&self, class_name: &str, selector: &str) -> bool {
+        !self.is_shadowed_class(class_name)
+            && self.runs_class_method_in_caller(class_name, selector)
     }
 
     /// Whether a static send of the class-side `selector` to the literal class
