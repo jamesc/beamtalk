@@ -699,7 +699,7 @@ Examples:
 
 ```text
 Send 'foo:' at line 23: dynamic dispatch (receiver: Dynamic (unannotated parameter) [dynamic]; reason: untyped)
-Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string)
+Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 8 other selectors are answered outside bt@stdlib@string)
 Send 'start' at line 40: dynamic dispatch (receiver: AppSupervisor [Object, declared]; reason: supervisor — AppSupervisor instances are Supervisor handles (beamtalk_supervisor tuples))
 ```
 

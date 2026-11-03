@@ -301,6 +301,41 @@ repeat_one_test() ->
     ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:repeat(<<"abc">>, 1)).
 
 %%% ============================================================================
+%%% as_charlist/1 (BT-4380: code points, not UTF-8 bytes)
+%%% ============================================================================
+
+as_charlist_ascii_test() ->
+    ?assertEqual("hello", beamtalk_string:as_charlist({beamtalk_string, <<"hello">>})).
+
+as_charlist_empty_test() ->
+    ?assertEqual([], beamtalk_string:as_charlist({beamtalk_string, <<>>})).
+
+as_charlist_code_points_test() ->
+    %% One code point per character, matching the FFI proxy's coercion.
+    ?assertEqual(
+        [99, 97, 102, 233, 8364],
+        beamtalk_string:as_charlist({beamtalk_string, <<"caf\x{E9}\x{20AC}"/utf8>>})
+    ).
+
+as_charlist_invalid_utf8_test() ->
+    %% Only reachable via asStringUnchecked: no code-point reading exists.
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = asCharlist
+            }
+        },
+        beamtalk_string:as_charlist({beamtalk_string, <<255, 254>>})
+    ).
+
+as_charlist_non_string_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = asCharlist}},
+        beamtalk_string:as_charlist(42)
+    ).
+
+%%% ============================================================================
 %%% as_list/1
 %%% ============================================================================
 

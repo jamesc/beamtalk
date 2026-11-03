@@ -504,6 +504,28 @@ sealed typed Binary subclass: String
   /// ```
   asList -> List(String) => @primitive
 
+  /// Convert the string to an Erlang charlist: a `List` of Unicode code
+  /// points, one `Integer` per code point.
+  ///
+  /// This is the OTP charlist convention (`unicode:characters_to_list/1`)
+  /// and the same conversion the FFI proxy applies when it retries a call
+  /// with a `String` coerced to a charlist, so `"café" asCharlist` names
+  /// the same file as passing `"café"` straight to `file:` or `filename:`.
+  /// Use it for Erlang functions that take charlists, e.g.
+  /// `inet:parse_address/1`. Code points, not UTF-8 bytes: `"é" asCharlist`
+  /// is `#(233)`; use `toBytes` for the bytes (`#(195, 169)`).
+  /// `String fromCodePoints:` is the exact inverse. `String fromIolist:`
+  /// also reads it back, except that it tries bytes first: a charlist
+  /// whose code points are all below 256 *and* happen to spell valid
+  /// UTF-8 (`"Ã©" asCharlist` is `#(195, 169)`) reads back as `"é"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" asCharlist          // => #(104, 101, 108, 108, 111)
+  /// "café" asCharlist           // => #(99, 97, 102, 233)
+  /// ```
+  asCharlist -> List(Integer) => @primitive
+
   // === Enumerating ===
 
   /// Iterate over each grapheme cluster, evaluating `block` with each one.

@@ -206,6 +206,8 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             ", 'utf8')"
         ]),
         "asList" => Some(Document::Str("call 'beamtalk_string':'as_list'(Self)")),
+        // BT-4380: code points (OTP charlist convention), not UTF-8 bytes.
+        "asCharlist" => Some(Document::Str("call 'beamtalk_string':'as_charlist'(Self)")),
         "each:" => Some(call_self_p0("beamtalk_string", "each", p0)),
         "collect:" => Some(call_self_p0("beamtalk_string", "collect", p0)),
         "select:" => Some(call_self_p0("beamtalk_string", "select", p0)),
@@ -746,6 +748,15 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_string':'as_list'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_string_as_charlist() {
+        let result = doc_to_string(generate_string_bif("asCharlist", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'as_charlist'(Self)".to_string())
         );
     }
 
