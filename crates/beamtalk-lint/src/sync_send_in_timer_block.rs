@@ -6,22 +6,23 @@
 //!
 //! **DDD Context:** Compilation
 //!
-//! Timer blocks execute in a separate process. A synchronous `self method.`
-//! inside such a block sends a `gen_server:call` back to the actor that
-//! scheduled the timer, which is likely waiting for the timer callback to
-//! return — causing a deadlock.
+//! Timer blocks execute in a separate process. A synchronous `self method`
+//! inside such a block is served by the actor that scheduled the timer
+//! remotely (a `gen_server:call` back to it) rather than inline, and can
+//! deadlock if that actor is waiting on the timer (ADR 0137).
 //!
 //! ```text
-//! // Bad — deadlock: sync send to self in timer block
+//! // Risky — sync send to self from the timer process
 //! Timer every: 1000 do: [self refresh]
 //!
-//! // Good — async cast avoids deadlock
+//! // Good — async cast never waits on the actor
 //! Timer every: 1000 do: [self refresh!]
 //! ```
 
-use crate::LintPass;
+use crate::{LintPass, async_cast_hint};
 use beamtalk_core::ast::{Block, Expression, Identifier, MessageSelector, Module};
-use beamtalk_core::source_analysis::Diagnostic;
+use beamtalk_core::ast_walker::cascade_sends;
+use beamtalk_core::source_analysis::{Diagnostic, Span};
 
 /// Lint pass that warns on synchronous `self` sends inside `Timer every:do:`
 /// and `Timer after:do:` blocks.
@@ -69,6 +70,33 @@ fn is_self(expr: &Expression) -> bool {
     )
 }
 
+/// The lint for a synchronous `self {selector}` send inside a Timer block.
+///
+/// `has_cast_spelling` is false for a cascade message, which has no cast
+/// spelling of its own; otherwise only a unary send has one — `!` terminates
+/// the full send (`self update: 42!`, never `self update:!`). Without one the
+/// hint is generic.
+fn timer_self_send_diagnostic(
+    selector: &MessageSelector,
+    has_cast_spelling: bool,
+    span: Span,
+) -> Diagnostic {
+    let send = format!("self {}", selector.name());
+    let cast = (has_cast_spelling && matches!(selector, MessageSelector::Unary(_)))
+        .then(|| format!("{send}!"));
+    Diagnostic::lint(
+        format!(
+            "synchronous send `{send}` inside a Timer block is served by the actor \
+             remotely rather than inline, and can deadlock if the actor is waiting on the timer"
+        ),
+        span,
+    )
+    .with_hint(format!(
+        "Timer blocks run in a separate process. {}",
+        async_cast_hint(cast.as_deref())
+    ))
+}
+
 /// Handles a `MessageSend` node: detects Timer block boundaries and flags
 /// sync self-sends inside timer blocks. Returns `true` if a Timer send was
 /// detected (and fully handled), `false` otherwise.
@@ -77,7 +105,7 @@ fn check_message_send(
     selector: &MessageSelector,
     arguments: &[Expression],
     is_cast: bool,
-    span: beamtalk_core::source_analysis::Span,
+    span: Span,
     in_timer_block: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -96,19 +124,7 @@ fn check_message_send(
 
     // If we're inside a timer block and this is a sync self-send, flag it
     if in_timer_block && !is_cast && is_self(receiver) {
-        let selector_name = selector.name();
-        diagnostics.push(
-            Diagnostic::lint(
-                format!(
-                    "synchronous send `self {selector_name}` inside a Timer block will deadlock"
-                ),
-                span,
-            )
-            .with_hint(format!(
-                "Timer blocks run in a separate process; \
-                 use `self {selector_name}!` (async cast) instead"
-            )),
-        );
+        diagnostics.push(timer_self_send_diagnostic(selector, true, span));
     }
     false
 }
@@ -171,26 +187,31 @@ fn walk_for_timer_sends(
             messages,
             span,
         } => {
-            walk_for_timer_sends(receiver, in_timer_block, diagnostics);
-            // Cascades send all messages to the same receiver. If the receiver
-            // is `self` and we're in a timer block, each cascade message is an
-            // inherently synchronous send that will deadlock.
-            if in_timer_block && is_self(receiver) {
-                for msg in messages {
-                    let selector_name = msg.selector.name();
-                    diagnostics.push(
-                        Diagnostic::lint(
-                            format!(
-                                "synchronous send `self {selector_name}` inside a Timer block will deadlock"
-                            ),
-                            *span,
-                        )
-                        .with_hint(format!(
-                            "Timer blocks run in a separate process; \
-                             use `self {selector_name}!` (async cast) instead"
-                        )),
-                    );
+            // Cascades send all messages to the same receiver. The parser folds
+            // the first message into `receiver` as a whole `MessageSend`, so
+            // `cascade_sends` pairs every message (first and later) with the
+            // shared receiver (BT-3716). A cascade message has no cast
+            // spelling of its own, so each gets the generic hint.
+            if in_timer_block {
+                for send in cascade_sends(expr) {
+                    if !send.is_cast && is_self(send.receiver) {
+                        diagnostics.push(timer_self_send_diagnostic(send.selector, false, *span));
+                    }
                 }
+            }
+            // The folded first message was judged above: when it is a `self`
+            // send, walk only its arguments so it is not reported twice.
+            match receiver.as_ref() {
+                Expression::MessageSend {
+                    receiver: inner,
+                    arguments,
+                    ..
+                } if is_self(inner) => {
+                    for arg in arguments {
+                        walk_for_timer_sends(arg, in_timer_block, diagnostics);
+                    }
+                }
+                _ => walk_for_timer_sends(receiver, in_timer_block, diagnostics),
             }
             for msg in messages {
                 for arg in &msg.arguments {
@@ -367,6 +388,73 @@ mod tests {
             diags[0].message.contains("self update:"),
             "message: {}",
             diags[0].message
+        );
+    }
+
+    #[test]
+    fn keyword_self_send_hint_is_generic() {
+        // `!` terminates the full send: `self update:!` would not parse.
+        let diags = timer_lints(
+            "Actor subclass: Foo\n  start =>\n    Timer after: 0 do: [self update: 42]\n",
+        );
+        assert_eq!(diags.len(), 1, "expected one lint, got: {diags:?}");
+        let hint = diags[0].hint.as_ref().expect("expected a hint");
+        assert!(
+            hint.contains("`!` after the full send"),
+            "keyword hint must be generic: {hint:?}"
+        );
+        assert!(!hint.contains("update:!"), "invalid spelling: {hint:?}");
+    }
+
+    #[test]
+    fn cascade_self_send_hint_is_generic() {
+        // A cascade message has no cast spelling of its own, and every
+        // message — the folded first one included — is reported once.
+        let diags = timer_lints(
+            "Actor subclass: Foo\n  start =>\n    Timer after: 0 do: [self refresh; save]\n",
+        );
+        assert_eq!(
+            diags.len(),
+            2,
+            "expected one lint per message, got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("`self refresh`"),
+            "{}",
+            diags[0].message
+        );
+        assert!(
+            diags[1].message.contains("`self save`"),
+            "{}",
+            diags[1].message
+        );
+        for d in &diags {
+            let hint = d.hint.as_ref().expect("expected a hint");
+            assert!(
+                hint.contains("`!` after the full send"),
+                "cascade hint must be generic: {hint:?}"
+            );
+            assert!(
+                !hint.contains("save!"),
+                "no cascade cast spelling: {hint:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn message_does_not_claim_certain_deadlock() {
+        // Post-ADR 0137 the send is served remotely and works; it deadlocks
+        // only if the actor is waiting on the timer.
+        let diags = timer_lints(
+            "Actor subclass: Foo\n  start =>\n    Timer every: 1000 do: [self refresh]\n",
+        );
+        assert_eq!(diags.len(), 1, "expected one lint, got: {diags:?}");
+        let msg = &diags[0].message;
+        assert!(!msg.contains("will deadlock"), "overstated: {msg}");
+        assert!(
+            msg.contains("served by the actor remotely rather than inline")
+                && msg.contains("can deadlock if the actor is waiting on the timer"),
+            "message: {msg}"
         );
     }
 }

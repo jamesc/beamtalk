@@ -80,7 +80,7 @@
 
 use std::collections::HashSet;
 
-use crate::{LintPass, hierarchy_for_lint};
+use crate::{LintPass, async_cast_hint, hierarchy_for_lint};
 use beamtalk_core::ast::{
     Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement,
     MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation,
@@ -749,10 +749,7 @@ fn self_send_diagnostic(
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
-    let hint = self_send.cast.as_ref().map_or_else(
-        || "Use an async cast (`!` after the full send) instead (ADR 0137)".to_string(),
-        |cast| format!("Use `{cast}` (async cast) instead (ADR 0137)"),
-    );
+    let hint = async_cast_hint(self_send.cast.as_deref());
     Diagnostic::lint(
         format!(
             "block sends `{}` and is {}: the send is served by {class} remotely \
