@@ -98,13 +98,13 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             " = ",
             body_code,
-            " in let _ = apply ",
-            leaf::var(body_var),
-            " () in apply ",
+            " in let _ = ",
+            // BT-4366: the body apply sits inside the loop's `letrec`.
+            self.annotate_current_send_call(docvec!["apply ", leaf::var(body_var), " ()"]),
+            " in apply ",
             leaf::fname(loop_fn.clone(), 0),
-            " () in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            " () in ",
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ])
     }
 

@@ -1467,11 +1467,16 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "let ",
             leaf::var(nested_var.clone()),
-            " = call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(outer_array_var.to_string()),
-            ", 'at:', [",
-            index_lit(one_based),
-            "]) in ",
+            " = ",
+            // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(outer_array_var.to_string()),
+                ", 'at:', [",
+                index_lit(one_based),
+                "])"
+            ]),
+            " in ",
             "case call 'erlang':'is_map'(",
             leaf::var(nested_var.clone()),
             ") of ",
@@ -1518,11 +1523,16 @@ impl CoreErlangGenerator {
         docvec![
             "let ",
             leaf::var(dup_var.clone()),
-            " = call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(array_var.to_string()),
-            ", 'at:', [",
-            index_lit(one_based),
-            "]) in ",
+            " = ",
+            // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(array_var.to_string()),
+                ", 'at:', [",
+                index_lit(one_based),
+                "])"
+            ]),
+            " in ",
             "case call 'erlang':'=:='(",
             leaf::var(core_var),
             ", ",
@@ -1597,11 +1607,16 @@ impl CoreErlangGenerator {
                     Ok(docvec![
                         "let ",
                         leaf::var(core_var),
-                        " = call 'beamtalk_message_dispatch':'send'(",
-                        leaf::var(array_var.to_string()),
-                        ", 'at:', [",
-                        index_lit(one_based),
-                        "]) in ",
+                        " = ",
+                        // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
+                        self.annotate_current_send_call(docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            leaf::var(array_var.to_string()),
+                            ", 'at:', [",
+                            index_lit(one_based),
+                            "])"
+                        ]),
+                        " in ",
                         next
                     ])
                 }

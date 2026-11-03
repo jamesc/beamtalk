@@ -3339,8 +3339,20 @@ impl CoreErlangGenerator {
     /// The receiver is compiled as-is: a caller whose receiver holds a field
     /// write has sequenced it ahead (`hoist_vt_operand_producers`,
     /// [`Self::vt_conditional_value_producer`]).
-    #[allow(clippy::too_many_lines)]
     fn lower_vt_conditional(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+        capture_value: bool,
+    ) -> Result<Option<VtConditionalLowered>> {
+        // BT-4366: the conditional's nested call nodes carry its line.
+        self.with_current_span(expr.span(), |this| {
+            this.lower_vt_conditional_inner(expr, frame, capture_value)
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn lower_vt_conditional_inner(
         &mut self,
         expr: &Expression,
         frame: FrameId,

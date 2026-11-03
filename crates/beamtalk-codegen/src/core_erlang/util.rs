@@ -351,6 +351,20 @@ impl CoreErlangGenerator {
         expr: &Expression,
         frame: FrameId,
     ) -> Result<ThreadedValue> {
+        // BT-4366: a producer lowered here never passes through
+        // `generate_expression`, so it names its own line
+        // for the call nodes nested in its `let`/`case` (see
+        // `current_send_span`).
+        self.with_current_span(expr.span(), |this| {
+            this.threaded_expression_with_sync_window(expr, frame)
+        })
+    }
+
+    fn threaded_expression_with_sync_window(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
         // ADR 0137: with the flag on, a call that may run user code is bracketed.
         if let Some(window) = self.open_sync_window(expr) {
             let version_before = self.state_version();
