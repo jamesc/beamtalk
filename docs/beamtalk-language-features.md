@@ -4987,10 +4987,11 @@ ordinary dynamic send. A built-in receiver with its own representation
 dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
 `String` and `Pid` receivers do the same for every selector except the few the
 dynamic send answers outside their module, which stay dynamic: `Pid`'s future
-protocol (`await`, `await:`, `awaitForever`, `whenResolved:`,
-`whenRejected:`), and the byte-level selectors `String` shares with `Binary`
-(`asBase64`, `asBase64Url`, `asCharlist`, `asHex`, `asStringUnchecked`,
-`bitSize`, `byteAt:`, `concat:`, `part:size:`, `toBytes`). A `String`
+protocol (`await`, `whenResolved:`, …) and the byte-level selectors `String`
+shares with `Binary` (`byteAt:`, `asHex`, …). The exact lists are the
+`special_selectors` of the `String` and `Pid` rows in the routing fixture
+(`tagged_map_routing_conformance.json`), which the runtime conformance tests
+check against `beamtalk_primitive`. A `String`
 extension never moves any other selector: it is looked up inside `String`'s
 module, so a typed call site sees it at once. `Binary`, `Boolean`,
 `Bitstring` and `Character` receivers, abstract classes, `Object`, `Value`,
