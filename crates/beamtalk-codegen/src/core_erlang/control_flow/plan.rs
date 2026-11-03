@@ -877,7 +877,8 @@ impl ThreadingPlan {
         if !allow_direct_params || threaded_locals.is_empty() {
             return false;
         }
-        (!body_analysis.has_state_effects() || !field_writes_block_stateless_loops())
+        !body_analysis.has_self_sends
+            && (body_analysis.field_writes.is_empty() || !field_writes_block_stateless_loops())
             && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
@@ -904,7 +905,8 @@ impl ThreadingPlan {
         {
             return false;
         }
-        (!body_analysis.has_state_effects() || !field_writes_block_stateless_loops())
+        !body_analysis.has_self_sends
+            && (body_analysis.field_writes.is_empty() || !field_writes_block_stateless_loops())
             && !effects.body_has_synced_sends
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations

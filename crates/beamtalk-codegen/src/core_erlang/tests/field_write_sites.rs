@@ -11,6 +11,13 @@
 //! constructions and the hook's callers are counted per file in
 //! [`FIELD_WRITE_SITES`]: a new site is a reviewed edit to that list, not a
 //! silent bypass. Mirrors `stale_read_sites.rs` (BT-4180).
+//!
+//! Two kinds of write are counted. A static field write (`self.x := v`) builds
+//! a `BindOp::Put { field: .. }` ([`FIELD_WRITE_SITES`]). A dynamic-key write
+//! (`self fieldAt: k put: v`, `self clearField: k`) builds a raw `maps:put` or
+//! `maps:remove` document on a name variable and is noted as `"<dynamic>"`
+//! ([`DYNAMIC_FIELD_WRITE_SITES`]); a self-send keeps such a body off the
+//! stateless paths too, so the record is a second guard, not the only one.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +31,17 @@ const LOCAL_SLOT_PUT: &str = "BindOp::Put{field:state_key";
 
 /// The hook's call, with a leading `.` so its definition is not counted.
 const NOTE_CALL: &str = ".note_field_write(";
+
+/// The hook's call for a dynamic key, counted apart from [`NOTE_CALL`]'s
+/// static callers.
+const NOTE_DYNAMIC_CALL: &str = ".note_field_write(\"<dynamic>\"";
+
+/// A dynamic-key field mutation: a `maps:put` or `maps:remove` on a name
+/// variable, matched with whitespace removed.
+const DYNAMIC_MUTATIONS: &[&str] = &[
+    "'maps':'put'(\",leaf::var(name_var)",
+    "'maps':'remove'(\",leaf::var(name_var)",
+];
 
 /// Production code ends where the inline test module starts.
 const TEST_MODULE: &str = "#[cfg(test)]modtests";
@@ -46,6 +64,17 @@ const FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
 /// builds: the emitter renders a frame-slot rebind (`key` is a slot key naming
 /// a local, `threaded_ir/emit.rs`). Not counted as field writes.
 const NOT_FIELD_WRITES: &[(&str, usize)] = &[("threaded_ir/emit.rs", 1)];
+
+/// Every file that builds a dynamic-key field mutation or notes one, with how
+/// many of each: (path relative to `core_erlang/`, mutations, `"<dynamic>"`
+/// hook calls). `fieldAt:put:` and `clearField:` in the open-document
+/// lowering, in a conditional arm (three kinds) and in a control-flow method
+/// body.
+const DYNAMIC_FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
+    ("control_flow/conditionals.rs", 3, 3),
+    ("dispatch_codegen.rs", 2, 2),
+    ("gen_server/methods.rs", 1, 1),
+];
 
 fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("core_erlang source dir is readable") {
@@ -87,6 +116,7 @@ fn field_writes_record_themselves_for_the_loop_checkout() {
         "the walk found the code generator sources"
     );
     let mut found: Vec<(String, usize, usize)> = Vec::new();
+    let mut found_dynamic: Vec<(String, usize, usize)> = Vec::new();
     for file in files {
         let rel = file
             .strip_prefix(&root)
@@ -100,9 +130,17 @@ fn field_writes_record_themselves_for_the_loop_checkout() {
             .map_or(0, |(_, n)| *n);
         let puts =
             code.matches(FIELD_PUT).count() - code.matches(LOCAL_SLOT_PUT).count() - not_field;
-        let notes = code.matches(NOTE_CALL).count();
+        let dynamic_notes = code.matches(NOTE_DYNAMIC_CALL).count();
+        let notes = code.matches(NOTE_CALL).count() - dynamic_notes;
+        let dynamic_writes: usize = DYNAMIC_MUTATIONS
+            .iter()
+            .map(|pattern| code.matches(pattern).count())
+            .sum();
         if puts > 0 || notes > 0 {
-            found.push((rel, puts, notes));
+            found.push((rel.clone(), puts, notes));
+        }
+        if dynamic_writes > 0 || dynamic_notes > 0 {
+            found_dynamic.push((rel, dynamic_writes, dynamic_notes));
         }
     }
     found.sort();
@@ -121,6 +159,24 @@ fn field_writes_record_themselves_for_the_loop_checkout() {
         assert!(
             notes >= puts,
             "{rel}: {puts} field `Put`s but only {notes} `note_field_write` calls"
+        );
+    }
+    found_dynamic.sort();
+    let mut expected_dynamic: Vec<(String, usize, usize)> = DYNAMIC_FIELD_WRITE_SITES
+        .iter()
+        .map(|(f, w, n)| ((*f).to_string(), *w, *n))
+        .collect();
+    expected_dynamic.sort();
+    assert_eq!(
+        found_dynamic, expected_dynamic,
+        "BT-4369: a dynamic-key field mutation (`fieldAt:put:`, `clearField:`) appeared, moved or \
+         vanished. Each must call `note_field_write(\"<dynamic>\", ..)`; update \
+         `DYNAMIC_FIELD_WRITE_SITES` only for a site that does."
+    );
+    for (rel, writes, notes) in &found_dynamic {
+        assert!(
+            notes >= writes,
+            "{rel}: {writes} dynamic field mutations but only {notes} `<dynamic>` hook calls"
         );
     }
 }

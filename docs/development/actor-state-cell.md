@@ -337,8 +337,9 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   whole `State` and never brackets around the write. The rule is also checked
   independently of mode selection: every field-write lowering calls
   `note_field_write` (`lower_simple_field_write_bind`,
-  `lower_hybrid_field_rebind`, the arm and method-body field `Put`s), which
-  records the write on the innermost loop marker; the checkout that brackets
+  `lower_hybrid_field_rebind`, the arm and method-body field `Put`s, and the
+  dynamic-key writers `fieldAt:put:` and `clearField:`, noted as
+  `"<dynamic>"`), which records the write on the innermost loop marker; the checkout that brackets
   reports each one as `FieldWriteInBracketedLoop`, and a loop that does not
   bracket hands them to the enclosing marker, so a write in a nested loop is
   seen by a bracketing ancestor. This is the rule the nested-`StateAcc` seed
@@ -349,8 +350,10 @@ cost of gate 3. The bracket closes it without threading (BT-4121):
   arm and an `on:do:` body all call the same hook. A write inside an actor
   closure goes through the cell view (`cell_field_write_doc`), is never part of
   the loop's frame and records nothing. `tests/field_write_sites.rs` counts the
-  field `Put` constructions and the hook's callers per file, so a new write
-  site cannot skip the record; `tests/guarded_op_loops.rs` shows the finding
+  field `Put` constructions, the dynamic `maps:put`/`maps:remove` mutations and
+  the hook's callers per file, so a new write site of either shape cannot skip
+  the record. (A self-send, which `fieldAt:put:` and `clearField:` are, keeps a
+  body off the stateless paths too, so for those the record is a second guard.) `tests/guarded_op_loops.rs` shows the finding
   fires under a test-only fault that turns mode selection's exclusion off.
 - Each marker records the loop-entry `State`, and each threaded-`State` use
   in its body (an `on:do:` `PreState` boundary, a `StateAcc` seed) is noted

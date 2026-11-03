@@ -1220,6 +1220,8 @@ impl CoreErlangGenerator {
                 // `Statement`, but `Bind`'s `op` may still be opaque).
                 BodyExprKind::SelfFieldAtPutControlFlow => {
                     if let Expression::MessageSend { arguments, .. } = expr {
+                        // BT-4369: a dynamic-key field write records itself for the loop checkout.
+                        self.note_field_write("<dynamic>", span);
                         let name_var = self.fresh_temp_var("Name");
                         let name_code = self.expression_doc(&arguments[0])?;
                         let tuple_var = self.fresh_temp_var("CfTuple");

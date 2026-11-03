@@ -128,7 +128,9 @@ thread_local! {
 /// BT-4369: whether a body's field writes keep it out of a stateless loop
 /// (direct fun parameters or a tuple accumulator), as mode selection requires.
 /// Always `true`; a test-only fault turns it off so the loop checkout's
-/// `FieldWriteInBracketedLoop` rule can be shown to fire.
+/// `FieldWriteInBracketedLoop` rule can be shown to fire. Only the field-write
+/// half of the exclusion: a body with a self-send stays off the stateless
+/// paths either way.
 pub(in crate::core_erlang) fn field_writes_block_stateless_loops() -> bool {
     #[cfg(test)]
     if FAULT_STATELESS_FIELD_WRITES.with(std::cell::Cell::get) {
