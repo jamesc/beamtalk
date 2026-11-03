@@ -1783,14 +1783,17 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // `class` (unary, well-known) returns class as first-class object.
         if matches!(selector.well_known(), Some(WellKnownSelector::Class)) {
+            // BT-4127: a receiver typed as a tagged-map class gets the class
+            // object inline, behind the BT-4069 tag guard.
+            if let Ok(super::dispatch_codegen::TypedSendTarget::Tagged(target)) =
+                self.typed_send_target(receiver, selector)
+            {
+                return self.generate_typed_class_of(receiver, &target).map(Some);
+            }
             // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "Obj")?;
             let recv_doc = seq.next();
-            let call_doc = docvec![
-                "call 'beamtalk_primitive':'class_of_object'(",
-                recv_doc,
-                ")",
-            ];
+            let call_doc = Self::class_of_object_call_doc(recv_doc);
             return Ok(Some(seq.close(self, call_doc, "ClassRes")));
         }
 

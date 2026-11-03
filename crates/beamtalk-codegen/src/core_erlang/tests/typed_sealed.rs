@@ -1406,3 +1406,219 @@ fn abstract_value_new_stays_a_plain_builder_for_subclass_chaining() {
 // BT-4200 (3)'s exclusion-set-vs-fixture test is structural since BT-4292:
 // the exclusion set is generated from the shared fixture
 // (`routing::routing_table_tests::routing_table_is_generated_from_fixture`).
+
+// ---------------------------------------------------------------------------
+// BT-4127: `obj class` on a typed tagged-map receiver builds the class object
+// inline behind the same tag guard; every other receiver keeps the plain
+// `class_of_object/1` call.
+// ---------------------------------------------------------------------------
+
+/// The plain `obj class` lowering (and the inline shape's miss arms).
+const CLASS_OF_OBJECT: &str = "call 'beamtalk_primitive':'class_of_object'(";
+
+/// Asserts `code` lowers `obj class` to the plain `class_of_object/1` call,
+/// with no inline class object.
+fn assert_plain_class_of(code: &str, why: &str) {
+    assert!(
+        code.contains(CLASS_OF_OBJECT),
+        "{why}: `class` should stay a class_of_object/1 call. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("TClassRecv"),
+        "{why}: `class` must not take the inline path. Got:\n{code}"
+    );
+}
+
+#[test]
+fn sealed_value_typed_class_is_inlined_behind_the_tag_guard() {
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  classOf: w :: SealedWidget -> Object =>\n",
+        "    w class\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        code.contains("maps':'get'('$beamtalk_class', _TClassRecv"),
+        "inline class should be guarded on the runtime class tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "<'SealedWidget'> when 'true' -> case call 'erlang':'whereis'('beamtalk_class_SealedWidget') of"
+        ),
+        "a tag match should look the class pid up by its compile-time registered name. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"),
+        "a live class should answer the class object with the pinned module. Got:\n{code}"
+    );
+    // Miss arms: the inner tag mismatch, the non-map arm and a removed class
+    // (`whereis` answers 'undefined') each fall back to the dynamic call.
+    assert_eq!(
+        code.matches("call 'beamtalk_primitive':'class_of_object'(_TClassRecv")
+            .count(),
+        3,
+        "every miss arm should fall back to class_of_object/1. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("class_of_object_by_name") && !code.contains("class_object_tag"),
+        "the inline path builds no tag at runtime. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn typed_class_binds_the_receiver_once() {
+    // The receiver is a send: it must run exactly once, before the guard, and
+    // every arm reads the bound temp.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  classOf: f :: Factory -> Object =>\n",
+        "    f make class\n\n",
+        "Object subclass: Factory\n",
+        "  make -> SealedWidget => SealedWidget new\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    // Bound once, read by is_map, maps:get and the three fallbacks.
+    assert_eq!(
+        code.matches("TClassRecv").count(),
+        6,
+        "receiver should be bound once and read five times. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn open_value_typed_class_is_inlined() {
+    // BT-4293: the guard matches the exact tag, so a subclass instance
+    // misses it and takes `class_of_object/1` — `sealed` is not needed.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  classOf: w :: OpenWidget -> Object =>\n",
+        "    w class\n\n",
+        "Value subclass: OpenWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        code.contains("{'beamtalk_object', 'OpenWidget class', 'bt@open_widget', _TClassPid"),
+        "open typed receiver should inline the class object too. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn typed_class_inside_an_actor_is_verifier_clean() {
+    // Debug assertions are on, so a ThreadedIr verifier finding panics here.
+    let code = codegen(concat!(
+        "Actor subclass: Caller\n",
+        "  state: last :: Object = nil\n",
+        "  classOf: w :: SealedWidget -> Object =>\n",
+        "    self.last := w class\n",
+        "    self.last\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        code.contains("{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"),
+        "actor-side typed receiver should inline the class object. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn untyped_class_stays_plain() {
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  classOf: w -> Object =>\n",
+        "    w class\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert_plain_class_of(&code, "untyped receiver");
+}
+
+#[test]
+fn class_of_non_tagged_and_excluded_receivers_stays_plain() {
+    // Built-ins (even ones with a guarded send route), abstract classes, the
+    // exception family and representation ancestors: no inline class object.
+    for (ty, extra) in [
+        ("Integer", ""),
+        ("List(Integer)", ""),
+        ("String", ""),
+        (
+            "AbstractShape",
+            "abstract Value subclass: AbstractShape\n  field: x :: Integer = 0\n",
+        ),
+        (
+            "SealedBoom",
+            "sealed typed Exception subclass: SealedBoom\n  answer -> Integer => 42\n",
+        ),
+        ("Error", ""),
+        ("Object", ""),
+    ] {
+        let code = codegen(&format!(
+            "Object subclass: Caller\n  classOf: r :: {ty} -> Object =>\n    r class\n\n{extra}"
+        ));
+        assert_plain_class_of(&code, ty);
+    }
+}
+
+#[test]
+fn module_less_ambient_class_of_stays_plain() {
+    let src = concat!(
+        "Object subclass: Caller\n",
+        "  classOf: w :: AmbientWidget -> Object =>\n",
+        "    w class\n",
+    );
+    let code = codegen_with_ambient(src, ambient_sealed_object(true, None));
+    assert_plain_class_of(&code, "module-less receiver");
+    // Positive control: the same class with a compiled module is inlined, so
+    // the negative above cannot pass vacuously.
+    let code = codegen_with_ambient(src, ambient_sealed_object(false, None));
+    assert!(
+        code.contains("{'beamtalk_object', 'AmbientWidget class', 'bt@ambient_widget', _TClassPid"),
+        "module-ful ambient receiver should inline the class object. Got:\n{code}"
+    );
+}
+
+#[test]
+fn shadowed_class_of_stays_plain() {
+    // BT-4151: two packages' `AmbientWidget` collide into one last-wins
+    // runtime class, so no module can be pinned.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  classOf: w :: AmbientWidget -> Object =>\n",
+        "    w class\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@app@caller").with_class_hierarchy(vec![
+            ambient_sealed_object(false, Some("json")),
+            ambient_sealed_object(false, Some("xml")),
+        ]),
+    )
+    .expect("codegen should succeed");
+    assert_plain_class_of(&code, "shadowed class name");
+}
+
+#[test]
+fn packaged_ambient_class_of_pins_the_qualified_module() {
+    // The module pin is `typed_tagged_target`'s, so it follows the same
+    // resolution as the direct `dispatch/3` call.
+    let code = codegen_with_ambient(
+        concat!(
+            "Object subclass: Caller\n",
+            "  classOf: w :: AmbientWidget -> Object =>\n",
+            "    w class\n",
+        ),
+        ambient_sealed_object(false, Some("live")),
+    );
+    assert!(
+        code.contains(
+            "{'beamtalk_object', 'AmbientWidget class', 'bt@live@ambient_widget', _TClassPid"
+        ),
+        "packaged ambient receiver should pin the qualified module. Got:\n{code}"
+    );
+}
