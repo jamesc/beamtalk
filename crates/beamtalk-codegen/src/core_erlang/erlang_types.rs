@@ -269,14 +269,8 @@ impl ModuleName {
     /// - `"BeamtalkRuntime"` → `"beamtalk_runtime_class"` (not `"beamtalk_beamtalk_runtime_class"`)
     #[must_use]
     pub fn class(class_name: &str) -> Self {
-        let snake = to_module_name(class_name);
-        let base = if snake.starts_with("beamtalk_") {
-            snake
-        } else {
-            format!("beamtalk_{snake}")
-        };
         Self {
-            name: format!("{base}_class"),
+            name: format!("{}_class", Self::instance(class_name).name),
         }
     }
 

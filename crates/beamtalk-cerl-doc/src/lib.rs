@@ -248,6 +248,22 @@ fn len_as_isize(len: usize) -> isize {
 }
 
 impl Document<'_> {
+    /// Returns the text content of a `Str` or `Owned` leaf, or `None` for
+    /// any other variant (including `Vec`, `Nest`, …).
+    ///
+    /// Callers that need to inspect literal text (e.g. to detect a known
+    /// structural marker like `"( "`) should use this rather than matching
+    /// on the variant directly — `Document::Owned` is construction-restricted
+    /// to typed-leaf helpers (ADR 0089).
+    #[must_use]
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Document::Str(s) => Some(s),
+            Document::Owned(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
     /// Renders the document to a string using the default line width.
     ///
     /// Uses the Wadler-Lindig algorithm: `Group` nodes are rendered flat when
