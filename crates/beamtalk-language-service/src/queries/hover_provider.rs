@@ -3541,7 +3541,16 @@ mod tests {
     /// both on the declaration selector and at a send site.
     #[test]
     fn hover_on_options_doc_shows_signature_plus_option_bullets() {
+        // Typed like a real BT-4337 options method (BT-4382): both hovers
+        // carry the parameter and return types, asserted in full. The
+        // declaration shows the source signature; a send site shows the
+        // hierarchy's signature, which has types but no parameter names.
+        const DECLARATION_HOVER: &str =
+            "```beamtalk\nfetch: url :: String options: opts :: List(FetchOption) -> String\n```";
+        const SEND_SITE_HOVER: &str =
+            "```beamtalk\nfetch: String options: List(FetchOption) -> String\n```";
         let source = concat!(
+            "type FetchOption = #timeout | #retries\n",
             "Object subclass: Fetcher\n",
             "  /// Fetch a URL with options.\n",
             "  ///\n",
@@ -3551,7 +3560,7 @@ mod tests {
             "  /// ## Options\n",
             "  /// - `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n",
             "  /// - `#retries` (Integer, default `3`) — times to retry on failure.\n",
-            "  class fetch: url options: opts => url\n",
+            "  class fetch: url :: String options: opts :: List(FetchOption) -> String => url\n",
             "  run => Fetcher fetch: 1 options: 2\n",
         );
         let tokens = lex_with_eof(source);
@@ -3559,13 +3568,9 @@ mod tests {
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let assert_options_hover = |hover: Option<HoverInfo>| {
+        let assert_options_hover = |hover: Option<HoverInfo>, expected_signature: &str| {
             let hover = hover.expect("hover on method with ## Options docs");
-            assert!(
-                hover.contents.contains("fetch:"),
-                "hover shows the signature, got: {}",
-                hover.contents
-            );
+            assert_eq!(hover.contents, expected_signature);
             let doc = hover.documentation.as_deref().unwrap_or_default();
             assert!(
                 doc.contains("## Options"),
@@ -3581,17 +3586,20 @@ mod tests {
 
         // Declaration selector.
         let offset = source.find("fetch: url").unwrap();
-        assert_options_hover(hover_at(source, pos_at(source, offset)));
+        assert_options_hover(hover_at(source, pos_at(source, offset)), DECLARATION_HOVER);
 
         // Send site: hovering the call resolves via the hierarchy.
         let offset = source.rfind("fetch: 1").unwrap();
-        assert_options_hover(compute_hover(
-            &module,
-            source,
-            pos_at(source, offset),
-            &hierarchy,
-            None,
-            None,
-        ));
+        assert_options_hover(
+            compute_hover(
+                &module,
+                source,
+                pos_at(source, offset),
+                &hierarchy,
+                None,
+                None,
+            ),
+            SEND_SITE_HOVER,
+        );
     }
 }

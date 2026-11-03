@@ -99,8 +99,11 @@ configures `ignore_modules` (currently just `BtAttachWeb.Layouts`, a pure
 `Mix.Tasks.Test.Coverage` only reads `:threshold` from there, not from the
 top-level `test_coverage` options. The `liveview` CI job runs `mix test
 --cover` directly, so PRs get the threshold enforced as a real gate; a
-separate `coverage` job (push-to-`main` only) publishes the
-`elixir-coverage.json` badge.
+separate `coverage` job in `liveview.yml` (push-to-`main` only) publishes
+the `elixir-coverage.json` badge, through the same
+`scripts/ci/publish-coverage-badge.sh` that `ci.yml`'s `publish-coverage`
+job uses for the Rust and Erlang badges (measured by its `coverage-rust`
+and `coverage-erlang` legs).
 
 The threshold started at 55 (floor below the ~60% baseline measured in
 BT-3288). After the WorkspaceLive decomposition and direct-test issues

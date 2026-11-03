@@ -265,10 +265,12 @@ Object subclass: Search
 
 - Prefer tuple destructuring over positional access: `{method, target, headers, t} := ...`
   keeps field names at the use site and reads better than `req at: 1` chains.
-- For multi-field `Value` construction, prefer the `new:` map form with one
-  entry per line (missing keys keep defaults). It scales better than long
-  `withX:` chains and, unlike the keyword constructor, does not require
-  every slot.
+- Construct a `Value` with its keyword constructor by default
+  (`Point x: 3 y: 4`), as the language reference recommends. Use the `new:`
+  map form, one entry per line, when there are many slots or you want some
+  slots to keep their defaults: missing keys keep defaults, while the keyword
+  constructor requires every slot. Either reads better than a long `withX:`
+  chain.
 
 ## Language Documentation
 
