@@ -1193,7 +1193,7 @@ impl CoreErlangGenerator {
     /// and every guard miss take the dynamic call, so a lying annotation, a
     /// subclass instance or a future changes nothing.
     ///
-    /// Known limitation (shared with the direct `dispatch/3`): a class
+    /// Known limitation (BT-4200, shared with the direct `dispatch/3`): a class
     /// redefined into a *different* module after this unit compiled leaves
     /// the pin stale, and the answer then differs from the class reference
     /// in its module field until the caller is recompiled.
