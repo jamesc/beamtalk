@@ -87,6 +87,30 @@ fn whole_binary_tail_is_all_compiler_generated() {
 }
 
 #[test]
+fn nested_construction_value_skips_the_string_unwrap() {
+    // BT-4407: a nested construction is a raw bitstring by construction, so
+    // its `binary`/`bits` segment emits no `String` unwrap; a variable
+    // beside it in the same construction still gets one.
+    for body in [
+        "<<16:8, (<<v:8, 7:8>>)/binary>>",
+        "<<((<<v:8>>)):1/binary>>",
+        "<<(<<v:3>>)/bits>>",
+    ] {
+        let code = compile_body(body);
+        assert!(
+            !code.contains("<{'beamtalk_string', "),
+            "{body}: String unwrap emitted in\n{code}"
+        );
+    }
+    let code = compile_body("<<(<<v:8>>)/binary, p/binary>>");
+    assert_eq!(
+        code.matches("<{'beamtalk_string', ").count(),
+        1,
+        "only `p` is unwrapped in\n{code}"
+    );
+}
+
+#[test]
 fn bits_tail_is_binary_with_unit_one() {
     let code = compile_body("<<p/bits>>");
     assert!(
@@ -321,7 +345,7 @@ fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
     }
 
     // Other scope kinds: the construction compiles (through erlc when
-    // available) with its operands threaded.
+    // available); the left-to-right order is only checked above.
     for (context, src) in [
         (
             "value type",

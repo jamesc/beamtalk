@@ -93,6 +93,9 @@ const CEILINGS: &[(&str, usize)] = &[
     // peels; `(super)` checks; cascade shared receivers
     // (`tier2_merge_call_name`, `sequence_children` of a cascade receiver).
     ("beamtalk-codegen/src/core_erlang/actor_state_access.rs", 1),
+    // A binary construction segment's value (BT-4407: a nested construction
+    // needs no `String` unwrap).
+    ("beamtalk-codegen/src/core_erlang/binary_construction.rs", 1),
     (
         "beamtalk-codegen/src/core_erlang/control_flow/analysis.rs",
         6,

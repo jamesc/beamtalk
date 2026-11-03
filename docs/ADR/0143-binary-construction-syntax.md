@@ -11,8 +11,9 @@ failures).
 > **Implemented note (2026-11-03).** Shipped as described, except: the
 > run-time error names the failing segment's type and value but not yet its
 > position (§ Runtime failures; BT-4406: codegen does not emit the Core
-> `{segment, N}` annotation, so the BEAM reports index 0), and the `String` unwrap is not yet skipped for values
-> statically known to be `Binary` (§ String values; BT-4407). A
+> `{segment, N}` annotation, so the BEAM reports index 0). The `String`
+> unwrap is skipped only for a nested construction, not for values typed
+> `Binary` (§ String values; BT-4407). A
 > parenthesised string literal (`<<("hi")/binary>>`) is still a string
 > literal, so it gets the same compile error as `<<"hi"/binary>>`.
 
@@ -194,8 +195,14 @@ way the match side treats a String subject, by its UTF-8 bytes:
   contributes its UTF-8 bytes (`<<name/binary>>` with `name := "hé"` builds
   `#(104, 195, 169)`). Codegen unwraps the tag: a `{beamtalk_string, B}`
   value becomes `B`, and any other value passes through unchanged for the
-  BEAM to check. The unwrap is skipped when the value is statically a
-  `Binary`.
+  BEAM to check. The unwrap is skipped when the value is a raw bitstring
+  by its syntax: a nested construction (`<<(<<a:8>>)/binary>>`). It is
+  *not* skipped for a value the type checker types as `Binary` (amended
+  2026-11-03, BT-4407): `String` is a subclass of `Binary`, so a
+  `Binary`-typed value may still be a `{beamtalk_string, B}` at run time,
+  and a declared `:: Binary` is not checked at run time. Skipping on the
+  static type would turn a correct build into a `badarg`, to save one
+  `case` on a term the BEAM inspects anyway.
 - A string **literal** with no specifiers is its UTF-8 bytes, as in
   patterns: `<<"é">>` builds `#(195, 169)`. This deliberately differs from
   `erlc`, where `<<"é">>` is the single byte 233 (each character truncated
@@ -217,7 +224,8 @@ shape:
 
 Statically, the type checker answers `Binary` when every segment's bit size
 is known and the sum is a multiple of 8 (literal sizes times units, default
-sizes, and `binary`/`bytes`/`utf*` segments, which are whole bytes), and
+sizes, and `binary`/`bytes`/`utf*` segments, which are whole bytes, as is a
+`float` segment of any size: it builds 16, 32 or 64 bits or fails), and
 `Bitstring` when the known sum is not. When a `bits`/`bitstring` value or a
 variable size with a sub-byte unit leaves alignment unknown, it answers
 `Bitstring | Binary`, the union `Bitstring>>concat:` already answers;

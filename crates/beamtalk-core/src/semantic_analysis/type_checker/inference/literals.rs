@@ -276,8 +276,9 @@ impl TypeChecker {
 /// when a segment leaves the alignment unknown.
 ///
 /// A segment's bits are known from a literal size × unit and the default
-/// `integer`/`float` sizes; a bare string literal and `utf*` segments are
-/// whole bytes. Any other segment (a variable size, a sizeless `binary` or
+/// `integer` size; a bare string literal and `utf*` segments are whole
+/// bytes, and so is a `float` segment of any size (it is 16, 32 or 64 bits
+/// or the construction fails). Any other segment (a variable size, a sizeless `binary` or
 /// `bits` value) is a whole number of its units, so it keeps the alignment
 /// exactly when its unit is a multiple of 8 (`binary` defaults to 8, `bits`
 /// to 1).
@@ -292,7 +293,11 @@ pub(in crate::semantic_analysis::type_checker) fn binary_construction_type(
         );
         let bare_string = seg.segment_type.is_none()
             && matches!(seg.value.binary_literal(), Some((Literal::String(_), _)));
-        let segment_bits = if utf || bare_string {
+        // A `float` segment builds 16, 32 or 64 bits or fails at run time
+        // (`badarg`), whatever its size and unit, so when the construction
+        // answers at all the segment is whole bytes.
+        let float = seg.effective_type() == BinarySegmentType::Float;
+        let segment_bits = if utf || bare_string || float {
             Some(0)
         } else if let Some(bits) = seg.literal_bit_size() {
             Some(bits % 8)
