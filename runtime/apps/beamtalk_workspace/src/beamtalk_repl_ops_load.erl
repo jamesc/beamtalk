@@ -1898,7 +1898,7 @@ load_files_sequential(Files, SessionPid) ->
     %% BT-4378: every compile of this batch carries the same `project_batch'
     %% token (merged into the compile options with the indexes), so the
     %% compiler port verifies the project scope once per load, not per file.
-    Batch = #{project_batch => integer_to_binary(erlang:unique_integer([positive]))},
+    Batch = new_project_batch(),
     Indexes0 = maps:merge(beamtalk_repl_compiler:build_class_indexes(), Batch),
     {RevClasses, RevErrors, _} =
         lists:foldl(
@@ -1921,16 +1921,22 @@ load_files_sequential(Files, SessionPid) ->
 
 -doc """
 Load files without a session.
-Uses beamtalk_repl_loader:reload_class_file/1 for stateless compilation.
+Uses beamtalk_repl_loader:reload_class_file/3 for stateless compilation.
 Called by sync_project when no SessionPid is available (e.g., from
 the Workspace sync primitive).
+
+Like `load_files_sequential/2', every compile of the load — each file's own
+and any protocol-reload fan-out recompile it triggers — carries one
+`project_batch' token (BT-4394), so the compiler port verifies the project
+scope once per load rather than after every fan-out.
 """.
 -spec load_files_stateless([string()]) -> {[map()], [map()]}.
 load_files_stateless(Files) ->
+    Batch = new_project_batch(),
     {RevClasses, RevErrors} =
         lists:foldl(
             fun(Path, {ClassesAcc, ErrorsAcc}) ->
-                case beamtalk_repl_loader:reload_class_file(Path) of
+                case beamtalk_repl_loader:reload_class_file(Path, undefined, Batch) of
                     {ok, Classes} ->
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
                     {error, Reason} ->
@@ -1942,6 +1948,13 @@ load_files_stateless(Files) ->
             Files
         ),
     {lists:reverse(RevClasses), lists:reverse(RevErrors)}.
+
+%% A fresh `project_batch' compile option for one `load_project' (BT-4378):
+%% the compiler port verifies a project's scope on the first compile tagged
+%% with a given token and reuses it for the rest of that batch.
+-spec new_project_batch() -> #{project_batch := binary()}.
+new_project_batch() ->
+    #{project_batch => integer_to_binary(erlang:unique_integer([positive]))}.
 
 -doc """
 Build structured error maps for a per-file load failure.
