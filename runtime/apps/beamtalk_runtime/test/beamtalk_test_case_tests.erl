@@ -597,3 +597,96 @@ ensure_test_context_includes_test_file_test() ->
         ?assertEqual(Expected, Result),
         ?assertNot(has_raw_mfa(Result))
     end).
+
+%%% ============================================================================
+%%% BT-4358: source snippet at the error site (no raw MFA)
+%%% ============================================================================
+
+%% Run Fun(AbsPath) with a throwaway source file holding Content.
+with_snippet_file(Content, Fun) ->
+    Path = iolist_to_binary(
+        filename:absname(
+            "bt4358_snippet_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".bt"
+        )
+    ),
+    ok = file:write_file(Path, Content),
+    try
+        Fun(Path)
+    after
+        file:delete(Path)
+    end.
+
+source_snippet_marks_failing_line_test() ->
+    with_snippet_file(<<"one\ntwo\nthree\nfour\n">>, fun(Path) ->
+        ?assertEqual(
+            <<"\n      1 | one\n    > 2 | two\n      3 | three">>,
+            beamtalk_test_case:source_snippet(Path, 2)
+        )
+    end).
+
+source_snippet_clamps_at_file_start_and_end_test() ->
+    with_snippet_file(<<"a\r\nb\nc">>, fun(Path) ->
+        ?assertEqual(
+            <<"\n    > 1 | a\n      2 | b">>, beamtalk_test_case:source_snippet(Path, 1)
+        ),
+        ?assertEqual(
+            <<"\n      2 | b\n    > 3 | c">>, beamtalk_test_case:source_snippet(Path, 3)
+        )
+    end).
+
+source_snippet_degrades_gracefully_test() ->
+    ?assertEqual(none, beamtalk_test_case:source_snippet(<<"/no/such/dir/x.bt">>, 3)),
+    ?assertEqual(none, beamtalk_test_case:source_snippet(<<"/">>, 3)),
+    with_snippet_file(<<"only\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 50)),
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 0))
+    end),
+    with_snippet_file(<<255, 254, "\nok\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 1))
+    end).
+
+source_snippet_caps_reads_and_line_length_test() ->
+    Long = binary:copy(<<"x">>, 1000),
+    with_snippet_file(<<Long/binary, "\n">>, fun(Path) ->
+        Snippet = beamtalk_test_case:source_snippet(Path, 1),
+        ?assert(byte_size(Snippet) < 250),
+        ?assertMatch({_, _}, binary:match(Snippet, <<"...">>))
+    end),
+    %% A line beyond the read cap is simply not shown.
+    Filler = binary:copy(<<"\n">>, 300000),
+    with_snippet_file(<<Filler/binary, "late\n">>, fun(Path) ->
+        ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 300001))
+    end).
+
+format_stacktrace_adds_snippet_for_readable_file_test() ->
+    with_snippet_file(<<"a\nb := x at: 1\nc\nd\n">>, fun(Path) ->
+        Frames = [
+            {'bt@user@A', helper, 0, [{file, binary_to_list(Path)}, {line, 2}]},
+            {'bt@user@A', testFoo, 0, [{file, binary_to_list(Path)}, {line, 4}]}
+        ],
+        Text = beamtalk_test_case:format_stacktrace(Frames),
+        %% Snippet only under the innermost frame, before the next `at` line.
+        [First, Second] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
+        ?assertNotEqual(nomatch, binary:match(First, <<"> 2 | b := x at: 1">>)),
+        ?assertEqual(nomatch, binary:match(Second, <<" | ">>)),
+        ?assertNot(has_raw_mfa(Text)),
+        %% frames[i] <-> i-th `at` line is unchanged.
+        ?assertEqual(
+            length(beamtalk_test_case:stack_frames(Frames)),
+            length(binary:matches(Text, <<"\n  at ">>))
+        )
+    end).
+
+format_stacktrace_skips_unreadable_to_next_frame_test() ->
+    with_snippet_file(<<"a\nb\nc\n">>, fun(Path) ->
+        Frames = [
+            {'bt@user@A', gone, 0, [{file, "no/such/file.bt"}, {line, 2}]},
+            {'bt@user@A', testFoo, 0, [{file, binary_to_list(Path)}, {line, 2}]}
+        ],
+        Text = beamtalk_test_case:format_stacktrace(Frames),
+        ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | b">>))
+    end),
+    Missing = beamtalk_test_case:format_stacktrace([
+        {'bt@user@A', gone, 0, [{file, "no/such/file.bt"}, {line, 2}]}
+    ]),
+    ?assertEqual(nomatch, binary:match(Missing, <<" | ">>)).
