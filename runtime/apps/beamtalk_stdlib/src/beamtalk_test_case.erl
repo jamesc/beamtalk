@@ -47,8 +47,6 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 %% Exported for testing stack trace formatting
 -export([
     format_stacktrace/1,
-    format_stackframe/1,
-    ensure_test_context/4,
     stack_frames/1,
     source_snippet/2,
     test_failure/4,
@@ -669,6 +667,7 @@ truncate_line(Text) ->
             Text
     end.
 
+-ifdef(TEST).
 -doc """
 The structured form of the frames `format_stacktrace/1` renders (BT-4355).
 
@@ -682,6 +681,7 @@ cannot disagree. Raw Erlang module/function/arity are never included.
 -spec stack_frames(list()) -> [map()].
 stack_frames(Frames) ->
     [entry_frame(E) || E <- trace_entries(Frames)].
+-endif.
 
 -doc """
 Whether the full filtered trace (not the 3-frame default) is wanted.
@@ -768,15 +768,6 @@ is_stdlib_module(Module) when is_atom(Module) ->
 is_stdlib_module(_) ->
     false.
 
--doc """
-Format a single raw BEAM stacktrace frame for display. Delegates to the shared
-renderer `beamtalk_stack_frame:format_frame/1`, so test failure output and
-`Exception>>stackTrace` print a frame byte-identically (BT-4357).
-""".
--spec format_stackframe({atom(), atom(), non_neg_integer() | [term()], list()}) -> binary().
-format_stackframe(Frame) ->
-    beamtalk_stack_frame:format_frame(beamtalk_stack_frame:wrap_frame(Frame)).
-
 -doc "Filter stacktrace frames, removing internal test runner and OTP frames.".
 -spec filter_stackframes(list()) -> list().
 filter_stackframes(Frames) ->
@@ -801,7 +792,7 @@ Select up to 3 representative frames from a filtered stacktrace.
 When 3 or fewer frames exist, return all of them. When more than 3,
 keep the 2 innermost (error site) plus the outermost (test method)
 so the caller's file/line info is preserved rather than being truncated
-and replaced by a synthetic frame from ensure_test_context/4.
+and replaced by a synthetic frame from build_trace/3.
 With `--full-traces` (`full_traces/0`) every filtered frame is kept.
 """.
 -spec select_frames(list()) -> list().
@@ -836,19 +827,6 @@ error_head(Class, Reason) ->
     ClassBin = atom_to_binary(Class, utf8),
     ReasonBin = decode_beam_error(Reason),
     <<ClassBin/binary, ": ", ReasonBin/binary>>.
-
--doc """
-Ensure the test method location appears in the failure message.
-
-When the BEAM stacktrace is truncated (default depth is 8), the test method
-frame can be lost. If it is, the synthetic test-method `at` line (from
-`build_trace/3`) is appended so the user always sees where the failing test
-is defined. For messages that carry no rendered trace (`test_failure_untraced/4`).
-""".
--spec ensure_test_context(binary(), atom(), atom(), list()) -> binary().
-ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
-    {_Real, Synthetic} = build_trace(Module, MethodName, Stacktrace),
-    <<FailMsg/binary, (render_at(Synthetic))/binary>>.
 
 -doc """
 Build a failed-test result from the message `Head` (no stacktrace) and the
@@ -1066,7 +1044,7 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                             error, undef, TestST
                         ),
                     %% BT-4173: message is a tagged String — unwrap like the
-                    %% sibling clauses (ensure_test_context renders bytes).
+                    %% sibling clauses (the failure message is bytes).
                     %% The DNU text has no rendered trace, so its structured
                     %% frames must not carry one either (frames[i] <-> "at" line i).
                     test_failure_untraced(

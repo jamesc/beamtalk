@@ -464,8 +464,14 @@ at_lines_match_frames_test_() ->
     ].
 
 %%% ============================================================================
-%%% ensure_test_context/4 Tests (frame ordering)
+%%% synthetic test-context (test_failure_untraced/4) Tests (frame ordering)
 %%% ============================================================================
+
+%% The message with the synthetic test-method `at` line appended when needed.
+ensure_test_context(FailMsg, Module, MethodName, Stacktrace) ->
+    {fail, MethodName, Msg, _Frames} =
+        beamtalk_test_case:test_failure_untraced(MethodName, FailMsg, Module, Stacktrace),
+    Msg.
 
 %% When the test method is already in the rendered frames, message is unchanged.
 ensure_test_context_has_test_frame_test() ->
@@ -474,7 +480,7 @@ ensure_test_context_has_test_frame_test() ->
         {'bt@user@A', helper, 0, []},
         {'bt@user@A', testFoo, 0, []}
     ],
-    Result = beamtalk_test_case:ensure_test_context(
+    Result = ensure_test_context(
         FailMsg, 'bt@user@A', testFoo, Stacktrace
     ),
     ?assertEqual(FailMsg, Result).
@@ -487,7 +493,7 @@ ensure_test_context_appends_context_test() ->
         {'bt@user@A', helper, 0, []},
         {'bt@user@A', deepHelper, 0, []}
     ],
-    Result = beamtalk_test_case:ensure_test_context(
+    Result = ensure_test_context(
         FailMsg, 'bt@user@A', testBar, Stacktrace
     ),
     ?assertNotEqual(nomatch, binary:match(Result, <<"testBar">>)),
@@ -617,7 +623,7 @@ format_frame_identical_across_test_and_stackframe_paths_test_() ->
     ],
     [
         ?_test(begin
-            ViaTest = iolist_to_binary(beamtalk_test_case:format_stackframe(F)),
+            <<"\n  at ", ViaTest/binary>> = beamtalk_test_case:format_stacktrace([F]),
             [Wrapped] = beamtalk_stack_frame:wrap([F]),
             ViaFrame = beamtalk_stack_frame:format_frame(Wrapped),
             ?assertEqual(ViaFrame, ViaTest),
@@ -644,7 +650,7 @@ format_stacktrace_collapses_identical_adjacent_frames_test() ->
 ensure_test_context_includes_test_file_test() ->
     with_trace_fixture(fun(RelPath) ->
         FailMsg = <<"FAIL testBar: some error">>,
-        Result = beamtalk_test_case:ensure_test_context(
+        Result = ensure_test_context(
             FailMsg, ?TRACE_FIXTURE_MOD, testBar, []
         ),
         Expected = iolist_to_binary([
