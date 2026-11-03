@@ -201,6 +201,30 @@ fn escaping_block_messages_name_the_shape() {
     }
 }
 
+/// BT-4283: a block passed to a class reference whose name another package in
+/// scope also declares escapes to a class method: the name is one last-wins
+/// runtime class, so the stateless `CvA` this unit declares need not be the
+/// class that answers. The unshadowed control is the `CvA onEvent:` row of
+/// [`escaping_block_messages_name_the_shape`].
+#[test]
+fn block_passed_to_a_shadowed_class_escapes_to_a_class_method() {
+    let src = in_value("CvA onEvent: [:e | t := t + 1]\nt");
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(declared_by(
+            "dep",
+            "Object subclass: CvA\n  class onEvent: b => b value\n",
+        ));
+    let diags = analyse_full(&parse_module(&src), ctx).diagnostics;
+    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+    assert_eq!(s6.len(), 1, "{diags:?}");
+    assert_eq!(
+        s6[0].message.as_str(),
+        "`t` is assigned in a block passed to a class method (`onEvent:`); it would run in \
+         another process"
+    );
+}
+
 /// The note's construct list is generated from `state_threading_selectors`,
 /// the one list codegen reads: every selector it names threads a block literal
 /// written directly as its argument (no diagnostic), and the one shape it

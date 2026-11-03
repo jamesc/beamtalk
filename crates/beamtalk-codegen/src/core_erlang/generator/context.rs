@@ -125,7 +125,7 @@ pub(in crate::core_erlang) struct ClassContext {
     /// the driver before generation.
     ///
     /// [`CoreErlangGenerator::is_shadowed_class`]: crate::core_erlang::CoreErlangGenerator::is_shadowed_class
-    pub shadowed_class_names: std::collections::HashSet<ecow::EcoString>,
+    pub shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames,
     /// The class this unit compiles (the module's first class), set by the
     /// driver via [`CoreErlangGenerator::register_own_class_module`]. Its
     /// compiled module is this unit's own `module_name`, whatever the index
@@ -211,7 +211,7 @@ impl ClassContext {
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
-            shadowed_class_names: std::collections::HashSet::new(),
+            shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames::default(),
             own_class_name: None,
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,

@@ -23,7 +23,7 @@ use ecow::EcoString;
 
 use crate::ast::{Expression, Module};
 use crate::ast_walker;
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// A record of which package exports a given class name.
@@ -152,7 +152,7 @@ fn declared_by_multiple_packages<'a>(packages: impl IntoIterator<Item = Option<&
 #[must_use]
 pub fn shadowed_class_names<'a>(
     declarations: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
-) -> HashSet<EcoString> {
+) -> ShadowedClassNames {
     let mut packages_by_class: HashMap<&'a str, Vec<Option<&'a str>>> = HashMap::new();
     for (class_name, package) in declarations {
         packages_by_class
@@ -165,6 +165,91 @@ pub fn shadowed_class_names<'a>(
         .filter(|(_, packages)| declared_by_multiple_packages(packages.iter().copied()))
         .map(|(class_name, _)| EcoString::from(class_name))
         .collect()
+}
+
+/// BT-4283: [`shadowed_class_names`] over one compilation scope — the
+/// `pre_loaded` class declarations a producer hands in (every
+/// cross-file/dependency/ambient declaration it can see) plus `module`'s own
+/// classes, declared by `own_package`. The one place that turns a scope into
+/// the shadowed set: the codegen driver and [`analyse_full`] both call it,
+/// and the result reaches every consumer through
+/// [`ClassHierarchy::is_shadowed_class`] (codegen's `is_shadowed_class` gate
+/// reads the same [`ShadowedClassNames::is_shadowed`]).
+///
+/// A pre-loaded entry for one of `module`'s own classes is usually that same
+/// class seen from outside (its Pass 1 info, or its live entry on a REPL
+/// reload), not a rival. It counts as the unit's own declaration when its
+/// package is either name the unit goes by: `own_package`, or the package
+/// `own_hierarchy` (built from `module`) records for that class — which can
+/// differ, e.g. for `beamtalk test`'s unqualified `bt@<stem>` modules, whose
+/// module name encodes no package while analysis stamps one (BT-4152).
+///
+/// [`analyse_full`]: crate::semantic_analysis::analyse_full
+#[must_use]
+pub fn shadowed_class_names_in_scope(
+    pre_loaded: &[ClassInfo],
+    module: &Module,
+    own_package: Option<&str>,
+    own_hierarchy: &ClassHierarchy,
+) -> ShadowedClassNames {
+    let is_own_declaration = |info: &ClassInfo| {
+        module
+            .classes
+            .iter()
+            .any(|class| class.name.name == info.name)
+            && (info.package.as_deref() == own_package
+                || own_hierarchy
+                    .get_class(info.name.as_str())
+                    .is_some_and(|own| own.package == info.package))
+    };
+    shadowed_class_names(
+        pre_loaded
+            .iter()
+            .map(|info| {
+                let package = if is_own_declaration(info) {
+                    own_package
+                } else {
+                    info.package.as_deref()
+                };
+                (info.name.as_str(), package)
+            })
+            .chain(
+                module
+                    .classes
+                    .iter()
+                    .map(|class| (class.name.name.as_str(), own_package)),
+            ),
+    )
+}
+
+/// The class names declared by more than one package in a compilation scope
+/// ([`shadowed_class_names`], BT-4151): each is one last-wins runtime class,
+/// so no compile-time verdict about it may assume a single package's class.
+///
+/// [`Self::is_shadowed`] is THE shadowing predicate (BT-4283): codegen's
+/// `is_shadowed_class` gate and [`ClassHierarchy::is_shadowed_class`] (read by
+/// the block-escape validators and lints) both answer through it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShadowedClassNames(HashSet<EcoString>);
+
+impl ShadowedClassNames {
+    /// Whether `class_name` is declared by more than one package in scope.
+    #[must_use]
+    pub fn is_shadowed(&self, class_name: &str) -> bool {
+        self.0.contains(class_name)
+    }
+
+    /// Whether no class name in scope is shadowed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl FromIterator<EcoString> for ShadowedClassNames {
+    fn from_iter<I: IntoIterator<Item = EcoString>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
 }
 
 /// Build a `DependencyRegistry` from per-dependency class module indexes.
@@ -545,7 +630,7 @@ mod tests {
             ("Parser", Some("xml")),
             ("Lexer", Some("json")),
         ]);
-        assert_eq!(shadowed, HashSet::from([EcoString::from("Parser")]));
+        assert_eq!(shadowed, ["Parser".into()].into_iter().collect());
     }
 
     #[test]
@@ -553,7 +638,7 @@ mod tests {
         // A workspace/single-file class sharing a name with a package's
         // class collides at runtime just the same.
         let shadowed = shadowed_class_names([("Parser", None), ("Parser", Some("json"))]);
-        assert!(shadowed.contains("Parser"));
+        assert!(shadowed.is_shadowed("Parser"));
     }
 
     #[test]
