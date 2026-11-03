@@ -447,7 +447,8 @@ impl ClassHierarchy {
     /// (BT-4300). The lints that ask where a class method runs
     /// (`class-state-abroad`, `actor-state-abroad`, `class-process-ffi` /
     /// `class-method-process-resource`) and the local-threading escape
-    /// analysis read this; codegen reads [`Self::is_direct_call_eligible`],
+    /// analysis read this (for a class *reference* receiver, through
+    /// [`Self::class_reference_send_runs_in_caller`], which adds shadowing); codegen reads [`Self::is_direct_call_eligible`],
     /// which adds only the own-method condition. Like every compile-time
     /// verdict it describes the classes as compiled: a class-side extension or
     /// ADR 0084 runtime fun sends the method back to the class process at run

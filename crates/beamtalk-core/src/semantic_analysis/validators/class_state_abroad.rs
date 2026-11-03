@@ -27,7 +27,11 @@
 //!   passed there stays home) when no class in the receiving class's chain
 //!   declares class variables and its selector is not process-bound
 //!   ([`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1, the rule
-//!   codegen's direct-call table builds on), sealed or not.
+//!   codegen's direct-call table builds on), sealed or not. A class name more
+//!   than one package in scope declares never does
+//!   ([`ClassHierarchy::class_reference_send_runs_in_caller`], BT-4283): it is
+//!   one last-wins runtime class, so a send to it, qualified or not, may reach
+//!   another package's class process.
 //!
 //! This is a lint, not a guarantee: a block passed through a variable or an
 //! instance method is only caught at run time, and only for writes. A block
