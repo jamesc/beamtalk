@@ -4974,9 +4974,17 @@ ordinary dynamic send. A built-in receiver with its own representation
 `Symbol`, `True`, `False`, `UndefinedObject`, `Block`, `Tuple`, `Reference`,
 `Port`) compiles to a direct call guarded by the same representation test the
 dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
-`String`, `Binary`, `Pid`, `Boolean`, `Bitstring` and `Character` receivers,
-abstract classes, `Object`, `Value`, actors, and the supervisor and exception
-families always send dynamically. The result is always what a dynamic send answers
+`String` and `Pid` receivers do the same for every selector except the few the
+dynamic send answers outside their module, which stay dynamic: `Pid`'s future
+protocol (`await`, `await:`, `awaitForever`, `whenResolved:`,
+`whenRejected:`), and the byte-level selectors `String` shares with `Binary`
+(`asBase64`, `asBase64Url`, `asCharlist`, `asHex`, `asStringUnchecked`,
+`bitSize`, `byteAt:`, `concat:`, `part:size:`, `toBytes`). A `String`
+extension never moves any other selector: it is looked up inside `String`'s
+module, so a typed call site sees it at once. `Binary`, `Boolean`,
+`Bitstring` and `Character` receivers, abstract classes, `Object`, `Value`,
+actors, and the supervisor and exception families always send
+dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
 (`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
 module all reach typed call sites at once, because they act inside that

@@ -62,18 +62,36 @@ fn routed_builtin_send_is_converted() {
 
 #[test]
 fn builtin_receiver_reports_its_routing_row() {
+    // BT-4390: a `String` special selector names itself, not the whole row.
     let hint = hint_for(
-        "Object subclass: Caller\n  run: s :: String => s size\n",
-        "size",
+        "Object subclass: Caller\n  run: s :: String => s asBase64\n",
+        "asBase64",
     );
     assert!(
         hint.contains(
-            "reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string"
+            "reason: builtin — String: the dynamic path answers 'asBase64' outside bt@stdlib@string"
         ),
         "{hint}"
     );
     assert!(hint.contains("receiver: String"), "{hint}");
     assert!(hint.contains("declared]"), "{hint}");
+}
+
+#[test]
+fn string_and_pid_ordinary_selectors_are_converted() {
+    // BT-4390: only the fixture's special selectors keep a `String` or `Pid`
+    // send dynamic; any other selector takes the guarded direct call.
+    let hints = report(concat!(
+        "Object subclass: Caller\n",
+        "  run: s :: String => s size\n",
+        "  go: p :: Pid => p frobnicate\n",
+    ));
+    assert!(
+        !hints
+            .iter()
+            .any(|h| h.starts_with("Send 'size'") || h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
 }
 
 #[test]
@@ -103,17 +121,18 @@ fn builtin_without_a_single_module_reports_why() {
 }
 
 #[test]
-fn builtin_special_selectors_keep_the_whole_row_dynamic() {
-    // `Pid` answers the future protocol through `beamtalk_future`, so even a
-    // selector outside it stays dynamic: the row's module does not speak for
-    // the whole protocol.
+fn builtin_special_selector_reports_itself() {
+    // `Pid` answers the future protocol through `beamtalk_future`, so
+    // `whenResolved:` stays dynamic; the reason names that one selector (the
+    // old whole-row wording read "and 0 other selectors" for a one-entry
+    // list).
     let hint = hint_for(
-        "Object subclass: Caller\n  run: p :: Pid => p frobnicate\n",
-        "frobnicate",
+        "Object subclass: Caller\n  run: p :: Pid => p whenResolved: [:v | v]\n",
+        "whenResolved:",
     );
     assert!(
         hint.contains(
-            "reason: builtin — Pid: 'await' and 4 other selectors are answered outside bt@stdlib@pid"
+            "reason: builtin — Pid: the dynamic path answers 'whenResolved:' outside bt@stdlib@pid"
         ),
         "{hint}"
     );
