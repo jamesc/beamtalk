@@ -1395,23 +1395,32 @@ fn parse_binary_pattern_unit_rules_match_erlc() {
 #[test]
 fn parse_binary_pattern_non_ascii_character_warns() {
     // BT-4376: `<<$é>>` matches byte 233 (its code point, like `erlc`),
-    // which disagrees with `<<"é">>` (UTF-8 bytes) — warn on the default
-    // 8-bit size only.
+    // which disagrees with `<<"é">>` (UTF-8 bytes) — warn whenever the
+    // segment is 8 bits wide: the default size, or (BT-4382) an explicit
+    // size × unit of 8.
     use crate::source_analysis::Severity;
-    let diagnostics = parse_err("x match: [<<$é, rest/binary>> -> rest]");
-    let warnings: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == Severity::Warning)
-        .collect();
-    assert_eq!(warnings.len(), 1, "got: {diagnostics:?}");
-    assert!(
-        warnings[0].message.contains("not its UTF-8 encoding"),
-        "got: {}",
-        warnings[0].message
-    );
+    for source in [
+        "x match: [<<$é, rest/binary>> -> rest]",
+        "x match: [<<$é:8, rest/binary>> -> rest]",
+        "x match: [<<$é:1/unit:8, rest/binary>> -> rest]",
+    ] {
+        let diagnostics = parse_err(source);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(warnings.len(), 1, "{source}: got {diagnostics:?}");
+        assert!(
+            warnings[0].message.contains("not its UTF-8 encoding"),
+            "{source}: got {}",
+            warnings[0].message
+        );
+    }
     for source in [
         "x match: [<<$A, rest/binary>> -> rest]",
+        "x match: [<<$A:8, rest/binary>> -> rest]",
         "x match: [<<$é:16, rest/binary>> -> rest]",
+        "x match: [<<$é:2/unit:8, rest/binary>> -> rest]",
         "x match: [<<$é/utf8, rest/binary>> -> rest]",
     ] {
         let diagnostics = parse_err(source);

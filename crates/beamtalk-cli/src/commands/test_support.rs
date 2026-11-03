@@ -99,10 +99,37 @@ static BEAMTALK_HOME_LOCK: RwLock<()> = RwLock::new(());
 /// A poisoned lock (some other guarded test panicked while holding it) is
 /// still safe to read through here — the panic is that test's own
 /// assertion failure, not a corrupted directory.
+///
+/// # Panics
+///
+/// When the calling thread already holds a [`BeamtalkHomeOverride`]: the
+/// read side would wait forever on that thread's own write lock (BT-4382,
+/// the BT-4374 self-deadlock that hung `run_prune` tests). A test must use
+/// one or the other, never both.
 pub(crate) fn real_home_guard() -> RwLockReadGuard<'static, ()> {
+    assert_no_home_override_held("real_home_guard()");
     BEAMTALK_HOME_LOCK
         .read()
         .unwrap_or_else(PoisonError::into_inner)
+}
+
+std::thread_local! {
+    /// Whether this thread holds a [`BeamtalkHomeOverride`] (and so the
+    /// write side of [`BEAMTALK_HOME_LOCK`]).
+    static HOLDS_HOME_OVERRIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Panic with a clear message, instead of self-deadlocking on
+/// [`BEAMTALK_HOME_LOCK`], when this thread already holds a
+/// [`BeamtalkHomeOverride`].
+fn assert_no_home_override_held(acquirer: &str) {
+    assert!(
+        !HOLDS_HOME_OVERRIDE.with(std::cell::Cell::get),
+        "{acquirer} called on a thread that already holds a BeamtalkHomeOverride: \
+         BEAMTALK_HOME_LOCK is not reentrant, so this would deadlock. A test that \
+         overrides BEAMTALK_HOME must not also take the real-home guard (directly \
+         or via WorkspaceFixture)."
+    );
 }
 
 /// RAII guard that overrides `BEAMTALK_HOME` to `dir` for its lifetime,
@@ -118,9 +145,11 @@ pub(crate) struct BeamtalkHomeOverride {
 
 impl BeamtalkHomeOverride {
     pub(crate) fn new(dir: &Path) -> Self {
+        assert_no_home_override_held("BeamtalkHomeOverride::new()");
         let lock = BEAMTALK_HOME_LOCK
             .write()
             .unwrap_or_else(PoisonError::into_inner);
+        HOLDS_HOME_OVERRIDE.with(|held| held.set(true));
         let prev = std::env::var("BEAMTALK_HOME").ok();
         // SAFETY: the exclusive write lock above guarantees no other thread is
         // reading BEAMTALK_HOME or the directory it controls concurrently.
@@ -138,6 +167,30 @@ impl Drop for BeamtalkHomeOverride {
             // SAFETY: see above.
             None => unsafe { std::env::remove_var("BEAMTALK_HOME") },
         }
+        HOLDS_HOME_OVERRIDE.with(|held| held.set(false));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BeamtalkHomeOverride, real_home_guard};
+
+    /// BT-4382: taking the real-home guard while this thread holds an
+    /// override panics with a clear message instead of deadlocking.
+    #[test]
+    #[should_panic(expected = "already holds a BeamtalkHomeOverride")]
+    fn real_home_guard_panics_under_a_held_override() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let _home = BeamtalkHomeOverride::new(tmp.path());
+        let _guard = real_home_guard();
+    }
+
+    /// Once the override drops, the same thread may take the guard again.
+    #[test]
+    fn real_home_guard_works_after_the_override_drops() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        drop(BeamtalkHomeOverride::new(tmp.path()));
+        let _guard = real_home_guard();
     }
 }
 

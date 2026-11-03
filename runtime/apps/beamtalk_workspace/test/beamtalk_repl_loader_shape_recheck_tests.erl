@@ -788,7 +788,7 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
 %% report `{ok, []}` ("no baseline"). This forces that interleaving
 %% deterministically by suspending the worker across the load (the issue's
 %% 300 ms sleep in the worker produces the same interleaving, less
-%% deterministically): without the `sync/0` drain in
+%% deterministically): without the `sync/1` drain in
 %% `precheck_class_shape/2`, the precheck returns no findings here; with
 %% it, the precheck blocks until the resumed worker has captured and
 %% reports the dropped field.

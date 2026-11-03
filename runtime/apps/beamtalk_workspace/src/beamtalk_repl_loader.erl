@@ -2617,7 +2617,7 @@ install records asynchronously (`spawn_shape_recheck/1` casts the capture
 to `beamtalk_workspace_shape_recheck_worker`). A precheck sent immediately
 after a class's *first* install would therefore race the worker and could
 still see no baseline and return `{ok, []}` (BT-3945), so this drains the
-worker's queue first (`beamtalk_workspace_shape_recheck_worker:sync/0`,
+worker's queue first (`beamtalk_workspace_shape_recheck_worker:sync/1`,
 best-effort: a stopped worker or a congested backlog simply falls back to
 whatever the store currently holds), and only then reads the baseline. A
 `{ok, []}` from here therefore means "genuinely nothing recorded", not
@@ -2640,9 +2640,14 @@ precheck_class_shape(ClassNameBin, PendingSource) ->
 %% `previous/1` read in `precheck_class_shape/2` cannot observe a
 %% not-yet-captured baseline. Never fails the precheck: when the worker is
 %% not running (no live reload path) or the queue is congested past the
-%% call timeout, fall back to whatever the store currently holds.
+%% call timeout, fall back to whatever the store currently holds. The
+%% timeout is short (BT-4382): a precheck is an interactive, advisory
+%% query, so a long re-check backlog must not stall it for the
+%% `gen_server:call` default of 5 s.
+-define(PRECHECK_DRAIN_TIMEOUT_MS, 1000).
+
 drain_shape_recheck_worker() ->
-    try beamtalk_workspace_shape_recheck_worker:sync() of
+    try beamtalk_workspace_shape_recheck_worker:sync(?PRECHECK_DRAIN_TIMEOUT_MS) of
         ok -> ok
     catch
         exit:_ -> ok;

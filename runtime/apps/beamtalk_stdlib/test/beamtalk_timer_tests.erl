@@ -371,7 +371,15 @@ send_every_unregistered_name_stops_test() ->
     T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
     wait_for_exit(maps:get(pid, T), 1000).
 
-%% The timer keeps phase with wall-clock deadlines instead of drifting.
+%% Steady delivery: a running timer delivers about one tick per period.
+%%
+%% Despite its name, this is not the drift guard: with only a lower bound
+%% (`N >= 8` in 10 periods) a timer that slipped a little every period would
+%% still pass. Phase-keeping is pinned without any timing by
+%% `next_deadline_test_` (each deadline is computed from the previous
+%% deadline, never from "now"), and missed-tick handling by
+%% `send_every_skips_missed_ticks_test`. The name is kept so existing flake
+%% history and CI logs (BT-4249, #4734) still find it (BT-4382).
 %%
 %% Synchronised on observable conditions, not guessed sleeps (BT-4249): the
 %% first tick proves the timer is inside send_loop with a deadline, then the

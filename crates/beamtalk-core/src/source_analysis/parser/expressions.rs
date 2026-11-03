@@ -2513,7 +2513,12 @@ impl Parser {
             };
             if let Some(v) = int_value {
                 if let Literal::Character(c) = lit {
-                    if seg_type == BinarySegmentType::Integer && size.is_none() {
+                    // Any 8-bit-wide integer segment: the default size, or
+                    // an explicit size × unit of 8 (`$é:8`, `$é:1/unit:8`).
+                    let eight_bits = size.is_none()
+                        || size_lit
+                            .is_some_and(|(n, _)| n.saturating_mul(unit_multiplier(unit)) == 8);
+                    if seg_type == BinarySegmentType::Integer && eight_bits {
                         self.warn_non_ascii_byte_character(*c, *value_span);
                     }
                 }
