@@ -2842,6 +2842,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", expr.span());
             let name_var = self.fresh_var("Name");
             let val_var = self.fresh_temp_var("Val");
             let name_code = self.expression_doc(&arguments[0])?;
@@ -2902,6 +2904,8 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<(Document<'static>, String)> {
         if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", expr.span());
             let name_var = self.fresh_var("Name");
             let name_code = self.expression_doc(&arguments[0])?;
             let current_state = self.current_state_var();

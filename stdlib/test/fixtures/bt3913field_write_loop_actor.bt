@@ -1,0 +1,48 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4369 fixture: an actor whose loop nest holds a field write beside a
+// guarded operator whose slow path re-enters the actor (`Bt4121TallyMoney>>+`
+// reports each addition through `noteAdd:`). The field write makes the outer
+// loop a `StateAcc` frame, so the loop never brackets around it; the nested
+// `do:` is stateless and brackets its own operator. The field must survive
+// the nested loop's slow-path writes to the cell (ADR 0137 §4b: no loop that
+// brackets admits a field write in its body, enforced by
+// `VerifyError::FieldWriteInBracketedLoop`). Asserted in
+// bt3913field_write_loop_test.bt.
+
+Actor subclass: Bt3913FieldWriteLoopActor
+  state: count = 0
+  state: n = 0
+
+  count => self.count
+
+  n => self.n
+
+  noteAdd: _sum =>
+    self.count := self.count + 1
+    self.count
+
+  /// `k` outer passes; each bumps `n`, then adds `m` twice over untyped locals.
+  run: m times: k =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    j := 0
+    [j < k]
+      whileTrue: [
+        j := j + 1
+        self.n := self.n + 1
+        #(1, 2) do: [:z | acc := acc + m]
+      ]
+    acc cents
+
+  /// The same nest with the field write after the nested loop.
+  runWriteAfter: m times: k =>
+    acc := ((Bt4121TallyMoney new) withCents: 0) withTally: self
+    j := 0
+    [j < k]
+      whileTrue: [
+        j := j + 1
+        #(1, 2) do: [:z | acc := acc + m]
+        self.n := self.n + 1
+      ]
+    acc cents
