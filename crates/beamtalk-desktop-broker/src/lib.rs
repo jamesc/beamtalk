@@ -12,10 +12,9 @@
 //! ```text
 //! discover_workspaces() ─┐
 //!                        ▼
-//!         pick a workspace, spawn::spawn_front_with_port_retry
-//!         (refuses on OIDC; retries on an apparent port conflict —
-//!          see spawn::spawn_front_with_port_retry's doc comment for
-//!          why that retry signal is a heuristic, not a proof)
+//!         pick a workspace, spawn::launch_front
+//!         (refuses on OIDC; spawns the front with PORT=0 and waits for
+//!          it to report the port it bound — see port's module docs)
 //!                        │
 //!                        ▼
 //!          readiness::wait_ready (two-stage: HTTP up, then /readiness,
@@ -57,7 +56,7 @@ pub mod error;
 pub mod monitor;
 /// Refuse-to-spawn guard for OIDC configuration.
 pub mod oidc_guard;
-/// Free port allocation with conflict retry.
+/// Port handoff: the front binds port 0 and reports the port it got.
 pub mod port;
 /// Two-stage readiness probe (HTTP up, then `/readiness`).
 pub mod readiness;
@@ -78,4 +77,4 @@ mod test_support;
 
 pub use discovery::{WorkspaceSummary, discover_workspaces};
 pub use error::{BrokerError, Result};
-pub use spawn::{SpawnAttemptConfig, SpawnConfig, spawn_front, spawn_front_with_port_retry};
+pub use spawn::{LaunchConfig, SpawnConfig, launch_front, spawn_front};

@@ -316,9 +316,8 @@ struct ErrBody {
 /// budget below is therefore *far* more generous than actually needed on
 /// this broker's real (loopback-only) posture, but there is no evidence it
 /// causes harm, so it was left as a safety ceiling rather than tightened —
-/// unlike [`crate::spawn::DEFAULT_BIND_FAILURE_GRACE`], being *slower* than
-/// necessary here has no failure mode (it does not misclassify a state; it
-/// just leaves headroom no one so far has needed).
+/// being *slower* than necessary here has no failure mode (it does not
+/// misclassify a state; it just leaves headroom no one so far has needed).
 ///
 /// The two timeouts are still deliberately **separate**, not one shared
 /// duration, because a single timeout tuned for the cheap HTTP-up check

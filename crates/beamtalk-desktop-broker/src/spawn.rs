@@ -3,8 +3,12 @@
 
 //! Spawn a per-workspace front (ADR 0097 Decision / Broker §2).
 //!
-//! Concretely, on Unix: `PORT=<free-port> BT_ATTACH_BIND_IP=127.0.0.1
-//! BT_ATTACH_NODE_SUFFIX=<id> RELEASE_DISTRIBUTION=none bin/server <id>`.
+//! Concretely, on Unix: `PORT=0 BT_ATTACH_PORT_FILE=<file>
+//! BT_ATTACH_BIND_IP=127.0.0.1 BT_ATTACH_NODE_SUFFIX=<id>
+//! RELEASE_DISTRIBUTION=none bin/server <id>`. `PORT=0` makes the front's
+//! own listener pick a free port as part of its bind, and the front reports
+//! that port back through `<file>` — see [`crate::port`] for why the broker
+//! no longer chooses the port itself (BT-4398).
 //!
 //! `bin/server <id>` (`editors/liveview/rel/overlays/bin/server`) already
 //! re-resolves `BT_WORKSPACE_NODE`/`BT_WORKSPACE_COOKIE` from
@@ -13,7 +17,7 @@
 //! id — the ADR's "Local-only posture" section calls that ephemeral-per-boot
 //! key *deliberate* (no durable session worth preserving on the
 //! unauthenticated localhost lane), so this broker does not set it itself on
-//! Unix. The broker's job there is exactly the four env vars above, plus
+//! Unix. The broker's job there is exactly the env vars above, plus
 //! (this module's other duty) refusing to spawn at all when OIDC is
 //! configured.
 //!
@@ -110,16 +114,15 @@
 //! sweep remains the fallback net for any process this mechanism still
 //! misses (e.g. a broker that dies between `spawn()` and the assignment).
 
-use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::error::{BrokerError, Result};
 use crate::oidc_guard::{default_ide_config_path, oidc_configured};
-use crate::port::{self, SpawnAttempt};
+use crate::port;
 use crate::sname::attach_node_suffix;
 
 /// Everything needed to spawn one front.
@@ -142,8 +145,11 @@ pub struct SpawnConfig {
     /// own `start` command instead). Either way it also seeds
     /// `BT_ATTACH_NODE_SUFFIX`.
     pub workspace_id: String,
-    /// Port the front should bind Phoenix to.
-    pub port: u16,
+    /// Identifies this one spawn: names the front's port file
+    /// ([`crate::port::port_file_path`]) and, on Windows, its per-front
+    /// `RELEASE_TMP` directory ([`release_tmp_dir`]). [`SpawnConfig::new`]
+    /// generates a fresh one ([`crate::port::new_instance_id`]).
+    pub instance_id: String,
     /// Loopback bind address (ADR 0097 "Local-only posture" — always
     /// `127.0.0.1`/`::1`, never `0.0.0.0`).
     pub bind_ip: String,
@@ -153,14 +159,14 @@ pub struct SpawnConfig {
 }
 
 impl SpawnConfig {
-    /// Build a config with the standard loopback bind and default
-    /// `ide.toml` path.
+    /// Build a config with a fresh instance id, the standard loopback bind
+    /// and the default `ide.toml` path.
     #[must_use]
-    pub fn new(launcher: PathBuf, workspace_id: impl Into<String>, port: u16) -> Self {
+    pub fn new(launcher: PathBuf, workspace_id: impl Into<String>) -> Self {
         Self {
             launcher,
             workspace_id: workspace_id.into(),
-            port,
+            instance_id: port::new_instance_id(),
             bind_ip: "127.0.0.1".to_string(),
             ide_toml_path: default_ide_config_path(),
         }
@@ -169,7 +175,8 @@ impl SpawnConfig {
 
 /// The env vars this broker sets on **every** platform, in a stable order
 /// (for deterministic logging/tests — `Command::envs` doesn't care about
-/// order). On Windows, [`build_launch_command`] sets five more
+/// order). `port_file` is where the front reports the port it bound (see
+/// [`crate::port`]). On Windows, [`build_launch_command`] sets five more
 /// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
 /// `PHX_SERVER`, `RELEASE_TMP`) that don't go through this function — it
 /// does not report the full env set there, only the cross-platform baseline.
@@ -194,10 +201,14 @@ impl SpawnConfig {
 /// (`beamtalk_cli::commands::workspace::epmd::check_epmd_loopback`), not by
 /// anything this broker can control after the fact.
 #[must_use]
-pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
+pub fn build_env(config: &SpawnConfig, port_file: &Path) -> Vec<(String, String)> {
     let epmd_address = beamtalk_workspace::resolve_epmd_address();
     vec![
-        ("PORT".to_string(), config.port.to_string()),
+        ("PORT".to_string(), "0".to_string()),
+        (
+            port::PORT_FILE_ENV.to_string(),
+            port_file.display().to_string(),
+        ),
         ("BT_ATTACH_BIND_IP".to_string(), config.bind_ip.clone()),
         (
             "BT_ATTACH_NODE_SUFFIX".to_string(),
@@ -218,9 +229,27 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
 #[derive(Debug)]
 pub struct SpawnedFront {
     child: Child,
+    instance_id: String,
+    port_file: PathBuf,
     #[cfg(windows)]
     #[allow(dead_code)] // held for its Drop side effect only, never read
     job: crate::winjob::JobHandle,
+}
+
+impl SpawnedFront {
+    /// The [`SpawnConfig::instance_id`] this front was spawned with — persist
+    /// it in its [`crate::reap::FrontRecord`] so cleanup can find its
+    /// per-front `RELEASE_TMP` directory on Windows.
+    #[must_use]
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
+
+    /// Where this front will report its bound port (see [`crate::port`]).
+    #[must_use]
+    pub fn port_file(&self) -> &Path {
+        &self.port_file
+    }
 }
 
 impl std::ops::Deref for SpawnedFront {
@@ -292,7 +321,12 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         return Err(BrokerError::UnknownWorkspace(config.workspace_id.clone()));
     }
 
-    let mut cmd = build_launch_command(config)?;
+    let port_file = port::port_file_path(&config.workspace_id, &config.instance_id)?;
+    // Fresh name per spawn, so nothing should be there — but a leftover from
+    // a crashed broker must never be mistaken for this front's report.
+    port::remove_port_file(&port_file);
+
+    let mut cmd = build_launch_command(config, &port_file)?;
 
     // Checked here, immediately after
     // `build_launch_command` succeeds, rather than inside it — that function
@@ -315,7 +349,8 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
         // does for the identical reason, just inlined here too.
         #[cfg(windows)]
         {
-            let _ = std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, config.port));
+            let _ =
+                std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, &config.instance_id));
         }
         return Err(BrokerError::LauncherNotFound(
             config.launcher.display().to_string(),
@@ -367,14 +402,24 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
             // directory behind — same cleanup `remove_record` does on the
             // success path, just inlined here since this failure never
             // reaches a saved `FrontRecord` for `remove_record` to key off.
-            let _ = std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, config.port));
+            let _ =
+                std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, &config.instance_id));
             return Err(e.into());
         }
-        Ok(SpawnedFront { child, job })
+        Ok(SpawnedFront {
+            child,
+            instance_id: config.instance_id.clone(),
+            port_file,
+            job,
+        })
     }
     #[cfg(not(windows))]
     {
-        Ok(SpawnedFront { child })
+        Ok(SpawnedFront {
+            child,
+            instance_id: config.instance_id.clone(),
+            port_file,
+        })
     }
 }
 
@@ -464,11 +509,11 @@ fn kill_orphaned_child(child: &mut std::process::Child) {
 /// Returns [`BrokerError::LauncherPlatformMismatch`] if `config.launcher`
 /// doesn't look like a Unix entry point.
 #[cfg(unix)]
-fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
+fn build_launch_command(config: &SpawnConfig, port_file: &Path) -> Result<Command> {
     check_launcher_platform(&config.launcher)?;
     let mut cmd = Command::new(&config.launcher);
     cmd.arg(&config.workspace_id);
-    for (key, value) in build_env(config) {
+    for (key, value) in build_env(config, port_file) {
         cmd.env(key, value);
     }
     Ok(cmd)
@@ -525,7 +570,7 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// `bin/server`'s Unix fail-fast behavior instead of guessing) — or
 /// [`BrokerError::Io`] if the per-front [`release_tmp_dir`] can't be created.
 #[cfg(windows)]
-fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
+fn build_launch_command(config: &SpawnConfig, port_file: &Path) -> Result<Command> {
     check_launcher_platform(&config.launcher)?;
     let node_name = crate::discovery::read_node_name(&config.workspace_id)?;
     let cookie = beamtalk_workspace::read_cookie_file(&config.workspace_id)?
@@ -533,7 +578,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
 
     let mut cmd = Command::new(&config.launcher);
     cmd.arg("start");
-    for (key, value) in build_env(config) {
+    for (key, value) in build_env(config, port_file) {
         cmd.env(key, value);
     }
     cmd.env("BT_WORKSPACE_NODE", node_name);
@@ -566,7 +611,7 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
     // on a real install would fail with a permission error before the VM
     // even finishes booting. Point it at a per-user-writable, per-front
     // directory instead.
-    let release_tmp = release_tmp_dir(&config.workspace_id, config.port);
+    let release_tmp = release_tmp_dir(&config.workspace_id, &config.instance_id);
     std::fs::create_dir_all(&release_tmp)?;
     cmd.env("RELEASE_TMP", release_tmp);
 
@@ -590,12 +635,10 @@ fn build_launch_command(config: &SpawnConfig) -> Result<Command> {
 /// resolves the still-relative launcher path it was told to run *against the
 /// new current directory* — turning `dist-liveview\bin\bt_attach.bat` into
 /// an attempted `dist-liveview\dist-liveview\bin\bt_attach.bat`, which
-/// doesn't exist, so `cmd.exe` exits almost immediately. That early exit is
-/// exactly what [`spawn_front_with_port_retry`]'s heuristic treats as a
-/// suspected port conflict — silently turning a real (if unusual)
-/// dev-workflow launcher path into a confusing `PortsExhausted`, the precise
-/// failure mode this same issue's `PortsExhausted` diagnostic improvement
-/// exists to prevent. Requiring `is_absolute()` keeps this a no-op (today's
+/// doesn't exist, so `cmd.exe` exits almost immediately — surfacing as a
+/// confusing [`BrokerError::FrontExitedBeforeReportingPort`] for what is
+/// really a real (if unusual) dev-workflow launcher path. Requiring
+/// `is_absolute()` keeps this a no-op (today's
 /// behavior: no `current_dir` set, BEAM inherits the Tauri app's cwd) for
 /// that dev/fallback shape instead.
 #[cfg(windows)]
@@ -655,15 +698,18 @@ fn check_launcher_platform(launcher: &std::path::Path) -> Result<()> {
 /// `std::env::temp_dir()` (never `None`) only if `dirs::cache_dir()` itself
 /// can't be resolved.
 ///
-/// Scoped by workspace id *and* port (not just workspace id) so two fronts
-/// for the same workspace — e.g. a stale one mid-reap while a new one spawns
-/// on retry — never race on the same `sys.config`/boot files.
+/// Scoped by workspace id *and* spawn instance id (not just workspace id) so
+/// two fronts for the same workspace — e.g. a stale one mid-reap while a new
+/// one spawns — never race on the same `sys.config`/boot files. Keyed by
+/// instance rather than port because the port isn't known until the front
+/// has booted and reported it (see [`crate::port`]), long after
+/// `RELEASE_TMP` must be set.
 #[cfg(windows)]
-pub(crate) fn release_tmp_dir(workspace_id: &str, port: u16) -> PathBuf {
+pub(crate) fn release_tmp_dir(workspace_id: &str, instance_id: &str) -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("beamtalk-release-tmp")
-        .join(format!("{workspace_id}-{port}"))
+        .join(format!("{workspace_id}-{instance_id}"))
 }
 
 /// Generate an ephemeral `SECRET_KEY_BASE` for one Windows front boot —
@@ -683,25 +729,23 @@ fn generate_secret_key_base() -> String {
     base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
 }
 
-/// Config for [`spawn_front_with_port_retry`] — the fields [`SpawnConfig`]
-/// needs, minus `port` (chosen per attempt) plus the retry knobs.
+/// Config for [`launch_front`] — the fields [`SpawnConfig`] needs, minus the
+/// per-spawn instance id (generated per launch), plus how long to wait for
+/// the front to report its port.
 #[derive(Debug, Clone)]
-pub struct SpawnAttemptConfig {
+pub struct LaunchConfig {
     pub launcher: PathBuf,
     pub workspace_id: String,
     pub bind_ip: String,
     pub ide_toml_path: PathBuf,
-    /// Passed through to [`crate::port::allocate_port_with_retry`].
-    pub max_port_attempts: u32,
-    /// How long to wait after spawning before checking whether the child
-    /// already exited — see [`spawn_front_with_port_retry`]'s doc comment
-    /// for why this is a best-effort heuristic, not a proof.
-    pub bind_failure_grace: Duration,
+    /// Upper bound on waiting for a still-running front to report its bound
+    /// port — see [`crate::port::wait_for_reported_port`].
+    pub port_report_timeout: Duration,
 }
 
-impl SpawnAttemptConfig {
+impl LaunchConfig {
     /// Build a config with the standard loopback bind, default `ide.toml`
-    /// path, [`port::DEFAULT_MAX_ATTEMPTS`], and [`DEFAULT_BIND_FAILURE_GRACE`].
+    /// path and [`port::DEFAULT_PORT_REPORT_TIMEOUT`].
     #[must_use]
     pub fn new(launcher: PathBuf, workspace_id: impl Into<String>) -> Self {
         Self {
@@ -709,159 +753,58 @@ impl SpawnAttemptConfig {
             workspace_id: workspace_id.into(),
             bind_ip: "127.0.0.1".to_string(),
             ide_toml_path: default_ide_config_path(),
-            max_port_attempts: port::DEFAULT_MAX_ATTEMPTS,
-            bind_failure_grace: DEFAULT_BIND_FAILURE_GRACE,
+            port_report_timeout: port::DEFAULT_PORT_REPORT_TIMEOUT,
         }
     }
 }
 
-/// Default grace period for [`spawn_front_with_port_retry`]'s bind-failure
-/// heuristic.
+/// Spawn a front and wait for it to report the HTTP port it bound (ADR 0097
+/// Broker §2): [`spawn_front`] with `PORT=0`, then
+/// [`crate::port::wait_for_reported_port`]. Returns the running front and
+/// the port to probe — the port our front's own listener holds, so there is
+/// no check-then-use race to retry around (see [`crate::port`]'s module
+/// docs, BT-4398).
 ///
-/// **Calibrated against a real `dist-liveview` release**, racing
-/// two fronts for the same port against a live workspace: a genuine
-/// `:eaddrinuse` crash took 2.76s–3.40s (mean ~3.05s, n=3) to surface as a
-/// process exit — the VM boots fully, the supervision tree's `Endpoint`
-/// child fails to bind, the failure unwinds through `application_controller`,
-/// a crash dump is written, and only then does the OS process exit. A
-/// healthy front, by contrast, reaches HTTP-up in under 1s. The
-/// previous 1.5s default sat *between* those two figures — comfortably
-/// after a healthy bind, but routinely **before** a real conflict's crash
-/// had actually happened, which would have handed
-/// [`spawn_front_with_port_retry`]'s caller a doomed child (misclassified as
-/// [`crate::port::SpawnAttempt::Bound`]) that then died ~1.5-2s later,
-/// outside this heuristic's view. 5s gives ~1.6s of margin over the worst
-/// observed crash latency, matching the safety-margin style used by
-/// [`crate::readiness::ProbeTimeouts::default_local`].
-///
-/// This grace period is paid in full on the **success** path of every spawn
-/// attempt (`spawn_front_with_port_retry` polls `try_wait` up to this
-/// deadline — see `poll_try_wait_until` — but a still-running process can't be told apart
-/// from one about to crash without waiting out the full window) — so
-/// raising it here trades ~3.5s of extra latency on every attach for not
-/// silently handing back a front that is already doomed. Correctness was
-/// judged more important than shaving that fixed cost. The **conflict**
-/// path (an early exit) can return sooner, as soon as the poll loop
-/// observes it.
-///
-/// This also compounds with [`port::DEFAULT_MAX_ATTEMPTS`]: the pathological
-/// worst case (every one of 10 fresh, OS-assigned candidate ports conflicts)
-/// now takes up to 50s before [`spawn_front_with_port_retry`] gives up,
-/// versus 15s at the old 1.5s grace. In practice each candidate is a
-/// distinct ephemeral port from a fresh [`port::find_free_port`] call, not
-/// the same port retried, so an all-10-conflict run is far less likely than
-/// the single-attempt TOCTOU race [`port`]'s module docs describe — but a
-/// future caller setting a tight overall UI timeout around the whole spawn
-/// call should size it with this worst case in mind, not just the common
-/// one-attempt path.
-pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
-
-/// Spawn a front with automatic retry on port conflict (ADR 0097 Broker §2;
-/// ties [`crate::port::allocate_port_with_retry`] to [`spawn_front`] — see
-/// [`crate::port`]'s module docs for the TOCTOU race this exists to work
-/// around, which the spike flagged as unhandled in its own throwaway harness
-/// and explicitly called out as real broker-core work).
-///
-/// **This is a heuristic, not a proof.** `spawn_front` returns as soon as
-/// the launcher process execs; the actual `PORT` bind happens seconds later,
-/// inside the BEAM VM's own boot sequence, and there is no synchronous
-/// signal this function can observe for "the bind failed." What it *can*
-/// observe is whether the spawned process is still alive after
-/// `bind_failure_grace` — a process that exits almost immediately is a
-/// reasonable (if imperfect) proxy for "the port was already taken and the
-/// release's supervision tree gave up," while one still running is treated
-/// as bound and handed to the caller. `bind_failure_grace` was calibrated
-/// against a real `bin/server`/`dist-liveview` boot: a genuine
-/// `:eaddrinuse` takes 2.76s–3.40s to surface as a process exit, versus well
-/// under 1s for a healthy boot to reach HTTP-up — see
-/// [`DEFAULT_BIND_FAILURE_GRACE`]'s doc comment for the full measurement and
-/// the resulting default.
+/// On failure after the spawn, the front is killed and reaped (and on
+/// Windows its `RELEASE_TMP` directory removed) before returning, so a
+/// caller never has a process or secret-bearing directory to clean up from
+/// an `Err`.
 ///
 /// # Errors
 ///
-/// Returns [`BrokerError::PortsExhausted`] if every port attempt looks like
-/// a conflict — carrying the *last* attempt's real launcher exit status as a
-/// diagnostic (see that variant's doc comment for why: this
-/// function's retry signal is a heuristic, so a genuine non-conflict launcher
-/// failure that happens to exit early on every attempt would otherwise be
-/// reported as an opaque attempt count with no clue it wasn't really a port
-/// conflict) — or propagates the first non-conflict error (OIDC refusal,
-/// unknown workspace, spawn I/O failure, or a `try_wait` I/O error).
-///
-/// # Panics
-///
-/// Never in practice: [`port::allocate_port_with_retry`] only returns `Ok`
-/// after the closure below returned [`SpawnAttempt::Bound`], which always
-/// stores a child into `spawned` first — the `expect` documents that
-/// invariant rather than guarding against a real failure mode.
-pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(SpawnedFront, u16)> {
-    let spawned: RefCell<Option<SpawnedFront>> = RefCell::new(None);
-    let port = port::allocate_port_with_retry(config.max_port_attempts, |candidate| {
-        let spawn_config = SpawnConfig {
-            launcher: config.launcher.clone(),
-            workspace_id: config.workspace_id.clone(),
-            port: candidate,
-            bind_ip: config.bind_ip.clone(),
-            ide_toml_path: config.ide_toml_path.clone(),
-        };
-        let mut child = spawn_front(&spawn_config)?;
-        // Poll try_wait() up to the deadline instead of a single
-        // sleep-then-check. A single check exactly at the deadline can miss
-        // a child that has *actually* exited but whose exit status the OS
-        // hasn't yet made visible to this process under scheduler
-        // contention (e.g. many parallel `cargo test` threads forking
-        // processes, or a throttled/virtualized sandbox) — polling gives
-        // several chances to observe the exit within the same total window,
-        // and returns as soon as it's detected rather than always paying
-        // the full grace period on the conflict path. The happy (bound)
-        // path is unaffected: a still-running process can't be told apart
-        // from one about to crash before the deadline, so that path still
-        // pays the full `bind_failure_grace` either way.
-        let exit_status = poll_try_wait_until(&mut child, config.bind_failure_grace)?;
-        if let Some(exit_status) = exit_status {
-            // Carry the launcher's actual exit status through, so a
-            // caller that exhausts every attempt sees more than a bare count
-            // (see BrokerError::PortsExhausted's doc comment) — this is a
-            // diagnostic only, not a reclassification: an early exit is still
-            // just *treated* as a suspected port conflict per this
-            // function's own heuristic doc comment above, whatever the real
-            // cause turns out to be.
-            Ok(SpawnAttempt::PortTaken(Some(exit_status.to_string())))
-        } else {
-            *spawned.borrow_mut() = Some(child);
-            Ok(SpawnAttempt::Bound)
+/// Propagates [`spawn_front`]'s errors (OIDC refusal, unknown workspace,
+/// launcher problems, spawn I/O), and
+/// [`crate::port::wait_for_reported_port`]'s:
+/// [`BrokerError::FrontExitedBeforeReportingPort`] if the front dies during
+/// boot, [`BrokerError::PortReportTimedOut`] if it never reports, or
+/// [`BrokerError::InvalidPortFile`].
+pub fn launch_front(config: &LaunchConfig) -> Result<(SpawnedFront, u16)> {
+    let spawn_config = SpawnConfig {
+        launcher: config.launcher.clone(),
+        workspace_id: config.workspace_id.clone(),
+        instance_id: port::new_instance_id(),
+        bind_ip: config.bind_ip.clone(),
+        ide_toml_path: config.ide_toml_path.clone(),
+    };
+    let mut front = spawn_front(&spawn_config)?;
+    let port_file = front.port_file().to_path_buf();
+    match port::wait_for_reported_port(&mut front, &port_file, config.port_report_timeout) {
+        Ok(port) => Ok((front, port)),
+        Err(e) => {
+            let _ = front.kill();
+            let _ = front.wait();
+            #[cfg(windows)]
+            {
+                // Closes the job (killing the whole tree) before removing the
+                // directory erl.exe may still hold open.
+                drop(front);
+                let _ = std::fs::remove_dir_all(release_tmp_dir(
+                    &spawn_config.workspace_id,
+                    &spawn_config.instance_id,
+                ));
+            }
+            Err(e)
         }
-    })?;
-    let child = spawned
-        .into_inner()
-        .expect("SpawnAttempt::Bound is only returned after storing the child above");
-    Ok((child, port))
-}
-
-/// Poll `child.try_wait()` at short intervals until it reports an exit or
-/// `grace` elapses, whichever comes first.
-///
-/// Returns `Ok(Some(status))` as soon as an exit is observed, or
-/// `Ok(None)` once the deadline passes with the child still reported
-/// running. Checks *before* sleeping on every iteration — including the
-/// final one right at the deadline — so this observes strictly more
-/// opportunities for the exit to become visible than a single
-/// sleep-then-check, without extending the total wait beyond `grace`.
-fn poll_try_wait_until(
-    child: &mut Child,
-    grace: Duration,
-) -> io::Result<Option<std::process::ExitStatus>> {
-    const POLL_INTERVAL: Duration = Duration::from_millis(15);
-    let deadline = Instant::now() + grace;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(Some(status));
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Ok(None);
-        }
-        std::thread::sleep(POLL_INTERVAL.min(remaining));
     }
 }
 
@@ -906,16 +849,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_env_sets_the_five_required_vars() {
+    fn build_env_sets_the_required_vars() {
         let _guard = crate::test_support::lock_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
-        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
-        let env = build_env(&config);
+        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123");
+        let env = build_env(&config, Path::new("front.port"));
         assert_eq!(
             env,
             vec![
-                ("PORT".to_string(), "4567".to_string()),
+                ("PORT".to_string(), "0".to_string()),
+                ("BT_ATTACH_PORT_FILE".to_string(), "front.port".to_string()),
                 ("BT_ATTACH_BIND_IP".to_string(), "127.0.0.1".to_string()),
                 ("BT_ATTACH_NODE_SUFFIX".to_string(), "abc123".to_string()),
                 ("RELEASE_DISTRIBUTION".to_string(), "none".to_string()),
@@ -931,8 +875,8 @@ mod tests {
         let _guard = crate::test_support::lock_env();
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::set_var("ERL_EPMD_ADDRESS", "10.0.0.5") };
-        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
-        let env = build_env(&config);
+        let config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123");
+        let env = build_env(&config, Path::new("front.port"));
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("ERL_EPMD_ADDRESS") };
         assert!(env.contains(&("ERL_EPMD_ADDRESS".to_string(), "10.0.0.5".to_string())));
@@ -940,9 +884,9 @@ mod tests {
 
     #[test]
     fn build_env_uses_configured_bind_ip() {
-        let mut config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
+        let mut config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123");
         "::1".clone_into(&mut config.bind_ip);
-        let env = build_env(&config);
+        let env = build_env(&config, Path::new("front.port"));
         assert!(env.contains(&("BT_ATTACH_BIND_IP".to_string(), "::1".to_string())));
     }
 
@@ -954,7 +898,7 @@ mod tests {
         // test in this crate that touches BT_OIDC_* env vars.
         unsafe { std::env::set_var("BT_OIDC_ISSUER", "https://idp.example.com") };
 
-        let mut config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123", 4567);
+        let mut config = SpawnConfig::new(PathBuf::from("/bin/true"), "abc123");
         config.ide_toml_path = tmp.path().join("ide.toml");
         let result = spawn_front(&config);
 
@@ -974,7 +918,6 @@ mod tests {
         let mut config = SpawnConfig::new(
             PathBuf::from("/bin/true"),
             "__nonexistent_workspace_broker_test__",
-            4567,
         );
         config.ide_toml_path = tmp.path().join("ide.toml");
         let result = spawn_front(&config);
@@ -1030,9 +973,10 @@ mod tests {
             Some("bt_attach_win_launch_ok_1@localhost"),
             Some("testcookie123"),
         );
-        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone());
 
-        let cmd = build_launch_command(&config).expect("should build a command");
+        let cmd =
+            build_launch_command(&config, Path::new("front.port")).expect("should build a command");
 
         assert_eq!(
             cmd.get_program(),
@@ -1057,7 +1001,11 @@ mod tests {
                 })
             })
             .collect();
-        assert_eq!(envs.get("PORT").map(String::as_str), Some("4567"));
+        assert_eq!(envs.get("PORT").map(String::as_str), Some("0"));
+        assert_eq!(
+            envs.get("BT_ATTACH_PORT_FILE").map(String::as_str),
+            Some("front.port")
+        );
         assert_eq!(
             envs.get("BT_ATTACH_BIND_IP").map(String::as_str),
             Some("127.0.0.1")
@@ -1116,9 +1064,10 @@ mod tests {
         );
         let release_root = tempfile::TempDir::new().unwrap();
         let launcher = release_root.path().join("bin").join("bt_attach.bat");
-        let config = SpawnConfig::new(launcher, ws.id.clone(), 4567);
+        let config = SpawnConfig::new(launcher, ws.id.clone());
 
-        let cmd = build_launch_command(&config).expect("should build a command");
+        let cmd =
+            build_launch_command(&config, Path::new("front.port")).expect("should build a command");
 
         assert_eq!(
             cmd.get_current_dir(),
@@ -1267,8 +1216,9 @@ mod tests {
             Some("bt_attach_win_launch_contract@localhost"),
             Some("c"),
         );
-        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
-        let cmd = build_launch_command(&config).expect("should build a command");
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone());
+        let cmd =
+            build_launch_command(&config, Path::new("front.port")).expect("should build a command");
         let env_names: std::collections::HashSet<String> = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|_| k.to_string_lossy().into_owned()))
@@ -1285,18 +1235,15 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn release_tmp_dir_is_scoped_by_workspace_and_port() {
-        let a = release_tmp_dir("workspace_a", 4567);
-        let b = release_tmp_dir("workspace_a", 4568);
-        let c = release_tmp_dir("workspace_b", 4567);
+    fn release_tmp_dir_is_scoped_by_workspace_and_instance() {
+        let a = release_tmp_dir("workspace_a", "i1");
+        let b = release_tmp_dir("workspace_a", "i2");
+        let c = release_tmp_dir("workspace_b", "i1");
         assert_ne!(
             a, b,
-            "different ports for the same workspace must not collide"
+            "different spawns of the same workspace must not collide"
         );
-        assert_ne!(
-            a, c,
-            "different workspaces on the same port must not collide"
-        );
+        assert_ne!(a, c, "different workspaces must not collide");
     }
 
     #[cfg(windows)]
@@ -1307,9 +1254,9 @@ mod tests {
         // Windows build — the exact scenario
         // flagged: this used to fail with an opaque OS error instead of a
         // named one.
-        let config = SpawnConfig::new(PathBuf::from(r"bin\server"), ws.id.clone(), 4567);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\server"), ws.id.clone());
 
-        let result = build_launch_command(&config);
+        let result = build_launch_command(&config, Path::new("front.port"));
 
         assert!(
             matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
@@ -1348,7 +1295,7 @@ mod tests {
         // A well-formed, absolute .bat path — passes check_launcher_platform
         // — that is simply never written to disk.
         let launcher = tmp.path().join("bin").join("bt_attach.bat");
-        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone(), 4567);
+        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("BT_OIDC_ISSUER") };
@@ -1369,9 +1316,9 @@ mod tests {
     #[test]
     fn build_launch_command_errors_when_metadata_lacks_node_name() {
         let ws = WindowsTestWorkspaceDir::new("win_launch_no_node_name", None, Some("c"));
-        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone());
 
-        let result = build_launch_command(&config);
+        let result = build_launch_command(&config, Path::new("front.port"));
 
         assert!(
             matches!(result, Err(BrokerError::MissingNodeName(ref w)) if w == &ws.id),
@@ -1388,9 +1335,9 @@ mod tests {
             Some("bt_attach_win_launch_no_cookie@localhost"),
             None,
         );
-        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone(), 4567);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), ws.id.clone());
 
-        let result = build_launch_command(&config);
+        let result = build_launch_command(&config, Path::new("front.port"));
 
         assert!(matches!(result, Err(BrokerError::MissingCookie(_))));
     }
@@ -1411,15 +1358,7 @@ mod tests {
         );
     }
 
-    // ── spawn_front_with_port_retry ─────────────────────────────────────
-    //
-    // `spawn_front` itself refuses unless `~/.beamtalk/workspaces/<id>/`
-    // exists, so these tests create (and clean up) a real, throwaway
-    // workspace directory under the actual home dir — the same pattern
-    // `beamtalk-cli`'s own tests use (there's no HOME-override hook in
-    // `beamtalk_workspace`), rather than pointing at a fake filesystem root.
-
-    // Only the #[cfg(unix)] spawn_front_with_port_retry_* tests below
+    // Only the #[cfg(unix)] launch_front_* tests below
     // construct this (write_launcher_script needs a real #!/bin/sh script,
     // which has no Windows equivalent) — gate it to match, or it's dead
     // code on Windows.
@@ -1484,27 +1423,12 @@ mod tests {
         path
     }
 
-    /// Exec `launcher` once, synchronously, and return its exit status —
-    /// warms the OS's one-time "cold exec" cost for a brand-new script file
-    /// so a subsequent *timed* exec of the same file
-    /// isn't racing that one-time cost against a tight grace window. Only
-    /// suitable for a launcher that's expected to exit on its own quickly;
-    /// see `spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log`
-    /// for the spawn-then-kill variant this doesn't cover (a launcher that
-    /// never exits by itself).
-    #[cfg(unix)]
-    fn warm_up_launcher_exec(launcher: &std::path::Path) -> std::process::ExitStatus {
-        Command::new(launcher)
-            .status()
-            .expect("warm-up exec of the launcher should run")
-    }
-
     #[cfg(unix)]
     #[test]
     fn build_launch_command_errors_on_launcher_platform_mismatch() {
-        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), "abc123", 4567);
+        let config = SpawnConfig::new(PathBuf::from(r"bin\bt_attach.bat"), "abc123");
 
-        let result = build_launch_command(&config);
+        let result = build_launch_command(&config, Path::new("front.port"));
 
         assert!(
             matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
@@ -1519,9 +1443,9 @@ mod tests {
         // equally clear tell that this launcher was built for Windows
         // (adversarial-review follow-up: the original denylist only caught
         // .bat/.cmd, silently accepting an obviously-wrong-platform .exe).
-        let config = SpawnConfig::new(PathBuf::from("bin/bt_attach.exe"), "abc123", 4567);
+        let config = SpawnConfig::new(PathBuf::from("bin/bt_attach.exe"), "abc123");
 
-        let result = build_launch_command(&config);
+        let result = build_launch_command(&config, Path::new("front.port"));
 
         assert!(
             matches!(result, Err(BrokerError::LauncherPlatformMismatch(_, _))),
@@ -1542,7 +1466,7 @@ mod tests {
         let ws = TestWorkspaceDir::new("launcher_missing");
         let tmp = tempfile::TempDir::new().unwrap();
         let launcher = tmp.path().join("server"); // deliberately never written
-        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone(), 4567);
+        let mut config = SpawnConfig::new(launcher.clone(), ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("BT_OIDC_ISSUER") };
@@ -1555,24 +1479,43 @@ mod tests {
         );
     }
 
+    /// Shell snippet a test launcher runs to act like a booted front: write
+    /// a port to `$BT_ATTACH_PORT_FILE` the way `BtAttach.PortReport` does
+    /// (temp file, then rename).
+    #[cfg(unix)]
+    const REPORT_PORT_SH: &str = "echo 43210 > \"$BT_ATTACH_PORT_FILE.tmp\" && \
+         mv \"$BT_ATTACH_PORT_FILE.tmp\" \"$BT_ATTACH_PORT_FILE\"";
+
     #[cfg(unix)]
     #[test]
-    fn spawn_front_with_port_retry_returns_a_live_child_on_the_first_attempt() {
-        let ws = TestWorkspaceDir::new("port_retry_ok");
+    fn launch_front_returns_the_port_the_front_reports() {
+        let ws = TestWorkspaceDir::new("launch_ok");
         let tmp = tempfile::TempDir::new().unwrap();
-        let launcher = write_launcher_script(tmp.path(), "server", "sleep 5");
+        let launcher =
+            write_launcher_script(tmp.path(), "server", &format!("{REPORT_PORT_SH}; sleep 5"));
 
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
-        config.bind_failure_grace = Duration::from_millis(100);
 
-        let (mut child, port) =
-            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
-        assert!(port >= 1024);
+        let (mut child, port) = launch_front(&config).expect("should spawn and report a port");
+        assert_eq!(
+            port, 43_210,
+            "must hand back exactly the port the front reported"
+        );
         assert_eq!(
             child.try_wait().unwrap(),
             None,
             "child should still be running (the launcher sleeps)"
+        );
+        assert!(
+            !child.port_file().exists(),
+            "the one-shot port file should be consumed once read"
+        );
+        assert!(
+            child
+                .port_file()
+                .starts_with(beamtalk_workspace::workspace_dir(&ws.id).unwrap()),
+            "the port file should live in the workspace dir"
         );
 
         let _ = child.kill();
@@ -1581,7 +1524,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn spawn_front_with_port_retry_captures_front_stdout_and_stderr_to_attach_log() {
+    fn launch_front_captures_front_stdout_and_stderr_to_attach_log() {
         // The spawned front's stdout/stderr must land in
         // `~/.beamtalk/workspaces/<id>/attach.log`, not the packaged app's
         // inherited (and, in a release build, nonexistent) stdio.
@@ -1590,18 +1533,15 @@ mod tests {
         let launcher = write_launcher_script(
             tmp.path(),
             "server",
-            "echo stdout-marker; echo stderr-marker 1>&2; sleep 5",
+            &format!("echo stdout-marker; echo stderr-marker 1>&2; {REPORT_PORT_SH}; sleep 5"),
         );
 
         // Pay this exact file's first-exec tax here, untimed,
         // instead of racing it against the fixed 2s `wait_for_file_contents`
-        // timeout below. Same root cause as the sibling
-        // `..._recovers_after_transient_conflicts` test: the *first* exec of
-        // a brand-new script file can take 200ms+ on a loaded macOS sandbox —
+        // timeout below: the *first* exec of a brand-new script file can take 200ms+ on a loaded macOS sandbox —
         // and under full-crate parallel `cargo test` scheduler contention,
         // occasionally much more — while every *subsequent* exec of that same
-        // already-warm file consistently lands under 20ms. Unlike the
-        // `exit 1`-style launchers in the sibling tests, this script never
+        // already-warm file consistently lands under 20ms. This script never
         // exits on its own (it ends in `sleep 5`), so the warm-up here can't
         // wait for a natural exit — it only needs to force the one-time
         // cold-exec cost to happen now, so the timed spawn below execs an
@@ -1610,6 +1550,7 @@ mod tests {
         // this warm-up run's own `echo` output doesn't leak into the test
         // process's stdout/stderr.
         let mut warmup = Command::new(&launcher)
+            .env(port::PORT_FILE_ENV, tmp.path().join("warmup.port"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1618,12 +1559,10 @@ mod tests {
         let _ = warmup.kill();
         let _ = warmup.wait();
 
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
-        config.bind_failure_grace = Duration::from_millis(100);
 
-        let (mut child, _port) =
-            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
+        let (mut child, _port) = launch_front(&config).expect("should spawn and report a port");
 
         let log_path = beamtalk_workspace::workspace_dir(&ws.id)
             .unwrap()
@@ -1673,191 +1612,86 @@ mod tests {
         }
     }
 
-    /// `poll_try_wait_until` should observe an exit that happens
-    /// well before the deadline without waiting out the full grace period —
-    /// this is what lets the conflict path in
-    /// `spawn_front_with_port_retry` return early instead of always paying
-    /// the full `bind_failure_grace`.
+    /// A front that dies during boot (bad release, config error, a bind
+    /// failure) surfaces as a named error carrying its exit status — promptly,
+    /// not after the port-report timeout, and with no retry.
     #[cfg(unix)]
     #[test]
-    fn poll_try_wait_until_returns_promptly_once_the_child_exits() {
-        let mut child = Command::new("/bin/sh")
-            .arg("-c")
-            .arg("exit 7")
-            .spawn()
-            .unwrap();
-
-        let started = Instant::now();
-        let status = poll_try_wait_until(&mut child, Duration::from_secs(5))
-            .unwrap()
-            .expect("child should have exited");
-        let elapsed = started.elapsed();
-
-        assert_eq!(status.code(), Some(7));
-        assert!(
-            elapsed < Duration::from_secs(1),
-            "expected an early return well under the 5s grace period, took {elapsed:?}"
-        );
-    }
-
-    /// A still-running child must not be misreported as exited —
-    /// `poll_try_wait_until` should keep polling right up to (and
-    /// including) the deadline and only then report `None`.
-    #[cfg(unix)]
-    #[test]
-    fn poll_try_wait_until_returns_none_when_the_child_outlives_the_deadline() {
-        let mut child = Command::new("/bin/sh")
-            .arg("-c")
-            .arg("sleep 5")
-            .spawn()
-            .unwrap();
-
-        let started = Instant::now();
-        let status = poll_try_wait_until(&mut child, Duration::from_millis(100)).unwrap();
-        let elapsed = started.elapsed();
-
-        assert_eq!(status, None, "child is still running, should report None");
-        assert!(
-            elapsed >= Duration::from_millis(100),
-            "should have waited out the full grace period, took {elapsed:?}"
-        );
-
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn spawn_front_with_port_retry_gives_up_after_max_attempts_when_launcher_always_exits() {
-        let ws = TestWorkspaceDir::new("port_retry_fail");
+    fn launch_front_reports_a_front_that_exits_before_reporting_its_port() {
+        let ws = TestWorkspaceDir::new("launch_exits");
         let tmp = tempfile::TempDir::new().unwrap();
-        // Simulates an immediate `:eaddrinuse`-style crash on every attempt.
-        let launcher = write_launcher_script(tmp.path(), "server", "exit 1");
-
-        // Pay this exact file's first-exec tax here, untimed,
-        // instead of racing it against `bind_failure_grace` below — same
-        // fix as the sibling `..._recovers_after_transient_conflicts`
-        // test (see its comment for the full root-cause rationale). The
-        // *first* exec of a brand-new script file can take 200ms+ on a
-        // loaded macOS sandbox, comfortably exceeding this test's 250ms
-        // grace and misclassifying attempt 1 as `Bound`; every *subsequent*
-        // exec of the same already-warm file consistently lands under
-        // 20ms. Running the launcher once here, synchronously and with no
-        // deadline, forces that one-time tax to happen before the timed
-        // retry logic below starts, so all three *measured* attempts exec
-        // an already-warm file.
-        let warmup_status = warm_up_launcher_exec(&launcher);
-        assert_eq!(
-            warmup_status.code(),
-            Some(1),
-            "warm-up exec should hit the script's own `exit 1` branch, got {warmup_status:?}"
+        let counter = tmp.path().join("runs");
+        let launcher = write_launcher_script(
+            tmp.path(),
+            "server",
+            &format!("echo run >> {}; exit 1", counter.display()),
         );
 
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        // The poll loop alone doesn't stabilize this in a sandboxed
-        // CI/dev environment — the *first* exec of a brand-new tempdir path
-        // (a fresh one every run, from `tempfile::TempDir::new()`) can pay a
-        // cold-exec tax north of 50ms here, independent of how tightly
-        // `try_wait` is polled within the window. 250ms (the spec's allowed
-        // ceiling) comfortably covers that without masking a real hang.
-        // The warm-up above removes the *first-exec* tax race; this
-        // grace still covers ordinary scheduler jitter across all 3 timed
-        // attempts, same as it always has.
-        config.bind_failure_grace = Duration::from_millis(250);
-        config.max_port_attempts = 3;
+        config.port_report_timeout = Duration::from_secs(20);
 
-        let result = spawn_front_with_port_retry(&config);
+        let started = std::time::Instant::now();
+        let result = launch_front(&config);
+
         assert!(
             matches!(
                 result,
-                Err(BrokerError::PortsExhausted {
-                    attempts: 3,
-                    last_exit_status: Some(_)
-                })
+                Err(BrokerError::FrontExitedBeforeReportingPort { ref exit_status })
+                    if exit_status.contains('1')
             ),
-            "expected PortsExhausted with attempts=3 and a diagnostic exit status \
-             (the launcher's real exit status should be surfaced, not just \
-             a bare count), got {result:?}"
+            "expected FrontExitedBeforeReportingPort with the launcher's exit status, \
+             got {result:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "a dead front should be reported as soon as its exit is seen"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&counter).unwrap().lines().count(),
+            1,
+            "no retry: the front chooses its own port, so an exit is never a port race"
         );
     }
 
+    /// A front that stays up but never reports its port is killed (not
+    /// leaked) when the wait times out.
     #[cfg(unix)]
     #[test]
-    fn spawn_front_with_port_retry_recovers_after_transient_conflicts() {
-        let ws = TestWorkspaceDir::new("port_retry_recover");
+    fn launch_front_kills_a_front_that_never_reports_its_port() {
+        let ws = TestWorkspaceDir::new("launch_silent");
         let tmp = tempfile::TempDir::new().unwrap();
-        // Fails twice (via a counter file each invocation increments), then
-        // stays up — exercises the actual retry-then-succeed path, not just
-        // the all-fail / all-succeed extremes.
-        let counter_path = tmp.path().join("attempts");
-        std::fs::write(&counter_path, b"0").unwrap();
-        let script = format!(
-            "n=$(cat {0})\nn=$((n + 1))\necho \"$n\" > {0}\nif [ \"$n\" -lt 3 ]; then exit 1; fi\nsleep 5\n",
-            counter_path.display()
+        let pid_file = tmp.path().join("pid");
+        let launcher = write_launcher_script(
+            tmp.path(),
+            "server",
+            &format!("echo $$ > {}; exec sleep 30", pid_file.display()),
         );
-        let launcher = write_launcher_script(tmp.path(), "server", &script);
 
-        // Pay this exact file's first-exec tax here, untimed,
-        // instead of racing it against `bind_failure_grace` below. Root
-        // cause (confirmed by instrumenting `spawn_front_with_port_retry`
-        // locally): the *first* exec of a brand-new script file — even one
-        // as small as this one — can take 200ms+ on a loaded macOS sandbox,
-        // while every *subsequent* exec of that same already-warm file
-        // consistently lands under 20ms. The poll loop only shortens
-        // *detection* latency once the process actually exits; it can't
-        // shorten the process's own wall-clock time to reach `exit 1`, so
-        // when that first-exec tax alone exceeds the 250ms grace, attempt 1
-        // is still running (not yet even at the `cat`/arithmetic/`echo`
-        // lines) when the deadline fires and gets misclassified as `Bound`
-        // — the test then reads a `0`-or-`1`-attempts counter instead of the
-        // expected `3`. Widening the grace further would only raise the bar
-        // the tax has to clear, not remove the race (forbidden by this
-        // issue's acceptance criteria) — running the launcher once here,
-        // synchronously and with no deadline, forces that one-time tax to
-        // happen before the timed retry logic below ever starts, so all
-        // three *measured* attempts exec an already-warm file.
-        let warmup_status = warm_up_launcher_exec(&launcher);
-        assert!(
-            warmup_status.success() || warmup_status.code() == Some(1),
-            "warm-up exec should either succeed or hit the script's own \
-             `exit 1` branch, got {warmup_status:?}"
-        );
-        // The warm-up run above incremented the counter file (it's the same
-        // script, same file, counting the same way) — reset it so the timed
-        // retry logic below starts counting from a clean `0`.
-        std::fs::write(&counter_path, b"0").unwrap();
-
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        // See the sibling `..._always_exits` test above for why
-        // this needed raising past the poll loop alone — same cold-exec tax
-        // applies to this test's first attempt at a brand-new tempdir path.
-        // The warm-up above removes the *first-exec* tax race; this
-        // grace still covers ordinary scheduler jitter across all 3 timed
-        // attempts, same as it always has.
-        config.bind_failure_grace = Duration::from_millis(250);
-        config.max_port_attempts = 5;
+        config.port_report_timeout = Duration::from_millis(500);
 
-        let (mut child, _port) =
-            spawn_front_with_port_retry(&config).expect("should eventually succeed");
-        assert_eq!(
-            child.try_wait().unwrap(),
-            None,
-            "third attempt should stay up"
+        let result = launch_front(&config);
+        assert!(
+            matches!(result, Err(BrokerError::PortReportTimedOut { .. })),
+            "got {result:?}"
         );
-        let attempts: u32 = std::fs::read_to_string(&counter_path)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert_eq!(attempts, 3, "should have taken exactly 3 attempts");
 
-        let _ = child.kill();
-        let _ = child.wait();
+        // `launch_front` kill+waits before returning, so the pid (if the
+        // script got far enough to record it) must already be gone.
+        if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+            let pid: libc::pid_t = pid.trim().parse().unwrap();
+            // SAFETY: signal 0 only checks for existence; sends nothing.
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            assert!(
+                !alive,
+                "the silent front (pid {pid}) should have been killed"
+            );
+        }
     }
 
-    // ── spawn_front_with_port_retry: real spawn ─────────────────────────
+    // ── launch_front: real spawn on Windows ─────────────────────────────
     //
     // The `build_launch_command_*` tests above only assert that the
     // `cmd.env(...)` calls that produced a `Command` ran, via
@@ -1866,11 +1700,9 @@ mod tests {
     // Windows process-spawning behavior (the `cmd.exe` wrapping a `.bat`
     // triggers per `Command`'s "BatBadBut" fix, whether `creation_flags`
     // actually applied, whether the job-object assignment in `spawn_front`
-    // succeeds against a real child). `spawn_front_with_port_retry` — the
-    // function the desktop app actually calls — previously had zero Windows
-    // test coverage; these two mirror the `#[cfg(unix)]`
-    // `spawn_front_with_port_retry_*` tests above, using a throwaway `.bat`
-    // in place of a `#!/bin/sh` script.
+    // succeeds against a real child, whether `BT_ATTACH_PORT_FILE` reaches
+    // the batch file intact). These mirror the `#[cfg(unix)]` `launch_front_*`
+    // tests above, using a throwaway `.bat` in place of a `#!/bin/sh` script.
     //
     // Both hold `ENV_LOCK` across the actual spawn: unlike the Unix
     // `write_launcher_script` tests (which exec their throwaway script
@@ -1897,24 +1729,30 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn spawn_front_with_port_retry_returns_a_live_child_on_the_first_attempt_windows() {
+    fn launch_front_returns_the_port_the_front_reports_windows() {
         let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
-            "port_retry_ok_win",
-            Some("bt_attach_port_retry_ok_win@localhost"),
+            "launch_ok_win",
+            Some("bt_attach_launch_ok_win@localhost"),
             Some("testcookie"),
         );
         let tmp = tempfile::TempDir::new().unwrap();
-        // A short ping-based sleep — no coreutils `sleep` on Windows.
-        let launcher = write_launcher_batch(tmp.path(), "bt_attach", "ping -n 6 127.0.0.1 >nul");
+        // Report a port the way BtAttach.PortReport does (temp file, then
+        // rename), then a short ping-based sleep — no coreutils `sleep` on
+        // Windows.
+        let launcher = write_launcher_batch(
+            tmp.path(),
+            "bt_attach",
+            "echo 43210>\"%BT_ATTACH_PORT_FILE%.tmp\"\r\n\
+             move /y \"%BT_ATTACH_PORT_FILE%.tmp\" \"%BT_ATTACH_PORT_FILE%\" >nul\r\n\
+             ping -n 6 127.0.0.1 >nul",
+        );
 
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
-        config.bind_failure_grace = Duration::from_millis(300);
 
-        let (mut child, port) =
-            spawn_front_with_port_retry(&config).expect("should spawn and bind on first try");
-        assert!(port >= 1024);
+        let (mut child, port) = launch_front(&config).expect("should spawn and report a port");
+        assert_eq!(port, 43_210);
         assert_eq!(
             child.try_wait().unwrap(),
             None,
@@ -1927,41 +1765,26 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn spawn_front_with_port_retry_gives_up_after_max_attempts_when_launcher_always_exits_windows()
-    {
+    fn launch_front_reports_a_front_that_exits_before_reporting_its_port_windows() {
         let _guard = crate::test_support::lock_env();
         let ws = WindowsTestWorkspaceDir::new(
-            "port_retry_fail_win",
-            Some("bt_attach_port_retry_fail_win@localhost"),
+            "launch_exits_win",
+            Some("bt_attach_launch_exits_win@localhost"),
             Some("testcookie"),
         );
         let tmp = tempfile::TempDir::new().unwrap();
-        // Simulates an immediate `:eaddrinuse`-style crash on every attempt.
         let launcher = write_launcher_batch(tmp.path(), "bt_attach", "exit /b 1");
 
-        let mut config = SpawnAttemptConfig::new(launcher, ws.id.clone());
+        let mut config = LaunchConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml");
-        // Wider than the Unix counterpart's 50ms: a freshly-written `.bat` in
-        // a fresh tempdir is a plausible target for Windows Defender's
-        // real-time-scan-on-first-exec latency, on top of `cmd.exe`'s own
-        // (larger than a POSIX shell's) process-creation overhead — a tight
-        // grace here risks misclassifying a genuinely-crashing launcher as
-        // still bound under CI load.
-        config.bind_failure_grace = Duration::from_millis(750);
-        config.max_port_attempts = 3;
 
-        let result = spawn_front_with_port_retry(&config);
+        let result = launch_front(&config);
         assert!(
             matches!(
                 result,
-                Err(BrokerError::PortsExhausted {
-                    attempts: 3,
-                    last_exit_status: Some(_)
-                })
+                Err(BrokerError::FrontExitedBeforeReportingPort { .. })
             ),
-            "expected PortsExhausted with attempts=3 and a diagnostic exit status \
-             (the launcher's real exit status should be surfaced, not just \
-             a bare count), got {result:?}"
+            "expected FrontExitedBeforeReportingPort, got {result:?}"
         );
     }
 
@@ -2152,7 +1975,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let launcher = write_launcher_batch(tmp.path(), "bt_attach", "ping -n 30 127.0.0.1 >nul");
 
-        let mut config = SpawnConfig::new(launcher, ws.id.clone(), 54_321);
+        let mut config = SpawnConfig::new(launcher, ws.id.clone());
         config.ide_toml_path = tmp.path().join("ide.toml"); // doesn't exist: no OIDC
 
         let front = spawn_front(&config).expect("should spawn");
