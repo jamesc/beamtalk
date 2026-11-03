@@ -65,17 +65,26 @@ TestCase subclass: StringBinaryInheritanceTest
     // toBytes returns list of byte integers
     self assert: "hello" toBytes equals: #(104, 101, 108, 108, 111)
 
-  testAsCharlistAnswersBytes =>
-    // asCharlist is the FFI charlist spelling of toBytes (BT-4324)
+  testAsCharlistAnswersCodePoints =>
+    // asCharlist answers Unicode code points: the OTP charlist convention,
+    // and the FFI proxy's own String-to-charlist coercion (BT-4380)
     self assert: "hello" asCharlist equals: #(104, 101, 108, 108, 111)
-    self assert: "hello" asCharlist equals: "hello" toBytes
-    // Multi-byte: "é" is 2 UTF-8 bytes (C3 A9), not 1 code point (233)
-    self assert: "é" asCharlist equals: #(195, 169)
-    // Non-UTF8 bytes pass through untouched (byte semantics, not text)
-    self assert: (Binary fromBytes: #(255, 254)) asCharlist equals: #(255, 254)
-    self assert: "café" asCharlist equals: "café" toBytes
-    self assert: (Binary fromBytes: #(195, 169)) asCharlist equals: #(195, 169)
     self assert: "" asCharlist equals: #()
+    // Multi-byte: "é" is 1 code point (233), not its 2 UTF-8 bytes (C3 A9)
+    self assert: "é" asCharlist equals: #(233)
+    self assert: "é" toBytes equals: #(195, 169)
+    self assert: "café€" asCharlist equals: #(99, 97, 102, 233, 8364)
+    // A charlist is text, so asCharlist is String-only: a Binary's raw
+    // bytes are toBytes (BT-4380)
+    self deny: ((Binary fromBytes: #(195, 169)) respondsTo: #asCharlist)
+    self assert: ("é" respondsTo: #asCharlist)
+
+  testAsCharlistRoundTripsThroughFromIolist =>
+    // Non-ASCII code points survive String -> charlist -> String (BT-4380)
+    self assert: (String fromIolist: "café" asCharlist) equals: "café"
+    self assert: (String fromIolist: "€ ünï 😀" asCharlist) equals: "€ ünï 😀"
+    self assert: (String fromIolist: "hello" asCharlist) equals: "hello"
+    self assert: (String fromCodePoints: "€ ünï 😀" asCharlist) equals: "€ ünï 😀"
 
   testAsStringOnString =>
     // asString on a String is a no-op, returns the string itself

@@ -39,6 +39,7 @@ see the `BT-4173` clauses); anything else raises `type_error` via
     split_on/2,
     repeat/2,
     as_list/1,
+    as_charlist/1,
     join/1,
     join/2,
     each/2,
@@ -351,6 +352,33 @@ as_list({beamtalk_string, Str}) when is_binary(Str) ->
 as_list(Bin) when is_binary(Bin) -> as_list({beamtalk_string, Bin});
 as_list(Str) ->
     raise_not_string('asList', Str).
+
+-doc """
+Convert a String to an Erlang charlist of Unicode code points (BT-4380).
+
+Uses `unicode:characters_to_list/2` — the OTP charlist convention, and the
+same conversion the FFI proxy applies when it retries a call with a
+`String` argument coerced to a charlist (`beamtalk_erlang_proxy`'s
+`coerce_arg/1`), so `"café" asCharlist` names the same file as passing
+`"café"` straight to `file:`/`filename:`. A `String` built with
+`asStringUnchecked` from bytes that are not valid UTF-8 has no code-point
+reading and raises a `type_error` rather than answering a partial list.
+""".
+-spec as_charlist(t() | binary()) -> [char()].
+as_charlist({beamtalk_string, Str}) when is_binary(Str) ->
+    case unicode:characters_to_list(Str, utf8) of
+        Chars when is_list(Chars) ->
+            Chars;
+        _ ->
+            beamtalk_error:raise_type_error(
+                'String',
+                asCharlist,
+                <<"String is not valid UTF-8; use toBytes for the raw bytes">>
+            )
+    end;
+as_charlist(Bin) when is_binary(Bin) -> as_charlist({beamtalk_string, Bin});
+as_charlist(Str) ->
+    raise_not_string('asCharlist', Str).
 
 -doc """
 Join a list of grapheme Strings into a single string.

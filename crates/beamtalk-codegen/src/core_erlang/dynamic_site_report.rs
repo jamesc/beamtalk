@@ -17,7 +17,7 @@
 //! Each hint reads
 //!
 //! ```text
-//! Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string)
+//! Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 8 other selectors are answered outside bt@stdlib@string)
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
