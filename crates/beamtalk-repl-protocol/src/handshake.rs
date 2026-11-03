@@ -131,8 +131,10 @@ pub fn auth_request(
 ///
 /// # Errors
 ///
-/// Returns a version-mismatch message (naming both sides plus the rebuild
-/// hint) when `versions` is absent or either version differs.
+/// Returns a version-mismatch message (naming both sides, how to stop the
+/// stale node, and how to get matching toolchains — see
+/// [`version_mismatch_remedy`]) when `versions` is absent or either version
+/// differs.
 pub fn verify_server_versions(
     versions: Option<&Value>,
     beamtalk_version: &str,
@@ -141,8 +143,9 @@ pub fn verify_server_versions(
     let versions = versions.ok_or_else(|| {
         format!(
             "Workspace did not report versions (describe has no versions map) — \
-             the node predates the version handshake. Stop it and rebuild from \
-             the same checkout: `just build`. Client is beamtalk {beamtalk_version}."
+             the node predates the version handshake. Client is beamtalk \
+             {beamtalk_version}. {}",
+            version_mismatch_remedy(beamtalk_version, None)
         )
     })?;
     let server_beamtalk = versions.get("beamtalk").and_then(Value::as_str);
@@ -151,12 +154,38 @@ pub fn verify_server_versions(
         (Some(bt), Some(p)) if bt == beamtalk_version && p == protocol_version => Ok(()),
         _ => Err(format!(
             "Workspace version mismatch: node reports beamtalk {}, protocol {}; \
-             this client is beamtalk {beamtalk_version}, protocol {protocol_version}. \
-             Stop the stale node and rebuild from the same checkout: `just build`.",
+             this client is beamtalk {beamtalk_version}, protocol {protocol_version}. {}",
             server_beamtalk.unwrap_or("<missing>"),
             server_protocol.unwrap_or("<missing>"),
+            version_mismatch_remedy(beamtalk_version, server_beamtalk),
         )),
     }
+}
+
+/// The "what to do" half of a client-side version-mismatch message.
+///
+/// Always names `beamtalk workspace stop <id>` (the client does not learn
+/// the node's workspace id from `describe`; `beamtalk workspace list` shows
+/// it). Suggests `just build` only when either side is a `-dev` build — a
+/// source checkout, where rebuilding is the fix; between released
+/// toolchains the fix is installing the same release on both sides.
+fn version_mismatch_remedy(client_beamtalk: &str, server_beamtalk: Option<&str>) -> String {
+    let rebuild = if is_dev_version(client_beamtalk) || server_beamtalk.is_some_and(is_dev_version)
+    {
+        "rebuild from the same checkout (`just build`)"
+    } else {
+        "install the same beamtalk release for both"
+    };
+    format!(
+        "Stop the stale node with `beamtalk workspace stop <id>` \
+         (`beamtalk workspace list` shows the id), then {rebuild}."
+    )
+}
+
+/// True for a source-checkout build's version (`0.4.0-dev+<sha>`), as
+/// opposed to a release (`0.4.0`).
+fn is_dev_version(version: &str) -> bool {
+    version.contains("-dev")
 }
 
 /// Client side of the version lock over any async transport (BT-4327,
@@ -337,6 +366,28 @@ mod tests {
         let versions = serde_json::json!({"protocol": "2.0", "beamtalk": "0.3.0"});
         let err = verify_server_versions(Some(&versions), "0.4.0", "2.0").unwrap_err();
         assert!(err.contains("0.3.0"), "{err}");
+        assert!(err.contains("beamtalk workspace stop <id>"), "{err}");
+    }
+
+    /// BT-4382: `just build` is a source-checkout remedy — suggested only
+    /// when either side is a `-dev` build, never between two releases.
+    #[test]
+    fn verify_server_versions_suggests_just_build_only_for_dev_versions() {
+        let release = serde_json::json!({"protocol": "2.0", "beamtalk": "0.3.0"});
+        let err = verify_server_versions(Some(&release), "0.4.0", "2.0").unwrap_err();
+        assert!(!err.contains("just build"), "{err}");
+        assert!(err.contains("same beamtalk release"), "{err}");
+
+        let err = verify_server_versions(Some(&release), "0.4.0-dev+abc1234", "2.0").unwrap_err();
+        assert!(err.contains("just build"), "{err}");
+
+        let dev_node = serde_json::json!({"protocol": "2.0", "beamtalk": "0.4.0-dev+abc1234"});
+        let err = verify_server_versions(Some(&dev_node), "0.4.0", "2.0").unwrap_err();
+        assert!(err.contains("just build"), "{err}");
+
+        let err = verify_server_versions(None, "0.4.0", "2.0").unwrap_err();
+        assert!(!err.contains("just build"), "{err}");
+        let err = verify_server_versions(None, "0.4.0-dev+abc1234", "2.0").unwrap_err();
         assert!(err.contains("just build"), "{err}");
     }
 

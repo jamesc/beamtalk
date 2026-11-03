@@ -722,7 +722,7 @@ mod tests {
             let msg = err.to_string();
             assert!(msg.contains("version mismatch"), "got: {msg}");
             assert!(msg.contains("0.0.0-stale"), "got: {msg}");
-            assert!(msg.contains("just build"), "got: {msg}");
+            assert!(msg.contains("beamtalk workspace stop"), "got: {msg}");
         }
 
         #[test]
@@ -862,7 +862,7 @@ mod tests {
             };
             let msg = err.to_string();
             assert!(msg.contains("predates"), "got: {msg}");
-            assert!(msg.contains("just build"), "got: {msg}");
+            assert!(msg.contains("beamtalk workspace stop"), "got: {msg}");
         }
 
         #[test]

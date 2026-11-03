@@ -574,16 +574,45 @@ check_client_versions(AuthMsg) ->
                     io_lib:format(
                         "Version mismatch: client is beamtalk ~s protocol ~s, "
                         "this workspace node is beamtalk ~s protocol ~s. "
-                        "Stop the stale side and rebuild both from the same "
-                        "checkout (`just build`), then restart the workspace.",
+                        "Stop this node with `beamtalk workspace stop ~s`, "
+                        "then ~s and restart the workspace.",
                         [
                             display_vsn(ClientBeamtalk),
                             display_vsn(ClientProtocol),
                             display_vsn(ServerBeamtalk),
-                            display_vsn(?PROTOCOL_VERSION)
+                            display_vsn(?PROTOCOL_VERSION),
+                            this_workspace_id(),
+                            version_remedy(ClientBeamtalk, ServerBeamtalk)
                         ]
                     )
                 )}
+    end.
+
+-doc """
+How to get matching toolchains (BT-4382): `just build` is a source-checkout
+remedy, suggested only when either side is a `-dev` build; between two
+releases the fix is installing the same release on both sides.
+""".
+-spec version_remedy(term(), binary()) -> string().
+version_remedy(ClientBeamtalk, ServerBeamtalk) ->
+    case is_dev_vsn(ClientBeamtalk) orelse is_dev_vsn(ServerBeamtalk) of
+        true -> "rebuild both from the same checkout (`just build`)";
+        false -> "install the same beamtalk release for both"
+    end.
+
+-spec is_dev_vsn(term()) -> boolean().
+is_dev_vsn(Vsn) when is_binary(Vsn) -> binary:match(Vsn, <<"-dev">>) =/= nomatch;
+is_dev_vsn(_) -> false.
+
+-doc """
+This node's workspace id for the `workspace stop` hint, or `<id>` when the
+node has no workspace metadata (`beamtalk workspace list` shows it).
+""".
+-spec this_workspace_id() -> binary().
+this_workspace_id() ->
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{workspace_id := Id}} when is_binary(Id), Id =/= <<>> -> Id;
+        _ -> <<"<id>">>
     end.
 
 -doc """

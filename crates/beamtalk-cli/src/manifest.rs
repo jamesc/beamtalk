@@ -1336,7 +1336,10 @@ mod tests {
     fn package_checker_scope_covers_every_manifest_state() {
         use beamtalk_core::semantic_analysis::KnowledgeScope;
 
-        assert_eq!(package_checker_scope(None), PackageCheckerScope::module_only());
+        assert_eq!(
+            package_checker_scope(None),
+            PackageCheckerScope::module_only()
+        );
 
         let dir = TempDir::new().unwrap();
         let root = write_manifest(&dir, "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n");
