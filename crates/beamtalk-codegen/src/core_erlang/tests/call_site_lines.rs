@@ -164,7 +164,11 @@ fn loop_entry_applies(code: &str) -> Vec<usize> {
     const LOOP_APPLY: &str = "apply '_Loop";
     let mut last: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for (at, _) in code.match_indices(LOOP_APPLY) {
-        let name_len = code[at..].find("'/").unwrap_or(0);
+        // A malformed site must fail loudly: with no arity every such site
+        // would share one empty key and silently drop out of the scan.
+        let name_len = code[at..]
+            .find("'/")
+            .unwrap_or_else(|| panic!("loop apply without arity at byte {at}"));
         last.insert(&code[at..at + name_len], at);
     }
     let mut entries: Vec<usize> = last.into_values().collect();
