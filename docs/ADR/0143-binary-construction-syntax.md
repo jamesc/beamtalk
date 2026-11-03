@@ -9,9 +9,9 @@ values, § Literal checks, § String values, § Result class, § Runtime
 failures).
 
 > **Implemented note (2026-11-03).** Shipped as described, except: the
-> run-time error does not yet name the failing segment (§ Runtime failures:
-> a construction `badarg` still surfaces as a generic `argument_error`;
-> tracked in BT-4406), and the `String` unwrap is not yet skipped for values
+> run-time error names the failing segment's type and value but not yet its
+> position (§ Runtime failures; BT-4406: codegen does not emit the Core
+> `{segment, N}` annotation, so the BEAM reports index 0), and the `String` unwrap is not yet skipped for values
 > statically known to be `Binary` (§ String values; BT-4407). A
 > parenthesised string literal (`<<("hi")/binary>>`) is still a string
 > literal, so it gets the same compile error as `<<"hi"/binary>>`.

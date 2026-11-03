@@ -314,10 +314,32 @@ TestCase subclass: BinaryConstructionTest
     a stop
 
   // --- Run-time failures ---
+  // ADR 0143 § Runtime failures (BT-4406): a failed construction is an
+  // `argument_error` whose message names the segment's type and the
+  // offending value (as its printString).
   testNonBinaryInBinarySegmentRaises =>
     v := 1
     self should: [<<v/binary>>] raise: #argument_error
+    message := [<<v/binary>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: 'binary' segment: expected a binary but got: 1"
 
   testNegativeVariableSizeRaises =>
     n := 0 - 1
     self should: [<<5:n>>] raise: #argument_error
+    // A size the BEAM compiler can see is negative (`0 - 1` folds) fails
+    // without naming its segment; a size known only at run time names it.
+    m := #(-1) first
+    message := [<<5:m>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: 'integer' segment: expected a non-negative integer as size but got: -1"
+
+  testNonIntegerInIntegerSegmentNamesValue =>
+    v := #(#foo) first
+    self should: [<<v:8>>] raise: #argument_error
+    message := [<<1:8, v:8>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: 'integer' segment: expected an integer but got: #foo"
+
+  testFailedConstructionRecordsSegmentDetails =>
+    v := 1
+    details := [<<v/binary>>] on: Error do: [:e | e details]
+    self assert: (details at: #segment_type) equals: #binary
+    self assert: (details at: #value) equals: 1
