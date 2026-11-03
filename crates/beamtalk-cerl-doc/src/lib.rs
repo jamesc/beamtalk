@@ -248,6 +248,19 @@ fn len_as_isize(len: usize) -> isize {
 }
 
 impl Document<'_> {
+    /// The text of a single text leaf (`Str`, or the typed-leaf `Owned`
+    /// backing), or `None` for any other node. A read-only view: it lets
+    /// callers inspect a leaf without naming the internal `Owned` variant,
+    /// which only typed-leaf helpers may build (ADR 0089).
+    #[must_use]
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Document::Str(s) => Some(s),
+            Document::Owned(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
     /// Renders the document to a string using the default line width.
     ///
     /// Uses the Wadler-Lindig algorithm: `Group` nodes are rendered flat when

@@ -784,11 +784,7 @@ impl CoreErlangGenerator {
         let Document::Vec(parts) = doc else {
             return false;
         };
-        let text = |d: &Document<'static>| match d {
-            Document::Str(s) => Some((*s).to_string()),
-            Document::Owned(s) => Some(s.clone()),
-            _ => None,
-        };
+        let text = |d: &Document<'static>| d.as_text().map(str::to_string);
         let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
         else {
             return false;
