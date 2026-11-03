@@ -12,18 +12,22 @@
 //! a synchronous `self` send is an ordinary message to the actor. Where the
 //! compiler can see the block leave home it says so, at the block:
 //!
-//! - **writes.** A block that writes a `state:` field and is passed to
+//! - **writes.** A block that writes a field (`self.name := v`, `self
+//!   fieldAt: #name put: v` or `self clearField: #name`) and is passed to
 //!   `Timer`, to a send whose receiver is statically another actor, or to a
 //!   class-side method that is not direct-called, "raises
 //!   `actor_state_unreachable`".
-//! - **reads.** A block that reads a `state:` field, or probes with `self
-//!   hasField:`, in the same positions, "reads the values captured at
-//!   creation". A synchronous call blocks the actor, so the capture is live
+//! - **reads.** A block that reads a `state:` field (`self.name` or `self
+//!   fieldAt: #name`), or probes with `self hasField:`, in the same
+//!   positions, "reads the values captured at creation". A synchronous call blocks the actor, so the capture is live
 //!   unless the callee keeps the block and runs it later: the actor and
 //!   class-method clauses say "may keep it". `Parallel all:`/`any:` always
 //!   blocks, so reads there are exempt outright.
 //! - **self-sends.** A block that makes a synchronous `self` send, directly
-//!   or through a local bound to `self` (a cast is fine), in the same
+//!   or through a local bound to `self` (a cast is fine, and so is a
+//!   reflective field access on `self` — `fieldAt:`, `fieldAt:put:`,
+//!   `clearField:`, `hasField:` — which reads or writes the actor cell in
+//!   place rather than messaging the actor), in the same
 //!   positions "is served remotely rather than inline, and can deadlock if
 //!   the actor is waiting on the callee".
 //!
@@ -68,22 +72,22 @@
 //! via the hierarchy's `spawns_block` mark); a `super` send in the block
 //! (away-`super` runs the superclass method against the capture and needs its
 //! own message); a block nested in a `spawnWith:` argument map; reflective
-//! field access (`fieldAt:` reads and `fieldAt:put:`/`clearField:` writes
-//! warn only as self-sends, not with their read/write hazard); a block
-//! reaching an actor held in a field or parameter not typed as another actor
-//! class, or an actor behind `unwrap`/`value`; and a standalone definition
+//! field access through a local bound to `self` (only a literal `self`
+//! receiver is a reflective access: an alias send is an ordinary message and
+//! warns as a self-send); a block reaching an actor held in a field or
+//! parameter not typed as another actor class, or an actor behind `unwrap`/`value`; and a standalone definition
 //! for a class outside this module.
 //!
 //! **Category.** These diagnostics carry
 //! `DiagnosticCategory::ActorStateAbroad`: site-level `@expect
 //! actor_state_abroad`, `[diagnostics]` key `actor-state-abroad`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::{LintPass, async_cast_hint, hierarchy_for_lint};
 use beamtalk_core::ast::{
-    Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement,
-    MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation,
+    Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement, Literal,
+    MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
@@ -451,10 +455,32 @@ fn check_block(
     // the actor's mutable fields, so `reads`/`writes` are field reads/writes
     // and `has_field_probes` are actor-state probes (nested blocks included).
     let accesses = class_var_accesses(block, &ctx.fields);
-    if let Some((field, _)) = accesses.writes.iter().min_by_key(|(_, span)| span.start()) {
-        report(block, writes_diagnostic(ctx, block, field, shape));
-    } else if !skip_reads && accesses.reads_class_state() {
-        report(block, reads_diagnostic(ctx, block, &accesses, shape));
+    // `fieldAt:put:`/`clearField:` writes and `fieldAt:` reads on `self`
+    // (BT-4184): the same cell writes and capture reads, reflectively.
+    let reflective = reflective_accesses(block, &ctx.fields);
+    let first_write = accesses
+        .writes
+        .iter()
+        .map(|(field, span)| {
+            (
+                span.start(),
+                format!("writes field '{field}' of {}", ctx.class_name),
+            )
+        })
+        .chain(
+            reflective
+                .writes
+                .iter()
+                .map(|w| (w.start, w.describe(ctx.class_name))),
+        )
+        .min_by_key(|(start, _)| *start);
+    if let Some((_, what)) = first_write {
+        report(block, writes_diagnostic(ctx, block, &what, shape));
+    } else if !skip_reads && (accesses.reads_class_state() || reflective.reads_any()) {
+        report(
+            block,
+            reads_diagnostic(ctx, block, &accesses, &reflective, shape),
+        );
     } else if let Some(self_send) = first_sync_self_send(block) {
         report(block, self_send_diagnostic(ctx, block, &self_send, shape));
     }
@@ -577,6 +603,137 @@ impl ClassCtx<'_> {
     }
 }
 
+/// A reflective write on `self` in a block: `fieldAt:put:` or `clearField:`.
+struct ReflectiveWrite {
+    /// `fieldAt:put:` or `clearField:`.
+    selector: &'static str,
+    /// The field named by a symbol-literal argument; `None` when computed.
+    field: Option<String>,
+    /// Where the send starts, for source-order priority against `self.x :=`.
+    start: u32,
+}
+
+impl ReflectiveWrite {
+    /// ``writes field 'n' of Counter with `fieldAt:put:` ``, ``clears a field
+    /// of Counter with `clearField:` ``.
+    fn describe(&self, class: &str) -> String {
+        let verb = if self.selector == "clearField:" {
+            "clears"
+        } else {
+            "writes"
+        };
+        let selector = self.selector;
+        match &self.field {
+            Some(field) => format!("{verb} field '{field}' of {class} with `{selector}`"),
+            None => format!("{verb} a field of {class} with `{selector}`"),
+        }
+    }
+}
+
+/// Reflective field access on `self` in a block, nested blocks included
+/// (BT-4184): the reflective counterpart of [`class_var_accesses`]'s
+/// `self.name` reads and writes. Inside an actor closure these reach the
+/// actor cell exactly like a `self.name` access: away from home a read
+/// answers the creation-time capture and a write raises
+/// `actor_state_unreachable`. Only a plain send to a literal `self` counts:
+/// a cast messages the actor's own mailbox (it runs at home), and a cascade
+/// message or an alias receiver is an ordinary send.
+#[derive(Default)]
+struct ReflectiveAccesses {
+    /// `self fieldAt: #name put: v` / `self clearField: #name`, any name: a
+    /// write away from home raises whatever field it names.
+    writes: Vec<ReflectiveWrite>,
+    /// `self fieldAt: #name` reads of mutable fields, sorted. A name that is
+    /// not a mutable field (a `field:` slot, or no field at all) reads the
+    /// same anywhere and is left out, as an immutable `self.name` read is.
+    reads: BTreeSet<String>,
+    /// Whether some `self fieldAt: k` read has a computed argument (it may
+    /// name a mutable field).
+    computed_read: bool,
+}
+
+impl ReflectiveAccesses {
+    fn reads_any(&self) -> bool {
+        !self.reads.is_empty() || self.computed_read
+    }
+
+    /// What the block reads reflectively, `field n, m`, or `a field` when
+    /// only computed reads were seen; `None` when it makes no reflective
+    /// read.
+    fn read_noun(&self) -> Option<String> {
+        if !self.reads.is_empty() {
+            let names = self
+                .reads
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!("field {names}"))
+        } else if self.computed_read {
+            Some("a field".to_string())
+        } else {
+            None
+        }
+    }
+}
+
+/// See [`ReflectiveAccesses`].
+fn reflective_accesses(block: &Block, fields: &HashSet<String>) -> ReflectiveAccesses {
+    let mut found = ReflectiveAccesses::default();
+    let symbol_arg = |send: &SendRef<'_>| match send.arguments.first() {
+        Some(Expression::Literal(Literal::Symbol(name), _)) => Some(name.to_string()),
+        _ => None,
+    };
+    for stmt in &block.body {
+        walk_sends(&stmt.expression, &mut |send| {
+            if send.is_cast || !is_reflective_self_access(&send) {
+                return;
+            }
+            let selector = match send.selector.well_known() {
+                Some(WellKnownSelector::FieldAtPut) => "fieldAt:put:",
+                Some(WellKnownSelector::ClearField) => "clearField:",
+                Some(WellKnownSelector::FieldAt) => {
+                    match symbol_arg(&send) {
+                        Some(name) if fields.contains(&name) => {
+                            found.reads.insert(name);
+                        }
+                        Some(_) => {}
+                        None => found.computed_read = true,
+                    }
+                    return;
+                }
+                // `hasField:` probes are `class_var_accesses`'s.
+                _ => return,
+            };
+            found.writes.push(ReflectiveWrite {
+                selector,
+                field: symbol_arg(&send),
+                start: send.receiver.span().start(),
+            });
+        });
+    }
+    found
+}
+
+/// Whether `send` is a reflective field access on `self` that reads or
+/// writes the actor cell in place (`fieldAt:`, `fieldAt:put:`,
+/// `clearField:`, `hasField:`) rather than messaging the actor. A cascade
+/// message is not one: a cascade dispatches every message as an ordinary
+/// send.
+fn is_reflective_self_access(send: &SendRef<'_>) -> bool {
+    send.site == SendSite::Plain
+        && is_self(send.receiver)
+        && matches!(
+            send.selector.well_known(),
+            Some(
+                WellKnownSelector::FieldAt
+                    | WellKnownSelector::FieldAtPut
+                    | WellKnownSelector::ClearField
+                    | WellKnownSelector::HasField
+            )
+        )
+}
+
 /// Blocks carried one level inside a collection-literal argument:
 /// `Parallel all:` takes a *list* of blocks, not a block, so its abroad
 /// blocks are literal elements (`Parallel all: #([self.n := 1])`), never
@@ -621,7 +778,7 @@ fn first_sync_self_send(block: &Block) -> Option<SyncSelfSend> {
     let mut found = None;
     for stmt in &block.body {
         walk_sends(&stmt.expression, &mut |send| {
-            if found.is_some() || send.is_cast {
+            if found.is_some() || send.is_cast || is_reflective_self_access(&send) {
                 return;
             }
             let Expression::Identifier(id) = send.receiver.unwrap_parens() else {
@@ -678,17 +835,18 @@ fn is_super(expr: &Expression) -> bool {
     matches!(expr.unwrap_parens(), Expression::Super(_))
 }
 
+/// `what` names the write: `writes field 'n' of Counter`, or a reflective
+/// [`ReflectiveWrite::describe`].
 fn writes_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    field: &str,
+    what: &str,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
     Diagnostic::lint(
         format!(
-            "block writes field '{field}' of {class} and is {}: the write raises \
-             `actor_state_unreachable`",
+            "block {what} and is {}: the write raises `actor_state_unreachable`",
             shape.run_clause(class)
         ),
         block.span,
@@ -704,36 +862,50 @@ fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
     accesses: &ClassVarAccesses,
+    reflective: &ReflectiveAccesses,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
-    let fields = accesses
-        .reads
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join(", ");
+    // `self.n` reads and reflective `fieldAt:` reads, joined: ``reads field n
+    // of Counter and field m with `fieldAt:` ``.
+    let direct = (!accesses.reads.is_empty()).then(|| {
+        let fields = accesses
+            .reads
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("field {fields}")
+    });
+    let reads = match (direct, reflective.read_noun()) {
+        (None, None) => None,
+        (Some(direct), None) => Some(format!("reads {direct} of {class}")),
+        (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),
+        (Some(direct), Some(refl)) => Some(format!(
+            "reads {direct} of {class} and {refl} with `fieldAt:`"
+        )),
+    };
     // The fix advice and the verb for the Timer-only message alternative.
     let (what, base, verb) = if accesses.has_field_probes.is_empty() {
         (
-            format!("reads field {fields} of {class}"),
+            reads.unwrap_or_default(),
             "Read the field into a local before building the block",
             "returns it",
         )
     } else {
         let probe = probe_clause(&accesses.has_field_probes);
-        if fields.is_empty() {
+        if let Some(reads) = reads {
+            (
+                format!("{reads} and probes its state with {probe}"),
+                "Read the field and evaluate the `hasField:` test into locals before \
+                 building the block",
+                "does",
+            )
+        } else {
             (
                 format!("probes the state of {class} with {probe}"),
                 "Evaluate the `hasField:` test into a local before building the block",
                 "makes it",
-            )
-        } else {
-            (
-                format!("reads field {fields} of {class} and probes its state with {probe}"),
-                "Read the field and evaluate the `hasField:` test into locals before \
-                 building the block",
-                "does",
             )
         }
     };
@@ -799,14 +971,17 @@ mod tests {
     }
 
     /// This pass's diagnostics only: every message starts with one of the
-    /// four flavor verbs. Other passes' diagnostics on the same fixture
+    /// flavor verbs. Other passes' diagnostics on the same fixture
     /// (e.g. `sync_send_in_timer_block` on a Timer self-send) are excluded.
     fn abroad(source: &str) -> Vec<Diagnostic> {
         lint(source)
             .into_iter()
             .filter(|d| {
                 d.message.starts_with("block writes field")
+                    || d.message.starts_with("block writes a field")
+                    || d.message.starts_with("block clears ")
                     || d.message.starts_with("block reads field")
+                    || d.message.starts_with("block reads a field")
                     || d.message.starts_with("block probes the state")
                     || d.message.starts_with("block sends `")
             })
@@ -1120,6 +1295,211 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
+    }
+
+    // ---- Reflective field access (BT-4184) ---------------------------------
+
+    /// The one diagnostic `body` produces, checked to carry each of `parts`
+    /// in its message.
+    fn one_with(body: &str, parts: &[&str]) -> Diagnostic {
+        let d = only(body);
+        assert_eq!(d.len(), 1, "{d:?}");
+        for part in parts {
+            assert!(d[0].message.contains(part), "{part:?}: {}", d[0].message);
+        }
+        d.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn reflective_fieldatput_warns_as_write() {
+        let d = one_with(
+            "  startPut => Timer after: 1 do: [self fieldAt: #n put: 1]\n",
+            &[
+                "block writes field 'n' of Counter with `fieldAt:put:`",
+                "passed to 'Timer after:do:'",
+                "raises `actor_state_unreachable`",
+            ],
+        );
+        assert!(
+            d.hint.as_ref().unwrap().contains("async cast"),
+            "write hint: {:?}",
+            d.hint
+        );
+    }
+
+    #[test]
+    fn reflective_computed_fieldatput_warns_as_write() {
+        one_with(
+            "  startPut: k => Timer after: 1 do: [self fieldAt: k put: 1]\n",
+            &[
+                "block writes a field of Counter with `fieldAt:put:`",
+                "raises `actor_state_unreachable`",
+            ],
+        );
+    }
+
+    #[test]
+    fn reflective_clearfield_warns_as_write() {
+        let d = one_with(
+            "  startClear => Timer after: 1 do: [self clearField: #onTick]\n",
+            &[
+                "block clears field 'onTick' of Counter with `clearField:`",
+                "raises `actor_state_unreachable`",
+            ],
+        );
+        assert!(
+            d.hint.as_ref().unwrap().contains("async cast"),
+            "write hint: {:?}",
+            d.hint
+        );
+    }
+
+    #[test]
+    fn reflective_write_of_immutable_field_warns() {
+        // A write away raises whatever field it names.
+        one_with(
+            "  startTag => Timer after: 1 do: [self fieldAt: #tag put: #d]\n",
+            &["block writes field 'tag' of Counter with `fieldAt:put:`"],
+        );
+    }
+
+    #[test]
+    fn reflective_write_to_another_actor_warns() {
+        one_with(
+            "  hand => (Worker spawn) keep: [self fieldAt: #n put: 0]\n",
+            &[
+                "block writes field 'n' of Counter with `fieldAt:put:`",
+                "handed to another actor by 'keep:'",
+            ],
+        );
+    }
+
+    #[test]
+    fn reflective_fieldat_warns_as_read() {
+        let d = one_with(
+            "  startPeek => Timer after: 1 do: [(self fieldAt: #n) printNl]\n",
+            &[
+                "block reads field n of Counter with `fieldAt:`",
+                "reads the values captured at creation",
+            ],
+        );
+        assert!(
+            d.hint
+                .as_ref()
+                .unwrap()
+                .contains("Read the field into a local"),
+            "read hint: {:?}",
+            d.hint
+        );
+    }
+
+    #[test]
+    fn reflective_computed_fieldat_warns_as_read() {
+        one_with(
+            "  startPeek: k => Timer after: 1 do: [(self fieldAt: k) printNl]\n",
+            &[
+                "block reads a field of Counter with `fieldAt:`",
+                "reads the values captured at creation",
+            ],
+        );
+    }
+
+    #[test]
+    fn reflective_fieldat_class_method_may_keep_it() {
+        one_with(
+            "  peekVia => Lib each: [(self fieldAt: #n) printNl]\n",
+            &[
+                "block reads field n of Counter with `fieldAt:`",
+                "passed to 'Lib each:', which may keep it",
+            ],
+        );
+    }
+
+    #[test]
+    fn reflective_fieldat_immutable_field_quiet() {
+        let d = only("  startTag => Timer after: 1 do: [(self fieldAt: #tag) printNl]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn direct_and_reflective_reads_combined() {
+        one_with(
+            "  startBoth => Timer after: 1 do: [self.n printNl. (self fieldAt: #onTick) printNl]\n",
+            &["block reads field n of Counter and field onTick with `fieldAt:`"],
+        );
+    }
+
+    #[test]
+    fn reflective_read_and_probe_combined() {
+        one_with(
+            "  startBoth => Timer after: 1 do: [(self fieldAt: #n) printNl. self hasField: #m]\n",
+            &["reads field n of Counter with `fieldAt:` and probes its state with `hasField: #m`"],
+        );
+    }
+
+    #[test]
+    fn reflective_write_beats_read_and_self_send() {
+        one_with(
+            "  startAll => Timer after: 1 do: [self.n printNl. self bump. self clearField: #n]\n",
+            &["block clears field 'n' of Counter with `clearField:`"],
+        );
+    }
+
+    #[test]
+    fn earliest_write_names_the_block() {
+        one_with(
+            "  startTwo => Timer after: 1 do: [self fieldAt: #onTick put: 1. self.n := 2]\n",
+            &["block writes field 'onTick' of Counter with `fieldAt:put:`"],
+        );
+        one_with(
+            "  startTwo => Timer after: 1 do: [self.n := 2. self fieldAt: #onTick put: 1]\n",
+            &["block writes field 'n' of Counter and is"],
+        );
+    }
+
+    #[test]
+    fn reflective_read_beats_self_send() {
+        one_with(
+            "  startBoth => Timer after: 1 do: [(self fieldAt: #n) printNl. self bump]\n",
+            &["reads the values captured at creation"],
+        );
+    }
+
+    #[test]
+    fn reflective_cast_to_self_quiet() {
+        let d = only("  startCast => Timer after: 1 do: [self fieldAt: #n put: 1!]\n");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    #[test]
+    fn aliased_reflective_write_warns_as_self_send() {
+        // Only a literal `self` receiver reaches the cell; through an alias
+        // it is an ordinary message to the actor.
+        one_with(
+            "  startAlias => Timer after: 1 do: [a := self. a fieldAt: #n put: 1]\n",
+            &["sends `a fieldAt:put:`"],
+        );
+    }
+
+    #[test]
+    fn parallel_reflective_write_warns() {
+        one_with(
+            "  fanPut => Parallel all: #([self fieldAt: #n put: 1])\n",
+            &[
+                "block writes field 'n' of Counter with `fieldAt:put:`",
+                "passed to 'Parallel all:'",
+            ],
+        );
+    }
+
+    #[test]
+    fn parallel_reflective_read_quiet() {
+        // `Parallel` blocks until its workers finish, so the capture is live;
+        // a reflective read is a cell access, not a self-send.
+        let d = only("  fanPeek => Parallel all: #([(self fieldAt: #n) printNl])\n");
+        assert!(d.is_empty(), "{d:?}");
+        let d = only("  fanProbe => Parallel all: #([self hasField: #n])\n");
+        assert!(d.is_empty(), "{d:?}");
     }
 
     // ---- Shape A: Parallel -------------------------------------------------
