@@ -23,6 +23,8 @@
 //! 3. runs on a BEAM against the runtime, in eval and trace mode, and answers
 //!    the value and the bindings [`expected`] says.
 
+mod common;
+
 use beamtalk_codegen::core_erlang::repl_nlr::boundary_fault::without_boundary;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
@@ -31,6 +33,7 @@ use beamtalk_repl::codegen::{
     generate_repl_expressions, generate_repl_expressions_surfacing_verifier,
     generate_repl_expressions_traced,
 };
+use common::erlc_batched;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -333,39 +336,6 @@ fn erlang_available() -> bool {
         && Command::new("erl").arg("-version").output().is_ok()
 }
 
-/// Compiles `modules` with `erlc` into `dir`; `Err` with `erlc`'s output.
-///
-/// In batches: Windows caps a command line at ~32K characters, and this
-/// corpus is hundreds of modules, so one `erlc` call with every path
-/// overflows it (`Os { code: 206 }`, BT-4224). Batches of 32 keep every
-/// invocation to a few kilobytes on every platform.
-fn erlc(dir: &Path, modules: &[(String, String)]) -> Result<(), String> {
-    const BATCH: usize = 32;
-    let mut files = Vec::new();
-    for (name, code) in modules {
-        let file = dir.join(format!("{name}.core"));
-        std::fs::write(&file, code).expect("write core");
-        files.push(file);
-    }
-    for chunk in files.chunks(BATCH) {
-        let output = Command::new("erlc")
-            .arg("+from_core")
-            .arg("-o")
-            .arg(dir)
-            .args(chunk)
-            .output()
-            .expect("run erlc");
-        if !output.status.success() {
-            return Err(format!(
-                "{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -500,7 +470,7 @@ fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
     if erlang_available() {
         let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4288_compile");
         std::fs::create_dir_all(&dir).expect("temp dir");
-        if let Err(e) = erlc(&dir, &modules) {
+        if let Err(e) = erlc_batched(&dir, &modules) {
             failures.push(format!("erlc: {e}"));
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -543,7 +513,7 @@ fn repl_loop_body_returns_answer_like_a_method() {
     }
     let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4288_run");
     std::fs::create_dir_all(&dir).expect("temp dir");
-    erlc(&dir, &modules).unwrap_or_else(|e| panic!("erlc: {e}"));
+    erlc_batched(&dir, &modules).unwrap_or_else(|e| panic!("erlc: {e}"));
     let names: Vec<(String, bool)> = modules
         .iter()
         .map(|(m, _)| (m.clone(), m.starts_with("bt4288_r1_")))

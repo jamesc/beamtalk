@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4369: a field write in a loop that also holds a guarded operator keeps
+// its value and the operator's slow-path writes, in a nest where the field
+// write sits before or after a nested stateless loop. Each pass adds `m` twice,
+// so k passes answer 200k cents, bump `n` k times and note 2k additions.
+// See fixtures/bt3913field_write_loop_actor.bt.
+
+TestCase subclass: Bt3913FieldWriteLoopTest
+  field: a = nil
+  field: m = nil
+
+  setUp =>
+    self.a := Bt3913FieldWriteLoopActor spawn
+    self.m := ((Bt4121TallyMoney new) withCents: 100) withTally: self.a
+    self
+
+  testFieldWriteBeforeTheNestedLoopSurvives =>
+    self assert: (self.a run: self.m times: 3) equals: 600
+    self assert: self.a n equals: 3
+    self assert: self.a count equals: 6
+
+  testFieldWriteAfterTheNestedLoopSurvives =>
+    self assert: (self.a runWriteAfter: self.m times: 3) equals: 600
+    self assert: self.a n equals: 3
+    self assert: self.a count equals: 6
