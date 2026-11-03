@@ -9,9 +9,9 @@
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
-    LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode,
-    TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
+    FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt,
+    ThreadingMode, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -219,6 +219,7 @@ pub(in crate::core_erlang) fn render(
                 produces,
                 outer_args,
                 exit_arm,
+                entry_line,
                 span: _,
             } => docs.push(render_conditional_loop(
                 fn_name,
@@ -232,6 +233,7 @@ pub(in crate::core_erlang) fn render(
                 produces,
                 outer_args.as_deref(),
                 exit_arm,
+                entry_line.as_ref(),
                 ctx,
             )),
             // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
@@ -719,12 +721,14 @@ fn render_threaded(
     match mode {
         ThreadingMode::DirectParams => {
             let fn_name = ctx.fresh_temp_var("Loop");
-            render_loop_skeleton(fn_name, frame, None, body, produces, None, ctx, None, None)
+            render_loop_skeleton(
+                &fn_name, frame, None, body, produces, None, ctx, None, None, None,
+            )
         }
         ThreadingMode::Hybrid => {
             let fn_name = ctx.fresh_temp_var("Loop");
             render_loop_skeleton(
-                fn_name,
+                &fn_name,
                 frame,
                 None,
                 body,
@@ -735,6 +739,7 @@ fn render_threaded(
                     in_loop_body: true,
                     in_hybrid_loop: true,
                 }),
+                None,
                 None,
             )
         }
@@ -837,7 +842,7 @@ struct ConditionalLoopHeader<'a> {
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)] // shared param_list/outer_args/body/final_args plumbing for both bare Threaded loops and real ConditionalLoop nodes
 fn render_loop_skeleton(
-    fn_name: String,
+    fn_name: &str,
     frame: FrameId,
     counter: Option<&LoopCounter>,
     body: &[ThreadedStmt],
@@ -846,6 +851,7 @@ fn render_loop_skeleton(
     ctx: &mut RenderCtx,
     loop_context: Option<LoopContextFlags>,
     header: Option<ConditionalLoopHeader<'_>>,
+    entry_line: Option<&CallSiteLine>,
 ) -> Document<'static> {
     let arity = produces.len() + usize::from(counter.is_some());
 
@@ -946,35 +952,54 @@ fn render_loop_skeleton(
         None => render_in_loop_body(ctx),
     };
 
+    // BT-4401: the ENTRY apply is the one frame the method running the loop
+    // reports, so it carries the send's line (resolved at lowering time and
+    // carried on the node); the recursive back-edges above stay bare tail
+    // calls. Both skeleton shapes share this one entry.
+    let entry_apply = {
+        let call = docvec![
+            "apply ",
+            leaf::fname(fn_name.to_string(), arity),
+            " (",
+            outer_args,
+            ")",
+        ];
+        match entry_line {
+            Some(site) => CoreErlangGenerator::annotate_with_line_in(
+                site.source_path.as_deref(),
+                call,
+                site.line,
+            ),
+            None => call,
+        }
+    };
+
     match header {
         None => docvec![
             "letrec ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " = fun (",
             param_list,
             ") -> ",
             body_doc,
             "apply ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             final_args,
             ")",
-            " in apply ",
-            leaf::fname(fn_name, arity),
-            " (",
-            outer_args,
-            ")",
+            " in ",
+            entry_apply,
         ],
         Some(h) => docvec![
             "letrec ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " = fun (",
             param_list,
             ") -> ",
             condition_doc.expect("condition_doc is always Some when header is Some"),
             body_doc,
             " apply ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             final_args,
             ") ",
@@ -985,11 +1010,8 @@ fn render_loop_skeleton(
             // `"in apply "` concatenation (`while_loops.rs`'s
             // `generate_while_loop_direct`) exactly; an extra leading space
             // here would double it.
-            "in apply ",
-            leaf::fname(fn_name, arity),
-            " (",
-            outer_args,
-            ")",
+            "in ",
+            entry_apply,
         ],
     }
 }
@@ -1089,6 +1111,7 @@ fn render_conditional_loop(
     produces: &[VersionedVar],
     outer_args_override: Option<&[Document<'static>]>,
     exit_arm: &Document<'static>,
+    entry_line: Option<&CallSiteLine>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
     let loop_context = match mode {
@@ -1113,7 +1136,7 @@ fn render_conditional_loop(
         ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) => None,
     };
     render_loop_skeleton(
-        fn_name.to_string(),
+        fn_name,
         frame,
         counter,
         body,
@@ -1127,6 +1150,7 @@ fn render_conditional_loop(
             continue_arm,
             exit_arm,
         }),
+        entry_line,
     )
 }
 

@@ -309,6 +309,7 @@ fn while_loop(mode: ThreadingMode, frame: FrameId, body: Vec<ThreadedStmt>) -> T
         produces: vec![local("t", 0, frame)],
         outer_args: None,
         exit_arm: docvec!["<'false'> when 'true' -> 'nil' end "],
+        entry_line: None,
         span: span(),
     }
 }

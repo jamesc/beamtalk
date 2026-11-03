@@ -23,7 +23,7 @@
 //! parent's ordinary AST-directed compile substitutes that value instead of
 //! compiling (and, for a self-send, dispatching) the child a second time.
 
-use super::threaded_ir::{ThreadedStmt, VerifyError};
+use super::threaded_ir::{CallSiteLine, ThreadedStmt, VerifyError};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -304,6 +304,18 @@ impl CoreErlangGenerator {
             Some(span) => self.annotate_call_node_with_line(call, span),
             None => call,
         }
+    }
+
+    /// BT-4401: the [`CallSiteLine`] that [`Self::annotate_current_send_call`]
+    /// would annotate with, resolved now so a `ThreadedIr` node can carry it
+    /// to the emitter (which has no access to `current_send_span`). `None`
+    /// exactly where that method leaves the call bare.
+    pub(super) fn current_send_call_site_line(&self) -> Option<CallSiteLine> {
+        let span = self.current_send_span.or(self.current_method_span)?;
+        Some(CallSiteLine {
+            source_path: self.source_path.clone(),
+            line: self.span_to_line(span)?,
+        })
     }
 
     /// Removes every entry `scope` registered, once the parent compile

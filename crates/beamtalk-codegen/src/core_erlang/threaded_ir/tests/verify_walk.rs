@@ -72,6 +72,7 @@ fn verify_silent_on_well_formed_conditional_loop_fixture() {
         produces: vec![sum_v0],
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }];
     assert_eq!(verify(&ir), Vec::new());
@@ -114,6 +115,7 @@ fn verify_silent_on_conditional_loop_with_condition_prelude() {
         produces: vec![sum_v0],
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }];
     assert_eq!(verify(&ir), Vec::new());
@@ -139,6 +141,7 @@ fn verify_unbound_version_conditional_loop_condition_references_unbound_version(
         produces: Vec::new(),
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }];
     let errors = verify(&ir);
@@ -178,6 +181,7 @@ fn verify_unbound_version_conditional_loop_frame_flow_matches_threaded() {
         produces: vec![local("sum", 1, frame)],
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }];
     let errors = verify(&ir);
@@ -601,6 +605,7 @@ fn repro_b_loop(hand_back: bool) -> Vec<ThreadedStmt> {
         produces,
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }]
 }
@@ -669,6 +674,7 @@ fn repl_condition_binding_loop(hand_back: bool) -> Vec<ThreadedStmt> {
         produces: vec![VersionedVar::new(VersionPrefix::State, 0, frame)],
         outer_args: None,
         exit_arm: Document::Str("<opaque exit>"),
+        entry_line: None,
         span: span(),
     }]
 }

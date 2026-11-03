@@ -802,6 +802,14 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// chain of `Put`s with `Gensym` targets, which this variant already
         /// makes directly expressible).
         exit_arm: Document<'static>,
+        /// BT-4401: the line of the send this loop lowers, resolved at
+        /// LOWERING time (while the generator's `current_send_span` is the
+        /// loop's own send) and carried on the node so the emitter can put it
+        /// on the entry `apply 'FnName'/N (..)` — the one frame the method
+        /// running the loop reports. `None` outside any source (generated
+        /// infrastructure). The recursive back-edge stays bare: it is a tail
+        /// call whose frame is the loop's own.
+        entry_line: Option<CallSiteLine>,
         span: Span,
     },
 
@@ -1653,4 +1661,15 @@ impl ThreadedValue {
             ValueRef::Var(_) | ValueRef::Literal(_) | ValueRef::Version(_)
         )
     }
+}
+
+/// BT-4401: the already-resolved source line of the send a node lowers, plus
+/// the source path to attach (`None` when compiling from a string). Resolved
+/// at lowering time by `CoreErlangGenerator::current_send_call_site_line` so
+/// the emitter, which has no generator access to the current send span, can
+/// still annotate the node's control-transferring `call`/`apply`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct CallSiteLine {
+    pub(in crate::core_erlang) source_path: Option<String>,
+    pub(in crate::core_erlang) line: u32,
 }

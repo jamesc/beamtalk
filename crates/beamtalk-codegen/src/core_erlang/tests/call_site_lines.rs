@@ -152,26 +152,70 @@ const DISPATCH_CALL_PREFIXES: [&str; 3] = [
     "apply _",
 ];
 
-/// Byte offsets of each `letrec` loop's entry `apply '_LoopN'/0` (BT-4392).
+/// Whether a `letrec` function name is a loop's: the generic fallbacks'
+/// gensym'd `_LoopN` (BT-4392) or the static name a `ThreadedIr`-lowered
+/// loop carries (`while`, `loop`, `repeat`; BT-4401).
+fn is_loop_fn(name: &str) -> bool {
+    name.starts_with("_Loop") || matches!(name, "while" | "loop" | "repeat")
+}
+
+/// Byte offsets of each `letrec` loop's entry `apply 'FnName'/N` (BT-4392,
+/// BT-4401).
 ///
-/// A loop's recursive back-edge `apply '_LoopN'/0 ()` sits in the loop fun's
-/// own body and stays bare: it is a tail call, and the frame it would name
-/// is the loop's own. Only the entry call, the one frame the method making
-/// the send reports, carries the send's line. Loop names are unique within a
-/// module and the `letrec` binding (with its back-edges) precedes the entry
-/// in the text, so a name's last `apply` is its entry.
+/// A loop's recursive back-edge sits in the loop fun's own body and stays
+/// bare: it is a tail call, and the frame it would name is the loop's own.
+/// Only the entry call, the one frame the method making the send reports,
+/// carries the send's line. A `ThreadedIr` loop's name is static (not unique
+/// per module), so the entry is found structurally: the `apply` following the
+/// `in` that closes the `letrec` binding, counting the `let`/`letrec`
+/// keywords the binding's body opens.
 fn loop_entry_applies(code: &str) -> Vec<usize> {
-    const LOOP_APPLY: &str = "apply '_Loop";
-    let mut last: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for (at, _) in code.match_indices(LOOP_APPLY) {
-        // A malformed site must fail loudly: with no arity every such site
-        // would share one empty key and silently drop out of the scan.
-        let name_len = code[at..]
-            .find("'/")
-            .unwrap_or_else(|| panic!("loop apply without arity at byte {at}"));
-        last.insert(&code[at..at + name_len], at);
+    const LETREC: &str = "letrec '";
+    let bytes = code.as_bytes();
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'@';
+    let mut entries = Vec::new();
+    for (at, _) in code.match_indices(LETREC) {
+        let name_start = at + LETREC.len();
+        // A malformed site must fail loudly rather than silently drop out.
+        let name_len = code[name_start..]
+            .find('\'')
+            .unwrap_or_else(|| panic!("letrec without a closing name quote at byte {at}"));
+        if !is_loop_fn(&code[name_start..name_start + name_len]) {
+            continue;
+        }
+        let mut pending = 1usize;
+        let mut i = name_start + name_len + 1;
+        while i < bytes.len() {
+            let lit_end = skip_literal(bytes, i);
+            if lit_end != i {
+                i = lit_end + 1;
+                continue;
+            }
+            if bytes[i].is_ascii_alphabetic() && !is_ident(bytes[i - 1]) {
+                let end = (i..bytes.len())
+                    .find(|&j| !is_ident(bytes[j]))
+                    .unwrap_or(bytes.len());
+                match &code[i..end] {
+                    "let" | "letrec" => pending += 1,
+                    "in" => {
+                        pending -= 1;
+                        if pending == 0 {
+                            let rest = code[end..].trim_start();
+                            let rest = rest.strip_prefix("( ").unwrap_or(rest).trim_start();
+                            if rest.starts_with("apply ") {
+                                entries.push(code.len() - rest.len());
+                            }
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i = end;
+                continue;
+            }
+            i += 1;
+        }
     }
-    let mut entries: Vec<usize> = last.into_values().collect();
     entries.sort_unstable();
     entries
 }
@@ -481,4 +525,70 @@ fn the_scanner_flags_an_unannotated_loop_entry_but_not_back_edges() {
         "( letrec '_Loop1'/0 = fun () -> apply '_Loop1'/0 () in ( apply '_Loop1'/0 () {anno} ) {anno} )"
     );
     assert!(unannotated_dispatch_calls(&good).is_empty());
+}
+
+/// BT-4401: the entry `apply 'FnName'/N` of a `ThreadedIr`-lowered loop
+/// (`ConditionalLoop`: the outer local `sum` is threaded through each loop)
+/// carries the send's line, on the loop's own source line. Before the line was
+/// carried on the node, the emitter left this apply bare.
+#[test]
+fn threaded_ir_loops_annotate_their_entry_apply() {
+    let src = concat!(
+        "Object subclass: Runner\n",
+        "  run: n =>\n",
+        "    sum := 0.\n",
+        "    1 to: n do: [:i | sum := sum + i].\n",
+        "    [sum > 0] whileTrue: [sum := sum - 1].\n",
+        "    n timesRepeat: [sum := sum + 1].\n",
+        "    sum\n",
+    );
+    let code = codegen_with_lines(src);
+    let entries = loop_entry_applies(&code);
+    assert_eq!(entries.len(), 3, "expected 3 loop entries in:\n{code}");
+    for (at, line) in entries.into_iter().zip([4, 5, 6]) {
+        let rest = &code[at..];
+        let close = rest.find(") -|").expect("annotation after loop entry");
+        assert!(
+            code[..at].ends_with("( ") && rest[close + 1..].starts_with(&line_anno(line)),
+            "loop entry should carry line {line}, got `{}`:\n{code}",
+            &rest[..rest.len().min(80)]
+        );
+    }
+    assert!(unannotated_dispatch_calls(&code).is_empty(), "{code}");
+    assert_compiles_through_erlc("runner", &code);
+}
+
+/// BT-4401: the same for the `StateAcc` loops of an actor mutating its state
+/// (the other `ConditionalLoop` lowerings), in a multi-line method.
+#[test]
+fn threaded_ir_state_loops_annotate_their_entry_apply() {
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: n :: Integer = 0\n",
+        "  bump: k =>\n",
+        "    1 to: k do: [:i | self.n := self.n + i].\n",
+        "    [self.n > 100] whileTrue: [self.n := self.n - 1].\n",
+        "    k timesRepeat: [self.n := self.n + 1].\n",
+        "    self.n\n",
+    );
+    let code = codegen_with_lines(src);
+    let entries = loop_entry_applies(&code);
+    assert!(!entries.is_empty(), "expected loops in:\n{code}");
+    assert!(unannotated_dispatch_calls(&code).is_empty(), "{code}");
+    assert_compiles_through_erlc("runner", &code);
+}
+
+#[test]
+fn the_scanner_finds_static_named_loop_entries_not_back_edges() {
+    let anno = "-| [3, {'file', \"a.bt\"}]";
+    // A body `let` chain before the back-edge must not end the binding early.
+    let bad = format!(
+        "( letrec 'while'/1 = fun (S) -> let X = 1 in apply 'while'/1 (X) in apply 'while'/1 (S) {anno} )"
+    );
+    assert_eq!(unannotated_dispatch_calls(&bad).len(), 1);
+    let good = format!(
+        "( letrec 'while'/1 = fun (S) -> let X = 1 in apply 'while'/1 (X) in ( apply 'while'/1 (S) {anno} ) {anno} )"
+    );
+    assert!(unannotated_dispatch_calls(&good).is_empty());
+    assert_eq!(loop_entry_applies(&good).len(), 1);
 }
