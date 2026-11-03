@@ -158,8 +158,8 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(self.dir());
             // Clean up lockfile created by acquire_workspace_lock
-            if let Ok(base) = workspaces_base_dir() {
-                let _ = fs::remove_file(base.join(format!("{}.lock", self.id)));
+            if let Ok(lock) = storage::workspace_lockfile_path(&self.id) {
+                let _ = fs::remove_file(lock);
             }
         }
     }

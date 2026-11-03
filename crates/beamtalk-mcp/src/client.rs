@@ -947,54 +947,28 @@ where
     Ok(handshake::session_id(&session_json))
 }
 
-/// Client side of the version lock (BT-4327): ask the node for its
-/// `describe` versions and refuse a stale node.
-///
-/// A node predating the server gate ignores the new `auth` fields, so
-/// without this check a new client would silently compile against a stale
-/// toolchain. The error propagates to the tool caller — tools must not
-/// swallow it into an offline fallback.
-///
-/// The node queues actor-snapshot push frames ahead of our reply, so this
-/// waits for the frame echoing our `describe` id rather than trusting the
-/// next frame off the socket.
+/// Client side of the version lock (BT-4327): refuse a stale node via
+/// [`handshake::verify_server_versions_via_describe`]. The error propagates
+/// to the tool caller — tools must not swallow it into an offline fallback.
 async fn verify_server_versions<S>(
     ws: &mut tokio_tungstenite::WebSocketStream<S>,
 ) -> Result<(), String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let describe = RequestBuilder::describe();
-    let want_id = describe
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let describe_str = serde_json::to_string(&describe)
-        .map_err(|e| format!("Failed to serialize describe: {e}"))?;
-    ws.send(Message::Text(describe_str.into()))
-        .await
-        .map_err(|e| format!("Failed to send describe: {e}"))?;
-    let deadline = tokio::time::Instant::now() + REPL_IO_TIMEOUT;
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err("Timed out waiting for the describe version check".to_string());
-        }
-        let response = read_text_message_with_timeout(ws, remaining).await?;
-        let response_json: serde_json::Value = serde_json::from_str(&response)
-            .map_err(|e| format!("Failed to parse describe response: {e}"))?;
-        let parsed: ReplResponse = serde_json::from_value(response_json)
-            .map_err(|e| format!("Failed to decode describe response: {e}"))?;
-        if want_id.is_some() && parsed.id == want_id {
-            return handshake::verify_server_versions(
-                parsed.versions.as_ref(),
-                handshake::beamtalk_version(),
-                handshake::PROTOCOL_VERSION,
-            );
-        }
-        // Anything else (actor-snapshot pushes queued ahead of our reply)
-        // is not our answer — keep waiting.
-    }
+    handshake::verify_server_versions_via_describe(
+        ws,
+        REPL_IO_TIMEOUT,
+        async |ws: &mut tokio_tungstenite::WebSocketStream<S>, text: String| {
+            ws.send(Message::Text(text.into()))
+                .await
+                .map_err(|e| e.to_string())
+        },
+        async |ws: &mut tokio_tungstenite::WebSocketStream<S>, remaining| {
+            read_text_message_with_timeout(ws, remaining).await
+        },
+    )
+    .await
 }
 
 /// Read the next text message from a WebSocket stream.

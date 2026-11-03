@@ -159,6 +159,65 @@ pub fn verify_server_versions(
     }
 }
 
+/// Client side of the version lock over any async transport (BT-4327,
+/// BT-4382): send a `describe` request, wait for the reply echoing its id,
+/// and check its versions with [`verify_server_versions`] against this
+/// toolchain's [`beamtalk_version`] and [`PROTOCOL_VERSION`].
+///
+/// A node predating the server gate ignores the `auth` version fields, so
+/// without this check a new client would silently compile against a stale
+/// toolchain. The node queues actor-snapshot push frames ahead of the reply,
+/// so frames with any other id are skipped. The whole wait is bounded by
+/// `timeout`: a node emitting a continuous push stream would otherwise delay
+/// connect indefinitely.
+///
+/// The I/O stays with the caller (this crate has no async runtime in its
+/// production build): `send` writes one text frame to `io`, and `recv` reads
+/// the next text frame, giving up after the `Duration` it is passed (the
+/// time left before the deadline).
+///
+/// # Errors
+///
+/// Returns the first transport error from `send`/`recv`, a parse error for
+/// an undecodable frame, a timeout message, or the version-mismatch message
+/// from [`verify_server_versions`].
+pub async fn verify_server_versions_via_describe<T>(
+    io: &mut T,
+    timeout: std::time::Duration,
+    send: impl AsyncFnOnce(&mut T, String) -> Result<(), String>,
+    mut recv: impl AsyncFnMut(&mut T, std::time::Duration) -> Result<String, String>,
+) -> Result<(), String> {
+    let describe = crate::RequestBuilder::describe();
+    let want_id = describe
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let describe_str = serde_json::to_string(&describe)
+        .map_err(|e| format!("failed to serialise describe: {e}"))?;
+    send(io, describe_str)
+        .await
+        .map_err(|e| format!("failed to send describe: {e}"))?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err("timed out waiting for the describe version check".to_string());
+        }
+        let response = recv(io, remaining).await?;
+        let parsed: crate::ReplResponse = serde_json::from_str(&response)
+            .map_err(|e| format!("failed to decode describe response: {e}"))?;
+        if want_id.is_some() && parsed.id == want_id {
+            return verify_server_versions(
+                parsed.versions.as_ref(),
+                beamtalk_version(),
+                PROTOCOL_VERSION,
+            );
+        }
+        // Anything else (actor-snapshot pushes queued ahead of our reply)
+        // is not our answer — keep waiting.
+    }
+}
+
 /// The server's response to an `auth` request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthAck {

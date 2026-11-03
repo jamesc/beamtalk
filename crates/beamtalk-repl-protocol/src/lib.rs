@@ -21,6 +21,11 @@ mod response;
 /// `test` Cargo feature in their `[dev-dependencies]`.
 #[cfg(any(test, feature = "test"))]
 pub mod test_support;
+/// Test-only port helpers (no async deps). Gated on
+/// `#[cfg(any(test, feature = "test-ports"))]`; the `test` feature implies
+/// `test-ports`.
+#[cfg(any(test, feature = "test-ports"))]
+pub mod test_ports;
 
 pub use request::{RequestBuilder, next_msg_id};
 pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo};

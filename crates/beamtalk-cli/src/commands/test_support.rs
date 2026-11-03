@@ -33,20 +33,9 @@ use tungstenite::{Message, WebSocket};
 
 use super::workspace::storage::{NodeInfo, WorkspaceMetadata};
 
-/// A port that is guaranteed to refuse TCP connections for the life of the
-/// test process (BT-4058).
-///
-/// Never bind-then-drop `TcpListener::bind("127.0.0.1:0")` when a test needs
-/// "nothing listening": the freed ephemeral port can be rehanded to a
-/// parallel test's own listener before the probe runs, flipping the test
-/// down the node-is-running path. Every fake server in this binary binds via
-/// `"127.0.0.1:0"` (an OS-assigned ephemeral port), and OS ephemeral-port
-/// allocators never hand out ports below 1024 — while binding one ourselves
-/// would require root — so port 1 stays closed with no bind/drop window at
-/// all (same rationale as BT-3608's `client.port = 1` in `protocol.rs`).
-pub(crate) fn closed_port() -> u16 {
-    1
-}
+/// The shared "nothing is listening here" port (BT-4058, BT-4382); see
+/// [`beamtalk_repl_protocol::test_ports::closed_port`].
+pub(crate) use beamtalk_repl_protocol::test_ports::closed_port;
 
 /// Build a unique workspace ID per test so parallel `cargo test` threads
 /// never collide on the same on-disk directory or lockfile. `label` should
@@ -203,8 +192,8 @@ impl Drop for WorkspaceFixture {
         if let Ok(dir) = super::workspace::storage::workspace_dir(&self.id) {
             let _ = std::fs::remove_dir_all(dir);
         }
-        if let Ok(base) = super::workspace::storage::workspaces_base_dir() {
-            let _ = std::fs::remove_file(base.join(format!("{}.lock", self.id)));
+        if let Ok(lock) = super::workspace::storage::workspace_lockfile_path(&self.id) {
+            let _ = std::fs::remove_file(lock);
         }
     }
 }
