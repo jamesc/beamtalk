@@ -277,6 +277,35 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4366: runs `lower` with [`CoreErlangGenerator::current_send_span`]
+    /// set to `span`, restoring the enclosing span on every exit. For an
+    /// entry point reached without passing through `generate_expression`
+    /// (a statement-level or producer lowering of an expression).
+    pub(super) fn with_current_span<T>(
+        &mut self,
+        span: Span,
+        lower: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let outer = self.current_send_span.replace(span);
+        let result = lower(self);
+        self.current_send_span = outer;
+        result
+    }
+
+    /// BT-4366: [`Self::annotate_call_node_with_line`] for a lowering that has
+    /// no `Span` of its own in scope — annotates the `call`/`apply` node with
+    /// the line of the innermost send being lowered
+    /// ([`CoreErlangGenerator::current_send_span`]), and leaves it bare when
+    /// there is none (generated infrastructure outside any method).
+    pub(super) fn annotate_current_send_call(&self, call: Document<'static>) -> Document<'static> {
+        // Outside any expression (a primitive-bodied method), the method's own
+        // line is the best the frame can name.
+        match self.current_send_span.or(self.current_method_span) {
+            Some(span) => self.annotate_call_node_with_line(call, span),
+            None => call,
+        }
+    }
+
     /// Removes every entry `scope` registered, once the parent compile
     /// that was meant to consult them is done. An entry that was never
     /// consulted means that compile bypassed `generate_expression` for the
@@ -545,6 +574,10 @@ impl CoreErlangGenerator {
         }
         let prelude_doc = self.threaded_prelude_doc(prelude);
         let result_var = self.fresh_temp_var(result_prefix);
+        // BT-4366: with a prelude the call is no longer the send's outermost
+        // node — it sits in the `let` below, out of reach of the send's
+        // whole-document annotation — so it carries the send's line itself.
+        let call_doc = self.annotate_current_send_call(call_doc);
         docvec![
             prelude_doc,
             "let ",

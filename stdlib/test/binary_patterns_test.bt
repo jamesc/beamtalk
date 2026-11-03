@@ -441,3 +441,117 @@ TestCase subclass: BinaryPatternsTest
     ]
     self assert: (result at: 1) equals: 65
     self assert: (result at: 2) equals: #()
+
+  // BT-4376: an integer literal in a float segment is the float it denotes
+  // (erlc rewrites <<1/float>> to 1.0) — 1.0 as big-endian float64 is
+  // #(63, 240, 0, 0, 0, 0, 0, 0).
+  testMatchIntegerLiteralInFloatSegment =>
+    bin := Binary fromBytes: #(63, 240, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<1/float, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4376: 2.0 (#(64, 0, ...)) does not match <<1/float>>.
+  testMatchIntegerLiteralInFloatSegmentFallsThrough =>
+    bin := Binary fromBytes: #(64, 0, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<1/float>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback
+
+  // BT-4376: -3 in a 32-bit float segment is -3.0 (#(192, 64, 0, 0)).
+  testMatchNegativeIntegerLiteralInFloat32Segment =>
+    bin := Binary fromBytes: #(192, 64, 0, 0)
+    result := bin match: [
+      <<-3:32/float, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4376: $A in a float segment is 65.0 (#(64, 80, 64, 0, 0, 0, 0, 0)).
+  testMatchCharacterLiteralInFloatSegment =>
+    bin := Binary fromBytes: #(64, 80, 64, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<$A/float, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4376: little-endian utf32 decodes low byte first.
+  testMatchLittleUtf32Segment =>
+    bin := Binary fromBytes: #(65, 0, 0, 0, 7)
+    result := bin match: [
+      <<c/utf32-little, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 65
+    self assert: (result at: 2) equals: #(7)
+
+  // BT-4376: a utf16 surrogate pair (D83D DE00) decodes to one code point,
+  // U+1F600 (128512).
+  testMatchUtf16SurrogatePair =>
+    bin := Binary fromBytes: #(216, 61, 222, 0)
+    result := bin match: [
+      <<c/utf16, rest/binary>> -> {c, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 128512
+    self assert: (result at: 2) equals: #()
+
+  // BT-4376: <<"é">> matches the String "é" — the literal folds to its
+  // UTF-8 bytes #(195, 169), the String's runtime bytes.
+  testMatchNonAsciiStringLiteralMatchesString =>
+    result := "é" match: [
+      <<"é", rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 0
+
+  // BT-4376: <<"é">> matches the bytes #(195, 169), not the code point 233.
+  testMatchNonAsciiStringLiteralIsUtf8Bytes =>
+    utf8 := (Binary fromBytes: #(195, 169)) match: [
+      <<"é">> -> #matched;
+      _ -> #fallback
+    ]
+    latin1 := (Binary fromBytes: #(233)) match: [
+      <<"é">> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: utf8 equals: #matched
+    self assert: latin1 equals: #fallback
+
+  // BT-4376: <<""/utf8>> contributes no segments, so it matches any
+  // binary with the rest bound to all of it.
+  testMatchEmptyUtf8StringLiteral =>
+    result := "abc" match: [
+      <<""/utf8, rest/binary>> -> rest size;
+      _ -> -1
+    ]
+    self assert: result equals: 3
+
+  // BT-4376: a sizeless binary tail takes a unit — 2 remaining bytes are
+  // a multiple of 16 bits.
+  testMatchBinaryUnitTail =>
+    bin := Binary fromBytes: #(1, 2, 3)
+    result := bin match: [
+      <<a:8, rest/binary-unit:16>> -> {a, rest toBytes};
+      _ -> nil
+    ]
+    self assert: (result at: 1) equals: 1
+    self assert: (result at: 2) equals: #(2, 3)
+
+  // BT-4376: 1 remaining byte is not a multiple of 16 bits, so the
+  // /binary-unit:16 tail cannot match. The negative unit-conflict cases
+  // (<<x:2/bits-unit:8>>, <<x:2/bytes-unit:16>>, <<x/integer-unit:8>>)
+  // are compile errors, covered by the parser tests in
+  // crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs.
+  testMatchBinaryUnitTailFallsThrough =>
+    bin := Binary fromBytes: #(1, 2)
+    result := bin match: [
+      <<a:8, rest/binary-unit:16>> -> #matched;
+      _ -> #fallback
+    ]
+    self assert: result equals: #fallback

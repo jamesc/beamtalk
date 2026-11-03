@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4366: sends whose control-transferring `apply` is nested inside a
+// `let`/`case`/`try`/`letrec` (`ifNotNil:`, `ensure:`, `whileTrue:` on
+// non-literal blocks) carry the source line on that `apply` node itself, so
+// the frame of the method making the send reports its real `.bt` line.
+// Each helper keeps its send out of tail position (a tail call leaves no
+// frame to report). If a line above a helper shifts, update the expected
+// line numbers below to match.
+
+TestCase subclass: CallNodeLineTest
+
+  notNil: x block: blk =>
+    x ifNotNil: blk
+    nil
+
+  ensure: blk cleanup: cleanup =>
+    blk ensure: cleanup
+    nil
+
+  loop: cond body: body =>
+    cond whileTrue: body
+    nil
+
+  frameFor: selector in: trace => trace detect: [:f | f method =:= selector]
+
+  testIfNotNilFrameReportsItsLine =>
+    trace := [
+      self notNil: 1 block: [:x | x / 0]
+    ] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #notNil:block: in: trace
+    self assert: frame line equals: 15
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  testEnsureFrameReportsItsLine =>
+    trace := [
+      self ensure: [1 / 0] cleanup: [nil]
+    ] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #ensure:cleanup: in: trace
+    self assert: frame line equals: 19
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  testWhileTrueFrameReportsItsLine =>
+    trace := [
+      self loop: [true] body: [1 / 0]
+    ] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #loop:body: in: trace
+    self assert: frame line equals: 23
+    self assert: (frame file endsWith: "call_node_line_test.bt")

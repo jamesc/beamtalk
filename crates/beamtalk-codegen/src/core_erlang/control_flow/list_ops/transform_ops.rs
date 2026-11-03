@@ -61,11 +61,17 @@ impl CoreErlangGenerator {
             leaf::var(list_var.clone()),
             ") in call 'erlang':'length'(",
             leaf::var(filtered_var),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'count:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'count:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -279,11 +285,17 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'flatMap:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'flatMap:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -583,9 +595,12 @@ impl CoreErlangGenerator {
                 leaf::var(body_var.clone()),
                 " = ",
                 body_code,
-                " in fun (Elem, Acc) -> apply ",
-                leaf::var(body_var),
-                " (Acc, Elem)",
+                " in fun (Elem, Acc) -> ",
+                self.annotate_current_send_call(docvec![
+                    "apply ",
+                    leaf::var(body_var),
+                    " (Acc, Elem)"
+                ]),
             ]
         };
 
@@ -876,11 +891,17 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'takeWhile:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'takeWhile:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -1118,11 +1139,17 @@ impl CoreErlangGenerator {
             leaf::var(body_var.clone()),
             ", ",
             leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'dropWhile:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'dropWhile:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -1356,11 +1383,17 @@ impl CoreErlangGenerator {
             leaf::var(list_var.clone()),
             ", ",
             leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'partition:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'partition:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -1632,11 +1665,17 @@ impl CoreErlangGenerator {
             leaf::var(list_var.clone()),
             ", ",
             leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'groupBy:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'groupBy:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
@@ -1870,11 +1909,17 @@ impl CoreErlangGenerator {
             leaf::var(list_var.clone()),
             ", ",
             leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(list_var),
-            ", 'sort:', [",
-            leaf::var(body_var),
-            "]) end",
+            ") <'false'> when 'true' -> ",
+            // BT-4366: the fallback send is nested in the list-type `case`, so the
+            // call node carries the send's line itself.
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(list_var),
+                ", 'sort:', [",
+                leaf::var(body_var),
+                "])"
+            ]),
+            " end",
         ])
     }
 
