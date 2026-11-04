@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4075: `error:` in actor methods. A receiver that may be a class object is
+// an ordinary send whose answer the method replies with; `self error:` still
+// raises.
+
+TestCase subclass: ErrorSendActorTest
+
+  testClassSideErrorAsLastStatementReplies =>
+    a := ErrorSendActor spawn
+    r := a raise: #nope via: Result
+    self assert: r isError
+    self assert: r error equals: #nope
+    // The actor is still alive and answering.
+    self assert: a count equals: 0
+
+  testClassSideErrorMidMethodThreadsState =>
+    a := ErrorSendActor spawn
+    r := a raiseThenCount: #nope via: Result
+    self assert: r isError
+    self assert: a count equals: 1
+
+  testInstanceReceiverStillRaises =>
+    a := ErrorSendActor spawn
+    self assert: ([
+      a raise: "bad" via: 42
+    ] on: Exception do: [:e | e message]) equals: "bad"
+    self assert: ([
+      a raise: "bad" via: 42
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: a count equals: 0
+
+  testStateWritingArgumentIsSequenced =>
+    a := ErrorSendActor spawn
+    r := a tallyVia: Result
+    self assert: r isError
+    self assert: r error equals: 6
+    self assert: a count equals: 6
+
+  testLoggerErrorAsLastStatementReplies =>
+    a := ErrorSendActor spawn
+    self assert: (a logLast: "BT-4075 logged from an actor") equals: nil
+    self assert: a count equals: 0
+
+  testSelfErrorStillRaises =>
+    a := ErrorSendActor spawn
+    self assert: ([a boom] on: Exception do: [:e | e message]) equals: "boom"
+    self assert: a count equals: 0

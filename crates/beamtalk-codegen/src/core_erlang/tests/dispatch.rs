@@ -1446,6 +1446,124 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
     );
 }
 
+/// BT-4075: the body of method `name` in `code` (up to the next top-level fun).
+fn method_body<'a>(code: &'a str, name: &str) -> &'a str {
+    let start = code
+        .match_indices(&format!("\n'{name}'/"))
+        .map(|(at, _)| at + 1)
+        .find(|&at| {
+            code[at..]
+                .lines()
+                .next()
+                .is_some_and(|l| l.contains(" = fun "))
+        })
+        .unwrap_or_else(|| panic!("no method {name}:\n{code}"));
+    let rest = &code[start..];
+    let end = rest[1..].find("\n'").map_or(rest.len(), |i| i + 1);
+    &rest[..end]
+}
+
+#[test]
+fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
+    // `obj error:` with an untyped receiver: a class object whose class side
+    // understands `error:` takes the ordinary send (`Result class>>error:`),
+    // anything else raises in place.
+    let code = codegen("Object subclass: Probe\n  raise: msg via: obj => obj error: msg\n");
+    let body = method_body(&code, "raise:via:");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "untyped `error:` receiver must be guarded by class_object_understands:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_message_dispatch':'send'(") && body.contains("'error:', ["),
+        "class-object branch must send `error:`:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "instance branch must keep the user_error raise:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_instance_method_stays_unguarded_intrinsic() {
+    let code = codegen("Object subclass: Probe\n  boom => self error: \"x\"\n");
+    let body = method_body(&code, "boom");
+    assert!(
+        body.contains("'user_error'"),
+        "`self error:` in an instance method must raise user_error:\n{body}"
+    );
+    assert!(
+        !body.contains("class_object_understands"),
+        "`self` in an instance method is never a class object:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
+    // `self` in a class method is a class object: a class-side `error:` takes a
+    // class-side self-send, otherwise `Object>>error:` raises as before.
+    let code = codegen("Object subclass: Probe\n  class boom => self error: \"x\"\n");
+    let body = method_body(&code, "class_boom");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "class-method `self error:` must be guarded:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_self_send'("),
+        "class-method `self error:` must self-send, not go through the class process:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "class-method `self error:` without a class-side `error:` must still raise:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
+    // A class object's class-side `error:` answers a value, so an actor
+    // method ending in `obj error: msg` must reply with it (no bare
+    // never-returns emission), and the send may run user code, so it is
+    // bracketed like any other call. `self error:` keeps the bare raise.
+    let code = codegen(
+        "Actor subclass: Probe\n  state: n = 0\n  raise: msg via: obj => obj error: msg\n  boom => self error: \"x\"\n",
+    );
+    let guarded = code
+        .lines()
+        .find(|l| l.contains("'class_object_understands'("))
+        .unwrap_or_else(|| panic!("no guarded error: send:\n{code}"));
+    assert!(
+        guarded.contains("{'reply', _Result, "),
+        "`obj error:` as the last statement must reply with its answer:\n{guarded}"
+    );
+    assert!(
+        guarded.contains("'beamtalk_actor_state':'store'("),
+        "`obj error:` may run user code, so it must be bracketed:\n{guarded}"
+    );
+    let raise = code
+        .lines()
+        .find(|l| l.contains("'user_error'") && !l.contains("class_object_understands"))
+        .unwrap_or_else(|| panic!("no bare `self error:` raise:\n{code}"));
+    assert!(
+        !raise.contains("'reply'"),
+        "`self error:` never returns, so it gets no reply tuple:\n{raise}"
+    );
+}
+
+#[test]
+fn test_bt4075_actor_logger_error_last_statement_replies() {
+    // `Logger error:` answers nil: as the last statement it must reply, not
+    // be emitted bare as a never-returning `error:`.
+    let code = codegen("Actor subclass: Probe\n  state: n = 0\n  log: msg => Logger error: msg\n");
+    let line = code
+        .lines()
+        .find(|l| l.contains("'logger'"))
+        .unwrap_or_else(|| panic!("no logger call:\n{code}"));
+    assert!(
+        line.contains("{'reply', _Result, "),
+        "`Logger error:` as the last statement must reply:\n{line}"
+    );
+}
+
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`

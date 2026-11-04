@@ -78,7 +78,8 @@ pub(in crate::core_erlang) enum BodyExprKind {
     DestructureAssignment,
     /// `super method` — super message send.
     SuperSend,
-    /// `self error: "..."` — never returns.
+    /// `self error: "..."` in an instance method — never returns (BT-4075:
+    /// only for a receiver known to be an instance).
     ErrorSend,
     /// Tier 2 `value:` call — returns `{Result, NewState}`.
     Tier2ValueCall,
@@ -555,8 +556,18 @@ impl CoreErlangGenerator {
             return BodyExprKind::SuperSend;
         }
 
-        // self error: "..." — never returns
-        if Self::is_error_message_send(expr) {
+        // self error: "..." — never returns. Only when the receiver is known to
+        // be an instance (BT-4075): any other receiver may be a class object
+        // whose class-side `error:` answers a value, so it is a `Pure` send
+        // that replies with its result.
+        if Self::is_error_message_send(expr)
+            && matches!(
+                expr,
+                Expression::MessageSend { receiver, .. }
+                    if self.error_signal_receiver_kind(receiver)
+                        == crate::core_erlang::intrinsics::ErrorSignalReceiver::Instance
+            )
+        {
             return BodyExprKind::ErrorSend;
         }
 

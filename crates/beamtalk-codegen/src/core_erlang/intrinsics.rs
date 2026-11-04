@@ -43,6 +43,20 @@ pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong arg
 /// self-dispatch by `expr_shape::selector_dispatches_via_self`).
 pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:withArguments:timeout:";
 
+/// BT-4075: what an `error:` receiver is statically known to be. Only an
+/// instance takes the `Object>>error:` raise intrinsic unconditionally; a class
+/// object with a class-side `error:` (`Result class>>error:`) receives the send,
+/// decided at run time by `beamtalk_class_dispatch:class_object_understands/2`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ErrorSignalReceiver {
+    /// `self` in an instance-side method, or a literal: always an instance.
+    Instance,
+    /// `self` in a class method: a class object, sent to via `class_self_send/3`.
+    ClassSelf,
+    /// Anything else: sent to via `beamtalk_message_dispatch:send/3`.
+    Unknown,
+}
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -2256,6 +2270,12 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         debug_assert_eq!(arguments.len(), 1);
+        // BT-4075: the raise is `Object>>error:`, an *instance*-side method. A
+        // class object (`cls := Result. cls error: #nope`) with its own
+        // class-side `error:` (`Result class>>error:`, `Logger class>>error:`)
+        // must receive the send instead, so only a receiver known to be an
+        // instance raises unconditionally.
+        let receiver_kind = self.error_signal_receiver_kind(receiver);
         // Hoist open-scope receiver + message (e.g. class method self-sends).
         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Err")?;
         let recv_doc = seq.next();
@@ -2266,19 +2286,11 @@ impl CoreErlangGenerator {
         let err0 = self.fresh_temp_var("Err");
         let err1 = self.fresh_temp_var("Err");
 
-        let call_doc = docvec![
+        let raise_doc = docvec![
             "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_doc,
-            " in let ",
-            leaf::var(msg_var.clone()),
-            " = ",
-            msg_doc,
-            " in let ",
             leaf::var(class_var.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
-            leaf::var(recv_var),
+            leaf::var(recv_var.clone()),
             ") in let ",
             leaf::var(err0.clone()),
             " = call 'beamtalk_error':'new'('user_error', ",
@@ -2288,12 +2300,116 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_error':'with_message'(",
             leaf::var(err0),
             ", ",
-            leaf::var(msg_var),
+            leaf::var(msg_var.clone()),
             ") in call 'beamtalk_error':'raise'(",
             leaf::var(err1),
             ")",
         ];
+        // Possibly a class object: one whose class side understands `error:`
+        // receives the send; anything else (an instance, or a class object
+        // without a class-side `error:`) raises in place, exactly as the
+        // intrinsic always has.
+        let body_doc = match receiver_kind {
+            ErrorSignalReceiver::Instance => raise_doc,
+            // A class-method self-send runs where its method runs (ADR 0142),
+            // never back through the class process.
+            ErrorSignalReceiver::ClassSelf => self.class_side_error_guard(
+                "call 'beamtalk_class_dispatch':'class_self_send'(",
+                &recv_var,
+                &msg_var,
+                receiver,
+                raise_doc,
+            ),
+            ErrorSignalReceiver::Unknown => self.class_side_error_guard(
+                "call 'beamtalk_message_dispatch':'send'(",
+                &recv_var,
+                &msg_var,
+                receiver,
+                raise_doc,
+            ),
+        };
+
+        let call_doc = docvec![
+            "let ",
+            leaf::var(recv_var),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(msg_var),
+            " = ",
+            msg_doc,
+            " in ",
+            body_doc,
+        ];
         Ok(Some(seq.close(self, call_doc, "ErrRes")))
+    }
+
+    /// BT-4075: `case class_object_understands(Recv, 'error:') of 'true' ->
+    /// <send_fn>(Recv, 'error:', [Msg]) 'false' -> <raise_doc> end` — the
+    /// class-side `error:` send when the receiver is a class object that
+    /// defines one, the `Object>>error:` raise otherwise.
+    fn class_side_error_guard(
+        &mut self,
+        send_fn: &'static str,
+        recv_var: &str,
+        msg_var: &str,
+        receiver: &Expression,
+        raise_doc: Document<'static>,
+    ) -> Document<'static> {
+        let send_doc = self.annotate_call_node_with_line(
+            docvec![
+                send_fn,
+                leaf::var(recv_var.to_string()),
+                ", ",
+                leaf::atom("error:"),
+                ", [",
+                leaf::var(msg_var.to_string()),
+                "])"
+            ],
+            receiver.span(),
+        );
+        docvec![
+            "case call 'beamtalk_class_dispatch':'class_object_understands'(",
+            leaf::var(recv_var.to_string()),
+            ", ",
+            leaf::atom("error:"),
+            ") of 'true' when 'true' -> ",
+            send_doc,
+            " 'false' when 'true' -> ",
+            raise_doc,
+            " end",
+        ]
+    }
+
+    /// BT-4075: what `receiver` is statically known to be for an `error:`
+    /// send — see [`ErrorSignalReceiver`]. Starts from the shared syntactic
+    /// rule ([`beamtalk_core::ast::is_error_signal_instance_receiver`]: only
+    /// `self` can be an instance) and refines it with the method context.
+    /// Every codegen consumer that treats `error:` as never returning (the
+    /// actor method-body `ErrorSend` classification) asks this.
+    pub(in crate::core_erlang) fn error_signal_receiver_kind(
+        &self,
+        receiver: &Expression,
+    ) -> ErrorSignalReceiver {
+        if !beamtalk_core::ast::is_error_signal_instance_receiver(receiver) {
+            return ErrorSignalReceiver::Unknown;
+        }
+        if !super::expr_shape::is_self_identifier(receiver) {
+            // A literal: never a class object.
+            return ErrorSignalReceiver::Instance;
+        }
+        // A top-level REPL `self` is whatever the eval binds it to (the
+        // Inspector's `evaluate:` binds the inspected value, possibly a class).
+        if self.lookup_var("self").is_none() && self.context == CodeGenContext::Repl {
+            return ErrorSignalReceiver::Unknown;
+        }
+        // `self` is the class object in a class method (including a
+        // `ClassBuilder` class-method block), an instance everywhere else.
+        if self.in_class_method() || self.builder_class_method_class().is_some() {
+            ErrorSignalReceiver::ClassSelf
+        } else {
+            ErrorSignalReceiver::Instance
+        }
     }
 
     /// Generates code for object identity and representation methods.
