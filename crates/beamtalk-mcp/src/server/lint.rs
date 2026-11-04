@@ -185,7 +185,7 @@ pub(crate) fn collect_known_erlang_modules(path: &str) -> std::collections::Hash
 /// value suitable for direct MCP tool output.
 #[allow(clippy::too_many_lines)] // Multi-pass pipeline is inherently sequential.
 pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
-    use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
+    use beamtalk_core::semantic_analysis::{CoverageReport, infer_types};
     use beamtalk_core::source_analysis::DiagnosticSummary;
 
     let source_files = match resolve_source_files(path) {
@@ -231,51 +231,25 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path));
 
     // Pass 1: Parse all files and extract class metadata.
-    let mut all_class_infos = Vec::new();
-    let mut parsed_files = Vec::new();
-    // Trait users, flattened below once dependency protocols are merged
-    // (BT-3673) — same step as `beamtalk lint`.
-    let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    // Track unreadable target files separately so the caller sees a clear error
+    // instead of a deceptively-clean `files_checked=0` summary. Unreadable
+    // package-only files produce a softer warning since cross-file class
+    // extraction may be incomplete but the targets themselves were still checked.
     let mut unreadable_files: Vec<String> = Vec::new();
     let mut unreadable_target_files: Vec<String> = Vec::new();
-
-    for file in &extraction_files {
-        let Ok(source) = std::fs::read_to_string(file) else {
-            // Track unreadable target files separately so the caller
-            // sees a clear error instead of a deceptively-clean `files_checked=0`
-            // summary. Unreadable package-only files produce a softer
-            // warning since cross-file class extraction may be incomplete but
-            // the targets themselves were still checked.
-            let canonical = beamtalk_project::package::try_canonicalize(file);
-            if target_set.contains(&canonical) {
-                unreadable_target_files.push(file.to_string_lossy().into_owned());
+    let mut pass1 = run_lint_pass1(
+        &extraction_files,
+        &target_set,
+        current_package.as_deref(),
+        |file, is_target| {
+            let name = file.to_string_lossy().into_owned();
+            if is_target {
+                unreadable_target_files.push(name);
             } else {
-                unreadable_files.push(file.to_string_lossy().into_owned());
+                unreadable_files.push(name);
             }
-            continue;
-        };
-        let file_str = file.to_string_lossy().into_owned();
-        let tokens = lex_with_eof(&source);
-        let (module, parse_diags) = parse(tokens);
-        let mut class_infos = ClassHierarchy::extract_class_infos(&module);
-        // Stamp the package per-file, same as build's/lint's Pass 1 —
-        // without this, a same-package class defined in a sibling file is
-        // indistinguishable from a builtin/REPL class and never flagged as a
-        // leak by `check_class_visibility`.
-        if let Some(pkg) = current_package.as_deref() {
-            ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
-        }
-        all_class_infos.extend(class_infos);
-        // Records each carried protocol's source too, for provision routing.
-        trait_users.add_source_file(&module, &file_str, &source, current_package.as_deref());
-
-        let canonical = beamtalk_project::package::try_canonicalize(file);
-        if target_set.contains(&canonical) {
-            parsed_files.push((file_str, source, module, parse_diags));
-        }
-    }
-
+        },
+    );
     let LintAnalysisContext {
         has_package_dependencies,
         native_type_registry,
@@ -284,10 +258,15 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         protocol_sources,
     } = build_lint_analysis_context(
         path,
-        &mut all_class_infos,
-        &trait_users,
+        &mut pass1.all_class_infos,
+        &pass1.trait_users,
         current_package.as_deref(),
     );
+    let LintPass1State {
+        all_class_infos,
+        parsed_targets: parsed_files,
+        ..
+    } = pass1;
 
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
@@ -299,7 +278,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         typed_expressions: 0,
     };
 
-    for (file_str, source, module, parse_diags) in &parsed_files {
+    for (file, source, module, parse_diags) in &parsed_files {
+        let file_str = file.to_string_lossy().into_owned();
         // Pre-filter to lint-severity parse diagnostics (compute_diagnostic_summary
         // intentionally drops parse errors/warnings here — they're surfaced via
         // other channels).
@@ -309,9 +289,9 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             .cloned()
             .collect();
 
-        let is_stub_file = project_root.as_deref().is_some_and(|root| {
-            beamtalk_project::package::is_under_stubs_dir(root, std::path::Path::new(file_str))
-        });
+        let is_stub_file = project_root
+            .as_deref()
+            .is_some_and(|root| beamtalk_project::package::is_under_stubs_dir(root, file));
         let (file_diags, class_hierarchy) = run_module_analysis(
             module,
             source,
@@ -323,9 +303,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             native_type_registry.clone(),
             current_package.as_deref(),
             is_stub_file,
-            std::path::Path::new(file_str)
-                .file_stem()
-                .and_then(std::ffi::OsStr::to_str),
+            file.file_stem().and_then(std::ffi::OsStr::to_str),
             &known_erlang_modules,
         );
 
@@ -336,7 +314,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
 
         // Type coverage.
         let type_map = infer_types(module, &class_hierarchy, native_type_registry.as_deref());
-        let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
+        let file_report = CoverageReport::from_module(module, &type_map, &file_str, false);
         coverage.merge(file_report);
     }
 
@@ -669,6 +647,78 @@ fn build_lint_analysis_context(
     }
 }
 
+/// Parsed file state collected during Pass 1 of the two-pass lint pipeline.
+///
+/// Fields are populated by [`run_lint_pass1`] and consumed by the Pass-2 loops
+/// in [`run_lint_structured`] and [`compute_diagnostic_summary`].
+struct LintPass1State {
+    all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    /// Files from `target_set` that were read and parsed successfully, in encounter order.
+    parsed_targets: Vec<(
+        std::path::PathBuf,
+        String,
+        beamtalk_core::ast::Module,
+        Vec<beamtalk_core::source_analysis::Diagnostic>,
+    )>,
+}
+
+/// Run Pass 1 of the two-pass lint pipeline: parse every file in
+/// `extraction_files`, extract cross-file class metadata, and collect trait
+/// users. Files that belong to `target_set` are also accumulated in
+/// [`LintPass1State::parsed_targets`] for the caller's Pass-2 loop.
+///
+/// `on_unreadable(file, is_target)` is called once for each file that could
+/// not be read; `is_target` is `true` when that file is in `target_set`.
+/// Callers use the callback to record the error in whatever form suits their
+/// output format without duplicating the shared loop body.
+fn run_lint_pass1(
+    extraction_files: &[std::path::PathBuf],
+    target_set: &std::collections::HashSet<std::path::PathBuf>,
+    current_package: Option<&str>,
+    mut on_unreadable: impl FnMut(&std::path::Path, bool),
+) -> LintPass1State {
+    use beamtalk_core::semantic_analysis::ClassHierarchy;
+
+    let mut all_class_infos = Vec::new();
+    let mut parsed_targets = Vec::new();
+    let mut trait_users =
+        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+
+    for file in extraction_files {
+        // Canonicalize once per file; used for both the error path and the
+        // target-set membership check in the success path below.
+        let canonical = beamtalk_project::package::try_canonicalize(file);
+        let Ok(source) = std::fs::read_to_string(file) else {
+            on_unreadable(file, target_set.contains(&canonical));
+            continue;
+        };
+        let file_str = file.to_string_lossy().into_owned();
+        let tokens = lex_with_eof(&source);
+        let (module, parse_diags) = parse(tokens);
+        let mut class_infos = ClassHierarchy::extract_class_infos(&module);
+        // Stamp the package per-file, same as build's/lint's Pass 1 —
+        // without this, a same-package class defined in a sibling file is
+        // indistinguishable from a builtin/REPL class and never flagged as a
+        // leak by `check_class_visibility`.
+        if let Some(pkg) = current_package {
+            ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
+        }
+        all_class_infos.extend(class_infos);
+        // Records each carried protocol's source too, for provision routing.
+        trait_users.add_source_file(&module, &file_str, &source, current_package);
+        if target_set.contains(&canonical) {
+            parsed_targets.push((file.clone(), source, module, parse_diags));
+        }
+    }
+
+    LintPass1State {
+        all_class_infos,
+        trait_users,
+        parsed_targets,
+    }
+}
+
 /// Run lint passes on `path` (file or directory) and return structured results.
 ///
 /// Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
@@ -679,10 +729,7 @@ fn build_lint_analysis_context(
 /// than the CLI — e.g. `@expect type` annotations are falsely reported as
 /// stale because the type/DNU diagnostics they suppress require cross-file
 /// class resolution to appear.
-#[allow(clippy::too_many_lines)] // Two-pass pipeline is inherently sequential.
 pub(crate) fn run_lint_structured(path: &str) -> LintResult {
-    use beamtalk_core::semantic_analysis::ClassHierarchy;
-
     let source_files = match resolve_source_files(path) {
         Ok(files) => files,
         Err(result) => return result,
@@ -696,35 +743,23 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
     let current_package = resolve_current_package(path);
 
-    // Resolve the package root once, mirroring
-    // `compute_diagnostic_summary`'s own one-time resolution above, so each
-    // target file's `is_stub_file` can be derived via
-    // `beamtalk_project::package::is_under_stubs_dir` without re-walking
-    // ancestors per file.
+    // Resolve the package root once so each target file's `is_stub_file` can
+    // be derived via `beamtalk_project::package::is_under_stubs_dir` without
+    // re-walking ancestors per file.
     let project_root = beamtalk_project::package::find_package_root(std::path::Path::new(path));
 
     // Pass 1: Parse files and extract class metadata.
-    let mut all_class_infos = Vec::new();
-    let mut parsed_targets: Vec<(
-        std::path::PathBuf,
-        String,
-        beamtalk_core::ast::Module,
-        Vec<beamtalk_core::source_analysis::Diagnostic>,
-    )> = Vec::new();
-    // Trait users, flattened below once dependency protocols are merged
-    // (BT-3673) — same step as `beamtalk lint`.
-    let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
-
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
-
-    for file in &extraction_files {
-        let Ok(source) = std::fs::read_to_string(file) else {
-            let canonical = beamtalk_project::package::try_canonicalize(file);
-            if target_set.contains(&canonical) {
+    let mut pass1 = run_lint_pass1(
+        &extraction_files,
+        &target_set,
+        current_package.as_deref(),
+        |file, is_target| {
+            let name = file.to_string_lossy().into_owned();
+            if is_target {
                 errors.push(LintDiagnostic {
-                    file: file.to_string_lossy().into_owned(),
+                    file: name,
                     line: None,
                     message: format!("Failed to read '{}'", file.display()),
                     severity: "error",
@@ -736,7 +771,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
                 // drops the file, potentially re-introducing diagnostic
                 // divergence from CLI lint.
                 warnings.push(LintDiagnostic {
-                    file: file.to_string_lossy().into_owned(),
+                    file: name,
                     line: None,
                     message: format!(
                         "Failed to read package file '{}'; cross-file class extraction may be incomplete",
@@ -745,35 +780,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
                     severity: "warning",
                 });
             }
-            continue;
-        };
-
-        let tokens = lex_with_eof(&source);
-        let (module, parse_diags) = parse(tokens);
-
-        let mut class_infos = ClassHierarchy::extract_class_infos(&module);
-        // Stamp the package per-file, same as build's/lint's Pass 1 —
-        // without this, a same-package class defined in a sibling file is
-        // indistinguishable from a builtin/REPL class and never flagged as a
-        // leak by `check_class_visibility`.
-        if let Some(pkg) = current_package.as_deref() {
-            ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
-        }
-        all_class_infos.extend(class_infos);
-        // Records each carried protocol's source too, for provision routing.
-        trait_users.add_source_file(
-            &module,
-            &file.to_string_lossy(),
-            &source,
-            current_package.as_deref(),
-        );
-
-        let canonical = beamtalk_project::package::try_canonicalize(file);
-        if target_set.contains(&canonical) {
-            parsed_targets.push((file.clone(), source, module, parse_diags));
-        }
-    }
-
+        },
+    );
     let LintAnalysisContext {
         has_package_dependencies,
         native_type_registry,
@@ -782,10 +790,15 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         protocol_sources,
     } = build_lint_analysis_context(
         path,
-        &mut all_class_infos,
-        &trait_users,
+        &mut pass1.all_class_infos,
+        &pass1.trait_users,
         current_package.as_deref(),
     );
+    let LintPass1State {
+        all_class_infos,
+        parsed_targets,
+        ..
+    } = pass1;
 
     let mut all_provision_diags = Vec::new();
 
