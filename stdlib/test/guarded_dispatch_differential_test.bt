@@ -47,6 +47,12 @@
 // fixtures/guarded_diff_proxy.bt, fixtures/type_pattern_actor_fixture.bt,
 // fixtures/counter.bt.
 
+// BT-4412: receivers declared through a type alias take the same guarded
+// direct call as the aliased type (`testAliasTypedReceivers`).
+type GuardedDiffPair = Tuple(Integer, Integer)
+type GuardedDiffOptions = Dictionary(Symbol, Integer)
+type GuardedDiffPointAlias = GuardedDiffPoint
+
 DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
 
   // === Receivers ===
@@ -299,6 +305,30 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
     self
       send: #lyingDictionary
       typed: [:r :: GuardedDiffPoint | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: #{#x => 1}
+
+  // BT-4412: an alias-typed receiver hits and misses its guard exactly like
+  // the aliased type.
+  testAliasTypedReceivers =>
+    self
+      send: #aliasTuple
+      typed: [:r :: GuardedDiffPair | r at: 1]
+      dynamic: [:r | r at: 1]
+      on: (Tuple withAll: #(7, 8))
+    self
+      send: #aliasDictionary
+      typed: [:r :: GuardedDiffOptions | r at: #k put: 1]
+      dynamic: [:r | r at: #k put: 1]
+      on: #{#a => 1}
+    self
+      send: #aliasValue
+      typed: [:r :: GuardedDiffPointAlias | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: self point
+    self
+      send: #aliasValueMiss
+      typed: [:r :: GuardedDiffPointAlias | r baseOnly]
       dynamic: [:r | r baseOnly]
       on: #{#x => 1}
 

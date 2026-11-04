@@ -571,8 +571,9 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
 
 /// Checks if an expression is an `error:` message send.
 ///
-/// Since `erlang:error/1` never returns (always throws an exception),
-/// expressions ending with `error:` should not be wrapped in reply tuples.
+/// Selector shape only: whether the send *never returns* also depends on the
+/// receiver (BT-4075 — a class object's class-side `error:` answers a value),
+/// which callers decide with `CoreErlangGenerator::error_signal_receiver_kind`.
 pub(super) fn is_error_message_send(expr: &Expression) -> bool {
     // Classify via the well-known enum so a future rename of the
     // `Error` variant forces this site to update too. The classifier

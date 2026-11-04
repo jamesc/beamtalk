@@ -3935,3 +3935,51 @@ fn direct_call_eligibility_is_adr_0142s_rule() {
     assert!(!hierarchy.chain_has_class_variables("OpenSub"));
     assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
 }
+
+/// BT-4148: the compile-time class-variable reflection selector set agrees
+/// with the runtime's (`beamtalk_object_class:is_class_var_reflection_selector/1`).
+/// Both sides are pinned to the shared fixture; the Erlang half is
+/// `beamtalk_object_class_tests:class_var_reflection_selectors_match_shared_fixture_test/0`.
+#[test]
+fn class_var_reflection_selectors_match_shared_fixture() {
+    let path = crate::source_analysis::corpus_test_support::repo_root().join(
+        "runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json",
+    );
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
+    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
+    let list = |key: &str| -> Vec<String> {
+        fixture[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("fixture.{key} is an array"))
+            .iter()
+            .map(|v| v.as_str().expect("selector is a string").to_string())
+            .collect()
+    };
+    let members = list("selectors");
+    assert!(!members.is_empty());
+    for sel in &members {
+        assert!(
+            ClassInfo::is_class_var_reflection_selector(sel),
+            "{sel} is a class-variable reflection selector at runtime"
+        );
+    }
+    for sel in list("non_selectors") {
+        assert!(
+            !ClassInfo::is_class_var_reflection_selector(&sel),
+            "{sel} is not a class-variable reflection selector"
+        );
+    }
+}
+
+/// BT-4148: a user class method named `fieldAt:` / `fieldAt:put:` is never
+/// what a send reaches (the class process answers it first), so it is never
+/// direct-call eligible.
+#[test]
+fn field_at_class_methods_are_not_direct_call_eligible() {
+    let hierarchy = bt4099_hierarchy_for_source(
+        "Object subclass: Reg\n  class fieldAt: k => 1\n  class fieldAt: k put: v => 2\n",
+    );
+    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
+    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
+}

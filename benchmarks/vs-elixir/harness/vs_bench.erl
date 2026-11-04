@@ -122,6 +122,10 @@ rows() ->
             bt_counter, [{gen_cast, ex_counter}]},
         {"7d", machinery, "actor method doing self hasField: / GenServer.call", 20000,
             'actorProbe:c:', bt_counter, [{gen_probe, ex_counter}]},
+        {"7e", machinery, "inherited actor method doing self increment / delegated GenServer.call",
+            20000, 'actorViaSelfSub:c:', sub_counter, [{gen_via_self, sub_counter}]},
+        {"7f", machinery, "actor method doing self increment / GenServer.call", 20000,
+            'actorViaSelf:c:', counter, [{gen_via_self, counter}]},
         {"8a", machinery, "on: Error do: without a raise / try-rescue", 100000, 'onDoNoRaise:',
             none, [{try_no_raise, none}]},
         {"8b", machinery, "on: Error do: with a raise / raise-rescue", 10000, 'onDoRaise:', none, [
@@ -201,7 +205,9 @@ fixtures() ->
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
-        ex_counter => {none, ?EX:counter()}
+        ex_counter => {none, ?EX:counter()},
+        counter => {Bt(counter), ?EX:counter()},
+        sub_counter => {Bt(subCounter), ?EX:sub_counter()}
     }.
 
 class_fn(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
@@ -514,6 +520,8 @@ compiles_to("6e") -> "is_list guard, lists:foldl(fun); + with coercion try";
 compiles_to("7a") -> "send(C, count, []) -> beamtalk_actor:sync_send, gen_server:call + telemetry/trace/ctx hooks both sides";
 compiles_to("7b") -> "as 7a";
 compiles_to("7c") -> "beamtalk_message_dispatch:cast -> gen_server:cast + the same hooks";
+compiles_to("7e") -> "as 7a; the subclass's dispatch/4 default arm takes the memoised inherited_target/2 verdict to the owner (BT-4280)";
+compiles_to("7f") -> "as 7a; the self-send is a static call inside the class module";
 compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and walks the runtime method resolver";
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
 compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller (class_signal_message/2, BT-4115), wrapped and class-matched; frames built only on read";

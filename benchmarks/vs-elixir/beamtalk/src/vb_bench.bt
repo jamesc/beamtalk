@@ -34,6 +34,8 @@ sealed Object subclass: VbBench
 
   class counter -> VbCounter => VbCounter spawn
 
+  class subCounter -> VbSubCounter => VbSubCounter spawn
+
   class adder -> Block(Integer, Integer) => [:x | x + 1]
 
   class list100 -> List(Integer) => (1 to: 100) asList
@@ -204,6 +206,16 @@ sealed Object subclass: VbBench
   class actorProbe: n :: Integer c: c :: VbCounter -> Boolean =>
     last := false
     n timesRepeat: [last := c probe]
+    last
+
+  class actorViaSelfSub: n :: Integer c: c :: VbSubCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
+    last
+
+  class actorViaSelf: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
     last
 
   // `n` casts, then one sync call so every cast has been handled.

@@ -315,31 +315,52 @@ TestCase subclass: BinaryConstructionTest
 
   // --- Run-time failures ---
   // ADR 0143 § Runtime failures (BT-4406): a failed construction is an
-  // `argument_error` whose message names the segment's type and the
-  // offending value (as its printString).
+  // `argument_error` whose message names the segment's 1-based position
+  // and type (BT-4414) and the offending value (a scalar as its
+  // printString).
   testNonBinaryInBinarySegmentRaises =>
     v := 1
     self should: [<<v/binary>>] raise: #argument_error
     message := [<<v/binary>>] on: Error do: [:e | e message]
-    self assert: message equals: "binary construction: 'binary' segment: expected a binary but got: 1"
+    self assert: message equals: "binary construction: segment 1 of type 'binary': expected a binary but got: 1"
 
   testNegativeVariableSizeRaises =>
     n := 0 - 1
     self should: [<<5:n>>] raise: #argument_error
     // A size the BEAM compiler can see is negative (`0 - 1` folds) fails
-    // without naming its segment; a size known only at run time names it.
+    // with the plain "invalid argument"; a size known only at run time is
+    // named with its segment.
     m := #(-1) first
     message := [<<5:m>>] on: Error do: [:e | e message]
-    self assert: message equals: "binary construction: 'integer' segment: expected a non-negative integer as size but got: -1"
+    self assert: message equals: "binary construction: segment 1 of type 'integer': expected a non-negative integer as size but got: -1"
 
   testNonIntegerInIntegerSegmentNamesValue =>
     v := #(#foo) first
     self should: [<<v:8>>] raise: #argument_error
     message := [<<1:8, v:8>>] on: Error do: [:e | e message]
-    self assert: message equals: "binary construction: 'integer' segment: expected an integer but got: #foo"
+    self assert: message equals: "binary construction: segment 2 of type 'integer': expected an integer but got: #foo"
 
   testFailedConstructionRecordsSegmentDetails =>
     v := 1
     details := [<<v/binary>>] on: Error do: [:e | e details]
+    self assert: (details at: #segment) equals: 1
     self assert: (details at: #segment_type) equals: #binary
+    self assert: (details at: #failure) equals: #type
     self assert: (details at: #value) equals: 1
+    // For a size failure, `value` is the offending size.
+    m := #(-1) first
+    sizeDetails := [<<5:m>>] on: Error do: [:e | e details]
+    self assert: (sizeDetails at: #failure) equals: #size
+    self assert: (sizeDetails at: #value) equals: -1
+
+  testLaterSegmentFailureNamesItsSourcePosition =>
+    // The position is the source segment's: a string literal counts as one
+    // segment however many bytes it builds.
+    v := 1
+    message := [<<"ab", 16:8, v:4/binary, v:8>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: segment 3 of type 'binary': expected a binary but got: 1"
+    w := "hi"
+    message2 := [
+      <<"é"/utf16, 1:8, (w size):8, w:8>>
+    ] on: Error do: [:e | e message]
+    self assert: message2 equals: "binary construction: segment 4 of type 'integer': expected an integer but got: ""hi"""

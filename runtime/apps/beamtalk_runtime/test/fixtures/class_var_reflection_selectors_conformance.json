@@ -1,0 +1,5 @@
+{
+  "description": "BT-4148: the class-variable reflection sends the class gen_server answers from its own state ahead of the class-method lookup. Pinned on the Rust side by ClassInfo::is_class_var_reflection_selector (crates/beamtalk-core/src/semantic_analysis/class_hierarchy/tests.rs, class_var_reflection_selectors_match_shared_fixture) and on the Erlang side by beamtalk_object_class:is_class_var_reflection_selector/1 and class_var_reflection_op/2 (beamtalk_object_class_tests:class_var_reflection_selectors_match_shared_fixture_test/0).",
+  "selectors": ["hasField:", "clearField:", "fieldAt:", "fieldAt:put:"],
+  "non_selectors": ["fieldNames", "respondsTo:", "perform:", "new", "at:put:", "printString"]
+}

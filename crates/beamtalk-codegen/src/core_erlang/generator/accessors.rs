@@ -32,6 +32,10 @@ impl CoreErlangGenerator {
             direct_constructors: &self.own_direct_constructors,
             overrides_collection_selector: self.own_overrides_collection_selector,
             overrides_species_construction: self.own_overrides_species_construction,
+            threads_actor_state: self
+                .class_hierarchy
+                .as_ref()
+                .is_some_and(|h| h.threads_actor_state(&self.class_name())),
         }
     }
 

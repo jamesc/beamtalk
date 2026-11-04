@@ -403,14 +403,12 @@ fn manifest_less_and_stdlib_files_keep_legacy_scope() {
     );
 }
 
-/// Editing a project alias file re-resolves on the next compile: the memo
-/// is keyed by an exact path→mtime fingerprint, so the second compile sees
-/// the new expansion rather than a stale cached one.
-#[test]
-fn edited_alias_file_resolves_on_next_compile() {
-    let (dir, state_path) = write_parity_project();
-    let source = fs::read_to_string(&state_path).expect("read fixture state file");
-    let first = handle_compile(&load_like_compile_request(&source, &state_path));
+/// Compile the fixture's state file and assert the baseline sees `Scheme`
+/// (so a later compile's outcome reflects an edit, not a broken fixture).
+/// Returns the state file's source for the recompile.
+fn compile_baseline_state_file(state_path: &std::path::Path) -> String {
+    let source = fs::read_to_string(state_path).expect("read fixture state file");
+    let first = handle_compile(&load_like_compile_request(&source, state_path));
     assert_eq!(
         response_status(&first).as_deref(),
         Some("ok"),
@@ -423,10 +421,17 @@ fn edited_alias_file_resolves_on_next_compile() {
         "baseline must see Scheme: {:#?}",
         compile_warnings(&first)
     );
+    source
+}
 
-    // Narrow the alias so `#http` no longer matches.
+/// Rewrite the fixture's alias file, narrowing `Scheme` to `#https` so the
+/// state file's `#http` default no longer matches. The new content is
+/// shorter than the original, so the file's length changes. Returns the
+/// alias file's path.
+fn narrow_scheme_alias(root: &std::path::Path) -> std::path::PathBuf {
+    let alias_path = root.join("src/parity_config.bt");
     fs::write(
-        dir.path().join("src/parity_config.bt"),
+        &alias_path,
         "// Copyright 2026 James Casey\n\
          // SPDX-License-Identifier: Apache-2.0\n\
          \n\
@@ -436,24 +441,91 @@ fn edited_alias_file_resolves_on_next_compile() {
          \x20 defaultScheme -> Symbol => #http\n",
     )
     .expect("rewrite fixture alias file");
-    let second = handle_compile(&load_like_compile_request(&source, &state_path));
-    let Term::Map(ref m) = second else {
+    alias_path
+}
+
+/// Set `path`'s mtime to `time`.
+fn set_mtime(path: &std::path::Path, time: std::time::SystemTime) {
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open file to set mtime")
+        .set_modified(time)
+        .expect("set mtime");
+}
+
+/// Assert a recompile after [`narrow_scheme_alias`] saw the narrowed alias:
+/// the `#http` default is now a genuine mismatch, which the project's
+/// `type = "error"` escalates.
+fn assert_sees_narrowed_alias(second: &Term) {
+    let Term::Map(m) = second else {
         panic!("Expected map response: {second:?}");
     };
-    // Narrowing `Scheme` to `#https` turns the `#http` default into a genuine
-    // mismatch, which the project's `type = "error"` escalates.
     assert_eq!(
         map_get(m, "status"),
         Some(&atom("error")),
         "edited alias must reject the old default: {second:?}"
     );
-    let messages = error_diagnostic_messages(&second);
+    let messages = error_diagnostic_messages(second);
     assert!(
         messages
             .iter()
             .any(|msg| msg.contains("declared as Scheme (#https)")),
         "edited alias expansion must be visible on recompile: {messages:?}"
     );
+}
+
+/// Editing a project alias file re-resolves on the next compile: the memo
+/// is keyed by an exact path→(mtime, length) fingerprint, so the second
+/// compile sees the new expansion rather than a stale cached one.
+#[test]
+fn edited_alias_file_resolves_on_next_compile() {
+    let (dir, state_path) = write_parity_project();
+    let source = compile_baseline_state_file(&state_path);
+
+    // Bump the mtime forward explicitly rather than relying on wall-clock
+    // time: on NTFS both writes can land in one ~15.6 ms tick, leaving the
+    // mtime unchanged (BT-4365). This test covers the ordinary mtime-change
+    // path; `same_mtime_alias_edit_resolves_on_next_compile` covers the
+    // same-mtime path deterministically.
+    let alias_path = narrow_scheme_alias(dir.path());
+    let bumped = fs::metadata(&alias_path)
+        .and_then(|m| m.modified())
+        .expect("read rewritten alias mtime")
+        + std::time::Duration::from_secs(5);
+    set_mtime(&alias_path, bumped);
+
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_sees_narrowed_alias(&second);
+}
+
+/// BT-4365: an edit that keeps the alias file's mtime (two writes within one
+/// coarse filesystem tick, or `cp -p`/`rsync -t`) still re-resolves, because
+/// the fingerprint also records the file length and the edit changes it.
+#[test]
+fn same_mtime_alias_edit_resolves_on_next_compile() {
+    let (dir, state_path) = write_parity_project();
+    let alias_path = dir.path().join("src/parity_config.bt");
+    let original = fs::metadata(&alias_path).expect("stat original alias");
+    let original_mtime = original.modified().expect("read original alias mtime");
+    let source = compile_baseline_state_file(&state_path);
+
+    narrow_scheme_alias(dir.path());
+    set_mtime(&alias_path, original_mtime);
+    let edited = fs::metadata(&alias_path).expect("stat edited alias");
+    assert_eq!(
+        edited.modified().expect("read edited alias mtime"),
+        original_mtime,
+        "fixture must restore the original mtime"
+    );
+    assert_ne!(
+        edited.len(),
+        original.len(),
+        "fixture edit must change the file length"
+    );
+
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_sees_narrowed_alias(&second);
 }
 
 /// Copy the shared `tests/parity/projects/stubbed_ffi/` fixture — the same

@@ -38,6 +38,7 @@ defmodule VeBench do
   def square, do: %VeBench.Square{}
   def sub, do: %Sub{}
   def counter, do: elem(Counter.start(), 1)
+  def sub_counter, do: elem(VeBench.SubCounter.start(), 1)
   def adder, do: fn x -> x + 1 end
   def list100, do: Enum.to_list(1..100)
   def dict, do: %{a: 1, b: 2, k: 3}
@@ -94,6 +95,7 @@ defmodule VeBench do
   defbench(:gen_call, pid, do: GenServer.call(pid, :count))
   defbench(:gen_update, pid, do: GenServer.call(pid, :increment))
   defbench(:gen_probe, pid, do: GenServer.call(pid, :probe))
+  defbench(:gen_via_self, pid, do: GenServer.call(pid, :via_self))
 
   # n casts, then one call so every cast has been handled.
   def gen_cast(n, pid) do

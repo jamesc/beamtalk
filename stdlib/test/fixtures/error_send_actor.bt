@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4075: Actor fixture for `error:` sends whose receiver may be a class
+// object. Only `self error:` is known never to return; any other receiver's
+// `error:` may answer a value, which the method must reply with.
+
+Actor subclass: ErrorSendActor
+  state: n = 0
+
+  count => self.n
+
+  // Last statement: a class object's class-side `error:` answers a Result.
+  raise: msg via: obj => obj error: msg
+
+  // Not the last statement: the answer flows on and state still threads.
+  raiseThenCount: msg via: obj =>
+    r := obj error: msg
+    self.n := self.n + 1
+    r
+
+  // A state-writing fold in the argument is sequenced ahead of the send.
+  tallyVia: obj =>
+    obj
+      error: (#(1, 2, 3)
+        inject: 0
+        into: [:a :b |
+          self.n := self.n + b
+          a + b
+        ])
+
+  // `Logger error:` as the last statement answers nil.
+  logLast: msg => Logger error: msg
+
+  boom => self error: "boom"
