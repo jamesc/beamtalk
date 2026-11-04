@@ -414,6 +414,7 @@ impl CoreErlangGenerator {
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             Self::meta_process_bound_class_selectors_entry(),
+            Self::meta_caller_safe_class_primitives_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
             if provenance.overrides_collection_selector {
@@ -478,6 +479,45 @@ impl CoreErlangGenerator {
         docvec![
             ",\n      'process_bound_class_selectors' => ",
             Self::meta_atom_list(&selectors)
+        ]
+    }
+
+    /// BT-4270: `'caller_safe_class_primitives' => ~{'signal:' =>
+    /// 'classSignal:', ...}~`, each class-side selector whose body is exactly
+    /// one of `Exception`'s caller-safe signal primitives and compiles to that
+    /// raise ([`super::primitives::lowers_to_caller_safe_raise`]), mapped to
+    /// the primitive. The runtime installs a class-literal signal send's
+    /// caller-safe raise key, which names the primitive its hit arm raises
+    /// through, only while the defining module's current metadata maps the
+    /// selector to that same primitive, so a reload that replaces or swaps
+    /// the body ends the caller-side raise. Omitted when the class has none,
+    /// so only `Exception` changes.
+    fn meta_caller_safe_class_primitives_entry(class: &ClassDefinition) -> Document<'static> {
+        let class_name = class.name.name.as_str();
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for method in &class.class_methods {
+            let Some(primitive) = method
+                .quoted_primitive_name()
+                .filter(|p| super::primitives::lowers_to_caller_safe_raise(class_name, p))
+            else {
+                continue;
+            };
+            if !parts.is_empty() {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                leaf::atom(method.selector.name().to_string()),
+                " => ",
+                leaf::atom(primitive.to_string()),
+            ]);
+        }
+        if parts.is_empty() {
+            return Document::Nil;
+        }
+        docvec![
+            ",\n      'caller_safe_class_primitives' => ~{",
+            Document::Vec(parts),
+            "}~"
         ]
     }
 

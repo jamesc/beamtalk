@@ -288,7 +288,11 @@ over Elixir from the table.
   about 123 reductions and 171 words per operation (8b, 7 rounds,
   `results/bench-bt4115-after.md`),
   most of it wrapping the caught error and matching it against the handler's
-  class.
+  class. BT-4270 put that caller-side raise behind a run-time key (one
+  `persistent_term` read, ADR 0142 §2), so a later `class signal:` override
+  is honoured: 8b is 89 reductions and 141 words per operation against 86 and
+  151 on main before it (`results/bench-bt4270.md`; the words fell because
+  stripping `' class'` from a class tag no longer builds lists).
 
 ### The five largest costs for a Catalina-like workload
 

@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: an error class whose inherited `class signal:` a test replaces with
+// a runtime class-method fun after warm-up. See class_literal_signal_test.bt.
+
+Error subclass: Bt4270RaiseFunErr

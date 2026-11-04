@@ -1492,7 +1492,9 @@ Record that the static call key `Key` is installed for the class tagged `Tag`.
 Called by `beamtalk_class_shadow_flags:static_call_target/4` under the tag
 lock, before it puts the key.
 """.
--spec record_static_call_key(atom(), {module(), atom(), atom()}) -> ok.
+-spec record_static_call_key(
+    atom(), {module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}
+) -> ok.
 record_static_call_key(Tag, Key) ->
     ensure_static_call_keys_table(),
     true = ets:insert(?STATIC_CALL_KEYS, {Tag, Key}),
@@ -1503,7 +1505,8 @@ Remove and return every static call key recorded for `Tag`; `[]` when none
 (or the index does not exist yet). Called under the tag lock by
 `beamtalk_class_shadow_flags`, which erases each key.
 """.
--spec take_static_call_keys(atom()) -> [{module(), atom(), atom()}].
+-spec take_static_call_keys(atom()) ->
+    [{module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}].
 take_static_call_keys(Tag) ->
     try ets:take(?STATIC_CALL_KEYS, Tag) of
         Rows -> [Key || {_, Key} <- Rows]

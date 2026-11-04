@@ -527,7 +527,7 @@ compiles_to("7e") -> "as 7a; the subclass's dispatch/4 default arm takes the mem
 compiles_to("7f") -> "as 7a; the self-send is a static call inside the class module";
 compiles_to("7g") -> "as 7a; each `p x` is a tag + __is_slot/1-guarded maps:get with no cell bracket, the `+` a guarded BIF with none either (BT-4279)";
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
-compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller (class_signal_message/2, BT-4115), wrapped and class-matched; frames built only on read";
+compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller behind its caller-safe raise key (one persistent_term read, BT-4270), wrapped and class-matched; frames built only on read";
 compiles_to("9a") -> "class_send(Result, 'ok:') gen_server:call; `value` as a block-or-send case";
 compiles_to("9b") -> "tag-guarded direct Result:dispatch/3 (BT-4069); mismatch falls back to send/3";
 compiles_to("10a") -> "send(D, 'at:put:', ...) -> Dictionary:dispatch/3 -> maps:put";

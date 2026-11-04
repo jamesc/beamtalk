@@ -12,6 +12,7 @@ register and unregister on the same class concurrently).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
+-include("beamtalk_class_vars_keys.hrl").
 
 setup_runtime() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
@@ -372,6 +373,41 @@ stop_static_class(Pid) ->
     catch gen_server:stop(Pid, normal, 5000),
     ok.
 
+%% A class whose class methods (`testSelf`) live in `Module`.
+start_class_on(Name, Superclass, Module) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => Superclass,
+        module => Module,
+        class_methods => #{testSelf => #{arity => 0}},
+        class_state => #{},
+        meta => ?STATIC_META
+    }),
+    Pid.
+
+%% A class module defining `class_testSelf/1` whose metadata maps selectors to
+%% caller-safe signal primitives as `CallerSafe` does (BT-4270).
+load_raise_module(Module, CallerSafe) ->
+    Body = io_lib:format(
+        "class_testSelf(_ClassSelf) -> ok.~n"
+        "'__beamtalk_meta'() -> #{class_var_abi => ~p, caller_safe_class_primitives => ~p}.~n",
+        [?BT_CLASS_VAR_ABI, CallerSafe]
+    ),
+    load_module_binary(
+        Module, compile_module(Module, [{class_testSelf, 1}, {'__beamtalk_meta', 0}], Body)
+    ).
+
+%% A subclass that defines no class methods of its own: every class-side send
+%% to it resolves to `Superclass`'s (BT-4270).
+start_inheriting_class(Name, Superclass) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => Superclass,
+        module => ?HELPER,
+        class_methods => #{},
+        class_state => #{},
+        meta => ?STATIC_META
+    }),
+    Pid.
+
 with_static_class(Name, Fun) ->
     Pid = start_static_class(Name, none, #{}),
     try
@@ -579,6 +615,95 @@ static_call_target_test_() ->
                 _ = persistent_term:erase(Tag),
                 ok = beamtalk_class_shadow_flags:invalidate(Name),
                 ?assert(key_gone(Name))
+            end)
+        end},
+        {"installs an inherited owner's function with the receiving class as ClassSelf", fun() ->
+            %% BT-4270: a class-literal signal send keys `{DefiningModule,
+            %% FunName, ReceiverTag}`; the value is the dynamic path's
+            %% ClassSelf for the receiving class.
+            Root = start_static_class('Bt4270Root', none, #{}),
+            Leaf = start_inheriting_class('Bt4270Leaf', 'Bt4270Root'),
+            try
+                Key = static_key('Bt4270Leaf', class_testClassSelf),
+                Ref = target('Bt4270Leaf', Key, testClassSelf),
+                ?assertMatch(#beamtalk_object{class = 'Bt4270Leaf class', pid = Leaf}, Ref),
+                ?assertEqual(Ref, key_value(Key)),
+                ?assertEqual(Ref, beamtalk_class_dispatch:class_send(Leaf, testClassSelf, [])),
+                %% An ancestor's write erases it, as a descendant's key.
+                ok = beamtalk_class_shadow_flags:invalidate('Bt4270Root'),
+                ?assertNot(key_value(Key)),
+                %% Re-installed from the live classes on the next miss.
+                ?assertEqual(Ref, target('Bt4270Leaf', Key, testClassSelf))
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"an inherited owner's runtime fun erases the key and declines it", fun() ->
+            %% BT-4270: the in-caller path applies the defining class's ADR
+            %% 0084 runtime fun instead of its compiled function, so no key
+            %% may name that function while the fun is installed.
+            Root = start_static_class('Bt4270FunRoot', none, #{}),
+            Leaf = start_inheriting_class('Bt4270FunLeaf', 'Bt4270FunRoot'),
+            try
+                Key = static_key('Bt4270FunLeaf', class_testClassSelf),
+                ?assertMatch(#beamtalk_object{}, target('Bt4270FunLeaf', Key, testClassSelf)),
+                ok = beamtalk_object_class:put_class_method(
+                    Root, testClassSelf, fun(_ClassSelf) -> from_runtime_fun end
+                ),
+                ?assertNot(key_value(Key)),
+                ?assertNot(target('Bt4270FunLeaf', Key, testClassSelf)),
+                ?assertNot(key_value(Key)),
+                ?assertEqual(
+                    from_runtime_fun, beamtalk_class_dispatch:class_send(Leaf, testClassSelf, [])
+                )
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"a caller-safe raise key needs the defining module to list the selector", fun() ->
+            %% BT-4270: the hit arm raises as the method body would, without
+            %% calling it, so the key also needs the body to be a caller-safe
+            %% primitive, which the defining module's metadata lists.
+            Mod = bt4270_raise_root_module,
+            load_raise_module(Mod, #{testSelf => classSignal}),
+            Root = start_class_on('Bt4270RaiseRoot', none, Mod),
+            Leaf = start_inheriting_class('Bt4270RaiseLeaf', 'Bt4270RaiseRoot'),
+            try
+                Key =
+                    {caller_safe_raise, classSignal, Mod, class_testSelf, 'Bt4270RaiseLeaf class'},
+                ?assertMatch(
+                    #beamtalk_object{class = 'Bt4270RaiseLeaf class', pid = Leaf},
+                    target('Bt4270RaiseLeaf', Key, testSelf)
+                ),
+                ?assertMatch(#beamtalk_object{}, key_value(Key)),
+                %% A key naming another primitive than the body's declines.
+                OtherPrimitive =
+                    {caller_safe_raise, classSignalOther, Mod, class_testSelf,
+                        'Bt4270RaiseLeaf class'},
+                ?assertNot(target('Bt4270RaiseLeaf', OtherPrimitive, testSelf)),
+                %% A reload whose new body is no longer the primitive: the
+                %% reload's registration erases the key, and the new code's
+                %% metadata no longer certifies it.
+                load_raise_module(Mod, #{}),
+                ok = beamtalk_class_shadow_flags:invalidate('Bt4270RaiseRoot'),
+                ?assertNot(key_value(Key)),
+                ?assertNot(target('Bt4270RaiseLeaf', Key, testSelf)),
+                ?assertNot(key_value(Key))
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"a caller-safe raise key declines a module with no such metadata", fun() ->
+            with_static_class('Bt4270NoMeta', fun(_Pid) ->
+                Key =
+                    {caller_safe_raise, classSignal, ?HELPER, class_testSelf, 'Bt4270NoMeta class'},
+                ?assertNot(target('Bt4270NoMeta', Key, testSelf)),
+                ?assertNot(key_value(Key)),
+                %% The direct-call key of the same function still installs.
+                _ = warm('Bt4270NoMeta', _Pid)
             end)
         end},
         {"an ancestor's write erases a descendant's static call keys", fun() ->

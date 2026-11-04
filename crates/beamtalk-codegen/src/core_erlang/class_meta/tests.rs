@@ -884,3 +884,68 @@ fn test_meta_carries_no_tier2_keys() {
         "meta map should carry no tier2 keys. Got: {output}"
     );
 }
+
+#[test]
+fn test_meta_caller_safe_class_primitives_lists_only_primitive_signal_bodies() {
+    // BT-4270: the runtime installs a class-literal signal send's caller-safe
+    // raise key only while the defining module maps the selector to the key's
+    // primitive here, so only a body that is exactly a caller-safe primitive
+    // that compiles to the raise (in `Exception`) is listed.
+    let module = parse_single_class_module(
+        "Object subclass: Exception\n  \
+         class signal: msg => @primitive \"classSignal:\"\n  \
+         class signal => @primitive \"classSignal\"\n  \
+         class loud: msg => self signal: msg\n  \
+         class other => @primitive \"classClass\"\n",
+    );
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        module.classes.first().unwrap(),
+        &module,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    )
+    .to_pretty_string();
+    assert!(
+        output.contains(
+            "'caller_safe_class_primitives' => ~{'signal:' => 'classSignal:', 'signal' => 'classSignal'}~"
+        ),
+        "the primitive signal bodies are listed, nothing else. Got: {output}"
+    );
+
+    // The same primitive name in another class lowers to the runtime
+    // placeholder, not the raise, so it is never certified.
+    let other = parse_single_class_module(
+        "Object subclass: Raising\n  \
+         class signal: msg => @primitive \"classSignal:\"\n",
+    );
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        other.classes.first().unwrap(),
+        &other,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    )
+    .to_pretty_string();
+    assert!(
+        !output.contains("'caller_safe_class_primitives'"),
+        "a non-Exception class is not certified. Got: {output}"
+    );
+
+    let plain = module_with(make_actor_class("Counter"));
+    let output = CoreErlangGenerator::build_meta_map_doc(
+        plain.classes.first().unwrap(),
+        &plain,
+        false,
+        false,
+        None,
+        MetaProvenance::default(),
+    )
+    .to_pretty_string();
+    assert!(
+        !output.contains("'caller_safe_class_primitives'"),
+        "omitted for a class with none. Got: {output}"
+    );
+}
