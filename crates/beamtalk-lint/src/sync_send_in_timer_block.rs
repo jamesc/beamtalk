@@ -19,7 +19,7 @@
 //! Timer every: 1000 do: [self refresh!]
 //! ```
 
-use crate::{LintPass, async_cast_hint};
+use crate::{LintContext, LintPass, async_cast_hint};
 use beamtalk_core::ast::{BinarySegment, Block, Expression, Identifier, MessageSelector, Module};
 use beamtalk_core::ast_walker::cascade_sends;
 use beamtalk_core::source_analysis::{Diagnostic, Span};
@@ -29,7 +29,7 @@ use beamtalk_core::source_analysis::{Diagnostic, Span};
 pub(crate) struct SyncSendInTimerBlockPass;
 
 impl LintPass for SyncSendInTimerBlockPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for method in module.all_methods() {
             for stmt in &method.body {
                 walk_for_timer_sends(&stmt.expression, false, diagnostics);

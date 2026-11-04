@@ -61,7 +61,7 @@
 
 use std::collections::HashSet;
 
-use crate::{LintPass, hierarchy_for_lint};
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module,
     StringSegment,
@@ -77,12 +77,11 @@ use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 pub(crate) struct DeadBlockAssignmentPass;
 
 impl LintPass for DeadBlockAssignmentPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        // See `hierarchy_for_lint` doc comment for why this is needed
-        // instead of `class.class_kind`.
-        let hierarchy = hierarchy_for_lint(module);
+    fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+        // `ctx.hierarchy`, not `class.class_kind` (see `LintPass`).
+        let hierarchy = ctx.hierarchy;
 
-        let rejected: Vec<Span> = local_threading_diagnostics(module, &hierarchy)
+        let rejected: Vec<Span> = local_threading_diagnostics(module, hierarchy)
             .iter()
             .flat_map(|d| std::iter::once(d.span).chain(d.notes.iter().filter_map(|n| n.span)))
             .collect();

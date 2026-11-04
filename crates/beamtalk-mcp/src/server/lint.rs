@@ -38,11 +38,11 @@ pub(crate) struct LintResult {
     pub(crate) total: usize,
 }
 
-/// Run the shared three-step lint analysis pipeline for a single
+/// Run the shared lint analysis pipeline for a single
 /// module. Callers pre-filter `parse_diags` per their severity requirements
-/// and pass them in; this helper appends lint-pass results, runs semantic
-/// analysis with cross-file class context, filters analysis diagnostics by
-/// `category.is_some()`, applies `@expect` directives, and returns the
+/// and pass them in; this helper runs semantic analysis with cross-file
+/// class context, runs the lint passes against that cross-file hierarchy
+/// (BT-4183), filters analysis diagnostics by `category.is_some()`, applies `@expect` directives, and returns the
 /// resulting diagnostics together with the `ClassHierarchy` (used by
 /// `compute_diagnostic_summary` for type inference).
 ///
@@ -119,8 +119,6 @@ pub(crate) fn run_module_analysis(
 ) {
     use beamtalk_core::semantic_analysis::ClassHierarchy;
 
-    diags.extend(beamtalk_lint::run_lint_passes(module));
-
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
     let options = beamtalk_core::CompilerOptions {
         has_package_dependencies,
@@ -145,6 +143,9 @@ pub(crate) fn run_module_analysis(
             file_stem,
             diagnostics_overrides,
             &mut diags,
+            // BT-4183: the lint passes run against analyse_full's cross-file
+            // hierarchy, as `beamtalk lint` does.
+            |hierarchy| beamtalk_lint::run_lint_passes_with_hierarchy(module, hierarchy),
         );
 
     (diags, class_hierarchy)
@@ -828,9 +829,9 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             })
             .collect();
 
-        // run_module_analysis runs lint passes, semantic
-        // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
-        // and applies @expect directives.
+        // run_module_analysis runs semantic analysis with cross-file class
+        // context, the lint passes against that cross-file hierarchy
+        // (mirroring CLI `beamtalk lint`), and applies @expect directives.
         let is_stub_file = project_root
             .as_deref()
             .is_some_and(|root| beamtalk_project::package::is_under_stubs_dir(root, &file));

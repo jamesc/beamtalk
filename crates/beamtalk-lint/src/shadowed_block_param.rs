@@ -25,7 +25,7 @@
 
 use std::collections::HashSet;
 
-use crate::LintPass;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
 };
@@ -35,7 +35,7 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct ShadowedBlockParamPass;
 
 impl LintPass for ShadowedBlockParamPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         let mut scope = LintScope::new();
 
         // Top-level expressions (module scope, depth 0)

@@ -24,7 +24,7 @@
 //! "result: {x printString}"
 //! ```
 
-use crate::LintPass;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module, StringSegment};
 use beamtalk_core::source_analysis::{Diagnostic, Span};
 
@@ -33,7 +33,7 @@ use beamtalk_core::source_analysis::{Diagnostic, Span};
 pub(crate) struct InspectInStringPositionPass;
 
 impl LintPass for InspectInStringPositionPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for method in module.all_methods() {
             for stmt in &method.body {
                 walk(&stmt.expression, diagnostics);

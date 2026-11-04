@@ -976,3 +976,40 @@ fn run_lint_structured_knows_hex_dep_and_native_modules_but_warns_on_unknown() {
         "own native module should not warn: {messages:?}"
     );
 }
+
+/// BT-4183: MCP `lint` runs the lint passes against the cross-file
+/// hierarchy, as `beamtalk lint` does
+/// (`actor_state_abroad_resolves_out_of_file_actor_ancestor_bt_4183`): a
+/// subclass whose actor ancestor lives in a sibling file resolves as an
+/// actor, so its `Timer` block writing an inherited field warns in its file.
+#[test]
+fn run_lint_structured_resolves_out_of_file_actor_ancestor_bt_4183() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let src = temp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        temp.path().join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Base.bt"),
+        "Actor subclass: Base\n  state: count = 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Sub.bt"),
+        "Base subclass: Sub\n  startLate => Timer after: 100 do: [self.count := 1]\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(temp.path().to_str().unwrap());
+    let abroad: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("block writes field 'count' of Sub"))
+        .collect();
+    assert_eq!(abroad.len(), 1, "got: {:?}", result.warnings);
+    assert!(abroad[0].file.ends_with("Sub.bt"), "{}", abroad[0].file);
+}
