@@ -368,7 +368,8 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// **Miss policy.** Mirrors `sendersOf:`:
   /// - Indexed implementor rows whose class is no longer loaded are dropped
-  ///   silently (stale).
+  ///   silently (stale), including a class removed after the partition was
+  ///   read (BT-4111): such a row is dropped, never reported as a raw Symbol.
   /// - A class the registry reports as loaded but that is absent from the index
   ///   falls back to the legacy `includesSelector:` / `class includesSelector:`
   ///   probe for that class only, and the runtime logs one `xref_miss` warning.
@@ -393,12 +394,7 @@ sealed typed Object subclass: SystemNavigation
     partition := self xrefImplementorsOf: aSelector
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
-    // Map each indexed `{#owner, #class_side}` row to the class object
-    // (instance-side) or the metaclass object (class-side), reusing the same
-    // owner-tag/class-side resolver as `sendersOf:`.
-    indexImpls := indexedRows collect: [:row |
-      self senderClassFor: (row at: #owner) classSide: (row at: #class_side)
-    ]
+    indexImpls := self indexedImplementorsFrom: indexedRows
     // Miss-policy fallback: probe only the loaded-but-unindexed classes, on
     // both sides, exactly as the legacy scan did.
     // BT-4095: resolve the fallback names from the registry snapshot and probe
@@ -418,6 +414,21 @@ sealed typed Object subclass: SystemNavigation
         ] ifFalse: [acc]
       ]
     indexImpls ++ fallbackInstance ++ fallbackClassSide
+
+  /// Map indexed implementor rows (`#{#owner, #class_side}`) to the class
+  /// object (instance side) or metaclass object (class side). Uses the same
+  /// owner-tag/class-side resolver as `sendersOf:`.
+  ///
+  /// BT-4111: a row whose owner no longer resolves (the class was removed
+  /// after the xref partition was read) is dropped, so the result only ever
+  /// holds classes, never a raw owner Symbol.
+  class sealed indexedImplementorsFrom: indexedRows :: List(Dictionary) -> List(Behaviour) =>
+    indexedRows
+      inject: List new
+      into: [:acc :row |
+        cls := self senderClassFor: (row at: #owner) classSide: (row at: #class_side)
+        cls isNil ifTrue: [acc] ifFalse: [acc add: cls]
+      ]
 
   // ===== Outgoing Calls (messagesSentBy:) =====
 
@@ -503,7 +514,8 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// **Miss policy.** The index is authoritative for loaded classes, but a miss
   /// must never become a wrong answer:
-  /// - Rows whose owning class is no longer loaded are dropped silently (stale).
+  /// - Rows whose owning class is no longer loaded are dropped silently (stale),
+  ///   including a class removed after the partition was read (BT-4111).
   /// - A class the registry reports as loaded but that is absent from the index
   ///   falls back to the legacy source-scan (`collectSendersFor:in:into:`) for
   ///   that class only, and the runtime logs one `xref_miss` warning. The
@@ -562,11 +574,11 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// Instance-side hits report the class object; class-side hits report the
   /// metaclass object (`<class> class`), matching the legacy scan's `cls` /
-  /// `cls class` convention (BT-2195). Falls back to the raw tag if the name
-  /// resolves to nil (a registry entry with no live class behind it — should
-  /// not happen, but the scan must not crash; it also covers a class removed
-  /// after the xref rows were read). On that path the raw `ownerTag` Symbol is
-  /// returned as-is, even for class-side hits.
+  /// `cls class` convention (BT-2195).
+  ///
+  /// Answers `nil` when the owner no longer resolves — a class removed after
+  /// the xref rows were read. Every caller drops such a row (BT-4111), so a
+  /// query never reports a raw owner Symbol in place of a class.
   ///
   /// BT-4095: the class-side hit resolves the metaclass tag (`#'Foo class'`)
   /// through the registry, rather than sending `isKindOf:` and `class` to the
@@ -575,8 +587,7 @@ sealed typed Object subclass: SystemNavigation
     tag := isClassSide ifTrue: [
       self classObjectTag: ownerTag
     ] ifFalse: [ownerTag]
-    resolved := self findClass: tag
-    resolved isNil ifTrue: [ownerTag] ifFalse: [resolved]
+    self findClass: tag
 
   /// Map the xref index `bt_row()`s returned by `beamtalk_xref:senders_of_bt/1`
   /// or `references_to_bt/1` onto `#{#class, #selector, #line}` result records,
@@ -586,6 +597,8 @@ sealed typed Object subclass: SystemNavigation
   /// `#class_side` (Boolean), `#method` (Symbol), and `#line` (positive
   /// Integer). `#class` is resolved via `senderClassFor:classSide:` so the
   /// record shape is byte-for-byte identical to the legacy source-scan path.
+  /// A row whose owner no longer resolves (class removed since the rows were
+  /// read) is dropped (BT-4111).
   /// The `bt_row()` shape is shared by senders and references (both index a
   /// site to the *containing* method's selector), so the same mapper backs both
   /// `sendersOf:` and `referencesTo:` (BT-2302). The explicit
@@ -595,12 +608,17 @@ sealed typed Object subclass: SystemNavigation
     indexedRows
       inject: result
       into: [:acc :row |
-        acc
-          add: #{
-            #class => (self senderClassFor: (row at: #owner) classSide: (row at: #class_side)),
-            #selector => (row at: #method),
-            #line => (row at: #line)
-          }
+        cls := self senderClassFor: (row at: #owner) classSide: (row at: #class_side)
+        cls isNil
+          ifTrue: [acc]
+          ifFalse: [
+            acc
+              add: #{
+                #class => cls,
+                #selector => (row at: #method),
+                #line => (row at: #line)
+              }
+          ]
       ]
 
   /// Backwards-compatible alias for `indexedSiteRecordsFrom:into:`, retained
@@ -702,7 +720,9 @@ sealed typed Object subclass: SystemNavigation
         cls := site at: #announcementClass
         (acc includes: cls) ifTrue: [acc] ifFalse: [acc add: cls]
       ]
-    distinct sort: [:a :b | a name asString < b name asString]
+    // BT-4111: sort by the registry name, so an announcement class removed
+    // since its site was found is dropped rather than raising on `name`.
+    self sortedByName: distinct
 
   /// Return a collection of the announcement emission sites within `aClass` —
   /// the site-level form of `announcementsSentBy:` for IDE / event-graph use
@@ -823,12 +843,19 @@ sealed typed Object subclass: SystemNavigation
   /// defensively if `Announcement` is not in the loaded image. Uses
   /// `superclassChain includes:` exactly as `actorClasses` tests membership of
   /// `Actor`.
+  ///
+  /// BT-4111: the class is probed through the tolerant walk, so a class
+  /// removed before or during the probe answers `false` instead of raising.
   class sealed isAnnouncementClass: aClass :: Object -> Boolean =>
     aClass isNil ifTrue: [^false]
-    (aClass respondsTo: #superclassChain) ifFalse: [^false]
     announcementClass := self findClass: #Announcement
     announcementClass isNil ifTrue: [^false]
-    aClass superclassChain includes: announcementClass
+    hits := self liveClassesIn: #(aClass) select: [:c |
+      (c respondsTo: #superclassChain) and: [
+        c superclassChain includes: announcementClass
+      ]
+    ]
+    hits isEmpty not
 
   /// Append announcement emission sites found in every source-bearing extension
   /// method (ADR 0066 / BT-2196) that targets `aClass` to `result`. Returns the
@@ -836,11 +863,15 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// Mirrors `collectExtensionSendersFor:into:`, but — because the query is
   /// scoped to one publisher class rather than one selector — only extensions
-  /// whose resolved target is `aClass` (instance side) or `aClass class`
-  /// (class side) are scanned. Extension target identity is matched by name so
-  /// both an instance-side tag (`#Foo`) and a metaclass tag (`#'Foo class'`)
-  /// are recognised. Extensions registered via `register/4` (no source) are
-  /// invisible, as elsewhere.
+  /// whose target is `aClass` (instance side) or `aClass class`
+  /// (class side) are scanned. Extension target identity is matched on the
+  /// registry tag itself, so both an instance-side tag (`#Foo`) and a
+  /// metaclass tag (`#'Foo class'`) are recognised. Extensions registered via
+  /// `register/4` (no source) are invisible, as elsewhere.
+  ///
+  /// BT-4111: non-matching extensions are skipped on their tag alone, without
+  /// resolving or sending anything to their target class, and a matching
+  /// target removed since the extension table was read is skipped too.
   class sealed collectExtensionAnnounceSitesFor: aClass :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
     // `List add:` is functional (returns a new list), so capture the result
     // rather than mutating in place: the pair is `[aClass name, aClass class
@@ -854,9 +885,10 @@ sealed typed Object subclass: SystemNavigation
         extClassTag := entry at: 1
         extSelector := entry at: 2
         extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
-        targeted := self extensionTargets: extClass names: targetNames
-        targeted
+        extClass := (self extensionTag: extClassTag targets: targetNames)
+          ifTrue: [self findClass: extClassTag]
+          ifFalse: [nil]
+        extClass notNil
           ifTrue: [
             // `extSource` is bound `:: String` above to re-assert the
             // source-text invariant the seam erases (BT-2254).
@@ -869,18 +901,17 @@ sealed typed Object subclass: SystemNavigation
           ifFalse: [acc]
       ]
 
-  /// Whether the resolved extension-target class `extClass` is `aClass` or
+  /// Whether the extension registry tag `extClassTag` names `aClass` or
   /// `aClass class` — i.e. the extension extends the publisher under query.
   ///
   /// `targetNames` is the precomputed `[aClass name, aClass class name]` pair.
-  /// Matching by name handles both an instance-side tag (`#Foo` → `Foo`, name
-  /// `#Foo`) and a metaclass tag (`#'Foo class'` → `Foo class`, name
-  /// `#'Foo class'`) uniformly. A `resolveExtensionClass:` result that is a raw
-  /// atom (the defensive miss path) does not respond to `name` and answers
-  /// `false`.
-  class sealed extensionTargets: extClass :: Object names: targetNames :: List(Symbol) -> Boolean =>
-    (extClass respondsTo: #name) ifFalse: [^false]
-    targetNames includes: extClass name
+  /// A tag equals the `name` of the class it resolves to, for both an
+  /// instance-side tag (`#Foo`) and a metaclass tag (`#'Foo class'`), so the
+  /// tag is compared directly. BT-4111: comparing the tag rather than the
+  /// resolved class's `name` sends nothing to the extension's target class,
+  /// which may have been removed concurrently.
+  class sealed extensionTag: extClassTag :: Symbol targets: targetNames :: List(Symbol) -> Boolean =>
+    targetNames includes: extClassTag
 
   // ===== References To (ADR 0087) =====
 
@@ -1978,7 +2009,8 @@ sealed typed Object subclass: SystemNavigation
   /// / `#erlang_ffi` / `#other`). A send is dropped when its `#sent` selector is
   /// in `excluded`, when `#recv` is `#erlang_ffi`, or when its scope handles DNU
   /// and `#recv` is `#self` / `#super` — the same three exclusions `recordSend:…`
-  /// applies on the source-scan path.
+  /// applies on the source-scan path. A send whose owner no longer resolves
+  /// (class removed since the rows were read) is dropped too (BT-4111).
   class sealed groupIndexedSends: sendRows :: List(Dictionary) excluding: excluded :: Set(Symbol) dnuScopes: dnuScopes :: Set(String) into: result :: Dictionary -> Dictionary =>
     sendRows
       inject: result
@@ -1988,11 +2020,14 @@ sealed typed Object subclass: SystemNavigation
         skipForFfi := recv == #erlang_ffi
         handlesDnu := dnuScopes includes: (self dnuScopeKeyForOwner: (row at: #owner) classSide: (row at: #class_side))
         skipForDnu := handlesDnu and: [(recv == #self) or: [recv == #super]]
-        ((excluded includes: sentSel) or: [skipForFfi or: [skipForDnu]])
+        cls := ((excluded includes: sentSel) or: [skipForFfi or: [skipForDnu]])
+          ifTrue: [nil]
+          ifFalse: [self senderClassFor: (row at: #owner) classSide: (row at: #class_side)]
+        cls isNil
           ifTrue: [acc]
           ifFalse: [
             site := #{
-              #class => (self senderClassFor: (row at: #owner) classSide: (row at: #class_side)),
+              #class => cls,
               #selector => (row at: #method),
               #line => (row at: #line)
             }

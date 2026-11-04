@@ -93,3 +93,86 @@ TestCase subclass: SystemNavigationLiveWalkTest
     self assert: ((SystemNavigation implementorsOf: #bt4095Probe) includes: probe)
     probe removeFromSystem
     self deny: ((SystemNavigation implementorsOf: #bt4095Probe) includes: probe)
+
+  // ===== BT-4111: indexed rows and per-class queries =====
+  //
+  // The xref partition is read before its rows are resolved to classes, so a
+  // class can be removed in between. These tests feed the row mappers rows for
+  // a class that has already been removed, the state that window leaves.
+
+  // The owner resolver answers nil, not the raw owner Symbol, on both sides.
+  testSenderClassForRemovedOwnerIsNil =>
+    self.cls := self makeProbe: #BT4111GoneOwner
+    self.cls removeFromSystem
+    self assert: (SystemNavigation senderClassFor: #BT4111GoneOwner classSide: false) isNil
+    self assert: (SystemNavigation senderClassFor: #BT4111GoneOwner classSide: true) isNil
+    self assert: (SystemNavigation senderClassFor: #Integer classSide: false) equals: Integer
+    self assert: (SystemNavigation senderClassFor: #Integer classSide: true) equals: Integer class
+
+  // Indexed implementor rows whose owner was removed are dropped.
+  testIndexedImplementorsDropRemovedOwner =>
+    self.cls := self makeProbe: #BT4111GoneImplementor
+    self.cls removeFromSystem
+    rows := #(
+      #{#owner => #BT4111GoneImplementor, #class_side => false},
+      #{#owner => #Integer, #class_side => false},
+      #{#owner => #BT4111GoneImplementor, #class_side => true},
+      #{#owner => #Integer, #class_side => true}
+    )
+    impls := SystemNavigation indexedImplementorsFrom: rows
+    self assert: impls equals: #(Integer, Integer class)
+
+  // Indexed sender / reference rows whose owner was removed are dropped.
+  testIndexedSiteRecordsDropRemovedOwner =>
+    self.cls := self makeProbe: #BT4111GoneSender
+    self.cls removeFromSystem
+    rows := #(
+      #{#owner => #BT4111GoneSender, #class_side => false, #method => #foo, #line => 1},
+      #{#owner => #Integer, #class_side => false, #method => #bar, #line => 2}
+    )
+    records := SystemNavigation indexedSiteRecordsFrom: rows into: List new
+    self assert: records size equals: 1
+    self assert: (records first at: #class) equals: Integer
+    self assert: (records first at: #selector) equals: #bar
+
+  // `unimplementedSelectors`' indexed grouping drops removed owners as well.
+  testGroupIndexedSendsDropsRemovedOwner =>
+    self.cls := self makeProbe: #BT4111GoneGroup
+    self.cls removeFromSystem
+    rows := #(
+      #{#sent => #bt4111Sent, #owner => #BT4111GoneGroup, #class_side => false, #method => #foo, #line => 1, #recv => #other},
+      #{#sent => #bt4111Sent, #owner => #Integer, #class_side => false, #method => #bar, #line => 2, #recv => #other}
+    )
+    grouped := SystemNavigation
+      groupIndexedSends: rows
+      excluding: Set new
+      dnuScopes: Set new
+      into: Dictionary new
+    sites := grouped at: #bt4111Sent
+    self assert: sites size equals: 1
+    self assert: (sites first at: #class) equals: Integer
+
+  // The announcement gate answers false for a removed class instead of raising.
+  testIsAnnouncementClassFalseForRemovedClass =>
+    self.cls := Announcement classBuilder name: #BT4111GoneAnnouncement;
+      superclass: Announcement;
+      register
+    probe := self.cls
+    self assert: (SystemNavigation isAnnouncementClass: probe)
+    probe removeFromSystem
+    self deny: (SystemNavigation isAnnouncementClass: probe)
+
+  // `announcementsSentBy:` sorts through `sortedByName:`, which drops a class
+  // removed since it was collected rather than sending `name` to it.
+  testSortedByNameDropsRemovedClass =>
+    self.cls := self makeProbe: #BT4111GoneSorted
+    probe := self.cls
+    probe removeFromSystem
+    self assert: (SystemNavigation sortedByName: #(probe, Object, Integer)) equals: #(Integer, Object)
+
+  // Extensions are matched to the queried class on their registry tag alone.
+  testExtensionTagMatchesOnTag =>
+    names := #(#Integer, #'Integer class')
+    self assert: (SystemNavigation extensionTag: #Integer targets: names)
+    self assert: (SystemNavigation extensionTag: #'Integer class' targets: names)
+    self deny: (SystemNavigation extensionTag: #BT4111NoSuchClass targets: names)
