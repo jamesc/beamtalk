@@ -137,11 +137,6 @@ init(Opts) ->
         max_restarts = maps:get(max_restarts, Opts, ?DEFAULT_MAX_RESTARTS),
         window_ms = maps:get(window_ms, Opts, ?DEFAULT_WINDOW_MS)
     },
-    %% BT-4316: a class killed while no monitor was running sent no 'DOWN',
-    %% so its static call keys (which hold the dead pid) were never erased.
-    %% A fresh monitor cannot tell which classes died, so it erases them all;
-    %% each call site re-installs from the live class on its next send.
-    ok = beamtalk_class_shadow_flags:erase_all_static_call_keys(),
     %% If this monitor crashed and was restarted by beamtalk_runtime_sup, the
     %% surviving class processes are no longer watched — re-adopt them from
     %% the pg enumeration group so eager recovery is not silently lost for
@@ -161,6 +156,16 @@ init(Opts) ->
         State0,
         Survivors
     ),
+    %% BT-4316: a class killed while no monitor was running sent no 'DOWN',
+    %% so its static call keys (which hold the dead pid) were never erased.
+    %% A fresh monitor cannot tell which classes died, so it erases them all;
+    %% each call site re-installs from the live class on its next send. This
+    %% runs after adoption: a survivor that dies from here on sends a 'DOWN'
+    %% (`noproc` if it is already dead), and one that died before adoption is
+    %% caught by this sweep. A restart (eager or lazy) re-registers through
+    %% `beamtalk_class_metadata:merge_identity/5`, which invalidates, so a
+    %% missed 'DOWN' cannot outlive a restart either.
+    ok = beamtalk_class_shadow_flags:erase_all_static_call_keys(),
     {ok, State1}.
 
 handle_call({watch, ClassName, Pid}, _From, State) ->

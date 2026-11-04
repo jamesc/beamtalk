@@ -610,6 +610,30 @@ static_call_target_test_() ->
                 _ = warm('Bt4316MonitorInit', Pid)
             end)
         end},
+        {"restart_class/1 erases a dead class's keys even when no 'DOWN' was seen", fun() ->
+            %% A missed 'DOWN' (no monitor watching when the class died) must
+            %% not let a restart keep serving the dead pid as ClassSelf: the
+            %% restart re-registers via merge_identity/5, which invalidates.
+            Name = 'Bt4316Restart',
+            Pid = start_static_class(Name, none, #{}),
+            OldRef = warm(Name, Pid),
+            ok = beamtalk_class_monitor:unwatch(Name),
+            MRef = erlang:monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 5000 -> ?assert(false)
+            end,
+            ?assertEqual(OldRef, key_value(static_key(Name, class_testSelf))),
+            {ok, NewPid} = beamtalk_class_registry:restart_class(Name),
+            %% (Rebuilt from the helper module's meta, the restarted class has
+            %% no class-method table, so this test checks only the erase.)
+            try
+                ?assert(key_gone(Name))
+            after
+                stop_static_class(NewPid)
+            end
+        end},
         {"an install racing a shadow raise never survives it", fun() ->
             Name = 'Bt4316Race',
             Tag = 'Bt4316Race class',
