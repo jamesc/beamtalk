@@ -175,3 +175,26 @@ TestCase subclass: IsKindOfTest
     self deny: (42 isKindOf: 42)
     @expect type
     self deny: (42 isKindOf: #Integer)
+
+  // --- BT-4410: answers and errors pinned across the direct-call lowering ---
+
+  // `isKindOf:` became a direct call to the runtime intrinsic (no foreign-FFI
+  // proxy). These pin the answers it gave through the proxy.
+  testNonBehaviourArgumentsAreFalse =>
+    @expect type
+    self assert: (42 isKindOf: 3) equals: false
+    @expect type
+    self assert: (42 isKindOf: nil) equals: false
+    self assert: (42 isKindOf: 42 class class) equals: false
+
+  testPinnedClassAndSymbolAnswers =>
+    self assert: (Integer isKindOf: Number class) equals: true
+    self assert: (#foo isKindOf: String) equals: false
+
+  // A future receiver is awaited before the method runs; the answer is the
+  // resolved value's.
+  testResolvedFutureReceiver =>
+    future := (Erlang beamtalk_future) new
+    (Erlang beamtalk_future) resolve: future with: 7
+    self assert: (future isKindOf: Integer) equals: true
+    self assert: (future isKindOf: String) equals: false
