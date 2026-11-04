@@ -43,9 +43,8 @@ names.
 
 `key/1`, `assert_absent/1`, `install/2` and `uninstall/1` are the invocation
 entry points' API and take a class *name* (or the key). The access helpers
-(`get`, `get_late`, `put`, `clear`, `has`, `field_at`, `field_at_put`, `capture`,
-`with_snapshot`) take
-the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
+(`get`, `get_late`, `put`, `clear`, `has`, `field_at`, `field_at_put`,
+`capture`, `with_snapshot`) take the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
 `'Name class'`) and derive the key from its tag; a `nil` or non-class-object
 receiver is an internal error. On the success path the receiver check is only
 the record match (`class_tag/1`): the class name, which costs a tag-to-name
