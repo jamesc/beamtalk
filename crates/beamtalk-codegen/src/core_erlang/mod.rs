@@ -621,9 +621,10 @@ impl CoreErlangGenerator {
     /// fixture), so a class reference costs one `erlang:whereis/1` instead of
     /// `whereis_class/1`'s per-use `binary_to_atom`. Only the *name* is
     /// compile-time: the pid is looked up on every use, never baked, so a
-    /// restarted class process is found (ADR 0025 amendment §3), and the
-    /// module stays a run-time lookup, so a REPL redefinition into a new
-    /// module is seen.
+    /// restarted class process is found (ADR 0025 amendment §3). The module
+    /// stays a run-time lookup for user classes, so a REPL redefinition into a
+    /// new module is seen; a stdlib built-in whose routing-fixture row pins its
+    /// own module bakes it (BT-4411), since a stdlib class cannot be redefined.
     pub(in crate::core_erlang) fn registered_class_pid_doc(class_name: &str) -> Document<'static> {
         docvec![
             "call 'erlang':'whereis'(",
@@ -696,13 +697,35 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_object_class':'module_name_safe'(",
             leaf::var(class_pid_var.to_string()),
             ") in ",
+            Self::class_object_tuple_doc(
+                class_name,
+                leaf::var(class_mod_var.to_string()),
+                leaf::var(class_pid_var.to_string()),
+            ),
+            " ",
+        ]
+    }
+
+    /// `{'beamtalk_object', '<Name> class', Module, ClassPid}`: the class object
+    /// for `class_name`, the shape `beamtalk_object_class` builds at run time
+    /// (tag, module, pid). Every codegen site that builds a class object from
+    /// a class pid uses this, so the field order lives in one place: the class
+    /// literal ([`Self::generate_class_reference`]), the typed `class` send
+    /// (`generate_typed_class_of`) and the guarded class direct call
+    /// (`guarded_class_direct_call_doc`).
+    pub(in crate::core_erlang) fn class_object_tuple_doc(
+        class_name: &str,
+        module: Document<'static>,
+        class_pid: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
             "{'beamtalk_object', ",
             leaf::atom(util::metaclass_tag(class_name)),
             ", ",
-            leaf::var(class_mod_var.to_string()),
+            module,
             ", ",
-            leaf::var(class_pid_var.to_string()),
-            "} ",
+            class_pid,
+            "}",
         ]
     }
 
@@ -722,13 +745,12 @@ impl CoreErlangGenerator {
             "<",
             leaf::var(class_pid_var.to_string()),
             "> when 'true' -> ",
-            "{'beamtalk_object', ",
-            leaf::atom(util::metaclass_tag(class_name)),
-            ", ",
-            leaf::atom(module),
-            ", ",
-            leaf::var(class_pid_var.to_string()),
-            "} ",
+            Self::class_object_tuple_doc(
+                class_name,
+                leaf::atom(module),
+                leaf::var(class_pid_var.to_string()),
+            ),
+            " ",
         ]
     }
 
