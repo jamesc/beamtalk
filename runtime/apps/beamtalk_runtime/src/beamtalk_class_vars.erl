@@ -245,13 +245,20 @@ a variable the class does not declare (BT-3808).
 """.
 -spec put(class_self(), atom(), term()) -> term().
 put(ClassSelf, Name, Value) ->
-    Tag = class_tag(ClassSelf),
+    store(class_tag(ClassSelf), Name, Value, unchecked).
+
+%% `put/3`'s write. `Declared` is `checked` when the caller has already run a
+%% declared-set check on `Name` at least as strict as `assert_declared/2`
+%% (`field_at_put/3`'s `check_write/3`), so a creating write reads the class
+%% metadata once, not twice (BT-4428).
+-spec store(atom(), atom(), term(), checked | unchecked) -> term().
+store(Tag, Name, Value, Declared) ->
     Key = ?BT_CLASS_VARS_KEY(Tag),
     case erlang:get(Key) of
         Map when is_map(Map) ->
             %% A name already in the map was declared (or created under the
             %% lenient unknown-set rule): only a creating write checks.
-            case maps:is_key(Name, Map) of
+            case Declared =:= checked orelse maps:is_key(Name, Map) of
                 true -> ok;
                 false -> ok = assert_declared(tag_to_name(Tag), Name)
             end,
@@ -303,6 +310,14 @@ write `self.x := v` makes, so the read-only and unreachable rules are the
 same) after the `Cls fieldAt: #x put: v` declared-set check (`check_write/3`):
 a name not already in the map must be declared, and a class with no
 `classState:` at all cannot have one created on it. Answers `Value`.
+
+The declared-set check runs before the home check (BT-4428): an undeclared
+name raises `undeclared_class_variable` wherever the write runs, even with no
+home (where a declared name raises `class_state_unreachable`) or under the
+read-only marker (`class_state_read_only`). An undeclared name so fails the
+same way as through the outside `Cls fieldAt: #x put: v` send, and the error
+names what the source got wrong. A declared name then goes
+through `put/3`'s rules without a second declared-set check.
 """.
 -spec field_at_put(class_self(), term(), term()) -> term().
 field_at_put(ClassSelf, Name, Value) when is_atom(Name) ->
@@ -317,7 +332,7 @@ field_at_put(ClassSelf, Name, Value) when is_atom(Name) ->
         %% Only a creating write derives the class name (off the hot path).
         false -> ok = raise_on_error(check_write(tag_to_name(Tag), Map, Name))
     end,
-    put(ClassSelf, Name, Value);
+    store(Tag, Name, Value, checked);
 field_at_put(ClassSelf, Name, _Value) ->
     raise_field_name_type(ClassSelf, 'fieldAt:put:', Name).
 

@@ -529,13 +529,62 @@ pub struct ClassVarAccesses {
     /// Variables read reflectively as `self fieldAt: #name`, sorted (BT-4184,
     /// BT-4421): in a class method this lowers to an in-place read
     /// (`beamtalk_class_vars:field_at`, through a capture abroad), on an actor
-    /// a read of the cell. A literal name outside `vars` reads the same
-    /// anywhere and is left out, as a `self.name` of a non-variable is. Not a
-    /// cascade message or a cast, which are ordinary sends.
+    /// a read of the cell. A literal name outside `vars` is left out, as a
+    /// `self.name` of a non-variable is: it reads no captured state and
+    /// raises anyway (at home `undeclared_class_variable`, abroad with no
+    /// capture `class_state_unreachable`). `vars` may include inherited
+    /// names, while the runtime's `field_at` checks only the class's own
+    /// declared set (BT-3801). Not a cascade message or a cast, which are
+    /// ordinary sends.
     pub field_at_reads: std::collections::BTreeSet<String>,
     /// Whether some `self fieldAt: k` read has a computed argument (it may
     /// name a variable).
     pub computed_field_at_read: bool,
+    /// Reflective writes, `self fieldAt: #name put: v` and
+    /// `self clearField: #name`, in walk order (BT-4184, BT-4428): in a class
+    /// method these lower to in-place writes (`beamtalk_class_vars:field_at_put`
+    /// / `clear`), on an actor to writes of the cell, so away from home they
+    /// raise like a `self.name := v`. Every name is recorded, in `vars` or
+    /// not: what a write of a non-variable does is the caller's to judge. Not
+    /// a cascade message or a cast, which are ordinary sends.
+    pub reflective_writes: Vec<ReflectiveWrite>,
+}
+
+/// Which reflective write a [`ReflectiveWrite`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflectiveWriteKind {
+    /// `self fieldAt: #name put: v`.
+    FieldAtPut,
+    /// `self clearField: #name`.
+    ClearField,
+}
+
+/// A reflective write on `self` ([`ClassVarAccesses::reflective_writes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflectiveWrite {
+    /// `fieldAt:put:` or `clearField:`.
+    pub kind: ReflectiveWriteKind,
+    /// The name a symbol-literal argument gives; `None` when computed.
+    pub name: Option<String>,
+    /// Where the send starts, for source-order priority against `self.x :=`.
+    pub start: u32,
+}
+
+impl ReflectiveWrite {
+    /// The write as a verb phrase: ``writes {noun} 'n' of {class} with
+    /// `fieldAt:put:` ``, ``clears a {noun} of {class} with `clearField:` ``.
+    /// How the `class-state-abroad` and `actor-state-abroad` lints name it.
+    #[must_use]
+    pub fn describe(&self, noun: &str, class: &str) -> String {
+        let (verb, selector) = match self.kind {
+            ReflectiveWriteKind::FieldAtPut => ("writes", "fieldAt:put:"),
+            ReflectiveWriteKind::ClearField => ("clears", "clearField:"),
+        };
+        match &self.name {
+            Some(name) => format!("{verb} {noun} '{name}' of {class} with `{selector}`"),
+            None => format!("{verb} a {noun} of {class} with `{selector}`"),
+        }
+    }
 }
 
 /// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
@@ -583,22 +632,48 @@ impl ClassVarAccesses {
     }
 
     /// The `fieldAt:` reads as a noun phrase: `{noun} n, m`, or `a {noun}`
-    /// when only computed reads were seen; `None` when there are none. How
-    /// the `class-state-abroad` and `actor-state-abroad` lints name them.
+    /// when only computed reads were seen; `None` when there are none. A
+    /// name also read as `self.name` ([`Self::reads`]) is left out, so
+    /// [`Self::reads_phrase`] names each variable once.
     #[must_use]
     pub fn field_at_read_noun(&self, noun: &str) -> Option<String> {
-        if !self.field_at_reads.is_empty() {
-            let names = self
-                .field_at_reads
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!("{noun} {names}"))
+        let names: Vec<&str> = self
+            .field_at_reads
+            .difference(&self.reads)
+            .map(String::as_str)
+            .collect();
+        if !names.is_empty() {
+            Some(format!("{noun} {}", names.join(", ")))
         } else if self.computed_field_at_read {
             Some(format!("a {noun}"))
         } else {
             None
+        }
+    }
+
+    /// The block's reads as a verb phrase, `self.name` and reflective
+    /// `fieldAt:` reads joined: ``reads {noun} n of {class}``, ``reads
+    /// {noun} n of {class} and {noun} m with `fieldAt:` ``; `None` when the
+    /// block makes neither. How the `class-state-abroad` and
+    /// `actor-state-abroad` lints name them.
+    #[must_use]
+    pub fn reads_phrase(&self, noun: &str, class: &str) -> Option<String> {
+        let direct = (!self.reads.is_empty()).then(|| {
+            let names = self
+                .reads
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{noun} {names}")
+        });
+        match (direct, self.field_at_read_noun(noun)) {
+            (None, None) => None,
+            (Some(direct), None) => Some(format!("reads {direct} of {class}")),
+            (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),
+            (Some(direct), Some(refl)) => Some(format!(
+                "reads {direct} of {class} and {refl} with `fieldAt:`"
+            )),
         }
     }
 }
@@ -666,6 +741,28 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                     }
                     _ => accesses.computed_field_at_read = true,
                 }
+            }
+            WalkEvent::Send(send)
+                if send.site == SendSite::Plain
+                    && !send.is_cast
+                    && is_self_reference(send.receiver) =>
+            {
+                let kind = match send.selector.well_known() {
+                    Some(WellKnownSelector::FieldAtPut) => ReflectiveWriteKind::FieldAtPut,
+                    Some(WellKnownSelector::ClearField) => ReflectiveWriteKind::ClearField,
+                    _ => return,
+                };
+                let name = match send.arguments.first() {
+                    Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
+                        Some(name.to_string())
+                    }
+                    _ => None,
+                };
+                accesses.reflective_writes.push(ReflectiveWrite {
+                    kind,
+                    name,
+                    start: send.receiver.span().start(),
+                });
             }
             _ => {}
         });
@@ -4508,7 +4605,8 @@ mod tests {
             acc.field_at_read_noun("class variable").as_deref(),
             Some("class variable n")
         );
-        // A literal name that is no variable reads the same anywhere.
+        // A literal name that is no variable reads no captured state (it
+        // raises anyway).
         let acc = cv_accesses("[self fieldAt: #nope]");
         assert!(!acc.reads_class_state(), "{acc:?}");
         // A computed name may name one.
@@ -4523,6 +4621,70 @@ mod tests {
         assert!(!acc.reads_class_state(), "{acc:?}");
         let acc = cv_accesses("[:o | o fieldAt: #n]");
         assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_reads_phrase_names_each_variable_once() {
+        let acc = cv_accesses("[self.n printString. self fieldAt: #n. self fieldAt: #m]");
+        assert_eq!(
+            acc.reads_phrase("class variable", "C").as_deref(),
+            Some("reads class variable n of C and class variable m with `fieldAt:`")
+        );
+        let acc = cv_accesses("[self.n printString. self fieldAt: #n]");
+        assert_eq!(
+            acc.reads_phrase("field", "C").as_deref(),
+            Some("reads field n of C")
+        );
+        let acc = cv_accesses("[:k | self.n printString. self fieldAt: #n. self fieldAt: k]");
+        assert_eq!(
+            acc.reads_phrase("field", "C").as_deref(),
+            Some("reads field n of C and a field with `fieldAt:`")
+        );
+        assert_eq!(
+            cv_accesses("[self hasField: #n]").reads_phrase("f", "C"),
+            None
+        );
+    }
+
+    #[test]
+    fn class_var_accesses_records_reflective_writes_in_walk_order() {
+        let src =
+            "[:k | self clearField: #nope. [self fieldAt: k put: 1]. self fieldAt: #n put: 2]";
+        let acc = cv_accesses(src);
+        let found: Vec<(ReflectiveWriteKind, Option<&str>)> = acc
+            .reflective_writes
+            .iter()
+            .map(|w| (w.kind, w.name.as_deref()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (ReflectiveWriteKind::ClearField, Some("nope")),
+                (ReflectiveWriteKind::FieldAtPut, None),
+                (ReflectiveWriteKind::FieldAtPut, Some("n")),
+            ]
+        );
+        let first = u32::try_from(src.find("self clearField").expect("fixture")).expect("small");
+        assert_eq!(acc.reflective_writes[0].start, first);
+        assert_eq!(
+            acc.reflective_writes[0].describe("class variable", "C"),
+            "clears class variable 'nope' of C with `clearField:`"
+        );
+        assert_eq!(
+            acc.reflective_writes[1].describe("field", "C"),
+            "writes a field of C with `fieldAt:put:`"
+        );
+        // A write is not a read.
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // A cascade message, a cast or another receiver is an ordinary send.
+        for src in [
+            "[self fieldAt: #n put: 1; clearField: #m]",
+            "[self clearField: #n!]",
+            "[:o | o fieldAt: #n put: 1. o clearField: #n]",
+        ] {
+            let acc = cv_accesses(src);
+            assert!(acc.reflective_writes.is_empty(), "{src}: {acc:?}");
+        }
     }
 
     #[test]
