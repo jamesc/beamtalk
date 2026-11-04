@@ -3076,7 +3076,7 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
 #[test]
 fn test_class_literal_uses_compile_time_registered_name() {
     let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-    let doc = generator.generate_class_reference("Point", None).unwrap();
+    let doc = generator.generate_class_reference("Point").unwrap();
     let output = doc.to_pretty_string();
     assert!(
         output.contains("case call 'erlang':'whereis'('beamtalk_class_Point') of"),
@@ -3098,6 +3098,36 @@ fn test_class_literal_uses_compile_time_registered_name() {
 }
 
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
+
+/// BT-4074: a package-qualified class reference in compiled (non-REPL) code
+/// builds the canonical class object — tag `'Parser class'`, never
+/// `'json@Parser class'` — so it compares equal to the class object the
+/// runtime builds for the same class (`3 class == stdlib@Integer`).
+#[test]
+fn test_qualified_class_reference_uses_canonical_tag() {
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+    let expr = Expression::ClassReference {
+        name: Identifier::new("Parser", Span::new(5, 11)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 11),
+    };
+    let output = generator
+        .generate_expression(&expr)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'erlang':'whereis'('beamtalk_class_Parser')"),
+        "qualified reference must look up the bare class name. Got:\n{output}"
+    );
+    assert!(
+        output.contains("{'beamtalk_object', 'Parser class', "),
+        "qualified reference must carry the canonical tag. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("json@Parser"),
+        "no package-qualified tag may be emitted. Got:\n{output}"
+    );
+}
 
 #[test]
 fn test_qualified_class_method_call() {

@@ -60878,6 +60878,32 @@
       "explanation": "ProtoObject behavior tests - the root of the class hierarchy"
     },
     {
+      "id": "stdlib-test-qualified-class-reference-test",
+      "title": "QualifiedClassReferenceTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "QualifiedClassReferenceTest",
+        "TestCase",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "qualified_class_reference_test",
+        "string conversion",
+        "subclassing",
+        "testIncludesBehaviourQualified",
+        "testInstanceClassIdenticalToQualified",
+        "testIsKindOfQualifiedClass",
+        "testIsKindOfQualifiedSuperclass",
+        "testQualifiedIdenticalToUnqualified",
+        "testQualifiedNameUnchanged",
+        "toString",
+        "to_string"
+      ],
+      "source": "// BT-4074: a package-qualified class reference (`stdlib@Integer`) is the\n// canonical class object for its class, so it compares equal to the\n// unqualified reference and to every class object the runtime builds for the\n// same class (`3 class`, superclass chains, `includesBehaviour:`).\n\nTestCase subclass: QualifiedClassReferenceTest\n\n  testIsKindOfQualifiedClass =>\n    self assert: (3 isKindOf: stdlib@Integer)\n\n  testIsKindOfQualifiedSuperclass =>\n    self assert: (3 isKindOf: stdlib@Number)\n\n  testQualifiedIdenticalToUnqualified =>\n    self assert: stdlib@Integer == Integer\n\n  testInstanceClassIdenticalToQualified =>\n    self assert: 3 class == stdlib@Integer\n\n  testIncludesBehaviourQualified =>\n    self assert: (Integer includesBehaviour: stdlib@Integer)\n\n  testQualifiedNameUnchanged =>\n    self assert: stdlib@Integer printString equals: \"Integer\"",
+      "explanation": "BT-4074: a package-qualified class reference (`stdlib@Integer`) is the canonical class object for its class, so it compares equal to the unqualified reference and to every class object the runtime builds for the same class (`3 class`, superclass chains, `includesBehaviour:`)."
+    },
+    {
       "id": "stdlib-test-queue-test",
       "title": "QueueTest",
       "category": "stdlib-tests",

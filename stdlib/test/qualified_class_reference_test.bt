@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4074: a package-qualified class reference (`stdlib@Integer`) is the
+// canonical class object for its class, so it compares equal to the
+// unqualified reference and to every class object the runtime builds for the
+// same class (`3 class`, superclass chains, `includesBehaviour:`).
+
+TestCase subclass: QualifiedClassReferenceTest
+
+  testIsKindOfQualifiedClass =>
+    self assert: (3 isKindOf: stdlib@Integer)
+
+  testIsKindOfQualifiedSuperclass =>
+    self assert: (3 isKindOf: stdlib@Number)
+
+  testQualifiedIdenticalToUnqualified =>
+    self assert: stdlib@Integer == Integer
+
+  testInstanceClassIdenticalToQualified =>
+    self assert: 3 class == stdlib@Integer
+
+  testIncludesBehaviourQualified =>
+    self assert: (Integer includesBehaviour: stdlib@Integer)
+
+  testQualifiedNameUnchanged =>
+    self assert: stdlib@Integer printString equals: "Integer"
