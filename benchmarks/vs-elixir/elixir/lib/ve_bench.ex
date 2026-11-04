@@ -61,6 +61,7 @@ defmodule VeBench do
 
   defbench(:with_x, p, do: %{p | x: 3})
   defbench(:construct, a, do: %Point{x: a, y: 4})
+  defbench(:construct_map, a, do: struct!(Point, %{x: a, y: 4}))
 
   # === 3. Remote call ===
 

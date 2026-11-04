@@ -361,10 +361,28 @@ the whole walk to the base state's own keys: fail-open on the actor
 inheritance path (whose merged state already carries the user keys, so
 nothing is rejected) and default-complete on the base and value paths
 (whose states hold exactly their own defaults).
+
+The walk's answer is memoised per class in `beamtalk_class_derived_cache`
+under `{declared_fields, Class}` (BT-4281): every `new:`/`spawnWith:` with
+a map used to re-walk the chain. Only a completed walk (`{ok, Fields}`) is
+cached; the `not_found` fallback depends on `BaseState`, so it is
+recomputed every time. Every input of the walk is written by a path that
+invalidates the cache — `module`/`superclass` by `insert/5` and
+`merge_identity/5` (load, hot reload, redefinition), `instance_variables`
+by `put_reflection/2` — so a reload is seen on the next call. The compiled
+meta `fields` come from the loaded module, and a reload always goes
+through `merge_identity/5`.
 """.
 -spec declared_fields(class_name(), map()) -> [term()].
 declared_fields(Class, BaseState) ->
-    case declared_fields_walk(Class, [], 0) of
+    case
+        beamtalk_class_derived_cache:fetch({declared_fields, Class}, fun() ->
+            case declared_fields_walk(Class, [], 0) of
+                {ok, _} = Walked -> {cache, Walked};
+                not_found -> {nocache, not_found}
+            end
+        end)
+    of
         {ok, Fields} ->
             Fields;
         not_found ->

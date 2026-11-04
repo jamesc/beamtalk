@@ -428,3 +428,17 @@ side, main → PR. Rows not listed did not move.
   always-on aggregate (an ETS read, three `atomics:add`s and two
   `atomics:get`s), the actor-state/`From`/pending-action process-dictionary
   cells and the receiver's context restore.
+- **BT-4281** adds row 2c (`VbPoint new: #{#x => a, #y => 4}` against
+  `struct!(Point, %{x: a, y: 4})`) and memoises each class's declared-field
+  set, which `new:`/`spawnWith:` check an initialiser map against
+  (`check_init_args/5`, BT-4030), under `{declared_fields, Class}` in the
+  derived cache. Before, every construction walked VbPoint → Value → Object →
+  ProtoObject, reading each level's metadata row and `__beamtalk_meta/0`
+  (9 rounds each, the dev build, a shared 4-scheduler Linux container at load
+  average 13 to 16, so compare ns only within one run;
+  `results/bench-bt4281-{before,after}.md`, profiles in
+  `results/profile-bt4281-{before,after}.md`). Beamtalk side, before →
+  after: 2c 146 red / 175 w / 7.0 µs → **37.1 / 130 / 1.7 µs** (Elixir
+  26.0 / 36). Calls per op: 95 → 27; `own_declared_fields/1`,
+  `declared_fields_walk/3`, `read_meta_detailed/1` and `lookup_superclass/1`
+  (4 each before) no longer appear. Row 2b is unchanged (7.05 red / 11 w).
