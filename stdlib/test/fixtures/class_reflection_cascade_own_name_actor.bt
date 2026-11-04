@@ -46,8 +46,10 @@ Actor subclass: ClassReflectionCascadeOwnNameActor
 
   // Inside a closure run at home.
   class namedSumInto: items =>
-    items do: [:each |
-      ClassReflectionCascadeOwnNameActor fieldAt: #total put: (ClassReflectionCascadeOwnNameActor fieldAt: #total) + each]
+    items
+      do: [:each |
+        ClassReflectionCascadeOwnNameActor fieldAt: #total put: (ClassReflectionCascadeOwnNameActor fieldAt: #total) + each
+      ]
     self.total
 
   // Undeclared name: raises as the `self` form does.
