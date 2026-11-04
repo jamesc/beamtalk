@@ -929,7 +929,7 @@ reports the same message at the same span. No operation is surface-specific.
   hand a later one a writing block to send `value`.
 - **A `^` in a REPL loop or fold body ends the input (BT-4288).** At the REPL,
   a `^` in the body of a loop or collection operation run in place
-  (`block_facts::loop_body_returns`: `do:`, `collect:`, `inject:into:`,
+  (`block_facts::InPlaceReturns::in_place`: `do:`, `collect:`, `inject:into:`,
   `to:do:`, `timesRepeat:`, `whileTrue:`, ..., through conditional arms,
   evaluated and protected blocks and nested loops) ends the input with its
   value, as in a method: the eval establishes a non-local-return boundary
@@ -945,10 +945,25 @@ reports the same message at the same span. No operation is surface-specific.
   never assigns it; and, as before, such a `^` whose loop is held in a block
   that is not run where it is written (`b := [#(1, 2) do: [:x | ^x]]`): the
   block may run in a later input, where nothing catches the `^`
-  (`LoopBodyReturns::in_closure`). A `^` at the root, in a conditional arm, an evaluated or
-  protected block outside a loop, or a stored closure is unchanged: it
-  answers its value where it stands. The verdict is the analyser's, so
-  CLI/LSP/MCP diagnostics for the same top-level expressions change together.
+  (`InPlaceReturns::in_closure`).
+- **A `^` at the root or in a conditional arm ends the input too (BT-4312).**
+  The BT-4288 rule is widened to every REPL `^` run in place
+  (`block_facts::InPlaceReturns::in_place`, read by the analyser and by
+  codegen's `repl_eval_returns`): at the root of the input, in a conditional
+  arm, an evaluated block, a protected block (`on:do:` body or handler,
+  `ensure:` body), as well as a loop or fold body. A REPL input is a method
+  body: `x := 1. ^7. x := 2` answers 7 and leaves `x` at 1 (it answered 2);
+  `true ifTrue: [^3]. 5` answers 3 (it answered 5). REPL-visible, multi-statement
+  inputs only: a single-statement input answers what it did, and a `^` that is
+  the input's whole last statement keeps its bare-value lowering (in trace mode
+  it keeps the steps before it). A `^` that ends the input earlier answers one
+  trace step, as in BT-4288. Newly an error: a `^` run in place inside the
+  value of a top-level assignment (`x := c ifTrue: [^3] ifFalse: [4]`,
+  `r := [^3] value`), with the same message as BT-4288's loop case ("... so the
+  assignment to `x` never completes"). A `^` in a stored closure
+  (`b := [:x | ^x]`) is unchanged: it answers its value where it stands. The
+  verdict is the analyser's, so CLI/LSP/MCP diagnostics for the same
+  top-level expressions change together.
 
 ### `internal:` ThreadedIr verifier warning (ADR 0111 Addendum 17, BT-3724)
 

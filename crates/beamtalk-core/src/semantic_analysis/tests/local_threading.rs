@@ -4948,7 +4948,7 @@ fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
         assert!(
             errors
                 .iter()
-                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4288")),
+                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4312")),
             "REPL {input}: {errors:?}"
         );
     }
@@ -4983,5 +4983,92 @@ fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
     for src in [in_class(body), in_value(body), in_actor(body)] {
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
+    }
+}
+
+/// BT-4312 (owner decision A + A1): every REPL `^` run in place ends the
+/// input, as in a method, so the BT-4288 rule covers a `^` at the root, in a
+/// conditional arm, an evaluated block and a protected block too. Such a `^`
+/// in a multi-statement input is accepted wherever it sits; inside the value
+/// of a top-level assignment it is the BT-4288 error, since the workspace
+/// would bind the variable to the input's value. A `^` in a closure is
+/// neither: it answers its value where it stands.
+#[test]
+fn bt4312_a_return_run_in_place_at_the_repl_ends_the_input() {
+    for input in [
+        "x := 1\n^7\nx := 2\n",
+        "true ifTrue: [^3]\n5\n",
+        "x := 4\nx > 3 ifTrue: [^x * 10] ifFalse: [0]\nx := 0\n",
+        "[^4] value\nx := 0\n",
+        "[1 / 0] on: Error do: [:e | ^#caught]\nx := 0\n",
+        "[^55] ensure: [0]\nx := 0\n",
+        "true ifTrue: [r := true ifTrue: [^3]]\n",
+        "r := [:y | ^y]\nr value: 3\n",
+        "r := [true ifTrue: [^3]]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(errors.is_empty(), "REPL {input}: {errors:?}");
+    }
+    for input in [
+        "r := true ifTrue: [^3]\n",
+        "r := false ifTrue: [0] ifFalse: [^4]\n",
+        "x := 1\nr := x > 0 ifTrue: [^3] ifFalse: [4]\n",
+        "r := [^3] value\n",
+        "r := [^3] on: Error do: [:e | 0]\n",
+        "r := [1 / 0] on: Error do: [:e | ^0]\n",
+        "r := [^3] ensure: [0]\n",
+        "r := (true ifTrue: [^3]) + 1\n",
+        "#(a, b) := true ifTrue: [^#(1, 2)]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4312")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+}
+
+/// BT-4312: the one classifier of a top-level scope's `^`s, and the REPL
+/// eval's share of it (every in-place `^` but the input's whole last
+/// statement).
+#[test]
+fn bt4312_in_place_returns_classify_every_return_position() {
+    use crate::semantic_analysis::block_facts::{classify_in_place_returns, repl_eval_returns};
+    use crate::source_analysis::{lex_with_eof, parse};
+    let classify = |src: &str| {
+        let (parsed, diags) = parse(lex_with_eof(src));
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+        let exprs: Vec<_> = parsed
+            .expressions
+            .into_iter()
+            .map(|s| s.expression)
+            .collect();
+        let returns = classify_in_place_returns(exprs.iter());
+        (
+            returns.in_place.len(),
+            returns.in_closure.len(),
+            repl_eval_returns(&exprs).len(),
+        )
+    };
+    // (source, in place, in a closure's loop, throw to the eval)
+    for (src, expected) in [
+        ("^7", (1, 0, 0)),
+        ("x := 1\n^7", (1, 0, 0)),
+        ("x := 1\n^7\nx := 2", (1, 0, 1)),
+        ("true ifTrue: [^3]", (1, 0, 1)),
+        ("true ifTrue: [^3]\n5", (1, 0, 1)),
+        ("[^4] value", (1, 0, 1)),
+        ("[^5] on: Error do: [:e | ^6]", (2, 0, 2)),
+        ("[^55] ensure: [0]", (1, 0, 1)),
+        ("#(1, 2) do: [:x | ^x]", (1, 0, 1)),
+        ("^(#(1, 2) do: [:x | ^x])", (2, 0, 1)),
+        ("b := [:x | ^x]", (0, 0, 0)),
+        ("b := [true ifTrue: [^3]]", (0, 0, 0)),
+        ("b := [#(1, 2) do: [:x | ^x]]", (0, 1, 0)),
+        ("#(1, 2) do: [:z | b := [:y | ^y * z]]", (0, 0, 0)),
+    ] {
+        assert_eq!(classify(src), expected, "{src}");
     }
 }

@@ -103,6 +103,21 @@ them: the closure may run in a later REPL input, after the eval that created
 it has ended, so the REPL rejects it (`LoopBodyReturns::in_closure`); in a
 method it throws to the method's boundary as before.
 
+## Amendment (BT-4312, 2026-11-04): every in-place REPL `^` throws to the eval
+
+A REPL input is a method body. The REPL eval's boundary now catches every `^`
+run in place, not only a loop-body one: at the root of the input, in a
+conditional arm, an evaluated or protected block, as well as a loop or fold
+body. One rule, `block_facts::InPlaceReturns` (renamed from
+`LoopBodyReturns`; `classify_in_place_returns`), is read by the REPL check and
+by codegen (`repl_eval_returns`). So `x := 1. ^7. x := 2` answers 7 and
+`true ifTrue: [^3]. 5` answers 3, as in a method. A `^` that is the input's
+whole last statement keeps its bare-value lowering: it already ends the input.
+A `^` run in place inside the value of a top-level assignment is a compile
+error, as the loop-body case was. The verifier error is renamed
+`VerifyError::ReplReturnWithoutBoundary`. `in_closure` is unchanged: a `^` in
+a stored closure answers its value where it stands.
+
 ## Decision
 
 Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.

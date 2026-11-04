@@ -467,17 +467,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
 
-    /// BT-4288: a `^` in the body of a loop or fold run in place
-    /// (`beamtalk-core`'s `loop_body_returns`) lowered with no NLR boundary to
-    /// throw to, so it compiles to its bare value inside the loop's `fun`: the
-    /// loop ignores it and runs on (`#(1, 2) do: [:x | ^x]` answered the loop's
-    /// value; `[n < 3] whileTrue: [^10]` never ended). Invariant, in every
-    /// scope: such a `^` is a throw to the scope's boundary. A method, a
-    /// class method and a value-type method mint theirs whenever a block holds
-    /// a `^` (`body_has_block_nlr`); the REPL eval mints its own for exactly
-    /// these returns (`repl_nlr`). The repro was every REPL loop or fold whose
-    /// body held a `^`.
-    LoopReturnWithoutBoundary { at: Span },
+    /// BT-4288 / BT-4312: a REPL `^` run in place (`beamtalk-core`'s
+    /// `block_facts::repl_eval_returns`: at the root, in a conditional arm,
+    /// an evaluated or protected block, a loop or fold body; not the input's
+    /// whole last statement) lowered with no NLR boundary to throw to, so it
+    /// compiles to its bare value. In a loop's `fun` the loop ignores it and
+    /// runs on (`#(1, 2) do: [:x | ^x]` answered the loop's value; `[n < 3]
+    /// whileTrue: [^10]` never ended); elsewhere the input's later statements
+    /// run on (`x := 1. ^7. x := 2` answered 2; `true ifTrue: [^3]. 5`
+    /// answered 5). Invariant, in every scope: a `^` that must end its scope
+    /// from inside a construct's `fun`, or before the scope's later
+    /// statements, is a throw to the scope's boundary. A
+    /// method, a class method and a value-type method mint theirs whenever a
+    /// block holds a `^` (`body_has_block_nlr`); the REPL eval mints its own
+    /// for exactly these returns (`repl_nlr`). The repros were every REPL
+    /// loop or fold whose body held a `^` (BT-4288) and every non-final root
+    /// or arm `^` (BT-4312).
+    ReplReturnWithoutBoundary { at: Span },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in

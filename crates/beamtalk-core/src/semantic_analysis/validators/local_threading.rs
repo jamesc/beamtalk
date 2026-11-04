@@ -58,16 +58,15 @@ use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::block_facts::{
     EscapeShape, LocalThreadingConstruct, LocalThreadingFamily, LoopBodyContext, OuterLocalWrite,
     RootMethodKind, WriteKind, analyze_block, block_literal_of_other_arity,
-    classify_loop_body_returns, conditional_arm_blocks, conditional_producer_writes,
+    classify_in_place_returns, conditional_arm_blocks, conditional_producer_writes,
     construct_outer_local_writes, escape_sites, exception_arm_blocks, exception_producer_writes,
     is_actor_fold_value_site, is_fold_frame_body, is_loop_body_producer_site, is_self_or_super,
     is_threaded_frame_body, literal_block_value_arm, local_threading_construct, lookup_arm_blocks,
-    loop_body_producer_sites, loop_body_returns, match_arm_block, match_arm_body_writes,
-    match_arms, match_guard_writes, match_producer_writes, operand_producer_writes,
-    outer_local_writes, outer_state_writes, producer_body_block,
-    receiver_statically_not_dictionary, repl_arm_producer_sites, repl_evaluated_block,
-    repl_operand_sites, repl_producer_writes, root_producer_writes, sequenced_operand_sites,
-    value_blocks,
+    loop_body_producer_sites, match_arm_block, match_arm_body_writes, match_arms,
+    match_guard_writes, match_producer_writes, operand_producer_writes, outer_local_writes,
+    outer_state_writes, producer_body_block, receiver_statically_not_dictionary,
+    repl_arm_producer_sites, repl_evaluated_block, repl_operand_sites, repl_producer_writes,
+    root_producer_writes, sequenced_operand_sites, value_blocks,
 };
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -525,17 +524,19 @@ fn check_body(
 ///   5. b value` hands the block back and answers the stale 0 (BT-4275, closed
 ///   won't-do). Telling `withFallback:` from `keep:` would need a per-callee
 ///   "does not retain its block" fact.
-/// - **A `^` in a REPL loop or fold body that no REPL boundary catches**
-///   ([`classify_loop_body_returns`]). BT-4288: a loop-body `^` run in place
-///   ends the input with its value, as in a method, and the bindings written
-///   before it keep their values (codegen's REPL eval boundary). Two shapes
-///   stay rejected. A loop held in a closure (`b := [#(1, 2) do: [:x |
-///   ^x]]`) may run in a later input, after the eval that created it has
-///   ended: its `^` answers its value inside the loop, which ignores it and
-///   runs on (BT-4003). And such a `^` inside the value of a top-level
-///   assignment: in a method `r := xs do: [:x | ^x]` never assigns `r`, but
-///   the workspace binds a single-statement assignment's variable to the
-///   input's value, so `r` would be assigned the `^`'s value.
+/// - **A REPL `^` that no REPL boundary catches**
+///   ([`classify_in_place_returns`]). BT-4288 / BT-4312: a `^` run in place
+///   (at the root, in a conditional arm, an evaluated or protected block, a
+///   loop or fold body) ends the input with its value, as in a method, and
+///   the bindings written before it keep their values (codegen's REPL eval
+///   boundary). Two shapes stay rejected. A loop held in a closure (`b :=
+///   [#(1, 2) do: [:x | ^x]]`) may run in a later input, after the eval that
+///   created it has ended: its `^` answers its value inside the loop, which
+///   ignores it and runs on (BT-4003). And a `^` run in place inside the
+///   value of a top-level assignment: in a method `r := xs do: [:x | ^x]`
+///   and `r := c ifTrue: [^3]` never assign `r`, but the workspace binds a
+///   single-statement assignment's variable to the input's value, so `r`
+///   would be assigned the `^`'s value.
 fn report_stale_returns(
     context: MethodContext,
     params: &[EcoString],
@@ -559,7 +560,7 @@ fn report_stale_returns(
     }
     if context == Repl {
         report_repl_closure_loop_returns(body, diagnostics);
-        report_repl_assigned_loop_returns(body, diagnostics);
+        report_repl_assigned_returns(body, diagnostics);
     }
     let mut scan = StaleReturnScan {
         context,
@@ -574,13 +575,13 @@ fn report_stale_returns(
 }
 
 /// BT-4003 / BT-4288: a `^` in a REPL loop or fold body held in a closure
-/// ([`LoopBodyReturns::in_closure`](crate::semantic_analysis::block_facts::LoopBodyReturns)).
+/// ([`InPlaceReturns::in_closure`](crate::semantic_analysis::block_facts::InPlaceReturns)).
 /// See [`report_stale_returns`].
 fn report_repl_closure_loop_returns(
     body: &[ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let returns = classify_loop_body_returns(body.iter().map(|s| &s.expression));
+    let returns = classify_in_place_returns(body.iter().map(|s| &s.expression));
     for span in returns.in_closure {
         diagnostics.push(
             Diagnostic::error(
@@ -598,12 +599,11 @@ fn report_repl_closure_loop_returns(
     }
 }
 
-/// BT-4288: a `^` in a loop or fold body ([`loop_body_returns`]) inside the
-/// value of a top-level REPL assignment. See [`report_stale_returns`].
-fn report_repl_assigned_loop_returns(
-    body: &[ExpressionStatement],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
+/// BT-4288 / BT-4312: a `^` run in place
+/// ([`InPlaceReturns::in_place`](crate::semantic_analysis::block_facts::InPlaceReturns))
+/// inside the value of a top-level REPL assignment. See
+/// [`report_stale_returns`].
+fn report_repl_assigned_returns(body: &[ExpressionStatement], diagnostics: &mut Vec<Diagnostic>) {
     for stmt in body {
         let (value, what) = match &stmt.expression {
             Expression::Assignment { target, value, .. } => match target.as_ref() {
@@ -615,20 +615,20 @@ fn report_repl_assigned_loop_returns(
             }
             _ => continue,
         };
-        for span in loop_body_returns(std::iter::once(value.as_ref())) {
+        for span in classify_in_place_returns(std::iter::once(value.as_ref())).in_place {
             diagnostics.push(
                 Diagnostic::error(
                     format!(
-                        "a non-local return (`^`) in the body of a loop or collection \
-                         operation ends the input with its value, so the assignment to {what} \
-                         never completes; it is not supported in the value of a top-level \
-                         assignment (BT-4288)"
+                        "a non-local return (`^`) ends the input with its value, so the \
+                         assignment to {what} never completes; it is not supported in the \
+                         value of a top-level assignment (BT-4312)"
                     ),
                     span,
                 )
                 .with_hint(
-                    "answer the value with `detect:ifNone:` or `inject:into:` and assign that, \
-                     or leave the assignment out and let the `^` answer the input",
+                    "drop the `^` and assign the value (in a loop or collection operation, \
+                     answer it with `detect:ifNone:` or `inject:into:`), or leave the \
+                     assignment out and let the `^` answer the input",
                 )
                 .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );

@@ -45,10 +45,55 @@ w
 
 // Assigning the input's value would bind what a method never assigns.
 r := #(1, 2) do: [:x | ^x]
-// => ERROR: a non-local return (`^`) in the body of a loop or collection
+// => ERROR: a non-local return (`^`) ends the input with its value, so the assignment to `r` never completes
 
-// A `^` at the root, in an arm, an evaluated block, a protected block and a
-// stored closure answers its value where it stands.
+// ===========================================================================
+// BT-4312: so does a `^` at the root, in a conditional arm, an evaluated block
+// or a protected block (it used to answer its value where it stood, and the
+// rest of the input ran on: `x := 1. ^7. x := 2` answered 2).
+// ===========================================================================
+
+k := 1. ^7. k := 2
+// => 7
+
+k
+// => 1
+
+true ifTrue: [^3]. 5
+// => 3
+
+k := 4. k > 3 ifTrue: [^k * 10] ifFalse: [0]. k := 0
+// => 40
+
+k
+// => 4
+
+[^4] value. k := 0
+// => 4
+
+[1 / 0] on: Error do: [:e | ^#caught]. k := 0
+// => caught
+
+[^55] ensure: [0]. k := 0
+// => 55
+
+k
+// => 4
+
+// A `^` that never fires leaves the rest of the input to run.
+k > 9 ifTrue: [^#big]. k := 5
+// => 5
+
+// A `^` run in place inside the value of a top-level assignment: a method
+// never assigns `r`, but the workspace would bind it to the input's value.
+r := true ifTrue: [^3]
+// => ERROR: a non-local return (`^`) ends the input with its value, so the assignment to `r` never completes
+
+r := [^3] value
+// => ERROR: a non-local return (`^`) ends the input with its value, so the assignment to `r` never completes
+
+// A single-statement input answers as before, and a stored closure's `^`
+// answers its value where it stands.
 ^7
 // => 7
 

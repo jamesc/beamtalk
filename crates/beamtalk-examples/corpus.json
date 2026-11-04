@@ -671,7 +671,7 @@
         "mutation",
         "set"
       ],
-      "source": "w := 0\n#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]   // => 3\nw                                                        // => 3\n3 timesRepeat: [^8]. w := 99                             // => 8 (w is still 3)",
+      "source": "w := 0\n#(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]   // => 3\nw                                                        // => 3\n3 timesRepeat: [^8]. w := 99                             // => 8 (w is still 3)\nk := 1. ^7. k := 2                                       // => 7 (k is 1)\ntrue ifTrue: [^3]. 5                                     // => 3",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {

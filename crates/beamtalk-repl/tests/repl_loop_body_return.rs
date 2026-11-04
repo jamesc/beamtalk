@@ -1,12 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4288: a `^` in the body of a loop or collection operation at the REPL
-//! ends the input with its value, as in a method, and the workspace bindings
-//! written before it keep their values.
+//! BT-4288 / BT-4312: a `^` run in place at the REPL (in the body of a loop
+//! or collection operation, at the root of the input, in a conditional arm,
+//! an evaluated or protected block) ends the input with its value, as in a
+//! method, and the workspace bindings written before it keep their values.
 //!
-//! A generated corpus: every loop and fold kind whose body is run in place
-//! (`beamtalk-core`'s `block_facts::loop_body_returns`), crossed with the
+//! Two generated corpora. The BT-4312 one ([`root_rows`]) crosses every
+//! position of a `^` outside a loop with its position in a multi-statement
+//! input; see [`ROOT_SHAPES`]. The BT-4288 one: every loop and fold kind
+//! whose body is run in place (`beamtalk-core`'s
+//! `block_facts::InPlaceReturns::in_place`), crossed with the
 //! position of the `^` in the body (a statement, a conditional arm, an
 //! evaluated block, a nested loop, a protected block, a `match:` arm, before a
 //! binding write, an assigned value, a body that writes no binding, and one
@@ -18,7 +22,7 @@
 //! 1. compiles with the debug `ThreadedIr` verifier on and through `erlc`;
 //! 2. with the REPL eval boundary switched off
 //!    (`repl_nlr::boundary_fault::without_boundary`), fails with
-//!    `VerifyError::LoopReturnWithoutBoundary`, the check that fails on the
+//!    `VerifyError::ReplReturnWithoutBoundary`, the check that fails on the
 //!    repro before the fix;
 //! 3. runs on a BEAM against the runtime, in eval and trace mode, and answers
 //!    the value and the bindings [`expected`] says.
@@ -256,6 +260,162 @@ fn all_rows() -> Vec<Row> {
     rows
 }
 
+/// BT-4312: the shapes of a `^` outside any loop, `{V}` its value: whether
+/// the shape is a bare `^` (a statement of the input itself) and whether it
+/// fires. The guard reads `x`, which every row starts at 0.
+const ROOT_SHAPES: &[(&str, &str, bool)] = &[
+    ("root", "^{V}", true),
+    ("arm", "x == 0 ifTrue: [^{V}]", true),
+    ("ifFalse: arm", "x == 1 ifFalse: [^{V}]", true),
+    (
+        "two-armed, first",
+        "x == 0 ifTrue: [^{V}] ifFalse: [0]",
+        true,
+    ),
+    (
+        "two-armed, second",
+        "x == 1 ifTrue: [0] ifFalse: [^{V}]",
+        true,
+    ),
+    ("nested arm", "x == 0 ifTrue: [x < 5 ifTrue: [^{V}]]", true),
+    ("and: block", "(x == 0 and: [^{V}]) ifTrue: [0]", true),
+    ("or: block", "(x == 1 or: [^{V}]) ifTrue: [0]", true),
+    ("ifNil: arm", "nil ifNil: [^{V}]", true),
+    ("ifNotNil: arm", "x ifNotNil: [:v | ^{V}]", true),
+    ("lookup arm", "#{#a => 1} at: #b ifAbsent: [^{V}]", true),
+    ("tryDo: block", "Result tryDo: [^{V}]", true),
+    ("evaluated block", "[^{V}] value", true),
+    (
+        "arm in an evaluated block",
+        "[x == 0 ifTrue: [^{V}]] value",
+        true,
+    ),
+    ("protected block", "[^{V}] on: Error do: [:e | 0]", true),
+    ("handler", "[1 / 0] on: Error do: [:e | ^{V}]", true),
+    ("ensure: block", "[^{V}] ensure: [nil]", true),
+    ("ensure: cleanup", "[0] ensure: [^{V}]", true),
+    ("match: arm", "x match: [0 -> ^{V}; _ -> nil]", true),
+    ("operand", "#[0, (x == 0 ifTrue: [^{V}])]", true),
+    ("never fires", "x == 5 ifTrue: [^{V}]", false),
+];
+
+/// BT-4312: a position of the `^` (`{R}`) in the input.
+struct RootContext {
+    name: &'static str,
+    template: &'static str,
+    /// The value `w` has when the `^` runs.
+    w_at: i64,
+    /// The input's value when the `^` does not fire (`None`: the last
+    /// statement's own value, not checked).
+    unfired_value: Option<i64>,
+    /// The bindings `w` and `x` when the `^` does not fire.
+    unfired_w: i64,
+    unfired_x: i64,
+}
+
+/// BT-4312: the positions of the `^` in the input.
+const ROOT_CONTEXTS: &[RootContext] = &[
+    RootContext {
+        name: "between writes",
+        template: "w := 1\n{R}\nw := 9\nx := 2",
+        w_at: 1,
+        unfired_value: Some(2),
+        unfired_w: 9,
+        unfired_x: 2,
+    },
+    RootContext {
+        name: "first",
+        template: "{R}\nw := 9",
+        w_at: 0,
+        unfired_value: Some(9),
+        unfired_w: 9,
+        unfired_x: 0,
+    },
+    RootContext {
+        name: "same line",
+        template: "w := 1. {R}. w := 9. x := 2",
+        w_at: 1,
+        unfired_value: Some(2),
+        unfired_w: 9,
+        unfired_x: 2,
+    },
+    RootContext {
+        name: "last",
+        template: "w := 1\n{R}",
+        w_at: 1,
+        unfired_value: None,
+        unfired_w: 1,
+        unfired_x: 0,
+    },
+    RootContext {
+        name: "alone",
+        template: "{R}",
+        w_at: 0,
+        unfired_value: None,
+        unfired_w: 0,
+        unfired_x: 0,
+    },
+    RootContext {
+        name: "in an arm",
+        template: "w := 1\ntrue ifTrue: [{R}. w := 9]\nx := 2",
+        w_at: 1,
+        unfired_value: Some(2),
+        unfired_w: 9,
+        unfired_x: 2,
+    },
+    RootContext {
+        name: "after a loop",
+        template: "#(1, 2) do: [:y | w := w + y]\n{R}\nx := 2",
+        w_at: 3,
+        unfired_value: Some(2),
+        unfired_w: 3,
+        unfired_x: 2,
+    },
+];
+
+/// One BT-4312 row: the generated input and its reference answer, and
+/// whether its `^` is the input's whole last statement (which throws to no
+/// boundary: it already ends the input).
+struct RootRow {
+    row: Row,
+    final_root: bool,
+}
+
+/// Every BT-4312 row: each shape in each context. The `^` answers `w + 10`.
+fn root_rows() -> Vec<RootRow> {
+    let mut rows = Vec::new();
+    for (shape_name, shape, fires) in ROOT_SHAPES {
+        for ctx in ROOT_CONTEXTS {
+            let source = ctx.template.replace("{R}", &shape.replace("{V}", "w + 10"));
+            let expected = if *fires {
+                Expected {
+                    fired: true,
+                    value: Some(ctx.w_at + 10),
+                    w: ctx.w_at,
+                    x: Some(0),
+                }
+            } else {
+                Expected {
+                    fired: false,
+                    value: ctx.unfired_value,
+                    w: ctx.unfired_w,
+                    x: Some(ctx.unfired_x),
+                }
+            };
+            let final_root = *shape_name == "root" && matches!(ctx.name, "last" | "alone");
+            rows.push(RootRow {
+                row: Row {
+                    name: format!("{shape_name} / {}", ctx.name),
+                    source,
+                    expected,
+                },
+                final_root,
+            });
+        }
+    }
+    rows
+}
+
 /// The workspace bindings every row starts from.
 const KNOWN: &[&str] = &["w", "x"];
 
@@ -431,7 +591,9 @@ fn run_on_beam(dir: &Path, modules: &[(String, bool)]) -> HashMap<String, String
 }
 
 /// Whether the `erl` output `out` of a module agrees with `expected`.
-fn agrees(out: &str, expected: &Expected, trace: bool) -> bool {
+/// `throws`: the row's `^` throws to the eval's boundary (every row's but a
+/// `^` that is the input's whole last statement).
+fn agrees(out: &str, expected: &Expected, trace: bool, throws: bool) -> bool {
     let mut parts = out.split(' ');
     let (Some(value), Some(w), Some(x)) = (parts.next(), parts.next(), parts.next()) else {
         return false;
@@ -440,41 +602,94 @@ fn agrees(out: &str, expected: &Expected, trace: bool) -> bool {
     let w_ok = w == expected.w.to_string();
     let x_ok = x == expected.x.unwrap_or(0).to_string();
     // A `^` ends a traced input with one step: the input and the `^`'s value.
-    let steps_ok = !(trace && expected.fired) || parts.next() == Some("steps=1");
+    let steps_ok = !(trace && expected.fired && throws) || parts.next() == Some("steps=1");
     value_ok && w_ok && x_ok && steps_ok
 }
 
-/// Proofs 1 and 2: the corpus compiles through the verifier and `erlc`, and
-/// without its boundary every row fails `LoopReturnWithoutBoundary`.
-#[test]
-fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
-    let rows = rows();
+/// Proofs 1 and 2 over `rows` (each with whether its `^` throws to the eval's
+/// boundary): every row compiles through the verifier and `erlc`, in eval and
+/// trace mode; without its boundary a row whose `^` throws fails
+/// `ReplReturnWithoutBoundary`, and one whose `^` does not compiles no throw.
+/// Answers the failures.
+fn compile_proofs(rows: &[(&Row, bool)], prefix: &str) -> Vec<String> {
     let mut failures = Vec::new();
     let mut modules = Vec::new();
-    for (i, row) in rows.iter().enumerate() {
+    for (i, (row, throws)) in rows.iter().enumerate() {
         for trace in [false, true] {
-            let module = format!("bt4288_c{}_{i}", u8::from(trace));
+            let module = format!("{prefix}_c{}_{i}", u8::from(trace));
             match generate(&row.source, &module, trace) {
+                Ok(code) if !throws && code.contains("'$bt_nlr'") => failures.push(format!(
+                    "{} (trace: {trace}): a final root `^` compiled to a throw",
+                    row.name
+                )),
                 Ok(code) => modules.push((module, code)),
                 Err(e) => failures.push(format!("{} (trace: {trace}): {e}", row.name)),
             }
         }
         let report = without_boundary(|| verifier_report(&row.source));
-        if !report.contains("LoopReturnWithoutBoundary") {
+        if *throws != report.contains("ReplReturnWithoutBoundary") {
             failures.push(format!(
-                "{}: without the boundary, expected LoopReturnWithoutBoundary, got {report}",
+                "{}: without the boundary, expected ReplReturnWithoutBoundary: {throws}, got {report}",
                 row.name
             ));
         }
     }
     if erlang_available() {
-        let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4288_compile");
+        let dir = beamtalk_core::test_helpers::unique_temp_dir(&format!("{prefix}_compile"));
         std::fs::create_dir_all(&dir).expect("temp dir");
         if let Err(e) = erlc_batched(&dir, &modules) {
             failures.push(format!("erlc: {e}"));
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+    failures
+}
+
+/// Proof 3 over `rows` (as for [`compile_proofs`]): every row answers, in
+/// eval and trace mode, what the method semantics says. Answers the
+/// failures.
+fn run_proofs(rows: &[(&Row, bool)], prefix: &str) -> Vec<String> {
+    let mut modules = Vec::new();
+    for (i, (row, _)) in rows.iter().enumerate() {
+        for trace in [false, true] {
+            let module = format!("{prefix}_r{}_{i}", u8::from(trace));
+            let code = generate(&row.source, &module, trace)
+                .unwrap_or_else(|e| panic!("{}: {e}", row.name));
+            modules.push((module, code));
+        }
+    }
+    let dir = beamtalk_core::test_helpers::unique_temp_dir(&format!("{prefix}_run"));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    erlc_batched(&dir, &modules).unwrap_or_else(|e| panic!("erlc: {e}"));
+    let trace_prefix = format!("{prefix}_r1_");
+    let names: Vec<(String, bool)> = modules
+        .iter()
+        .map(|(m, _)| (m.clone(), m.starts_with(&trace_prefix)))
+        .collect();
+    let outputs = run_on_beam(&dir, &names);
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut failures = Vec::new();
+    for (i, (row, throws)) in rows.iter().enumerate() {
+        for trace in [false, true] {
+            let module = format!("{prefix}_r{}_{i}", u8::from(trace));
+            let out = outputs.get(&module).map_or("<no output>", String::as_str);
+            if !agrees(out, &row.expected, trace, *throws) {
+                failures.push(format!(
+                    "{} (trace: {trace}):\n{}\n  expected {:?}, got {out}",
+                    row.name, row.source, row.expected
+                ));
+            }
+        }
+    }
+    failures
+}
+
+/// Proofs 1 and 2 for the loop-body corpus.
+#[test]
+fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
+    let rows = rows();
+    let rows: Vec<(&Row, bool)> = rows.iter().map(|row| (row, true)).collect();
+    let failures = compile_proofs(&rows, "bt4288");
     assert!(
         failures.is_empty(),
         "{} of {} REPL loop-body `^` row(s) fail:\n\n{}",
@@ -484,8 +699,7 @@ fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
     );
 }
 
-/// Proof 3: every row answers, in eval and trace mode, what the method
-/// semantics says.
+/// Proof 3 for the loop-body corpus.
 #[test]
 fn repl_loop_body_returns_answer_like_a_method() {
     if !erlang_available() {
@@ -502,43 +716,76 @@ fn repl_loop_body_returns_answer_like_a_method() {
         rows.iter().filter(|r| r.expected.fired).count() >= 190,
         "too few rows fire their `^`"
     );
-    let mut modules = Vec::new();
-    for (i, row) in rows.iter().enumerate() {
-        for trace in [false, true] {
-            let module = format!("bt4288_r{}_{i}", u8::from(trace));
-            let code = generate(&row.source, &module, trace)
-                .unwrap_or_else(|e| panic!("{}: {e}", row.name));
-            modules.push((module, code));
-        }
-    }
-    let dir = beamtalk_core::test_helpers::unique_temp_dir("bt4288_run");
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    erlc_batched(&dir, &modules).unwrap_or_else(|e| panic!("erlc: {e}"));
-    let names: Vec<(String, bool)> = modules
-        .iter()
-        .map(|(m, _)| (m.clone(), m.starts_with("bt4288_r1_")))
-        .collect();
-    let outputs = run_on_beam(&dir, &names);
-    let _ = std::fs::remove_dir_all(&dir);
-    let mut failures = Vec::new();
-    for (i, row) in rows.iter().enumerate() {
-        for trace in [false, true] {
-            let module = format!("bt4288_r{}_{i}", u8::from(trace));
-            let out = outputs.get(&module).map_or("<no output>", String::as_str);
-            if !agrees(out, &row.expected, trace) {
-                failures.push(format!(
-                    "{} (trace: {trace}):\n{}\n  expected {:?}, got {out}",
-                    row.name, row.source, row.expected
-                ));
-            }
-        }
-    }
+    let rows: Vec<(&Row, bool)> = rows.iter().map(|row| (row, true)).collect();
+    let failures = run_proofs(&rows, "bt4288");
     assert!(
         failures.is_empty(),
         "{} REPL loop-body `^` run(s) disagree with the method semantics:\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// BT-4312: proofs 1 and 2 for the root and arm corpus ([`root_rows`]).
+#[test]
+fn repl_root_and_arm_return_corpus_compiles_and_needs_its_boundary() {
+    let rows = root_rows();
+    let rows: Vec<(&Row, bool)> = rows.iter().map(|r| (&r.row, !r.final_root)).collect();
+    let failures = compile_proofs(&rows, "bt4312");
+    assert!(
+        failures.is_empty(),
+        "{} of {} REPL root or arm `^` row(s) fail:\n\n{}",
+        failures.len(),
+        rows.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// BT-4312: proof 3 for the root and arm corpus. Before the fix every row
+/// that fires its `^` before the input's last statement ran on (`w := 1.
+/// ^w + 10. w := 9. x := 2` answered 2).
+#[test]
+fn repl_root_and_arm_returns_answer_like_a_method() {
+    if !erlang_available() {
+        eprintln!("erl/erlc not installed: skipping the BEAM run");
+        return;
+    }
+    let rows = root_rows();
+    assert!(
+        rows.len() >= ROOT_SHAPES.len() * ROOT_CONTEXTS.len(),
+        "the corpus has thinned out: {}",
+        rows.len()
+    );
+    let rows: Vec<(&Row, bool)> = rows.iter().map(|r| (&r.row, !r.final_root)).collect();
+    let failures = run_proofs(&rows, "bt4312");
+    assert!(
+        failures.is_empty(),
+        "{} REPL root or arm `^` run(s) disagree with the method semantics:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// BT-4312 (A1): a `^` run in place inside the value of a top-level
+/// assignment is rejected before it compiles, as BT-4288's loop case is: a
+/// method never assigns the variable, but the workspace would bind it to the
+/// input's value.
+#[test]
+fn a_return_in_place_in_a_top_level_assignment_is_rejected() {
+    for src in [
+        "r := true ifTrue: [^3]",
+        "r := x == 0 ifTrue: [^3] ifFalse: [4]",
+        "w := 1\nr := [^w] value",
+        "r := [^3] on: Error do: [:e | 0]",
+        "r := [^3] ensure: [nil]",
+        "#(a, b) := true ifTrue: [^#(1, 2)]",
+        "r := #(1, 2) do: [:y | ^y]",
+    ] {
+        match parse_input(src) {
+            Err(e) if e.contains("never completes") => {}
+            other => panic!("{src}: expected the BT-4312 rejection, got {other:?}"),
+        }
+    }
 }
 
 /// A `^` whose loop is held in a closure never throws to the REPL eval's

@@ -319,11 +319,12 @@ impl CoreErlangGenerator {
                 // If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
-                // BT-4288: a REPL `^` in a loop or fold body throws to the
-                // eval's boundary (`repl_nlr`); every other REPL `^` has none.
+                // BT-4288 / BT-4312: a REPL `^` run in place throws to the
+                // eval's boundary (`repl_nlr`); a closure's `^` and one that
+                // is the input's whole last statement have none.
                 let nlr_token = match self.current_nlr_token().cloned() {
                     Some(token) => Some(token),
-                    None => self.repl_loop_return_token(*span),
+                    None => self.repl_return_token(*span),
                 };
                 if let Some(nlr_token) = nlr_token {
                     // Emit diagnostic for NLR throw/catch generation.
