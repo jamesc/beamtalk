@@ -334,6 +334,77 @@ mod tests {
         assert_eq!(sites[0].file, "b.bt");
     }
 
+    #[test]
+    fn parse_corpus_source_returns_none_on_parse_error() {
+        // An unclosed block is a parse error; the function must return None.
+        let result = parse_corpus_source("bad.bt", "Object subclass: Foo\n  class bad => [\n");
+        assert!(result.is_none(), "expected None for a source with parse errors");
+    }
+
+    #[test]
+    fn scan_corpus_finds_bt_files_in_temp_dir() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join("foo.bt"),
+            "Object subclass: Foo\n  classState: n = 0\n",
+        )
+        .expect("write");
+        let scan = scan_corpus(&[dir.path().to_path_buf()]);
+        assert_eq!(scan.files.len(), 1);
+        assert_eq!(scan.unparsed.len(), 0);
+    }
+
+    #[test]
+    fn standalone_class_method_definition_is_scanned() {
+        // The class declares classState; a separate file defines a class-side
+        // standalone method that returns a block reading that variable.
+        let class_file =
+            parse_corpus_source("foo.bt", "Object subclass: Foo\n  classState: n = 0\n")
+                .expect("class file parses");
+        let method_file = parse_corpus_source("ext.bt", "Foo class >> reader => [self.n]\n")
+            .expect("standalone method file parses");
+        let sites = escaping_class_var_closures(&[class_file, method_file]);
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].class, "Foo");
+        assert_eq!(sites[0].selector, "reader");
+        assert_eq!(sites[0].shape, EscapeShape::Returned);
+    }
+
+    #[test]
+    fn count_by_shape_empty_returns_empty_map() {
+        assert!(count_by_shape(&[]).is_empty());
+    }
+
+    #[test]
+    fn count_by_shape_tallies_by_shape() {
+        let make = |shape| EscapeSite {
+            file: "a.bt".to_string(),
+            class: "Foo".to_string(),
+            selector: "s".to_string(),
+            line: 1,
+            shape,
+            reads: vec!["n".to_string()],
+        };
+        let sites = vec![
+            make(EscapeShape::Returned),
+            make(EscapeShape::Returned),
+            make(EscapeShape::StoredLocal),
+        ];
+        let counts = count_by_shape(&sites);
+        assert_eq!(counts[&EscapeShape::Returned], 2);
+        assert_eq!(counts[&EscapeShape::StoredLocal], 1);
+        assert_eq!(counts.len(), 2);
+    }
+
+    #[test]
+    fn site_line_matches_source_line() {
+        // The block opens on line 3 (1-based).
+        let src = "Object subclass: Foo\n  classState: n = 0\n  class reader => [self.n]\n";
+        let sites = sites_for(src);
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].line, 3);
+    }
+
     /// The Phase 0 census: counts escaping closures over the three corpora
     /// named by BT-3703 and prints the table the PR report quotes
     /// (`cargo test -p beamtalk-core --features test census -- --nocapture`).
