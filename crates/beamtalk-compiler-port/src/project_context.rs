@@ -41,8 +41,9 @@
 //!   (BT-4394).
 //!
 //! The alias scan and the registry are memoized per project root (exact
-//! path→mtime fingerprints, so any source, stub, manifest or cache change
-//! re-resolves). A `compile` request carrying a `project_batch` token — one
+//! path→(mtime, length) fingerprints, so any source, stub, manifest or cache
+//! change re-resolves — including a same-mtime edit that changes the size,
+//! BT-4365). A `compile` request carrying a `project_batch` token — one
 //! per workspace `load_project` — verifies those fingerprints only on the
 //! batch's first request for that root; the rest of the batch reuses the
 //! verified scope, so a load stats the project once rather than once per
@@ -115,11 +116,12 @@ pub(crate) fn merge_aliases(
     merged
 }
 
-/// Memoized per-root scope. Fingerprints are exact path→mtime maps, so any
-/// added/removed/modified file re-resolves on the next verified compile.
+/// Memoized per-root scope. Fingerprints are exact path→(mtime, length)
+/// maps, so any added/removed/modified file re-resolves on the next verified
+/// compile.
 struct CachedProject {
-    alias_files: Vec<(PathBuf, Option<SystemTime>)>,
-    registry_files: Vec<(PathBuf, Option<SystemTime>)>,
+    alias_files: Vec<Fingerprint>,
+    registry_files: Vec<Fingerprint>,
     /// The scope last resolved for this root.
     context: FileProjectContext,
     /// The `project_batch` whose request last verified the fingerprints
@@ -133,11 +135,30 @@ struct CachedProject {
 /// a rescan.
 const MAX_CACHED_PROJECTS: usize = 64;
 
-/// Fingerprint of a single file: its path plus mtime (a missing file
-/// fingerprints as absent, so creating or deleting it re-resolves).
-fn file_fingerprint(path: &Path) -> (PathBuf, Option<SystemTime>) {
-    let mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
-    (path.to_path_buf(), mtime)
+/// One file's memo key: its path plus `(mtime, length)`, or `None` when the
+/// file is missing or unstatable.
+///
+/// The length is free (the same `metadata()` call returns it) and catches an
+/// edit that keeps the mtime — two writes within one coarse filesystem tick
+/// (NTFS stamps from a ~15.6 ms clock), or `cp -p`/`rsync -t` — as long as
+/// the size changes (BT-4365). A same-size, same-mtime edit is the accepted
+/// residual: hashing contents would read every source on every verified
+/// compile, which is the cost this memo exists to avoid.
+type Fingerprint = (PathBuf, Option<(SystemTime, u64)>);
+
+/// The `(mtime, length)` stamp of a stat result, or `None` when the
+/// platform cannot report an mtime.
+fn metadata_stamp(metadata: &std::fs::Metadata) -> Option<(SystemTime, u64)> {
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+/// Fingerprint of a single file (a missing file fingerprints as absent, so
+/// creating or deleting it re-resolves).
+fn file_fingerprint(path: &Path) -> Fingerprint {
+    let stamp = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| metadata_stamp(&m));
+    (path.to_path_buf(), stamp)
 }
 
 static PROJECT_CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, CachedProject>>> =
@@ -210,12 +231,12 @@ fn extract_aliases(files: &[Utf8PathBuf], package: &str) -> Vec<AliasInfo> {
     aliases
 }
 
-/// Exact path→mtime fingerprint of a file set (sorted, so comparison is a
-/// single `==`). Any add/remove/modify changes it. Unstatable files are
-/// carried as `None` rather than dropped, so a file flipping between
-/// readable and unreadable still re-resolves.
-fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, Option<SystemTime>)> {
-    let mut entries: Vec<(PathBuf, Option<SystemTime>)> = files
+/// Exact path→(mtime, length) fingerprint of a file set (sorted, so
+/// comparison is a single `==`). Any add/remove/modify changes it.
+/// Unstatable files are carried as `None` rather than dropped, so a file
+/// flipping between readable and unreadable still re-resolves.
+fn fingerprint(files: &[Utf8PathBuf]) -> Vec<Fingerprint> {
+    let mut entries: Vec<Fingerprint> = files
         .iter()
         .map(|f| file_fingerprint(f.as_std_path()))
         .collect();
@@ -223,17 +244,18 @@ fn fingerprint(files: &[Utf8PathBuf]) -> Vec<(PathBuf, Option<SystemTime>)> {
     entries
 }
 
-/// Fingerprint of a directory's immediate entries: paths plus mtimes, with
-/// an unstatable entry carried as `None` (see [`fingerprint`]).
-fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, Option<SystemTime>)> {
+/// Fingerprint of a directory's immediate entries: paths plus
+/// `(mtime, length)`, with an unstatable entry carried as `None` (see
+/// [`fingerprint`]).
+fn dir_file_fingerprint(dir: &Path) -> Vec<Fingerprint> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<(PathBuf, Option<SystemTime>)> = entries
+    let mut files: Vec<Fingerprint> = entries
         .flatten()
         .map(|e| {
-            let mtime = e.metadata().ok().and_then(|m| m.modified().ok());
-            (e.path(), mtime)
+            let stamp = e.metadata().ok().and_then(|m| metadata_stamp(&m));
+            (e.path(), stamp)
         })
         .collect();
     files.sort();
@@ -243,8 +265,8 @@ fn dir_file_fingerprint(dir: &Path) -> Vec<(PathBuf, Option<SystemTime>)> {
 /// Fingerprint of the project-local stub tier: every stub file the shared
 /// loader reads (it walks `stubs/` recursively), so adding, editing or
 /// deleting a stub re-resolves the registry. Like [`fingerprint`], a stub
-/// whose mtime cannot be read is carried as `None`, not dropped.
-fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, Option<SystemTime>)> {
+/// that cannot be stat'ed is carried as `None`, not dropped.
+fn stub_file_fingerprint(root: &Utf8Path) -> Vec<Fingerprint> {
     let stubs_dir = root.join(PROJECT_STUBS_DIR);
     if !stubs_dir.is_dir() {
         return Vec::new();
@@ -263,7 +285,7 @@ fn stub_file_fingerprint(root: &Utf8Path) -> Vec<(PathBuf, Option<SystemTime>)> 
 /// too: otherwise a dependency rebuild without a fresh `beamtalk build`
 /// would keep serving the old specs until the port restarts. (An OTP upgrade
 /// mid-session is the accepted residual — it warrants a restart anyway.)
-fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<(PathBuf, Option<SystemTime>)> {
+fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<Fingerprint> {
     let mut entries = dir_file_fingerprint(cache_dir);
     for ebin in beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(root) {
         entries.extend(dir_file_fingerprint(ebin.as_std_path()));
