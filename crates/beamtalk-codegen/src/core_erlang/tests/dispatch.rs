@@ -3761,9 +3761,9 @@ fn test_class_method_self_send_in_sealed_class_is_guarded() {
 }
 
 /// BT-4301: an explicit own-class reference (`OpenCls foo`) binds the method
-/// to the named class, never late-bound on the receiver, which stays
-/// `ClassSelf`: the guard checks only shadows on the named class, and its
-/// fallback resolves `foo` from the named class.
+/// to the named class, never late-bound on the receiver. In the receiver-is-
+/// `OpenCls` arm (BT-4317) the guard checks only shadows on the named class,
+/// and its fallback resolves `foo` from the named class.
 #[test]
 fn test_class_method_explicit_class_reference_binds_the_named_class() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
@@ -3774,13 +3774,111 @@ fn test_class_method_explicit_class_reference_binds_the_named_class() {
     );
     assert!(
         code.contains("call 'test':'class_foo'(ClassSelf)"),
-        "the guarded arm passes the receiver. Got:\n{code}"
+        "the guarded arm passes the receiver, which is OpenCls in this arm. Got:\n{code}"
     );
     assert!(
         code.contains(
             "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('OpenCls', 'foo', [], ClassSelf)"
         ),
         "the fallback resolves from the named class. Got:\n{code}"
+    );
+}
+
+/// BT-4317: a class literal always denotes that class. `Base who` inside a
+/// class method of `Base` cases on the running receiver's tag: the own-class
+/// direct path when it is `Base` (no `gen_server:call` into the running
+/// class process), the ordinary literal class send to `Base` otherwise (an
+/// inherited method running for a subclass), so `who` runs with
+/// `self == Base` either way. The argument is bound once ahead of the `case`
+/// and both arms read the same variable.
+#[test]
+fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
+    let src = "Object subclass: Base\n  class who: x => x\n\n  class run => Base who: 1 + 2\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_run'/1 = fun")
+        .expect("class_run function present");
+    let run = &code[start..];
+    let end = run[1..].find("\n'").map_or(run.len(), |e| e + 1);
+    let run = &run[..end];
+    let tag_case = run
+        .find("case call 'erlang':'element'(2, ClassSelf) of <'Base class'> when 'true' ->")
+        .unwrap_or_else(|| panic!("the send cases on the receiver tag. Got:\n{run}"));
+    let literal_arm = tag_case
+        + run[tag_case..]
+            .find("<_> when 'true' -> let _ClassPid")
+            .unwrap_or_else(|| panic!("the other arm is the literal class send. Got:\n{run}"));
+    let own_arm = &run[tag_case..literal_arm];
+    assert!(
+        own_arm.contains("call 'test':'class_who:'(ClassSelf, ")
+            && own_arm.contains("'class_self_dispatch_local'('Base', 'who:', ["),
+        "the Base arm is the own-class direct path. Got:\n{own_arm}"
+    );
+    assert!(
+        !own_arm.contains("'class_send'"),
+        "the Base arm never sends to its own class process. Got:\n{own_arm}"
+    );
+    let literal = &run[literal_arm..];
+    assert!(
+        literal.contains("'direct_call_ok'('Base class', 'Base')")
+            && literal.contains(":'class_who:'({'beamtalk_object', 'Base class', ")
+            && literal.contains("'class_send'(_ClassPid"),
+        "the literal arm is the guarded direct call with Base's own reference. Got:\n{literal}"
+    );
+    assert_eq!(
+        run.matches("call 'erlang':'+'(").count(),
+        1,
+        "the argument is compiled once, before the case. Got:\n{run}"
+    );
+    assert!(
+        run.find("call 'erlang':'+'(").unwrap() < tag_case,
+        "the argument is bound ahead of the case. Got:\n{run}"
+    );
+}
+
+/// BT-4317: own-class sends nested in block arguments grow linearly. Each
+/// send's arguments (here a block holding the next send) are compiled once,
+/// ahead of its receiver-tag `case`, so the innermost body appears once and
+/// each send emits one own-class guard and one literal-send guard.
+#[test]
+fn test_nested_own_class_sends_in_block_args_compile_once() {
+    let src = "Object subclass: Base\n  class foo => 1\n\n  class at: k section: aBlock => aBlock value\n\n  class go => Base at: 1 section: [Base at: 2 section: [Base at: 3 section: [Base foo]]]\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_go'/1 = fun")
+        .expect("class_go function present");
+    let go = &code[start..];
+    let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
+    let go = &go[..end];
+    assert_eq!(
+        go.matches("'class_self_direct_ok'").count(),
+        4,
+        "one own-class guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("'direct_call_ok'('Base class', 'Base')").count(),
+        4,
+        "one literal-send guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("<'Base class'> when 'true'").count(),
+        4,
+        "one receiver-tag case per send. Got:\n{go}"
+    );
+}
+
+/// BT-4317: `self foo` still late-binds to the receiver: no receiver-tag case.
+#[test]
+fn test_self_send_in_class_method_has_no_receiver_tag_case() {
+    let src = "Object subclass: Base\n  class who => 1\n\n  class run => self who\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("case call 'erlang':'element'(2, ClassSelf) of <'Base class'>"),
+        "self sends are not own-class literal sends. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_self_send'(ClassSelf, 'who', [])"),
+        "self who walks from the receiver. Got:\n{code}"
     );
 }
 

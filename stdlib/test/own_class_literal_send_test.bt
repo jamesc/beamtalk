@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: inside a class method of `Base`, an explicit own-class send
+// (`Base foo`) runs `foo` with `self == Base`, also when the method runs for
+// a subclass that inherits it: a class literal always denotes that class.
+// `self foo` still late-binds to the receiver.
+//
+// Three shapes: a stateless chain (the send runs in the caller), a chain
+// with class variables (the send goes to `Base`'s class process), and a
+// class-side extension shadowing `foo` (the dynamic fallback).
+//
+// Fixtures: stdlib/test/fixtures/bt4317own_literal_*.bt
+
+TestCase subclass: OwnClassLiteralSendTest
+
+  // === Stateless chain ===
+  testStatelessOwnReceiver =>
+    self assert: Bt4317OwnLiteralBase who equals: #Bt4317OwnLiteralBase
+    self assert: Bt4317OwnLiteralBase make class equals: Bt4317OwnLiteralBase
+
+  testStatelessSubclassSelfIsBase =>
+    self assert: Bt4317OwnLiteralChild who equals: #Bt4317OwnLiteralBase
+
+  testStatelessSubclassNewBuildsBase =>
+    self assert: Bt4317OwnLiteralChild make class equals: Bt4317OwnLiteralBase
+
+  testStatelessSubclassKeywordSend =>
+    self assert: (Bt4317OwnLiteralChild whoWith: #x) equals: #(#Bt4317OwnLiteralBase, #x)
+
+  testStatelessSelfSendStillLateBinds =>
+    self assert: Bt4317OwnLiteralChild whoViaSelf equals: #childOverride
+    self assert: Bt4317OwnLiteralBase whoViaSelf equals: #Bt4317OwnLiteralBase
+
+  // === Chain with class variables ===
+  testStatefulOwnReceiver =>
+    self assert: Bt4317OwnLiteralStateful who equals: #Bt4317OwnLiteralStateful
+    self assert: Bt4317OwnLiteralStateful readLabel equals: #base
+    self assert: Bt4317OwnLiteralStateful make class equals: Bt4317OwnLiteralStateful
+
+  testStatefulSubclassSelfIsBase =>
+    self assert: Bt4317OwnLiteralStatefulChild who equals: #Bt4317OwnLiteralStateful
+
+  testStatefulSubclassReadsBaseClassVariable =>
+    self assert: Bt4317OwnLiteralStatefulChild readLabel equals: #base
+    self assert: Bt4317OwnLiteralForgot readLabel equals: #base
+
+  testStatefulSubclassNewBuildsBase =>
+    self assert: Bt4317OwnLiteralStatefulChild make class equals: Bt4317OwnLiteralStateful
+
+  testStatefulSelfSendStillLateBinds =>
+    self assert: Bt4317OwnLiteralStatefulChild readLabelViaSelf equals: #child
+    self should: [
+      Bt4317OwnLiteralForgot readLabelViaSelf
+    ] raise: #undeclared_class_variable
+
+  // === Class-side extension shadowing the sent selector ===
+  testShadowedOwnReceiver =>
+    self assert: Bt4317OwnLiteralShadowed who equals: #Bt4317OwnLiteralShadowed
+
+  testShadowedSubclassSelfIsBase =>
+    self assert: Bt4317OwnLiteralShadowedChild who equals: #Bt4317OwnLiteralShadowed
+
+// Shadows the compiled `tag`, so `Bt4317OwnLiteralShadowed tag` falls back to
+// the dynamic lookup. Its `self name` shows which class it runs for.
+Bt4317OwnLiteralShadowed class >> tag -> Symbol => self name

@@ -68,6 +68,32 @@ type SendHandler = fn(
     &[Expression],
 ) -> Result<Option<Document<'static>>>;
 
+/// The arguments of a class-side send: the source expressions, threaded by
+/// the lowering that consumes them, or (BT-4317) already-bound variable
+/// references, when one argument binding feeds several lowerings spliced into
+/// the arms of a runtime `case` (each arm would otherwise thread, and so
+/// compile, the same expressions again).
+#[derive(Clone, Copy)]
+pub(super) enum ClassSendArgs<'a> {
+    /// Source expressions, threaded at the use site.
+    Exprs(&'a [Expression]),
+    /// Variables or literals already bound ahead of the send.
+    Bound(&'a [Document<'static>]),
+}
+
+impl ClassSendArgs<'_> {
+    fn len(self) -> usize {
+        match self {
+            Self::Exprs(exprs) => exprs.len(),
+            Self::Bound(docs) => docs.len(),
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// `generate_message_send`'s dispatch priority as data, replacing
 /// what were 15 source-ordered `if let Some(doc) = self.try_*()?` calls (two
 /// of them a duplicated `is_character_typed_receiver` check — see
@@ -1411,7 +1437,7 @@ impl CoreErlangGenerator {
                     leaf::atom(name.name.to_string()),
                     module_doc,
                     &selector_atom,
-                    arguments,
+                    ClassSendArgs::Exprs(arguments),
                 )?;
                 return Ok(Some(doc));
             }
@@ -1740,17 +1766,18 @@ impl CoreErlangGenerator {
             {
                 return Ok(Some(doc));
             }
-            // When inside a class method and the explicit class name matches
-            // the current class, use direct dispatch (same as `self` sends) to avoid
-            // deadlock. The class actor is already processing the outer call, so
-            // routing through class_send would deadlock on gen_server:call.
+            // BT-4317: inside a class method, an explicit send to the class
+            // being compiled (`Base foo`) denotes `Base` whatever the receiver:
+            // the own-class direct path (which avoids a `gen_server:call` back
+            // into the running class process) when the receiver is `Base`, an
+            // ordinary literal class send otherwise.
             if super::expr_shape::is_own_class_reference(&self.shape_ctx(), receiver) {
                 // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`/`generate_message_send` (not
                 // `threaded_expression`'s own producer recognition), so the
                 // producer's prelude is closed inline into a self-contained
                 // `Document` here rather than left open.
-                let tv = self.generate_class_method_self_send(selector, arguments, false)?;
+                let tv = self.generate_own_class_literal_send(&name.name, selector, arguments)?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
             // ADR 0129 §7: only REPL top-level expressions can name a session
@@ -1770,10 +1797,62 @@ impl CoreErlangGenerator {
             // registry using the short class name. The package qualifier doesn't
             // affect dispatch — it's used for module name resolution in spawns and
             // standalone references, not for class method calls.
-            let doc = self.generate_class_method_call(&name.name, selector, arguments)?;
+            let doc = self.generate_class_method_call(
+                &name.name,
+                selector,
+                ClassSendArgs::Exprs(arguments),
+            )?;
             return Ok(Some(doc));
         }
         Ok(None)
+    }
+
+    /// An explicit own-class send (`Base foo` inside a class method of `Base`),
+    /// BT-4317: a class literal always denotes that class, so `foo` runs with
+    /// `self == Base` even when the method running is inherited by a subclass
+    /// `C` (its `ClassSelf` is `C`'s reference). Only `self foo` late-binds to
+    /// the receiver.
+    ///
+    /// ```erlang
+    /// let <Arg1> = … in
+    /// case call 'erlang':'element'(2, ClassSelf) of
+    ///   <'Base class'> when 'true' -> <own-class direct send, Arg1>
+    ///   <_> when 'true' -> <literal class send to 'Base', Arg1>
+    /// end
+    /// ```
+    ///
+    /// When the receiver is `Base`, the own-class lowering of
+    /// [`Self::generate_class_method_self_send`] runs it directly in this
+    /// process: for a class with class variables that process is `Base`'s own,
+    /// and a `class_send` would `gen_server:call` itself. Otherwise the send is
+    /// the ordinary literal class send ([`Self::generate_class_method_call`]):
+    /// in the caller for a stateless
+    /// chain, in `Base`'s class process (not the one running) when the chain
+    /// declares class variables. The arguments are bound once, ahead of the
+    /// `case`, and both arms read the same variables.
+    fn generate_own_class_literal_send(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<ThreadedValue> {
+        let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+        let bound = ClassSendArgs::Bound(&arg_refs);
+        let own_class = self.generate_class_method_self_send(selector, bound, false)?;
+        let own_class_doc = self.close_threaded_value_doc(own_class);
+        let literal_doc = self.generate_class_method_call(class_name, selector, bound)?;
+        let call_doc = docvec![
+            "case call 'erlang':'element'(2, ",
+            leaf::var(CLASS_SELF_VAR),
+            ") of <",
+            leaf::atom(super::util::metaclass_tag(class_name)),
+            "> when 'true' -> ",
+            own_class_doc,
+            " <_> when 'true' -> ",
+            literal_doc,
+            " end"
+        ];
+        Ok(self.class_self_send_value(&args_preamble, call_doc))
     }
 
     /// Inlines a class-literal send whose class-side method is a caller-safe
@@ -1886,7 +1965,11 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 5b: reached through ordinary
                 // `generate_expression`, not `threaded_expression`'s own
                 // producer recognition — close the prelude inline.
-                let tv = self.generate_class_method_self_send(selector, arguments, true)?;
+                let tv = self.generate_class_method_self_send(
+                    selector,
+                    ClassSendArgs::Exprs(arguments),
+                    true,
+                )?;
                 return Ok(Some(self.close_threaded_value_doc(tv)));
             }
         }
@@ -1895,9 +1978,11 @@ impl CoreErlangGenerator {
 
     /// Core logic for direct dispatch of class method calls.
     ///
-    /// Used by both `self` sends and explicit class name sends within
-    /// class methods. Generates direct module function calls to avoid deadlock
-    /// since class methods execute inside a `gen_server:call` handler.
+    /// Used by `self` sends (`receiver_is_self`) and, for the arm where the
+    /// running receiver is this class, explicit own-class sends
+    /// ([`Self::generate_own_class_literal_send`], BT-4317) within class
+    /// methods. Generates direct module function calls to avoid deadlock
+    /// since class methods may execute inside a `gen_server:call` handler.
     ///
     /// ADR 0118 phase 5b: returns a [`ThreadedValue`] whose
     /// prelude is real `ThreadedStmt`s throughout — every branch threads
@@ -1910,7 +1995,7 @@ impl CoreErlangGenerator {
     pub(super) fn generate_class_method_self_send(
         &mut self,
         selector: &MessageSelector,
-        arguments: &[Expression],
+        arguments: ClassSendArgs<'_>,
         receiver_is_self: bool,
     ) -> Result<ThreadedValue> {
         let selector_atom = selector.name().to_string();
@@ -1931,7 +2016,7 @@ impl CoreErlangGenerator {
                     value: ValueRef::Doc(doc),
                 });
             }
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
             // BT-4301: the fun's own `ClassSelf` is the live receiver, passed
             // as is (no registry read rebuilds it).
             let call_doc = docvec![
@@ -1960,18 +2045,19 @@ impl CoreErlangGenerator {
         // class (an inherited method's `self foo` must reach a subclass
         // override, the template-method pattern); its fallback is the runtime
         // walk from the receiver. An explicit own-class reference (`Base foo`)
-        // binds the method statically to this class whatever the receiver, so
-        // its guard passes this class's tag as the receiver's too, and its
-        // fallback resolves `foo` from this class (its extension, its runtime
-        // fun, then its own method and the chain above it). Both pass the
-        // method's own `ClassSelf`, the receiver.
+        // reaches here only when the receiver is this class (BT-4317,
+        // `generate_own_class_literal_send`); it binds the method statically
+        // to this class, so its guard passes this class's tag as the
+        // receiver's, and its fallback resolves `foo` from this class (its
+        // extension, its runtime fun, then its own method and the chain above
+        // it). Both pass the method's own `ClassSelf`, the receiver.
         let defines_selector = self.class_method_selectors().contains(&selector_atom);
         if defines_selector {
             // Bind every argument once, before the guarded `case`: the doc is
             // spliced into both arms, and an inline block argument containing
             // further class-side self-sends would otherwise double per nesting
             // level (2^depth code growth).
-            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let (args_preamble, arg_refs) = self.thread_class_send_args_bound(arguments)?;
             let args_doc = Self::join_docs_with_commas(arg_refs);
             let class_name = self.class_name();
             let class_tag = super::util::metaclass_tag(&class_name);
@@ -2033,7 +2119,7 @@ impl CoreErlangGenerator {
             .is_some_and(|kw| kw == selector_atom)
         {
             let module = self.module_name.clone();
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
             let comma = if arguments.is_empty() { "" } else { ", " };
             // Hash long keyword constructor atoms to stay within
             // Erlang's 255-char atom limit.
@@ -2090,7 +2176,7 @@ impl CoreErlangGenerator {
             // Hoist preambles from sub-expression class var mutations.
             let module = self.module_name.clone();
             let fun_name = selector_atom.replace(':', "");
-            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
 
             let call_doc = docvec![
                 "call ",
@@ -2108,9 +2194,35 @@ impl CoreErlangGenerator {
             });
         }
 
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
         let call_doc = Self::class_self_send_call_doc(&selector_atom, args_doc);
         Ok(self.class_self_send_value(&args_preamble, call_doc))
+    }
+
+    /// [`Self::thread_args`] over [`ClassSendArgs`]: bound arguments need no
+    /// threading, so their prelude is empty.
+    fn thread_class_send_args(
+        &mut self,
+        args: ClassSendArgs<'_>,
+    ) -> Result<(Vec<ThreadedStmt>, Document<'static>)> {
+        match args {
+            ClassSendArgs::Exprs(exprs) => self.thread_args(exprs),
+            ClassSendArgs::Bound(docs) => {
+                Ok((Vec::new(), Self::join_docs_with_commas(docs.to_vec())))
+            }
+        }
+    }
+
+    /// [`Self::thread_args_bound`] over [`ClassSendArgs`]: bound arguments
+    /// already are variable references.
+    fn thread_class_send_args_bound(
+        &mut self,
+        args: ClassSendArgs<'_>,
+    ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
+        match args {
+            ClassSendArgs::Exprs(exprs) => self.thread_args_bound(exprs, "Arg"),
+            ClassSendArgs::Bound(docs) => Ok((Vec::new(), docs.to_vec())),
+        }
     }
 
     /// The value of a class-side self-send (ADR 0130 §3): the call's bare
@@ -2238,7 +2350,7 @@ impl CoreErlangGenerator {
     fn try_instantiation_intrinsic(
         &mut self,
         selector_atom: &str,
-        arguments: &[Expression],
+        arguments: ClassSendArgs<'_>,
     ) -> Result<Option<Document<'static>>> {
         // ADR 0135 §1: `self spawn…` in a class method of a supervisor class
         // starts a supervisor instance of the receiving class (a subclass
@@ -2257,7 +2369,7 @@ impl CoreErlangGenerator {
         match selector_atom {
             "new" | "new:" => {
                 // Hoist preambles from sub-expression class var mutations.
-                let (args_preamble, args_doc) = self.thread_args(arguments)?;
+                let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
                     Self::class_self_name_doc(),
@@ -2277,7 +2389,7 @@ impl CoreErlangGenerator {
                 else {
                     return Ok(None);
                 };
-                let (args_preamble, args_doc) = self.thread_args(arguments)?;
+                let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':",
                     leaf::atom(variant.class_self_helper()),
@@ -2387,9 +2499,9 @@ impl CoreErlangGenerator {
         class_doc: Document<'static>,
         module_doc: Document<'static>,
         selector_atom: &str,
-        arguments: &[Expression],
+        arguments: ClassSendArgs<'_>,
     ) -> Result<Document<'static>> {
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
         let call_doc = docvec![
             "call 'beamtalk_supervisor':'class_start'(",
             class_doc,
@@ -2414,9 +2526,9 @@ impl CoreErlangGenerator {
         helper: &'static str,
         result_prefix: &'static str,
         selector_atom: &'static str,
-        arguments: &[Expression],
+        arguments: ClassSendArgs<'_>,
     ) -> Result<Document<'static>> {
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
         let call_doc = docvec![
             "call 'beamtalk_class_instantiation':'",
             Document::Str(helper),
@@ -3494,11 +3606,15 @@ impl CoreErlangGenerator {
     /// let ClassPid = call 'erlang':'whereis'('beamtalk_class_Tracing') in
     /// call 'beamtalk_object_class':'class_send'(ClassPid, 'setContext:', [Ctx])
     /// ```
+    ///
+    /// `arguments` may be already bound ([`ClassSendArgs::Bound`]): the
+    /// explicit own-class send of [`Self::generate_own_class_literal_send`]
+    /// splices this lowering into one arm of its receiver-tag `case`.
     fn generate_class_method_call(
         &mut self,
         class_name: &str,
         selector: &MessageSelector,
-        arguments: &[Expression],
+        arguments: ClassSendArgs<'_>,
     ) -> Result<Document<'static>> {
         let raw_selector = selector.name().to_string();
 
@@ -3517,7 +3633,7 @@ impl CoreErlangGenerator {
             // Bind every argument once: the doc is spliced into both arms of
             // the guard (an inline block argument holding further guarded
             // sends would otherwise double per nesting level).
-            let (args_preamble, arg_refs) = self.thread_args_bound(arguments, "Arg")?;
+            let (args_preamble, arg_refs) = self.thread_class_send_args_bound(arguments)?;
             let args_doc = Self::join_docs_with_commas(arg_refs);
             let call_doc = self.guarded_class_direct_call_doc(
                 class_name,
@@ -3535,7 +3651,7 @@ impl CoreErlangGenerator {
         // Hoist preambles from sub-expression class var mutations.
         let selector_atom = super::selector_mangler::safe_class_method_selector(&raw_selector);
         let class_pid_var = self.fresh_var("ClassPid");
-        let (args_preamble, args_doc) = self.thread_args(arguments)?;
+        let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
 
         let call_doc = docvec![
             "let ",
