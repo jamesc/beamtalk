@@ -1519,6 +1519,52 @@ fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
 }
 
 #[test]
+fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
+    // A class object's class-side `error:` answers a value, so an actor
+    // method ending in `obj error: msg` must reply with it (no bare
+    // never-returns emission), and the send may run user code, so it is
+    // bracketed like any other call. `self error:` keeps the bare raise.
+    let code = codegen(
+        "Actor subclass: Probe\n  state: n = 0\n  raise: msg via: obj => obj error: msg\n  boom => self error: \"x\"\n",
+    );
+    let guarded = code
+        .lines()
+        .find(|l| l.contains("'class_object_understands'("))
+        .unwrap_or_else(|| panic!("no guarded error: send:\n{code}"));
+    assert!(
+        guarded.contains("{'reply', _Result, "),
+        "`obj error:` as the last statement must reply with its answer:\n{guarded}"
+    );
+    assert!(
+        guarded.contains("'beamtalk_actor_state':'store'("),
+        "`obj error:` may run user code, so it must be bracketed:\n{guarded}"
+    );
+    let raise = code
+        .lines()
+        .find(|l| l.contains("'user_error'") && !l.contains("class_object_understands"))
+        .unwrap_or_else(|| panic!("no bare `self error:` raise:\n{code}"));
+    assert!(
+        !raise.contains("'reply'"),
+        "`self error:` never returns, so it gets no reply tuple:\n{raise}"
+    );
+}
+
+#[test]
+fn test_bt4075_actor_logger_error_last_statement_replies() {
+    // `Logger error:` answers nil: as the last statement it must reply, not
+    // be emitted bare as a never-returning `error:`.
+    let code = codegen("Actor subclass: Probe\n  state: n = 0\n  log: msg => Logger error: msg\n");
+    let line = code
+        .lines()
+        .find(|l| l.contains("'logger'"))
+        .unwrap_or_else(|| panic!("no logger call:\n{code}"));
+    assert!(
+        line.contains("{'reply', _Result, "),
+        "`Logger error:` as the last statement must reply:\n{line}"
+    );
+}
+
+#[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
     // Routes through proxy for consistent validation/coercion

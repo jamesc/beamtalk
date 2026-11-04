@@ -375,6 +375,21 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
     }
 }
 
+/// BT-4075: whether an `error:` send to `receiver` can be statically known to
+/// be the `Object>>error:` raise, which never returns and runs no user code.
+///
+/// Only a bare `self` can be: any other receiver may be a class object whose
+/// class side defines `error:` (`Result class>>error:`, `Logger class>>error:`),
+/// and then `error:` is an ordinary send that answers a value. This is the
+/// syntactic half of the rule, and every consumer starts from it. Code
+/// generation refines it with the method context, since `self` in a class
+/// method or a top-level REPL `self` may also be a class object
+/// (`CoreErlangGenerator::error_signal_receiver_kind`).
+#[must_use]
+pub fn is_error_signal_instance_receiver(receiver: &super::Expression) -> bool {
+    matches!(receiver, super::Expression::Identifier(id) if id.name == "self")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
