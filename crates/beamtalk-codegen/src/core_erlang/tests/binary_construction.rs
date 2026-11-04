@@ -52,12 +52,21 @@ fn construction(code: &str) -> &str {
 
 const INT: &str = "'integer',['unsigned'|['big']]";
 
+/// `segment` annotated with its 1-based source segment number, as `erlc`
+/// annotates every segment that can fail at run time.
+fn numbered(n: usize, segment: &str) -> String {
+    format!("( {segment} -| [{{'segment', {n}}}] )")
+}
+
 #[test]
 fn integer_variable_with_a_size() {
     let code = compile_body("<<v:4>>");
     let c = construction(&code);
-    assert!(c.starts_with("#{#<_BinSeg"), "{c}");
-    assert!(c.ends_with(&format!(">(4,1,{INT})}}#")), "{c}");
+    assert!(c.starts_with("#{( #<_BinSeg"), "{c}");
+    assert!(
+        c.ends_with(&format!(">(4,1,{INT}) -| [{{'segment', 1}}] )}}#")),
+        "{c}"
+    );
 }
 
 #[test]
@@ -66,7 +75,10 @@ fn integer_literal_takes_the_default_size() {
     assert_eq!(
         construction(&code),
         format!(
-            "#{{#<16>(8,1,{INT}), #<3>(8,1,{INT}), #<300>(16,1,'integer',['signed'|['little']])}}#"
+            "#{{{}, {}, {}}}#",
+            numbered(1, &format!("#<16>(8,1,{INT})")),
+            numbered(2, &format!("#<3>(8,1,{INT})")),
+            numbered(3, "#<300>(16,1,'integer',['signed'|['little']])")
         )
     );
 }
@@ -132,7 +144,7 @@ fn sized_binary_with_a_variable_size() {
 fn unit_is_the_second_specifier() {
     let code = compile_body("<<v:8/unit:2>>");
     assert!(
-        construction(&code).ends_with(&format!(">(8,2,{INT})}}#")),
+        construction(&code).ends_with(&format!(">(8,2,{INT}) -| [{{'segment', 1}}] )}}#")),
         "{code}"
     );
 }
@@ -185,14 +197,20 @@ fn native_float_literal_is_not_folded() {
     let code = compile_body("<<1.5/float-native>>");
     assert_eq!(
         construction(&code),
-        "#{#<1.5>(64,1,'float',['unsigned'|['native']])}#"
+        format!(
+            "#{{{}}}#",
+            numbered(1, "#<1.5>(64,1,'float',['unsigned'|['native']])")
+        )
     );
 }
 
 #[test]
 fn character_literal_is_its_code_point() {
     let code = compile_body("<<$A>>");
-    assert_eq!(construction(&code), format!("#{{#<65>(8,1,{INT})}}#"));
+    assert_eq!(
+        construction(&code),
+        format!("#{{{}}}#", numbered(1, &format!("#<65>(8,1,{INT})")))
+    );
 }
 
 #[test]
@@ -209,7 +227,46 @@ fn utf_string_literal_expands_per_character() {
     let code = compile_body("<<\"hi\"/utf16>>");
     assert_eq!(
         construction(&code),
-        "#{#<104>('undefined','undefined','utf16',['unsigned'|['big']]), #<105>('undefined','undefined','utf16',['unsigned'|['big']])}#"
+        format!(
+            "#{{{}, {}}}#",
+            numbered(
+                1,
+                "#<104>('undefined','undefined','utf16',['unsigned'|['big']])"
+            ),
+            numbered(
+                1,
+                "#<105>('undefined','undefined','utf16',['unsigned'|['big']])"
+            )
+        )
+    );
+}
+
+#[test]
+fn segments_carry_their_source_segment_number() {
+    // BT-4414: each segment that can fail at run time names its 1-based
+    // *source* segment, so the BEAM reports that position. Folded constant
+    // bytes (a string literal, a constant float) cannot fail and, as from
+    // `erlc`, carry no annotation; a segment expanded per character keeps
+    // its source segment's number.
+    let code = compile_body("<<\"ab\", v:8, 1.5/float, \"hé\"/utf16, p/binary>>");
+    let c = construction(&code);
+    let numbers: Vec<&str> = c
+        .match_indices("{'segment', ")
+        .map(|(at, m)| {
+            let rest = &c[at + m.len()..];
+            &rest[..rest.find('}').unwrap_or(rest.len())]
+        })
+        .collect();
+    assert_eq!(numbers, ["2", "4", "4", "5"], "{c}");
+    assert!(
+        c.starts_with(&format!(
+            "#{{#<97>(8,1,{INT}),#<98>(8,1,{INT}), ( #<_BinSeg"
+        )),
+        "{c}"
+    );
+    assert!(
+        c.contains(&format!("#<63>(8,1,{INT}),#<248>(8,1,{INT})")),
+        "{c}"
     );
 }
 
@@ -328,7 +385,7 @@ fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
             .unwrap_or_else(|| panic!("{context}: no {method} in\n{code}"));
         let body = &code[body_at..];
         let start = body
-            .find("#{#<")
+            .find("#{( #<")
             .unwrap_or_else(|| panic!("{context}: no construction in\n{body}"));
         let end = start + body[start..].find("}#").expect("closed construction");
         let vars = segment_vars(&body[start..end]);
