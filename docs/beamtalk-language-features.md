@@ -1749,7 +1749,9 @@ lenient — `SomeClass fieldAt: #typo` answers `nil` and `SomeClass fieldAt:
 four selectors itself whenever the name argument is a Symbol, a class-side
 method named `hasField:`, `clearField:`, `fieldAt:` or `fieldAt:put:` is
 never reached by such a send; the compiler warns at its declaration
-(rename it).
+(rename it). Inside a class method, `self fieldAt: #x`
+and `self fieldAt: #x put: v` read and write in place, like `self.x` and
+`self.x := v`, under the same rules.
 
 **Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
 legitimate dependency injection (substituting a value for a slot normally

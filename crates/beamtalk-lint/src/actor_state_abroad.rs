@@ -87,7 +87,7 @@
 //! `DiagnosticCategory::ActorStateAbroad`: site-level `@expect
 //! actor_state_abroad`, `[diagnostics]` key `actor-state-abroad`.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use crate::{LintContext, LintPass, async_cast_hint};
 use beamtalk_core::ast::{
@@ -461,9 +461,9 @@ fn check_block(
     // the actor's mutable fields, so `reads`/`writes` are field reads/writes
     // and `has_field_probes` are actor-state probes (nested blocks included).
     let accesses = class_var_accesses(block, &ctx.fields);
-    // `fieldAt:put:`/`clearField:` writes and `fieldAt:` reads on `self`
-    // (BT-4184): the same cell writes and capture reads, reflectively.
-    let reflective = reflective_accesses(block, &ctx.fields);
+    // `fieldAt:put:`/`clearField:` writes on `self` (BT-4184): the same cell
+    // writes, reflectively (`fieldAt:` reads are `accesses.field_at_reads`).
+    let reflective = reflective_accesses(block);
     let first_write = accesses
         .writes
         .iter()
@@ -482,11 +482,8 @@ fn check_block(
         .min_by_key(|(start, _)| *start);
     if let Some((_, what)) = first_write {
         report(block, writes_diagnostic(ctx, block, &what, shape));
-    } else if !skip_reads && (accesses.reads_class_state() || reflective.reads_any()) {
-        report(
-            block,
-            reads_diagnostic(ctx, block, &accesses, &reflective, shape),
-        );
+    } else if !skip_reads && accesses.reads_class_state() {
+        report(block, reads_diagnostic(ctx, block, &accesses, shape));
     } else if let Some(self_send) = first_sync_self_send(block) {
         report(block, self_send_diagnostic(ctx, block, &self_send, shape));
     }
@@ -636,60 +633,24 @@ impl ReflectiveWrite {
     }
 }
 
-/// Reflective field access on `self` in a block, nested blocks included
+/// Reflective field writes on `self` in a block, nested blocks included
 /// (BT-4184): the reflective counterpart of [`class_var_accesses`]'s
-/// `self.name` reads and writes. Inside an actor closure these reach the
-/// actor cell exactly like a `self.name` access: away from home a read
-/// answers the creation-time capture and a write raises
-/// `actor_state_unreachable`. Only a plain send to a literal `self` counts:
-/// a cast messages the actor's own mailbox (it runs at home), and a cascade
-/// message or an alias receiver is an ordinary send.
+/// `self.name := v` writes (its `field_at_reads` are the reflective reads).
+/// Inside an actor closure these reach the actor cell exactly like a
+/// `self.name :=`: away from home they raise `actor_state_unreachable`. Only a
+/// plain send to a literal `self` counts: a cast messages the actor's own
+/// mailbox (it runs at home), and a cascade message or an alias receiver is an
+/// ordinary send.
 #[derive(Default)]
 struct ReflectiveAccesses {
     /// `self fieldAt: #name put: v` / `self clearField: #name`, any name: a
     /// write away from home raises whatever field it names.
     writes: Vec<ReflectiveWrite>,
-    /// `self fieldAt: #name` reads of mutable fields, sorted. A name that is
-    /// not a mutable field (a `field:` slot, or no field at all) reads the
-    /// same anywhere and is left out, as an immutable `self.name` read is.
-    reads: BTreeSet<String>,
-    /// Whether some `self fieldAt: k` read has a computed argument (it may
-    /// name a mutable field).
-    computed_read: bool,
-}
-
-impl ReflectiveAccesses {
-    fn reads_any(&self) -> bool {
-        !self.reads.is_empty() || self.computed_read
-    }
-
-    /// What the block reads reflectively, `field n, m`, or `a field` when
-    /// only computed reads were seen; `None` when it makes no reflective
-    /// read.
-    fn read_noun(&self) -> Option<String> {
-        if !self.reads.is_empty() {
-            let names = self
-                .reads
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!("field {names}"))
-        } else if self.computed_read {
-            Some("a field".to_string())
-        } else {
-            None
-        }
-    }
 }
 
 /// See [`ReflectiveAccesses`].
-fn reflective_accesses(block: &Block, fields: &HashSet<String>) -> ReflectiveAccesses {
+fn reflective_accesses(block: &Block) -> ReflectiveAccesses {
     let mut found = ReflectiveAccesses::default();
-    let symbol_arg = |send: &SendRef<'_>| match send.arguments.first() {
-        Some(Expression::Literal(Literal::Symbol(name), _)) => Some(name.to_string()),
-        _ => None,
-    };
     for stmt in &block.body {
         walk_sends(&stmt.expression, &mut |send| {
             if send.is_cast || !is_reflective_self_access(&send) {
@@ -698,22 +659,17 @@ fn reflective_accesses(block: &Block, fields: &HashSet<String>) -> ReflectiveAcc
             let selector = match send.selector.well_known() {
                 Some(WellKnownSelector::FieldAtPut) => "fieldAt:put:",
                 Some(WellKnownSelector::ClearField) => "clearField:",
-                Some(WellKnownSelector::FieldAt) => {
-                    match symbol_arg(&send) {
-                        Some(name) if fields.contains(&name) => {
-                            found.reads.insert(name);
-                        }
-                        Some(_) => {}
-                        None => found.computed_read = true,
-                    }
-                    return;
-                }
-                // `hasField:` probes are `class_var_accesses`'s.
+                // `fieldAt:` reads and `hasField:` probes are
+                // `class_var_accesses`'s.
                 _ => return,
+            };
+            let field = match send.arguments.first() {
+                Some(Expression::Literal(Literal::Symbol(name), _)) => Some(name.to_string()),
+                _ => None,
             };
             found.writes.push(ReflectiveWrite {
                 selector,
-                field: symbol_arg(&send),
+                field,
                 start: send.receiver.span().start(),
             });
         });
@@ -868,7 +824,6 @@ fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
     accesses: &ClassVarAccesses,
-    reflective: &ReflectiveAccesses,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
@@ -883,7 +838,7 @@ fn reads_diagnostic(
             .join(", ");
         format!("field {fields}")
     });
-    let reads = match (direct, reflective.read_noun()) {
+    let reads = match (direct, accesses.field_at_read_noun("field")) {
         (None, None) => None,
         (Some(direct), None) => Some(format!("reads {direct} of {class}")),
         (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),

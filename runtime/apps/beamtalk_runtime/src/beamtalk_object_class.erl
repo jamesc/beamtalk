@@ -1872,9 +1872,10 @@ handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = Clas
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}};
 handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises. Shared with `get_class_var`'s
-    %% declared-`late` branch above (BT-4061).
-    {reply, class_var_assigned(ClassVars, Name), State};
+    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
+    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
+    %% declared-`late` branch (`read_in/4`, BT-4061).
+    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
 handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
     %% the instance-side intrinsic's `clearField: -> Self` convention.
@@ -2009,108 +2010,34 @@ notify_compiler_server_register(ClassName, Meta) ->
     end.
 
 -doc """
-Read class variable `Name` from the class-state map `ClassVars` of `ClassName`
-(ADR 0124 §1/§4i/B4): `{ok, Value}`, or `{error, Error}` with the structured
-error *built, not raised*, so the class gen_server can reply with it instead of
-crashing. The one read rule behind both the `get_class_var` `handle_call`
-clause and the `Cls fieldAt: #x` reflection send (`dispatch_class_method/5`,
-BT-4148), so the two cannot drift apart.
-
-A declared-`late` class variable is an error when unassigned, agreeing with
-the instance-side direct read (`generate_late_field_read`) — keyed on
-*declared* late. Any other absent name goes through the shared declared-set
-rule (BT-3807): undeclared raises `undeclared_class_variable` as a method-body
-read does, and a class with unknown metadata (ClassBuilder) answers `nil`. The
-metadata is read once for both decisions.
-
-`Caller` selects the declared-set rule's form
-(`beamtalk_class_vars:check_declared/4`): `in_process` for `get_class_var`,
-which keeps the known-empty leniency, and `reflective` for `Cls fieldAt: #x`
-sent from outside, where a class with a known-empty own set (no `classState:`
-at all) raises `undeclared_class_variable` too, the same rule as
-`Cls fieldAt: #x put: v` (`write_class_var/4`).
+Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
+`{ok, Value}`, or `{error, Error}` (built, not raised, so the class gen_server
+can reply with it instead of crashing). The rule itself is
+`beamtalk_class_vars:read_in/4`, shared with the in-process `self fieldAt: #x`
+of a class method (BT-4421), so the gen_server's `get_class_var`, the outside
+`Cls fieldAt: #x` (BT-4148) and the inside read cannot drift apart.
 """.
 -spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 read_class_var(ClassName, ClassVars, Name, Caller) ->
-    Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
-    case class_var_declared_late(Kinds, Name) of
-        true ->
-            %% BT-4061: presence — not value — is assignment (ADR 0124 §2,
-            %% as amended). The presence question is `class_var_assigned/2`,
-            %% shared with the `has_class_var` clause, so the raising read
-            %% and `hasField:` cannot drift apart again.
-            case class_var_assigned(ClassVars, Name) of
-                true -> {ok, maps:get(Name, ClassVars)};
-                false -> {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)}
-            end;
-        false ->
-            case maps:find(Name, ClassVars) of
-                {ok, Value} ->
-                    {ok, Value};
-                error ->
-                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds, Caller) of
-                        ok -> {ok, nil};
-                        {error, _} = Err -> Err
-                    end
-            end
-    end.
+    beamtalk_class_vars:read_in(ClassName, ClassVars, Name, Caller).
 
 -doc """
 Write class variable `Name` into the class-state map `ClassVars` of
 `ClassName` for the `Cls fieldAt: #x put: v` reflection send (BT-4148):
 `{ok, NewClassVars}`, or `{error, Error}` (built, not raised).
 
-Decision: **checked**, like an in-process class-method write
-(`beamtalk_class_vars:put/3`, BT-3808) and unlike the out-of-band
-`{set_class_var, ...}` runtime-API call, which is deliberately unchecked
-(ADR 0124). `fieldAt:put:` is a user-facing reflection send, so it must not
-silently create a variable the class does not declare: a name already in the
-map writes unchecked, and a creating write applies the shared declared-set rule
-in its strict, reflective form (`beamtalk_class_vars:check_declared_reflective/2`):
-a class with a known-empty own set (no `classState:` at all) raises
-`undeclared_class_variable` too, since the known-empty leniency exists only for
-inherited class methods, which an outside send is not. Unknown metadata
-(ClassBuilder) stays lenient. No type check is applied, matching instance-side
-`fieldAt:put:`.
+**Checked**, unlike the out-of-band `{set_class_var, ...}` runtime-API call
+(ADR 0124). The rule is `beamtalk_class_vars:check_write/3`, shared with the
+in-process `self fieldAt: #x put: v` of a class method (BT-4421).
 """.
 -spec write_class_var(class_name(), map(), atom(), term()) ->
     {ok, map()} | {error, #beamtalk_error{}}.
 write_class_var(ClassName, ClassVars, Name, Value) ->
-    Declared =
-        case maps:is_key(Name, ClassVars) of
-            true -> ok;
-            false -> beamtalk_class_vars:check_declared_reflective(ClassName, Name)
-        end,
-    case Declared of
+    case beamtalk_class_vars:check_write(ClassName, ClassVars, Name) of
         ok -> {ok, ClassVars#{Name => Value}};
         {error, _} = Err -> Err
     end.
-
--doc """
-True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
-`ClassName` itself (class variables are not inherited, BT-3801) — the class-side
-counterpart to `beamtalk_reflection`'s `declared_late/2`, over the kinds read by
-`beamtalk_class_metadata:class_var_kinds_or_unknown/1` (`unknown` is not late).
-Keyed on *declared* late: an undeclared name is not late and falls through to
-the `check_declared/3` branch of `get_class_var`.
-""".
--spec class_var_declared_late(unknown | #{atom() => eager | late}, atom()) -> boolean().
-class_var_declared_late(unknown, _Name) ->
-    false;
-class_var_declared_late(Kinds, Name) ->
-    maps:get(Name, Kinds, eager) =:= late.
-
--doc """
-Presence test for a class variable in a class-state map (BT-4061): the one
-"is this variable assigned" helper, shared by `get_class_var`'s
-declared-`late` branch and the `has_class_var` clause, so the raising read
-and `hasField:` cannot drift apart again. Presence — not value — is
-assignment (ADR 0124 §2, as amended): a stored `nil` is assigned.
-""".
--spec class_var_assigned(map(), atom()) -> boolean().
-class_var_assigned(ClassVars, Name) ->
-    maps:is_key(Name, ClassVars).
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
