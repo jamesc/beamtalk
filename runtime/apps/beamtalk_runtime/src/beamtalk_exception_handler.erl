@@ -630,8 +630,8 @@ strip_unknown_segment(General, Type) ->
 %% user `printString` and never awaits a future. Its cost is bounded by the
 %% byte cap and the depth limit, not by the size of the value, with one
 %% exception: an integer is printed in full before the message is cut, so a
-%% very large Integer costs time proportional to its digits (`~0tP` does not
-%% bound integers either). It never crashes: a `printString` that fails falls
+%% very large Integer costs time that grows with its digit count (`~0tP`
+%% does not bound integers either). It never crashes: a `printString` that fails falls
 %% back to the term format.
 -define(BS_FAIL_VALUE_BYTES, 32).
 -define(BS_FAIL_VALUE_CHARS, 80).
@@ -660,8 +660,8 @@ bs_fail_value(Value) ->
     bs_fail_truncate(Printed).
 
 %% A value `bs_fail_value/1` renders as its `printString`: one whose printing
-%% runs no user code and costs at most its (capped) size, or its digit count
-%% for an integer.
+%% runs no user code and costs at most its (capped) size; an integer's cost
+%% grows with its digit count.
 -spec bs_fail_scalar(term()) -> boolean().
 bs_fail_scalar(Value) when is_integer(Value); is_float(Value); is_atom(Value) -> true;
 bs_fail_scalar(Value) when is_bitstring(Value) -> byte_size(Value) =< ?BS_FAIL_VALUE_BYTES;
