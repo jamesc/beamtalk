@@ -155,9 +155,12 @@ share of each figure.
 
 ### What matches or beats Elixir
 
-- **A `class sealed` method on a sealed class (3a)** compiles to a direct
-  `Mod:'class_double:'(nil, 21)` and costs exactly what `Math.double(21)` costs.
-  This is the static-dispatch target, and it already exists for one case.
+- **A `class sealed` method on a sealed class (3a)** compiled (in the table
+  above) to an unguarded `Mod:'class_double:'(nil, 21)` and cost exactly what
+  `Math.double(21)` costs. Since BT-4301 every static class send (3a-3c) is a
+  guarded direct call; since BT-4316 its hit path is one `persistent_term`
+  read of the call target's key, whose value is the class reference passed as
+  `ClassSelf`: see `results/bench-bt4316.md` for the current figures.
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.
 - **`collect:`, `inject:into:` and a `do:` that assigns nothing (6c-6e)**

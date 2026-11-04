@@ -3735,45 +3735,53 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&args_preamble, call_doc, "ClassCall"))
     }
 
-    /// ADR 0142 §2 (BT-4301): the guarded direct call of a static send of
-    /// `raw_selector`, which `class_name` itself defines, to the literal class
-    /// `class_name` compiled to `module_name`. `args_doc` must be variables or
-    /// literals: it is spliced into every arm.
+    /// ADR 0142 §2 (BT-4301, BT-4316): the guarded direct call of a static
+    /// send of `raw_selector`, which `class_name` itself defines, to the
+    /// literal class `class_name` compiled to `module_name`. `args_doc` must
+    /// be variables or literals: it is spliced into both arms.
     ///
     /// ```erlang
-    /// let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
-    /// case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Point class', 'Point') of
-    ///   <'true'> when call 'erlang':'is_pid'(ClassPid) ->
-    ///     case call 'erlang':'function_exported'('bt@point', 'class_origin', 1) of
-    ///       <'true'> when 'true' ->
-    ///         call 'bt@point':'class_origin'({'beamtalk_object', 'Point class', 'bt@point', ClassPid})
-    ///       <_> when 'true' -> call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
-    ///     end
-    ///   <_> when 'true' ->
+    /// let StaticSelf = case call 'persistent_term':'get'(
+    ///         {'bt@point', 'class_origin', 'Point class'}, 'false') of
+    ///     <'false'> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
+    ///           {'bt@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
+    ///     <StaticRef> when 'true' -> StaticRef
+    ///   end
+    /// in case StaticSelf of
+    ///   <'false'> when 'true' ->
+    ///     let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
     ///     call 'beamtalk_object_class':'class_send'(ClassPid, 'origin', [])
+    ///   <_> when 'true' -> call 'bt@point':'class_origin'(StaticSelf)
     /// end
     /// ```
     ///
-    /// The guard is the contract (ADR 0025 amendment): `direct_call_ok/2`
-    /// holds only while nothing shadows the compiled method (no class-side
-    /// extension, no ADR 0084 runtime fun) and neither the class nor an
-    /// ancestor declares class variables, exactly when the dynamic path would
-    /// run the same compiled method in the caller; otherwise the fallback is
-    /// that dynamic `class_send`, byte for byte. `function_exported/3` keeps a
-    /// method that no longer exists (`removeSelector:`, a reload that dropped
-    /// it, a module not loaded yet) on that fallback too, so it answers what a
+    /// The guard is the contract (ADR 0025 amendment). The hit path is one
+    /// `persistent_term` read of the call target's static call key
+    /// (BT-4316), whose value is the class reference the callee gets as
+    /// `ClassSelf`. The runtime installs the key
+    /// (`beamtalk_class_shadow_flags:static_call_target/4`) only while
+    /// `direct_call_ok/2` holds (nothing shadows the compiled method: no
+    /// class-side extension, no ADR 0084 runtime fun; neither the class nor
+    /// an ancestor declares class variables), the dynamic path would run
+    /// exactly this function in the caller, the function is exported and the
+    /// class process is alive, and erases it on every class-metadata write
+    /// that could change one of those answers. Otherwise the fallback is the
+    /// dynamic `class_send`, byte for byte, so a removed method answers what a
     /// dynamic send answers instead of `undef`. The direct call stays in tail
     /// position: tail recursion through a literal class reference runs in
     /// constant stack.
     ///
-    /// The callee gets the real class reference as `ClassSelf` (its tag, its
-    /// own module and its registered pid, the value a class literal evaluates
-    /// to), never `nil` (BT-4037); a class that is not registered takes the
-    /// fallback, which raises `class_not_found` as before. The pid is looked
-    /// up by the compile-time registered name
-    /// ([`Self::registered_class_pid_doc`], the BT-4295 form), never
-    /// baked: a restarted class process is found. The module is the
-    /// compile-time one the call names anyway.
+    /// The key is the call-site literal `{Module, FunName, Tag}`, passed whole
+    /// to the runtime, which never spells it. The metaclass tag keeps a call
+    /// site naming one class from hitting a key another class installed for
+    /// the same module (after `renameTo:`, or a removed class's module name
+    /// reused): such a site misses, and its own miss path answers for the
+    /// class it names (`class_not_found` once that class is gone). The callee gets the real class
+    /// reference (its tag, its own module and its registered pid, the value a
+    /// class literal evaluates to), never `nil` (BT-4037); the pid is never
+    /// baked: the key is erased when the class process goes down, so a
+    /// restarted class process is found.
     pub(super) fn guarded_class_direct_call_doc(
         &mut self,
         class_name: &str,
@@ -3783,51 +3791,59 @@ impl CoreErlangGenerator {
         arg_count: usize,
     ) -> Document<'static> {
         let tag = super::util::metaclass_tag(class_name);
-        let class_pid_var = self.fresh_var("ClassPid");
+        let class_self_var = self.fresh_temp_var("StaticSelf");
+        let static_ref_var = self.fresh_temp_var("StaticRef");
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let comma = if arg_count == 0 { "" } else { ", " };
-        let fallback = self.class_send_call_doc(&class_pid_var, selector_atom, args_doc.clone());
+        let fallback =
+            self.generate_class_send_fallback(class_name, raw_selector, args_doc.clone());
+        let key_doc = docvec![
+            "{",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::atom(safe_fn.clone()),
+            ", ",
+            leaf::atom(tag),
+            "}"
+        ];
         // BT-4366: the direct call sits inside the guard `case`, so it carries
         // the send's line itself.
         let direct_call = self.annotate_current_send_call(docvec![
             "call ",
-            leaf::atom(module_name.clone()),
+            leaf::atom(module_name),
             ":",
-            leaf::atom(safe_fn.clone()),
+            leaf::atom(safe_fn),
             "(",
-            Self::class_object_tuple_doc(
-                class_name,
-                leaf::atom(module_name.clone()),
-                leaf::var(class_pid_var.clone()),
-            ),
+            leaf::var(class_self_var.clone()),
             comma,
             args_doc,
             ")"
         ]);
         docvec![
             "let ",
-            leaf::var(class_pid_var.clone()),
-            " = ",
-            Self::registered_class_pid_doc(class_name),
-            " in case call 'beamtalk_class_shadow_flags':'direct_call_ok'(",
-            leaf::atom(tag.clone()),
+            leaf::var(class_self_var.clone()),
+            " = case call 'persistent_term':'get'(",
+            key_doc.clone(),
+            ", 'false') of <'false'> when 'true' -> ",
+            "call 'beamtalk_class_shadow_flags':'static_call_target'(",
+            key_doc,
             ", ",
             leaf::atom(class_name.to_string()),
-            ") of <'true'> when call 'erlang':'is_pid'(",
-            leaf::var(class_pid_var.clone()),
-            ") -> case call 'erlang':'function_exported'(",
-            leaf::atom(module_name),
             ", ",
-            leaf::atom(safe_fn),
+            leaf::atom(selector_atom),
             ", ",
             leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> ",
-            direct_call,
-            " <_> when 'true' -> ",
-            fallback.clone(),
-            " end <_> when 'true' -> ",
+            ") <",
+            leaf::var(static_ref_var.clone()),
+            "> when 'true' -> ",
+            leaf::var(static_ref_var),
+            " end in case ",
+            leaf::var(class_self_var),
+            " of <'false'> when 'true' -> ",
             fallback,
+            " <_> when 'true' -> ",
+            direct_call,
             " end"
         ]
     }

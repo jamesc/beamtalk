@@ -113,6 +113,66 @@ reader's view.
 - The key is never rewritten while present (either value answers both guards
   without an install), so a send never pays a global scan.
 
+BT-4316: static call keys. A static class send that compiles to a guarded
+direct call (ADR 0142 §2) reads ONE `persistent_term` key per call target,
+`{Module, FunName, Tag}` (the call-site literal, passed in whole so the runtime
+never spells it; `Tag` is the metaclass tag of the class the call site names),
+whose value is the class reference the callee receives as `ClassSelf`:
+`#beamtalk_object{class = Tag, class_mod = Module, pid = Pid}`, served from the
+literal area without a copy. The tag is part of the key because the module is
+not unique to a class over time: after `renameTo:` (same module, same process)
+or when a removed class's module name is reused, a call site still naming the
+old class must miss and ask for that class (`class_not_found`), not run with
+the reference another class installed. While the key is present:
+- the class's derived flag is `true` (`direct_call_ok/2` holds);
+- `beamtalk_class_dispatch:in_caller_owner/2`, the dynamic path's answer,
+  names this class as both receiver and definer, `Module` as both modules and
+  `FunName` as the function, so a dynamic send would run exactly this
+  compiled function in the caller;
+- `erlang:function_exported(Module, FunName, Arity)` holds;
+- `Pid` is the class's live registered process.
+
+`static_call_target/4` (the call site's miss path) derives all four and, under
+the class's tag lock, records the key in the per-tag index
+(`beamtalk_class_registry:record_static_call_key/2`) and then puts it. Every
+erase of the class's derived key (`erase_direct_flag/1`: `set/2`,
+`set_class_vars/2`, `invalidate/1`, and through `invalidate/1` an ancestor's
+write) also erases the class's static call keys, unconditionally (a static call
+key may outlive a derived key another path erased), so a key is gone wherever
+the dynamic answer could change. The class monitor's `'DOWN'` handler calls
+`invalidate/1` too, so a dead pid is not served once the monitor has seen the
+death. Between the death and that `'DOWN'`, a direct call may still receive the
+dead pid in `ClassSelf`: the same window as a `whereis` that answers just
+before the process dies, and harmless to a method that by construction needs
+no class process.
+
+Reload has no `undef` window. A compiled module's `-on_load` hook registers
+the class synchronously (`register_class/0` -> `update_class/2` ->
+`apply_class_info/2`), and the VM keeps the OLD code current until that hook
+returns. Both of the reload's invalidations therefore erase the class's keys
+while the old code still exports every function a key names, and any install
+after the second one reads the new metadata, in which a dropped method is no
+longer the owner, so it declines. By the time the new code is current no key
+names a function it dropped. A method the reload adds is installed only once
+the new code exports it. (Proved by the "reload that drops a method" test in
+`beamtalk_class_shadow_flags_tests`.)
+
+A call site that keeps declining (a shadowed class, a class-variable chain,
+an unregistered or dead class, another owner) has no key, so it pays this
+whole unlocked check on every send, and then `class_send` checks the same
+facts again: dearer than the BT-4301 guard's decline, which was one
+`persistent_term` read. A declining site already takes the gen_server
+`class_send`, which dominates that cost, so a negative answer is not cached:
+caching it would need an eraser for every way a site starts to qualify
+(`clear/2` of a shadow, class registration and restart), and a missed one
+would strand the site on the slow path.
+
+Each `persistent_term:erase/1` of a present key costs a global literal-area
+scan, so a metadata write on a class with k installed static call keys costs
+k+1 scans instead of 1 (measured in
+`benchmarks/vs-elixir/results/bench-bt4316.md`). Only metadata writes erase;
+never the send path.
+
 `persistent_term` writes that change a value trigger a global scan, so only
 actual transitions write (set when unset, erase when set); both are rare
 (registration / class (re)definition), never on the send path.
@@ -128,10 +188,13 @@ actual transitions write (set when unset, erase when set); both are rare
     is_direct_flag_set/1,
     direct_flag_value/1,
     invalidate/1,
+    erase_all_static_call_keys/0,
     set_class_vars/2,
     mark_ready/0,
     is_ready/0,
-    with_tag_lock/2
+    with_tag_lock/2,
+    static_call_target/4,
+    static_call_key_value/1
 ]).
 
 -include("beamtalk.hrl").
@@ -145,7 +208,9 @@ actual transitions write (set when unset, erase when set); both are rare
 -type kind() :: extension | runtime_fun | class_vars.
 %% The derived flag's installed value (BT-4299; see the moduledoc).
 -type derived() :: true | class_vars.
--export_type([kind/0, derived/0]).
+%% A static call key (BT-4316): `{Module, FunName, Tag}`, the call-site literal.
+-type static_call_key() :: {module(), atom(), atom()}.
+-export_type([kind/0, derived/0, static_call_key/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
 key(Kind, Name) -> {beamtalk_class_shadow, Kind, Name}.
@@ -176,6 +241,9 @@ class_tag(extension, Tag) -> Tag;
 class_tag(runtime_fun, Name) -> beamtalk_class_registry:class_object_tag(Name);
 class_tag(class_vars, Name) -> beamtalk_class_registry:class_object_tag(Name).
 
+%% Erase the class's derived key and, unconditionally, its static call keys
+%% (BT-4316): a static call key may outlive a derived key another path erased.
+%% Runs only under the tag lock.
 -spec erase_direct_flag(atom()) -> ok.
 erase_direct_flag(Tag) ->
     case persistent_term:get(Tag, false) of
@@ -184,7 +252,14 @@ erase_direct_flag(Tag) ->
         _ ->
             _ = persistent_term:erase(Tag),
             ok
-    end.
+    end,
+    lists:foreach(
+        fun(Key) ->
+            _ = persistent_term:erase(Key),
+            ok
+        end,
+        beamtalk_class_registry:take_static_call_keys(Tag)
+    ).
 
 -doc """
 Erase `ClassName`'s derived direct-call flag, and its descendants', each under
@@ -208,6 +283,23 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
+
+-doc """
+Erase every class's derived key and static call keys, each under its tag lock
+(BT-4316). Called by a (re)starting `beamtalk_class_monitor`: a class killed
+while the monitor was down sends it no `'DOWN'`, so the per-class
+`invalidate/1` that would erase its static call keys never runs, and those
+keys would keep serving the dead pid as `ClassSelf` after lazy recovery
+restarts the class. A fresh monitor is rare, so erasing all keys is cheap; the
+next send of each call site re-installs from the live class. Must never be
+called from inside `with_tag_lock/2`.
+""".
+-spec erase_all_static_call_keys() -> ok.
+erase_all_static_call_keys() ->
+    lists:foreach(
+        fun(Tag) -> with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end) end,
+        beamtalk_class_registry:static_call_key_tags()
+    ).
 
 %% Erase one class's derived key under its tag lock, always taking the lock
 %% (see `invalidate/1`: an in-flight install may still put a stale value).
@@ -359,16 +451,95 @@ install_direct_flag(ClassTag, ClassName) ->
         false ->
             false;
         _ ->
-            with_tag_lock(ClassTag, fun() ->
-                case derive(ClassTag, ClassName) of
+            with_tag_lock(ClassTag, fun() -> install_direct_flag_locked(ClassTag, ClassName) end)
+    end.
+
+%% The derived value under the tag lock: the installed one, or re-derived from
+%% the raw flags and installed. Must run inside `with_tag_lock(ClassTag, _)`.
+-spec install_direct_flag_locked(atom(), atom()) -> derived() | false.
+install_direct_flag_locked(ClassTag, ClassName) ->
+    case persistent_term:get(ClassTag, false) of
+        false ->
+            case derive(ClassTag, ClassName) of
+                false ->
+                    false;
+                Value ->
+                    persistent_term:put(ClassTag, Value),
+                    Value
+            end;
+        Value ->
+            Value
+    end.
+
+-doc """
+The miss path of a static class send's guarded direct call (BT-4316, ADR 0142
+§2): the class reference to pass as `ClassSelf` to `Module:FunName/Arity`, or
+`false` (take the dynamic `class_send` fallback). `Key` is the call site's
+`{Module, FunName, Tag}` literal, `Tag` the metaclass tag of `ClassName`.
+When every condition in the moduledoc's "static call keys" holds, installs
+`Key` with that reference under the class's tag lock, so the call site's next
+`persistent_term:get(Key, false)` answers it.
+Declines, installing nothing, when the class is shadowed, has class variables
+in its chain, is not registered or not alive, when the dynamic path's owner
+(`beamtalk_class_dispatch:in_caller_owner/2`) is another class, module or
+function, or when the function is not exported.
+
+The checks run once without the lock, so a call site that keeps declining
+never takes a global lock per send, and again under it, after the class's
+derived flag is installed there: every eraser holds the same lock, so an
+install that lands before an erase is removed by it, and one after it sees
+the write. Never called from inside `with_tag_lock/2`.
+""".
+-spec static_call_target(static_call_key(), atom(), atom(), arity()) ->
+    #beamtalk_object{} | false.
+static_call_target({Module, FunName, Tag} = Key, ClassName, Selector, Arity) when
+    is_atom(Module), is_atom(FunName), is_atom(Tag)
+->
+    case static_call_ref(Key, ClassName, Selector, Arity) of
+        false ->
+            false;
+        #beamtalk_object{} ->
+            with_tag_lock(Tag, fun() ->
+                case
+                    install_direct_flag_locked(Tag, ClassName) =:= true andalso
+                        static_call_ref(Key, ClassName, Selector, Arity)
+                of
                     false ->
                         false;
-                    Value ->
-                        persistent_term:put(ClassTag, Value),
-                        Value
+                    #beamtalk_object{} = Ref ->
+                        %% Index first: a key is never installed without the
+                        %% row that lets `erase_direct_flag/1` find it.
+                        ok = beamtalk_class_registry:record_static_call_key(Tag, Key),
+                        persistent_term:put(Key, Ref),
+                        Ref
                 end
             end)
     end.
+
+%% The class reference a static call of `Module:FunName/Arity` may pass, or
+%% `false`: the registered class process is alive and the dynamic path's owner
+%% (`in_caller_owner/2`, which also requires `direct_call_ok/2`) is this class
+%% defining `Selector` as exactly this exported function. Under the tag lock
+%% it takes no lock itself: the caller installed the derived flag first, so
+%% `direct_call_ok/2` answers from it.
+-spec static_call_ref(static_call_key(), atom(), atom(), arity()) ->
+    #beamtalk_object{} | false.
+static_call_ref({Module, FunName, Tag}, ClassName, Selector, Arity) ->
+    Pid = beamtalk_class_registry:whereis_class(ClassName),
+    case is_pid(Pid) andalso beamtalk_class_dispatch:in_caller_owner(Pid, Selector) of
+        {owner, ClassName, Tag, Module, ClassName, Module, FunName} ->
+            case erlang:function_exported(Module, FunName, Arity) of
+                true -> #beamtalk_object{class = Tag, class_mod = Module, pid = Pid};
+                false -> false
+            end;
+        _ ->
+            false
+    end.
+
+-doc "The class reference a static call key holds, `false` when absent (test hook).".
+-spec static_call_key_value(static_call_key()) -> #beamtalk_object{} | false.
+static_call_key_value(Key) ->
+    persistent_term:get(Key, false).
 
 -doc """
 Mark the flags authoritative: the extension registry exists, so an unset

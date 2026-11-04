@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4316: a class whose static call key a test warms, then hot-patches with
+// a runtime class-method fun. See guarded_static_call_test.bt.
+
+Object subclass: GscWarmPatched
+
+  class answer -> Symbol => #compiled

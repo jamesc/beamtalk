@@ -8,7 +8,7 @@ Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 > - **Rule 2 is chain-wide (deviation from §1).** A class keeps its class process when it *or any class in its superclass chain* declares class variables, not only when the resolved method's defining class does. A subclass that declares none of its own holds its ancestors' class variables in its own process, and a method it defines itself reaches them through a class-side `self` send, which would raise `class_state_unreachable` in the caller. The runtime rule is `beamtalk_class_metadata:chain_has_class_variables/1`, the compile-time rule `ClassHierarchy::runs_class_method_in_caller` (Rust), and the derived `direct_call_ok/2` flag folds the class-variable facts over the whole chain (BT-4300, BT-4301).
 > - **The guarded static call** also checks `erlang:function_exported/3`, so a method removed by `removeSelector:` or a reload takes the `class_send` fallback instead of raising `undef`, and gets the class pid by `erlang:whereis/1` of the compile-time registered name. The direct call stays in tail position. Class-side `self foo` and explicit own-class sends go through `class_self_direct_ok/4`, sealed or not; no unguarded class-side direct call remains. The `class_var_abi` is 3 (the class-method calling convention changed); modules compiled for 2 are refused at load.
 > - **Flag erasure** is as amended in §2 below: a class's own derived inputs are raised before its change is visible, its descendants' flags are erased just after.
-> - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 is the follow-up to bring it back.
+> - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 brought it back to the target with one `persistent_term` read per static call target (§2, amended).
 > - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
 > - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
 > - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307).
@@ -218,6 +218,57 @@ end
   `beamtalk_class_metadata:put_class_variables/2`.
 - This guard **replaces** the unguarded ADR 0129 static calls, which closes
   BT-4126, BT-4133 and BT-4134 for class methods.
+- **Amended (BT-4316, 2026-11-04): one read per static call target.** The
+  shipped guard read the class's flag, called `function_exported/3` and
+  `erlang:whereis/1` per send (row 3a: 7.03 reductions). A static send now
+  reads one `persistent_term` key per call target, `{Module, FunName, Tag}`
+  (`Tag` is the metaclass tag of the class the call site names), whose value
+  is the class reference the callee receives:
+
+  ```erlang
+  let ClassSelf = case call 'persistent_term':'get'(
+                        {'bt@app@point', 'class_origin', 'Point class'}, 'false') of
+      <'false'> -> call 'beamtalk_class_shadow_flags':'static_call_target'(
+                       {'bt@app@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
+      <Ref>     -> Ref
+    end
+  in case ClassSelf of
+    <'false'> -> <today's class_send>
+    <_>       -> call 'bt@app@point':'class_origin'(ClassSelf)
+  end
+  ```
+
+  `static_call_target/4` installs the key, under the class's tag lock, only
+  while `direct_call_ok/2` holds, the dynamic path's in-caller owner
+  (`beamtalk_class_dispatch:in_caller_owner/2`) names this class, module and
+  function, the function is exported and the registered class process is
+  alive. Every erase of the class's derived flag (and so every ancestor
+  write) erases its static call keys, and so does the class monitor's
+  `'DOWN'`.
+  - **The tag is part of the key.** A module is not unique to one class over
+    time: `renameTo:` keeps the module and process, and a removed class's
+    module name can be reused. A call site still naming the old class misses
+    the new class's key and asks for its own class, so it raises
+    `class_not_found` as before, instead of running with the other class's
+    reference.
+  - **Reload has no `undef` window.** A compiled module's `-on_load` hook
+    registers the class synchronously, and the VM keeps the old code current
+    until the hook returns. Both of the reload's erases therefore land while
+    the old code still exports every function a key names. Any install after
+    the second erase reads the new metadata, in which a dropped method is no
+    longer the owner, so it declines. No key names a dropped function once the
+    new code is current, so a static send of it takes the fallback, as the
+    BT-4301 per-send `function_exported/3` check ensured. A method the reload
+    adds is installed only once the new code exports it.
+  - **A declining call site costs more per send.** A site that never gets a
+    key (shadowed, class variables in the chain, another owner, a dead class)
+    runs the unlocked check on every send and then `class_send`. That costs
+    more than the old one-read decline, but less than the `class_send` it
+    leads to. A negative answer is not cached, because every change that lets
+    a site qualify would need to erase it.
+
+  See the `beamtalk_class_shadow_flags` moduledoc and
+  `benchmarks/vs-elixir/results/bench-bt4316.md`.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

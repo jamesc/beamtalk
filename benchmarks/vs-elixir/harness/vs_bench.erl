@@ -498,7 +498,7 @@ compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoi
 compiles_to("2c") ->
     "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
 compiles_to("3a") ->
-    "guarded direct call: erlang:whereis(registered name) + direct_call_ok/2, Mod:'class_double:'(ClassRef, 21) (BT-4301)";
+    "guarded direct call: one persistent_term:get of the {Mod, Fun, Tag} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
 compiles_to("3b") ->
     "guarded direct call, as 3a: `class sealed` plays no part (ADR 0142, BT-4301)";
 compiles_to("3c") -> "guarded direct call, as 3a: open class (ADR 0142, BT-4301)";
