@@ -68,6 +68,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_class_methods_map/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
+    class_var_reflection_op/2,
     is_class_var_reflection_send/2,
     is_class_var_reflection_selector/1,
     %% ADR 0114: in-place identity move for a dynamic
@@ -2119,8 +2120,10 @@ The class-variable reflection sends `dispatch_class_method/5` answers from the
 class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x` /
 `Cls fieldAt: #x` / `Cls fieldAt: #x put: v`, ADR 0124 §1/§4i/B4, BT-4148), or
 `none` for every other send. The single decision behind
-`dispatch_class_method/5`, `is_class_var_reflection_send/2` and
-`is_class_var_reflection_selector/1`.
+`dispatch_class_method/5`, `is_class_var_reflection_send/2`,
+`is_class_var_reflection_selector/1` and the in-place answer to the same
+send made from inside the class's own process
+(`beamtalk_class_dispatch:class_send_from_own_process/2`, BT-4423).
 """.
 -spec class_var_reflection_op(atom(), list()) ->
     {has | clear | get, atom()} | {put, atom(), term()} | none.

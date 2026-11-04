@@ -458,6 +458,21 @@ send takes (BT-4252). This is what lets a Beamtalk-bodied protocol method
 that sends to its receiver (`Class>>printString => self name asString`)
 answer when it runs in the class process.
 
+The class-variable reflection sends (`hasField:`, `clearField:`,
+`fieldAt:`, `fieldAt:put:` with a Symbol name: the one decision,
+`beamtalk_object_class:class_var_reflection_op/2`, that the class process
+itself answers ahead of its method lookup) answer in place
+(`class_var_reflection_in_place/1`, BT-4423): the class method running here
+holds this class's variables in the process dictionary, so the
+`beamtalk_class_vars` helpers that a compiled `self fieldAt:` calls answer
+them, exactly as the class process would. This is how a cascade on `self`
+(`self fieldAt: #x put: 1; yourself`) and the class's own name
+(`Counter fieldAt: #x` inside a `Counter` class method) answer: both are
+ordinary sends whose receiver is this class. The receiver is always the
+class whose process this is, never the running method's `ClassSelf`, so an
+inherited method sending to its defining class by name from a subclass's
+process reaches the defining class's own process instead.
+
 A selector the class itself understands would run one of its own class
 methods re-entrantly, which has no safe route, so it still raises the
 structured `dispatch_error` (`handle_class_self_call/1`). So does a protocol
@@ -467,11 +482,16 @@ effect.
 """.
 -spec class_send_from_own_process(selector(), list()) -> term() | no_return().
 class_send_from_own_process(Selector, Args) ->
-    %% The same decision the external send makes before skipping the class
-    %% process (`class_chain_only_send/3`), so the two cannot disagree: the
-    %% class-variable reflection sends (`hasField:`/`clearField:`), which only
-    %% the class process answers from its own state, stay on the
-    %% `dispatch_error` path.
+    case beamtalk_object_class:class_var_reflection_op(Selector, Args) of
+        none -> class_send_from_own_process_lookup(Selector, Args);
+        Op -> class_var_reflection_in_place(Op)
+    end.
+
+%% A send `class_var_reflection_in_place/1` does not answer: the same decision
+%% the external send makes before skipping the class process
+%% (`class_chain_only_send/3`), so the two cannot disagree.
+-spec class_send_from_own_process_lookup(selector(), list()) -> term() | no_return().
+class_send_from_own_process_lookup(Selector, Args) ->
     case class_chain_only_send(self(), Selector, Args) of
         {ok, ClassName, Module} ->
             %% This is the class's own process, so `self()` is its pid.
@@ -481,6 +501,23 @@ class_send_from_own_process(Selector, Args) ->
             class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf);
         error ->
             handle_class_self_call(Selector)
+    end.
+
+%% A class-variable reflection send to this class from inside its own process
+%% (`class_send_from_own_process/2`, BT-4423): the same `beamtalk_class_vars`
+%% helper a compiled class-side `self hasField:` / `clearField:` / `fieldAt:` /
+%% `fieldAt:put:` calls, on this class's object (`class_object_from_pid/1`
+%% reads the name and module from this process's dictionary, no call).
+-spec class_var_reflection_in_place(
+    {has | clear | get, atom()} | {put, atom(), term()}
+) -> term().
+class_var_reflection_in_place(Op) ->
+    ClassSelf = beamtalk_class_registry:class_object_from_pid(self()),
+    case Op of
+        {has, Name} -> beamtalk_class_vars:has(ClassSelf, Name);
+        {clear, Name} -> beamtalk_class_vars:clear(ClassSelf, Name);
+        {get, Name} -> beamtalk_class_vars:field_at(ClassSelf, Name);
+        {put, Name, Value} -> beamtalk_class_vars:field_at_put(ClassSelf, Name, Value)
     end.
 
 -doc """

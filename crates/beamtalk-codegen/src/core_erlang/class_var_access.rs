@@ -227,6 +227,15 @@ impl CoreErlangGenerator {
     /// The reflection intrinsics call it; the capture walker
     /// ([`Self::block_reads_class_var`]) applies the same rule to the reads.
     ///
+    /// A cascade message to `self` and a send to the class's own name stay
+    /// ordinary sends here (BT-4423): the runtime answers them in place when
+    /// they reach the class from inside its own process
+    /// (`beamtalk_class_dispatch:class_send_from_own_process/2`), and by
+    /// message from anywhere else, so they never read a capture and the
+    /// walker rightly does not count them. A class name always means that
+    /// class, never the running method's `ClassSelf`, so lowering it here
+    /// against `ClassSelf`'s key would be wrong in an inherited method.
+    ///
     /// No method is special-cased (BT-4301): a method of an open stateless
     /// class may run for a subclass receiver that declares class variables,
     /// so its `hasField:` is not a constant. In the caller, with no

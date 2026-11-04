@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-4423 (ADR 0124 §4i, ADR 0130 §2): the class-side reflection
+// sends written as a cascade on `self` or with the class's own name as the
+// receiver, inside a class method, answer the same as the plain `self` form
+// (BT-4421), with no re-entrant `class_send` (`dispatch_error`).
+//
+// Fixtures: stdlib/test/fixtures/class_reflection_cascade_own_name_actor.bt,
+// stdlib/test/fixtures/class_reflection_own_name_sub_actor.bt
+
+TestCase subclass: ClassReflectionCascadeOwnNameTest
+
+  // One test drives the fixture class through the whole lifecycle: its class
+  // variables live in one long-lived class gen_server, never reset between
+  // test methods, so several methods on the same class would be
+  // order-dependent.
+  testCascadeAndOwnNameReflectionLifecycle =>
+    // Cascade on `self`.
+    self assert: (ClassReflectionCascadeOwnNameActor cascadeWrite: 3) equals: 3
+    self assert: ClassReflectionCascadeOwnNameActor cascadeRead equals: 3
+    // `extra` has no initializer but is declared, so it starts assigned (`nil`).
+    self assert: ClassReflectionCascadeOwnNameActor cascadeHas
+    self deny: ClassReflectionCascadeOwnNameActor cascadeSetAndClear
+    self deny: ClassReflectionCascadeOwnNameActor cascadeHas
+    // The class's own name as the receiver.
+    self assert: ClassReflectionCascadeOwnNameActor namedRead equals: 3
+    self assert: (ClassReflectionCascadeOwnNameActor namedWrite: 4) equals: 4
+    self assert: ClassReflectionCascadeOwnNameActor getTotal equals: 4
+    self deny: (ClassReflectionCascadeOwnNameActor namedHas: #extra)
+    self assert: (ClassReflectionCascadeOwnNameActor namedSet: 9) equals: 9
+    self assert: (ClassReflectionCascadeOwnNameActor namedHas: #extra)
+    self assert: ClassReflectionCascadeOwnNameActor cascadeHas
+    self deny: ClassReflectionCascadeOwnNameActor namedClear
+    self assert: (ClassReflectionCascadeOwnNameActor namedSumInto: #(1, 2, 3)) equals: 10
+    self should: [
+      ClassReflectionCascadeOwnNameActor namedReadNope
+    ] raise: #undeclared_class_variable
+    // The class process survived the error above.
+    self assert: ClassReflectionCascadeOwnNameActor getTotal equals: 10
+    // An inherited method: `self` is the subclass, the parent's name is the
+    // parent, whose own class process answers.
+    self assert: ClassReflectionOwnNameSubActor cascadeRead equals: 100
+    self assert: ClassReflectionOwnNameSubActor namedRead equals: 10
+    self assert: (ClassReflectionOwnNameSubActor namedWrite: 11) equals: 100
+    self assert: ClassReflectionCascadeOwnNameActor getTotal equals: 11
+    self assert: ClassReflectionOwnNameSubActor getTotal equals: 100
