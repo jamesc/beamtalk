@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ClassReflectionCascadeOwnNameActor — test fixture for BT-4423 (ADR 0124
+// §4i, ADR 0130 §2)
+//
+// The class-side reflection sends (`fieldAt:`, `fieldAt:put:`, `hasField:`,
+// `clearField:`) written as a cascade on `self`, or with the class's own name
+// as the receiver, inside a class method answer the same as the plain `self`
+// form, with no re-entrant `dispatch_error`. Kept as its own class so the
+// lifecycle test that drives it owns its long-lived class gen_server's class
+// variables.
+
+Actor subclass: ClassReflectionCascadeOwnNameActor
+  classState: total :: Integer = 0
+  classState: extra
+
+  // Cascade on `self`.
+  class cascadeWrite: value =>
+    self fieldAt: #total put: value; yourself
+    self.total
+
+  class cascadeRead => self yourself; fieldAt: #total
+
+  class cascadeHas => self yourself; hasField: #extra
+
+  class cascadeSetAndClear =>
+    self fieldAt: #extra put: 1; clearField: #extra
+    self hasField: #extra
+
+  // The class's own name as the receiver.
+  class namedRead => ClassReflectionCascadeOwnNameActor fieldAt: #total
+
+  class namedWrite: value =>
+    ClassReflectionCascadeOwnNameActor fieldAt: #total put: value
+    self.total
+
+  class namedHas: name => ClassReflectionCascadeOwnNameActor hasField: name
+
+  class namedClear =>
+    ClassReflectionCascadeOwnNameActor clearField: #extra
+    self hasField: #extra
+
+  class namedSet: value =>
+    ClassReflectionCascadeOwnNameActor fieldAt: #extra put: value
+
+  // Inside a closure run at home.
+  class namedSumInto: items =>
+    items
+      do: [:each |
+        ClassReflectionCascadeOwnNameActor fieldAt: #total put: (ClassReflectionCascadeOwnNameActor fieldAt: #total) + each
+      ]
+    self.total
+
+  // Undeclared name: raises as the `self` form does.
+  class namedReadNope => ClassReflectionCascadeOwnNameActor fieldAt: #nope
+
+  class getTotal => self.total

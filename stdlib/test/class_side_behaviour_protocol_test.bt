@@ -152,10 +152,10 @@ TestCase subclass: ClassSideBehaviourProtocolTest
       Bt4252ClassProtocolObjectChild byNameDefinedSelector
     ] raise: #dispatch_error
 
-  testActorByNameClassVarReflectionInClassProcessRaisesDispatchError =>
-    self should: [
-      Bt4252ClassProtocolActorChild byNameHasField
-    ] raise: #dispatch_error
+  // BT-4423: a class-variable reflection send answers in place from the
+  // class's own variables (`x` is not one; `pinned` is).
+  testActorByNameClassVarReflectionInClassProcessAnswersInPlace =>
+    self deny: Bt4252ClassProtocolActorChild byNameHasField
 
   // BT-4262: a primitive that changes the class is refused before any side
   // effect, and the class is still there.
