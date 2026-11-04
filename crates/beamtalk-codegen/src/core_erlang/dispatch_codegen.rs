@@ -713,11 +713,15 @@ impl CoreErlangGenerator {
 
     /// BT-4069, BT-4294: the receiver's trusted static class — the class
     /// the type checker's `TypeMap` records as `Known` for the receiver's
-    /// span with a trusted provenance (`Declared`, `Inferred` or
-    /// `Substituted` — the same set `project_recv_type` trusts, but as a
-    /// dispatch-owned rule: xref wants recall while dispatch wants precision,
-    /// so the two must not share one predicate) — or
+    /// span with a trusted provenance (`Declared`, `Inferred`, `Substituted`
+    /// or `Aliased` — a dispatch-owned rule: xref wants recall while dispatch
+    /// wants precision, so the two must not share one predicate) — or
     /// [`StaysDynamic::Untyped`].
+    ///
+    /// BT-4412: `Aliased` is trusted because the type checker attaches it
+    /// only at the point a user-written annotation naming an alias is
+    /// expanded (ADR 0108), so it is a declared type under another name.
+    /// `Extracted` (`-spec`-derived) stays untrusted.
     fn trusted_static_class(
         &self,
         receiver: &Expression,
@@ -738,6 +742,7 @@ impl CoreErlangGenerator {
             TypeProvenance::Declared(_)
                 | TypeProvenance::Inferred(_)
                 | TypeProvenance::Substituted(_)
+                | TypeProvenance::Aliased { .. }
         ) {
             return Err(StaysDynamic::Untyped);
         }
