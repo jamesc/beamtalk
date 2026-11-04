@@ -338,7 +338,7 @@ pub use beamtalk_core::compilation::diagnostics_policy::{
 /// 1. `analyse_full` → keep categorised diagnostics plus every `Error` (an
 ///    uncategorised structural error fails `build` and a REPL load, so a lint
 ///    gate that dropped it would pass a file neither accepts — BT-4377) →
-///    extend `diags`; then `lint_passes(&class_hierarchy)` → extend `diags`
+///    extend `diags`, after `lint_passes(&class_hierarchy)`'s diagnostics
 /// 2. `check_class_file_name_agreement` → extend `diags`
 /// 3. `apply_expect_directives` → suppress matching `@expect` annotations
 /// 4. `check_near_miss_dividers` → append near-miss section-divider diagnostics
@@ -372,10 +372,13 @@ pub fn run_post_analysis_lint_pipeline(
 ) -> beamtalk_core::semantic_analysis::ClassHierarchy {
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     let class_hierarchy = analysis_result.class_hierarchy;
+    // Lint-pass diagnostics go ahead of the analysis ones, the order the
+    // surfaces reported them in before the hook existed (they ran the passes
+    // before analysis): the output is not re-sorted.
+    diags.extend(lint_passes(&class_hierarchy));
     diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
         d.category.is_some() || d.severity == beamtalk_core::source_analysis::Severity::Error
     }));
-    diags.extend(lint_passes(&class_hierarchy));
     diags.extend(
         beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
             module, file_stem,

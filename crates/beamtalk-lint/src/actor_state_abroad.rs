@@ -2192,7 +2192,7 @@ Actor subclass: Counter
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
-        crate::check_parsed(&super::ActorStateAbroadPass, &module, &mut diags);
+        crate::run_pass(&super::ActorStateAbroadPass, &module, &mut diags);
         // Apply @expect directives
         beamtalk_core::compilation::diagnostics_policy::apply_expect_directives(
             &module, &mut diags,

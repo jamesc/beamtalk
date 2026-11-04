@@ -89,7 +89,7 @@ pub(crate) struct LintContext<'a> {
 pub(crate) trait LintPass {
     fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>);
 
-    /// The tree [`run_lint_passes`] hands to [`LintPass::check`].
+    /// The tree [`run_lint_passes_with_hierarchy`] hands to [`LintPass::check`].
     fn tree(&self) -> LintTree {
         LintTree::Normalised
     }
@@ -188,7 +188,8 @@ fn tree_for<'m>(pass: &dyn LintPass, parsed: &'m Module, normalised: &'m Module)
     }
 }
 
-/// One pass on `module`, reading the tree [`run_lint_passes`] would hand it:
+/// One pass on `module`, reading the tree [`run_lint_passes`] would hand it
+/// and against the same module-local hierarchy:
 /// for a pass's own tests.
 #[cfg(test)]
 pub(crate) fn run_pass(pass: &dyn LintPass, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
@@ -196,25 +197,6 @@ pub(crate) fn run_pass(pass: &dyn LintPass, module: &Module, diagnostics: &mut V
     let hierarchy = module_hierarchy(module);
     pass.check(
         tree_for(pass, module, &normalised),
-        &LintContext {
-            hierarchy: &hierarchy,
-        },
-        diagnostics,
-    );
-}
-
-/// [`run_pass`]-style direct call of `pass` on `module` exactly as parsed,
-/// against the module-local hierarchy: for tests that call
-/// [`LintPass::check`] themselves.
-#[cfg(test)]
-pub(crate) fn check_parsed(
-    pass: &dyn LintPass,
-    module: &Module,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let hierarchy = module_hierarchy(module);
-    pass.check(
-        module,
         &LintContext {
             hierarchy: &hierarchy,
         },

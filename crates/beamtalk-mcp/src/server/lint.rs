@@ -41,9 +41,8 @@ pub(crate) struct LintResult {
 /// Run the shared lint analysis pipeline for a single
 /// module. Callers pre-filter `parse_diags` per their severity requirements
 /// and pass them in; this helper runs semantic analysis with cross-file
-/// class context, filters analysis diagnostics by `category.is_some()`,
-/// appends the lint-pass results (run against that cross-file hierarchy,
-/// BT-4183), applies `@expect` directives, and returns the
+/// class context, runs the lint passes against that cross-file hierarchy
+/// (BT-4183), filters analysis diagnostics by `category.is_some()`, applies `@expect` directives, and returns the
 /// resulting diagnostics together with the `ClassHierarchy` (used by
 /// `compute_diagnostic_summary` for type inference).
 ///
