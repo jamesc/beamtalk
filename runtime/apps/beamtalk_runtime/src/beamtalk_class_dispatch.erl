@@ -42,6 +42,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     handle_class_method_call/6,
     handle_async_dispatch/5,
     class_understands_class_selector/2,
+    class_object_understands/2,
     find_class_method_from_class/2,
     in_caller_owner/2
 ]).
@@ -1898,6 +1899,24 @@ superclass_from_ets(ClassName) ->
         {ok, Super} -> Super;
         not_found -> none
     end.
+
+-doc """
+Is `Receiver` a class object whose own class side understands `Selector`
+(`class_understands_class_selector/2`)? Answers `false` for any other value,
+including a class object that only reaches `Selector` through the generic
+`Class`/`Behaviour`/`Object` protocol.
+
+BT-4075: guards the `error:` intrinsic. `Object>>error:` raises, but a class
+object with a class-side `error:` (`Result class>>error:`, `Logger
+class>>error:`) must receive the send instead, so codegen asks this before
+raising when the receiver is not statically known to be an instance.
+""".
+-spec class_object_understands(term(), selector()) -> boolean().
+class_object_understands(#beamtalk_object{class = Tag} = Receiver, Selector) ->
+    beamtalk_class_registry:is_class_object(Receiver) andalso
+        class_understands_class_selector(beamtalk_primitive:class_name_from_tag(Tag), Selector);
+class_object_understands(_Receiver, _Selector) ->
+    false.
 
 -doc """
 Test whether `ClassName`'s own metaclass tag understands `Selector`

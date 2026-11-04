@@ -3041,3 +3041,40 @@ safe_name_lookups_do_not_message_class_process_test_() ->
             end)
         ]
     end}.
+
+class_var_reflection_selectors_match_shared_fixture_test() ->
+    %% BT-4148: the runtime's class-variable reflection selector set
+    %% (`is_class_var_reflection_selector/1`, and the `class_var_reflection_op/2`
+    %% decision behind `is_class_var_reflection_send/2`) agrees with the
+    %% compile-time `ClassInfo::is_class_var_reflection_selector`. Both sides
+    %% are pinned to the same shared fixture; the Rust half is
+    %% `class_hierarchy::tests::class_var_reflection_selectors_match_shared_fixture`.
+    Fixture = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "class_var_reflection_selectors_conformance.json"
+    ]),
+    ToAtom = fun(Bin) -> binary_to_atom(Bin, utf8) end,
+    Members = [ToAtom(B) || B <- maps:get(<<"selectors">>, Fixture)],
+    NonMembers = [ToAtom(B) || B <- maps:get(<<"non_selectors">>, Fixture)],
+    ?assertNotEqual([], Members),
+    SymbolArgs = fun(Sel) ->
+        lists:duplicate(beamtalk_class_builder:selector_arity(Sel), x)
+    end,
+    lists:foreach(
+        fun(Sel) ->
+            ?assert(beamtalk_object_class:is_class_var_reflection_selector(Sel)),
+            ?assert(beamtalk_object_class:is_class_var_reflection_send(Sel, SymbolArgs(Sel)))
+        end,
+        Members
+    ),
+    lists:foreach(
+        fun(Sel) ->
+            ?assertNot(beamtalk_object_class:is_class_var_reflection_selector(Sel)),
+            ?assertNot(beamtalk_object_class:is_class_var_reflection_send(Sel, SymbolArgs(Sel)))
+        end,
+        NonMembers
+    ).

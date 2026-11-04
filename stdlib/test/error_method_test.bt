@@ -61,6 +61,34 @@ TestCase subclass: ErrorMethodTest
       42 error: 99
     ] on: Exception do: [:e | e errorClass]) equals: #Integer
 
+  // BT-4075: `error:` on a variable bound to a class is the class-side send.
+  testErrorOnClassVariableIsClassSideSend =>
+    cls := Result
+    r := cls error: #nope
+    self assert: r isError
+    self assert: r error equals: #nope
+    // The same through an untyped parameter.
+    self assert: (Validator new raise: #nope via: Result) isError
+
+  // BT-4075: an instance through the same untyped parameter still raises.
+  testErrorOnUntypedInstanceStillRaises =>
+    self assert: ([
+      Validator new raise: "bad" via: 42
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: ([
+      Validator new raise: "bad" via: 42
+    ] on: Exception do: [:e | e errorClass]) equals: #Integer
+
+  // BT-4075: `self error:` in a class method without a class-side `error:`
+  // still raises user_error.
+  testClassMethodSelfErrorRaises =>
+    self assert: ([
+      Validator rejectAll
+    ] on: Exception do: [:e | e message]) equals: "rejected"
+    self assert: ([
+      Validator rejectAll
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+
   // BT-4191: errorClass answers a Symbol, matching its `-> Symbol` declaration.
   testErrorClassIsSymbol =>
     @expect dnu
