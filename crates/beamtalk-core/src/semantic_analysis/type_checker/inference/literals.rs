@@ -278,10 +278,10 @@ impl TypeChecker {
 /// A segment's bits are known from a literal size × unit and the default
 /// `integer` size; a bare string literal and `utf*` segments are whole
 /// bytes, and so is a `float` segment of any size (it is 16, 32 or 64 bits
-/// or the construction fails). Any other segment (a variable size, a sizeless `binary` or
-/// `bits` value) is a whole number of its units, so it keeps the alignment
-/// exactly when its unit is a multiple of 8 (`binary` defaults to 8, `bits`
-/// to 1).
+/// or the construction fails). Any other segment (a variable size, a
+/// sizeless `binary` or `bits` value) is a whole number of its units, so it
+/// keeps the alignment exactly when its unit is a multiple of 8 (`binary`
+/// defaults to 8, `bits` to 1).
 pub(in crate::semantic_analysis::type_checker) fn binary_construction_type(
     segments: &[BinarySegment<Expression>],
 ) -> InferredType {

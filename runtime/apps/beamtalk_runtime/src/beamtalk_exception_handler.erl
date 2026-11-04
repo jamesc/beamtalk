@@ -613,24 +613,45 @@ strip_unknown_segment(General, Type) ->
     end.
 
 %% Render a failing segment's value as its Beamtalk `printString`, bounded so
-%% a large binary or collection cannot flood the message. Never crashes: an
-%% error formatter must not itself fail.
+%% a large binary or collection cannot flood the message. Never crashes and
+%% never blocks: an error formatter must not itself fail or wait. A value
+%% holding a future at any depth is rendered with the bounded Erlang term
+%% format, because `printString` would await the future.
 -define(BS_FAIL_VALUE_BYTES, 32).
 -define(BS_FAIL_VALUE_CHARS, 80).
 -spec bs_fail_value(term()) -> unicode:chardata().
 bs_fail_value(Value) when is_bitstring(Value), byte_size(Value) > ?BS_FAIL_VALUE_BYTES ->
     <<Prefix:?BS_FAIL_VALUE_BYTES/binary, _/bitstring>> = Value,
     [bs_fail_value(Prefix), <<"...">>];
-bs_fail_value({beamtalk_future, _} = Future) ->
-    %% printString would await the future; an error formatter must not block.
-    io_lib:format("~0tP", [Future, 10]);
 bs_fail_value(Value) ->
     Printed =
-        try
-            beamtalk_primitive:print_string(Value)
-        catch
-            _:_ -> iolist_to_binary(io_lib:format("~0tP", [Value, 20]))
+        case holds_future(Value) of
+            true ->
+                iolist_to_binary(io_lib:format("~0tP", [Value, 20]));
+            false ->
+                try
+                    beamtalk_primitive:print_string(Value)
+                catch
+                    _:_ -> iolist_to_binary(io_lib:format("~0tP", [Value, 20]))
+                end
         end,
+    bs_fail_truncate(Printed).
+
+%% True if `Term` contains a future at any depth (lists, including improper
+%% ones, tuples and maps).
+-spec holds_future(term()) -> boolean().
+holds_future({beamtalk_future, _}) ->
+    true;
+holds_future([H | T]) ->
+    holds_future(H) orelse holds_future(T);
+holds_future(T) when is_tuple(T) -> lists:any(fun holds_future/1, tuple_to_list(T));
+holds_future(M) when is_map(M) ->
+    lists:any(fun({K, V}) -> holds_future(K) orelse holds_future(V) end, maps:to_list(M));
+holds_future(_) ->
+    false.
+
+-spec bs_fail_truncate(unicode:chardata()) -> unicode:chardata().
+bs_fail_truncate(Printed) ->
     case string:length(Printed) > ?BS_FAIL_VALUE_CHARS of
         true -> [string:slice(Printed, 0, ?BS_FAIL_VALUE_CHARS), <<"...">>];
         false -> Printed

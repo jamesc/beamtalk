@@ -1543,6 +1543,25 @@ bs_fail_large_value_is_truncated_test() ->
     ?assert(byte_size(Message) < 200),
     ?assertEqual(<<"...">>, binary:part(Message, byte_size(Message), -3)).
 
+%% A future nested in a container is never awaited by the formatter: the
+%% container is rendered with the bounded Erlang term format, so the error
+%% path cannot block (EUnit's 5 s default timeout would fail this test).
+bs_fail_nested_future_does_not_block_test() ->
+    Silent = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        Inner = wrapped_failure(fun() ->
+            bs_sized([{beamtalk_future, Silent}], 8)
+        end),
+        ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+        ?assertNotEqual(nomatch, binary:match(message_of(Inner), <<"beamtalk_future">>))
+    after
+        Silent ! stop
+    end.
+
 %% A segment the compiler did not annotate reports index 0: the message names
 %% its type and value but no position.
 bs_fail_unannotated_segment_omits_position_test() ->
