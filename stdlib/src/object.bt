@@ -274,13 +274,13 @@ ProtoObject subclass: Object
   /// ```
   sealed fieldAt: name :: Symbol => @intrinsic fieldAt
 
-  /// Set the value of the named field (returns new state).
+  /// Set the value of the named field. Answers `value`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// object fieldAt: #name put: "Alice"
   /// ```
-  sealed fieldAt: name :: Symbol put: value :: Object -> Self =>
+  sealed fieldAt: name :: Symbol put: value :: Object -> Object =>
     @intrinsic fieldAtPut
 
   /// Test whether the receiver has the named field. Never raises — the

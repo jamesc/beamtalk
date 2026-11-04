@@ -19,8 +19,9 @@
 //! state on every commit** — silent data loss. This validator rejects such
 //! names at compile time so the collision is impossible by construction.
 
-use crate::ast::{Expression, Identifier, Module};
+use crate::ast::{Expression, Identifier, MethodDefinition, Module};
 use crate::ast_walker::walk_module;
+use crate::semantic_analysis::class_hierarchy::ClassInfo;
 use crate::semantic_analysis::extract_pattern_bindings;
 use crate::source_analysis::{Diagnostic, Span};
 
@@ -162,6 +163,66 @@ fn push_module_info_diagnostic(kind: &str, span: Span, diagnostics: &mut Vec<Dia
              (used by profilers, xref and cover), so the compiler reserves the name."
                 .to_string(),
         ),
+    );
+}
+
+/// Warn at the declaration of a class-side method whose selector the class
+/// process answers itself (BT-4422): `hasField:`, `clearField:`, `fieldAt:`
+/// and `fieldAt:put:`, as decided by the one shared rule
+/// [`ClassInfo::is_class_var_reflection_selector`].
+///
+/// The class process serves these as class-variable reflection ahead of the
+/// class-method lookup whenever the name argument is a Symbol
+/// (`beamtalk_object_class:class_var_reflection_op/2`), so `Cls fieldAt: #k`
+/// never reaches a user-defined `class fieldAt:`. A non-Symbol argument still
+/// does, so this is a warning, not an error. Instance-side methods of the
+/// same name are unaffected.
+///
+/// Covers class-side methods of every class in the module and standalone
+/// `Cls class >> fieldAt: …` definitions. (A protocol cannot provide a
+/// class-side method; the parser rejects one.)
+pub(crate) fn check_class_var_reflection_shadowing(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let class_methods = module
+        .classes
+        .iter()
+        .flat_map(|class| class.class_methods.iter())
+        .chain(
+            module
+                .method_definitions
+                .iter()
+                .filter(|standalone| standalone.is_class_method)
+                .map(|standalone| &standalone.method),
+        );
+    for method in class_methods {
+        push_class_var_reflection_shadowing(method, diagnostics);
+    }
+}
+
+fn push_class_var_reflection_shadowing(
+    method: &MethodDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let selector = method.selector.name();
+    if !ClassInfo::is_class_var_reflection_selector(&selector) {
+        return;
+    }
+    diagnostics.push(
+        Diagnostic::warning(
+            format!(
+                "class method `{selector}` is shadowed: the class process answers \
+                 `{selector}` itself when the argument is a Symbol, so such a send never \
+                 reaches this method"
+            ),
+            method.head_span(),
+        )
+        .with_hint(format!(
+            "Rename it. `{selector}` sent to a class is class-variable reflection \
+             (`hasField:`, `clearField:`, `fieldAt:`, `fieldAt:put:`), which the class \
+             process serves before looking up class methods."
+        )),
     );
 }
 
@@ -342,6 +403,68 @@ mod tests {
     fn allows_keyword_and_class_side_module_info() {
         let diagnostics = module_info_diagnostics_for(
             "Object subclass: Widget\n  module_info: x => x\n  class module_info => 1\n",
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    fn reflection_shadowing_for(source: &str) -> Vec<Diagnostic> {
+        let module = parse_bt(source);
+        let mut diagnostics = Vec::new();
+        check_class_var_reflection_shadowing(&module, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn warns_on_each_class_side_reflection_selector() {
+        for (decl, selector) in [
+            ("class fieldAt: key => key", "fieldAt:"),
+            ("class fieldAt: key put: value => value", "fieldAt:put:"),
+            ("class hasField: key => false", "hasField:"),
+            ("class clearField: key => nil", "clearField:"),
+        ] {
+            let source = format!("Object subclass: Reg\n  {decl}\n");
+            let diagnostics = reflection_shadowing_for(&source);
+            assert_eq!(diagnostics.len(), 1, "{selector}: {diagnostics:?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(
+                diagnostic.severity,
+                crate::source_analysis::Severity::Warning,
+                "{selector}"
+            );
+            assert!(
+                diagnostic
+                    .message
+                    .contains(&format!("class method `{selector}` is shadowed")),
+                "{selector}: {}",
+                diagnostic.message
+            );
+            assert!(
+                diagnostic
+                    .hint
+                    .as_deref()
+                    .is_some_and(|hint| hint.starts_with("Rename it")),
+                "{selector}: {diagnostic:?}"
+            );
+            // Anchored on the declaration head, not the body.
+            let head = &source[diagnostic.span.start() as usize..diagnostic.span.end() as usize];
+            assert!(head.starts_with("class "), "{selector}: {head:?}");
+        }
+    }
+
+    #[test]
+    fn warns_on_standalone_class_side_reflection_selector() {
+        let standalone = reflection_shadowing_for(
+            "Object subclass: Reg\n  run => 1\n\nReg class >> fieldAt: key => key\n",
+        );
+        assert_eq!(standalone.len(), 1, "{standalone:?}");
+    }
+
+    #[test]
+    fn allows_instance_side_and_unrelated_class_side_selectors() {
+        let diagnostics = reflection_shadowing_for(
+            "Object subclass: Reg\n  fieldAt: key => key\n  hasField: key => true\n  \
+             class at: key => key\n  class fieldAt: key default: d => d\n  \
+             class hasField: n s: s => false\n\nReg >> clearField: key => nil\n",
         );
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
