@@ -6,4 +6,5 @@
 // protocol. (`self error:` here would send to this same method again.)
 
 Object subclass: SuperErrorProbe
+
   class error: message => super error: message

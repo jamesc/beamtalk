@@ -101,29 +101,42 @@ TestCase subclass: ErrorMethodTest
     self assert: ([
       Validator error: "v"
     ] on: Exception do: [:e | e kind]) equals: #user_error
+    // A class with class variables answers in its class process; the raise
+    // still reaches the caller.
+    self assert: ([
+      DirectDispatchStateful error: "s"
+    ] on: Exception do: [:e | e kind]) equals: #user_error
 
   testErrorViaPerformOnClassWithoutClassSideErrorRaises =>
-    self assert: ([
-      Integer perform: #error: withArguments: #("y")
-    ] on: Exception do: [:e | e kind]) equals: #user_error
-    self assert: ([
-      Integer perform: #error: withArguments: #("y")
-    ] on: Exception do: [:e | e message]) equals: "y"
+    self
+      assert: ([
+        Integer perform: #error: withArguments: #("y")
+      ] on: Exception do: [:e | e kind])
+      equals: #user_error
+    self
+      assert: ([
+        Integer perform: #error: withArguments: #("y")
+      ] on: Exception do: [:e | e message])
+      equals: "y"
 
   testErrorViaPerformOnInstanceRaises =>
     self assert: ([
       42 perform: #error: withArguments: #("z")
     ] on: Exception do: [:e | e kind]) equals: #user_error
-    self assert: ([
-      42 perform: #error: withArguments: #("z")
-    ] on: Exception do: [:e | e errorClass]) equals: #Integer
+    self
+      assert: ([
+        42 perform: #error: withArguments: #("z")
+      ] on: Exception do: [:e | e errorClass])
+      equals: #Integer
 
   // The literal, a variable and `perform:` agree.
   testErrorOnClassLiteralMatchesVariable =>
     cls := Integer
     literal := [Integer error: "x"] on: Exception do: [:e | e errorClass]
     viaVar := [cls error: "x"] on: Exception do: [:e | e errorClass]
-    viaPerform := [Integer perform: #error: withArguments: #("x")] on: Exception do: [:e | e errorClass]
+    viaPerform := [
+      Integer perform: #error: withArguments: #("x")
+    ] on: Exception do: [:e | e errorClass]
     self assert: literal equals: viaVar
     self assert: viaPerform equals: viaVar
 
