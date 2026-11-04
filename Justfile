@@ -854,7 +854,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-lint-stamp
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-coverage-skips test-lint-stamp
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -898,6 +898,21 @@ lint-removed-facade-names:
 [windows]
 lint-removed-facade-names:
     @echo "lint-removed-facade-names: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-4408): every `--skip` name in `coverage_rust_skip` must still match
+# a Rust function, so renaming a live-only `#[ignore]` test cannot silently
+# re-enable it in coverage-rust (libtest's `--skip` is a substring filter that
+# never complains). To clear a failure: update the name in `coverage_rust_skip`.
+# The self-test first proves a stale name is reported. Unix-only (bash); Linux
+# CI covers it.
+[unix]
+lint-coverage-skips:
+    @bash scripts/ci/lint-coverage-skips.sh --self-test
+    @bash scripts/ci/lint-coverage-skips.sh
+
+[windows]
+lint-coverage-skips:
+    @echo "lint-coverage-skips: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-3758): runtime/stdlib Erlang sources must recognise `^` non-local
 # returns with the `?IS_NLR(T)` guard from beamtalk.hrl, never a hand-rolled
@@ -1912,7 +1927,7 @@ coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \
     --skip bad_cookie_readiness_resolves_within_the_default_budget \
-    --skip a_real_port_conflict_exits_within_the_calibrated_grace_period \
+    --skip concurrent_launches_each_report_their_own_port \
     --skip detach_kills_the_front_and_it_exits_cleanly \
     --skip dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang"
 
