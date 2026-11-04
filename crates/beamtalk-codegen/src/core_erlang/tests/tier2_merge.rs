@@ -169,3 +169,30 @@ fn caret_out_of_merged_fun_carries_take_plus_locals() {
         "no findings on the merged shape:\n{out}"
     );
 }
+
+/// BT-4312 (finding A of the review): a merged fun's `^` that unwinds through
+/// a writing `ensure:` carries the captured locals as they were at the `^`
+/// (`count` is 11 there). The relay resumes the throw with the carried state
+/// under the cell (`refresh(Self, Carried)`), so the cleanup's field write
+/// rides along and `count` keeps the value the `^` flushed. Rebuilding the
+/// state at the `ensure:` re-flushed `count` as bound there (1), which
+/// `RebuildsCarriedStateAtSite` rejects (`ensure_relay_corpus.rs`).
+#[test]
+fn merged_fun_ensure_relay_keeps_the_locals_the_return_carried() {
+    let out = compile(&format!(
+        "{PREAMBLE}  run =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 1. [count := count + 10. ^count] ensure: [self.n := 9]]\n    b value\n    0\n"
+    ));
+    assert!(
+        out.contains("call 'beamtalk_actor_state':'refresh'(Self, _EnsureCarried"),
+        "the relay resumes with the carried state under the cell:\n{out}"
+    );
+    let relay = out
+        .split("when call 'erlang':'=:='(_EnsureNlrTok")
+        .nth(1)
+        .and_then(|clause| clause.split("<_EnsureOther").next())
+        .expect("a relay clause");
+    assert!(
+        !relay.contains("'__local__count'"),
+        "the relay must not re-flush `count` from the `ensure:` site:\n{relay}"
+    );
+}

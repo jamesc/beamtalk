@@ -394,8 +394,9 @@ pub fn generate_test_expression_surfacing_verifier(
 /// to the wrapped [`CoreErlangGenerator`].
 pub(crate) struct ReplAssembler<'a> {
     generator: &'a mut CoreErlangGenerator,
-    /// BT-4288: the eval's non-local-return boundary, while an input that
-    /// holds a `^` in a loop or fold body is assembled: its token and, in
+    /// BT-4288 / BT-4312: the eval's non-local-return boundary, while an
+    /// input that holds a `^` run in place (other than its whole last
+    /// statement) is assembled: its token and, in
     /// trace mode, the input's source text.
     eval_boundary: Option<(String, Option<String>)>,
 }
@@ -411,7 +412,7 @@ impl<'a> ReplAssembler<'a> {
 
     /// Runs `assemble` for the REPL input `expressions` inside the eval's
     /// non-local-return boundary (BT-4288, `repl_nlr`): opened before any of
-    /// the input is compiled, so a `^` in a loop or fold body throws to it,
+    /// the input is compiled, so a `^` run in place throws to it,
     /// and closed on every path. `trace_source` is the input's source text in
     /// trace mode.
     fn with_eval_boundary(

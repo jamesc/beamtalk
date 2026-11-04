@@ -309,6 +309,7 @@ mod control_flow;
 mod cross_file_abstract;
 mod dispatch;
 mod dynamic_site_report;
+mod ensure_relay_corpus;
 mod evaluated_block_arg_local_producer;
 mod evaluated_block_grid_corpus;
 mod evaluated_block_producer;

@@ -1900,36 +1900,40 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
     }
 }
 
-/// BT-4288: the `^`s in `exprs` whose nearest enclosing block run in a loop's
-/// or fold's place is a loop or fold body: walking outward from the `^`, a
-/// block of a [`local_threading_construct`] of the
-/// [`LocalThreadingFamily::Loop`] or [`LocalThreadingFamily::Fold`] family
-/// that codegen threads today ([`LocalThreadingConstruct::is_threaded_today`])
-/// is reached before any closure (a block literal that is no construct block:
-/// stored, passed to a method, ...). Such a `^` is compiled inside the loop's
-/// `fun`, so it reaches the end of its scope only as a non-local-return throw
-/// to that scope's boundary.
+/// BT-4288 / BT-4312: the `^`s of a top-level scope (a REPL input), by where
+/// they run. The one rule both the REPL check
+/// (`validators/local_threading.rs`) and codegen's REPL eval boundary
+/// (`beamtalk-codegen`'s `repl_nlr.rs`, through [`repl_eval_returns`]) read.
+///
+/// A block is *run in place* when it is a block of a
+/// [`local_threading_construct`] that codegen threads today
+/// ([`LocalThreadingConstruct::is_threaded_today`]): a conditional arm, an
+/// evaluated or protected block (`value`, `on:do:`, `ensure:`), a loop or
+/// fold body. Any other block literal is a *closure* (stored, passed to a
+/// method, ...).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LoopBodyReturns {
-    /// Every enclosing block is run in place (a conditional arm, an evaluated
-    /// or protected block, a loop or fold body): the `^` runs while the
-    /// method or REPL input that holds it runs, so it can end it. At the REPL,
-    /// codegen establishes the eval's boundary for exactly these, and only
-    /// these throw to it.
+pub struct InPlaceReturns {
+    /// No closure encloses the `^` (it is at the root, or every enclosing
+    /// block is run in place): the `^` runs while the method or REPL input
+    /// that holds it runs, so it ends it with its value, as in a method.
     pub in_place: Vec<Span>,
-    /// A closure encloses the loop (`b := [#(1, 2) do: [:x | ^x]]`,
-    /// `Holder keep: [...]`): the `^` may run in a later REPL input, after
-    /// the eval that created it has ended, so no REPL boundary can catch it.
-    /// At the REPL it answers its value inside the loop, which ignores it, so
-    /// the REPL check rejects it (BT-4003).
+    /// The `^` is in a loop or fold body (walking outward, a loop or fold
+    /// body is reached before any closure) and a closure encloses that loop
+    /// (`b := [#(1, 2) do: [:x | ^x]]`, `Holder keep: [...]`): the `^` may
+    /// run in a later REPL input, after the eval that created it has ended,
+    /// so no REPL boundary can catch it. At the REPL it answers its value
+    /// inside the loop, which ignores it, so the REPL check rejects it
+    /// (BT-4003). A `^` held by a closure but in no loop body of its own
+    /// (`b := [:x | ^x]`) is in neither list: it answers its value where it
+    /// stands, the closure's value.
     pub in_closure: Vec<Span>,
 }
 
-/// Classifies the loop-body `^`s of `exprs` ([`LoopBodyReturns`]).
+/// Classifies the `^`s of `exprs` ([`InPlaceReturns`]).
 #[must_use]
-pub fn classify_loop_body_returns<'a>(
+pub fn classify_in_place_returns<'a>(
     exprs: impl IntoIterator<Item = &'a Expression>,
-) -> LoopBodyReturns {
+) -> InPlaceReturns {
     let mut in_place: HashSet<Span> = HashSet::new();
     let mut loop_bodies: HashSet<Span> = HashSet::new();
     let mut blocks: Vec<Span> = Vec::new();
@@ -1960,7 +1964,7 @@ pub fn classify_loop_body_returns<'a>(
     }
     let encloses =
         |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
-    let mut result = LoopBodyReturns::default();
+    let mut result = InPlaceReturns::default();
     for ret in returns {
         // The blocks enclosing the `^`, innermost first.
         let mut enclosing: Vec<Span> = blocks
@@ -1969,27 +1973,35 @@ pub fn classify_loop_body_returns<'a>(
             .filter(|b| encloses(*b, ret))
             .collect();
         enclosing.sort_by_key(|b| b.end() - b.start());
-        let Some(loop_at) = enclosing
-            .iter()
-            .position(|b| !in_place.contains(b) || loop_bodies.contains(b))
-            .filter(|&at| loop_bodies.contains(&enclosing[at]))
-        else {
-            continue;
-        };
-        if enclosing[loop_at..].iter().all(|b| in_place.contains(b)) {
+        if enclosing.iter().all(|b| in_place.contains(b)) {
             result.in_place.push(ret);
-        } else {
+        } else if enclosing
+            .iter()
+            .find(|b| !in_place.contains(*b) || loop_bodies.contains(*b))
+            .is_some_and(|b| loop_bodies.contains(b))
+        {
             result.in_closure.push(ret);
         }
     }
     result
 }
 
-/// The [`LoopBodyReturns::in_place`] returns of `exprs`: the ones a REPL eval
-/// boundary catches.
+/// The [`InPlaceReturns::in_place`] returns of the REPL input `exprs` that
+/// throw to the eval's boundary: every one but a `^` that is the input's
+/// whole last statement (`x := 1. ^x`). That one already ends the input where
+/// it stands, so it keeps its bare-value lowering and, in trace mode, the
+/// steps of the statements before it.
 #[must_use]
-pub fn loop_body_returns<'a>(exprs: impl IntoIterator<Item = &'a Expression>) -> Vec<Span> {
-    classify_loop_body_returns(exprs).in_place
+pub fn repl_eval_returns(exprs: &[Expression]) -> Vec<Span> {
+    let last_root = match exprs.last() {
+        Some(Expression::Return { span, .. }) => Some(*span),
+        _ => None,
+    };
+    classify_in_place_returns(exprs)
+        .in_place
+        .into_iter()
+        .filter(|span| Some(*span) != last_root)
+        .collect()
 }
 
 /// ADR 0131 §1 "Transitive closure" (BT-3746): the outer locals a

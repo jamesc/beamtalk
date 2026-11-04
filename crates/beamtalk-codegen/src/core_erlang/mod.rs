@@ -129,6 +129,7 @@ mod driver;
 #[cfg(any(test, feature = "test"))]
 pub mod dropped_assignment_probe;
 mod dynamic_site_report;
+pub mod ensure_nlr_relay;
 pub mod erlang_types;
 mod error;
 mod errors;
@@ -319,11 +320,12 @@ impl CoreErlangGenerator {
                 // If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
-                // BT-4288: a REPL `^` in a loop or fold body throws to the
-                // eval's boundary (`repl_nlr`); every other REPL `^` has none.
+                // BT-4288 / BT-4312: a REPL `^` run in place throws to the
+                // eval's boundary (`repl_nlr`); a closure's `^` and one that
+                // is the input's whole last statement have none.
                 let nlr_token = match self.current_nlr_token().cloned() {
                     Some(token) => Some(token),
-                    None => self.repl_loop_return_token(*span),
+                    None => self.repl_return_token(*span),
                 };
                 if let Some(nlr_token) = nlr_token {
                     // Emit diagnostic for NLR throw/catch generation.
@@ -401,62 +403,8 @@ impl CoreErlangGenerator {
                         let result_doc = self.threaded_value_doc(&tv.value);
                         (dispatch_doc, result_doc)
                     };
-                    // All NLR throws carry state as a 4-tuple.
-                    // Actor methods use the current gen_server state; value type
-                    // methods use the latest Self{N} snapshot so field mutations
-                    // accumulated before the ^ are preserved.
-                    // Class methods carry no state (ADR 0130 §3): class
-                    // variables are written in place, so a `^` unwinding out
-                    // of a class method has nothing to hand back beside the
-                    // value, and the slot is `nil`.
-                    let state_doc = if let Some(merged) = self.tier2_merged_fun.clone() {
-                        // BT-4122: a `^` out of a merged Tier 2 fun carries
-                        // the cell merged with the fun's current locals — the
-                        // throw bypasses the exit flush, so without this the
-                        // fun's local writes would be lost.
-                        let take_var = self.fresh_temp_var("T2Nlr");
-                        let (flush_doc, final_acc) =
-                            self.tier2_flush_locals_doc(&take_var, &merged.captured);
-                        docvec![
-                            "let ",
-                            leaf::var(take_var),
-                            " = ",
-                            threaded_ir::cell_take_call(),
-                            " in ",
-                            flush_doc,
-                            leaf::var(final_acc),
-                        ]
-                    } else if self.in_class_method() {
-                        leaf::atom("nil")
-                    } else if self.is_repl_mode() {
-                        // BT-4288: a REPL throw carries the workspace bindings
-                        // map at the `^` (a loop body's `StateAcc`), which the
-                        // eval's catch answers as its bindings.
-                        leaf::var(self.current_state_var())
-                    } else if self.in_cell_closure() {
-                        // ADR 0137 §3: an actor closure holds no threaded
-                        // `State`; the throw carries the actor's current one,
-                        // the cell at home (the creation-time capture away).
-                        self.cell_view_doc()
-                    } else if self.context == CodeGenContext::Actor {
-                        // A direct-params loop binds no `StateAcc`: its body cannot
-                        // write `State`, so the throw carries the state the loop
-                        // captured on entry (BT-3562's `current_field_read_state_var`).
-                        // BT-4121: unless the loop brackets guarded operators, whose
-                        // slow paths wrote the cell — then the throw carries the
-                        // live cell, like the loop's own exit pack, and the
-                        // pre-throw store below keeps those writes instead of
-                        // clobbering them with the entry state.
-                        // (BT-4180: decided and recorded by the read choke point.)
-                        match self
-                            .actor_state_source(threaded_ir::StateReadSite::NlrThrowState, *span)
-                        {
-                            synced_call::ActorStateSource::Cell => threaded_ir::cell_take_call(),
-                            synced_call::ActorStateSource::Var(var) => leaf::var(var),
-                        }
-                    } else {
-                        leaf::var(self.current_self_var())
-                    };
+                    // All NLR throws carry state as a 4-tuple (`nlr_throw_state_doc`).
+                    let state_doc = self.nlr_throw_state_doc(*span);
                     let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
                         leaf::var(nlr_token),
