@@ -24,6 +24,13 @@ Object subclass: GuardedDiffClassRoot
 
   class boom -> Integer => self error: "class boom"
 
+  // BT-4317: an explicit own-class send names this class, also when the
+  // method runs for a subclass; `receiverNameOf:` is the same send with the
+  // class held in a variable.
+  class ownLiteralReceiverName -> Symbol => GuardedDiffClassRoot receiverName
+
+  class receiverNameOf: cls -> Symbol => cls receiverName
+
   // Class-variable reflection on a class with no class variables (BT-4300):
   // the same answer in the class process and in the caller.
   class clearMissing => self clearField: #missing

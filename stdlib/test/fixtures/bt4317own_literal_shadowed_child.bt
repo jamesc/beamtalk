@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a stateless subclass of Bt4317OwnLiteralShadowed.
+
+Bt4317OwnLiteralShadowed subclass: Bt4317OwnLiteralShadowedChild

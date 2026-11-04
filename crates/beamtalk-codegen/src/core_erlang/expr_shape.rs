@@ -291,9 +291,11 @@ fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
 
 /// Checks if an expression is a self-send to a class method,
 /// including an explicit same-class-name receiver (`ClassName
-/// foo` from inside `ClassName`'s own class method dispatches exactly
-/// like `self foo` — `try_handle_class_reference` routes both through
-/// [`CoreErlangGenerator::generate_class_method_self_send`] identically).
+/// foo` from inside `ClassName`'s own class method). The latter binds `self`
+/// to `ClassName` rather than late-binding (BT-4317,
+/// `generate_own_class_literal_send`), but its value is the same closed,
+/// pure class-side send with its arguments bound ahead, so it has the same
+/// prelude shape as `self foo`.
 ///
 /// ADR 0118 phase 5b: without the `ClassReference` shape here,
 /// `subexpr_needs_prelude` is blind to it — a locally-declared
@@ -318,12 +320,15 @@ fn class_method_self_send_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
 }
 
 /// Whether `expr` is an explicit, unqualified reference to the class whose
-/// class method is being compiled (`C` inside `C class run => …`). Such a
-/// receiver dispatches exactly like `self` there, for every selector shape
-/// (unary, binary, keyword): the send is already running inside the class's
-/// own `gen_server:call`, so it must become a direct class-side call
+/// class method is being compiled (`C` inside `C class run => …`). For every
+/// selector shape (unary, binary, keyword) such a send takes the class-side
+/// handlers, never the operator lowering or a plain `class_send`: when the
+/// running receiver is `C` the send may be running inside `C`'s own
+/// `gen_server:call`, so it must become a direct class-side call
 /// ([`CoreErlangGenerator::generate_class_method_self_send`]), never a
-/// `class_send` back into that same `gen_server`.
+/// `class_send` back into that same `gen_server`. When the receiver is a
+/// subclass running an inherited method, it is an ordinary literal send to
+/// `C` (BT-4317: a class literal always denotes that class).
 pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     ctx.in_class_method
         && beamtalk_core::semantic_analysis::block_facts::is_own_class_reference(
@@ -447,9 +452,10 @@ pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
 /// The receiver is the dispatching self when it is:
 /// - bare `self` in an actor instance method or any class method, or
 /// - an own-class reference ([`is_own_class_reference`]) in a class method,
-///   which dispatches exactly like `self` there for every selector shape —
-///   the unary/keyword shapes already reach `try_handle_class_reference`
-///   unconditionally, so this is the one place the binary shape is admitted.
+///   which takes the class-side handlers for every selector shape (it may be
+///   the running receiver) — the unary/keyword shapes already reach
+///   `try_handle_class_reference` unconditionally, so this is the one place
+///   the binary shape is admitted.
 ///
 /// And the selector must be one that dispatches at all
 /// ([`binary_self_send_dispatches`]): a structurally lowered operator stays

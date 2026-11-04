@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a stateless class whose class methods name their own class
+// explicitly (`Bt4317OwnLiteralBase tag`). A class literal always denotes
+// that class, so inherited by Bt4317OwnLiteralChild these sends still run
+// with `self == Bt4317OwnLiteralBase`. Only `self tag` late-binds.
+
+Value subclass: Bt4317OwnLiteralBase
+
+  class tag -> Symbol => self name
+
+  class who -> Symbol => Bt4317OwnLiteralBase tag
+
+  class whoViaSelf -> Symbol => self tag
+
+  class make => Bt4317OwnLiteralBase new
+
+  class whoWith: suffix :: Symbol -> List => Bt4317OwnLiteralBase pair: suffix
+
+  class pair: suffix :: Symbol -> List => #(self name, suffix)
