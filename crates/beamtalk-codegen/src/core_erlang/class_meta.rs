@@ -482,30 +482,42 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4270: `'caller_safe_class_primitives' => ['signal:', ...]`, the
-    /// class-side selectors whose body is exactly one of `Exception`'s
-    /// caller-safe signal primitives
-    /// ([`super::primitives::is_caller_safe_class_primitive`]). The runtime
-    /// installs a class-literal signal send's caller-safe raise key only while
-    /// the defining module's current metadata lists the selector, so a reload
-    /// that replaces the primitive body ends the caller-side raise. Omitted
-    /// when the class has none, so only `Exception` changes.
+    /// BT-4270: `'caller_safe_class_primitives' => ~{'signal:' =>
+    /// 'classSignal:', ...}~`, each class-side selector whose body is exactly
+    /// one of `Exception`'s caller-safe signal primitives and compiles to that
+    /// raise ([`super::primitives::lowers_to_caller_safe_raise`]), mapped to
+    /// the primitive. The runtime installs a class-literal signal send's
+    /// caller-safe raise key, which names the primitive its hit arm raises
+    /// through, only while the defining module's current metadata maps the
+    /// selector to that same primitive, so a reload that replaces or swaps
+    /// the body ends the caller-side raise. Omitted when the class has none,
+    /// so only `Exception` changes.
     fn meta_caller_safe_class_primitives_entry(class: &ClassDefinition) -> Document<'static> {
-        let selectors: Vec<String> = class
-            .class_methods
-            .iter()
-            .filter(|m| {
-                m.quoted_primitive_name()
-                    .is_some_and(|p| super::primitives::is_caller_safe_class_primitive(p))
-            })
-            .map(|m| m.selector.name().to_string())
-            .collect();
-        if selectors.is_empty() {
+        let class_name = class.name.name.as_str();
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for method in &class.class_methods {
+            let Some(primitive) = method
+                .quoted_primitive_name()
+                .filter(|p| super::primitives::lowers_to_caller_safe_raise(class_name, p))
+            else {
+                continue;
+            };
+            if !parts.is_empty() {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                leaf::atom(method.selector.name().to_string()),
+                " => ",
+                leaf::atom(primitive.to_string()),
+            ]);
+        }
+        if parts.is_empty() {
             return Document::Nil;
         }
         docvec![
-            ",\n      'caller_safe_class_primitives' => ",
-            Self::meta_atom_list(&selectors)
+            ",\n      'caller_safe_class_primitives' => ~{",
+            Document::Vec(parts),
+            "}~"
         ]
     }
 

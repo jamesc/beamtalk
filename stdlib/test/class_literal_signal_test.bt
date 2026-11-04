@@ -29,6 +29,13 @@ TestCase subclass: ClassLiteralSignalTest
       #(#returned, aBlock value)
     ] on: cls do: [:e | #(#raised, e class, e message)]
 
+  // The hit path is taken, not only the fallback: a warmed `Error signal:`
+  // call site's raise key is installed, holding `Error`'s class reference.
+  testWarmedSendInstallsItsKey =>
+    [Error signal: "warm"] on: Error do: [:e | nil]
+    key := Erlang erlang list_to_tuple: #(#caller_safe_raise, #classSignal:, #'bt@stdlib@exception', #class_signal:, #'Error class')
+    self assert: (Erlang beamtalk_class_shadow_flags static_call_key_value: key) equals: Error
+
   testRaiseIsTheReceivingClassAndCaughtByIt =>
     self assert: (self outcomeOf: [
       self raiseExt: "x"

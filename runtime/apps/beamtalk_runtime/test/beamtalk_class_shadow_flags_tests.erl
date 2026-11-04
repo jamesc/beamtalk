@@ -384,8 +384,8 @@ start_class_on(Name, Superclass, Module) ->
     }),
     Pid.
 
-%% A class module defining `class_testSelf/1` whose metadata lists
-%% `CallerSafe` as caller-safe signal primitives (BT-4270).
+%% A class module defining `class_testSelf/1` whose metadata maps selectors to
+%% caller-safe signal primitives as `CallerSafe` does (BT-4270).
 load_raise_module(Module, CallerSafe) ->
     Body = io_lib:format(
         "class_testSelf(_ClassSelf) -> ok.~n"
@@ -667,20 +667,26 @@ static_call_target_test_() ->
             %% calling it, so the key also needs the body to be a caller-safe
             %% primitive, which the defining module's metadata lists.
             Mod = bt4270_raise_root_module,
-            load_raise_module(Mod, [testSelf]),
+            load_raise_module(Mod, #{testSelf => classSignal}),
             Root = start_class_on('Bt4270RaiseRoot', none, Mod),
             Leaf = start_inheriting_class('Bt4270RaiseLeaf', 'Bt4270RaiseRoot'),
             try
-                Key = {caller_safe_raise, Mod, class_testSelf, 'Bt4270RaiseLeaf class'},
+                Key =
+                    {caller_safe_raise, classSignal, Mod, class_testSelf, 'Bt4270RaiseLeaf class'},
                 ?assertMatch(
                     #beamtalk_object{class = 'Bt4270RaiseLeaf class', pid = Leaf},
                     target('Bt4270RaiseLeaf', Key, testSelf)
                 ),
                 ?assertMatch(#beamtalk_object{}, key_value(Key)),
+                %% A key naming another primitive than the body's declines.
+                OtherPrimitive =
+                    {caller_safe_raise, classSignalOther, Mod, class_testSelf,
+                        'Bt4270RaiseLeaf class'},
+                ?assertNot(target('Bt4270RaiseLeaf', OtherPrimitive, testSelf)),
                 %% A reload whose new body is no longer the primitive: the
                 %% reload's registration erases the key, and the new code's
                 %% metadata no longer certifies it.
-                load_raise_module(Mod, []),
+                load_raise_module(Mod, #{}),
                 ok = beamtalk_class_shadow_flags:invalidate('Bt4270RaiseRoot'),
                 ?assertNot(key_value(Key)),
                 ?assertNot(target('Bt4270RaiseLeaf', Key, testSelf)),
@@ -692,7 +698,8 @@ static_call_target_test_() ->
         end},
         {"a caller-safe raise key declines a module with no such metadata", fun() ->
             with_static_class('Bt4270NoMeta', fun(_Pid) ->
-                Key = {caller_safe_raise, ?HELPER, class_testSelf, 'Bt4270NoMeta class'},
+                Key =
+                    {caller_safe_raise, classSignal, ?HELPER, class_testSelf, 'Bt4270NoMeta class'},
                 ?assertNot(target('Bt4270NoMeta', Key, testSelf)),
                 ?assertNot(key_value(Key)),
                 %% The direct-call key of the same function still installs.

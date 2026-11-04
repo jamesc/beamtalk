@@ -4,7 +4,7 @@
 //! BT-4270: a class-literal send whose class-side method is one of
 //! `Exception`'s caller-safe signal primitives (`Error signal: m`) raises in
 //! the caller (BT-4115), but only behind a run-time key,
-//! `{caller_safe_raise, DefiningModule, Fun, ReceiverTag}`: the runtime
+//! `{caller_safe_raise, Primitive, DefiningModule, Fun, ReceiverTag}`: the runtime
 //! installs it only while the send still resolves to that compiled primitive,
 //! else the call site takes the dynamic `class_send`. So a later
 //! `class signal:` override, extension, runtime fun or reload is honoured.
@@ -47,7 +47,7 @@ fn function_body<'a>(out: &'a str, name: &str) -> &'a str {
 /// The module `Exception`'s class methods compile to, as the keys name it.
 fn exception_module(out: &str) -> String {
     let body = function_body(out, "boomOwn:");
-    let head = "{'caller_safe_raise', ";
+    let head = "{'caller_safe_raise', 'classSignal:', ";
     let at = body
         .find(head)
         .unwrap_or_else(|| panic!("`Exception signal:` reads a raise key. Got:\n{body}"))
@@ -111,7 +111,10 @@ fn signal_sends_raise_through_the_handler_only_in_the_hit_arm() {
         ),
     ] {
         let body = function_body(&out, method);
-        let key = format!("{{'caller_safe_raise', {module}, '{fun}', '{class} class'}}");
+        // `Exception`'s method bodies: `class signal: msg => @primitive "classSignal:"`.
+        let primitive = format!("class{}{}", &selector[..1].to_uppercase(), &selector[1..]);
+        let key =
+            format!("{{'caller_safe_raise', '{primitive}', {module}, '{fun}', '{class} class'}}");
         assert!(
             body.contains(&format!("call 'persistent_term':'get'({key}, 'false')"))
                 && body.contains(&format!(

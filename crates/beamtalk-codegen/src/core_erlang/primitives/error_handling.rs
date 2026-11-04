@@ -75,6 +75,23 @@ pub(crate) fn is_caller_safe_class_primitive(name: &str) -> bool {
     CALLER_SAFE_CLASS_PRIMITIVES.contains(&name)
 }
 
+/// BT-4270: whether a class-side method of `class_name` whose body is
+/// `@primitive "<primitive>"` compiles to that caller-safe raise, i.e. the
+/// primitive is caller-safe and `class_name`'s primitive table
+/// ([`super::generate_primitive_bif`], the one registry) lowers it. A class
+/// other than `Exception` declaring the same primitive name gets the runtime
+/// placeholder, not the raise, so it is never certified.
+#[must_use]
+pub(crate) fn lowers_to_caller_safe_raise(class_name: &str, primitive: &str) -> bool {
+    if !is_caller_safe_class_primitive(primitive) {
+        return false;
+    }
+    let params: Vec<String> = (0..primitive.matches(':').count())
+        .map(|i| format!("P{i}"))
+        .collect();
+    super::generate_primitive_bif(class_name, primitive, &params).is_some()
+}
+
 /// Lowers a caller-safe class primitive to its `beamtalk_exception_handler`
 /// call, given the argument documents and the receiving class's document.
 ///

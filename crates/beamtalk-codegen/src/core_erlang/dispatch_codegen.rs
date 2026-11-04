@@ -3787,7 +3787,8 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let StaticSelf = case call 'persistent_term':'get'(
-    ///         {'caller_safe_raise', 'bt@stdlib@exception', 'class_signal:', 'Error class'}, 'false') of
+    ///         {'caller_safe_raise', 'classSignal:', 'bt@stdlib@exception', 'class_signal:',
+    ///          'Error class'}, 'false') of
     ///     <'false'> when 'true' ->
     ///       call 'beamtalk_class_shadow_flags':'static_call_target'(<same key>, 'Error', 'signal:', 2)
     ///     <StaticRef> when 'true' -> StaticRef
@@ -3802,9 +3803,9 @@ impl CoreErlangGenerator {
     /// The key names the defining class's compiled method and the receiving
     /// class's tag; the runtime installs it only while every condition of a
     /// direct-call key holds for that method (the dynamic path would run it in
-    /// the caller for this receiver) and the defining module's metadata lists
-    /// the selector as a caller-safe primitive, i.e. its body is the raise the
-    /// hit arm performs (`beamtalk_class_shadow_flags`, `key_body_holds/3`).
+    /// the caller for this receiver) and the defining module's metadata maps
+    /// the selector to the key's primitive, i.e. its body is the raise the hit
+    /// arm performs (`beamtalk_class_shadow_flags`, `key_body_holds/3`).
     /// The hit arm raises exactly what that body raises: the primitive with
     /// the receiving class's name in place of its `ClassSelf`. `arg_refs` must
     /// be variables or literals: they are spliced into both arms.
@@ -3830,6 +3831,8 @@ impl CoreErlangGenerator {
         let raise = self.annotate_current_send_call(raise);
         let key_doc = docvec![
             "{'caller_safe_raise', ",
+            leaf::atom(primitive.to_string()),
+            ", ",
             leaf::atom(module_name),
             ", ",
             leaf::atom(super::selector_mangler::safe_class_method_fn_name(
@@ -3901,8 +3904,9 @@ impl CoreErlangGenerator {
     /// BT-4270: the defining module and primitive of the class-side method a
     /// class-literal send of `raw_selector` to `class_name` resolves to, when
     /// that method (own or inherited) is one of `Exception`'s caller-safe
-    /// signal primitives ([`super::primitives::is_caller_safe_class_primitive`],
-    /// read from its source, `MethodInfo::primitive`) and its defining class
+    /// signal primitives that compiles to that raise in its defining class
+    /// ([`super::primitives::lowers_to_caller_safe_raise`], the primitive read
+    /// from its source, `MethodInfo::primitive`) and its defining class
     /// may run it in the caller ([`Self::direct_call_eligible_module`]). The
     /// send then compiles to [`Self::guarded_caller_safe_raise_doc`]: this is
     /// only the compile-time candidate; the runtime key decides each send.
@@ -3921,7 +3925,9 @@ impl CoreErlangGenerator {
         let primitive = method
             .primitive
             .as_deref()
-            .filter(|p| super::primitives::is_caller_safe_class_primitive(p))?
+            .filter(|p| {
+                super::primitives::lowers_to_caller_safe_raise(method.defined_in.as_str(), p)
+            })?
             .to_string();
         let module = self.direct_call_eligible_module(method.defined_in.as_str(), raw_selector)?;
         Some((module, primitive))

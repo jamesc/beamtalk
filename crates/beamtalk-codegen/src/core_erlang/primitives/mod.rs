@@ -35,7 +35,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-pub(crate) use error_handling::{generate_class_signal_bif, is_caller_safe_class_primitive};
+pub(crate) use error_handling::{generate_class_signal_bif, lowers_to_caller_safe_raise};
 
 /// `call 'beamtalk_primitive':'string_from_binary'(<inner>)` — wrap
 /// BIF-produced bytes as a `String` value (BT-4170: `printString` and

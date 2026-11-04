@@ -44,7 +44,8 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_understands_class_selector/2,
     class_object_understands/2,
     find_class_method_from_class/2,
-    in_caller_owner/2
+    in_caller_owner/2,
+    class_method_body/2
 ]).
 
 -type selector() :: atom().
@@ -1614,18 +1615,30 @@ export. Shared by `apply_class_method_in_context/6` and the in-caller path
 apply_class_method_body(
     ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
 ) ->
-    %% ADR 0084: a runtime-installed class-method fun shadows
-    %% the compiled export. The retrieval store is keyed by the resolved
-    %% DefiningClass, so this works identically for own and inherited
-    %% methods, and is gated so compile-time-only classes pay no extra
-    %% read on the dispatch hot path.
-    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
-        {ok, #{block := Fun}} ->
+    case class_method_body(DefiningClass, Selector) of
+        {runtime_fun, Fun} ->
             apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector);
-        error ->
+        compiled ->
             apply_compiled_class_method(
                 ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
             )
+    end.
+
+-doc """
+Which body a class-side `Selector` resolved to `DefiningClass` runs: its ADR
+0084 runtime-installed fun, which shadows the compiled export, or the
+compiled export. The retrieval store is keyed by the resolved
+`DefiningClass`, so this works identically for own and inherited methods,
+and is gated so compile-time-only classes pay no extra read on the dispatch
+hot path. The one rule behind `apply_class_method_body/7` and
+`beamtalk_class_shadow_flags`' static call keys (BT-4270), which name a
+compiled function only while this answers `compiled`.
+""".
+-spec class_method_body(class_name(), selector()) -> {runtime_fun, fun()} | compiled.
+class_method_body(DefiningClass, Selector) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+        {ok, #{block := Fun}} -> {runtime_fun, Fun};
+        error -> compiled
     end.
 
 -doc """
