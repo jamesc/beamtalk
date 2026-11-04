@@ -252,8 +252,8 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
         .expect("codegen should succeed")
     };
     let forwarded = "'class_helper:'(ClassSelf, ";
-    let probe_direct =
-        "call 'bt@parser':'class_helper:'({'beamtalk_object', 'Parser class', 'bt@parser', ";
+    // BT-4316: the guarded direct call reads the call target's static call key.
+    let probe_direct = "call 'persistent_term':'get'({'bt@parser', 'class_helper:'}, 'false')";
 
     // Control: no rival, so the class-reference send in `probe` direct-calls.
     let control = compile(vec![]);

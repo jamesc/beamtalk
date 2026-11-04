@@ -132,9 +132,10 @@ pub fn generate_repl_expressions_with_index(
 /// eligibility from `hierarchy` (ADR 0142 §1-§2).
 ///
 /// A send of a class method the class defines and may run in the caller
-/// (`System osPlatform`) then emits the guarded direct call, a
-/// `direct_call_ok/2` guard around `call 'Module':'Fn'(ClassRef, ...)` with
-/// `beamtalk_object_class:class_send` as the fallback. The rule is the one
+/// (`System osPlatform`) then emits the guarded direct call: one
+/// `persistent_term` read of the call target's static call key (BT-4316),
+/// whose value is the `ClassRef` passed to `call 'Module':'Fn'(ClassRef, ...)`,
+/// with `beamtalk_object_class:class_send` as the fallback. The rule is the one
 /// module codegen and the lints use (`ClassHierarchy::is_direct_call_eligible`,
 /// through `CoreErlangGenerator::compute_direct_call_eligible`).
 ///

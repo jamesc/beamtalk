@@ -28,6 +28,11 @@ supervisor restart-intensity counter cannot provide.
 
 Normal exits (`normal`, `shutdown`, `{shutdown, _}`) are deliberate stops —
 `removeFromSystem` uses `gen_server:stop/1` — and are never restarted.
+
+Every `'DOWN'` of a watched class, deliberate or not, first calls
+`beamtalk_class_shadow_flags:invalidate/1` (BT-4316): the class's static call
+keys serve a class reference holding the dead pid, and must go before a
+restart registers a new one.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -178,6 +183,11 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, #state{watched = Watched, refs 
         error ->
             {noreply, State1};
         {ok, ClassName} ->
+            %% BT-4316: the class's static call keys hold this pid in the
+            %% class reference they serve; erase them (and the derived flag)
+            %% before any restart, so a dead pid is never served once the
+            %% death is seen, whatever the reason.
+            ok = beamtalk_class_shadow_flags:invalidate(ClassName),
             case is_deliberate_stop(Reason) of
                 true -> {noreply, State1};
                 false -> {noreply, restart_within_budget(ClassName, Reason, State1)}

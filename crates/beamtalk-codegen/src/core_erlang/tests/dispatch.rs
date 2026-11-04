@@ -4281,15 +4281,24 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("call 'beamtalk_class_shadow_flags':'direct_call_ok'('Pt class', 'Pt')"),
-        "eligible keyword ctor must be guarded. Got:\n{output}"
-    );
+    // BT-4316: the hit path is one read of the call target's static call key,
+    // whose value is the class reference; a miss asks the runtime, which
+    // installs it only while the guard holds.
     assert!(
         output.contains(
-            "call 'bt@test@pt':'class_x:y:'({'beamtalk_object', 'Pt class', 'bt@test@pt', "
+            "case call 'persistent_term':'get'({'bt@test@pt', 'class_x:y:'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:'}, 'Pt class', 'Pt', 'x:y:', 3)"
         ),
-        "eligible keyword ctor must call class_x:y:/3 with the class reference. Got:\n{output}"
+        "eligible keyword ctor must be guarded by its static call key. Got:\n{output}"
+    );
+    // The direct call is the case's last arm, in tail position, passed the
+    // key's value as `ClassSelf`. No `try` wraps it.
+    assert!(
+        output.contains("<_> when 'true' -> call 'bt@test@pt':'class_x:y:'(_StaticSelf"),
+        "eligible keyword ctor must call class_x:y:/3 with the key's class reference. Got:\n{output}"
+    );
+    assert!(
+        output.contains("of <'false'> when 'true' -> let _ClassPid"),
+        "a declined key falls back to class_send. Got:\n{output}"
     );
     assert!(
         output.contains("'beamtalk_object_class':'class_send'("),
@@ -4299,12 +4308,16 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         !output.contains("'nil'"),
         "no `nil` class self (BT-4037). Got:\n{output}"
     );
-    // A removed method (`removeSelector:`, a reload) answers what the dynamic
-    // send answers instead of `undef`: an unexported function takes the
-    // `class_send` fallback. No `try` wraps the call (it stays a tail call).
+    // The hit path calls nothing else: no flag read, no `function_exported/3`,
+    // no `whereis` outside the fallback (the runtime checks them at install).
     assert!(
-        output.contains("case call 'erlang':'function_exported'('bt@test@pt', 'class_x:y:', 3) of <'true'> when 'true' -> call 'bt@test@pt':'class_x:y:'("),
-        "the direct call is guarded by function_exported. Got:\n{output}"
+        !output.contains("direct_call_ok") && !output.contains("function_exported"),
+        "the hit path is the key read only. Got:\n{output}"
+    );
+    assert_eq!(
+        output.matches("call 'bt@test@pt':'class_x:y:'(").count(),
+        1,
+        "the direct call appears once. Got:\n{output}"
     );
     assert!(
         !output.contains("try "),

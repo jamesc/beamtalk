@@ -335,3 +335,233 @@ shadow_flag_test_() ->
             ?assertNot(beamtalk_class_shadow_flags:is_set(extension, Tag))
         end}
     ]}.
+
+%%% ============================================================================
+%%% BT-4316: static call keys (`static_call_target/5`)
+%%% ============================================================================
+
+-define(HELPER, beamtalk_class_dispatch_test_helper).
+
+%% Class methods the helper module defines (`class_testSelf/1`,
+%% `class_testClassSelf/1`), plus one it does not export.
+-define(STATIC_METHODS, #{
+    testSelf => #{arity => 0},
+    testClassSelf => #{arity => 0},
+    testNotExported => #{arity => 0}
+}).
+
+-define(STATIC_META, #{process_bound_class_selectors => [new, spawn]}).
+
+%% A watched class process (`start/2`, so the class monitor sees its 'DOWN').
+%% A compiled class's module is loaded before its class process exists (it
+%% registers from `on_load`); load the helper the same way, since
+%% `function_exported/3` is false for a module not loaded yet.
+start_static_class(Name, Superclass, ClassVars) ->
+    {module, ?HELPER} = code:ensure_loaded(?HELPER),
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => Superclass,
+        module => ?HELPER,
+        class_methods => ?STATIC_METHODS,
+        class_state => ClassVars,
+        meta => ?STATIC_META
+    }),
+    Pid.
+
+stop_static_class(Pid) ->
+    catch gen_server:stop(Pid, normal, 5000),
+    ok.
+
+with_static_class(Name, Fun) ->
+    Pid = start_static_class(Name, none, #{}),
+    try
+        Fun(Pid)
+    after
+        stop_static_class(Pid)
+    end.
+
+static_key(Fun) -> {?HELPER, Fun}.
+
+target(Name, Key, Selector) ->
+    Tag = beamtalk_class_registry:class_object_tag(Name),
+    beamtalk_class_shadow_flags:static_call_target(Key, Tag, Name, Selector, 1).
+
+key_value(Key) -> beamtalk_class_shadow_flags:static_call_key_value(Key).
+
+warm(Name, Pid) ->
+    Tag = beamtalk_class_registry:class_object_tag(Name),
+    Ref = {beamtalk_object, Tag, ?HELPER, Pid},
+    ?assertEqual(Ref, target(Name, static_key(class_testSelf), testSelf)),
+    ?assertEqual(Ref, key_value(static_key(class_testSelf))),
+    Ref.
+
+key_gone() -> key_value(static_key(class_testSelf)) =:= false.
+
+%% The class monitor erases asynchronously, on its 'DOWN'.
+wait_until(Pred, 0) ->
+    ?assert(Pred());
+wait_until(Pred, N) ->
+    case Pred() of
+        true ->
+            ok;
+        false ->
+            timer:sleep(10),
+            wait_until(Pred, N - 1)
+    end.
+
+%% Hold `Tag`'s lock while an installer (whose unlocked pre-check passes) and
+%% `Writer` both block behind it, then release: whichever runs second, no
+%% static call key may be left.
+race_install_against(Name, Tag, Writer) ->
+    Parent = self(),
+    beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+        _ = spawn_link(fun() ->
+            Parent ! {installed, target(Name, static_key(class_testSelf), testSelf)}
+        end),
+        timer:sleep(50),
+        _ = spawn_link(fun() ->
+            ok = Writer(),
+            Parent ! written
+        end),
+        timer:sleep(50)
+    end),
+    receive
+        {installed, _} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    receive
+        written -> ok
+    after 5000 -> ?assert(false)
+    end,
+    ?assert(key_gone()),
+    ?assertNot(target(Name, static_key(class_testSelf), testSelf)),
+    ?assert(key_gone()).
+
+static_call_target_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"installs the class reference the callee receives as ClassSelf", fun() ->
+            with_static_class('Bt4316Install', fun(Pid) ->
+                Ref = warm('Bt4316Install', Pid),
+                %% Exactly the dynamic path's ClassSelf.
+                ?assertEqual(Ref, beamtalk_class_dispatch:class_send(Pid, testClassSelf, []))
+            end)
+        end},
+        {"declines when the call site's module or function is not the owner's", fun() ->
+            with_static_class('Bt4316Mismatch', fun(_Pid) ->
+                OtherModule = {bt4316_other_module, class_testSelf},
+                OtherFun = static_key(class_testClassSelf),
+                ?assertNot(target('Bt4316Mismatch', OtherModule, testSelf)),
+                ?assertNot(target('Bt4316Mismatch', OtherFun, testSelf)),
+                ?assertNot(key_value(OtherModule)),
+                ?assertNot(key_value(OtherFun)),
+                ?assert(key_gone())
+            end)
+        end},
+        {"declines when the function is not exported", fun() ->
+            with_static_class('Bt4316NotExported', fun(_Pid) ->
+                Key = static_key(class_testNotExported),
+                ?assertNot(target('Bt4316NotExported', Key, testNotExported)),
+                ?assertNot(key_value(Key))
+            end)
+        end},
+        {"declines when the class process is gone", fun() ->
+            Pid = start_static_class('Bt4316Dead', none, #{}),
+            stop_static_class(Pid),
+            ?assertNot(target('Bt4316Dead', static_key(class_testSelf), testSelf)),
+            ?assert(key_gone())
+        end},
+        {"declines when shadowed or when the class declares class variables", fun() ->
+            with_static_class('Bt4316Shadowed', fun(_Pid) ->
+                Tag = 'Bt4316Shadowed class',
+                ok = beamtalk_class_shadow_flags:set(extension, Tag),
+                try
+                    ?assertNot(target('Bt4316Shadowed', static_key(class_testSelf), testSelf)),
+                    ?assert(key_gone())
+                after
+                    beamtalk_class_shadow_flags:clear(extension, Tag)
+                end
+            end),
+            Pid = start_static_class('Bt4316Stateful', none, #{count => 0}),
+            try
+                ?assertNot(target('Bt4316Stateful', static_key(class_testSelf), testSelf)),
+                ?assert(key_gone())
+            after
+                stop_static_class(Pid)
+            end
+        end},
+        {"every path that erases the class's derived flag erases its static call keys", fun() ->
+            Name = 'Bt4316Erase',
+            Tag = 'Bt4316Erase class',
+            with_static_class(Name, fun(Pid) ->
+                Writes = [
+                    fun() -> beamtalk_class_shadow_flags:set(extension, Tag) end,
+                    fun() -> beamtalk_class_shadow_flags:set(runtime_fun, Name) end,
+                    fun() -> beamtalk_class_shadow_flags:set_class_vars(Name, true) end,
+                    fun() -> beamtalk_class_shadow_flags:invalidate(Name) end
+                ],
+                lists:foreach(
+                    fun(Write) ->
+                        _ = warm(Name, Pid),
+                        try
+                            ok = Write(),
+                            ?assert(key_gone()),
+                            ?assertEqual([], beamtalk_class_registry:take_static_call_keys(Tag))
+                        after
+                            beamtalk_class_shadow_flags:clear(extension, Tag),
+                            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+                            beamtalk_class_shadow_flags:set_class_vars(Name, false)
+                        end
+                    end,
+                    Writes
+                ),
+                %% Erased even when the derived key is already gone.
+                _ = warm(Name, Pid),
+                _ = persistent_term:erase(Tag),
+                ok = beamtalk_class_shadow_flags:invalidate(Name),
+                ?assert(key_gone())
+            end)
+        end},
+        {"an ancestor's write erases a descendant's static call keys", fun() ->
+            Root = start_static_class('Bt4316Root', none, #{}),
+            Leaf = start_static_class('Bt4316Leaf', 'Bt4316Root', #{}),
+            try
+                _ = warm('Bt4316Leaf', Leaf),
+                ok = beamtalk_class_shadow_flags:invalidate('Bt4316Root'),
+                ?assert(key_gone())
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"the class monitor's 'DOWN' erases the class's static call keys", fun() ->
+            Pid = start_static_class('Bt4316Down', none, #{}),
+            _ = warm('Bt4316Down', Pid),
+            stop_static_class(Pid),
+            wait_until(fun key_gone/0, 500)
+        end},
+        {"an install racing a shadow raise never survives it", fun() ->
+            Name = 'Bt4316Race',
+            Tag = 'Bt4316Race class',
+            with_static_class(Name, fun(_Pid) ->
+                try
+                    race_install_against(Name, Tag, fun() ->
+                        beamtalk_class_shadow_flags:set(extension, Tag)
+                    end)
+                after
+                    beamtalk_class_shadow_flags:clear(extension, Tag)
+                end
+            end)
+        end},
+        {"an install racing a class-variable write and its invalidate never survives it", fun() ->
+            Name = 'Bt4316RaceInv',
+            Tag = 'Bt4316RaceInv class',
+            with_static_class(Name, fun(_Pid) ->
+                try
+                    race_install_against(Name, Tag, fun() ->
+                        beamtalk_class_metadata:put_class_variables(Name, true)
+                    end)
+                after
+                    beamtalk_class_metadata:put_class_variables(Name, false)
+                end
+            end)
+        end}
+    ]}.

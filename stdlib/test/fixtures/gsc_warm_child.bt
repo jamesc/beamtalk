@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4316: a stateless subclass whose class method answers the process that
+// runs it. See guarded_static_call_test.bt.
+
+GscWarmParent subclass: GscWarmChild
+
+  class whoRuns =>
+    @expect class_method_process_resource "answers the process running it"
+    Erlang erlang self

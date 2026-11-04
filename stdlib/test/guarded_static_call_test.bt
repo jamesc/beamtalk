@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4301 / ADR 0142 §2: a literal-receiver class send to a method the class
-// itself defines compiles to a direct call behind the
-// `beamtalk_class_shadow_flags:direct_call_ok/2` guard, whose fallback is the
-// dynamic `class_send`. The ADR 0129 static direct calls were unguarded; these
+// itself defines compiles to a direct call behind a run-time guard, whose
+// fallback is the dynamic `class_send`. Since BT-4316 the guard is one read of
+// the call target's static call key, installed by
+// `beamtalk_class_shadow_flags:static_call_target/5` only while
+// `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these
 // are the regression tests for the bugs that caused:
 // - BT-4133: a class-side extension shadowing a direct-called method was
 //   silently bypassed;
@@ -16,7 +18,9 @@
 //
 // Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,
 // fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,
-// fixtures/gsc_pong.bt.
+// fixtures/gsc_pong.bt, fixtures/gsc_warm_ext.bt, fixtures/gsc_warm_patched.bt,
+// fixtures/gsc_warm_parent.bt, fixtures/gsc_warm_child.bt,
+// fixtures/gsc_restart.bt.
 
 TestCase subclass: GuardedStaticCallTest
 
@@ -85,3 +89,81 @@ TestCase subclass: GuardedStaticCallTest
     Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
     self deny: guardOff
     self assert: viaFallback equals: GscClassSelf
+
+  // === BT-4316: the static call key ===
+  //
+  // A static send's hit path is one `persistent_term` read of a key per call
+  // target, whose value is the class reference passed as `ClassSelf`. Each
+  // test below warms that key with a static send first, then changes what the
+  // dynamic path answers and checks the static send answers the same. (The
+  // reload cases, a dropped method and a superclass that gains `classState:`
+  // on reload, need a workspace: see
+  // tests/repl-protocol/cases/guarded_static_call_key.btscript.)
+
+  // The class held as a Dynamic value: sends to it compile to `class_send`.
+  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
+
+  // (a) A class-side extension registered after warm-up wins.
+  testExtensionRegisteredAfterWarmUpWins =>
+    self assert: GscWarmExt answer equals: #compiled
+    Erlang beamtalk_extensions
+      register: #'GscWarmExt class'
+      selector: #answer
+      fun: [:args :receiver | #extension]
+      owner: #test
+    literal := GscWarmExt answer
+    dynamic := (self lookUp: #GscWarmExt) answer
+    Erlang beamtalk_extensions
+      unregister: #GscWarmExt
+      selector: #answer
+      classSide: true
+    self assert: literal equals: #extension
+    self assert: dynamic equals: #extension
+    self assert: GscWarmExt answer equals: #compiled
+
+  // (b) A runtime class-method fun installed after warm-up wins.
+  testRuntimeClassMethodAfterWarmUpWins =>
+    self assert: GscWarmPatched answer equals: #compiled
+    pid := Erlang beamtalk_class_registry whereis_class: #GscWarmPatched
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: #answer
+      fun: [:classSelf | #fromRuntimeFun]
+    self assert: GscWarmPatched answer equals: #fromRuntimeFun
+    self assert: (self lookUp: #GscWarmPatched) answer equals: #fromRuntimeFun
+
+  // (d) Once a superclass publishes class variables (the fact a reload that
+  // adds `classState:` publishes), a warmed static send takes the class
+  // process, as the dynamic send does.
+  testSuperclassClassVariablesAfterWarmUpTakeTheClassProcess =>
+    me := Erlang erlang self
+    self assert: GscWarmChild whoRuns equals: me
+    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: true
+    literal := GscWarmChild whoRuns
+    dynamic := (self lookUp: #GscWarmChild) whoRuns
+    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: false
+    self deny: literal =:= me
+    self deny: dynamic =:= me
+    self assert: literal equals: dynamic
+    self assert: GscWarmChild whoRuns equals: me
+
+  // (e) After the class process is killed and the class monitor restarts it,
+  // the callee's `ClassSelf` holds the new pid.
+  testRestartedClassProcessIsTheNewClassSelf =>
+    oldPid := Erlang beamtalk_class_registry whereis_class: #GscRestart
+    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: oldPid
+    Erlang erlang exit: oldPid with: #kill
+    newPid := self pidOf: #GscRestart other: oldPid tries: 500
+    self deny: newPid =:= oldPid
+    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: newPid
+    self assert: (Erlang erlang element: 4 of: (self lookUp: #GscRestart) me) equals: newPid
+
+  // The registered pid of class `name` once it is a live pid other than
+  // `oldPid`, polling every 10 ms up to `tries` times.
+  pidOf: name :: Symbol other: oldPid tries: tries :: Integer =>
+    pid := Erlang beamtalk_class_registry whereis_class: name
+    ((Erlang erlang is_pid: pid) and: [pid =/= oldPid]) ifTrue: [^pid]
+    tries =:= 0 ifTrue: [^pid]
+    Erlang timer sleep: 10
+    self pidOf: name other: oldPid tries: tries - 1
