@@ -21,4 +21,4 @@ n := 42
 // => 42
 
 [n error: "too big"] on: Exception do: [:e | e message]
-// => too big
+// => "too big"
