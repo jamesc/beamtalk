@@ -580,7 +580,12 @@ impl CoreErlangGenerator {
         }
 
         let class_pid_var = self.fresh_var("ClassPid");
-        let class_mod_var = self.fresh_var("ClassModName");
+        let object_clause = if let Some(module) = self.pinned_builtin_class_module(class_name) {
+            Self::class_object_with_module_clause(&class_pid_var, module, class_name)
+        } else {
+            let class_mod_var = self.fresh_var("ClassModName");
+            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name)
+        };
         let error_doc = self.class_not_found_error_doc(class_name);
 
         Ok(docvec![
@@ -588,9 +593,23 @@ impl CoreErlangGenerator {
             Self::registered_class_pid_doc(class_name),
             " of ",
             error_doc,
-            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name),
+            object_clause,
             "end",
         ])
+    }
+
+    /// BT-4411: the compile-time module of a built-in class literal, when its
+    /// routing-fixture row pins one ([`routing::pinned_class_module`]) and that
+    /// module is the class's own compiled module (the one
+    /// `module_name_safe/1` would read at run time). `None` for every other
+    /// class, and for a name declared by more than one package
+    /// ([`Self::is_shadowed_class`]): those keep the run-time module lookup.
+    fn pinned_builtin_class_module(&self, class_name: &str) -> Option<&'static str> {
+        if self.is_shadowed_class(class_name) {
+            return None;
+        }
+        let module = routing::pinned_class_module(class_name)?;
+        (self.compiled_module_name(class_name) == module).then_some(module)
     }
 
     /// `call 'erlang':'whereis'('beamtalk_class_<Name>')`: the pid of the class
@@ -681,6 +700,32 @@ impl CoreErlangGenerator {
             leaf::atom(util::metaclass_tag(class_name)),
             ", ",
             leaf::var(class_mod_var.to_string()),
+            ", ",
+            leaf::var(class_pid_var.to_string()),
+            "} ",
+        ]
+    }
+
+    /// BT-4411: the `<ClassPid> when 'true' -> {'beamtalk_object', Tag,
+    /// 'module', ClassPid}` clause for a built-in whose module is known at
+    /// compile time ([`Self::pinned_builtin_class_module`]). The pid is still
+    /// the run-time `whereis` result, so a restarted class process is seen
+    /// (ADR 0025 amendment §3); only the `module_name_safe/1` lookup is
+    /// dropped. The tuple is `=:=` to the one
+    /// [`Self::class_object_from_registry_clause`] builds.
+    fn class_object_with_module_clause(
+        class_pid_var: &str,
+        module: &'static str,
+        class_name: &str,
+    ) -> Document<'static> {
+        docvec![
+            "<",
+            leaf::var(class_pid_var.to_string()),
+            "> when 'true' -> ",
+            "{'beamtalk_object', ",
+            leaf::atom(util::metaclass_tag(class_name)),
+            ", ",
+            leaf::atom(module),
             ", ",
             leaf::var(class_pid_var.to_string()),
             "} ",
