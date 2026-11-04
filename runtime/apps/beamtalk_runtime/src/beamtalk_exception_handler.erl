@@ -631,8 +631,8 @@ strip_unknown_segment(General, Type) ->
 %% byte cap and the depth limit, not by the size of the value, with one
 %% exception: an integer is printed in full before the message is cut, so a
 %% very large Integer costs time that grows with its digit count (`~0tP`
-%% does not bound integers either). It never crashes: a `printString` that fails falls
-%% back to the term format.
+%% does not bound integers either). It never crashes: a `printString` that
+%% fails falls back to the term format.
 -define(BS_FAIL_VALUE_BYTES, 32).
 -define(BS_FAIL_VALUE_CHARS, 80).
 -define(BS_FAIL_VALUE_DEPTH, 20).
