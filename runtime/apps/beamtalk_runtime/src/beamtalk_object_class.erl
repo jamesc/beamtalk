@@ -1849,7 +1849,7 @@ handle_call(
     {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
 ) ->
     %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
-    %% `read_class_var/3`, shared with `Cls fieldAt:` (BT-4148).
+    %% `read_class_var/4`, shared with `Cls fieldAt:` (BT-4148).
     %%
     %% Replies `{error, Error}` rather than raising here: this
     %% `handle_call` clause runs directly in the class gen_server's own
@@ -1862,7 +1862,7 @@ handle_call(
     %% caller with a catchable error, so it is never called directly.
     %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
     %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
-    case read_class_var(ClassName, ClassVars, Name) of
+    case read_class_var(ClassName, ClassVars, Name, in_process) of
         {ok, Value} -> {reply, Value, State};
         {error, _} = Err -> {reply, Err, State}
     end;
@@ -2022,9 +2022,17 @@ the instance-side direct read (`generate_late_field_read`) — keyed on
 rule (BT-3807): undeclared raises `undeclared_class_variable` as a method-body
 read does, and a class with unknown metadata (ClassBuilder) answers `nil`. The
 metadata is read once for both decisions.
+
+`Caller` selects the declared-set rule's form
+(`beamtalk_class_vars:check_declared/4`): `in_process` for `get_class_var`,
+which keeps the known-empty leniency, and `reflective` for `Cls fieldAt: #x`
+sent from outside, where a class with a known-empty own set (no `classState:`
+at all) raises `undeclared_class_variable` too, the same rule as
+`Cls fieldAt: #x put: v` (`write_class_var/4`).
 """.
--spec read_class_var(class_name(), map(), atom()) -> {ok, term()} | {error, #beamtalk_error{}}.
-read_class_var(ClassName, ClassVars, Name) ->
+-spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+read_class_var(ClassName, ClassVars, Name, Caller) ->
     Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
     case class_var_declared_late(Kinds, Name) of
         true ->
@@ -2041,7 +2049,7 @@ read_class_var(ClassName, ClassVars, Name) ->
                 {ok, Value} ->
                     {ok, Value};
                 error ->
-                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds) of
+                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds, Caller) of
                         ok -> {ok, nil};
                         {error, _} = Err -> Err
                     end
@@ -2122,20 +2130,18 @@ ownership when there is no session context to fall back to (tier 1).
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
-%% ADR 0124 §1/§4i/B4: `Cls hasField:`/`Cls clearField:` (and, BT-4148,
-%% `Cls fieldAt:`/`Cls fieldAt:put:`) reach the class gen_server here, ahead
-%% of the local-class-method/superclass-chain/DNU priority order below —
-%% like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
-%% 0035), these are reflection primitives, not overridable class methods. `ClassVars` lives in `State` directly, so
-%% neither needs `handle_class_method_call/6`'s method-lookup machinery;
-%% `has_class_var`/`clear_class_var`'s own `handle_call` clauses provide the
-%% identical read/write for `beamtalk_object_class:has_class_var/2` /
-%% `clear_class_var/2`'s direct-message-shape callers, so this clause is the
-%% ordinary-message-send route to the SAME two operations, not a third
-%% implementation of them (CLAUDE.md's no-duplicate-implementations rule
-%% notwithstanding — `maps:is_key/2`/`maps:remove/2` are the whole
-%% operation, so there is nothing to extract into a shared helper beyond
-%% the builtin itself).
+%% ADR 0124 §1/§4i/B4, BT-4148: `Cls hasField:`, `Cls clearField:`,
+%% `Cls fieldAt:` and `Cls fieldAt:put:` reach the class gen_server here,
+%% ahead of the local-class-method/superclass-chain/DNU priority order below.
+%% Like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
+%% 0035), these are reflection primitives, not overridable class methods.
+%% `ClassVars` lives in `State` directly, so none of them needs
+%% `handle_class_method_call/6`'s method-lookup machinery. `has`/`clear` are
+%% the same operations as the `has_class_var`/`clear_class_var` `handle_call`
+%% clauses (`maps:is_key/2`/`maps:remove/2` are the whole operation); `get`
+%% shares `read_class_var/4` with `get_class_var`; and `put` is the checked
+%% counterpart (`write_class_var/4`) of the deliberately unchecked
+%% `set_class_var`.
 dispatch_class_method(Selector, Args, From, State, Restore) ->
     case class_var_reflection_op(Selector, Args) of
         {has, Name} ->
@@ -2158,12 +2164,12 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
             {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
         {get, Name} ->
             %% BT-4148: `Cls fieldAt: #x` — the `get_class_var` read rule
-            %% (`read_class_var/3`). An error is replied as `{error, Error}`,
+            %% (`read_class_var/4`, reflective form). An error is replied as `{error, Error}`,
             %% which the caller (`class_method_result/4`) raises in its own
             %% process, so the class gen_server survives it.
             Restore(),
             #class_state{name = ClassName, class_state = ClassVars} = State,
-            {reply, read_class_var(ClassName, ClassVars, Name), State};
+            {reply, read_class_var(ClassName, ClassVars, Name, reflective), State};
         {put, Name, Value} ->
             %% BT-4148: `Cls fieldAt: #x put: v` — a checked write
             %% (`write_class_var/4` records why). Answers the assigned value,

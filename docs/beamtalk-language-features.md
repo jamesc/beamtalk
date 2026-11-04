@@ -1737,13 +1737,12 @@ already raises, since a `Value` is fully constructed and never reassigned.
 The class-side counterpart (`classState:`) works the same way, both from
 inside a class method (`self hasField:`/`self clearField:`) and from
 outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`). From
-outside, `SomeClass fieldAt: #x` reads a class variable with the same rules
-as a class-method read (an unassigned `late` one raises
-`uninitialized_state_error`, an undeclared name raises
-`undeclared_class_variable`), and `SomeClass fieldAt: #x put: v` writes one,
-answering `v`. The write is checked: it raises `undeclared_class_variable`
-rather than create a name the class does not declare, including on a class
-that declares no class variables at all.
+outside, `SomeClass fieldAt: #x` reads a class variable (an unassigned
+`late` one raises `uninitialized_state_error`) and `SomeClass fieldAt: #x
+put: v` writes one, answering `v`. Both raise `undeclared_class_variable`
+for a name the class does not declare, including on a class that declares
+no class variables at all, so a typo neither reads `nil` nor creates a
+variable.
 
 **Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
 legitimate dependency injection (substituting a value for a slot normally

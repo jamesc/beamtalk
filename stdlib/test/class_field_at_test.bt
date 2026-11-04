@@ -41,10 +41,14 @@ TestCase subclass: ClassFieldAtTest
     // Still alive after every error above.
     self assert: FieldAtClassVarOutsideActor getCurrent equals: 7
 
-  // A class that declares no class variables: a write from outside cannot
-  // create one (the known-empty leniency is only for inherited class
-  // methods), and the class keeps answering.
+  // A class that declares no class variables: from outside, a read of an
+  // undeclared name raises and a write cannot create one (the known-empty
+  // leniency is only for inherited class methods), and the class keeps
+  // answering.
   testClassFieldAtPutOnClassWithoutClassVarsRaises =>
+    self should: [
+      FieldAtNoClassVarsHolder fieldAt: #typo
+    ] raise: #undeclared_class_variable
     self should: [
       FieldAtNoClassVarsHolder fieldAt: #typo put: 1
     ] raise: #undeclared_class_variable
@@ -52,11 +56,22 @@ TestCase subclass: ClassFieldAtTest
     self assert: FieldAtNoClassVarsHolder answer equals: 42
 
   testObjectFieldAtPutOfUndeclaredNameRaises =>
+    self should: [Object fieldAt: #typo] raise: #undeclared_class_variable
     self should: [
       Object fieldAt: #typo put: 1
     ] raise: #undeclared_class_variable
     self deny: (Object hasField: #typo)
     self assert: Object name equals: #Object
+
+  // A non-Symbol name is not a class-variable reflection send: it falls
+  // through to the class-method lookup and raises a structured
+  // `immutable_value` error there, and the class process survives.
+  testClassFieldAtWithNonSymbolNameRaisesAndClassSurvives =>
+    // Built at run time: a literal non-Symbol name is a compile error.
+    name := "typo"
+    kind := [FieldAtNoClassVarsHolder fieldAt: name] on: Error do: [:e | e kind]
+    self assert: kind equals: #immutable_value
+    self assert: FieldAtNoClassVarsHolder answer equals: 42
 
   // Primitive receivers keep the intrinsic's inline `immutable_value` error,
   // hint included (`fieldAt:put:` on a literal is a compile-time error;

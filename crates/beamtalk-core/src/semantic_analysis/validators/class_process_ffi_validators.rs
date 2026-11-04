@@ -275,8 +275,8 @@ fn check_method(
 /// The `class-process-ffi` hint for a class method that runs in the class
 /// process: the reason [`ClassHierarchy::runs_class_method_in_caller`] gave,
 /// and only that one (BT-4301). For a non-process-bound selector it is one of:
-/// a class-variable reflection selector (`hasField:`/`clearField:`, which the
-/// class process answers itself); class variables declared by the class or by
+/// a class-variable reflection selector (`hasField:`/`clearField:`/
+/// `fieldAt:`/`fieldAt:put:`, which the class process answers itself); class variables declared by the class or by
 /// a named ancestor; or a superclass chain that could not be resolved, which
 /// the rule treats as a doubt.
 fn class_process_hint(hierarchy: &ClassHierarchy, class: &ClassInfo, selector: &str) -> String {
@@ -741,6 +741,32 @@ Base subclass: Sub
             "{h}"
         );
         assert!(!h.contains("declares class variables"), "{h}");
+    }
+
+    #[test]
+    fn field_at_reflection_selector_hint_names_the_selector() {
+        // BT-4148: `fieldAt:`/`fieldAt:put:` are class-variable reflection
+        // selectors too, so a class method of that name runs in the class
+        // process and gets the rename hint.
+        for (src, sel) in [
+            (
+                "Object subclass: Reg\n  class fieldAt: k => Erlang erlang self\n",
+                "fieldAt:",
+            ),
+            (
+                "Object subclass: Reg\n  class fieldAt: k put: v => Erlang erlang self\n",
+                "fieldAt:put:",
+            ),
+        ] {
+            let diags = in_class_process(src);
+            assert_eq!(diags.len(), 1, "{sel}: {diags:?}");
+            let h = hint(&diags[0]);
+            assert!(
+                h.contains(&format!("the class process itself answers `{sel}`")),
+                "{h}"
+            );
+            assert!(in_caller(src).is_empty(), "{sel}");
+        }
     }
 
     #[test]
