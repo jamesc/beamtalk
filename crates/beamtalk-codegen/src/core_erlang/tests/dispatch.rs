@@ -1556,8 +1556,8 @@ fn test_bt4075_actor_logger_error_last_statement_replies() {
     let code = codegen("Actor subclass: Probe\n  state: n = 0\n  log: msg => Logger error: msg\n");
     let line = code
         .lines()
-        .find(|l| l.contains("'logger'"))
-        .unwrap_or_else(|| panic!("no logger call:\n{code}"));
+        .find(|l| l.contains("'beamtalk_logging_config':'log'"))
+        .unwrap_or_else(|| panic!("no Logger log call:\n{code}"));
     assert!(
         line.contains("{'reply', _Result, "),
         "`Logger error:` as the last statement must reply:\n{line}"
@@ -3193,6 +3193,70 @@ fn test_sealed_method_logger_call_tags_own_selector() {
          as 'unknown' — that was the pre-MethodFrame regression this test \
          pins. Got:\n{code}"
     );
+}
+
+#[test]
+fn test_logger_call_site_routes_through_runtime_string_unwrap() {
+    // BT-4321: a Beamtalk String is the tagged `{beamtalk_string, Bin}` term,
+    // which OTP's `~ts` cannot format. Call-site `Logger` sends must go through
+    // `beamtalk_logging_config:log/3` (which unwraps message and metadata), never
+    // straight into `logger:log`.
+    let src = concat!(
+        "Object subclass: Svc\n\n",
+        "  run =>\n",
+        "    Logger error: \"boom\"\n",
+        "    Logger warn: \"retry\" metadata: #{\"attempt\" => 2}\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("'logger':'log'"),
+        "Logger sends must not call logger:log directly (BT-4321). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_logging_config':'log'('error', "),
+        "Logger error: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_logging_config':'log'('warning', "),
+        "Logger warn:metadata: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_selector' => 'run'"),
+        "Injected metadata must still carry the caller's selector. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_logger_intrinsic_bodies_route_through_runtime_string_unwrap() {
+    // BT-4321: the `@intrinsic logger*` method bodies (reached through
+    // `perform:` and other dynamic sends) previously passed the tagged String
+    // straight to `logger:log/3` as its message. They share the call-site
+    // lowering now.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../stdlib/src/logger.bt"
+    ))
+    .expect("stdlib/src/logger.bt should be readable");
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@stdlib@logger").with_stdlib_mode(true),
+    )
+    .expect("logger.bt codegen should succeed");
+    assert!(
+        !code.contains("'logger':'log'"),
+        "Logger intrinsic bodies must not call logger:log directly (BT-4321). Got:\n{code}"
+    );
+    for level in ["debug", "info", "warning", "error"] {
+        let needle = format!("call 'beamtalk_logging_config':'log'('{level}', ");
+        assert_eq!(
+            code.matches(&needle).count(),
+            2,
+            "expected the plain and metadata: `{level}` bodies to lower to \
+             beamtalk_logging_config:log/3. Got:\n{code}"
+        );
+    }
 }
 
 #[test]
