@@ -1450,7 +1450,7 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
 fn test_qualified_class_reference_standalone() {
     // ADR 0070 Phase 2: `json@Parser` as a standalone expression should use
     // the class registry with the short name 'Parser' and produce the
-    // display name 'json@Parser class' in the class object tuple.
+    // canonical tag 'Parser class' in the class object tuple (BT-4074).
     use beamtalk_core::ast::{Expression, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
 
@@ -1481,10 +1481,14 @@ fn test_qualified_class_reference_standalone() {
         "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
     );
 
-    // Display name in the class object tuple includes package qualifier
+    // BT-4074: the class object carries the canonical tag, not a qualified one
     assert!(
-        code.contains("'json@Parser class'"),
-        "Class object tuple should use 'json@Parser class' as display name. Got:\n{code}"
+        code.contains("{'beamtalk_object', 'Parser class', "),
+        "Class object tuple should use the canonical 'Parser class' tag. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("json@Parser class"),
+        "No package-qualified tag may be emitted. Got:\n{code}"
     );
 }
 
