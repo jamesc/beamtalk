@@ -132,6 +132,8 @@ instantiation_test_() ->
                 fun test_declared_fields_reparent_invalidates/0},
             {"the declared-fields not_found fallback is never cached",
                 fun test_declared_fields_fallback_not_cached/0},
+            {"published instance variables win over a stale compiled meta (reload window)",
+                fun test_declared_fields_ignore_stale_meta/0},
             {"module-less new with multiple args raises type_error",
                 fun test_generic_new_multi_args/0},
             {"module-less generic instance dispatches a fun-backed method",
@@ -943,6 +945,42 @@ test_declared_fields_fallback_not_cached() ->
     after
         delete_classes([Child])
     end.
+
+%% During a hot reload's `-on_load` the OLD code is still current, so
+%% `__beamtalk_meta/0` answers the old `fields` while the published instance
+%% variables already hold the new ones. The walk must answer the published
+%% set: a removed field (`y`) is rejected, not unioned back in and memoised.
+test_declared_fields_ignore_stale_meta() ->
+    Class = 'Bt4281StaleMetaClass',
+    Module = bt4281_stale_meta_mod,
+    load_meta_module(Module, [x, y]),
+    ok = beamtalk_class_metadata:insert(Class, Module, undefined, none, false),
+    ok = beamtalk_class_metadata:put_reflection(Class, reflection([x])),
+    try
+        ?assertEqual(#{x => 1}, check_new(Class, #{x => 1})),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := y}}},
+            check_new(Class, #{y => 1})
+        )
+    after
+        delete_classes([Class]),
+        _ = code:purge(Module),
+        _ = code:delete(Module),
+        _ = code:purge(Module)
+    end.
+
+%% Load a throwaway module whose `__beamtalk_meta/0` declares `Fields`.
+load_meta_module(Module, Fields) ->
+    Forms = [
+        {attribute, 1, module, Module},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [
+            {clause, 3, [], [], [erl_parse:abstract(#{fields => Fields}, 3)]}
+        ]}
+    ],
+    {ok, Module, Bin} = compile:forms(Forms),
+    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
+    ok.
 
 %% A module-less metadata row whose only declared names are its published
 %% instance variables (the builder-class shape `own_declared_fields/1` reads).

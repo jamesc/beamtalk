@@ -341,13 +341,13 @@ Full declared field set for `Class`: own, inherited, and `late` names.
 
 Walks the superclass chain over ETS-only metadata reads
 (`lookup_instance_variables/1`, `lookup_superclass/1`, plus each level's
-own `__beamtalk_meta/0` `fields`) — deliberately no `gen_server:call`,
+own `__beamtalk_meta/0` `fields` when it has published none) — deliberately
+no `gen_server:call`,
 which issued from `init/1` while the spawning class server is still inside
 its own `{spawn, ...}` handler would deadlock the two against each other
-(the same reason `publish_reflection/1` exists). Unioning the meta list
-with the published variables keeps a level fail-open: a stale extra name
-at worst accepts a key for a removed field (the pre-BT-4030 behaviour),
-never rejects a valid one.
+(the same reason `publish_reflection/1` exists). A level's published
+variables come from the same compiled meta `fields` list its registration
+passed in, so preferring them rejects no valid name.
 
 Every level of a class being instantiated is registered by the time this
 runs: a module's `on_load` `register_class/0` re-raises failures instead
@@ -369,9 +369,11 @@ cached; the `not_found` fallback depends on `BaseState`, so it is
 recomputed every time. Every input of the walk is written by a path that
 invalidates the cache — `module`/`superclass` by `insert/5` and
 `merge_identity/5` (load, hot reload, redefinition), `instance_variables`
-by `put_reflection/2` — so a reload is seen on the next call. The compiled
-meta `fields` come from the loaded module, and a reload always goes
-through `merge_identity/5`.
+by `put_reflection/2` — so a reload is seen on the next call. A level's
+compiled `__beamtalk_meta/0` is read only when it has published no
+instance variables: during a reload's `-on_load` the old code is still
+current, so that read would answer the old `fields` (see
+`own_declared_fields/1`).
 """.
 -spec declared_fields(class_name(), map()) -> [term()].
 declared_fields(Class, BaseState) ->
@@ -424,33 +426,45 @@ declared_fields_walk(Class, Acc, Depth) ->
             not_found
     end.
 
-%% One level's own declared names: the union of the compiled meta `fields`
-%% list (always includes `late` slots) and the published instance
-%% variables (the only source for module-less builder classes).
+%% One level's own declared names. The published instance variables are the
+%% source of truth whenever the level has published them: every compiled
+%% registration passes its own `__beamtalk_meta/0` map in `ClassInfo`, and
+%% `apply_class_info/2` / `init/1` publish its `fields` (which always include
+%% `late` slots), so they already equal the new module's meta. The compiled
+%% meta is read only for a level with no published row yet.
+%%
+%% Never union the two (BT-4281 review): during a hot reload's `-on_load`
+%% the OLD code is still current, so `read_meta/1` answers the old `fields`.
+%% A walk racing that window would union a removed field back in and memoise
+%% it under the post-invalidation generation, accepting the removed key
+%% until some unrelated class write.
 -spec own_declared_fields(class_name()) -> {ok, [term()]} | not_found.
 own_declared_fields(Class) ->
-    MetaFields =
-        case beamtalk_class_metadata:lookup_module(Class) of
-            {ok, Module} ->
-                case beamtalk_class_metadata:read_meta(Module) of
-                    {ok, Meta} ->
-                        case maps:get(fields, Meta, []) of
-                            L when is_list(L) -> L;
-                            _ -> []
-                        end;
-                    not_available ->
-                        []
-                end;
-            not_found ->
-                []
-        end,
     case beamtalk_class_metadata:lookup_instance_variables(Class) of
         {ok, IVars} ->
-            {ok, MetaFields ++ (IVars -- MetaFields)};
-        not_found when MetaFields =/= [] ->
-            {ok, MetaFields};
+            {ok, IVars};
         not_found ->
-            not_found
+            case compiled_meta_fields(Class) of
+                [] -> not_found;
+                MetaFields -> {ok, MetaFields}
+            end
+    end.
+
+-spec compiled_meta_fields(class_name()) -> [term()].
+compiled_meta_fields(Class) ->
+    case beamtalk_class_metadata:lookup_module(Class) of
+        {ok, Module} ->
+            case beamtalk_class_metadata:read_meta(Module) of
+                {ok, Meta} ->
+                    case maps:get(fields, Meta, []) of
+                        L when is_list(L) -> L;
+                        _ -> []
+                    end;
+                not_available ->
+                    []
+            end;
+        not_found ->
+            []
     end.
 
 -doc """
