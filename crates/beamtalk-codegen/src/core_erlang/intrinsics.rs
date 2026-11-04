@@ -2611,7 +2611,6 @@ impl CoreErlangGenerator {
                         let name_doc = seq.next();
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
-                        let pid_var = self.fresh_var("Pid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -2620,10 +2619,21 @@ impl CoreErlangGenerator {
                         // user-defined value objects are maps and use beamtalk_reflection.
                         let hint = leaf::binary_lit("Value types have no instance variables");
 
-                        // The non-actor branch is split:
+                        // A `#beamtalk_object{}` receiver — an actor instance OR a
+                        // class object, which share that shape — goes through
+                        // `beamtalk_message_dispatch:send/3`, whose
+                        // `classify_receiver` tells them apart (actor →
+                        // `sync_send`; class object → `class_send`, reaching
+                        // `dispatch_class_method`'s `fieldAt:` clause; BT-4148).
+                        // Sending a class object the actor message shape
+                        // instead crashed the class gen_server.
+                        //
+                        // The non-object branch is split:
                         //   - map receiver → delegate to beamtalk_primitive:send (routes
                         //     through dispatch/3 which respects ClassKind::Value vs Object)
-                        //   - other (primitive literal) → raise immutable_value
+                        //   - other (primitive literal) → raise immutable_value inline,
+                        //     keeping this intrinsic's own hint (the dynamic path's
+                        //     primitive `fieldAt:` arm words it differently).
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2640,12 +2650,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> let ",
-                            leaf::var(pid_var.clone()),
-                            " = call 'erlang':'element'(4, ",
+                            "<'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
                             leaf::var(receiver_var.clone()),
-                            ") in call 'beamtalk_actor':'sync_send'(",
-                            leaf::var(pid_var),
                             ", 'fieldAt:', [",
                             leaf::var(name_var.clone()),
                             "])",
@@ -2733,13 +2739,16 @@ impl CoreErlangGenerator {
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
-                        let pid_var = self.fresh_var("Pid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
                         let hint = leaf::binary_lit(super::errors::VALUE_IMMUTABLE_SLOT_HINT);
 
+                        // As `fieldAt:` above: a `#beamtalk_object{}` receiver
+                        // (actor instance or class object) goes through
+                        // `beamtalk_message_dispatch:send/3` (BT-4148); anything
+                        // else raises `immutable_value` inline.
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2760,12 +2769,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> let ",
-                            leaf::var(pid_var.clone()),
-                            " = call 'erlang':'element'(4, ",
+                            "<'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
                             leaf::var(receiver_var.clone()),
-                            ") in call 'beamtalk_actor':'sync_send'(",
-                            leaf::var(pid_var),
                             ", 'fieldAt:put:', [",
                             leaf::var(name_var),
                             ", ",
@@ -2852,22 +2857,16 @@ impl CoreErlangGenerator {
                         // `'hasField:'` clause; value/tagged-map/primitive
                         // → `beamtalk_primitive:send`, reaching the
                         // `hasField:` arm every class's `dispatch/3` now
-                        // carries). Unlike `fieldAt:`/`fieldAt:put:` above
-                        // (which hand-roll an `is_tuple`/`is_map` receiver
-                        // check that only distinguishes "an actor-shaped
-                        // `#beamtalk_object{}` tuple" from "not" — mistaking
-                        // a CLASS object, also `#beamtalk_object{}`-shaped,
-                        // for a plain actor instance and sending it the
-                        // wrong message shape, `{Selector, Args, PropCtx}`
-                        // instead of `{class_method_call, ...}`, which
-                        // crashes the class gen_server with a
-                        // `function_clause` — found via this issue's own
-                        // "from outside" test), `hasField:`/`clearField:`
-                        // reuse the SAME general dispatcher `perform:`
-                        // already does, so a class-object receiver is
-                        // handled correctly (CLAUDE.md no-duplicate-implementations
-                        // rule: `classify_receiver`'s actor/class/value
-                        // distinction lives in exactly one place).
+                        // carries). A class object is also
+                        // `#beamtalk_object{}`-shaped, so treating it as an
+                        // actor instance would send it the wrong message
+                        // shape and crash the class gen_server;
+                        // `hasField:`/`clearField:` reuse the SAME general
+                        // dispatcher `perform:` already does (as
+                        // `fieldAt:`/`fieldAt:put:` do for their
+                        // `#beamtalk_object{}` receivers, BT-4148), so
+                        // `classify_receiver`'s actor/class/value
+                        // distinction lives in exactly one place.
                         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "HasF")?;
                         let recv_doc = seq.next();
                         let name_doc = seq.next();
@@ -2950,12 +2949,10 @@ impl CoreErlangGenerator {
                         // General dispatch: delegate to
                         // `beamtalk_message_dispatch:send/3`, exactly like
                         // `hasField:` above and for the identical reason —
-                        // a hand-rolled `is_tuple`/`is_map` receiver check
-                        // (as `fieldAt:`/`fieldAt:put:` above still do)
-                        // cannot tell a class-object `#beamtalk_object{}`
-                        // apart from an actor-instance one, so it would send
-                        // a live class gen_server the wrong message shape
-                        // and crash it. A value/primitive receiver reaches
+                        // a hand-rolled receiver check cannot tell a
+                        // class-object `#beamtalk_object{}` apart from an
+                        // actor-instance one, so it would send a live class
+                        // gen_server the wrong message shape and crash it. A value/primitive receiver reaches
                         // the class's own `dispatch/3`, whose `clearField:`
                         // arm always raises `immutable_value` (added
                         // unconditionally, not only for `ClassKind::Value`

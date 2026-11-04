@@ -2486,10 +2486,21 @@ fn test_field_names_actor_uses_sync_send() {
     );
 }
 
+/// True when `code` delegates `selector` to `beamtalk_message_dispatch:send/3`.
+fn has_message_dispatch_send_for_selector(code: &str, selector: &str) -> bool {
+    code.match_indices("'beamtalk_message_dispatch':'send'(")
+        .any(|(idx, _)| {
+            let end = (idx + 200).min(code.len());
+            code[idx..end].contains(selector)
+        })
+}
+
 #[test]
-fn test_field_at_actor_uses_sync_send() {
-    // fieldAt: on an actor receiver must use sync_send.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:' atom.
+fn test_field_at_object_receiver_uses_message_dispatch() {
+    // BT-4148: a `#beamtalk_object{}` receiver of `fieldAt:` may be an actor
+    // instance OR a class object; only `beamtalk_message_dispatch:send/3`
+    // (`classify_receiver`) tells them apart. A direct `sync_send` sent a
+    // class object the actor message shape and crashed its gen_server.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2498,8 +2509,12 @@ fn test_field_at_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldAt:'"),
-        "fieldAt: on actor must call sync_send with 'fieldAt:' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
+        "fieldAt: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:'"),
+        "fieldAt: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2509,12 +2524,16 @@ fn test_field_at_actor_uses_sync_send() {
         !code.contains("'beamtalk_future':'new'"),
         "fieldAt: must not allocate a future. Got:\n{code}"
     );
+    // The primitive-receiver error stays inline.
+    assert!(
+        code.contains("'immutable_value'"),
+        "fieldAt: must keep its inline immutable_value error for primitives. Got:\n{code}"
+    );
 }
 
 #[test]
-fn test_field_at_put_actor_uses_sync_send() {
-    // fieldAt:put: on an actor receiver must use sync_send.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:put:' atom.
+fn test_field_at_put_object_receiver_uses_message_dispatch() {
+    // BT-4148: as `fieldAt:` above, for `fieldAt:put:`.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2523,8 +2542,12 @@ fn test_field_at_put_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldAt:put:'"),
-        "fieldAt:put: on actor must call sync_send with 'fieldAt:put:' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
+        "fieldAt:put: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:put:'"),
+        "fieldAt:put: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2533,6 +2556,36 @@ fn test_field_at_put_actor_uses_sync_send() {
     assert!(
         !code.contains("'beamtalk_future':'new'"),
         "fieldAt:put: must not allocate a future. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'immutable_value'"),
+        "fieldAt:put: must keep its inline immutable_value error for primitives. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_class_receiver_uses_message_dispatch() {
+    // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
+    // class route through `beamtalk_message_dispatch:send/3`, which reaches
+    // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
+    let src = concat!(
+        "Object subclass: Holder\n",
+        "  classState: count = 0\n\n",
+        "  probe => Holder fieldAt: #count\n",
+        "  poke => Holder fieldAt: #count put: 3\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
+        "Cls fieldAt: must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
+        "Cls fieldAt:put: must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:"),
+        "Cls fieldAt:[put:] must not sync_send to the class pid. Got:\n{code}"
     );
 }
 

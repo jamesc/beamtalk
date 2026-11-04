@@ -3256,6 +3256,8 @@ class_chain_skip_test_() ->
                 fun test_class_extension_shadows_class_chain/0},
             {"hasField:/clearField: still answer from the class process",
                 fun test_class_var_reflection_still_routes_to_class/0},
+            {"BT-4148: fieldAt:/fieldAt:put: answer from the class process, which survives",
+                fun test_class_field_at_routes_to_class/0},
             {"an unknown selector still raises does_not_understand on the class",
                 fun test_class_chain_skip_dnu/0}
         ]
@@ -3345,6 +3347,25 @@ test_class_var_reflection_still_routes_to_class() ->
         ?assertEqual(false, beamtalk_class_dispatch:class_send(Pid, 'hasField:', [missing])),
         _ = beamtalk_class_dispatch:class_send(Pid, 'clearField:', [counter]),
         ?assertEqual(false, beamtalk_class_dispatch:class_send(Pid, 'hasField:', [counter]))
+    after
+        stop_quietly(Pid)
+    end.
+
+test_class_field_at_routes_to_class() ->
+    %% BT-4148: `Cls fieldAt:` / `Cls fieldAt:put:` reach the class
+    %% gen_server's `dispatch_class_method/5` clauses rather than the
+    %% class-method lookup (or a DNU), and neither kills the class process.
+    ?assert(beamtalk_object_class:is_class_var_reflection_selector('fieldAt:')),
+    ?assert(beamtalk_object_class:is_class_var_reflection_selector('fieldAt:put:')),
+    ?assert(beamtalk_object_class:is_class_var_reflection_send('fieldAt:put:', [x, 1])),
+    ?assertNot(beamtalk_object_class:is_class_var_reflection_send('fieldAt:put:', ["x", 1])),
+    Pid = start_bt4073_class('BT4148ClassVars', none, #{}, #{counter => 1}),
+    try
+        ?assertEqual(1, beamtalk_class_dispatch:class_send(Pid, 'fieldAt:', [counter])),
+        ?assertEqual(5, beamtalk_class_dispatch:class_send(Pid, 'fieldAt:put:', [counter, 5])),
+        ?assertEqual(5, beamtalk_class_dispatch:class_send(Pid, 'fieldAt:', [counter])),
+        ?assertEqual(5, gen_server:call(Pid, {get_class_var, counter})),
+        ?assert(is_process_alive(Pid))
     after
         stop_quietly(Pid)
     end.
