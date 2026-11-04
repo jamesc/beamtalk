@@ -2182,6 +2182,21 @@ mod tests {
         }
     }
 
+    /// BT-4410: `Object>>isKindOf:` is a direct call to the runtime
+    /// intrinsic, not the foreign-FFI proxy (`beamtalk_erlang_proxy`).
+    #[test]
+    fn test_object_is_kind_of_lowers_to_direct_intrinsic_call() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Object",
+            "isKindOf:",
+            &["AClass".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'objectIsKindOf'(Self, AClass)".to_string())
+        );
+    }
+
     #[test]
     fn test_proto_object_perform_variants_do_not_self_dispatch() {
         let timeout = doc_to_string(generate_primitive_bif(
