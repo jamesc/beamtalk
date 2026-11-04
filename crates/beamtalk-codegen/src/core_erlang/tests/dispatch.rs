@@ -1556,8 +1556,8 @@ fn test_bt4075_actor_logger_error_last_statement_replies() {
     let code = codegen("Actor subclass: Probe\n  state: n = 0\n  log: msg => Logger error: msg\n");
     let line = code
         .lines()
-        .find(|l| l.contains("'logger'"))
-        .unwrap_or_else(|| panic!("no logger call:\n{code}"));
+        .find(|l| l.contains("'beamtalk_logging_config':'log'"))
+        .unwrap_or_else(|| panic!("no Logger log call:\n{code}"));
     assert!(
         line.contains("{'reply', _Result, "),
         "`Logger error:` as the last statement must reply:\n{line}"
