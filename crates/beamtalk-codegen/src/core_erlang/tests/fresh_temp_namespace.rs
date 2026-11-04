@@ -406,6 +406,7 @@ const HAND_WRITTEN_CAPITALIZED: &[&str] = &[
     "InitCleanState",
     "InitErr",
     "InitNewState",
+    "IsSlotSelector",
     "IvaErr",
     "IvaName",
     "IvapName",

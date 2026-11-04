@@ -189,6 +189,32 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4279: `'__is_slot'/1`: `'true'` exactly for the selectors whose
+    /// `dispatch/3` clause in this module is an auto-generated slot getter
+    /// (`getters`, [`compute_auto_slot_methods`]), `'false'` for every other
+    /// term. A typed slot read in an actor method asks the loaded module this
+    /// before skipping its cell bracket, so a reload that replaces a getter
+    /// with a method is seen at once.
+    ///
+    /// ```erlang
+    /// '__is_slot'/1 = fun (IsSlotSelector) ->
+    ///     case IsSlotSelector of <'x'> when 'true' -> 'true' <_> when 'true' -> 'false' end
+    /// ```
+    pub(in crate::core_erlang) fn generate_is_slot(getters: &[String]) -> Document<'static> {
+        let arms: Vec<Document<'static>> = getters
+            .iter()
+            .map(|field| docvec!["<", leaf::atom(field.clone()), "> when 'true' -> 'true' "])
+            .collect();
+        docvec![
+            leaf::fname("__is_slot".to_string(), 1),
+            " = fun (IsSlotSelector) ->\n",
+            "    case IsSlotSelector of ",
+            concat(arms),
+            "<_> when 'true' -> 'false' end\n",
+            "\n",
+        ]
+    }
+
     /// Generates an auto `with*:` functional setter for a single slot.
     ///
     /// ```erlang

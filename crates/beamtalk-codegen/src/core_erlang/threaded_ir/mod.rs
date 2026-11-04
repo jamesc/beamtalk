@@ -96,8 +96,8 @@ pub(super) use emit::{
 pub(super) use ir::CallSiteLine;
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FastPath, FoldCarry, FrameId,
+    LoopCounter, NlrThrowShape, OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
     ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
     VersionedVar,
 };

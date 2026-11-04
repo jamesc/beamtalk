@@ -329,11 +329,15 @@ fn typed_string_literal_is_rejected_by_the_parser() {
 fn value_origin(code: &str, var: &str) -> usize {
     let mut var = var.to_string();
     loop {
-        let binding = format!("let {var} = ");
-        let at = code
-            .find(&binding)
+        // A BT-4279 fast-path bracket binds its value as `let <V, State> = `.
+        let plain = format!("let {var} = ");
+        let fast = format!("let <{var}, ");
+        let (at, len) = code
+            .find(&plain)
+            .map(|at| (at, plain.len()))
+            .or_else(|| code.find(&fast).map(|at| (at, fast.len())))
             .unwrap_or_else(|| panic!("no binding of {var} in\n{code}"));
-        let rhs = &code[at + binding.len()..];
+        let rhs = &code[at + len..];
         let alias: String = rhs
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '@')

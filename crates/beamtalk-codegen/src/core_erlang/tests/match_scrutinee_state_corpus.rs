@@ -180,6 +180,19 @@ fn newest_state_before(out: &str, at: usize) -> Option<String> {
                         if name.starts_with("State") && rest[name_len..].starts_with(" = ") {
                             bindings.push((name, scopes.innermost()));
                         }
+                        // BT-4279: a fast-path bracket binds its reload in a
+                        // value list, `let <_Synced@N, StateK> = `.
+                        if let Some(list) = rest.strip_prefix('<')
+                            && let Some(close) = list.find("> = ")
+                        {
+                            for name in list[..close].split(", ") {
+                                if name.starts_with("State")
+                                    && name.chars().all(|c| c.is_ascii_alphanumeric())
+                                {
+                                    bindings.push((name, scopes.innermost()));
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }

@@ -10,7 +10,7 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt,
+    FastPath, FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt,
     ThreadingMode, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
@@ -309,15 +309,25 @@ pub(in crate::core_erlang) fn render(
                 result,
                 load,
                 tier2_local_rebinds,
+                fast_path,
                 ..
-            } => docs.push(render_synced_call(
-                store,
-                call,
-                result.as_deref(),
-                load.as_ref(),
-                tier2_local_rebinds,
-                ctx,
-            )),
+            } => docs.push(match (fast_path, result, load) {
+                // BT-4279: a fast path renders only when the bracket has a
+                // result and a reload and no Tier 2 rebinds; the verifier
+                // reports any other shape (`FastPathOnUnsplittableBracket`),
+                // which then renders as the plain bracket.
+                (Some(fast), Some(result), Some(load)) if tier2_local_rebinds.is_empty() => {
+                    render_fast_path_synced_call(store, call, result, load, fast, ctx)
+                }
+                _ => render_synced_call(
+                    store,
+                    call,
+                    result.as_deref(),
+                    load.as_ref(),
+                    tier2_local_rebinds,
+                    ctx,
+                ),
+            }),
         }
     }
     Document::Vec(docs)
@@ -411,6 +421,49 @@ fn render_synced_call(
         }
     }
     Document::Vec(parts)
+}
+
+/// BT-4279: renders a [`ThreadedStmt::SyncedCall`] with a [`FastPath`]: the
+/// guard's `true` arm hands the fast value and the stored `State` through
+/// unchanged; every other arm is the bracket, store, call and reload.
+fn render_fast_path_synced_call(
+    store: &VersionedVar,
+    call: &Document<'static>,
+    result: &str,
+    load: &VersionedVar,
+    fast: &FastPath,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let store_name = ctx.resolve_prefix(store);
+    let load_name = ctx.resolve_prefix(load);
+    docvec![
+        fast.bindings.clone(),
+        "let <",
+        leaf::var(result.to_string()),
+        ", ",
+        leaf::var(load_name),
+        "> = case ",
+        fast.test.clone(),
+        " of <'true'> when 'true' -> <",
+        fast.fast.clone(),
+        ", ",
+        leaf::var(store_name.clone()),
+        "> <_> when 'true' -> let _ = ",
+        cell_put_call(leaf::var(store_name)),
+        " in let ",
+        leaf::var(fast.slow_result.clone()),
+        " = ",
+        call.clone(),
+        " in let ",
+        leaf::var(fast.slow_state.clone()),
+        " = ",
+        cell_take_call(),
+        " in <",
+        leaf::var(fast.slow_result.clone()),
+        ", ",
+        leaf::var(fast.slow_state.clone()),
+        "> end in ",
+    ]
 }
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call

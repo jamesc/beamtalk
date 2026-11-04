@@ -1086,6 +1086,12 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// A node is verified without its ancestor frames, so the fact travels
         /// on the node. `false` for every well-formed bracket.
         on_private_scratch: bool,
+        /// BT-4279: a guard that proves `call` runs no user code. When it
+        /// holds, the call is the [`FastPath::fast`] value with no store and
+        /// no reload (`load` is `store`); otherwise the bracket runs `call`
+        /// exactly as above. `None` for every bracket whose call has no such
+        /// guard.
+        fast_path: Option<FastPath>,
     },
 
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
@@ -1100,6 +1106,39 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         threads: Vec<String>,
         body: Vec<ThreadedStmt>,
     },
+}
+
+/// BT-4279: the fast path of a [`ThreadedStmt::SyncedCall`]: a guarded send
+/// whose guard, when it holds, proves the send runs no user code (a builtin
+/// operator on primitive operands, an auto-generated slot read of a tagged
+/// map). Rendered as
+///
+/// ```erlang
+/// <bindings>
+/// let <R, State4> = case <test> of
+///     <'true'> when 'true' -> <<fast>, State3>
+///     <_> when 'true' ->
+///         let _ = call 'beamtalk_actor_state':'store'(State3) in
+///         let Slow = <call> in
+///         let SlowState = call 'beamtalk_actor_state':'take'() in <Slow, SlowState>
+/// end in
+/// ```
+///
+/// so the store and reload run only on the arm that may run user code. The
+/// version step is the bracket's own (`store` to `load`): the fast arm hands
+/// `store` through unchanged as `load`.
+///
+/// `bindings`, `test` and `fast` run no user code by construction (the
+/// emitters build them from type tests, BIFs and `maps:get/2`); `bindings`
+/// binds the operands `test`, `fast` and the bracketed call read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct FastPath {
+    pub(in crate::core_erlang) bindings: Document<'static>,
+    pub(in crate::core_erlang) test: Document<'static>,
+    pub(in crate::core_erlang) fast: Document<'static>,
+    /// Fresh names for the slow arm's call value and reloaded state.
+    pub(in crate::core_erlang) slow_result: String,
+    pub(in crate::core_erlang) slow_state: String,
 }
 
 impl ThreadedStmt {
