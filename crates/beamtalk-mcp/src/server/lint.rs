@@ -729,6 +729,7 @@ fn run_lint_pass1(
 /// than the CLI — e.g. `@expect type` annotations are falsely reported as
 /// stale because the type/DNU diagnostics they suppress require cross-file
 /// class resolution to appear.
+#[allow(clippy::too_many_lines)] // Two-pass pipeline is inherently sequential.
 pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     let source_files = match resolve_source_files(path) {
         Ok(files) => files,
