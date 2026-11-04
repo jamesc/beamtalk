@@ -4320,7 +4320,7 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
 /// an Actor class too (whose class methods share `CodeGenContext::Actor`), at
 /// body level, in a block (a read takes the block's capture, ADR 0130 §5)
 /// and as an operand — never a `class_send` back into the class's own
-/// gen_server, nor the instance-side state-threaded `fieldAt:put:`.
+/// `gen_server`, nor the instance-side state-threaded `fieldAt:put:`.
 #[test]
 fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
     let src = concat!(

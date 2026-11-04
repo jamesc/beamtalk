@@ -223,7 +223,7 @@ impl CoreErlangGenerator {
     /// in a class method, a `self` receiver. `self hasField:` lowers to
     /// `beamtalk_class_vars:has`, `self fieldAt:` to `field_at`,
     /// `self fieldAt:put:` to `field_at_put` and `self clearField:` to `clear`
-    /// (BT-4421), never a `class_send` back into the class's own gen_server.
+    /// (BT-4421), never a `class_send` back into the class's own `gen_server`.
     /// The reflection intrinsics call it; the capture walker
     /// ([`Self::block_reads_class_var`]) applies the same rule to the reads.
     ///
