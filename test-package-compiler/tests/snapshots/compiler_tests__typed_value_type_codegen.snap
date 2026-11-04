@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'x'/1, 'y'/1, 'withX:'/2, 'withY:'/2, 'class_x:y:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'typed_value_type' ['new'/0, 'new'/1, 'getX'/1, 'getY'/1, 'distanceTo:'/2, 'printString'/1, 'x'/1, 'y'/1, 'withX:'/2, 'withY:'/2, '__is_slot'/1, 'class_x:y:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'TypedPoint', 'Value'}],
      'type' =
@@ -51,6 +51,10 @@ call 'bt@stdlib@typed_point':'dispatch'('printString', [], Self)
 
 'withY:'/2 = fun (Self, NewVal) ->
     call 'maps':'put'('y', NewVal, Self)
+
+
+'__is_slot'/1 = fun (IsSlotSelector) ->
+    case IsSlotSelector of <'x'> when 'true' -> 'true' <'y'> when 'true' -> 'true' <_> when 'true' -> 'false' end
 
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

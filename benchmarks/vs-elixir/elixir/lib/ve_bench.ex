@@ -94,6 +94,7 @@ defmodule VeBench do
   defbench(:gen_call, pid, do: GenServer.call(pid, :count))
   defbench(:gen_update, pid, do: GenServer.call(pid, :increment))
   defbench(:gen_probe, pid, do: GenServer.call(pid, :probe))
+  defbench(:gen_sum_of, pid, do: GenServer.call(pid, {:sum_of, %Point{x: 1, y: 2}}))
   defbench(:gen_via_self, pid, do: GenServer.call(pid, :via_self))
 
   # n casts, then one call so every cast has been handled.

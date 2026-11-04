@@ -206,6 +206,12 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := c viaSelf]
     last
 
+  class actorSumOf: n :: Integer c: c :: VbCounter -> Integer =>
+    p := VbPoint x: 1 y: 2
+    last := 0
+    n timesRepeat: [last := c sumOf: p]
+    last
+
   class actorViaSelf: n :: Integer c: c :: VbCounter -> Integer =>
     last := 0
     n timesRepeat: [last := c viaSelf]

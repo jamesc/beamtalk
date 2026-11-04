@@ -1081,7 +1081,7 @@ impl CoreErlangGenerator {
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
             ", ",
-            leaf::atom(selector_atom),
+            leaf::atom(selector_atom.clone()),
             ", [",
             args_list_doc,
             "])",
@@ -1099,6 +1099,34 @@ impl CoreErlangGenerator {
             }
         };
 
+        // BT-4279: a unary send that may be an auto-generated slot getter of a
+        // tagged Value class. Its fast path reads the slot with no bracket
+        // when the receiver is tagged exactly that class and the loaded
+        // module's `__is_slot/1` says the selector is still a plain slot read
+        // (a reload that turns it into a method answers `false`).
+        if let TypedSendTarget::Tagged(tagged) = target
+            && arguments.is_empty()
+            && preamble.is_empty()
+            && self.class_declares_value_slot(&tagged.class_name, &selector_atom)
+        {
+            let test = Self::slot_read_test_doc(&receiver_var, tagged, &selector_atom);
+            let fast = docvec![
+                "call 'maps':'get'(",
+                leaf::atom(selector_atom.clone()),
+                ", ",
+                leaf::var(receiver_var.clone()),
+                ")",
+            ];
+            let bindings = docvec![
+                "let ",
+                leaf::var(receiver_var.clone()),
+                " = ",
+                receiver_doc.clone(),
+                " in ",
+            ];
+            self.offer_fast_path(receiver, bindings, test, fast, case_doc.clone());
+        }
+
         let mut body = case_doc;
         for (var, doc) in arg_vars.into_iter().zip(arg_docs).rev() {
             body = docvec!["let ", leaf::var(var), " = ", doc, " in ", body];
@@ -1112,6 +1140,48 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// BT-4279: whether `class_name` is a Value class that declares a field
+    /// named `selector`, so a unary send of it may reach the class's
+    /// auto-generated getter (whether it does is the loaded module's
+    /// `__is_slot/1` answer at run time).
+    fn class_declares_value_slot(&self, class_name: &str, selector: &str) -> bool {
+        self.class_hierarchy.as_ref().is_some_and(|h| {
+            h.get_class(class_name)
+                .is_some_and(|c| c.is_value && c.state.iter().any(|f| f.as_str() == selector))
+        })
+    }
+
+    /// BT-4279: the slot-read fast path's test: the receiver is a map tagged
+    /// exactly the target class, and that class's loaded module answers
+    /// `true` from `__is_slot/1` for the selector. A module compiled before
+    /// `__is_slot/1` existed answers `false` (the export check).
+    fn slot_read_test_doc(
+        receiver_var: &str,
+        tagged: &TypedTaggedTarget,
+        selector: &str,
+    ) -> Document<'static> {
+        let module = leaf::atom(tagged.module_name.clone());
+        docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(receiver_var.to_string()),
+            ") of <'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(receiver_var.to_string()),
+            ", 'undefined') of <",
+            leaf::atom(tagged.class_name.clone()),
+            "> when 'true' -> ",
+            "case call 'erlang':'function_exported'(",
+            module.clone(),
+            ", '__is_slot', 1) of <'true'> when 'true' -> call ",
+            module,
+            ":'__is_slot'(",
+            leaf::atom(selector.to_string()),
+            ") <_> when 'true' -> 'false' end ",
+            "<_> when 'true' -> 'false' end ",
+            "<_> when 'true' -> 'false' end",
+        ]
     }
 
     /// The tagged-map guard of [`Self::generate_typed_guarded_send`]:
