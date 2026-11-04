@@ -111,13 +111,16 @@ to bare binaries via `beamtalk_primitive:deep_unwrap_strings/1` first. A
 message that is still not text after unwrapping (e.g. an Integer sent
 through `perform:`) is printed with `~tp` instead of failing the format.
 
-The unwrap is skipped when `Level` is filtered out. The event carries no
-`mfa`, so `logger:log/4` applies only the primary level — the same filtering
-the previous inline `logger:log/3` call had.
+The unwrap is skipped when `Level` is below the primary level. The gate
+checks the primary level only, never `logger:allow(Level, ?MODULE)`: every
+user `Logger` send funnels through this module, so a module-level override
+on it must not silence or unlock user logging. The event carries no `mfa`,
+so `logger:log/4` also applies only the primary level, matching the previous
+inline `logger:log/3` call.
 """.
 -spec log(logger:level(), term(), map()) -> nil.
 log(Level, Message, Meta) ->
-    case logger:allow(Level, ?MODULE) of
+    case logger:compare_levels(Level, maps:get(level, logger:get_primary_config())) =/= lt of
         true ->
             Msg = beamtalk_primitive:deep_unwrap_strings(Message),
             Format =

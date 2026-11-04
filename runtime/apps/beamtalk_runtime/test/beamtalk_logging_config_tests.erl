@@ -1098,6 +1098,31 @@ log_filtered_level_files_nothing_test() ->
     end).
 
 -doc """
+BT-4321: a module-level override on `beamtalk_logging_config` does not gate
+user Logger sends. Every send funnels through `log/3`, so only the primary
+level may filter them, as with the previous inline `logger:log/3` call.
+""".
+log_ignores_module_level_override_test() ->
+    with_capture_handler(bt_4321_module_level_test_handler, fun() ->
+        ok = logger:set_module_level(beamtalk_logging_config, none),
+        try
+            nil = beamtalk_logging_config:log(
+                info, {beamtalk_string, <<"still filed">>}, #{domain => ?BT_4321_DOMAIN}
+            ),
+            receive
+                {bt_4321_log_event, #{msg := {Format, Args}}} ->
+                    ?assertEqual(
+                        <<"still filed">>, iolist_to_binary(io_lib:format(Format, Args))
+                    )
+            after 1000 ->
+                ?assert(false, "module-level override on beamtalk_logging_config dropped the send")
+            end
+        after
+            ok = logger:unset_module_level(beamtalk_logging_config)
+        end
+    end).
+
+-doc """
 BT-4321: a non-text message (e.g. an Integer reaching a Logger body through
 `perform:`) is printed with `~tp` rather than failing the `~ts` format.
 """.
