@@ -85,8 +85,7 @@ pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
 pub use reserved_name_validators::MODULE_INFO_FUNCTION;
 pub(crate) use reserved_name_validators::{
-    check_class_var_reflection_shadowing, check_reserved_internal_names,
-    check_reserved_module_info,
+    check_class_var_reflection_shadowing, check_reserved_internal_names, check_reserved_module_info,
 };
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,

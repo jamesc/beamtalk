@@ -18,6 +18,10 @@
 //! bare atom `'__local__balance'` and then **silently stripped from persisted
 //! state on every commit** — silent data loss. This validator rejects such
 //! names at compile time so the collision is impossible by construction.
+//!
+//! It also warns at a class-side method named after a class-variable
+//! reflection selector (`hasField:`, …; BT-4422), a name the class process
+//! answers itself, ahead of the class-method lookup.
 
 use crate::ast::{Expression, Identifier, MethodDefinition, Module};
 use crate::ast_walker::walk_module;
@@ -213,15 +217,14 @@ fn push_class_var_reflection_shadowing(
         Diagnostic::warning(
             format!(
                 "class method `{selector}` is shadowed: the class process answers \
-                 `{selector}` itself when the argument is a Symbol, so such a send never \
+                 `{selector}` itself when the name argument is a Symbol, so such a send never \
                  reaches this method"
             ),
             method.head_span(),
         )
         .with_hint(format!(
-            "Rename it. `{selector}` sent to a class is class-variable reflection \
-             (`hasField:`, `clearField:`, `fieldAt:`, `fieldAt:put:`), which the class \
-             process serves before looking up class methods."
+            "Rename it. `{selector}` sent to a class is class-variable reflection, which \
+             the class process serves before looking up class methods."
         )),
     );
 }
@@ -457,6 +460,18 @@ mod tests {
             "Object subclass: Reg\n  run => 1\n\nReg class >> fieldAt: key => key\n",
         );
         assert_eq!(standalone.len(), 1, "{standalone:?}");
+    }
+
+    #[test]
+    fn analyse_reports_class_side_reflection_shadowing() {
+        let module = parse_bt("Object subclass: Reg\n  class fieldAt: key => key\n");
+        let diagnostics = crate::semantic_analysis::analyse(&module).diagnostics;
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("class method `fieldAt:` is shadowed")),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]
