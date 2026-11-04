@@ -108,6 +108,9 @@ pub enum WellKnownSelector {
     /// receiver is *not* a class literal that defines its own class-side `error:`.
     /// `try_generate_error_signaling` already short-circuits on
     /// `Expression::ClassReference { .. }`, leaving the `Logger` codegen path intact.
+    /// Any other receiver not known to be an instance (`self` in a class method,
+    /// a variable) is a class-side send when, at run time, it is a class object
+    /// whose class side understands `error:` (BT-4075).
     Error,
 
     // --- Object reflection ---

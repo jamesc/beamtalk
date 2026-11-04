@@ -1446,6 +1446,78 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
     );
 }
 
+/// BT-4075: the body of method `name` in `code` (up to the next top-level fun).
+fn method_body<'a>(code: &'a str, name: &str) -> &'a str {
+    let start = code
+        .match_indices(&format!("\n'{name}'/"))
+        .map(|(at, _)| at + 1)
+        .find(|&at| {
+            code[at..]
+                .lines()
+                .next()
+                .is_some_and(|l| l.contains(" = fun "))
+        })
+        .unwrap_or_else(|| panic!("no method {name}:\n{code}"));
+    let rest = &code[start..];
+    let end = rest[1..].find("\n'").map_or(rest.len(), |i| i + 1);
+    &rest[..end]
+}
+
+#[test]
+fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
+    // `obj error:` with an untyped receiver: a class object whose class side
+    // understands `error:` takes the ordinary send (`Result class>>error:`),
+    // anything else raises in place.
+    let code = codegen("Object subclass: Probe\n  raise: msg via: obj => obj error: msg\n");
+    let body = method_body(&code, "raise:via:");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "untyped `error:` receiver must be guarded by class_object_understands:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_message_dispatch':'send'(") && body.contains("'error:', ["),
+        "class-object branch must send `error:`:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "instance branch must keep the user_error raise:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_instance_method_stays_unguarded_intrinsic() {
+    let code = codegen("Object subclass: Probe\n  boom => self error: \"x\"\n");
+    let body = method_body(&code, "boom");
+    assert!(
+        body.contains("'user_error'"),
+        "`self error:` in an instance method must raise user_error:\n{body}"
+    );
+    assert!(
+        !body.contains("class_object_understands"),
+        "`self` in an instance method is never a class object:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
+    // `self` in a class method is a class object: a class-side `error:` takes a
+    // class-side self-send, otherwise `Object>>error:` raises as before.
+    let code = codegen("Object subclass: Probe\n  class boom => self error: \"x\"\n");
+    let body = method_body(&code, "class_boom");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "class-method `self error:` must be guarded:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_self_send'("),
+        "class-method `self error:` must self-send, not go through the class process:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "class-method `self error:` without a class-side `error:` must still raise:\n{body}"
+    );
+}
+
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`

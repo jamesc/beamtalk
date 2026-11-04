@@ -3366,3 +3366,30 @@ test_class_chain_skip_dnu() ->
     after
         stop_quietly(Pid)
     end.
+
+%%% ===========================================================================
+%%% BT-4075: class_object_understands/2 — only a class object asks its class side
+%%% ===========================================================================
+
+class_object_understands_non_class_values_test_() ->
+    [
+        ?_assertNot(beamtalk_class_dispatch:class_object_understands(42, 'error:')),
+        ?_assertNot(beamtalk_class_dispatch:class_object_understands(<<"x">>, 'error:')),
+        %% An actor instance (its tag has no " class" suffix) is not a class object.
+        ?_assertNot(
+            beamtalk_class_dispatch:class_object_understands(
+                #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()}, 'error:'
+            )
+        ),
+        %% A class object of an unregistered class has no class-side methods.
+        ?_assertNot(
+            beamtalk_class_dispatch:class_object_understands(
+                #beamtalk_object{
+                    class = 'BT4075Unregistered class',
+                    class_mod = bt4075_unregistered,
+                    pid = self()
+                },
+                'error:'
+            )
+        )
+    ].
