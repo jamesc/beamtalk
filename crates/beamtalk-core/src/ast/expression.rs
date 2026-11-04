@@ -67,6 +67,10 @@ pub enum ExpectCategory {
     /// that is direct-called in the caller's process directly creates a
     /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
+    /// Suppress class-var-reflection-shadowing warnings — a class-side method
+    /// named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which
+    /// the class process answers itself for a Symbol argument (BT-4422).
+    ClassVarReflectionShadowing,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
     /// (ADR 0137).
@@ -109,6 +113,7 @@ impl ExpectCategory {
             "class_state_abroad" => Some(Self::ClassStateAbroad),
             "class_process_ffi" => Some(Self::ClassProcessFfi),
             "class_method_process_resource" => Some(Self::ClassMethodProcessResource),
+            "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "ffi_nested_string" => Some(Self::FfiNestedString),
             "stored_closure" => Some(Self::StoredClosure),
@@ -140,6 +145,7 @@ impl ExpectCategory {
             Self::ClassStateAbroad => "class_state_abroad",
             Self::ClassProcessFfi => "class_process_ffi",
             Self::ClassMethodProcessResource => "class_method_process_resource",
+            Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::FfiNestedString => "ffi_nested_string",
             Self::StoredClosure => "stored_closure",
@@ -171,6 +177,7 @@ impl ExpectCategory {
             "class_state_abroad",
             "class_process_ffi",
             "class_method_process_resource",
+            "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
             "all",
