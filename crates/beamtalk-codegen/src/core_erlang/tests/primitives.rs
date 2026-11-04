@@ -42,6 +42,33 @@ fn test_generate_primitive_structural_intrinsic() {
 }
 
 #[test]
+fn test_generate_primitive_error_body_raises_user_error() {
+    // BT-4417: `Object>>error:`'s compiled body is reached by generic dispatch
+    // (`perform: #error:`, and a class object without a class-side `error:`
+    // through the class-object protocol fallthrough). It raises the same
+    // `user_error` as the call-site intrinsic, instead of self-dispatching the
+    // intrinsic name `error` (a `does_not_understand` naming `'error'`).
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Object")));
+    generator.current_method_params = vec!["Message".to_string()];
+
+    let doc = generator
+        .generate_primitive("error", false, Span::new(0, 0))
+        .unwrap();
+    let rendered = doc.to_pretty_string();
+    assert!(
+        rendered.contains("call 'beamtalk_primitive':'class_of'(Self)")
+            && rendered.contains("call 'beamtalk_error':'new'('user_error', ")
+            && rendered.contains(", Message) in call 'beamtalk_error':'raise'("),
+        "expected the Object>>error: raise, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("'dispatch'"),
+        "expected no self-dispatch of the intrinsic name, got: {rendered}"
+    );
+}
+
+#[test]
 fn test_generate_primitive_block_value_structural_fallback() {
     // `blockValue`'s fallback body (reached via `perform:`, not the
     // call-site interception) discriminates Tier 1 (plain fun) from Tier 2

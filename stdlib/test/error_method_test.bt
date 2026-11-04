@@ -89,6 +89,59 @@ TestCase subclass: ErrorMethodTest
       Validator rejectAll
     ] on: Exception do: [:e | e kind]) equals: #user_error
 
+  // BT-4417: a class object is an Object, so a class with no class-side
+  // `error:` reaches Object>>error: however the send is written.
+  testErrorOnClassLiteralWithoutClassSideErrorRaises =>
+    self assert: ([
+      Integer error: "x"
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: ([
+      Integer error: "x"
+    ] on: Exception do: [:e | e message]) equals: "x"
+    self assert: ([
+      Validator error: "v"
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+
+  testErrorViaPerformOnClassWithoutClassSideErrorRaises =>
+    self assert: ([
+      Integer perform: #error: withArguments: #("y")
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: ([
+      Integer perform: #error: withArguments: #("y")
+    ] on: Exception do: [:e | e message]) equals: "y"
+
+  testErrorViaPerformOnInstanceRaises =>
+    self assert: ([
+      42 perform: #error: withArguments: #("z")
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: ([
+      42 perform: #error: withArguments: #("z")
+    ] on: Exception do: [:e | e errorClass]) equals: #Integer
+
+  // The literal, a variable and `perform:` agree.
+  testErrorOnClassLiteralMatchesVariable =>
+    cls := Integer
+    literal := [Integer error: "x"] on: Exception do: [:e | e errorClass]
+    viaVar := [cls error: "x"] on: Exception do: [:e | e errorClass]
+    viaPerform := [Integer perform: #error: withArguments: #("x")] on: Exception do: [:e | e errorClass]
+    self assert: literal equals: viaVar
+    self assert: viaPerform equals: viaVar
+
+  // A class-side `error:` still receives the send.
+  testClassSideErrorKeepsItsMeaning =>
+    self assert: (Result error: #x) isError
+    self assert: (Result error: #x) error equals: #x
+    self assert: (Result perform: #error: withArguments: #(#x)) error equals: #x
+
+  // `super error:` in a class-side `error:` reaches Object>>error:.
+  testSuperErrorInClassSideErrorRaises =>
+    self assert: ([
+      SuperErrorProbe error: "s"
+    ] on: Exception do: [:e | e kind]) equals: #user_error
+    self assert: ([
+      SuperErrorProbe error: "s"
+    ] on: Exception do: [:e | e message]) equals: "s"
+
   // BT-4191: errorClass answers a Symbol, matching its `-> Symbol` declaration.
   testErrorClassIsSymbol =>
     @expect dnu

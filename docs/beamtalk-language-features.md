@@ -988,6 +988,8 @@ Common uses:
 - **Supervisor lifecycle:** `class supervise`, `class current` (configuration such as `childSpecs` and `strategy` is instance-side, ADR 0135)
 - **Singleton access:** `class current` — return the singleton instance (see `classState:` below)
 
+**`error:` on a class object.** A class object is an `Object`, so a class with no class-side `error:` answers `error:` with `Object>>error:`: `Integer error: "x"` raises a `user_error` (its `errorClass` is `Integer class`), whether the class is written literally, held in a variable or reached with `perform:`, and so does `self error: "x"` in its class methods. A class that defines a class-side `error:` (`Result class>>error:`, `Logger class>>error:`) receives the send instead, by every route: `Result error: #x` builds a `Result`. Inside such a method, `self error: m` sends to that same class-side `error:` again, so `class error: m => self error: m` recurses instead of raising. To raise from it, use `super error: m` (which reaches `Object>>error:`) or `Error signal: m`.
+
 **`classState:`** declares mutable class-level state — shared across all instances and accessible from class methods. Used for singletons:
 
 ```beamtalk

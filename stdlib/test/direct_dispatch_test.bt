@@ -91,7 +91,8 @@ TestCase subclass: DirectDispatchTest
   testDynamicResultConstructorsMatchStatic =>
     cls := Result
     self assert: (cls ok: 3) equals: (Result ok: 3)
-    // (`cls error: x` with a variable receiver is the Object>>error: intrinsic.)
+    // (`cls error: x` with a variable receiver is the class-side send too, BT-4075.)
+    self assert: (cls error: #nope) error equals: #nope
     self assert: (cls perform: #error: withArguments: #(#nope)) error equals: #nope
     self assert: (Result perform: #ok: withArguments: #(4)) equals: (Result ok: 4)
     self assert: (cls fromTuple: {#ok, 5}) equals: (Result ok: 5)

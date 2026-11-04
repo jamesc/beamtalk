@@ -382,9 +382,15 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
 /// receiver may be a class object whose class side defines `error:`
 /// (`Result class>>error:`, `Logger class>>error:`), and then `error:` is an
 /// ordinary send that answers a value. This is the syntactic half of the rule,
-/// and every consumer starts from it. Code generation refines it with the
-/// method context, since `self` in a class method or a top-level REPL `self`
-/// may also be a class object (`CoreErlangGenerator::error_signal_receiver_kind`).
+/// and every consumer that needs to know whether `error:` returns starts from
+/// it. Code generation refines it with the method context, since `self` in a
+/// class method or a top-level REPL `self` may also be a class object
+/// (`CoreErlangGenerator::error_signal_receiver_kind`).
+///
+/// `block_facts::operands_not_sequenced` does not ask: it stops at the operands
+/// of every `error:` send, whatever the receiver
+/// (`UnsequencedOperand::ErrorSend`). That over-approximation is safe, because
+/// the `error:` lowering sequences its own operands for every receiver kind.
 #[must_use]
 pub fn is_error_signal_instance_receiver(receiver: &super::Expression) -> bool {
     match receiver {
