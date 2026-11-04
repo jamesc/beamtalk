@@ -18,8 +18,10 @@
 //!   this case is broader than the synchronous class-side exemption below),
 //!   stored in a local, class variable or literal, or returned, "reads the
 //!   values captured at creation".
-//! - **(b) writes.** A block literal that writes a class variable, directly or
-//!   through a `self`/own-class send that
+//! - **(b) writes.** A block literal that writes a class variable, directly,
+//!   reflectively (`self fieldAt: #n put: v`, `self clearField: #n`, which
+//!   write in place like `self.n := v`, BT-4421/BT-4428), or through a
+//!   `self`/own-class send that
 //!   [`compute_class_var_mutating_selectors`] cannot prove pure, and is passed
 //!   to a class-side send whose receiver is statically another (user-defined)
 //!   class and which runs in that class's process, "raises
@@ -61,7 +63,7 @@ use crate::ast_walker::{SendRef, walk_sends};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use crate::semantic_analysis::block_facts::{
-    ClassVarAccesses, EscapeShape, analyze_method_body, class_var_accesses,
+    ClassVarAccesses, EscapeShape, ReflectiveWriteKind, analyze_method_body, class_var_accesses,
     compute_class_var_mutating_selectors, escaping_blocks, probe_clause,
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -304,16 +306,40 @@ impl ClassCtx<'_> {
         .then(|| target.to_string())
     }
 
-    /// The first class-variable write `block` makes, in source order: a
-    /// direct `self.n := ...` ([`class_var_accesses`]) or a `self`/own-class
-    /// send, cascade messages included, that may write one, whichever starts
-    /// first. Nested blocks included.
+    /// The first class-variable write `block` makes, in source order, as a
+    /// verb phrase: a direct `self.n := ...` or a reflective `self fieldAt:
+    /// #n put: v` / `self clearField: #n` (both [`class_var_accesses`],
+    /// BT-4428), or a `self`/own-class send, cascade messages included, that
+    /// may write one, whichever starts first. Nested blocks included.
+    ///
+    /// A `fieldAt:put:` of a literal name the class does not declare is left
+    /// out: it raises `undeclared_class_variable` wherever it runs (the
+    /// declared-set check comes first). A `clearField:` of any name, and a
+    /// computed name, count: away from home either raises
+    /// `class_state_unreachable`.
     fn first_class_var_write(&self, block: &Block) -> Option<String> {
-        let direct = class_var_accesses(block, &self.class_vars)
+        let class = self.class_name;
+        let accesses = class_var_accesses(block, &self.class_vars);
+        let direct = accesses
             .writes
-            .into_iter()
+            .iter()
             .min_by_key(|(_, span)| span.start())
-            .map(|(var, span)| (span.start(), format!("class variable '{var}'")));
+            .map(|(var, span)| {
+                (
+                    span.start(),
+                    format!("writes class variable '{var}' of {class}"),
+                )
+            });
+        let reflective = accesses
+            .reflective_writes
+            .iter()
+            .find(|w| {
+                w.kind == ReflectiveWriteKind::ClearField
+                    || w.name
+                        .as_ref()
+                        .is_none_or(|name| self.class_vars.contains(name))
+            })
+            .map(|w| (w.start, w.describe("class variable", class)));
         let mut through_send = None;
         for stmt in &block.body {
             walk_sends(&stmt.expression, &mut |send| {
@@ -325,7 +351,7 @@ impl ClassCtx<'_> {
                     if self.may_write_class_var(&name, by_reference) {
                         through_send = Some((
                             send.receiver.span().start(),
-                            format!("class variables through '{name}'"),
+                            format!("writes class variables through '{name}' of {class}"),
                         ));
                     }
                 }
@@ -333,6 +359,7 @@ impl ClassCtx<'_> {
         }
         direct
             .into_iter()
+            .chain(reflective)
             .chain(through_send)
             .min_by_key(|(start, _)| *start)
             .map(|(_, what)| what)
@@ -476,23 +503,7 @@ fn reads_diagnostic(
     let class = ctx.class_name;
     // `self.n` reads and reflective `fieldAt:` reads (BT-4421), joined:
     // ``reads class variable n of Counter and class variable m with `fieldAt:` ``.
-    let direct = (!accesses.reads.is_empty()).then(|| {
-        let vars = accesses
-            .reads
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("class variable {vars}")
-    });
-    let reads = match (direct, accesses.field_at_read_noun("class variable")) {
-        (None, None) => None,
-        (Some(direct), None) => Some(format!("reads {direct} of {class}")),
-        (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),
-        (Some(direct), Some(refl)) => Some(format!(
-            "reads {direct} of {class} and {refl} with `fieldAt:`"
-        )),
-    };
+    let reads = accesses.reads_phrase("class variable", class);
     let (what, captured, hint) = if accesses.has_field_probes.is_empty() {
         (
             reads.unwrap_or_default(),
@@ -529,6 +540,8 @@ fn reads_diagnostic(
     .with_category(DiagnosticCategory::ClassStateAbroad)
 }
 
+/// Rule (b): `what` is the write as a verb phrase
+/// ([`ClassCtx::first_class_var_write`]).
 fn writes_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
@@ -539,7 +552,7 @@ fn writes_diagnostic(
     let class = ctx.class_name;
     Diagnostic::warning(
         format!(
-            "block writes {what} of {class} and is passed to '{target} {selector}', which runs \
+            "block {what} and is passed to '{target} {selector}', which runs \
              it in {target}'s process: outside an invocation of {class}, the write raises \
              `class_state_unreachable`"
         ),
