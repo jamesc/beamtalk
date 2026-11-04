@@ -3806,7 +3806,7 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
         .unwrap_or_else(|| panic!("the send cases on the receiver tag. Got:\n{run}"));
     let literal_arm = tag_case
         + run[tag_case..]
-            .find("<_> when 'true' -> let _ClassPid")
+            .find("<_> when 'true' -> let _StaticSelf")
             .unwrap_or_else(|| panic!("the other arm is the literal class send. Got:\n{run}"));
     let own_arm = &run[tag_case..literal_arm];
     assert!(
@@ -3820,8 +3820,9 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
     );
     let literal = &run[literal_arm..];
     assert!(
-        literal.contains("'direct_call_ok'('Base class', 'Base')")
-            && literal.contains(":'class_who:'({'beamtalk_object', 'Base class', ")
+        literal.contains("'class_who:', 'Base class'}, 'false')")
+            && literal.contains("'static_call_target'(")
+            && literal.contains(":'class_who:'(_StaticSelf")
             && literal.contains("'class_send'(_ClassPid"),
         "the literal arm is the guarded direct call with Base's own reference. Got:\n{literal}"
     );
@@ -3856,7 +3857,8 @@ fn test_nested_own_class_sends_in_block_args_compile_once() {
         "one own-class guard per send. Got:\n{go}"
     );
     assert_eq!(
-        go.matches("'direct_call_ok'('Base class', 'Base')").count(),
+        go.matches("'beamtalk_class_shadow_flags':'static_call_target'(")
+            .count(),
         4,
         "one literal-send guard per send. Got:\n{go}"
     );
