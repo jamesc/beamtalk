@@ -2634,6 +2634,15 @@ impl CoreErlangGenerator {
                         //   - other (primitive literal) → raise immutable_value inline,
                         //     keeping this intrinsic's own hint (the dynamic path's
                         //     primitive `fieldAt:` arm words it differently).
+                        // The dispatch call is nested in a `case`, so it carries its
+                        // own line annotation (BT-4356).
+                        let dispatch_call = self.annotate_current_send_call(docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            leaf::var(receiver_var.clone()),
+                            ", 'fieldAt:', [",
+                            leaf::var(name_var.clone()),
+                            "])",
+                        ]);
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2650,11 +2659,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-                            leaf::var(receiver_var.clone()),
-                            ", 'fieldAt:', [",
-                            leaf::var(name_var.clone()),
-                            "])",
+                            "<'true'> when 'true' -> ",
+                            dispatch_call,
                             // Non-actor: delegate map receivers to beamtalk_primitive:send
                             // which routes through dispatch/3 (respects ClassKind)
                             " <_> when 'true' -> case call 'erlang':'is_map'(",
@@ -2748,7 +2754,17 @@ impl CoreErlangGenerator {
                         // As `fieldAt:` above: a `#beamtalk_object{}` receiver
                         // (actor instance or class object) goes through
                         // `beamtalk_message_dispatch:send/3` (BT-4148); anything
-                        // else raises `immutable_value` inline.
+                        // else raises `immutable_value` inline. The dispatch call
+                        // carries its own line annotation (BT-4356).
+                        let dispatch_call = self.annotate_current_send_call(docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            leaf::var(receiver_var.clone()),
+                            ", 'fieldAt:put:', [",
+                            leaf::var(name_var.clone()),
+                            ", ",
+                            leaf::var(value_var.clone()),
+                            "])",
+                        ]);
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2769,13 +2785,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
-                            leaf::var(receiver_var.clone()),
-                            ", 'fieldAt:put:', [",
-                            leaf::var(name_var),
-                            ", ",
-                            leaf::var(value_var),
-                            "])",
+                            "<'true'> when 'true' -> ",
+                            dispatch_call,
                             " <_> when 'true' -> let ",
                             leaf::var(class_var.clone()),
                             " = call 'beamtalk_primitive':'class_of'(",

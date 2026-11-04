@@ -2065,12 +2065,14 @@ instance-side `fieldAt:put:`.
 -spec write_class_var(class_name(), map(), atom(), term()) ->
     {ok, map()} | {error, #beamtalk_error{}}.
 write_class_var(ClassName, ClassVars, Name, Value) ->
-    case
-        maps:is_key(Name, ClassVars) orelse
-            beamtalk_class_vars:check_declared(ClassName, Name)
-    of
-        {error, _} = Err -> Err;
-        _ -> {ok, ClassVars#{Name => Value}}
+    Declared =
+        case maps:is_key(Name, ClassVars) of
+            true -> ok;
+            false -> beamtalk_class_vars:check_declared(ClassName, Name)
+        end,
+    case Declared of
+        ok -> {ok, ClassVars#{Name => Value}};
+        {error, _} = Err -> Err
     end.
 
 -doc """
