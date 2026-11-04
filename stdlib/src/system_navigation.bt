@@ -612,12 +612,11 @@ sealed typed Object subclass: SystemNavigation
         cls isNil
           ifTrue: [acc]
           ifFalse: [
-            acc
-              add: #{
-                #class => cls,
-                #selector => (row at: #method),
-                #line => (row at: #line)
-              }
+            acc add: #{
+              #class => cls,
+              #selector => (row at: #method),
+              #line => (row at: #line)
+            }
           ]
       ]
 
@@ -850,11 +849,13 @@ sealed typed Object subclass: SystemNavigation
     aClass isNil ifTrue: [^false]
     announcementClass := self findClass: #Announcement
     announcementClass isNil ifTrue: [^false]
-    hits := self liveClassesIn: #(aClass) select: [:c |
-      (c respondsTo: #superclassChain) and: [
-        c superclassChain includes: announcementClass
+    hits := self
+      liveClassesIn: #(aClass)
+      select: [:c |
+        (c respondsTo: #superclassChain) and: [
+          c superclassChain includes: announcementClass
+        ]
       ]
-    ]
     hits isEmpty not
 
   /// Append announcement emission sites found in every source-bearing extension
@@ -885,9 +886,9 @@ sealed typed Object subclass: SystemNavigation
         extClassTag := entry at: 1
         extSelector := entry at: 2
         extSource :: String := entry at: 3
-        extClass := (self extensionTag: extClassTag targets: targetNames)
-          ifTrue: [self findClass: extClassTag]
-          ifFalse: [nil]
+        extClass := (self extensionTag: extClassTag targets: targetNames) ifTrue: [
+          self findClass: extClassTag
+        ] ifFalse: [nil]
         extClass notNil
           ifTrue: [
             // `extSource` is bound `:: String` above to re-assert the
@@ -2020,9 +2021,13 @@ sealed typed Object subclass: SystemNavigation
         skipForFfi := recv == #erlang_ffi
         handlesDnu := dnuScopes includes: (self dnuScopeKeyForOwner: (row at: #owner) classSide: (row at: #class_side))
         skipForDnu := handlesDnu and: [(recv == #self) or: [recv == #super]]
-        cls := ((excluded includes: sentSel) or: [skipForFfi or: [skipForDnu]])
-          ifTrue: [nil]
-          ifFalse: [self senderClassFor: (row at: #owner) classSide: (row at: #class_side)]
+        cls := ((excluded includes: sentSel) or: [
+          skipForFfi or: [skipForDnu]
+        ]) ifTrue: [
+          nil
+        ] ifFalse: [
+          self senderClassFor: (row at: #owner) classSide: (row at: #class_side)
+        ]
         cls isNil
           ifTrue: [acc]
           ifFalse: [

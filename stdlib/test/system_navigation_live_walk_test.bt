@@ -113,12 +113,16 @@ TestCase subclass: SystemNavigationLiveWalkTest
   testIndexedImplementorsDropRemovedOwner =>
     self.cls := self makeProbe: #BT4111GoneImplementor
     self.cls removeFromSystem
-    rows := #(
-      #{#owner => #BT4111GoneImplementor, #class_side => false},
-      #{#owner => #Integer, #class_side => false},
-      #{#owner => #BT4111GoneImplementor, #class_side => true},
-      #{#owner => #Integer, #class_side => true}
-    )
+    rows := #(#{
+      #owner => #BT4111GoneImplementor,
+      #class_side => false
+    }, #{
+      #owner => #Integer,
+      #class_side => false
+    }, #{
+      #owner => #BT4111GoneImplementor,
+      #class_side => true
+    }, #{#owner => #Integer, #class_side => true})
     impls := SystemNavigation indexedImplementorsFrom: rows
     self assert: impls equals: #(Integer, Integer class)
 
@@ -126,10 +130,12 @@ TestCase subclass: SystemNavigationLiveWalkTest
   testIndexedSiteRecordsDropRemovedOwner =>
     self.cls := self makeProbe: #BT4111GoneSender
     self.cls removeFromSystem
-    rows := #(
-      #{#owner => #BT4111GoneSender, #class_side => false, #method => #foo, #line => 1},
-      #{#owner => #Integer, #class_side => false, #method => #bar, #line => 2}
-    )
+    rows := #(#{
+      #owner => #BT4111GoneSender,
+      #class_side => false,
+      #method => #foo,
+      #line => 1
+    }, #{#owner => #Integer, #class_side => false, #method => #bar, #line => 2})
     records := SystemNavigation indexedSiteRecordsFrom: rows into: List new
     self assert: records size equals: 1
     self assert: (records first at: #class) equals: Integer
@@ -139,10 +145,21 @@ TestCase subclass: SystemNavigationLiveWalkTest
   testGroupIndexedSendsDropsRemovedOwner =>
     self.cls := self makeProbe: #BT4111GoneGroup
     self.cls removeFromSystem
-    rows := #(
-      #{#sent => #bt4111Sent, #owner => #BT4111GoneGroup, #class_side => false, #method => #foo, #line => 1, #recv => #other},
-      #{#sent => #bt4111Sent, #owner => #Integer, #class_side => false, #method => #bar, #line => 2, #recv => #other}
-    )
+    rows := #(#{
+      #sent => #bt4111Sent,
+      #owner => #BT4111GoneGroup,
+      #class_side => false,
+      #method => #foo,
+      #line => 1,
+      #recv => #other
+    }, #{
+      #sent => #bt4111Sent,
+      #owner => #Integer,
+      #class_side => false,
+      #method => #bar,
+      #line => 2,
+      #recv => #other
+    })
     grouped := SystemNavigation
       groupIndexedSends: rows
       excluding: Set new
