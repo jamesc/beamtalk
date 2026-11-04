@@ -234,7 +234,9 @@ sealed typed Object subclass: SystemNavigation
   /// Selector}` — one per extension method, shaped like the `sendersOf:` /
   /// `referencesTo:` records. The `#class` value is the *extended* class object
   /// (a real class, resolved via `resolveExtensionClass:`), not a name symbol,
-  /// so callers can navigate from it. The argument is a `Package` because
+  /// so callers can navigate from it. An extension whose target class has been
+  /// removed is dropped rather than reported with a Symbol `#class` (BT-4418).
+  /// The argument is a `Package` because
   /// extension owners are packages, not classes. Backed by
   /// `beamtalk_extensions:extensions_by/1` (BT-2202). Returns `[]` (not an error)
   /// when `aPackage` contributes no extensions; raises a typed error if
@@ -251,14 +253,20 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation extensionsBy: requires a Package object, e.g. (Package named: aPackageName)."
       ]
     pairs := self extensionPairsBy: aPackage name asAtom
+    self extensionRecordsFrom: pairs
+
+  /// Map `{extendedClassTag, selector}` pairs (as answered by
+  /// `beamtalk_extensions:extensions_by/1`) onto `#{#class, #selector}`
+  /// records for `extensionsBy:`. A pair whose target class no longer resolves
+  /// (removed since the pairs were read) is dropped (BT-4418).
+  class sealed extensionRecordsFrom: pairs :: List(Tuple) -> List(Dictionary) =>
     pairs
-      collect: [:pair |
-        extendedName := pair at: 1
-        selector := pair at: 2
-        #{
-          #class => (self resolveExtensionClass: extendedName),
-          #selector => selector
-        }
+      inject: List new
+      into: [:acc :pair |
+        extClass := self resolveExtensionClass: (pair at: 1)
+        extClass isNil
+          ifTrue: [acc]
+          ifFalse: [acc add: #{#class => extClass, #selector => (pair at: 2)}]
       ]
 
   /// Validate that `aClass` is a class/metaclass object and return its name
@@ -526,7 +534,8 @@ sealed typed Object subclass: SystemNavigation
   /// extensions are not yet part of the index (lands in a later phase). The
   /// `#class` for an extension hit is the extended target class (or the
   /// metaclass object resolved from the `#'Target class'` marker for
-  /// `Target class` extensions); `register/4` registrations without source
+  /// `Target class` extensions); an extension whose target class has been
+  /// removed is skipped (BT-4418). `register/4` registrations without source
   /// remain invisible to the source-text scan.
   ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
@@ -577,8 +586,10 @@ sealed typed Object subclass: SystemNavigation
   /// `cls class` convention (BT-2195).
   ///
   /// Answers `nil` when the owner no longer resolves — a class removed after
-  /// the xref rows were read. Every caller drops such a row (BT-4111), so a
-  /// query never reports a raw owner Symbol in place of a class.
+  /// the xref rows were read. Every caller drops such a row (BT-4111), and the
+  /// extension walks drop an entry whose target no longer resolves through
+  /// `resolveExtensionClass:` (BT-4418), so a query never reports a raw owner
+  /// Symbol in place of a class — neither for indexed rows nor extension hits.
   ///
   /// BT-4095: the class-side hit resolves the metaclass tag (`#'Foo class'`)
   /// through the registry, rather than sending `isKindOf:` and `class` to the
@@ -950,8 +961,9 @@ sealed typed Object subclass: SystemNavigation
   /// Extension methods (ADR 0066) are scanned when registered with source via
   /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
   /// extensions are not yet part of the index. The `#class` for an
-  /// extension hit is the extended target class (or the metaclass atom for
-  /// `Target class` extensions); `register/4` registrations without source
+  /// extension hit is the extended target class (or its metaclass object for
+  /// `Target class` extensions); an extension whose target class has been
+  /// removed is skipped (BT-4418). `register/4` registrations without source
   /// remain invisible.
   ///
   /// Argument must be a class object (a `Behaviour`). Passing a Symbol or
@@ -1425,14 +1437,13 @@ sealed typed Object subclass: SystemNavigation
   /// per-method scan to the FFI-site query and threading the module/function/
   /// arity target.
   class sealed collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self allExtensionsWithSource
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        extSource :: String := ext at: #source
         lines := self
           ffiSitesIn: extSource
           module: module
@@ -1481,8 +1492,9 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// Extension methods (ADR 0066) are scanned when registered with source via
   /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
-  /// extension hit is the extended target class (or the metaclass atom for
-  /// `Target class` extensions); `register/4` registrations without source
+  /// extension hit is the extended target class (or its metaclass object for
+  /// `Target class` extensions); an extension whose target class has been
+  /// removed is skipped (BT-4418). `register/4` registrations without source
   /// remain invisible.
   ///
   /// ## Examples
@@ -1701,19 +1713,18 @@ sealed typed Object subclass: SystemNavigation
   /// #line => Line}` shaped identically to the class-side scan, so callers
   /// cannot distinguish a hit on an extension from a hit on a class-body
   /// method. The `#class` value is resolved from the extension's registry
-  /// tag via `resolveExtensionClass:` — a real class object when the tag
-  /// is a known instance-side class name (e.g. `#Integer`), or the raw
-  /// atom (e.g. `#'String class'`) when no class lookup succeeds (e.g. for
-  /// metaclass-tagged class-side extensions).
+  /// tag via `liveExtensionsIn:` — the class object for an instance-side tag
+  /// (e.g. `#Integer`), the metaclass object for a class-side tag (e.g.
+  /// `#'String class'`). An extension whose target class has been removed is
+  /// skipped, never reported with a raw Symbol `#class` (BT-4418).
   class sealed collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self allExtensionsWithSource
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        extSource :: String := ext at: #source
         lines := self sendersIn: extSource selector: aSelector
         lines
           inject: acc
@@ -1731,14 +1742,13 @@ sealed typed Object subclass: SystemNavigation
   /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
   /// per-method scan to `findReferencesToIn:class:`.
   class sealed collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self allExtensionsWithSource
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        extSource :: String := ext at: #source
         lines := self referencesIn: extSource class: targetName
         lines
           inject: acc
@@ -1757,14 +1767,13 @@ sealed typed Object subclass: SystemNavigation
   /// but iterates the extension sources table rather than a class's
   /// instance method dictionary.
   class sealed collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self allExtensionsWithSource
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        extSource :: String := ext at: #source
         // `extSource` is bound `:: String` above to re-assert the source-text
         // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         (extSource matchesRegex: aRegex) ifTrue: [
@@ -2154,23 +2163,23 @@ sealed typed Object subclass: SystemNavigation
   /// Mirrors `collectExtensionSendersFor:into:` but threads a grouping
   /// Dictionary and asks the compiler for EVERY send via `allSendsIn:`. The
   /// `#class` for a site is resolved from the extension's registry tag via
-  /// `resolveExtensionClass:`, matching the class-body scan.
+  /// `liveExtensionsIn:`, matching the class-body scan; an extension whose
+  /// target class has been removed is skipped (BT-4418).
   ///
   /// The `doesNotUnderstand:` exclusion does not apply to extension sources:
   /// `handlesDnu` is `false` because an extension target's DNU handler (if any)
-  /// is a property of the *target* class, which `resolveExtensionClass:` may
-  /// return as a raw atom (not a queryable scope). Erring toward reporting is
+  /// is a property of the *target* class, and probing it would send to a class
+  /// that may be removed mid-query (BT-4065). Erring toward reporting is
   /// safe — extension bodies are rare and the user can add a documented
   /// exclusion if a real false positive ever appears.
   class sealed collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
-    extEntries := self allExtensionsWithSource
+    extEntries := self liveExtensionsIn: self allExtensionsWithSource
     extEntries
       inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := self resolveExtensionClass: extClassTag
+      into: [:acc :ext |
+        extClass := ext at: #class
+        extSelector := ext at: #selector
+        extSource :: String := ext at: #source
         // `extSource` is bound `:: String` above to re-assert the source-text
         // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         self
@@ -2198,20 +2207,39 @@ sealed typed Object subclass: SystemNavigation
   /// that encodes the tag (`class_object_tag/1`). The stdlib no longer
   /// reverse-engineers the `" class"` convention with string surgery.
   ///
-  /// Falls back to the raw tag only when the lookup misses (a tag with no
-  /// registered class behind it — should not happen in practice, but the scan
-  /// must not crash on a stray registry entry).
-  ///
-  /// Internal helper for the three `collectExtension*` walks. Splits the
-  /// lookup out so the surrounding `inject:into:` bodies stay a single
-  /// expression each (matches the helper style elsewhere in this file).
+  /// Answers `nil` when the lookup misses — the target class was removed
+  /// after the extension table was read, or a stray registry entry has no
+  /// class behind it. Every caller drops such an entry (BT-4418), the same
+  /// way indexed rows drop a `nil` from `senderClassFor:classSide:`, so a
+  /// query never reports the raw tag Symbol in place of a class. Nothing is
+  /// sent to the resolved value here (BT-4065).
   ///
   /// Return type is intentionally untyped (Dynamic) — the result is a class
-  /// object, a metaclass object, or (defensively) the raw atom, which have
-  /// no shared supertype in the declared type system.
+  /// object, a metaclass object, or `nil`, which have no shared supertype in
+  /// the declared type system.
   class sealed resolveExtensionClass: classTag :: Symbol -> Object =>
-    resolved := self findClass: classTag
-    resolved isNil ifTrue: [classTag] ifFalse: [resolved]
+    self findClass: classTag
+
+  /// Resolve each `{classTag, selector, source}` entry of `extEntries` (as
+  /// answered by `allExtensionsWithSource`) to a `#{#class, #selector,
+  /// #source}` record, dropping entries whose target class no longer resolves
+  /// (BT-4418). Shared by the `collectExtension*` walks so the resolution and
+  /// the removed-class rule live in one place.
+  class sealed liveExtensionsIn: extEntries :: List(Tuple) -> List(Dictionary) =>
+    extEntries
+      inject: List new
+      into: [:acc :entry |
+        extClass := self resolveExtensionClass: (entry at: 1)
+        extClass isNil
+          ifTrue: [acc]
+          ifFalse: [
+            acc add: #{
+              #class => extClass,
+              #selector => (entry at: 2),
+              #source => (entry at: 3)
+            }
+          ]
+      ]
 
   // ===== Unused Selectors (dead-method finder, ADR 0087 / BT-2303) =====
 

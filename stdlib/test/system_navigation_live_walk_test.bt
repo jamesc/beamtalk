@@ -193,3 +193,92 @@ TestCase subclass: SystemNavigationLiveWalkTest
     self assert: (SystemNavigation extensionTag: #Integer targets: names)
     self assert: (SystemNavigation extensionTag: #'Integer class' targets: names)
     self deny: (SystemNavigation extensionTag: #BT4111NoSuchClass targets: names)
+
+  // ===== BT-4418: extension walks =====
+  //
+  // The extension table is read before its entries are resolved to classes, so
+  // a target class can be removed in between (removing a class purges its
+  // extensions, but not from a table already read). These tests feed the
+  // resolvers entries for a class that has already been removed, or leave a
+  // stale source-bearing entry registered against a removed class's tag: the
+  // state that window leaves.
+
+  // The extension resolver answers nil, not the raw tag Symbol, on both sides.
+  testResolveExtensionClassForRemovedClassIsNil =>
+    self.cls := self makeProbe: #BT4418GoneResolve
+    self.cls removeFromSystem
+    self assert: (SystemNavigation resolveExtensionClass: #BT4418GoneResolve) isNil
+    self assert: (SystemNavigation resolveExtensionClass: #'BT4418GoneResolve class') isNil
+    self assert: (SystemNavigation resolveExtensionClass: #Integer) equals: Integer
+    self assert: (SystemNavigation resolveExtensionClass: #'Integer class') equals: Integer class
+
+  // The shared resolver behind every `collectExtension*` walk drops entries
+  // whose target was removed, on both sides, and keeps live ones.
+  testLiveExtensionsDropRemovedTarget =>
+    self.cls := self makeProbe: #BT4418GoneWalk
+    self.cls removeFromSystem
+    gone := Tuple withAll: #(#BT4418GoneWalk, #bt4418Gone, "bt4418Gone => 1")
+    live := Tuple withAll: #(#Integer, #bt4418Live, "bt4418Live => 2")
+    goneMeta := Tuple withAll: #(#'BT4418GoneWalk class', #bt4418GoneMeta, "bt4418GoneMeta => 3")
+    liveMeta := Tuple withAll: #(#'Integer class', #bt4418LiveMeta, "bt4418LiveMeta => 4")
+    entries := #(gone, live, goneMeta, liveMeta)
+    resolved := SystemNavigation liveExtensionsIn: entries
+    self assert: (resolved collect: [:e | e at: #class]) equals: #(Integer, Integer class)
+    self assert: (resolved collect: [:e | e at: #selector]) equals: #(#bt4418Live, #bt4418LiveMeta)
+    self assert: (resolved first at: #source) equals: "bt4418Live => 2"
+
+  // `extensionsBy:`'s record mapper drops pairs whose target was removed.
+  testExtensionRecordsDropRemovedTarget =>
+    self.cls := self makeProbe: #BT4418GoneBy
+    self.cls removeFromSystem
+    gone := Tuple withAll: #(#BT4418GoneBy, #bt4418Gone)
+    live := Tuple withAll: #(#String, #bt4418Live)
+    pairs := #(gone, live)
+    records := SystemNavigation extensionRecordsFrom: pairs
+    self assert: records size equals: 1
+    self assert: (records first at: #class) equals: String
+    self assert: (records first at: #selector) equals: #bt4418Live
+
+  // End to end through the extension registry: a source-bearing extension left
+  // registered against a removed class's tag (instance and class side) does not
+  // surface from `methodsMatching:` or `extensionsBy:`, while a live extension
+  // with the same body does.
+  testQueriesDropStaleExtensionOfRemovedClass =>
+    self.cls := self makeProbe: #BT4418GoneQuery
+    self.cls removeFromSystem
+    extFun := [:a :s | s]
+    Erlang beamtalk_extensions
+      register: #BT4418GoneQuery
+      selector: #bt4418GoneExt
+      fun: extFun
+      owner: #stdlib
+      source: "bt4418GoneExt => #bt4418Marker"
+    Erlang beamtalk_extensions
+      register: #'BT4418GoneQuery class'
+      selector: #bt4418GoneMetaExt
+      fun: extFun
+      owner: #stdlib
+      source: "bt4418GoneMetaExt => #bt4418Marker"
+    Erlang beamtalk_extensions
+      register: #String
+      selector: #bt4418LiveExt
+      fun: extFun
+      owner: #stdlib
+      source: "bt4418LiveExt => #bt4418Marker"
+    // Capture, clean up, then assert, so a failing assertion never leaks
+    // registry state (as in system_navigation_extensions_test.bt).
+    // Only the extension selectors are kept: this test method's own source
+    // matches the regex too.
+    ours := [:r | (r at: #selector) asString startsWith: "bt4418"]
+    matches := (SystemNavigation methodsMatching: (Regex from: "bt4418Marker") unwrap) select: ours
+    byPkg := (SystemNavigation extensionsBy: (Package named: "stdlib")) select: ours
+    Erlang beamtalk_extensions unregister: #BT4418GoneQuery selector: #bt4418GoneExt
+    Erlang beamtalk_extensions
+      unregister: #BT4418GoneQuery
+      selector: #bt4418GoneMetaExt
+      classSide: true
+    Erlang beamtalk_extensions unregister: #String selector: #bt4418LiveExt
+    self assert: (matches collect: [:r | r at: #class]) equals: #(String)
+    self assert: (matches collect: [:r | r at: #selector]) equals: #(#bt4418LiveExt)
+    self assert: (byPkg collect: [:r | r at: #class]) equals: #(String)
+    self assert: (byPkg collect: [:r | r at: #selector]) equals: #(#bt4418LiveExt)
