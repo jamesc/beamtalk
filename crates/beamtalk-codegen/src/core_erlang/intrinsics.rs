@@ -49,7 +49,7 @@ pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:with
 /// decided at run time by `beamtalk_class_dispatch:class_object_understands/2`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ErrorSignalReceiver {
-    /// `self` in an instance-side method: always an instance.
+    /// `self` in an instance-side method, or a literal: always an instance.
     Instance,
     /// `self` in a class method: a class object, sent to via `class_self_send/3`.
     ClassSelf,
@@ -2393,6 +2393,10 @@ impl CoreErlangGenerator {
     ) -> ErrorSignalReceiver {
         if !beamtalk_core::ast::is_error_signal_instance_receiver(receiver) {
             return ErrorSignalReceiver::Unknown;
+        }
+        if !super::expr_shape::is_self_identifier(receiver) {
+            // A literal: never a class object.
+            return ErrorSignalReceiver::Instance;
         }
         // A top-level REPL `self` is whatever the eval binds it to (the
         // Inspector's `evaluate:` binds the inspected value, possibly a class).

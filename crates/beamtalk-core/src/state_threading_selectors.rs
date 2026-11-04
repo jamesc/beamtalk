@@ -590,7 +590,7 @@ pub fn is_try_do_selector(sel: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendUserCode {
     /// An intrinsic that can never dispatch to user code, whatever its
-    /// arguments are (`isNil`, `class`, `hash`, `self error:`, the field
+    /// arguments are (`isNil`, `class`, `hash`, `error:` to `self` or a literal, the field
     /// reflection family, `spawn`/`await`, `asType:`, `yourself`).
     Never,
     /// A construct the compiler lowers in place (`ifTrue:`, `whileTrue:`, an
@@ -1286,6 +1286,7 @@ mod tests {
             "x hash",
             "x respondsTo: #foo",
             "self error: 'boom'",
+            "0 error: 'boom'",
             "x fieldNames",
             "x yourself",
             "x asType: Integer",
