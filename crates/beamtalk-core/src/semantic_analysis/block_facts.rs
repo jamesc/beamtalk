@@ -3619,7 +3619,12 @@ pub fn is_self_field_target(target: &Expression) -> bool {
 /// sequencing them through `threaded_expression`, so a local-threading
 /// producer among them would leak its raw `{Value, State}` tuple and drop the
 /// write. Those are the actor body lowerings of a `super` send, an `error:`
-/// send, `self fieldAt:put:` / `self clearField:`, a block `value`-family send
+/// send (the actor `ErrorSend` body lowering, which takes only an `error:` to
+/// an instance receiver; this stops at every `error:` send whatever its
+/// receiver, a safe over-approximation, since the `error:` lowering sequences
+/// its own operands for every receiver kind, see
+/// [`crate::ast::is_error_signal_instance_receiver`]),
+/// `self fieldAt:put:` / `self clearField:`, a block `value`-family send
 /// (`value:`, `valueWithArguments:`; a possible Tier 2 call on a local or a
 /// `self.field`) and a self-send carrying a block argument (a
 /// possible Tier 2 self-send). Applied in every context, so the diagnostic does
@@ -3693,7 +3698,9 @@ pub enum UnsequencedOperand {
     Cast,
     /// An argument of a `super` send.
     SuperSend,
-    /// The argument of an `error:` send.
+    /// The argument of an `error:` send, for any receiver: an
+    /// over-approximation of the actor `ErrorSend` body lowering, which takes
+    /// only an instance receiver (see [`operands_not_sequenced`]).
     ErrorSend,
     /// An argument of `self fieldAt:put:`.
     FieldAtPut,

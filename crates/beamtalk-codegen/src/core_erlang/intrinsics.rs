@@ -49,7 +49,11 @@ pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:with
 /// decided at run time by `beamtalk_class_dispatch:class_object_understands/2`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ErrorSignalReceiver {
-    /// `self` in an instance-side method, or a literal: always an instance.
+    /// A literal, or `self` in an instance-side method: raises unconditionally.
+    /// Usually an instance. In an instance-side method of `Behaviour`/`Class`,
+    /// `self` is a class object, and raising is still intended there: those
+    /// methods signal errors about the class, which must not be handed to a
+    /// class-side `error:` such as `Result class>>error:`.
     Instance,
     /// `self` in a class method: a class object, sent to via `class_self_send/3`.
     ClassSelf,
@@ -2282,29 +2286,7 @@ impl CoreErlangGenerator {
         let msg_doc = seq.next();
         let recv_var = self.fresh_temp_var("Obj");
         let msg_var = self.fresh_temp_var("Msg");
-        let class_var = self.fresh_temp_var("Class");
-        let err0 = self.fresh_temp_var("Err");
-        let err1 = self.fresh_temp_var("Err");
-
-        let raise_doc = docvec![
-            "let ",
-            leaf::var(class_var.clone()),
-            " = call 'beamtalk_primitive':'class_of'(",
-            leaf::var(recv_var.clone()),
-            ") in let ",
-            leaf::var(err0.clone()),
-            " = call 'beamtalk_error':'new'('user_error', ",
-            leaf::var(class_var),
-            ") in let ",
-            leaf::var(err1.clone()),
-            " = call 'beamtalk_error':'with_message'(",
-            leaf::var(err0),
-            ", ",
-            leaf::var(msg_var.clone()),
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(err1),
-            ")",
-        ];
+        let raise_doc = self.object_error_raise_doc(&recv_var, &msg_var);
         // Possibly a class object: one whose class side understands `error:`
         // receives the send; anything else (an instance, or a class object
         // without a class-side `error:`) raises in place, exactly as the
@@ -2342,6 +2324,41 @@ impl CoreErlangGenerator {
             body_doc,
         ];
         Ok(Some(seq.close(self, call_doc, "ErrRes")))
+    }
+
+    /// The `Object>>error:` raise: a `user_error` naming the receiver's class,
+    /// carrying `msg_var` as its message. The one lowering of the raise, shared
+    /// by the call-site intrinsic above and by the compiled `Object>>error:`
+    /// method body (`IntrinsicBody::Error`), which generic dispatch reaches
+    /// (`perform:`, and a class object without a class-side `error:` through
+    /// the class-object protocol fallthrough, BT-4417).
+    pub(in crate::core_erlang) fn object_error_raise_doc(
+        &mut self,
+        recv_var: &str,
+        msg_var: &str,
+    ) -> Document<'static> {
+        let class_var = self.fresh_temp_var("Class");
+        let err0 = self.fresh_temp_var("Err");
+        let err1 = self.fresh_temp_var("Err");
+        docvec![
+            "let ",
+            leaf::var(class_var.clone()),
+            " = call 'beamtalk_primitive':'class_of'(",
+            leaf::var(recv_var.to_string()),
+            ") in let ",
+            leaf::var(err0.clone()),
+            " = call 'beamtalk_error':'new'('user_error', ",
+            leaf::var(class_var),
+            ") in let ",
+            leaf::var(err1.clone()),
+            " = call 'beamtalk_error':'with_message'(",
+            leaf::var(err0),
+            ", ",
+            leaf::var(msg_var.to_string()),
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(err1),
+            ")",
+        ]
     }
 
     /// BT-4075: `case class_object_understands(Recv, 'error:') of 'true' ->

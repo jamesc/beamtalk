@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture (BT-4417): a class-side `error:` that raises through
+// `super error:`, which reaches Object>>error: through the class-object
+// protocol. (`self error:` here would send to this same method again.)
+
+Object subclass: SuperErrorProbe
+
+  class error: message => super error: message

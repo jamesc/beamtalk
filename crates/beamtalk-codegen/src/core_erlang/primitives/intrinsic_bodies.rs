@@ -51,6 +51,12 @@ enum IntrinsicBody {
     OnDo,
     /// `ensure` — Block's `ensure:`.
     Ensure,
+    /// `error` — `Object>>error:`. The call site raises inline
+    /// (`try_generate_error_signaling`), but generic dispatch reaches the
+    /// compiled body: `perform: #error:`, and a class object without a
+    /// class-side `error:` through the class-object protocol fallthrough
+    /// (BT-4417). The body is the same raise, so every route agrees.
+    Error,
     /// `erlangApply` — DNU-forwarding Erlang interop intrinsic.
     ErlangApply,
     /// `erlangModuleLookup` — same shape as `ErlangApply`, different target module.
@@ -147,7 +153,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("futureAwaitForever", IntrinsicBody::Placeholder),
     ("onDo", IntrinsicBody::OnDo),
     ("ensure", IntrinsicBody::Ensure),
-    ("error", IntrinsicBody::Placeholder),
+    ("error", IntrinsicBody::Error),
     ("erlangModuleLookup", IntrinsicBody::ErlangModuleLookup),
     ("erlangApply", IntrinsicBody::ErlangApply),
     ("classBuilderRegister", IntrinsicBody::ClassBuilderRegister),
@@ -401,6 +407,20 @@ impl CoreErlangGenerator {
             IntrinsicBody::Repeat => self.generate_repeat_structural_fallback(class_name),
             IntrinsicBody::OnDo => self.generate_on_do_structural_fallback(class_name),
             IntrinsicBody::Ensure => self.generate_ensure_structural_fallback(class_name),
+
+            IntrinsicBody::Error => {
+                let msg_param = self
+                    .current_method_params
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Message".to_string());
+                let self_var = if self.in_class_method() {
+                    "ClassSelf"
+                } else {
+                    "Self"
+                };
+                self.object_error_raise_doc(self_var, &msg_param)
+            }
 
             // Erlang interop DNU intrinsics — forward selector/args to
             // the handler module's dispatch/3 rather than passing the intrinsic name.
