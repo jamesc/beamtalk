@@ -220,9 +220,11 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
-            Expression::ClassReference { name, package, .. } => {
-                self.generate_class_reference(&name.name, package.as_ref().map(|p| p.name.as_str()))
-            }
+            // BT-4074: a package qualifier (`pkg@Foo`) selects nothing at
+            // runtime — the class process is registered under the bare name —
+            // so a qualified reference yields the same canonical class object
+            // as `Foo`.
+            Expression::ClassReference { name, .. } => self.generate_class_reference(&name.name),
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`). Semantic
@@ -540,23 +542,16 @@ impl CoreErlangGenerator {
     /// convenience names (Transcript, Beamtalk, Workspace), then falls back
     /// to class registry lookup. In batch mode, goes directly to the registry.
     ///
-    /// ADR 0070 Phase 2: When `package` is `Some`, the class is from a known
-    /// dependency and the module name is deterministic (`bt@{pkg}@{snake}`).
-    /// The class registry lookup uses the class name for now — package-aware
+    /// A package-qualified reference (`pkg@Foo`, ADR 0070) compiles exactly
+    /// like `Foo`: the registry lookup is by bare name, and the class object
+    /// carries the canonical `'Foo class'` tag so it compares equal to every
+    /// runtime-built class object for the same class (BT-4074). Package-aware
     /// registry disambiguation is a future phase.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_class_reference(
         &mut self,
         class_name: &str,
-        package: Option<&str>,
     ) -> Result<Document<'static>> {
-        // ADR 0070 Phase 2: For package-qualified references, we know the exact
-        // display name to use in the class object tuple.
-        let display_name = match package {
-            Some(pkg) => format!("{pkg}@{class_name}"),
-            None => class_name.to_string(),
-        };
-
         // ADR 0129 §7: REPL top-level expressions resolve a name through the
         // session map (locals and `bind:as:` entries) before the class registry.
         // Methods and batch-compiled code use the registry only, so a missing
@@ -579,11 +574,7 @@ impl CoreErlangGenerator {
                 Self::registered_class_pid_doc(class_name),
                 " of ",
                 error_doc,
-                Self::class_object_from_registry_clause(
-                    &class_pid_var,
-                    &class_mod_var,
-                    &display_name
-                ),
+                Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name),
                 "end end",
             ]);
         }
@@ -597,7 +588,7 @@ impl CoreErlangGenerator {
             Self::registered_class_pid_doc(class_name),
             " of ",
             error_doc,
-            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, &display_name),
+            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name),
             "end",
         ])
     }
@@ -638,18 +629,13 @@ impl CoreErlangGenerator {
     /// only the `module_name_safe/1` ETS reads and the class-object tuple are
     /// dropped. Returns `None` where the full class object is still needed:
     /// a REPL top-level expression (a session binding may shadow the name,
-    /// ADR 0129 §7) and a package-qualified reference (whose class object
-    /// carries the qualified display tag).
+    /// ADR 0129 §7). A package-qualified reference resolves by its bare name
+    /// like any other (BT-4074).
     pub(in crate::core_erlang) fn class_name_only_reference(
         &mut self,
         expr: &Expression,
     ) -> Option<Document<'static>> {
-        let Expression::ClassReference {
-            name,
-            package: None,
-            ..
-        } = expr
-        else {
+        let Expression::ClassReference { name, .. } = expr else {
             return None;
         };
         if self.context == CodeGenContext::Repl {
@@ -680,7 +666,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn class_object_from_registry_clause(
         class_pid_var: &str,
         class_mod_var: &str,
-        display_name: &str,
+        class_name: &str,
     ) -> Document<'static> {
         docvec![
             "<",
@@ -692,7 +678,7 @@ impl CoreErlangGenerator {
             leaf::var(class_pid_var.to_string()),
             ") in ",
             "{'beamtalk_object', ",
-            leaf::atom(util::metaclass_tag(display_name)),
+            leaf::atom(util::metaclass_tag(class_name)),
             ", ",
             leaf::var(class_mod_var.to_string()),
             ", ",

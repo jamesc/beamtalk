@@ -153,6 +153,30 @@ intPkg name
 stdlib@Integer isKindOf: Number
 // => false
 
+// BT-4074: a qualified reference is the canonical class object, so it
+// compares equal to the unqualified one and to runtime-built class objects.
+3 isKindOf: stdlib@Integer
+// => true
+
+3 isKindOf: stdlib@Number
+// => true
+
+stdlib@Integer == Integer
+// => true
+
+3 class == stdlib@Integer
+// => true
+
+Integer includesBehaviour: stdlib@Integer
+// => true
+
+// Display is unchanged: the qualifier never appeared in the name.
+stdlib@Integer
+// => Integer
+
+stdlib@Integer printString
+// => "Integer"
+
 // stdlib@Array is a class reference
 (stdlib@Array new) class
 // => Array

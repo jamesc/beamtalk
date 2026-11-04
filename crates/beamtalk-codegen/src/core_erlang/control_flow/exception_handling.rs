@@ -637,8 +637,9 @@ impl CoreErlangGenerator {
     /// (BT-4295, [`Self::class_name_only_reference`]): `matches_class/2`
     /// reads only the name, so building the class object would cost a
     /// `module_name_safe/1` lookup and a tuple for nothing. Any other filter
-    /// (a variable, a REPL top-level class literal, a package-qualified
-    /// class) is evaluated as an ordinary expression.
+    /// (a variable, a REPL top-level class literal) is evaluated as an
+    /// ordinary expression. A package-qualified literal (`pkg@Error`) is
+    /// passed by its bare name like any other (BT-4074).
     fn on_do_filter_doc(&mut self, ex_class: &Expression) -> Result<Document<'static>> {
         match self.class_name_only_reference(ex_class) {
             Some(doc) => Ok(doc),
