@@ -57039,7 +57039,7 @@
         "validator",
         "value"
       ],
-      "source": "// Test fixture: Validator value type with error: usage\n\nValue subclass: Validator\n\n  check: value =>\n    value < 0 ifTrue: [self error: \"must be non-negative\"]\n    value\n\n  /// BT-4075: `obj` is untyped, so `obj error:` is decided at run time — a\n  /// class object answers its class-side `error:`, an instance raises.\n  raise: msg via: obj => obj error: msg\n\n  /// BT-4075: `self error:` in a class method is a class-side send; Validator\n  /// has no class-side `error:`, so it reaches `Object>>error:` and raises.\n  class rejectAll => self error: \"rejected\"",
+      "source": "// Test fixture: Validator value type with error: usage\n\nValue subclass: Validator\n\n  /// BT-4075: `self` here is a class object, but Validator has no class-side\n  /// `error:`, so `self error:` still raises `user_error`.\n  class rejectAll => self error: \"rejected\"\n\n  check: value =>\n    value < 0 ifTrue: [self error: \"must be non-negative\"]\n    value\n\n  /// BT-4075: `obj` is untyped, so `obj error:` is decided at run time: a\n  /// class object with a class-side `error:` receives the send, anything else\n  /// raises.\n  raise: msg via: obj => obj error: msg",
       "explanation": "Test fixture: Validator value type with error: usage"
     },
     {

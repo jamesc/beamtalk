@@ -5,14 +5,15 @@
 
 Value subclass: Validator
 
-  /// BT-4075: `self error:` in a class method is a class-side send; Validator
-  /// has no class-side `error:`, so it reaches `Object>>error:` and raises.
+  /// BT-4075: `self` here is a class object, but Validator has no class-side
+  /// `error:`, so `self error:` still raises `user_error`.
   class rejectAll => self error: "rejected"
 
   check: value =>
     value < 0 ifTrue: [self error: "must be non-negative"]
     value
 
-  /// BT-4075: `obj` is untyped, so `obj error:` is decided at run time — a
-  /// class object answers its class-side `error:`, an instance raises.
+  /// BT-4075: `obj` is untyped, so `obj error:` is decided at run time: a
+  /// class object with a class-side `error:` receives the send, anything else
+  /// raises.
   raise: msg via: obj => obj error: msg
