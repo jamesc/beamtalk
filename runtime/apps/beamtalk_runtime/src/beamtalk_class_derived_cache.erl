@@ -35,7 +35,8 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
-`{class_method_owner, ClassPid, Selector}`).
+`{class_method_owner, ClassPid, Selector}`,
+`{inherited_target, Class, Selector}`).
 `instance_method_info` is `beamtalk_method_resolver:instance_method_info/2`,
 the dispatch-time method lookup behind
 `beamtalk_primitive:runtime_instance_method/2`; `class_object` is the
@@ -54,6 +55,12 @@ or `respondsTo:` probe), so the table holds up to one row per class and
 selector atom sent through that path; selectors are existing atoms, and the
 next class write flushes them all. The `defining_method` key caches hits
 only; a miss re-walks so errors keep their exact shape.
+`inherited_target` (BT-4280) is the verdict a compiled actor class's
+`dispatch/4` default arm asks first (`beamtalk_dispatch:inherited_target/2`):
+`{compiled, Owner, Module}` when an inherited send may call the owner's
+compiled `State`-threading method directly, else `slow`. Both are cached
+(an unregistered class is not), and a `compiled` hit re-checks the module's
+`dispatch/4` export.
 
 ## Invalidation
 

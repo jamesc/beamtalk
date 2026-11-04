@@ -531,17 +531,7 @@ impl CoreErlangGenerator {
         let class = self.class_name();
         hierarchy
             .find_method(&class, selector.name().as_str())
-            .is_some_and(|m| {
-                let defined_in = m.defined_in.as_str();
-                hierarchy
-                    .get_class(defined_in)
-                    .is_some_and(|c| !c.is_native)
-                    && defined_in != "Actor"
-                    && hierarchy
-                        .superclass_chain(defined_in)
-                        .iter()
-                        .any(|c| c.as_str() == "Actor")
-            })
+            .is_some_and(|m| hierarchy.threads_actor_state(m.defined_in.as_str()))
     }
 
     /// Whether a `super` send compiled now is in a position that threads no
@@ -568,17 +558,7 @@ impl CoreErlangGenerator {
             };
             hierarchy
                 .find_method(superclass.as_str(), selector.name().as_str())
-                .is_some_and(|m| {
-                    let defined_in = m.defined_in.as_str();
-                    hierarchy
-                        .get_class(defined_in)
-                        .is_some_and(|c| !c.is_native)
-                        && defined_in != "Actor"
-                        && hierarchy
-                            .superclass_chain(defined_in)
-                            .iter()
-                            .any(|c| c.as_str() == "Actor")
-                })
+                .is_some_and(|m| hierarchy.threads_actor_state(m.defined_in.as_str()))
         });
         if compiled {
             UserCodeCall::CompiledSelfSend

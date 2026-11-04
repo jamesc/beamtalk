@@ -607,14 +607,23 @@ impl CoreErlangGenerator {
     /// Generates the default case arm for `dispatch/4`.
     ///
     /// Handles unrecognized selectors by checking (in order):
-    /// 1. Extension registry (`beamtalk_extensions:lookup`)
-    /// 2. Class hierarchy walk (`beamtalk_dispatch:super`)
+    /// 0. BT-4280: the memoised `beamtalk_dispatch:inherited_target/2`
+    ///    verdict — an inherited compiled `State`-threading actor method is
+    ///    invoked directly (`invoke_resolved/6`), the run-time twin of the
+    ///    static `CompiledSelfSend` rule (ADR 0137 amended §1), so it skips
+    ///    the extension lookups, `super/5` and `call_foreign/3`;
+    /// 1. otherwise extension registry (`beamtalk_extensions:lookup`)
+    /// 2. class hierarchy walk (`beamtalk_dispatch:super`)
     /// 3. `doesNotUnderstand:args:` handler
     /// 4. `#beamtalk_error{}` fallback
+    ///
+    /// Every route binds `InheritedOutcome`, so the reply / DNU / raise
+    /// handling is emitted once and both routes share its error shapes.
     fn generate_dispatch_default_case(&self) -> Document<'static> {
         let class_name = self.class_name();
         let ext_lookup = self.generate_extension_lookup(&class_name);
-        let ext_case = self.generate_extension_case(&class_name);
+        let ext_case = Self::generate_extension_case(&class_name);
+        let outcome_case = self.generate_inherited_outcome_case(&class_name);
 
         docvec![
             "<OtherSelector> when 'true' ->",
@@ -622,13 +631,53 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
+                    "%% BT-4280: a memoised verdict picks the direct inherited call.",
                     line(),
-                    ext_lookup,
+                    "let InheritedOutcome =",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "case call 'beamtalk_dispatch':'inherited_target'(",
+                            leaf::atom(class_name.clone()),
+                            ", OtherSelector) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<{'compiled', InhOwner, InhModule}> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)",
+                                        ]
+                                    ),
+                                    line(),
+                                    "<_InhSlow> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
+                                            line(),
+                                            ext_lookup,
+                                            line(),
+                                            "in",
+                                            line(),
+                                            ext_case,
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
+                    ),
                     line(),
                     "in",
                     line(),
-                    ext_case,
+                    outcome_case,
                 ]
             ),
         ]
@@ -653,9 +702,11 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the `case ExtLookup of` with extension hit and hierarchy fallback arms.
-    fn generate_extension_case(&self, class_name: &str) -> Document<'static> {
-        let hierarchy_walk = self.generate_hierarchy_walk(class_name);
+    /// Generates the `case ExtLookup of` with extension hit and hierarchy
+    /// fallback arms. Its value is the `InheritedOutcome`: the extension's
+    /// final `{'reply', _, _}` / `{'error', _, State}`, or `super/5`'s result.
+    fn generate_extension_case(class_name: &str) -> Document<'static> {
+        let hierarchy_walk = Self::generate_hierarchy_walk(class_name);
 
         docvec![
             "case ExtLookup of",
@@ -757,25 +808,14 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
-    ///
-    /// `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
-    /// for two semantically different situations — the selector genuinely
-    /// isn't found anywhere in the hierarchy (`kind = does_not_understand`),
-    /// or the selector *was* found and invoked but the method itself raised a
-    /// real error (any other kind), already wrapped by
-    /// `beamtalk_exception_handler:ensure_wrapped/4`. Only the former should
-    /// fall through to the fabricated DNU fallback; the latter must
-    /// propagate via `beamtalk_error:raise/1` instead of being discarded.
-    fn generate_hierarchy_walk(&self, class_name: &str) -> Document<'static> {
-        let dnu_fallback = self.generate_dnu_fallback(class_name);
-
+    /// Generates the hierarchy walk via `beamtalk_dispatch:super` under
+    /// `call_foreign/3` (ADR 0137 §2): the slow route's `InheritedOutcome`.
+    fn generate_hierarchy_walk(class_name: &str) -> Document<'static> {
         docvec![
             "%% ADR 0006: Try hierarchy walk before DNU",
             line(),
             "%% ADR 0137 §2: inherited runtime methods run through call_foreign/3.",
             line(),
-            "case ",
             Self::call_foreign_doc(
                 "super",
                 5,
@@ -784,7 +824,26 @@ impl CoreErlangGenerator {
                     leaf::atom(class_name.to_string())
                 ],
             ),
-            " of",
+        ]
+    }
+
+    /// The case over `InheritedOutcome`, falling back to DNU.
+    ///
+    /// `beamtalk_dispatch:super/5` and `invoke_resolved/6` return
+    /// `{error, #beamtalk_error{}}`
+    /// for two semantically different situations — the selector genuinely
+    /// isn't found anywhere in the hierarchy (`kind = does_not_understand`),
+    /// or the selector *was* found and invoked but the method itself raised a
+    /// real error (any other kind), already wrapped by
+    /// `beamtalk_exception_handler:ensure_wrapped/4`. Only the former should
+    /// fall through to the fabricated DNU fallback; the latter must
+    /// propagate via `beamtalk_error:raise/1` instead of being discarded. An
+    /// extension's own `{error, E, State}` passes through unchanged.
+    fn generate_inherited_outcome_case(&self, class_name: &str) -> Document<'static> {
+        let dnu_fallback = self.generate_dnu_fallback(class_name);
+
+        docvec![
+            "case InheritedOutcome of",
             nest(
                 INDENT,
                 docvec![
@@ -825,6 +884,12 @@ impl CoreErlangGenerator {
                             line(),
                             "end",
                         ]
+                    ),
+                    line(),
+                    "<{'error', ExtError, ExtErrorState}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![line(), "{'error', ExtError, ExtErrorState}"]
                     ),
                 ]
             ),
