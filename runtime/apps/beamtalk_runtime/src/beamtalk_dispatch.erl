@@ -52,6 +52,12 @@ super(Selector, Args, Self, State, CurrentClass)
     -> {reply, Result, NewState} | {error, #beamtalk_error{}}
 ```
 
+### inherited_target/2, invoke_resolved/6
+The memoised verdict a compiled actor's `dispatch/4` default arm checks
+first (BT-4280): `{compiled, Owner, Module}` when the selector is inherited
+from a compiled actor method with no extension in the way, which the arm then
+runs with `invoke_resolved/6` (the call `super/5` ends in); `slow` otherwise.
+
 ## References
 
 - ADR 0006: Unified Method Dispatch with Hierarchy Walking
@@ -64,6 +70,8 @@ super(Selector, Args, Self, State, CurrentClass)
     super/5,
     super_value/4,
     responds_to/2,
+    inherited_target/2,
+    invoke_resolved/6,
     invoke_extension/6,
     check_extension/2
 ]).
@@ -217,6 +225,100 @@ super_value(Selector, Args, Self, CurrentClass) ->
         %% re-raise each through its own channel (raise/1 only takes records).
         {error, #beamtalk_error{} = Error} -> beamtalk_error:raise(Error);
         {error, Wrapped} -> error(Wrapped)
+    end.
+
+-doc """
+Where a compiled actor's `dispatch/4` default arm sends a selector its own
+clauses do not handle (BT-4280).
+
+Answers `{compiled, Owner, Module}` when all of these hold, and `slow`
+otherwise:
+
+* no extension on `ClassName` for `Selector`;
+* `ClassName` has a superclass `Super` in its metadata (the source
+  `super/5` reads, through `superclass_safe/1`);
+* no extension on `Super` for `Selector`;
+* `resolve_owner(Super, Selector)` names `Owner`, compiled as `Module`;
+* `Module`'s `__beamtalk_meta/0` carries `threads_actor_state => true` and
+  lists `Selector` among the class's own methods (`method_info`).
+
+`{compiled, ...}` is exactly where `super(Selector, _, _, _, ClassName)`
+ends up — `lookup_in_class_chain/5` → `invoke_resolved/6` on the same owner —
+so the arm calls `invoke_resolved/6` itself and skips both extension lookups,
+the superclass read and the `call_foreign/3` bracket. Skipping the bracket is
+sound because `threads_actor_state` is the codegen rule
+(`ClassHierarchy::threads_actor_state`) under which a compiled method takes
+`State` as an argument and stores it before any call that may run user code
+(ADR 0137 §2, the run-time twin of a static compiled self-send). An
+Object-owned, extension, DNU or module-less target answers `slow`, and the
+arm takes today's path unchanged.
+
+Memoised in the derived cache under `{inherited_target, ClassName,
+Selector}`, `slow` included: class writes (`put_method_records/3` — every
+`put_method` and `removeSelector:` — `merge_identity/5` on reload, `delete/1`)
+and extension install and removal flush it. A purge without a reload writes
+no metadata, so a cached `{compiled, ...}` is re-checked against the module's
+export on every hit, as in `resolve_owner/2`. Not cached while `ClassName` is
+unregistered.
+""".
+-spec inherited_target(class_name(), selector()) ->
+    {compiled, class_name(), module()} | slow.
+inherited_target(ClassName, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {inherited_target, ClassName, Selector},
+        fun() -> compute_inherited_target(ClassName, Selector) end,
+        fun
+            ({compiled, _, Module}) -> erlang:function_exported(Module, dispatch, 4);
+            (slow) -> true
+        end
+    ).
+
+-spec compute_inherited_target(class_name(), selector()) ->
+    {cache, {compiled, class_name(), module()} | slow} | {nocache, slow}.
+compute_inherited_target(ClassName, Selector) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            {nocache, slow};
+        _ClassPid ->
+            case beamtalk_class_metadata:lookup_superclass(ClassName) of
+                {ok, Super} when Super =/= none ->
+                    {cache, compute_inherited_target(ClassName, Super, Selector)};
+                {ok, none} ->
+                    {cache, slow};
+                not_found ->
+                    {nocache, slow}
+            end
+    end.
+
+-spec compute_inherited_target(class_name(), class_name(), selector()) ->
+    {compiled, class_name(), module()} | slow.
+compute_inherited_target(ClassName, Super, Selector) ->
+    case
+        check_extension(ClassName, Selector) =:= not_found andalso
+            check_extension(Super, Selector) =:= not_found andalso
+            resolve_owner(Super, Selector)
+    of
+        {owner, Owner, Module} ->
+            case threads_actor_state(Module, Selector) of
+                true -> {compiled, Owner, Module};
+                false -> slow
+            end;
+        _ ->
+            slow
+    end.
+
+%% The owner's compiled module threads actor `State` (the codegen flag) and
+%% `Selector` is one of its own compiled methods. A module compiled before the
+%% flag existed lacks it and reads `false`, so it keeps the bracketed path.
+-spec threads_actor_state(module(), selector()) -> boolean().
+threads_actor_state(Module, Selector) ->
+    case beamtalk_class_metadata:read_meta(Module) of
+        {ok, #{threads_actor_state := true, method_info := MethodInfo}} when
+            is_map(MethodInfo)
+        ->
+            is_map_key(Selector, MethodInfo);
+        _ ->
+            false
     end.
 
 -doc """
@@ -507,7 +609,8 @@ dispatchable_module(ClassPid) ->
 -doc """
 Invoke a resolved owner: the `printString`/`displayString`/`inspect`
 interception plus the compiled `dispatch/4` call, shared by the cached and
-walked paths.
+walked paths. Exported for a compiled actor's `dispatch/4` default arm, which
+calls it on an `inherited_target/2` `{compiled, Owner, Module}` verdict.
 """.
 -spec invoke_resolved(class_name(), module(), selector(), args(), bt_self(), state()) ->
     dispatch_result().
@@ -585,8 +688,10 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
     %% reported — widening `inspect`'s behaviour is out of scope.
     IsDisplaySelector =
         Selector =:= 'printString' orelse Selector =:= 'displayString',
+    %% The selector test first: it is a guard test, and the common case
+    %% (any other selector) then skips the supervisor-instance call.
     IsUnoverriddenSupervisorMethod =
-        is_supervisor_instance(Self) andalso IsDisplaySelector andalso
+        IsDisplaySelector andalso is_supervisor_instance(Self) andalso
             (MethodOwner =:= 'Object' orelse MethodOwner =:= 'Supervisor' orelse
                 MethodOwner =:= 'DynamicSupervisor'),
     IsUnoverriddenActorMethod =

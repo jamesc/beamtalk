@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// An open actor subclass with no methods (BT-4280): every send to it, and
+// every self-send inside it, reaches a method inherited from VbCounter.
+VbCounter subclass: VbSubCounter

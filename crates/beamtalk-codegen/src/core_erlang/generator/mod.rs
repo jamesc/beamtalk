@@ -446,6 +446,12 @@ pub struct CoreErlangGenerator {
     /// the stdlib (BT-3951). Baked into `__beamtalk_meta/0` as
     /// `overrides_species_construction`.
     pub(in crate::core_erlang) own_overrides_species_construction: bool,
+    /// BT-4280: whether the class being compiled threads the actor's `State`
+    /// through its compiled instance methods
+    /// (`ClassHierarchy::threads_actor_state`). Baked into `__beamtalk_meta/0`
+    /// as `threads_actor_state`, which `beamtalk_dispatch:inherited_target/2`
+    /// reads to invoke an inherited method directly.
+    pub(in crate::core_erlang) own_threads_actor_state: bool,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -634,6 +640,7 @@ impl CoreErlangGenerator {
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,
             own_overrides_species_construction: false,
+            own_threads_actor_state: false,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),

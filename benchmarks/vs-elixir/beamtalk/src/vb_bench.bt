@@ -34,6 +34,8 @@ sealed Object subclass: VbBench
 
   class counter -> VbCounter => VbCounter spawn
 
+  class subCounter -> VbSubCounter => VbSubCounter spawn
+
   class adder -> Block(Integer, Integer) => [:x | x + 1]
 
   class list100 -> List(Integer) => (1 to: 100) asList
@@ -192,6 +194,19 @@ sealed Object subclass: VbBench
   class actorUpdate: n :: Integer c: c :: VbCounter -> Integer =>
     last := 0
     n timesRepeat: [last := c increment]
+    last
+
+  // An inherited entry send, and an inherited `self increment` inside it
+  // (BT-4280).
+  class actorViaSelfSub: n :: Integer c: c :: VbSubCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
+    last
+
+  // The local twin of actorViaSelfSub:c:.
+  class actorViaSelf: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
     last
 
   class actorProbe: n :: Integer c: c :: VbCounter -> Boolean =>

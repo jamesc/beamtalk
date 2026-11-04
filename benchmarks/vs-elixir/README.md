@@ -428,3 +428,19 @@ side, main → PR. Rows not listed did not move.
   always-on aggregate (an ETS read, three `atomics:add`s and two
   `atomics:get`s), the actor-state/`From`/pending-action process-dictionary
   cells and the receiver's context restore.
+- **BT-4280** adds rows 7e (`sc viaSelf` on `VbSubCounter`, an open
+  `VbCounter subclass:` with no methods, so the entry send and the inner
+  `self increment` are both inherited) and 7f (its local twin, `c viaSelf` on
+  `VbCounter`). An inherited actor send now reaches the superclass method
+  from the subclass's `dispatch/4` default arm on one memoised verdict
+  (`beamtalk_dispatch:inherited_target/2`) and `invoke_resolved/6`, without
+  the extension lookups, `super/5`, the superclass read or the
+  `call_foreign/3` bracket (7 rounds, the dev build on a loaded 4-scheduler
+  container; `results/bench-bt4280-before.md` = main 81489b0,
+  `results/bench-bt4280-after.md` = this branch; profiles of 7e in
+  `results/profile-bt4280-{before,after}.md`). Beamtalk side, before →
+  after: 7e 196 red / 281 w → **123 / 203**; 7f 97.2 / 155 and 7b 92.2 / 148
+  unchanged. Calls per op for 7e: 134 → 86. What remains of an inherited
+  send, about 13 reductions each over a local self-send, is the extra
+  `dispatch/4` hop, the derived-cache read (generation, ETS row, export
+  re-check) and `invoke_resolved/6`'s error-normalising `try`.

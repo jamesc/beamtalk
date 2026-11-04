@@ -119,6 +119,10 @@ rows() ->
             bt_counter, [{gen_cast, ex_counter}]},
         {"7d", machinery, "actor method doing self hasField: / GenServer.call", 20000,
             'actorProbe:c:', bt_counter, [{gen_probe, ex_counter}]},
+        {"7e", machinery, "inherited self-send: sc viaSelf (VbSubCounter) / defdelegate in a GenServer",
+            20000, 'actorViaSelfSub:c:', bt_sub_counter, [{gen_via_self, ex_sub_counter}]},
+        {"7f", machinery, "local self-send: c viaSelf / local call in a GenServer", 20000,
+            'actorViaSelf:c:', bt_counter, [{gen_via_self, ex_counter}]},
         {"8a", machinery, "on: Error do: without a raise / try-rescue", 100000, 'onDoNoRaise:',
             none, [{try_no_raise, none}]},
         {"8b", machinery, "on: Error do: with a raise / raise-rescue", 10000, 'onDoRaise:', none, [
@@ -198,7 +202,9 @@ fixtures() ->
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
-        ex_counter => {none, ?EX:counter()}
+        ex_counter => {none, ?EX:counter()},
+        bt_sub_counter => {Bt(subCounter), none},
+        ex_sub_counter => {none, ?EX:sub_counter()}
     }.
 
 class_fn(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
@@ -510,6 +516,8 @@ compiles_to("7a") -> "send(C, count, []) -> beamtalk_actor:sync_send, gen_server
 compiles_to("7b") -> "as 7a";
 compiles_to("7c") -> "beamtalk_message_dispatch:cast -> gen_server:cast + the same hooks";
 compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and walks the runtime method resolver";
+compiles_to("7e") -> "as 7a; VbSubCounter:dispatch/4 misses both sends and its default arm runs VbCounter's method (BT-4280: memoised inherited_target + invoke_resolved)";
+compiles_to("7f") -> "as 7a; in the actor `self increment` is a direct VbCounter:dispatch/4 call";
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
 compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller (class_signal_message/2, BT-4115), wrapped and class-matched; frames built only on read";
 compiles_to("9a") -> "class_send(Result, 'ok:') gen_server:call; `value` as a block-or-send case";

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: the superclass whose compiled methods InheritedTargetSub inherits.
+// A send to the subclass reaches them through the subclass's `dispatch/4`
+// default arm, on the memoised `beamtalk_dispatch:inherited_target/2` verdict.
+
+Actor subclass: InheritedTargetBase
+  state: n = 0
+
+  n => self.n
+
+  bump => self.n := self.n + 1
+
+  label => #fromBase
+
+  twice: aBlock =>
+    aBlock value
+    aBlock value
+
+  bumpViaSelf =>
+    self bump
+    self.n

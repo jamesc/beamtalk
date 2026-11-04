@@ -161,6 +161,30 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "Actor")
     }
 
+    /// Whether the compiled instance methods of `class_name` thread the actor's
+    /// `State` explicitly (ADR 0137 §1–2): a non-native class that inherits
+    /// from `Actor`, other than `Actor` itself. Such a method takes `State` as an
+    /// argument, stores it to the cell before every call that may run user code
+    /// and answers its final version, so a caller can invoke it directly instead
+    /// of through `beamtalk_actor_state:call_foreign/3`.
+    ///
+    /// The single authority for that rule: codegen's static self-send and
+    /// `super` classification (`synced_call.rs`) and the `threads_actor_state`
+    /// key of `__beamtalk_meta/0`, which the runtime's
+    /// `beamtalk_dispatch:inherited_target/2` reads (BT-4280).
+    #[must_use]
+    pub fn threads_actor_state(&self, class_name: &str) -> bool {
+        class_name != "Actor"
+            && self
+                .classes
+                .get(class_name)
+                .is_some_and(|info| !info.is_native)
+            && self
+                .superclass_chain(class_name)
+                .iter()
+                .any(|s| s.as_str() == "Actor")
+    }
+
     /// Whether a standalone extension method (`Target >> sel => ...`) on
     /// `class_name` compiles with the actor method boundary. Anything else
     /// lowers through the value-type body path. Single authority for codegen's

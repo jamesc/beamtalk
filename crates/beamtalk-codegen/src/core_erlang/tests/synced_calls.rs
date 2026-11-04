@@ -188,10 +188,12 @@ fn a_bracket_around_a_call_whose_operand_is_bracketed_inside_a_closed_document_s
 
 /// ADR 0137 §2: every `dispatch/4` exit that is not a compiled Beamtalk method (an
 /// ADR 0066 extension fun, the inherited-method walk) runs through
-/// `beamtalk_actor_state:call_foreign/3`; the only other exit is the actor's own
-/// compiled `dispatch/4` (the `doesNotUnderstand:args:` handler). So the default arm
-/// holds no direct call into `beamtalk_dispatch`: each is the `make_fun` argument of a
-/// `call_foreign`.
+/// `beamtalk_actor_state:call_foreign/3`; the other exits are the actor's own
+/// compiled `dispatch/4` (the `doesNotUnderstand:args:` handler) and, under the
+/// `{compiled, ..}` verdict of `beamtalk_dispatch:inherited_target/2` (BT-4280),
+/// `invoke_resolved/6` on a compiled actor method of a superclass. So the default arm
+/// calls `beamtalk_dispatch` directly only for that verdict and that one exit; every
+/// other call into it is the `make_fun` argument of a `call_foreign`.
 #[test]
 fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n";
@@ -203,15 +205,65 @@ fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
         .split("'method_table'/0")
         .next()
         .expect("dispatch/4 ends before method_table/0");
-    let direct = default_arm.matches("call 'beamtalk_dispatch':").count();
+    let direct: Vec<&str> = default_arm
+        .match_indices("call 'beamtalk_dispatch':")
+        .map(|(i, _)| {
+            let rest = &default_arm[i + "call 'beamtalk_dispatch':".len()..];
+            &rest[..rest.find('(').expect("a call has arguments")]
+        })
+        .collect();
     assert_eq!(
-        direct, 0,
+        direct,
+        vec!["'inherited_target'", "'invoke_resolved'"],
         "a dispatch/4 exit bypasses call_foreign:\n{default_arm}"
+    );
+    assert!(
+        default_arm.contains(
+            "let InheritedTarget = call 'beamtalk_dispatch':'inherited_target'('Probe', OtherSelector) in"
+        ),
+        "{default_arm}"
+    );
+    // The direct exit sits under the `{compiled, ..}` pattern, and nowhere else.
+    let compiled_arm = "<{'compiled', InheritedOwner, InheritedModule}> when 'true' ->";
+    let (before, after) = default_arm
+        .split_once(compiled_arm)
+        .expect("the compiled-verdict arm");
+    assert!(!before.contains("'invoke_resolved'"), "{default_arm}");
+    let next_arm = after.find("<_> when 'true' ->").expect("the slow arm");
+    assert!(
+        after[..next_arm].contains(
+            "call 'beamtalk_dispatch':'invoke_resolved'(InheritedOwner, InheritedModule, OtherSelector, Args, Self, State)"
+        ),
+        "{default_arm}"
     );
     let foreign = default_arm
         .matches("call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', ")
         .count();
     assert_eq!(foreign, 2, "extension and inherited exits:\n{default_arm}");
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+/// BT-4280: `__beamtalk_meta/0` carries `threads_actor_state` exactly when
+/// `ClassHierarchy::threads_actor_state` holds — the rule the static self-send
+/// classification above uses — so the runtime only reads it.
+#[test]
+fn meta_threads_actor_state_only_for_compiled_actor_subclasses() {
+    const KEY: &str = "'threads_actor_state' => 'true'";
+    let actor = compile("Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n");
+    assert!(actor.contains(KEY), "{actor}");
+    // A `Server` subclass inherits from `Actor` through `Server`.
+    let server = compile("Server subclass: Handler\n  state: n = 0\n\n  run => self.n\n");
+    assert!(server.contains(KEY), "{server}");
+    for src in [
+        "Value subclass: Pt\n  field: x = 0\n\n  run => self.x\n",
+        "Object subclass: Greeter\n  hello => 1\n",
+        "Actor subclass: Wrapper native: my_mod\n  doIt => self delegate\n",
+        "Object subclass: Actor\n  run => 1\n",
+    ] {
+        let out = compile(src);
+        assert!(out.contains("'__beamtalk_meta'/0"), "{out}");
+        assert!(!out.contains("threads_actor_state"), "{src}\n{out}");
+    }
 }
 
 /// A `^` out of a direct-params loop throws with the method's current field-read

@@ -153,7 +153,26 @@ dispatch_test_() ->
             {"cached and walked resolution agree through skips",
                 fun test_cached_and_walked_agree_through_skips/0},
             {"misses never cache rows", fun test_misses_never_cache_rows/0},
-            {"reparenting flushes the cached owner", fun test_reparent_invalidates_cached_owner/0}
+            {"reparenting flushes the cached owner", fun test_reparent_invalidates_cached_owner/0},
+            %% BT-4280: the default arm's memoised inherited target
+            {"inherited_target names a compiled actor owner",
+                fun test_inherited_target_compiled_verdict/0},
+            {"inherited_target without the meta flag is slow (and cached)",
+                fun test_inherited_target_without_flag_is_slow/0},
+            {"inherited_target: unlisted selector and root class are slow",
+                fun test_inherited_target_unlisted_selector_and_root_are_slow/0},
+            {"inherited_target: an Object-owned selector is slow",
+                fun test_inherited_target_object_selector_is_slow/0},
+            {"inherited_target: an unregistered class is slow and not cached",
+                fun test_inherited_target_unregistered_class_not_cached/0},
+            {"inherited_target: a warm call reads no metadata or extension",
+                fun test_inherited_target_warm_call_reads_nothing/0},
+            {"inherited_target: extension install and removal flip the verdict",
+                fun test_inherited_target_extension_flips_verdict/0},
+            {"inherited_target: class writes flush the verdict",
+                fun test_inherited_target_class_writes_flush_verdict/0},
+            {"inherited_target: a purged owner module recomputes",
+                fun test_inherited_target_purged_module_recomputes/0}
         ]
     end}.
 
@@ -2088,6 +2107,254 @@ test_super_send_warms_shared_entry() ->
             [],
             ets:lookup(beamtalk_class_derived_cache, {defining_method, Leaf, bt3482DeepMethod})
         )
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%%% ============================================================================
+%%% BT-4280: inherited_target/2
+%%% ============================================================================
+
+%% A two-class stub chain: 'Bt4280Sub' (no methods) under 'Bt4280Base',
+%% which defines `bt3482DeepMethod` and whose `__beamtalk_meta/0` carries
+%% `threads_actor_state => Threads`. Base is a root (superclass none).
+-spec bt4280_build_pair(boolean()) -> #{names := [atom()], mods := [atom()]}.
+bt4280_build_pair(Threads) ->
+    BaseForms = bt4280_with_meta(
+        bt3482_stub_forms(bt4280_base_stub, 'Bt4280Base', none, true), Threads
+    ),
+    SubForms = bt3482_stub_forms(bt4280_sub_stub, 'Bt4280Sub', 'Bt4280Base', false),
+    ok = bt4280_load_and_start(bt4280_base_stub, 'Bt4280Base', none, BaseForms),
+    ok = bt4280_load_and_start(bt4280_sub_stub, 'Bt4280Sub', 'Bt4280Base', SubForms),
+    #{names => ['Bt4280Sub', 'Bt4280Base'], mods => [bt4280_sub_stub, bt4280_base_stub]}.
+
+bt4280_load_and_start(ModName, ClassName, Superclass, Forms) ->
+    {ok, ModName, Bin} = compile:forms(Forms),
+    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".beam", Bin),
+    {ok, _Pid} = beamtalk_object_class:start_link(ClassName, #{
+        module => ModName,
+        superclass => Superclass,
+        instance_methods => #{},
+        instance_variables => []
+    }),
+    ok.
+
+%% Adds `__beamtalk_meta/0` to a `bt3482_stub_forms/4` module.
+bt4280_with_meta([ModAttr, {attribute, L, export, Exports} | Rest], Threads) ->
+    Meta = #{
+        threads_actor_state => Threads,
+        method_info => #{
+            bt3482DeepMethod => #{
+                arity => 0,
+                param_types => [],
+                return_type => none,
+                is_sealed => false,
+                visibility => public
+            }
+        }
+    },
+    [ModAttr, {attribute, L, export, [{'__beamtalk_meta', 0} | Exports]} | Rest] ++
+        [{function, 6, '__beamtalk_meta', 0, [{clause, 6, [], [], [erl_parse:abstract(Meta, 6)]}]}].
+
+bt4280_row() ->
+    ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280Sub', bt3482DeepMethod}).
+
+%% The compiled verdict names the owner and its module, and invoking it
+%% answers exactly what `super/5` answers.
+test_inherited_target_compiled_verdict() ->
+    Chain = bt4280_build_pair(true),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        ?assertEqual(
+            {compiled, 'Bt4280Base', bt4280_base_stub},
+            beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)
+        ),
+        State = #{'$beamtalk_class' => 'Bt4280Sub'},
+        Self = make_ref(),
+        ?assertEqual(
+            beamtalk_dispatch:super(bt3482DeepMethod, [], Self, State, 'Bt4280Sub'),
+            beamtalk_dispatch:invoke_resolved(
+                'Bt4280Base', bt4280_base_stub, bt3482DeepMethod, [], Self, State
+            )
+        )
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% A module without the codegen flag (one compiled before it existed, or a
+%% non-actor class) keeps the bracketed path.
+test_inherited_target_without_flag_is_slow() ->
+    Chain = bt4280_build_pair(false),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)),
+        %% `slow' is cached too.
+        ?assertMatch([{_, _, slow}], bt4280_row())
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% A selector the owner's meta does not list (here: one no class in the
+%% chain defines) is `slow'; so is a root class.
+test_inherited_target_unlisted_selector_and_root_are_slow() ->
+    Chain = bt4280_build_pair(true),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280Sub', bt4280Missing)),
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280Base', bt3482DeepMethod))
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% An Object-owned selector is `slow': the owner is Object, which is no
+%% compiled actor class.
+test_inherited_target_object_selector_is_slow() ->
+    ok = ensure_counter_loaded(),
+    beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('Counter', printString)),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('Counter', yourself)).
+
+%% An unregistered class answers `slow' and caches nothing.
+test_inherited_target_unregistered_class_not_cached() ->
+    beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280NoSuchClass', foo)),
+    ?assertEqual(
+        [], ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', foo})
+    ).
+
+%% The second call is a cache hit: no metadata, extension or registry read.
+test_inherited_target_warm_call_reads_nothing() ->
+    Chain = bt4280_build_pair(true),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        Expected = {compiled, 'Bt4280Base', bt4280_base_stub},
+        ?assertEqual(Expected, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)),
+        TestPid = self(),
+        Worker = spawn(fun() ->
+            receive
+                go -> ok
+            end,
+            R = beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod),
+            TestPid ! {bt4280_done, R}
+        end),
+        Patterns = [
+            {beamtalk_class_metadata, '_', '_'},
+            {beamtalk_extensions, '_', '_'},
+            {beamtalk_class_registry, '_', '_'},
+            {beamtalk_object_class, '_', '_'}
+        ],
+        1 = erlang:trace(Worker, true, [call, {tracer, TestPid}]),
+        _ = [erlang:trace_pattern(P, true, [global]) || P <- Patterns],
+        Worker ! go,
+        Result =
+            receive
+                {bt4280_done, R} -> R
+            after 5000 -> error(bt4280_worker_timeout)
+            end,
+        _ = [erlang:trace_pattern(P, false, [global]) || P <- Patterns],
+        ?assertEqual(Expected, Result),
+        ?assertEqual([], bt4280_drain_trace_calls())
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+bt4280_drain_trace_calls() ->
+    bt4280_drain_trace_calls([]).
+
+bt4280_drain_trace_calls(Acc) ->
+    receive
+        {trace, _Pid, call, {M, F, Args}} ->
+            bt4280_drain_trace_calls([{M, F, length(Args)} | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+%% An extension on the class, or on its superclass, flips the verdict to
+%% `slow'; removing it flips it back.
+test_inherited_target_extension_flips_verdict() ->
+    Chain = bt4280_build_pair(true),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    ExtFun = fun(_Args, _Self, St) -> {bt4280_ext, St} end,
+    Compiled = {compiled, 'Bt4280Base', bt4280_base_stub},
+    try
+        lists:foreach(
+            fun(Class) ->
+                ?assertEqual(
+                    Compiled, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)
+                ),
+                ok = beamtalk_extensions:register(Class, bt3482DeepMethod, ExtFun, bt4280_test),
+                ?assertEqual(
+                    slow, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)
+                ),
+                ok = beamtalk_extensions:unregister(Class, bt3482DeepMethod),
+                ?assertEqual(
+                    Compiled, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)
+                )
+            end,
+            ['Bt4280Sub', 'Bt4280Base']
+        )
+    after
+        lists:foreach(
+            fun(Class) ->
+                try
+                    beamtalk_extensions:unregister(Class, bt3482DeepMethod)
+                catch
+                    _:_ -> ok
+                end
+            end,
+            ['Bt4280Sub', 'Bt4280Base']
+        ),
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% `put_method_records/3' (every `put_method' and `removeSelector:'),
+%% `merge_identity/5' (reload, reparent) and `delete/1' (class removal) each
+%% flush the cached verdict.
+test_inherited_target_class_writes_flush_verdict() ->
+    Chain = bt4280_build_pair(true),
+    beamtalk_class_derived_cache:invalidate(),
+    Compiled = {compiled, 'Bt4280Base', bt4280_base_stub},
+    Warm = fun() ->
+        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)),
+        ?assertMatch([{_, _, Compiled}], bt4280_row())
+    end,
+    try
+        Warm(),
+        Records = beamtalk_class_metadata:lookup_method_records('Bt4280Base', instance),
+        ok = beamtalk_class_metadata:put_method_records('Bt4280Base', instance, Records),
+        ?assertEqual([], bt4280_row()),
+        Warm(),
+        {ok, BaseMod, BaseSels} = beamtalk_class_metadata:lookup_methods('Bt4280Base'),
+        beamtalk_class_metadata:merge_identity('Bt4280Base', BaseMod, BaseSels, none, false),
+        ?assertEqual([], bt4280_row()),
+        Warm(),
+        %% Reparent the subclass to a root with no such method: the verdict
+        %% recomputes to `slow'.
+        {ok, SubMod, SubSels} = beamtalk_class_metadata:lookup_methods('Bt4280Sub'),
+        beamtalk_class_metadata:merge_identity('Bt4280Sub', SubMod, SubSels, none, false),
+        ?assertEqual([], bt4280_row()),
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)),
+        beamtalk_class_metadata:merge_identity('Bt4280Sub', SubMod, SubSels, 'Bt4280Base', false),
+        Warm(),
+        ok = beamtalk_class_metadata:delete('Bt4280Base'),
+        ?assertEqual([], bt4280_row())
+    after
+        bt3482_teardown_chain(Chain)
+    end.
+
+%% Purging the owner's module without a metadata write: the export check
+%% on the hit recomputes, and the answer is no longer `compiled'.
+test_inherited_target_purged_module_recomputes() ->
+    Chain = bt4280_build_pair(true),
+    beamtalk_class_derived_cache:invalidate(),
+    try
+        ?assertMatch(
+            {compiled, _, _}, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod)
+        ),
+        code:purge(bt4280_base_stub),
+        code:delete(bt4280_base_stub),
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280Sub', bt3482DeepMethod))
     after
         bt3482_teardown_chain(Chain)
     end.

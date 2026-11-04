@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: a compiled actor's `dispatch/4` default arm invokes a method
+// inherited from a compiled actor superclass directly, on a verdict memoised
+// per {Class, Selector} (`beamtalk_dispatch:inherited_target/2`). The class
+// writes that a workspace makes must flush that verdict: a live patch that
+// recompiles the superclass runs the new body, and `removeSelector:` of the
+// superclass's class-body method answers does_not_understand. The run-time
+// extension cases are in stdlib/test/actor_inherited_selfsend_test.bt.
+
+Actor subclass: Bt4280Base
+  state: n = 0
+  label => #fromBase
+// => "Bt4280Base"
+
+Bt4280Base >> bump => self.n := self.n + 1
+// => "Bt4280Base>>bump"
+
+Bt4280Base subclass: Bt4280Sub
+// => "Bt4280Sub"
+
+s := Bt4280Sub spawn
+// => Actor(Bt4280Sub, _)
+
+// Warm the verdict for both selectors.
+s label
+// => fromBase
+
+s bump
+// => 1
+
+s bump
+// => 2
+
+// Removing the class-body method from the defining class (ADR 0112): the
+// inherited send is a DNU.
+Bt4280Base removeSelector: #label
+// => Bt4280Base
+
+[s label] on: RuntimeError do: [:e | e kind]
+// => does_not_understand
+
+// State survives, and the other inherited selector still works.
+s bump
+// => 3
+
+// A live patch recompiles the superclass: the new body runs.
+Bt4280Base >> label => #patched
+// => "Bt4280Base>>label"
+
+s label
+// => patched
+
+s bump
+// => 4
+
+// Patching it again changes the body of a warm, compiled verdict.
+Bt4280Base >> label => #patchedAgain
+// => "Bt4280Base>>label"
+
+s label
+// => patchedAgain

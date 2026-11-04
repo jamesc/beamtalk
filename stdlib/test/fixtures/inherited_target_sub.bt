@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: an open subclass of InheritedTargetBase. Every selector but its
+// own reaches an inherited method through its `dispatch/4` default arm.
+
+InheritedTargetBase subclass: InheritedTargetSub
+
+  // A block that writes a field, passed to the inherited `twice:`.
+  addTwiceThroughInherited =>
+    self twice: [self.n := self.n + 1]
+    self.n

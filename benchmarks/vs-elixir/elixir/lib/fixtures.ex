@@ -66,7 +66,27 @@ defmodule VeBench.Counter do
   def handle_call(:count, _from, n), do: {:reply, n, n}
   def handle_call(:increment, _from, n), do: {:reply, n + 1, n + 1}
   def handle_call(:probe, _from, n), do: {:reply, is_integer(n), n}
+  def handle_call(:via_self, _from, n), do: bump(n)
 
   @impl true
   def handle_cast(:increment, n), do: {:noreply, n + 1}
+
+  # The callee of `:via_self` (row 7f): a local call.
+  def bump(n), do: {:reply, n + 1, n + 1}
+end
+
+# "Subclass" of the counter (row 7e): its `:via_self` reaches the counter's
+# `bump/1` through a delegate.
+defmodule VeBench.SubCounter do
+  use GenServer
+
+  def start, do: GenServer.start(__MODULE__, 0)
+
+  defdelegate bump(n), to: VeBench.Counter
+
+  @impl true
+  def init(n), do: {:ok, n}
+
+  @impl true
+  def handle_call(:via_self, _from, n), do: bump(n)
 end

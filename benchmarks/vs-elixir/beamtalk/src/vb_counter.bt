@@ -11,5 +11,9 @@ Actor subclass: VbCounter
 
   count -> Integer => self.count
 
+  // A self-send to a method this class defines (row 7f), or that a subclass
+  // inherits (row 7e, on VbSubCounter).
+  viaSelf -> Integer => self increment
+
   // A self-send the class module does not define (BT-4071's path).
   probe -> Boolean => self hasField: #count

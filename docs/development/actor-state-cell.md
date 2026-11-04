@@ -174,6 +174,27 @@ through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
+One default-arm exit is a compiled method and skips the bracket (BT-4280).
+The arm first asks `beamtalk_dispatch:inherited_target/2`, a verdict memoised
+in `beamtalk_class_derived_cache` under `{inherited_target, Class, Selector}`.
+It answers `{compiled, Owner, Module}` when there is no extension on the class
+or its superclass, and the superclass chain resolves the selector to
+`Owner`, whose `__beamtalk_meta/0` carries `threads_actor_state => true` and
+lists the selector among its own methods. The arm then calls
+`beamtalk_dispatch:invoke_resolved/6` on that owner, which is the call
+`super/5` ends in, so error shapes do not change. It skips both extension
+lookups, the superclass read and `call_foreign/3`. This is the run-time twin
+of the static compiled self-send above. `threads_actor_state` is emitted by
+the same Rust predicate that classifies a static self-send or `super` send as
+compiled (`ClassHierarchy::threads_actor_state`: not native, not `Actor`,
+inherits from `Actor`), so the rule is generated, not mirrored. Any other
+verdict (`slow`) takes the bracketed path above unchanged. A module compiled
+before the key existed reads as `slow`. Class writes and extension changes
+flush the verdict. A hit is re-checked against the module's `dispatch/4`
+export, which catches a purge that writes no metadata. The codegen test
+`every_dispatch_exit_is_compiled_or_goes_through_call_foreign` allows exactly
+this one direct exit.
+
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and
 returns the fun's own `{reply, R, NewState}` unless the cell changed during the
 call (always on, every build): if the answer is the exact entry state, the cell

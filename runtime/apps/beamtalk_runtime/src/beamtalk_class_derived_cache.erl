@@ -35,7 +35,8 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
-`{class_method_owner, ClassPid, Selector}`).
+`{class_method_owner, ClassPid, Selector}`,
+`{inherited_target, Class, Selector}`).
 `instance_method_info` is `beamtalk_method_resolver:instance_method_info/2`,
 the dispatch-time method lookup behind
 `beamtalk_primitive:runtime_instance_method/2`; `class_object` is the
@@ -47,7 +48,16 @@ is the send-path hierarchy resolution behind `beamtalk_dispatch:lookup/5`;
 cached pids are re-validated on every hit; `class_method_owner` is the
 class-side twin of `defining_method`, the defining class and module a dynamic
 class-side send runs in the caller (`beamtalk_class_dispatch:class_send/3`,
-ADR 0142 §2), or its `decline` (cached too, flushed by the next class write).
+ADR 0142 §2), or its `decline` (cached too, flushed by the next class write);
+`inherited_target` is the verdict a compiled actor's `dispatch/4` default
+arm checks first (`beamtalk_dispatch:inherited_target/2`, BT-4280):
+`{compiled, Owner, Module}` when the selector reaches a compiled actor
+method of a superclass with no extension in the way (the arm then calls
+`beamtalk_dispatch:invoke_resolved/6` directly, without the `call_foreign/3`
+bracket), `slow` otherwise. It caches `slow` too (one row per class and
+selector atom that reaches the default arm, flushed by the next class write
+or extension change), and re-validates a `{compiled, ...}` hit against the
+module's `dispatch/4` export.
 The `instance_method_info` key caches
 misses too (a selector no class in the chain defines, e.g. a DNU
 or `respondsTo:` probe), so the table holds up to one row per class and

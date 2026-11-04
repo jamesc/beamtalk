@@ -463,6 +463,7 @@ impl CoreErlangGenerator {
                 self.overrides_collection_selector_for(hierarchy, class);
             self.own_overrides_species_construction =
                 self.overrides_species_construction_for(hierarchy, class);
+            self.own_threads_actor_state = hierarchy.threads_actor_state(&class.name.name);
         }
     }
 

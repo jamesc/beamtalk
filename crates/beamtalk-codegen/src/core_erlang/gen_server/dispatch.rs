@@ -607,6 +607,9 @@ impl CoreErlangGenerator {
     /// Generates the default case arm for `dispatch/4`.
     ///
     /// Handles unrecognized selectors by checking (in order):
+    /// 0. The memoised inherited-target verdict
+    ///    (`beamtalk_dispatch:inherited_target/2`, BT-4280): `{compiled, Owner,
+    ///    Module}` invokes that compiled actor method directly and skips 1–2
     /// 1. Extension registry (`beamtalk_extensions:lookup`)
     /// 2. Class hierarchy walk (`beamtalk_dispatch:super`)
     /// 3. `doesNotUnderstand:args:` handler
@@ -622,6 +625,16 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
+                    "%% BT-4280: one memoised verdict per {Class, Selector}. {compiled, ..}",
+                    line(),
+                    "%% names a compiled actor method of a superclass, reached with no",
+                    line(),
+                    "%% extension in the way; anything else takes the path below.",
+                    line(),
+                    "let InheritedTarget = call 'beamtalk_dispatch':'inherited_target'(",
+                    leaf::atom(class_name.clone()),
+                    ", OtherSelector) in",
+                    line(),
                     "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
                     line(),
                     ext_lookup,
@@ -634,22 +647,42 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the `try call beamtalk_extensions:lookup(...)` expression.
+    /// Generates the `try call beamtalk_extensions:lookup(...)` expression,
+    /// skipped (`'not_found'`) when `InheritedTarget` is `{compiled, ..}`: that
+    /// verdict already ruled out an extension on the class and its superclass.
     #[allow(clippy::unused_self)] // method on impl for API consistency
     fn generate_extension_lookup(&self, class_name: &str) -> Document<'static> {
         docvec![
-            "let ExtLookup = try call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name.to_string()),
-            ", OtherSelector)",
+            "let ExtLookup = case InheritedTarget of",
             nest(
                 INDENT,
                 docvec![
                     line(),
-                    "of ExtLookupResult -> ExtLookupResult",
+                    "<{'compiled', _InheritedOwner, _InheritedModule}> when 'true' -> 'not_found'",
                     line(),
-                    "catch <_EType, _EReason, _EStack> -> 'not_found'",
+                    "<_> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "try call 'beamtalk_extensions':'lookup'(",
+                            leaf::atom(class_name.to_string()),
+                            ", OtherSelector)",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "of ExtLookupResult -> ExtLookupResult",
+                                    line(),
+                                    "catch <_EType, _EReason, _EStack> -> 'not_found'",
+                                ]
+                            ),
+                        ]
+                    ),
                 ]
             ),
+            line(),
+            "end",
         ]
     }
 
@@ -759,6 +792,13 @@ impl CoreErlangGenerator {
 
     /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
     ///
+    /// BT-4280: when `InheritedTarget` is `{compiled, Owner, Module}` the walk is
+    /// replaced by `beamtalk_dispatch:invoke_resolved/6` on that owner — the call
+    /// `super/5` itself ends in — with no `call_foreign/3` bracket: a compiled
+    /// actor method takes `State` as an argument and brackets whatever user code
+    /// it runs itself (ADR 0137 §2, the run-time twin of
+    /// `UserCodeCall::CompiledSelfSend`). Both answers feed one result case.
+    ///
     /// `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
     /// for two semantically different situations — the selector genuinely
     /// isn't found anywhere in the hierarchy (`kind = does_not_understand`),
@@ -773,18 +813,46 @@ impl CoreErlangGenerator {
         docvec![
             "%% ADR 0006: Try hierarchy walk before DNU",
             line(),
-            "%% ADR 0137 §2: inherited runtime methods run through call_foreign/3.",
+            "%% ADR 0137 §2: inherited runtime methods run through call_foreign/3;",
             line(),
-            "case ",
-            Self::call_foreign_doc(
-                "super",
-                5,
+            "%% a compiled actor owner (BT-4280) threads State itself.",
+            line(),
+            "let InheritedAnswer = case InheritedTarget of",
+            nest(
+                INDENT,
                 docvec![
-                    "OtherSelector, Args, Self, State, ",
-                    leaf::atom(class_name.to_string())
-                ],
+                    line(),
+                    "<{'compiled', InheritedOwner, InheritedModule}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "call 'beamtalk_dispatch':'invoke_resolved'(InheritedOwner, ",
+                            "InheritedModule, OtherSelector, Args, Self, State)",
+                        ]
+                    ),
+                    line(),
+                    "<_> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            Self::call_foreign_doc(
+                                "super",
+                                5,
+                                docvec![
+                                    "OtherSelector, Args, Self, State, ",
+                                    leaf::atom(class_name.to_string())
+                                ],
+                            ),
+                        ]
+                    ),
+                ]
             ),
-            " of",
+            line(),
+            "end",
+            line(),
+            "in case InheritedAnswer of",
             nest(
                 INDENT,
                 docvec![

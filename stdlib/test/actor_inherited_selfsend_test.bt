@@ -36,3 +36,75 @@ TestCase subclass: ActorInheritedSelfsendTest
     self.c increment
     self.c increment
     self assert: self.c getValueDirect equals: 3
+
+  // === BT-4280: the default arm's memoised inherited target ===
+  // InheritedTargetSub inherits every method but one from
+  // InheritedTargetBase, so each send below reaches a compiled superclass
+  // method through the subclass's `dispatch/4` default arm. The workspace
+  // cases (a live patch of the superclass, `removeSelector:` of its
+  // class-body method) are in
+  // tests/repl-protocol/cases/bt4280_inherited_target.btscript.
+
+  // An inherited method that self-sends another inherited method threads
+  // the state through both.
+  testInheritedTargetThreadsState =>
+    s := InheritedTargetSub spawn
+    s bump
+    self assert: s bumpViaSelf equals: 2
+    self assert: s n equals: 2
+    s stop
+
+  // A block that writes a field, passed to an inherited method that runs
+  // it: the write is kept.
+  testBlockWriteThroughInheritedMethodIsKept =>
+    s := InheritedTargetSub spawn
+    self assert: s addTwiceThroughInherited equals: 2
+    self assert: s addTwiceThroughInherited equals: 4
+    self assert: s n equals: 4
+    s stop
+
+  // An extension installed at run time on the superclass, for a selector
+  // the subclass already inherits, wins once installed and loses again
+  // after removal.
+  testSuperclassExtensionWinsThenLoses =>
+    s := InheritedTargetSub spawn
+    self assert: s label equals: #fromBase
+    Erlang beamtalk_extensions
+      register: #InheritedTargetBase
+      selector: #label
+      fun: [:args :receiver | #fromSuperExtension]
+      owner: #bt4280
+    [
+      self assert: s label equals: #fromSuperExtension
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #InheritedTargetBase selector: #label
+    ]
+    self assert: s label equals: #fromBase
+    s stop
+
+  // An extension on the subclass itself wins over the inherited method.
+  testSubclassExtensionWinsThenLoses =>
+    s := InheritedTargetSub spawn
+    self assert: s label equals: #fromBase
+    Erlang beamtalk_extensions
+      register: #InheritedTargetSub
+      selector: #label
+      fun: [:args :receiver | #fromSubExtension]
+      owner: #bt4280
+    [
+      self assert: s label equals: #fromSubExtension
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #InheritedTargetSub selector: #label
+    ]
+    self assert: s label equals: #fromBase
+    s stop
+
+  // A selector no class defines is a DNU through the inherited arm.
+  testDnuThroughInheritedArm =>
+    s := InheritedTargetSub spawn
+    self should: [self sendUnknownTo: s] raise: #does_not_understand
+    self assert: s bumpViaSelf equals: 1
+    s stop
+
+  // `s` is untyped here, so the send compiles without a DNU hint.
+  sendUnknownTo: s => s bt4280NoSuchSelector

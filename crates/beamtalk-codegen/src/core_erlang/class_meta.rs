@@ -63,6 +63,14 @@ pub(crate) struct MetaProvenance<'a> {
     /// `withAll:`); emitted as `'overrides_species_construction' => 'true'`
     /// (omitted when `false`). Read only for the species-dependent selectors.
     pub overrides_species_construction: bool,
+    /// BT-4280: the class's compiled instance methods thread the actor's
+    /// `State` (`ClassHierarchy::threads_actor_state`, the rule codegen's
+    /// static self-send classification uses); emitted as
+    /// `'threads_actor_state' => 'true'` (omitted when `false`, as in a module
+    /// compiled before the key existed). `beamtalk_dispatch:inherited_target/2`
+    /// reads it: an inherited method of such a class is invoked directly from
+    /// a subclass's `dispatch/4` default arm, without `call_foreign/3`.
+    pub threads_actor_state: bool,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -416,6 +424,11 @@ impl CoreErlangGenerator {
             },
             if provenance.overrides_species_construction {
                 Document::Str(",\n      'overrides_species_construction' => 'true'")
+            } else {
+                Document::Nil
+            },
+            if provenance.threads_actor_state {
+                Document::Str(",\n      'threads_actor_state' => 'true'")
             } else {
                 Document::Nil
             },
