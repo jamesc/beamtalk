@@ -587,6 +587,7 @@ key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_at
 %% code's metadata.
 -spec key_body_holds(static_call_key(), module(), atom()) -> boolean().
 key_body_holds({caller_safe_raise, Primitive, _, _, _}, Module, Selector) ->
+    %% bt-catcher-audit: not-applicable-no-block - a generated __beamtalk_meta/0 getter
     try Module:'__beamtalk_meta'() of
         #{caller_safe_class_primitives := #{Selector := Primitive}} -> true;
         _ -> false
