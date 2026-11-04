@@ -203,10 +203,29 @@ fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
         .split("'method_table'/0")
         .next()
         .expect("dispatch/4 ends before method_table/0");
+    // BT-4280: the only direct exits are the memoised verdict and, under its
+    // `{'compiled', ...}` arm alone, `invoke_resolved/6` of a compiled
+    // `State`-threading actor method (the run-time twin of `CompiledSelfSend`).
     let direct = default_arm.matches("call 'beamtalk_dispatch':").count();
     assert_eq!(
-        direct, 0,
+        direct, 2,
         "a dispatch/4 exit bypasses call_foreign:\n{default_arm}"
+    );
+    let verdict = default_arm
+        .find("call 'beamtalk_dispatch':'inherited_target'('Probe', OtherSelector)")
+        .expect("the inherited_target verdict");
+    let compiled_arm = default_arm
+        .find("<{'compiled', InhOwner, InhModule}> when 'true' ->")
+        .expect("the compiled arm");
+    let invoke = default_arm
+        .find("call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)")
+        .expect("the direct invoke");
+    let slow_arm = default_arm
+        .find("<_InhSlow> when 'true' ->")
+        .expect("the slow arm");
+    assert!(
+        verdict < compiled_arm && compiled_arm < invoke && invoke < slow_arm,
+        "invoke_resolved must sit under the compiled arm only:\n{default_arm}"
     );
     let foreign = default_arm
         .matches("call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', ")
@@ -259,4 +278,19 @@ fn a_send_as_a_match_scrutinee_after_a_field_write_is_bracketed() {
         "  failWith: reason -> Nil => nil\n",
     ));
     super::assert_compiles_through_erlc("test", &code);
+}
+
+/// BT-4280: `__beamtalk_meta/0` carries `'threads_actor_state' => 'true'`
+/// exactly for the classes whose compiled methods thread actor `State`
+/// (`ClassHierarchy::threads_actor_state`, the rule behind
+/// `CompiledSelfSend`), which `beamtalk_dispatch:inherited_target/2` reads.
+#[test]
+fn meta_flags_threads_actor_state_only_for_actor_subclasses() {
+    let flag = "'threads_actor_state' => 'true'";
+    let actor = compile("Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n");
+    assert!(actor.contains(flag), "{actor}");
+    let value = compile("Value subclass: Pt\n  field: x :: Integer = 0\n");
+    assert!(!value.contains(flag), "{value}");
+    let object = compile("Object subclass: Thing\n  run => 1\n");
+    assert!(!object.contains(flag), "{object}");
 }

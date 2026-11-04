@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: an inherited send to an actor instance takes the memoised direct
+// call (`beamtalk_dispatch:inherited_target/2` -> `invoke_resolved/6`) only
+// while nothing could make it reach something else. An extension on the class
+// or its superclass flips it back to the extension / `super/5` path, and
+// removing the extension flips it again. A field write from a block run by an
+// inherited method is kept (ADR 0137). Reloading the owner and
+// `removeSelector:` of its method need a workspace; they are in
+// tests/repl-protocol/cases/actor_inherited_target.btscript.
+//
+// Fixtures: fixtures/bt4280root.bt, bt4280mid.bt, bt4280leaf.bt.
+
+TestCase subclass: ActorInheritedTargetTest
+  field: leaf = nil
+
+  setUp => self.leaf := Bt4280Leaf spawn
+
+  tearDown => self.leaf isNil ifFalse: [self.leaf stop]
+
+  testInheritedSendReachesTheCompiledOwner =>
+    self assert: self.leaf tier equals: #fromRoot
+    self assert: self.leaf tier equals: #fromRoot
+
+  testExtensionOnTheSuperclassWinsThenLosesAfterRemoval =>
+    self assert: self.leaf tier equals: #fromRoot
+    Erlang beamtalk_extensions
+      register: #Bt4280Mid
+      selector: #tier
+      fun: [:args :receiver | #fromMidExtension]
+      owner: #bt4280
+    [
+      self assert: self.leaf tier equals: #fromMidExtension
+      Bt4280Mid removeSelector: #tier
+      self assert: self.leaf tier equals: #fromRoot
+    ] ensure: [Bt4280Mid removeSelector: #tier ifAbsent: [nil]]
+
+  testExtensionOnTheClassItselfWins =>
+    self assert: self.leaf tier equals: #fromRoot
+    Erlang beamtalk_extensions
+      register: #Bt4280Leaf
+      selector: #tier
+      fun: [:args :receiver | #fromLeafExtension]
+      owner: #bt4280
+    [
+      self assert: self.leaf tier equals: #fromLeafExtension
+      Bt4280Leaf removeSelector: #tier
+      self assert: self.leaf tier equals: #fromRoot
+    ] ensure: [Bt4280Leaf removeSelector: #tier ifAbsent: [nil]]
+
+  testBlockRunByAnInheritedMethodKeepsItsFieldWrite =>
+    self.leaf arm
+    self.leaf runStashed
+    self.leaf runStashed
+    self assert: self.leaf count equals: 2
+
+  testUnknownSelectorThroughTheInheritedArmIsDoesNotUnderstand =>
+    err := [self.leaf bt4280NoSuchSelector] on: Error do: [:e | e]
+    self assert: err kind equals: #does_not_understand

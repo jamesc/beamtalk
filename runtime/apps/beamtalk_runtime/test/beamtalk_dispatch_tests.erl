@@ -55,6 +55,14 @@ dispatch_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             {"lookup finds local method", fun test_lookup_local_method/0},
+            {"BT-4280: inherited_target answers compiled for an inherited actor method",
+                fun test_inherited_target_compiled/0},
+            {"BT-4280: inherited_target answers slow for an Object-owned selector",
+                fun test_inherited_target_object_owned_slow/0},
+            {"BT-4280: an extension on the class or its superclass flips the verdict",
+                fun test_inherited_target_extension_flips/0},
+            {"BT-4280: an unregistered class answers slow and is not cached",
+                fun test_inherited_target_unregistered/0},
             {"lookup finds inherited method", fun test_lookup_inherited_method/0},
             {"lookup returns DNU error for missing method", fun test_lookup_missing_method/0},
             {"super skips current class", fun test_super_skips_current/0},
@@ -2090,4 +2098,85 @@ test_super_send_warms_shared_entry() ->
         )
     after
         bt3482_teardown_chain(Chain)
+    end.
+
+%%% ============================================================================
+%%% BT-4280: inherited_target/2
+%%% ============================================================================
+
+%% `decrement` is defined on Counter (a compiled actor class, so its meta
+%% carries `threads_actor_state`) and inherited by LoggingCounter: the verdict
+%% is the direct call, and the second ask is a cache hit (the row is present
+%% and answers without recomputing).
+test_inherited_target_compiled() ->
+    ok = ensure_counter_loaded(),
+    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(
+        {compiled, 'Counter', 'bt@counter'},
+        beamtalk_dispatch:inherited_target('LoggingCounter', decrement)
+    ),
+    [{_, _, {compiled, 'Counter', 'bt@counter'}}] = ets:lookup(
+        beamtalk_class_derived_cache, {inherited_target, 'LoggingCounter', decrement}
+    ),
+    ?assertEqual(
+        {compiled, 'Counter', 'bt@counter'},
+        beamtalk_dispatch:inherited_target('LoggingCounter', decrement)
+    ).
+
+%% BT-4280: `printString` resolves to Object, an owner without the actor-State flag.
+test_inherited_target_object_owned_slow() ->
+    ok = ensure_counter_loaded(),
+    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', printString)),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', bt4280NoSuchSelector)).
+
+%% An extension on the class itself, or on its superclass, makes the verdict
+%% `slow` (today's extension / super path); removing it flips it back. Both
+%% install and removal flush the derived cache.
+test_inherited_target_extension_flips() ->
+    ok = ensure_counter_loaded(),
+    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    Fun = fun(_Args, _Self, St) -> {ext4280, St} end,
+    Compiled = {compiled, 'Counter', 'bt@counter'},
+    try
+        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
+        ok = beamtalk_extensions:register('LoggingCounter', decrement, Fun, bt4280_test),
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
+        ok = beamtalk_extensions:unregister('LoggingCounter', decrement),
+        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
+        ok = beamtalk_extensions:register('Counter', decrement, Fun, bt4280_test),
+        ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', decrement)),
+        ok = beamtalk_extensions:unregister('Counter', decrement),
+        ?assertEqual(Compiled, beamtalk_dispatch:inherited_target('LoggingCounter', decrement))
+    after
+        [
+            (try
+                beamtalk_extensions:unregister(C, decrement)
+            catch
+                _:_ -> ok
+            end)
+         || C <- ['LoggingCounter', 'Counter']
+        ]
+    end.
+
+test_inherited_target_unregistered() ->
+    beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('Bt4280NoSuchClass', anything)),
+    ?assertEqual(
+        [],
+        ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', anything})
+    ).
+
+ensure_fixture_loaded(ClassName, Module) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            {module, Module} = code:ensure_loaded(Module),
+            Module:register_class(),
+            ok;
+        _ ->
+            ok
     end.
