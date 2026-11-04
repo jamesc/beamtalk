@@ -96,10 +96,10 @@ pub(super) use emit::{
 pub(super) use ir::CallSiteLine;
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureNlrRelay,
-    FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
-    UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
+    EnsureNlrRelay, FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId,
+    TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.

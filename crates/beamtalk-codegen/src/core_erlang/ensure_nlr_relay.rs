@@ -18,9 +18,20 @@
 //!   catch runs the cleanup from that carried state and resumes the throw with
 //!   the cleanup's result, so the boundary answers the cleanup's writes too.
 //!   Where the state is the actor-state cell (an actor closure, a merged Tier 2
-//!   fun) the cleanup writes the cell and the throw resumes with the cell as it
-//!   is afterwards. A class method's throw carries nothing: its class variables
+//!   fun) the cleanup writes the cell and the throw resumes with the carried
+//!   state under the cell as it is afterwards (`refresh(Self, Carried)`): the
+//!   fields are the cell's, and the `__local__` keys a merged fun's `^`
+//!   flushed keep the values they had at the `^`, never the ones bound at the
+//!   `ensure:`. A class method's throw carries nothing: its class variables
 //!   are written in place (ADR 0130), so nothing is relayed.
+//! - **However the cleanup runs.** When neither block needs threading, or an
+//!   operand is not a block literal, the cleanup is applied as a closure,
+//!   which threads nothing and writes the actor-state cell in place. An actor
+//!   method's `^` stored its `State` to the cell before it threw, so the
+//!   throw resumes with the carried state under the cell, as in a closure.
+//!   Such a closure never writes the REPL's bindings (a block that assigns a
+//!   binding cannot be stored, ADR 0133) or a value type's `Self` (a closure
+//!   cannot assign its fields), so there nothing is relayed.
 //! - **A `^` of another scope** (a block created by another method) carries
 //!   that scope's state, not this one's: it takes the error path and is
 //!   re-raised as it came.
@@ -41,7 +52,8 @@
 
 use super::generator::CoreErlangGenerator;
 use super::threaded_ir::{
-    self, EnsureCatchVars, EnsureNlrRelay, NlrCarry, RenderCtx, ThreadedStmt, TokenId,
+    self, EnsureCatchVars, EnsureCleanup, EnsureNlrRelay, NlrCarry, RenderCtx, RethrowSlot,
+    ThreadedStmt, TokenId,
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
@@ -62,19 +74,34 @@ impl CoreErlangGenerator {
     /// Builds, verifies and renders the catch of a compiled `ensure:`
     /// ([`ThreadedStmt::EnsureCatch`]): `other` is the error path (the cleanup
     /// and the re-raise), `relay` the `$bt_nlr` clause for the scope's own
-    /// throw, `carry` what that throw carries and `cleanup_final` the carried
-    /// family's version the cleanup ends at. The single owner of every
-    /// compiled `ensure:` catch.
+    /// throw, `carry` what that throw carries and `cleanup` how the cleanup
+    /// runs (inlined, ending at a version of the carried family, or as a
+    /// closure). The single owner of every compiled `ensure:` catch.
     pub(in crate::core_erlang) fn ensure_catch(
         &mut self,
         triple: EnsureCatchTriple,
         carry: Option<NlrCarry>,
-        cleanup_final: Option<usize>,
+        cleanup: EnsureCleanup,
         relay: Option<EnsureNlrRelay>,
         other: Document<'static>,
         span: Span,
     ) -> Document<'static> {
-        let relay = relay.filter(|_| !fault::active());
+        let relay = match fault::active() {
+            None => relay,
+            Some(fault::RelayFault::NoRelay) => None,
+            // The relay before review: a cell-carried throw resumed with what
+            // a `^` at this site would carry, rebuilt from the site's bindings.
+            Some(fault::RelayFault::RebuildAtSite) => relay.map(|relay| {
+                if relay.rethrow == RethrowSlot::CellOverCarried && carry == Some(NlrCarry::Live) {
+                    EnsureNlrRelay {
+                        rethrow: RethrowSlot::SiteState(self.nlr_throw_state_doc(span)),
+                        ..relay
+                    }
+                } else {
+                    relay
+                }
+            }),
+        };
         let token = self.scope_nlr_token().map(TokenId::new);
         // The relay clause's pattern variables, minted only when it is
         // rendered so an `ensure:` that relays nothing keeps its numbering.
@@ -101,7 +128,7 @@ impl CoreErlangGenerator {
             vars: Box::new(vars),
             token,
             carry,
-            cleanup_final,
+            cleanup,
             relay,
             other,
             span,
@@ -123,45 +150,66 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Test-only: compiles `ensure:` without its `$bt_nlr` relay, as before
-/// BT-4312, so [`VerifyError::EnsureCleanupLostOnNlr`](super::threaded_ir::VerifyError::EnsureCleanupLostOnNlr)
+/// Test-only: compiles `ensure:` with its `$bt_nlr` relay as it was before a
+/// fix, so [`VerifyError::EnsureCleanupLostOnNlr`](super::threaded_ir::VerifyError::EnsureCleanupLostOnNlr)
 /// can be shown to fire on a real compile
-/// (`beamtalk-repl/tests/repl_loop_body_return.rs`). Compiled for this crate's
-/// tests and for dependents that enable the `test` feature; otherwise
-/// [`active`](fault::active) is always `false`.
+/// (`beamtalk-repl/tests/repl_loop_body_return.rs`,
+/// `tests/ensure_relay_corpus.rs`). Compiled for this crate's tests and for
+/// dependents that enable the `test` feature; otherwise
+/// [`active`](fault::active) is always `None`.
 pub mod fault {
     #[cfg(any(test, feature = "test"))]
     use std::cell::Cell;
 
+    /// The relay as it was before a fix.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(not(any(test, feature = "test")), allow(dead_code))]
+    pub enum RelayFault {
+        /// No relay: the catch re-raises the scope's own throw after the
+        /// cleanup, as every `ensure:` did before BT-4312.
+        NoRelay,
+        /// A cell-carried throw resumes with the state a `^` at the
+        /// `ensure:` site would carry, rebuilt from the site's bindings, as
+        /// the first BT-4312 relay did.
+        RebuildAtSite,
+    }
+
     #[cfg(any(test, feature = "test"))]
     thread_local! {
-        static OFF: Cell<bool> = const { Cell::new(false) };
+        static FAULT: Cell<Option<RelayFault>> = const { Cell::new(None) };
     }
 
-    /// Whether the `ensure:` relay is switched off on this thread.
+    /// The relay fault switched on on this thread, if any.
     #[cfg(any(test, feature = "test"))]
-    pub(crate) fn active() -> bool {
-        OFF.with(Cell::get)
+    pub(crate) fn active() -> Option<RelayFault> {
+        FAULT.with(Cell::get)
     }
 
-    /// Whether the `ensure:` relay is switched off on this thread.
+    /// The relay fault switched on on this thread, if any.
     #[cfg(not(any(test, feature = "test")))]
-    pub(crate) fn active() -> bool {
-        false
+    pub(crate) fn active() -> Option<RelayFault> {
+        None
     }
 
-    /// Runs `body` with the `ensure:` relay switched off, restoring it
-    /// afterwards even if `body` panics.
+    /// Runs `body` with `fault` switched on, restoring the relay afterwards
+    /// even if `body` panics.
     #[cfg(any(test, feature = "test"))]
-    pub fn without_relay<T>(body: impl FnOnce() -> T) -> T {
+    pub fn with_fault<T>(fault: RelayFault, body: impl FnOnce() -> T) -> T {
         struct Reset;
         impl Drop for Reset {
             fn drop(&mut self) {
-                OFF.with(|off| off.set(false));
+                FAULT.with(|f| f.set(None));
             }
         }
-        OFF.with(|off| off.set(true));
+        FAULT.with(|f| f.set(Some(fault)));
         let _reset = Reset;
         body()
+    }
+
+    /// Runs `body` with the `ensure:` relay switched off
+    /// ([`RelayFault::NoRelay`]).
+    #[cfg(any(test, feature = "test"))]
+    pub fn without_relay<T>(body: impl FnOnce() -> T) -> T {
+        with_fault(RelayFault::NoRelay, body)
     }
 }

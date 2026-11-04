@@ -916,6 +916,36 @@ fn ensure_cleanups_a_return_runs_need_their_relay() {
     );
 }
 
+/// BT-4312: an `ensure:` whose receiver or cleanup is not a block literal
+/// runs its cleanup as a closure. At the REPL such a closure can never write
+/// the bindings map a `^` of the eval carries, so the catch has nothing to
+/// relay: a block that assigns a binding cannot be stored (ADR 0133), and a
+/// `^` in a stored block answers its value where it stands, never throwing to
+/// the eval's boundary. The method scopes, where the closure writes the
+/// actor-state cell, are `beamtalk-codegen`'s `ensure_relay_corpus.rs`.
+#[test]
+fn a_closure_cleanup_never_writes_the_bindings_a_return_carries() {
+    for src in [
+        "c := [w := 9]. [^5] ensure: c",
+        "c := [w := w + 1]. [x == 0 ifTrue: [^5]] ensure: c",
+    ] {
+        match parse_input(src) {
+            Err(e) if e.contains("assigned in a block stored in") => {}
+            other => panic!("{src}: expected the ADR 0133 rejection, got {other:?}"),
+        }
+    }
+    for src in [
+        "b := [^5]. b ensure: [nil]. x := 2",
+        "b := [^5]. [b value] ensure: [w := 9]. x := 2",
+    ] {
+        let code = generate(src, "bt4312_closure", false).unwrap_or_else(|e| panic!("{src}: {e}"));
+        assert!(
+            !code.contains("'$bt_nlr'"),
+            "{src}: a stored block's `^` compiled to a throw:\n{code}"
+        );
+    }
+}
+
 /// BT-4312 (A1): a `^` run in place inside the value of a top-level
 /// assignment is rejected before it compiles, as BT-4288's loop case is: a
 /// method never assigns the variable, but the workspace would bind it to the

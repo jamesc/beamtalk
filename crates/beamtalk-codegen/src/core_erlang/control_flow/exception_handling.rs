@@ -57,8 +57,8 @@ use super::super::intrinsics::{
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureNlrRelay, FrameId, NlrCarry,
-    NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot,
+    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureNlrRelay, FrameId,
+    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot,
     StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
@@ -1145,25 +1145,34 @@ impl CoreErlangGenerator {
         let receiver_code = self.expression_doc(receiver)?;
         let cleanup_code = self.expression_doc(cleanup)?;
 
-        // BT-4312: the cleanup closure threads nothing, so the state a `^` of
-        // this scope carries is its result too, except where that state is the
-        // live actor-state cell, which the closure writes in place: the throw
-        // then resumes with the cell as the cleanup left it (`ensure_nlr_relay`).
+        // BT-4312: the cleanup closure threads no version; what it writes it
+        // writes in place, through the actor-state cell. Where the state a
+        // `^` of this scope carries is the cell, or an actor method's `State`
+        // (which the `^` stored to the cell before it threw), the throw resumes
+        // with the carried state under the cell as the cleanup left it
+        // (`ensure_nlr_relay`). The REPL's bindings and a value type's `Self`
+        // are not in the cell, and no closure can write them. A cleanup that
+        // is a block literal touching neither the actor's state nor user code
+        // writes nothing.
         let carry = self.nlr_slot().carry();
-        let relay =
-            (carry == Some(NlrCarry::Live) && self.scope_nlr_token().is_some()).then(|| {
-                let cleanup_apply = self.annotate_current_send_call(docvec![
-                    "apply ",
-                    leaf::var(cleanup_var.clone()),
-                    " ()"
-                ]);
-                EnsureNlrRelay {
-                    seed: Document::Nil,
-                    cleanup: docvec!["let _ = ", cleanup_apply, " in"],
-                    cell_store: false,
-                    rethrow: RethrowSlot::Live(self.nlr_throw_state_doc(receiver.span())),
-                }
-            });
+        let writes_cell = Self::extract_block_literal(cleanup)
+            .is_none_or(|block| self.block_touches_actor_state(block));
+        let relays = writes_cell
+            && matches!(carry, Some(NlrCarry::Live | NlrCarry::ActorState))
+            && self.scope_nlr_token().is_some();
+        let relay = relays.then(|| {
+            let cleanup_apply = self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_var.clone()),
+                " ()"
+            ]);
+            EnsureNlrRelay {
+                seed: Document::Nil,
+                cleanup: docvec!["let _ = ", cleanup_apply, " in"],
+                cell_store: false,
+                rethrow: RethrowSlot::CellOverCarried,
+            }
+        });
         let other = docvec![
             "do ",
             self.annotate_current_send_call(docvec![
@@ -1182,7 +1191,7 @@ impl CoreErlangGenerator {
                 carried_var: None,
             },
             carry,
-            None,
+            EnsureCleanup::Closure { writes_cell },
             relay,
             other,
             receiver.span(),
@@ -1516,19 +1525,19 @@ impl CoreErlangGenerator {
         // nothing where this construct's scratch map is private (a
         // direct-params loop body, a class method): its writes die with the
         // scope whatever the boundary answers.
-        let carry = self
-            .nlr_slot()
-            .carry()
-            .filter(|carry| *carry != NlrCarry::StateAcc || !private_scratch);
+        let carry = self.nlr_slot().carry().filter(|carry| {
+            !matches!(carry, NlrCarry::Bindings | NlrCarry::ActorState) || !private_scratch
+        });
         let cleanup_final = match carry {
-            Some(NlrCarry::StateAcc) => {
+            Some(NlrCarry::Bindings | NlrCarry::ActorState) => {
                 (error_arm.state_version > 0).then_some(error_arm.state_version)
             }
             Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
             Some(NlrCarry::Live) | None => None,
         };
+        let writes_cell = self.block_touches_actor_state(cleanup_block);
         let relays = self.scope_nlr_token().is_some()
-            && (cleanup_final.is_some() || carry == Some(NlrCarry::Live));
+            && (cleanup_final.is_some() || (carry == Some(NlrCarry::Live) && writes_cell));
         let carried_var = relays.then(|| self.ensure_relay_carried_var());
         let relay = match (carry, &carried_var) {
             (Some(carry), Some(carried)) => Some(self.ensure_relay(
@@ -1549,7 +1558,10 @@ impl CoreErlangGenerator {
                 ..triple
             },
             carry,
-            cleanup_final,
+            EnsureCleanup::Inlined {
+                final_version: cleanup_final,
+                writes_cell,
+            },
             relay,
             Document::Vec(other),
             span,
@@ -1576,8 +1588,9 @@ impl CoreErlangGenerator {
     /// state the scope's own throw carries (`carried`, the clause's pattern
     /// variable), and the slot the throw resumes with.
     ///
-    /// - [`NlrCarry::StateAcc`]: the REPL's bindings map, or an actor
-    ///   method's `State`. Seeded from the carried map; where the actor-state
+    /// - [`NlrCarry::Bindings`] / [`NlrCarry::ActorState`]: the REPL's
+    ///   bindings map, or an actor method's `State`. Seeded from the carried
+    ///   map; where the actor-state
     ///   cell is live, from the cell refresh the error path uses, which holds
     ///   the carried state (a `^` stores it before it throws, and every relay
     ///   further in stores its own result). Re-throws the cleanup's final
@@ -1585,7 +1598,10 @@ impl CoreErlangGenerator {
     /// - [`NlrCarry::SelfVt`]: a value-type method's `Self`, seeded from the
     ///   carried one; re-throws the cleanup's final `Self`.
     /// - [`NlrCarry::Live`]: the state is the cell, which the cleanup writes
-    ///   in place; re-throws what a `^` at the end of the cleanup carries.
+    ///   in place; re-throws the carried state with the cell's fields over it
+    ///   ([`RethrowSlot::CellOverCarried`]), so the `__local__` keys a merged
+    ///   Tier 2 fun's `^` flushed keep the values they had at the `^`
+    ///   (BT-4122), not the ones bound at this `ensure:`.
     #[allow(clippy::too_many_arguments)] // the pieces of one relay clause
     fn ensure_relay(
         &mut self,
@@ -1605,7 +1621,7 @@ impl CoreErlangGenerator {
             }
         };
         let relay = match carry {
-            NlrCarry::StateAcc => {
+            NlrCarry::Bindings | NlrCarry::ActorState => {
                 let seed = if cell_boundary {
                     Self::ensure_cell_refresh_doc()
                 } else {
@@ -1657,12 +1673,11 @@ impl CoreErlangGenerator {
                     arm,
                     None,
                 )?;
-                let state = self.nlr_throw_state_doc(cleanup_block.span);
                 EnsureNlrRelay {
                     seed: docvec![cell_seed(), family_seed],
                     cleanup: cleanup.doc,
                     cell_store: false,
-                    rethrow: RethrowSlot::Live(state),
+                    rethrow: RethrowSlot::CellOverCarried,
                 }
             }
         };

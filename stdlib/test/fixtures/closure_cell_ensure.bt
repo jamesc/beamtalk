@@ -99,3 +99,56 @@ Actor subclass: ClosureCellEnsure
     b := [[^1] ensure: [self.n := 9]]
     b value
     0
+
+  // BT-4312: an `ensure:` whose receiver or cleanup is not a block literal
+  // runs the cleanup as a closure, which writes the cell in place. The throw
+  // resumes with the cell's fields, so the method's boundary answers them.
+  storedReceiverAfterReturn =>
+    b := [^1]
+    b ensure: [self.n := 9]
+    0
+
+  storedCleanupAfterReturn =>
+    c := [self.n := 9]
+    [^1] ensure: c
+    0
+
+  storedBlocksAfterReturn =>
+    b := [
+      self.n := 5
+      ^1
+    ]
+    c := [self.n := self.n + 100]
+    b ensure: c
+    0
+
+  nestedStoredCleanupsAfterReturn =>
+    c1 := [self.n := self.n + 100]
+    c2 := [self.n := self.n * 2]
+    [[^1] ensure: c1] ensure: c2
+    0
+
+  passedCleanupAfterReturn => self returnThrough: [self.n := 9]
+
+  returnThrough: cleanup =>
+    [^1] ensure: cleanup
+    0
+
+  storedCleanupInALoopAfterReturn =>
+    c := [self.n := self.n + 1]
+    #(1, 2, 3) do: [:i | [i == 2 ifTrue: [^i]] ensure: c]
+    0
+
+  storedCleanupInAClosureAfterReturn =>
+    c := [self.n := 9]
+    b := [[^1] ensure: c]
+    b value
+    0
+
+  // PIN-BUG BT-4429: `Block>>ensure:` reached by `perform:` runs in the
+  // Block method, where the `^` is a foreign throw: its catch re-raises the
+  // state the `^` carried, so the cleanup's write is lost.
+  performedCleanupAfterReturn =>
+    c := [self.n := 9]
+    [^1] perform: #ensure: withArguments: #(c)
+    0

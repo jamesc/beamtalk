@@ -235,7 +235,8 @@ impl NlrSlot {
         match self {
             Self::Tier2Merged | Self::CellClosure => Some(NlrCarry::Live),
             Self::ClassMethod => None,
-            Self::Repl | Self::Actor => Some(NlrCarry::StateAcc),
+            Self::Repl => Some(NlrCarry::Bindings),
+            Self::Actor => Some(NlrCarry::ActorState),
             Self::ValueType => Some(NlrCarry::SelfVt),
         }
     }

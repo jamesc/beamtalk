@@ -15,10 +15,11 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureNlrRelay,
-    FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars,
-    RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason,
-    ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
+    EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
+    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -495,14 +496,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `State`, a value type's `Self`; a class method carries none, its class
     /// variables are written in place), so the catch must run the cleanup from
     /// that carried state and resume the throw with the cleanup's result.
-    /// Fires when the cleanup advances the carried family, or the scope's
-    /// state lives in the actor-state cell, and the node has no relay
-    /// ([`EnsureRelayDefect::NoRelay`]) or its relay re-throws anything but
-    /// the cleanup's result ([`EnsureRelayDefect::RethrowsStaleState`]). The
-    /// repro: `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
+    /// That holds however the cleanup runs: inlined, or applied as a closure
+    /// when an operand is not a block literal (which writes the actor-state
+    /// cell in place, so the result is the carried state with the cell's
+    /// fields over it).
+    /// Fires when the cleanup can write the carried state (an inlined one
+    /// advances the carried family; a closure one in an actor method; any
+    /// cleanup where the state lives in the cell) and the node has no relay
+    /// ([`EnsureRelayDefect::NoRelay`]), or its relay re-throws anything but
+    /// the cleanup's result ([`EnsureRelayDefect::RethrowsStaleState`]), or,
+    /// where the state lives in the cell, a state rebuilt from the `ensure:`
+    /// site's bindings instead of from the carried one
+    /// ([`EnsureRelayDefect::RebuildsCarriedStateAtSite`]). The repros:
+    /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
     /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
-    /// gap), and an actor method's `[^1] ensure: [self.n := 9]` never kept
-    /// `n`.
+    /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
+    /// nor did `c := [self.n := 9]. [^1] ensure: c`. Excluded: `Block>>ensure:`
+    /// reached by `perform:` builds no `EnsureCatch` (PIN-BUG BT-4429).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
@@ -767,6 +777,12 @@ pub(in crate::core_erlang) enum EnsureRelayDefect {
     NoRelay,
     /// The relay re-throws a state other than the cleanup's result.
     RethrowsStaleState,
+    /// Where the state lives in the actor-state cell, the relay re-throws
+    /// what a fresh `^` at the `ensure:` site would carry
+    /// ([`RethrowSlot::SiteState`]) instead of the carried state with the
+    /// cell over it: in a merged Tier 2 fun that re-flushes the captured
+    /// locals as bound at the `ensure:`, dropping the values the `^` carried.
+    RebuildsCarriedStateAtSite,
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -1826,13 +1842,13 @@ impl VerifyWalk<'_> {
             ThreadedStmt::EnsureCatch {
                 token,
                 carry,
-                cleanup_final,
+                cleanup,
                 relay,
                 span,
                 ..
             } => {
                 if let Some(defect) =
-                    check_ensure_relay(token.is_some(), *carry, *cleanup_final, relay.as_ref())
+                    check_ensure_relay(token.is_some(), *carry, *cleanup, relay.as_ref())
                 {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
@@ -1881,30 +1897,51 @@ impl VerifyWalk<'_> {
 }
 
 /// BT-4312 obligation of one [`ThreadedStmt::EnsureCatch`]: when a `^` of
-/// the scope can cross it (`has_token`) carrying state its cleanup writes (a
-/// cleanup that advances the carried family, or any cleanup when the state is
-/// the live cell), the relay must re-throw the cleanup's result.
+/// the scope can cross it (`has_token`) carrying state its cleanup can write,
+/// the relay must re-throw the cleanup's result. An inlined cleanup writes
+/// the carried family when it advances it (its result is that version); a
+/// closure writes only through the actor-state cell, so it can write an actor
+/// method's `State` but never the REPL's bindings or a value type's `Self`;
+/// where the state lives in the cell, any cleanup that may write the cell
+/// writes it. A result in the cell is the carried state with the cell's
+/// fields over it, never one rebuilt from the `ensure:` site's bindings.
 fn check_ensure_relay(
     has_token: bool,
     carry: Option<NlrCarry>,
-    cleanup_final: Option<usize>,
+    cleanup: EnsureCleanup,
     relay: Option<&EnsureNlrRelay>,
 ) -> Option<EnsureRelayDefect> {
     let carry = carry.filter(|_| has_token)?;
-    let expected = match (carry, cleanup_final) {
-        (NlrCarry::Live, _) => None,
-        (NlrCarry::StateAcc | NlrCarry::SelfVt, Some(version)) => Some(version),
-        (NlrCarry::StateAcc | NlrCarry::SelfVt, None) => return None,
+    let expected = match (carry, cleanup) {
+        (
+            NlrCarry::Live,
+            EnsureCleanup::Inlined {
+                writes_cell: true, ..
+            }
+            | EnsureCleanup::Closure { writes_cell: true },
+        )
+        | (NlrCarry::ActorState, EnsureCleanup::Closure { writes_cell: true }) => {
+            RethrowSlot::CellOverCarried
+        }
+        (
+            NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::SelfVt,
+            EnsureCleanup::Inlined {
+                final_version: Some(version),
+                ..
+            },
+        ) => RethrowSlot::Version(version),
+        _ => return None,
     };
     let Some(relay) = relay else {
         return Some(EnsureRelayDefect::NoRelay);
     };
-    let fresh = match (&relay.rethrow, expected) {
-        (RethrowSlot::Version(found), Some(version)) => *found == version,
-        (RethrowSlot::Live(_), None) => true,
-        _ => false,
-    };
-    (!fresh).then_some(EnsureRelayDefect::RethrowsStaleState)
+    match (&relay.rethrow, &expected) {
+        (found, expected) if found == expected => None,
+        (RethrowSlot::SiteState(_), RethrowSlot::CellOverCarried) => {
+            Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
+        }
+        _ => Some(EnsureRelayDefect::RethrowsStaleState),
+    }
 }
 
 /// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:

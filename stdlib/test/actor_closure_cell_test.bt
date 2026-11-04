@@ -87,6 +87,50 @@ TestCase subclass: ActorClosureCellTest
     self assert: c cleanupInAClosureAfterReturn equals: 1
     self assert: c n equals: 9
 
+  // BT-4312: the same when the receiver or the cleanup is not a block
+  // literal, so the cleanup runs as a closure that writes the cell.
+  testStoredReceiverCleanupWriteSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c storedReceiverAfterReturn equals: 1
+    self assert: c n equals: 9
+
+  testStoredCleanupWriteSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c storedCleanupAfterReturn equals: 1
+    self assert: c n equals: 9
+
+  testStoredBlocksCleanupWriteOverTheBodysWriteSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c storedBlocksAfterReturn equals: 1
+    self assert: c n equals: 105
+
+  testNestedStoredCleanupWritesSurviveAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c nestedStoredCleanupsAfterReturn equals: 1
+    self assert: c n equals: 200
+
+  testPassedCleanupWriteSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c passedCleanupAfterReturn equals: 1
+    self assert: c n equals: 9
+
+  testStoredCleanupWriteInALoopSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c storedCleanupInALoopAfterReturn equals: 2
+    self assert: c n equals: 2
+
+  testStoredCleanupWriteInAClosureSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c storedCleanupInAClosureAfterReturn equals: 1
+    self assert: c n equals: 9
+
+  // PIN-BUG BT-4429: an `ensure:` sent with `perform:` loses the cleanup's
+  // write when a `^` unwinds through it. The fix flips `n` to 9.
+  testPerformedEnsureCleanupWriteIsLostOnAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c performedCleanupAfterReturn equals: 1
+    self assert: c n equals: 0
+
   testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
     c := ClosureCellEnsure spawn
     rec := ClosureCellRecorder spawn

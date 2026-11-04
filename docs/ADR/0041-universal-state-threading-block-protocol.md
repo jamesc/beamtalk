@@ -134,10 +134,18 @@ or the eval's boundary. A `^` of another scope is re-raised as it came. The
 catch re-raised the original throw before, so its boundary answered the state
 at the `^`: `w := 0. [^5] ensure: [w := 9]` left `w` at 0 once this amendment
 made that `^` a throw (BT-4288's loop-body `^` had the same gap), and an actor
-method's `[^1] ensure: [self.n := 9]` never kept `n`. The catch is one
+method's `[^1] ensure: [self.n := 9]` never kept `n`. The same holds however
+the cleanup runs: when an operand is not a block literal the cleanup is a
+closure that writes the actor-state cell in place, and an actor method's `^`
+stored its `State` there before it threw, so the throw resumes with the
+carried state under the cell (`c := [self.n := 9]. [^1] ensure: c` kept no `n`
+before). Where the state is the cell, the relay never rebuilds it from the
+`ensure:` site's bindings: a merged Tier 2 fun's `^` flushed its captured
+locals as they were at the `^`. The catch is one
 `ThreadedStmt::EnsureCatch` node (`ensure_nlr_relay.rs`), and
-`VerifyError::EnsureCleanupLostOnNlr` fails a cleanup that writes the carried
-state with no relay.
+`VerifyError::EnsureCleanupLostOnNlr` fails a cleanup that can write the
+carried state with no relay, or a relay that re-throws anything but the
+cleanup's result.
 
 ## Decision
 

@@ -692,11 +692,15 @@ fn render_ensure_catch(
         RethrowSlot::Version(version) => {
             let family = match carry {
                 NlrCarry::SelfVt => "Self",
-                NlrCarry::StateAcc | NlrCarry::Live => "StateAcc",
+                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live => "StateAcc",
             };
             leaf::var(super::super::util::versioned_var(family, *version))
         }
-        RethrowSlot::Live(doc) => doc.clone(),
+        RethrowSlot::CellOverCarried => actor_state_call(
+            actor_state_helper::REFRESH,
+            vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
+        ),
+        RethrowSlot::SiteState(doc) => doc.clone(),
     };
     let store = if relay.cell_store {
         docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
