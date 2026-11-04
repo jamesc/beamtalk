@@ -3129,6 +3129,31 @@ fn test_qualified_class_reference_uses_canonical_tag() {
     );
 }
 
+/// BT-4074: an `on: json@ParseError do:` filter takes the name-only fast
+/// path (BT-4295) like an unqualified literal — the bare name, never a
+/// qualified atom.
+#[test]
+fn test_qualified_class_name_only_reference_uses_bare_name() {
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+    let expr = Expression::ClassReference {
+        name: Identifier::new("ParseError", Span::new(5, 15)),
+        package: Some(Identifier::new("json", Span::new(0, 4))),
+        span: Span::new(0, 15),
+    };
+    let output = generator
+        .class_name_only_reference(&expr)
+        .expect("a compiled-context qualified literal takes the name-only path")
+        .to_pretty_string();
+    assert!(
+        output.contains("'beamtalk_class_ParseError'") && output.contains("-> 'ParseError'"),
+        "qualified filter must resolve to the bare class name. Got:\n{output}"
+    );
+    assert!(
+        !output.contains("json@"),
+        "no package-qualified atom may be emitted. Got:\n{output}"
+    );
+}
+
 #[test]
 fn test_qualified_class_method_call() {
     // ADR 0070 Phase 2: `json@Parser parse: input` should use the class
