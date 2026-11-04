@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: an error class no test patches, so the raise-shape test does not
+// depend on the order the patching tests run in. See
+// class_literal_signal_test.bt.
+
+Error subclass: Bt4270RaisePlain

@@ -10,8 +10,12 @@
 // `on: <that class> do:` catches it. (A reload that adds an override needs a
 // workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)
 //
+// Each class a test patches irreversibly (a runtime class-method fun) is used
+// by that test alone, so the tests do not depend on their order.
+//
 // Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt,
-// fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt.
+// fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt,
+// fixtures/bt4270raise_plain.bt.
 
 TestCase subclass: ClassLiteralSignalTest
 
@@ -21,6 +25,8 @@ TestCase subclass: ClassLiteralSignalTest
   raiseFun: m => Bt4270RaiseFunErr signal: m
 
   raiseLeaf: m => Bt4270RaiseLeaf signal: m
+
+  raisePlain: m => Bt4270RaisePlain signal: m
 
   // What a call site does: the value it answers, or the class and message
   // of what it raised, caught by the class it named.
@@ -41,8 +47,8 @@ TestCase subclass: ClassLiteralSignalTest
       self raiseExt: "x"
     ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
     self assert: (self outcomeOf: [
-      self raiseLeaf: "y"
-    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "y")
+      self raisePlain: "y"
+    ] on: Bt4270RaisePlain) equals: #(#raised, Bt4270RaisePlain, "y")
     // An ancestor's handler catches it too.
     self assert: ([
       self raiseExt: "z"
@@ -70,7 +76,8 @@ TestCase subclass: ClassLiteralSignalTest
     ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
 
   // A runtime class-method fun replacing `signal:` on the receiving class
-  // after warm-up is honoured.
+  // after warm-up is honoured. (Nothing removes a runtime class-method fun,
+  // so the patched class is used by this test alone.)
   testRuntimeFunOnTheClassAfterWarmUpIsHonoured =>
     self assert: (self outcomeOf: [
       self raiseFun: "x"
@@ -86,7 +93,8 @@ TestCase subclass: ClassLiteralSignalTest
     ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)
 
   // The same on an ancestor between the receiving class and `Exception`: the
-  // ancestor's write takes away its descendant's key.
+  // ancestor's write takes away its descendant's key. (Used by this test
+  // alone, as above.)
   testRuntimeFunOnAnAncestorAfterWarmUpIsHonoured =>
     self assert: (self outcomeOf: [
       self raiseLeaf: "x"
