@@ -3332,6 +3332,76 @@ fn test_class_literal_uses_compile_time_registered_name() {
     );
 }
 
+/// BT-4411: a literal naming a built-in whose routing-fixture row pins its
+/// own module (`String`) builds the class object with that module baked in:
+/// the pid is still the run-time `whereis` result and `class_not_found` is
+/// unchanged, but there is no `module_name_safe/1` lookup.
+#[test]
+fn test_builtin_class_literal_bakes_pinned_module() {
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+    let output = generator
+        .generate_class_reference("String")
+        .unwrap()
+        .to_pretty_string();
+    let shape = regex::Regex::new(
+        r"(?s)case call 'erlang':'whereis'\('beamtalk_class_String'\) of\s*<'undefined'> when 'true' -> .*'class_not_found', 'String'.*<([\w@]+)> when 'true' -> \{'beamtalk_object', 'String class', 'bt@stdlib@string', ([\w@]+)\}\s*end",
+    )
+    .unwrap();
+    let caps = shape
+        .captures(&output)
+        .unwrap_or_else(|| panic!("unexpected String literal shape. Got:\n{output}"));
+    assert_eq!(
+        &caps[1], &caps[2],
+        "the class object carries the looked-up pid"
+    );
+    assert!(
+        !output.contains("module_name_safe"),
+        "a pinned built-in must not look its module up. Got:\n{output}"
+    );
+}
+
+/// BT-4411: only a fixture row whose `target_module` *is* the class's own
+/// module is baked. `ErlangModule` routes to `beamtalk_erlang_proxy`, which is
+/// not its class module, so its literal keeps the run-time lookup, as does
+/// every built-in without a target module (`Character`, `Boolean`).
+#[test]
+fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
+    for class in ["ErlangModule", "Character", "Boolean", "Object"] {
+        let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+        let output = generator
+            .generate_class_reference(class)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'beamtalk_object_class':'module_name_safe'("),
+            "{class} must keep the run-time module lookup. Got:\n{output}"
+        );
+    }
+}
+
+/// BT-4411: every fixture row with a `target_module` that names a stdlib
+/// class module is one the compiler resolves to that same module, so the
+/// bake actually applies to it (a drift in either would silently fall back
+/// to the run-time lookup).
+#[test]
+fn test_every_stdlib_pinned_row_is_its_class_module() {
+    let generator = CoreErlangGenerator::new("bt@my_app@main");
+    for row in crate::core_erlang::routing::rows() {
+        let Some(target) = row.target_module else {
+            continue;
+        };
+        if !target.starts_with("bt@stdlib@") {
+            continue;
+        }
+        assert_eq!(
+            generator.compiled_module_name(row.class),
+            target,
+            "{} pins {target}",
+            row.class
+        );
+    }
+}
+
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
 
 /// BT-4074: a package-qualified class reference in compiled (non-REPL) code
