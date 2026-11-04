@@ -86,6 +86,13 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := VbPoint x: a y: 4]
     last
 
+  // `new:` with a map: the generated `new/1` validates the keys against the
+  // class's declared fields (`check_init_args/5`, BT-4030; memoised, BT-4281).
+  class constructMap: n :: Integer a: a :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := VbPoint new: #{#x => a, #y => 4}]
+    last
+
   // === 3. Class-side method: sealed (static) vs open ===
   class classSealedMethod: n :: Integer -> Integer =>
     last := 0

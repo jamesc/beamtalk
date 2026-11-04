@@ -36,7 +36,11 @@ Keys are caller-chosen terms; namespace them with a leading tag
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
 `{class_method_owner, ClassPid, Selector}`,
-`{inherited_target, Class, Selector}`).
+`{inherited_target, Class, Selector}`, `{declared_fields, Class}`).
+`declared_fields` is the full declared field set (own, inherited and `late`
+names) that `beamtalk_class_instantiation:check_init_args/5` validates a
+`new:`/`spawnWith:` map against (BT-4281); only a completed superclass walk
+is cached, never its `BaseState`-derived `not_found` fallback.
 `instance_method_info` is `beamtalk_method_resolver:instance_method_info/2`,
 the dispatch-time method lookup behind
 `beamtalk_primitive:runtime_instance_method/2`; `class_object` is the
@@ -68,7 +72,10 @@ Every write that can change a class's `module`, `superclass` or published
 method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
 `merge_identity/5` (hot reload, redefinition), instance-side
 `put_method_records/3` (every `publish_reflection/1`: `init/1`, `put_method`,
-reload) and `delete/1` (removal, `terminate/2`), plus the
+reload), `put_reflection/2` (instance variables, which the `declared_fields`
+memo reads; it invalidates on its own rather than relying on
+`publish_reflection/1` calling `put_method_records/3` after it) and
+`delete/1` (removal, `terminate/2`), plus the
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
 write has landed. So do the class-side writes the `class_method_owner` memo
 reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),

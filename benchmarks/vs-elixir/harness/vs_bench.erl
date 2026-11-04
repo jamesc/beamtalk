@@ -68,6 +68,9 @@ rows() ->
         ]},
         {"2b", alloc, "construct: VbPoint x: a y: 4 / %Point{x: a, y: 4}", 50000, 'construct:a:',
             int, [{construct, int}]},
+        {"2c", alloc,
+            "construct via new: VbPoint new: #{#x => a, #y => 4} / struct!(Point, %{x: a, y: 4})",
+            50000, 'constructMap:a:', int, [{construct_map, int}, {construct, int}]},
         {"3a", dispatch, "`class sealed` method, sealed class / Mod.fun(arg)", 200000,
             'classSealedMethod:', none, [{remote_call, none}]},
         {"3b", dispatch, "class method, sealed class / Mod.fun(arg)", 50000, 'sealedClassMethod:',
@@ -490,6 +493,8 @@ compiles_to("1b") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS +
 compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
+compiles_to("2c") ->
+    "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
 compiles_to("3a") ->
     "guarded direct call: erlang:whereis(registered name) + direct_call_ok/2, Mod:'class_double:'(ClassRef, 21) (BT-4301)";
 compiles_to("3b") ->
