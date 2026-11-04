@@ -157,8 +157,11 @@ pub(crate) fn parse_normalised(
 pub(crate) fn codegen_named(src: &str, module_name: &str) -> String {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new(module_name))
-        .expect("codegen should succeed")
+    crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new(module_name),
+    )
+    .expect("codegen should succeed")
 }
 
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
