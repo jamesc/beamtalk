@@ -8,14 +8,11 @@
 
 TestCase subclass: QualifiedClassReferenceTest
 
-  testIsKindOfQualifiedClass =>
-    self assert: (3 isKindOf: stdlib@Integer)
+  testIsKindOfQualifiedClass => self assert: (3 isKindOf: stdlib@Integer)
 
-  testIsKindOfQualifiedSuperclass =>
-    self assert: (3 isKindOf: stdlib@Number)
+  testIsKindOfQualifiedSuperclass => self assert: (3 isKindOf: stdlib@Number)
 
-  testQualifiedIdenticalToUnqualified =>
-    self assert: stdlib@Integer == Integer
+  testQualifiedIdenticalToUnqualified => self assert: stdlib@Integer == Integer
 
   testInstanceClassIdenticalToQualified =>
     self assert: 3 class == stdlib@Integer
