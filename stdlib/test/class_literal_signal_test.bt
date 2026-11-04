@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: a class-literal signal send (`MyErr signal: m`) raises in the
+// caller (BT-4115) only while it still resolves to `Exception`'s compiled
+// signal primitive. The call sites below are compiled once, warmed (their
+// caller-safe raise key installed), then the class's `class signal:` is
+// replaced at run time: the already-compiled call site runs the replacement.
+// Before and after, the raised exception's class is the receiving class and
+// `on: <that class> do:` catches it. (A reload that adds an override needs a
+// workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)
+//
+// Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt,
+// fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt.
+
+TestCase subclass: ClassLiteralSignalTest
+
+  // The compiled call sites.
+  raiseExt: m => Bt4270RaiseExtErr signal: m
+
+  raiseFun: m => Bt4270RaiseFunErr signal: m
+
+  raiseLeaf: m => Bt4270RaiseLeaf signal: m
+
+  // What a call site does: the value it answers, or the class and message
+  // of what it raised, caught by the class it named.
+  outcomeOf: aBlock :: Block on: cls -> List =>
+    [
+      #(#returned, aBlock value)
+    ] on: cls do: [:e | #(#raised, e class, e message)]
+
+  testRaiseIsTheReceivingClassAndCaughtByIt =>
+    self assert: (self outcomeOf: [
+      self raiseExt: "x"
+    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
+    self assert: (self outcomeOf: [
+      self raiseLeaf: "y"
+    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "y")
+    // An ancestor's handler catches it too.
+    self assert: ([
+      self raiseExt: "z"
+    ] on: Error do: [:e | e class]) equals: Bt4270RaiseExtErr
+
+  // A class-side extension of `signal:` registered after warm-up is honoured
+  // by the call site compiled before it, and the raise is back once it goes.
+  testExtensionAfterWarmUpIsHonoured =>
+    self assert: (self outcomeOf: [
+      self raiseExt: "x"
+    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
+    Erlang beamtalk_extensions
+      register: #'Bt4270RaiseExtErr class'
+      selector: #signal:
+      fun: [:args :receiver | #fromExtension]
+      owner: #test
+    shadowed := self outcomeOf: [self raiseExt: "x"] on: Bt4270RaiseExtErr
+    Erlang beamtalk_extensions
+      unregister: #Bt4270RaiseExtErr
+      selector: #signal:
+      classSide: true
+    self assert: shadowed equals: #(#returned, #fromExtension)
+    self assert: (self outcomeOf: [
+      self raiseExt: "x"
+    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
+
+  // A runtime class-method fun replacing `signal:` on the receiving class
+  // after warm-up is honoured.
+  testRuntimeFunOnTheClassAfterWarmUpIsHonoured =>
+    self assert: (self outcomeOf: [
+      self raiseFun: "x"
+    ] on: Bt4270RaiseFunErr) equals: #(#raised, Bt4270RaiseFunErr, "x")
+    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseFunErr
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: #signal:
+      fun: [:classSelf :msg | #fromRuntimeFun]
+    self assert: (self outcomeOf: [
+      self raiseFun: "x"
+    ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)
+
+  // The same on an ancestor between the receiving class and `Exception`: the
+  // ancestor's write takes away its descendant's key.
+  testRuntimeFunOnAnAncestorAfterWarmUpIsHonoured =>
+    self assert: (self outcomeOf: [
+      self raiseLeaf: "x"
+    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "x")
+    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseMid
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: #signal:
+      fun: [:classSelf :msg | classSelf name]
+    // The fun runs with the receiving class as `self`, as the dynamic path does.
+    self assert: (self outcomeOf: [
+      self raiseLeaf: "x"
+    ] on: Bt4270RaiseLeaf) equals: #(#returned, #Bt4270RaiseLeaf)

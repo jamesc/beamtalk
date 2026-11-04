@@ -38,7 +38,9 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
 -include("beamtalk.hrl").
 
 %% BT-4115: the class-name atom a class-literal send (`Error signal: m`) passes
-%% in place of the class object. `nil` is excluded: it is the class-self of a
+%% in place of the class object, on the hit path of its caller-safe raise key
+%% (BT-4270: only while `static_call_target/4` certifies that the send still
+%% resolves to `Exception`'s compiled signal primitive). `nil` is excluded: it is the class-self of a
 %% direct-called class method (BT-4029), not a class name, and keeps the
 %% generic `Exception` fallback.
 -define(IS_CLASS_NAME_ATOM(X), (is_atom(X) andalso X =/= nil)).
@@ -241,12 +243,11 @@ e.g., 'RuntimeError class' → 'RuntimeError', 'TypeError' → 'TypeError'
 """.
 -spec strip_class_suffix(atom()) -> atom().
 strip_class_suffix(ClassName) ->
-    Str = atom_to_list(ClassName),
-    case lists:suffix(" class", Str) of
-        % elp:fixme W0023 class name derived from known class tag in exception path
-        true -> list_to_atom(lists:sublist(Str, length(Str) - 6));
-        false -> ClassName
-    end.
+    %% The one " class" rule (`beamtalk_class_registry:class_display_name/1`),
+    %% BIFs only: this runs on every `on:do:` match and every raise through a
+    %% class object (BT-4270).
+    % elp:fixme W0023 class name derived from known class tag in exception path
+    binary_to_atom(beamtalk_class_registry:class_display_name(ClassName), utf8).
 
 -doc """
 Wrap a `#beamtalk_error{}` record as an Exception tagged map.

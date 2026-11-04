@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: the ancestor of Bt4270RaiseLeaf that gains a runtime `class signal:`
+// fun after the leaf's call site warmed up. See class_literal_signal_test.bt.
+
+Error subclass: Bt4270RaiseMid

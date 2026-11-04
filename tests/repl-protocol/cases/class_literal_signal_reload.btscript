@@ -1,0 +1,46 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: a class-literal signal send (`CsrErr signal: m`) raises in the
+// caller only while it still resolves to `Exception`'s compiled signal
+// primitive. The workspace half of stdlib/test/class_literal_signal_test.bt:
+// a call site compiled and warmed before a reload that gives the class its own
+// `class signal:` runs the override, and raises again once the override is
+// gone. It needs a live workspace, which BUnit does not have.
+
+Error subclass: CsrErr
+// => "CsrErr"
+
+Object subclass: CsrCaller
+  class run => [CsrErr signal: "boom"] on: CsrErr do: [:e | e class name]
+// => "CsrCaller"
+
+CsrCaller run
+// => CsrErr
+
+CsrCaller run
+// => CsrErr
+
+// ===========================================================================
+// A RELOAD THAT OVERRIDES `class signal:` IS SEEN BY THE WARMED CALL SITE
+// ===========================================================================
+
+Error subclass: CsrErr
+  class signal: msg => #overridden
+// => "CsrErr"
+
+CsrCaller run
+// => overridden
+
+// ===========================================================================
+// A RELOAD THAT DROPS THE OVERRIDE RAISES AGAIN, AS THE RECEIVING CLASS
+// ===========================================================================
+
+Error subclass: CsrErr
+// => "CsrErr"
+
+CsrCaller run
+// => CsrErr
+
+[CsrErr signal: "direct"] on: CsrErr do: [:e | e message]
+// => "direct"

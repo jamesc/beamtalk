@@ -414,6 +414,7 @@ impl CoreErlangGenerator {
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             Self::meta_process_bound_class_selectors_entry(),
+            Self::meta_caller_safe_class_primitives_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
             if provenance.overrides_collection_selector {
@@ -477,6 +478,33 @@ impl CoreErlangGenerator {
             .collect();
         docvec![
             ",\n      'process_bound_class_selectors' => ",
+            Self::meta_atom_list(&selectors)
+        ]
+    }
+
+    /// BT-4270: `'caller_safe_class_primitives' => ['signal:', ...]`, the
+    /// class-side selectors whose body is exactly one of `Exception`'s
+    /// caller-safe signal primitives
+    /// ([`super::primitives::is_caller_safe_class_primitive`]). The runtime
+    /// installs a class-literal signal send's caller-safe raise key only while
+    /// the defining module's current metadata lists the selector, so a reload
+    /// that replaces the primitive body ends the caller-side raise. Omitted
+    /// when the class has none, so only `Exception` changes.
+    fn meta_caller_safe_class_primitives_entry(class: &ClassDefinition) -> Document<'static> {
+        let selectors: Vec<String> = class
+            .class_methods
+            .iter()
+            .filter(|m| {
+                m.quoted_primitive_name()
+                    .is_some_and(|p| super::primitives::is_caller_safe_class_primitive(p))
+            })
+            .map(|m| m.selector.name().to_string())
+            .collect();
+        if selectors.is_empty() {
+            return Document::Nil;
+        }
+        docvec![
+            ",\n      'caller_safe_class_primitives' => ",
             Self::meta_atom_list(&selectors)
         ]
     }

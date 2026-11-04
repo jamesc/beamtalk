@@ -1856,13 +1856,6 @@ impl CoreErlangGenerator {
                 let doc = self.generate_repl_bound_class_send(&name.name, selector, arguments)?;
                 return Ok(Some(doc));
             }
-            // BT-4115: `Error signal: m` raises in the caller when the
-            // class-side method resolves to a caller-safe class primitive.
-            if let Some(doc) =
-                self.try_inline_caller_safe_class_primitive(&name.name, selector, arguments)?
-            {
-                return Ok(Some(doc));
-            }
             // ADR 0070 Phase 2: Class method calls always go through the class
             // registry using the short class name. The package qualifier doesn't
             // affect dispatch — it's used for module name resolution in spawns and
@@ -1923,62 +1916,6 @@ impl CoreErlangGenerator {
             " end"
         ];
         Ok(self.class_self_send_value(&args_preamble, call_doc))
-    }
-
-    /// Inlines a class-literal send whose class-side method is a caller-safe
-    /// class primitive (BT-4115).
-    ///
-    /// `Error signal: m` resolves, through the class hierarchy, to
-    /// `Exception class >> signal: msg => @primitive "classSignal:"`. That
-    /// primitive reads nothing from the class but its name, so instead of a
-    /// `gen_server:call` into the `Error` class process (which raises there
-    /// and relays the error back to be re-raised here) the call site emits
-    /// the primitive's own `beamtalk_exception_handler` call with the
-    /// class-name atom in place of `ClassSelf`:
-    ///
-    /// ```erlang
-    /// call 'beamtalk_exception_handler':'class_signal_message'(Msg, 'Error')
-    /// ```
-    ///
-    /// The primitive name is read from the resolved method's own source
-    /// (`MethodInfo::primitive`) and the caller-safe list lives in
-    /// `primitives::error_handling`, so a subclass that overrides
-    /// `class signal:` resolves to a non-primitive method and keeps the class
-    /// send. This is decided at compile time, with the same trust model as
-    /// the other direct calls: a `class signal:` override gained by hot
-    /// reload, or a class-side extension shadowing it, is not seen by
-    /// already-compiled call sites (BT-4126, BT-4133).
-    fn try_inline_caller_safe_class_primitive(
-        &mut self,
-        class_name: &str,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) -> Result<Option<Document<'static>>> {
-        let Some(primitive) = self
-            .class_hierarchy
-            .as_ref()
-            .and_then(|h| h.find_class_method(class_name, &selector.name()))
-            .and_then(|method| method.primitive)
-            .filter(|p| super::primitives::is_caller_safe_class_primitive(p))
-        else {
-            return Ok(None);
-        };
-        let exprs: Vec<&Expression> = arguments.iter().collect();
-        let (prelude, arg_docs) = self.thread_subexprs(&exprs, "Arg")?;
-        // The primitive was resolved from this very selector, so its arity
-        // always matches the argument count and the lowering cannot decline.
-        let call_doc = super::primitives::generate_class_signal_bif(
-            &primitive,
-            &arg_docs,
-            leaf::atom(class_name.to_string()),
-        )
-        .ok_or_else(|| {
-            CodeGenError::Internal(format!(
-                "caller-safe class primitive `{primitive}` did not lower for `{class_name} {}`",
-                selector.name()
-            ))
-        })?;
-        Ok(Some(self.close_prelude(&prelude, call_doc, "Raise")))
     }
 
     /// Handles self-sends inside actor methods.
@@ -3667,8 +3604,10 @@ impl CoreErlangGenerator {
     /// to the guarded direct call of [`Self::guarded_class_direct_call_doc`].
     /// Everything else, an inherited class method included, takes the dynamic
     /// path (registered-name `whereis` + `class_send`), which itself runs a stateless
-    /// class method in the caller (BT-4300): no call site names a superclass
-    /// module.
+    /// class method in the caller (BT-4300). A send that resolves to one of
+    /// `Exception`'s caller-safe signal primitives, own or inherited
+    /// (`Error signal: m`), raises in the caller behind its own key instead
+    /// ([`Self::guarded_caller_safe_raise_doc`], BT-4115, BT-4270).
     ///
     /// # Generated Code (dynamic path)
     ///
@@ -3697,6 +3636,20 @@ impl CoreErlangGenerator {
             if let Some(module_name) = self.direct_new0_module(class_name) {
                 return Ok(Self::generate_direct_new_call(&module_name));
             }
+        }
+
+        if let Some((module_name, primitive)) =
+            self.caller_safe_signal_target(class_name, &raw_selector)
+        {
+            let (args_preamble, arg_refs) = self.thread_class_send_args_bound(arguments)?;
+            let call_doc = self.guarded_caller_safe_raise_doc(
+                class_name,
+                module_name,
+                &raw_selector,
+                &primitive,
+                arg_refs,
+            )?;
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SignalCall"));
         }
 
         if let Some(module_name) = self.direct_call_eligible_module(class_name, &raw_selector) {
@@ -3790,21 +3743,16 @@ impl CoreErlangGenerator {
         args_doc: Document<'static>,
         arg_count: usize,
     ) -> Document<'static> {
-        let tag = super::util::metaclass_tag(class_name);
-        let class_self_var = self.fresh_temp_var("StaticSelf");
-        let static_ref_var = self.fresh_temp_var("StaticRef");
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
-        let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
+        let class_self_var = self.fresh_temp_var("StaticSelf");
         let comma = if arg_count == 0 { "" } else { ", " };
-        let fallback =
-            self.generate_class_send_fallback(class_name, raw_selector, args_doc.clone());
         let key_doc = docvec![
             "{",
             leaf::atom(module_name.clone()),
             ", ",
             leaf::atom(safe_fn.clone()),
             ", ",
-            leaf::atom(tag),
+            leaf::atom(super::util::metaclass_tag(class_name)),
             "}"
         ];
         // BT-4366: the direct call sits inside the guard `case`, so it carries
@@ -3817,17 +3765,119 @@ impl CoreErlangGenerator {
             "(",
             leaf::var(class_self_var.clone()),
             comma,
-            args_doc,
+            args_doc.clone(),
             ")"
         ]);
+        self.keyed_static_send_doc(
+            class_name,
+            raw_selector,
+            &key_doc,
+            &class_self_var,
+            args_doc,
+            arg_count,
+            direct_call,
+        )
+    }
+
+    /// BT-4270: a class-literal send that resolves to one of `Exception`'s
+    /// caller-safe signal primitives ([`Self::caller_safe_signal_target`])
+    /// raises in the caller, as BT-4115 made it, but only behind a static
+    /// call key, so a later `class signal:` override, class-side extension,
+    /// runtime fun or reload is honoured:
+    ///
+    /// ```erlang
+    /// let StaticSelf = case call 'persistent_term':'get'(
+    ///         {'caller_safe_raise', 'bt@stdlib@exception', 'class_signal:', 'Error class'}, 'false') of
+    ///     <'false'> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(<same key>, 'Error', 'signal:', 2)
+    ///     <StaticRef> when 'true' -> StaticRef
+    ///   end
+    /// in case StaticSelf of
+    ///   <'false'> when 'true' -> <the dynamic class_send to 'Error'>
+    ///   <_> when 'true' ->
+    ///     call 'beamtalk_exception_handler':'class_signal_message'(Arg1, 'Error')
+    /// end
+    /// ```
+    ///
+    /// The key names the defining class's compiled method and the receiving
+    /// class's tag; the runtime installs it only while every condition of a
+    /// direct-call key holds for that method (the dynamic path would run it in
+    /// the caller for this receiver) and the defining module's metadata lists
+    /// the selector as a caller-safe primitive, i.e. its body is the raise the
+    /// hit arm performs (`beamtalk_class_shadow_flags`, `key_body_holds/3`).
+    /// The hit arm raises exactly what that body raises: the primitive with
+    /// the receiving class's name in place of its `ClassSelf`. `arg_refs` must
+    /// be variables or literals: they are spliced into both arms.
+    fn guarded_caller_safe_raise_doc(
+        &mut self,
+        class_name: &str,
+        module_name: String,
+        raw_selector: &str,
+        primitive: &str,
+        arg_refs: Vec<Document<'static>>,
+    ) -> Result<Document<'static>> {
+        let arg_count = arg_refs.len();
+        let raise = super::primitives::generate_class_signal_bif(
+            primitive,
+            &arg_refs,
+            leaf::atom(class_name.to_string()),
+        )
+        .ok_or_else(|| {
+            CodeGenError::Internal(format!(
+                "caller-safe class primitive `{primitive}` did not lower for `{class_name} {raw_selector}`"
+            ))
+        })?;
+        let raise = self.annotate_current_send_call(raise);
+        let key_doc = docvec![
+            "{'caller_safe_raise', ",
+            leaf::atom(module_name),
+            ", ",
+            leaf::atom(super::selector_mangler::safe_class_method_fn_name(
+                raw_selector
+            )),
+            ", ",
+            leaf::atom(super::util::metaclass_tag(class_name)),
+            "}"
+        ];
+        let class_self_var = self.fresh_temp_var("StaticSelf");
+        Ok(self.keyed_static_send_doc(
+            class_name,
+            raw_selector,
+            &key_doc,
+            &class_self_var,
+            Self::join_docs_with_commas(arg_refs),
+            arg_count,
+            raise,
+        ))
+    }
+
+    /// The shared shape of a keyed static class send (BT-4316): read the call
+    /// target's static call key, install it on a miss
+    /// (`beamtalk_class_shadow_flags:static_call_target/4`), and run `hit_doc`
+    /// (which may read `class_self_var`, the key's class reference) when it
+    /// is present, else the dynamic `class_send` fallback.
+    #[allow(clippy::too_many_arguments)] // One shape, two hit kinds: the parts are all distinct.
+    fn keyed_static_send_doc(
+        &mut self,
+        class_name: &str,
+        raw_selector: &str,
+        key_doc: &Document<'static>,
+        class_self_var: &str,
+        args_doc: Document<'static>,
+        arg_count: usize,
+        hit_doc: Document<'static>,
+    ) -> Document<'static> {
+        let static_ref_var = self.fresh_temp_var("StaticRef");
+        let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
+        let fallback = self.generate_class_send_fallback(class_name, raw_selector, args_doc);
         docvec![
             "let ",
-            leaf::var(class_self_var.clone()),
+            leaf::var(class_self_var.to_string()),
             " = case call 'persistent_term':'get'(",
             key_doc.clone(),
             ", 'false') of <'false'> when 'true' -> ",
             "call 'beamtalk_class_shadow_flags':'static_call_target'(",
-            key_doc,
+            key_doc.clone(),
             ", ",
             leaf::atom(class_name.to_string()),
             ", ",
@@ -3839,13 +3889,42 @@ impl CoreErlangGenerator {
             "> when 'true' -> ",
             leaf::var(static_ref_var),
             " end in case ",
-            leaf::var(class_self_var),
+            leaf::var(class_self_var.to_string()),
             " of <'false'> when 'true' -> ",
             fallback,
             " <_> when 'true' -> ",
-            direct_call,
+            hit_doc,
             " end"
         ]
+    }
+
+    /// BT-4270: the defining module and primitive of the class-side method a
+    /// class-literal send of `raw_selector` to `class_name` resolves to, when
+    /// that method (own or inherited) is one of `Exception`'s caller-safe
+    /// signal primitives ([`super::primitives::is_caller_safe_class_primitive`],
+    /// read from its source, `MethodInfo::primitive`) and its defining class
+    /// may run it in the caller ([`Self::direct_call_eligible_module`]). The
+    /// send then compiles to [`Self::guarded_caller_safe_raise_doc`]: this is
+    /// only the compile-time candidate; the runtime key decides each send.
+    fn caller_safe_signal_target(
+        &self,
+        class_name: &str,
+        raw_selector: &str,
+    ) -> Option<(String, String)> {
+        if self.is_shadowed_class(class_name) {
+            return None;
+        }
+        let method = self
+            .class_hierarchy
+            .as_ref()?
+            .find_class_method(class_name, raw_selector)?;
+        let primitive = method
+            .primitive
+            .as_deref()
+            .filter(|p| super::primitives::is_caller_safe_class_primitive(p))?
+            .to_string();
+        let module = self.direct_call_eligible_module(method.defined_in.as_str(), raw_selector)?;
+        Some((module, primitive))
     }
 
     /// Generates the `gen_server` `class_send` fallback for binding-aware dispatch.
