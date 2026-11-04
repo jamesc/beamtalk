@@ -46,6 +46,19 @@ enum SegmentValue<'a> {
     Var(String),
 }
 
+/// Whether a segment value is a raw BEAM bitstring by its syntax alone, so a
+/// `binary`/`bits` segment needs no `String` unwrap (ADR 0143 § String
+/// values): a nested construction (`<<(<<a:8>>)/binary>>`), through any
+/// parentheses, always answers a raw bitstring.
+///
+/// Deliberately syntactic rather than the type checker's `TypeMap`:
+/// `String` is a subclass of `Binary`, so a value typed `Binary` may hold a
+/// `{beamtalk_string, B}` at run time, and a declared annotation is not
+/// checked at run time either.
+fn is_raw_bitstring_by_construction(value: &Expression) -> bool {
+    matches!(value.unwrap_parens(), Expression::BinaryConstruction { .. })
+}
+
 impl CoreErlangGenerator {
     /// Lowers a binary construction (ADR 0143) to `#{...}#`. See the module
     /// documentation for the segment shapes.
@@ -89,11 +102,13 @@ impl CoreErlangGenerator {
                 let var = self.bind_construction_operand(next_operand()?, &mut bindings);
                 // ADR 0143 § String values: a `String` builds its UTF-8
                 // bytes in a `binary`/`bits` segment, through the same
-                // unwrap as a binary pattern's subject.
+                // unwrap as a binary pattern's subject — unless the value
+                // is a raw bitstring by construction.
                 if matches!(
                     seg.effective_type(),
                     BinarySegmentType::Binary | BinarySegmentType::Bitstring
-                ) {
+                ) && !is_raw_bitstring_by_construction(&seg.value)
+                {
                     let (prefix, bytes) = self.binary_match_scrutinee(&var);
                     bindings.push(prefix);
                     SegmentValue::Var(bytes)

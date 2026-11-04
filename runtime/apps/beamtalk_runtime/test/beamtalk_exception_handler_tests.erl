@@ -1471,3 +1471,144 @@ calling_self_exit_reason() ->
     catch
         exit:Reason -> Reason
     end.
+
+%%% ===================================================================
+%%% Failed binary construction names its segment (ADR 0143, BT-4406)
+%%% ===================================================================
+
+%% Constructions the tests make fail at run time. Erlang source carries the
+%% compiler's segment annotation, so the BEAM reports the source position.
+bs_integer_then_binary(V, P) -> <<V:8, P/binary>>.
+bs_sized(V, N) -> <<V:N>>.
+
+%% Run `Fun`, answering the caught `{Class, Reason, Stacktrace}`.
+caught(Fun) ->
+    try Fun() of
+        Value -> error({expected_failure, Value})
+    catch
+        Class:Reason:Stacktrace -> {Class, Reason, Stacktrace}
+    end.
+
+%% Wrap what `Fun` raised the way an `on:do:` catch does (ensure_wrapped/3).
+wrapped_failure(Fun) ->
+    {Class, Reason, Stacktrace} = caught(Fun),
+    #{error := Inner} = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
+    Inner.
+
+message_of(#beamtalk_error{message = {beamtalk_string, Message}}) -> Message.
+
+bs_fail_non_binary_in_binary_segment_test() ->
+    Inner = wrapped_failure(fun() -> bs_integer_then_binary(1, 7) end),
+    ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+    ?assertEqual(
+        <<"binary construction: segment 2 of type 'binary': expected a binary but got: 7">>,
+        message_of(Inner)
+    ),
+    ?assertMatch(
+        #{reason := badarg, segment := 2, segment_type := binary, value := 7},
+        Inner#beamtalk_error.details
+    ).
+
+bs_fail_non_integer_value_renders_as_print_string_test() ->
+    %% Values render as Beamtalk printStrings: a String is quoted, a Symbol
+    %% has its `#`.
+    String = wrapped_failure(fun() ->
+        bs_integer_then_binary({beamtalk_string, <<"hi">>}, <<>>)
+    end),
+    ?assertEqual(
+        <<"binary construction: segment 1 of type 'integer': expected an integer but got: \"hi\"">>,
+        message_of(String)
+    ),
+    Symbol = wrapped_failure(fun() -> bs_integer_then_binary(foo, <<>>) end),
+    ?assertEqual(
+        <<"binary construction: segment 1 of type 'integer': expected an integer but got: #foo">>,
+        message_of(Symbol)
+    ).
+
+bs_fail_negative_size_test() ->
+    Inner = wrapped_failure(fun() -> bs_sized(5, -1) end),
+    ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+    ?assertEqual(
+        <<
+            "binary construction: segment 1 of type 'integer': "
+            "expected a non-negative integer as size but got: -1"
+        >>,
+        message_of(Inner)
+    ).
+
+%% A large value is cut short rather than flooding the message.
+bs_fail_large_value_is_truncated_test() ->
+    Inner = wrapped_failure(fun() -> bs_sized(lists:seq(1, 200), 8) end),
+    Message = message_of(Inner),
+    ?assert(byte_size(Message) < 200),
+    ?assertEqual(<<"...">>, binary:part(Message, byte_size(Message), -3)).
+
+%% A future nested in a container is never awaited by the formatter: the
+%% container is rendered with the bounded Erlang term format, so the error
+%% path cannot block (EUnit's 5 s default timeout would fail this test).
+bs_fail_nested_future_does_not_block_test() ->
+    Silent = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        Inner = wrapped_failure(fun() ->
+            bs_sized([{beamtalk_future, Silent}], 8)
+        end),
+        ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+        ?assertNotEqual(nomatch, binary:match(message_of(Inner), <<"beamtalk_future">>))
+    after
+        Silent ! stop
+    end.
+
+%% A segment the compiler did not annotate reports index 0: the message names
+%% its type and value but no position.
+bs_fail_unannotated_segment_omits_position_test() ->
+    Stacktrace = [
+        {m, f, 1, [
+            {error_info, #{
+                module => erl_erts_errors,
+                function => format_bs_fail,
+                cause => {0, binary, type, 1}
+            }}
+        ]}
+    ],
+    Inner = classify(badarg, #{stacktrace => Stacktrace}),
+    ?assertEqual(
+        <<"binary construction: 'binary' segment: expected a binary but got: 1">>,
+        message_of(Inner)
+    ),
+    ?assertNot(is_map_key(segment, Inner#beamtalk_error.details)).
+
+%% Every stacktrace-carrying entry point reads the cause, and a dispatch
+%% breadcrumb still locates the message.
+bs_fail_through_ensure_wrapped_2_and_4_test() ->
+    {error, badarg, Stacktrace} = caught(fun() -> bs_integer_then_binary(1, 7) end),
+    #{error := Inner2} = beamtalk_exception_handler:ensure_wrapped(badarg, Stacktrace),
+    ?assertEqual(
+        <<"binary construction: segment 2 of type 'binary': expected a binary but got: 7">>,
+        message_of(Inner2)
+    ),
+    #{error := Inner4} = beamtalk_exception_handler:ensure_wrapped(
+        error, badarg, Stacktrace, #{selector => frame, class => 'Codec'}
+    ),
+    ?assertEqual(
+        <<"Codec>>frame: binary construction: segment 2 of type 'binary': ",
+            "expected a binary but got: 7">>,
+        message_of(Inner4)
+    ).
+
+%% A badarg from anything but a binary construction is unchanged, including
+%% one whose error_info comes from another OTP formatter.
+bs_fail_other_badarg_is_unchanged_test() ->
+    Inner = wrapped_failure(fun() -> binary_to_atom(id(1)) end),
+    ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+    ?assertEqual(<<"invalid argument">>, message_of(Inner)),
+    ?assertEqual(#{reason => badarg}, Inner#beamtalk_error.details),
+    Bare = beamtalk_exception_handler:ensure_wrapped(error, badarg, [{m, f, 0, []}]),
+    #{error := BareInner} = Bare,
+    ?assertEqual(<<"invalid argument">>, message_of(BareInner)).
+
+%% Hide a literal from the compiler's constant checks.
+id(X) -> X.

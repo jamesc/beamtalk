@@ -851,6 +851,11 @@ fn byte_aligned_binary_construction_is_a_binary() {
         "<<v>>",
         "<<1.5/float>>",
         "<<1.5:32/float>>",
+        // BT-4407: a float segment is 16/32/64 bits whatever its size
+        // expression, or the construction fails.
+        "<<v:n/float>>",
+        "<<v:n/float-unit:2>>",
+        "<<1:4, v:n/float, 1:4>>",
         "<<$A>>",
         "<<\"hi\">>",
         "<<c/utf8, c/utf16>>",

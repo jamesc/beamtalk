@@ -369,6 +369,13 @@ Every clause records the original raw term under `details.reason`, which
 `badarg` and lets bucket-A errors render located messages
 (e.g. `Tuple>>sum: …`). It is consulted only on this (error) path, so it adds
 nothing to successful dispatch.
+
+`Context` may also carry the caught `stacktrace` (`ensure_wrapped/2,3,4` add
+it). It refines a `badarg` raised by a failed binary construction: the
+message then names the failing segment and value from the `format_bs_fail`
+`error_info` the BEAM attached (ADR 0143 § Runtime failures, BT-4406), e.g.
+`binary construction: segment 2 of type 'binary': expected a binary but got: 1`.
+Any other `badarg` keeps its generic message.
 """.
 -spec wrap_raw(term(), map()) -> map().
 wrap_raw({badarity, {Fun, Args}}, _Context) when is_function(Fun), is_list(Args) ->
@@ -408,14 +415,23 @@ wrap_raw({badmap, Value}, Context) ->
         value => Value, reason => {badmap, Value}
     });
 wrap_raw(badarg, Context) ->
-    %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
-    %% error can't tell which. With a dispatch breadcrumb we can locate it as a
-    %% user argument error; without one we still give it its own kind rather
-    %% than the generic runtime_error catch-all.
-    {Sel, Cls} = breadcrumb(Context),
-    Message = located(Sel, Cls, <<"invalid argument">>),
-    Hint = <<"Check the argument types and values for this message.">>,
-    wrap_classified(classify_kind(badarg), Cls, Sel, Message, Hint, #{reason => badarg});
+    case binary_construction_failure(Context) of
+        {ok, Core, Details} ->
+            %% ADR 0143 § Runtime failures (BT-4406): a failed binary
+            %% construction names its segment and value.
+            {Sel, Cls} = breadcrumb(Context),
+            Hint = <<
+                "Check each segment's value against its type (integer, float, binary, "
+                "utf8, ...) and that every size is a non-negative integer."
+            >>,
+            wrap_classified(
+                classify_kind(badarg), Cls, Sel, located(Sel, Cls, Core), Hint, Details#{
+                    reason => badarg
+                }
+            );
+        none ->
+            wrap_plain_badarg(Context)
+    end;
 %%% --- Bucket B: internal bugs --------------------------------------------
 wrap_raw(Reason, Context) when
     Reason =:= function_clause orelse
@@ -520,6 +536,127 @@ located(Selector, Class, Core) ->
 internal_reason_tag(Reason) when is_atom(Reason) -> Reason;
 internal_reason_tag(Reason) when is_tuple(Reason) -> element(1, Reason).
 
+%% The generic `badarg`: overloaded (user mistake vs internal misuse) and the
+%% bare error can't tell which. With a dispatch breadcrumb we can locate it as
+%% a user argument error; without one we still give it its own kind rather
+%% than the generic runtime_error catch-all.
+-spec wrap_plain_badarg(map()) -> map().
+wrap_plain_badarg(Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"invalid argument">>),
+    Hint = <<"Check the argument types and values for this message.">>,
+    wrap_classified(classify_kind(badarg), Cls, Sel, Message, Hint, #{reason => badarg}).
+
+-doc """
+Recognise a failed binary construction (ADR 0143 § Runtime failures, BT-4406).
+
+A construction that fails raises a bare `badarg`; the BEAM attaches an
+`error_info` naming OTP's `erl_erts_errors:format_bs_fail/2` and a
+`{SegmentIndex, Type, Error, Value}` cause to the top stack frame. When the
+`Context` carries that stacktrace (`ensure_wrapped/2,3,4` add it), answer the
+message core and the `details` to record; otherwise `none`, and the `badarg`
+keeps its generic "invalid argument" message.
+
+The text is OTP's own (`format_bs_fail/2`), with values rendered as Beamtalk
+`printString`s. The segment index is the one the compiler annotated; an
+unannotated segment reports index 0, which is left out of the message rather
+than shown as a position.
+""".
+-spec binary_construction_failure(map()) -> {ok, binary(), map()} | none.
+binary_construction_failure(#{stacktrace := [{_M, _F, _A, Location} = Frame | Rest]}) when
+    is_list(Location)
+->
+    case proplists:get_value(error_info, Location) of
+        #{
+            module := erl_erts_errors,
+            function := format_bs_fail,
+            cause := {Index, Type, _Error, Value}
+        } = ErrorInfo when is_integer(Index), is_atom(Type) ->
+            Printer = ErrorInfo#{pretty_printer => fun bs_fail_value/1},
+            Frame1 = setelement(4, Frame, [
+                {error_info, Printer} | proplists:delete(error_info, Location)
+            ]),
+            %% An error formatter must never itself crash: an error_info
+            %% shape this OTP cannot format keeps the generic message.
+            Formatted =
+                try
+                    erl_erts_errors:format_bs_fail(badarg, [Frame1 | Rest])
+                catch
+                    _:_ -> #{}
+                end,
+            case Formatted of
+                #{general := General} ->
+                    Details0 = #{segment_type => Type, value => Value},
+                    {Text, Details} =
+                        case Index of
+                            0 -> {strip_unknown_segment(General, Type), Details0};
+                            _ -> {General, Details0#{segment => Index}}
+                        end,
+                    {ok, iolist_to_binary([<<"binary construction: ">>, Text]), Details};
+                _ ->
+                    none
+            end;
+        _ ->
+            none
+    end;
+binary_construction_failure(_Context) ->
+    none.
+
+%% OTP prefixes the text with `segment ~p of type '~ts': `; for an
+%% unannotated segment (index 0) drop the meaningless position.
+-spec strip_unknown_segment(unicode:chardata(), atom()) -> unicode:chardata().
+strip_unknown_segment(General, Type) ->
+    Prefix = io_lib:format("segment 0 of type '~ts': ", [Type]),
+    case string:prefix(General, Prefix) of
+        nomatch -> General;
+        Rest -> [io_lib:format("'~ts' segment: ", [Type]), Rest]
+    end.
+
+%% Render a failing segment's value as its Beamtalk `printString`, bounded so
+%% a large binary or collection cannot flood the message. Never crashes and
+%% never blocks: an error formatter must not itself fail or wait. A value
+%% holding a future at any depth is rendered with the bounded Erlang term
+%% format, because `printString` would await the future.
+-define(BS_FAIL_VALUE_BYTES, 32).
+-define(BS_FAIL_VALUE_CHARS, 80).
+-spec bs_fail_value(term()) -> unicode:chardata().
+bs_fail_value(Value) when is_bitstring(Value), byte_size(Value) > ?BS_FAIL_VALUE_BYTES ->
+    <<Prefix:?BS_FAIL_VALUE_BYTES/binary, _/bitstring>> = Value,
+    [bs_fail_value(Prefix), <<"...">>];
+bs_fail_value(Value) ->
+    Printed =
+        case holds_future(Value) of
+            true ->
+                iolist_to_binary(io_lib:format("~0tP", [Value, 20]));
+            false ->
+                try
+                    beamtalk_primitive:print_string(Value)
+                catch
+                    _:_ -> iolist_to_binary(io_lib:format("~0tP", [Value, 20]))
+                end
+        end,
+    bs_fail_truncate(Printed).
+
+%% True if `Term` contains a future at any depth (lists, including improper
+%% ones, tuples and maps).
+-spec holds_future(term()) -> boolean().
+holds_future({beamtalk_future, _}) ->
+    true;
+holds_future([H | T]) ->
+    holds_future(H) orelse holds_future(T);
+holds_future(T) when is_tuple(T) -> lists:any(fun holds_future/1, tuple_to_list(T));
+holds_future(M) when is_map(M) ->
+    lists:any(fun({K, V}) -> holds_future(K) orelse holds_future(V) end, maps:to_list(M));
+holds_future(_) ->
+    false.
+
+-spec bs_fail_truncate(unicode:chardata()) -> unicode:chardata().
+bs_fail_truncate(Printed) ->
+    case string:length(Printed) > ?BS_FAIL_VALUE_CHARS of
+        true -> [string:slice(Printed, 0, ?BS_FAIL_VALUE_CHARS), <<"...">>];
+        false -> Printed
+    end.
+
 -doc """
 Idempotent exception wrapper (ADR 0015).
 
@@ -578,7 +715,7 @@ ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
     %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
     maps:remove(stacktrace, Already#{raw_stacktrace => capture_stacktrace(Stacktrace)});
 ensure_wrapped(Other, Stacktrace) ->
-    Wrapped = wrap(Other),
+    Wrapped = wrap_with_stacktrace(Other, Stacktrace),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
 
 -doc """
@@ -676,8 +813,19 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
     end,
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => CaughtType};
 ensure_wrapped(_Type, Other, Stacktrace) ->
-    Wrapped = wrap(Other),
+    Wrapped = wrap_with_stacktrace(Other, Stacktrace),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error}.
+
+%% `wrap/1`, but a raw reason is classified with the caught stacktrace in its
+%% context, so `wrap_raw/2` can read the `error_info` the BEAM attached (a
+%% failed binary construction names its segment, BT-4406).
+-spec wrap_with_stacktrace(term(), term()) -> map().
+wrap_with_stacktrace(#beamtalk_error{} = Error, _Stacktrace) ->
+    wrap(Error);
+wrap_with_stacktrace(Reason, Stacktrace) when is_list(Stacktrace) ->
+    wrap_raw(Reason, #{stacktrace => Stacktrace});
+wrap_with_stacktrace(Reason, _Stacktrace) ->
+    wrap_raw(Reason).
 
 -doc """
 Idempotent exception wrapper with a dispatch breadcrumb.
@@ -705,7 +853,7 @@ ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already0, Stacktrace, _Context
 ensure_wrapped(error, Reason, Stacktrace, Context) when
     map_size(Context) > 0, Reason =/= undef, not is_record(Reason, beamtalk_error)
 ->
-    Wrapped = wrap_raw(Reason, Context),
+    Wrapped = wrap_raw(Reason, Context#{stacktrace => Stacktrace}),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(Type, Reason, Stacktrace, _Context) ->
     ensure_wrapped(Type, Reason, Stacktrace).
