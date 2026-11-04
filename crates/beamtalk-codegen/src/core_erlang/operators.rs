@@ -197,14 +197,29 @@ impl CoreErlangGenerator {
         let left_code = docs.pop().expect("left operand");
 
         let call_doc = if let Some(guard) = guard {
-            self.guarded_op_doc(
+            let parts = self.guarded_op_doc(
                 guard,
                 op,
                 erlang_op,
                 left_code,
                 right_code,
                 right_is_statically_numeric,
-            )
+            );
+            // BT-4279: when the guard's true arm is the bare BIF (it runs no
+            // user code) and the operands needed no prelude, the bracket
+            // around this send skips its store and reload on that arm.
+            if let Some((test, fast)) = parts.fast_path.clone()
+                && preamble.is_empty()
+            {
+                self.offer_fast_path(
+                    left,
+                    parts.bindings.clone(),
+                    test,
+                    fast,
+                    parts.case_doc.clone(),
+                );
+            }
+            docvec![parts.bindings, parts.case_doc]
         } else if is_arithmetic && !right_is_statically_numeric {
             // ADR 0116: left is statically numeric but the right
             // operand's type is genuinely unknown — wrap the bare BIF in the
@@ -433,7 +448,7 @@ impl CoreErlangGenerator {
         left_code: Document<'static>,
         right_code: Document<'static>,
         right_is_statically_numeric: bool,
-    ) -> Document<'static> {
+    ) -> GuardedOpParts {
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
 
@@ -451,17 +466,17 @@ impl CoreErlangGenerator {
         // right operand's type is genuinely unknown; every other case (the
         // comparison guard, or a statically-numeric right operand) keeps the
         // bare BIF unchanged.
-        let bif_branch =
-            if matches!(guard, OperatorGuard::Arithmetic) && !right_is_statically_numeric {
-                self.number_coercion_try_catch(
-                    op,
-                    erlang_op,
-                    var(left_var.clone()),
-                    var(right_var.clone()),
-                )
-            } else {
-                bare_bif
-            };
+        let coerces = matches!(guard, OperatorGuard::Arithmetic) && !right_is_statically_numeric;
+        let bif_branch = if coerces {
+            self.number_coercion_try_catch(
+                op,
+                erlang_op,
+                var(left_var.clone()),
+                var(right_var.clone()),
+            )
+        } else {
+            bare_bif.clone()
+        };
         // BT-4366: nested in the guard `case`, so the node carries the line.
         let send_branch = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
@@ -478,26 +493,69 @@ impl CoreErlangGenerator {
         // `case_clause_fallback`'s doc comment.
         let no_match_fallback = self.case_clause_fallback("BinOpNoMatch");
 
-        docvec![
-            "let ",
-            var(left_var),
-            " = ",
-            left_code,
-            " in let ",
-            var(right_var.clone()),
-            " = ",
-            right_code,
-            " in case ",
-            predicate,
-            " of <'true'> when 'true' -> ",
-            bif_branch,
-            " <'false'> when 'true' -> ",
-            send_branch,
-            no_match_fallback,
-            " end",
-        ]
+        // BT-4279: the fast path, a test under which the send runs no user
+        // code and the value then. The bare BIF under the guard's own test;
+        // under the coercion `try`/`catch` (whose `catch` dispatches a
+        // reflected selector) only integer `+ - *`, which never raise.
+        let fast_path = if !coerces {
+            Some((predicate.clone(), bare_bif))
+        } else if matches!(op, "+" | "-" | "*") {
+            let is_integer =
+                |v: &str| docvec!["call 'erlang':'is_integer'(", var(v.to_string()), ")"];
+            Some((
+                docvec![
+                    "call 'erlang':'and'(",
+                    is_integer(&left_var),
+                    ", ",
+                    is_integer(&right_var),
+                    ")",
+                ],
+                bare_bif,
+            ))
+        } else {
+            None
+        };
+        GuardedOpParts {
+            bindings: docvec![
+                "let ",
+                var(left_var),
+                " = ",
+                left_code,
+                " in let ",
+                var(right_var),
+                " = ",
+                right_code,
+                " in ",
+            ],
+            case_doc: docvec![
+                "case ",
+                predicate.clone(),
+                " of <'true'> when 'true' -> ",
+                bif_branch,
+                " <'false'> when 'true' -> ",
+                send_branch,
+                no_match_fallback,
+                " end",
+            ],
+            fast_path,
+        }
     }
+}
 
+/// The pieces of a guarded operator ([`CoreErlangGenerator::guarded_op_doc`]):
+/// `bindings` then `case_doc` is the whole send.
+struct GuardedOpParts {
+    /// `let BinLeft = .. in let BinRight = .. in`.
+    bindings: Document<'static>,
+    /// The guard `case`: the `true` arm, the dispatching arm, the fallback.
+    case_doc: Document<'static>,
+    /// BT-4279: `(test, value)` when some test proves the send runs no user
+    /// code: the bare BIF under the guard's test, or under an integer test
+    /// for a coercing `+ - *`. `None` for a coercing `/`.
+    fast_path: Option<(Document<'static>, Document<'static>)>,
+}
+
+impl CoreErlangGenerator {
     /// ADR 0116: maps an arithmetic operator to its number-on-the-left
     /// reflected-method selector (`n <op>FromNumber: self`, called on the
     /// *right* operand with the *left* operand as the argument — see the

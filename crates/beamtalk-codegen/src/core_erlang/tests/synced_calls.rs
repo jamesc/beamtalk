@@ -14,7 +14,8 @@ fn compile(src: &str) -> String {
 
 /// How many bracketed calls `out` holds (each stores through `store/1`).
 fn brackets(out: &str) -> usize {
-    count(out, "let _Synced")
+    // A BT-4279 fast-path bracket binds its value as `let <_Synced@N, ...>`.
+    count(out, "let _Synced@") + count(out, "let <_Synced@")
 }
 
 /// The panic message of compiling `src` with the flag on (a verifier finding
@@ -293,4 +294,98 @@ fn meta_flags_threads_actor_state_only_for_actor_subclasses() {
     assert!(!value.contains(flag), "{value}");
     let object = compile("Object subclass: Thing\n  run => 1\n");
     assert!(!object.contains(flag), "{object}");
+}
+
+/// The `let <R, State> = case <test> of <'true'> ... -> <Fast, State> ...`
+/// head a BT-4279 fast-path bracket renders, or `None`.
+fn fast_path_head(out: &str) -> Option<&str> {
+    let start = out.find("let <_Synced")?;
+    Some(&out[start..out[start..].find("<_> when 'true' -> let _ = ")? + start])
+}
+
+/// BT-4279: a guarded operator on a number hands the stored `State` through
+/// on its fast arm (no store, no reload); only the dispatching arm brackets.
+#[test]
+fn a_guarded_operator_brackets_only_its_dispatching_arm() {
+    let out = compile("Actor subclass: Probe\n  state: n = 0\n\n  bump: v => self.n := v + 1\n");
+    let head = fast_path_head(&out).expect("a fast-path bracket");
+    assert!(head.contains("call 'erlang':'is_number'("), "{head}");
+    assert!(head.contains("<call 'erlang':'+'("), "{head}");
+    assert!(
+        !head.contains("'store'") && !head.contains("'take'"),
+        "{head}"
+    );
+    assert!(out.contains("let _SyncedSlowState"), "{out}");
+    super::assert_compiles_through_erlc("test", &out);
+}
+
+/// BT-4279: an arithmetic operator whose right operand is not statically
+/// numeric reaches the number-on-the-left coercion `try`/`catch` on its true
+/// arm, which can dispatch a reflected selector. Integer `+ - *` never raise,
+/// so they take a fast path under an integer test; `/` (zero divisor) keeps
+/// the whole bracket.
+#[test]
+fn a_coercing_operator_has_a_fast_path_only_for_integer_add_sub_mul() {
+    let add =
+        compile("Actor subclass: Probe\n  state: n = 0\n\n  add: a to: b => self.n := a + b\n");
+    let head = fast_path_head(&add).expect("a fast-path bracket");
+    assert!(
+        head.contains("call 'erlang':'and'(call 'erlang':'is_integer'("),
+        "{head}"
+    );
+    assert!(!head.contains("try"), "{head}");
+    super::assert_compiles_through_erlc("test", &add);
+    let div =
+        compile("Actor subclass: Probe\n  state: n = 0\n\n  div: a by: b => self.n := a / b\n");
+    assert!(fast_path_head(&div).is_none(), "{div}");
+}
+
+/// BT-4279: a unary send of a field name to a typed tagged Value reads the
+/// slot with no bracket when the loaded module's `__is_slot/1` says it is
+/// still the auto getter; otherwise the guarded send is bracketed.
+#[test]
+fn a_typed_slot_read_brackets_only_its_slow_arm() {
+    let out = compile(concat!(
+        "Actor subclass: Probe\n  state: n = 0\n\n  read: p :: Pt => self.n := p x\n\n",
+        "sealed Value subclass: Pt\n  field: x :: Integer = 0\n",
+    ));
+    let head = fast_path_head(&out).expect("a fast-path bracket");
+    assert!(head.contains(":'__is_slot'('x')"), "{head}");
+    assert!(head.contains("<call 'maps':'get'('x', "), "{head}");
+    assert!(
+        !head.contains("'store'") && !head.contains("'take'"),
+        "{head}"
+    );
+    super::assert_compiles_through_erlc("test", &out);
+}
+
+/// BT-4279: a unary send that names no field of the Value class (a
+/// user-written method) keeps the whole bracket.
+#[test]
+fn a_typed_method_send_keeps_the_whole_bracket() {
+    let out = compile(concat!(
+        "Actor subclass: Probe\n  state: n = 0\n\n  read: p :: Pt => self.n := p twice\n\n",
+        "sealed Value subclass: Pt\n  field: x :: Integer = 0\n\n  twice -> Integer => self.x\n",
+    ));
+    assert!(fast_path_head(&out).is_none(), "{out}");
+}
+
+/// BT-4279: `__is_slot/1` answers `true` for exactly the auto getters: a
+/// field whose getter the class overrides with a method is not a slot read.
+#[test]
+fn is_slot_lists_exactly_the_auto_getters() {
+    let out = compile(concat!(
+        "Value subclass: Pt\n  field: x :: Integer = 0\n  field: y :: Integer = 0\n\n",
+        "  y -> Integer => self.x + 1\n",
+    ));
+    let is_slot = out
+        .split("'__is_slot'/1 = fun")
+        .nth(1)
+        .expect("__is_slot/1")
+        .split("\n\n")
+        .next()
+        .expect("its body");
+    assert!(is_slot.contains("<'x'> when 'true' -> 'true'"), "{is_slot}");
+    assert!(!is_slot.contains("'y'"), "{is_slot}");
+    assert!(out.contains("'__is_slot'/1,"), "exported: {out}");
 }

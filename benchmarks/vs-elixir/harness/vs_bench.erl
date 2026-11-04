@@ -68,6 +68,9 @@ rows() ->
         ]},
         {"2b", alloc, "construct: VbPoint x: a y: 4 / %Point{x: a, y: 4}", 50000, 'construct:a:',
             int, [{construct, int}]},
+        {"2c", alloc,
+            "construct via new: VbPoint new: #{#x => a, #y => 4} / struct!(Point, %{x: a, y: 4})",
+            50000, 'constructMap:a:', int, [{construct_map, int}, {construct, int}]},
         {"3a", dispatch, "`class sealed` method, sealed class / Mod.fun(arg)", 200000,
             'classSealedMethod:', none, [{remote_call, none}]},
         {"3b", dispatch, "class method, sealed class / Mod.fun(arg)", 50000, 'sealedClassMethod:',
@@ -123,6 +126,8 @@ rows() ->
             20000, 'actorViaSelfSub:c:', sub_counter, [{gen_via_self, sub_counter}]},
         {"7f", machinery, "actor method doing self increment / GenServer.call", 20000,
             'actorViaSelf:c:', counter, [{gen_via_self, counter}]},
+        {"7g", machinery, "actor method reading two getters of a typed sealed Value / GenServer.call",
+            20000, 'actorSumOf:c:', bt_counter, [{gen_sum_of, ex_counter}]},
         {"8a", machinery, "on: Error do: without a raise / try-rescue", 100000, 'onDoNoRaise:',
             none, [{try_no_raise, none}]},
         {"8b", machinery, "on: Error do: with a raise / raise-rescue", 10000, 'onDoRaise:', none, [
@@ -490,6 +495,8 @@ compiles_to("1b") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS +
 compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
+compiles_to("2c") ->
+    "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
 compiles_to("3a") ->
     "guarded direct call: erlang:whereis(registered name) + direct_call_ok/2, Mod:'class_double:'(ClassRef, 21) (BT-4301)";
 compiles_to("3b") ->
@@ -515,9 +522,10 @@ compiles_to("6e") -> "is_list guard, lists:foldl(fun); + with coercion try";
 compiles_to("7a") -> "send(C, count, []) -> beamtalk_actor:sync_send, gen_server:call + telemetry/trace/ctx hooks both sides";
 compiles_to("7b") -> "as 7a";
 compiles_to("7c") -> "beamtalk_message_dispatch:cast -> gen_server:cast + the same hooks";
+compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and walks the runtime method resolver";
 compiles_to("7e") -> "as 7a; the subclass's dispatch/4 default arm takes the memoised inherited_target/2 verdict to the owner (BT-4280)";
 compiles_to("7f") -> "as 7a; the self-send is a static call inside the class module";
-compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and walks the runtime method resolver";
+compiles_to("7g") -> "as 7a; each `p x` is a tag + __is_slot/1-guarded maps:get with no cell bracket, the `+` a guarded BIF with none either (BT-4279)";
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
 compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller (class_signal_message/2, BT-4115), wrapped and class-matched; frames built only on read";
 compiles_to("9a") -> "class_send(Result, 'ok:') gen_server:call; `value` as a block-or-send case";
@@ -533,7 +541,7 @@ compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
-compiles_to("12c") -> "as 12b, but the send walks String/Binary/Collection/Value/Object dispatch (an extensions lookup per level) to Object>>isKindOf:";
+compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and the send walks String/Binary/Collection/Value/Object dispatch (an extensions lookup per level) to Object>>isKindOf:";
 compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode precomputed (BT-4153), integer fast path";
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";

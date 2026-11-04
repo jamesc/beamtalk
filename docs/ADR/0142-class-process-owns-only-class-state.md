@@ -11,7 +11,8 @@ Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 > - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 is the follow-up to bring it back.
 > - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
 > - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
-> - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307); and an explicit own-class send `Base foo` inside an inherited class method runs with the subclass as `self` (BT-4317).
+> - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307).
+> - **Explicit own-class sends (BT-4317, amended 2026-11-04)**: see the amendment at the end of §2.
 
 ## Context
 
@@ -217,6 +218,27 @@ end
   `beamtalk_class_metadata:put_class_variables/2`.
 - This guard **replaces** the unguarded ADR 0129 static calls, which closes
   BT-4126, BT-4133 and BT-4134 for class methods.
+
+**Amended (BT-4317, 2026-11-04): a class literal always denotes that
+class.** Inside a class method of `Base`, an explicit own-class send `Base
+foo` binds `self` to `Base`, as the same send does anywhere else and as
+Smalltalk does; only `self foo` late-binds to the receiver. It used to run
+with the receiver as `self` when the method was inherited by a subclass `C`
+(`self name` answered `#C`, class variables were `C`'s and `Base new` built a
+`C`), a leftover of the own-class deadlock workaround. The send now cases on
+the running receiver's tag: when it is `Base`, the own-class direct path
+above runs it in the current process (for a stateful chain that is `Base`'s
+own class process, which a `class_send` would deadlock on); otherwise it is
+the ordinary literal class send to `Base` (the guarded static call or
+`class_send`), which runs in the caller for a stateless chain and in `Base`'s
+class process for a stateful one, never in the process already running.
+Rejected: keeping "receiver as `self`" (it contradicts what a class literal
+evaluates to), and passing `Base`'s reference to a direct call in the
+current process (for a stateful chain `Base`'s class variables live in
+`Base`'s process, not `C`'s). Consequence: if a `Base` class method running
+in `Base`'s process sends to `C`, and `C`'s inherited method then sends
+`Base bar`, that is a cross-process cycle between two stateful classes, like
+any other.
 
 ### 3. What moves into the caller
 
@@ -476,7 +498,7 @@ open-class class method.
 - Phase 2b: BT-4302, the `class-method-process-resource` lint.
 - Phase 3: BT-4303, REPL-protocol e2e test, docs, ADR amendments, CLAUDE.md and CHANGELOG.
 
-**Status:** Done (2026-10-30). Follow-ups: BT-4316 (row 3a), BT-4317, BT-4307.
+**Status:** Done (2026-10-30). Follow-ups: BT-4316 (row 3a), BT-4317 (done, amendment in §2), BT-4307.
 
 ## Migration Path
 

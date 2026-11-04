@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a class with class variables whose class methods name their own
+// class explicitly. Run for a subclass (in the subclass's class process),
+// `Bt4317OwnLiteralStateful label` goes to this class's process and reads
+// this class's variable.
+
+Value subclass: Bt4317OwnLiteralStateful
+  classState: label :: Symbol = #base
+
+  class label -> Symbol => self.label
+
+  class readLabel -> Symbol => Bt4317OwnLiteralStateful label
+
+  class readLabelViaSelf -> Symbol => self label
+
+  class tag -> Symbol => self name
+
+  class who -> Symbol => Bt4317OwnLiteralStateful tag
+
+  class make => Bt4317OwnLiteralStateful new

@@ -192,7 +192,7 @@ impl CoreErlangGenerator {
                 return Ok(self.render_intrinsic_body(body, name, &class_name, span));
             }
 
-            // Logger intrinsics — generate inline logger:log/3 calls.
+            // Logger intrinsics — generate beamtalk_logging_config:log/3 calls.
             // These are the method bodies for logger.bt's @intrinsic declarations.
             // Direct `Logger warn:` calls are intercepted at the call site by
             // try_generate_logger_intrinsic (which injects the caller's class/selector
@@ -521,7 +521,8 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates inline `logger:log/3` code for Logger @intrinsic bodies.
+    /// Generates the Logger @intrinsic method bodies as
+    /// `beamtalk_logging_config:log/3` calls (see `logger_log_call_doc`).
     ///
     /// Maps intrinsic names to OTP logger levels:
     /// - `loggerDebug` / `loggerDebugMeta` → `debug`
@@ -552,62 +553,10 @@ impl CoreErlangGenerator {
             .cloned()
             .unwrap_or_else(|| "Message".to_string());
 
-        let ctx_class = self.class_name();
-        let ctx_selector = self
-            .current_method_selector
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let metadata_map_doc = docvec![
-            "~{",
-            "'domain' => ['beamtalk' | ['user']], ",
-            "'beamtalk_class' => ",
-            leaf::atom(ctx_class),
-            ", ",
-            "'beamtalk_selector' => ",
-            leaf::atom(ctx_selector),
-            "}~",
-        ];
-
-        let discard_var = self.fresh_temp_var("LogOk");
-
-        let log_call_doc = if has_metadata {
-            let meta_param = params.get(1).cloned().unwrap_or_else(|| "Meta".to_string());
-            let merge_var = self.fresh_temp_var("LogMeta");
-            docvec![
-                "let ",
-                leaf::var(merge_var.clone()),
-                " = call 'maps':'merge'(",
-                leaf::var(meta_param),
-                ", ",
-                metadata_map_doc,
-                ") in call 'logger':'log'(",
-                leaf::atom(level.to_string()),
-                ", ",
-                leaf::var(msg_param),
-                ", ",
-                leaf::var(merge_var),
-                ")"
-            ]
-        } else {
-            docvec![
-                "call 'logger':'log'(",
-                leaf::atom(level.to_string()),
-                ", ",
-                leaf::var(msg_param),
-                ", ",
-                metadata_map_doc,
-                ")"
-            ]
-        };
-
-        let doc = docvec![
-            "let ",
-            leaf::var(discard_var),
-            " = ",
-            log_call_doc,
-            " in 'nil'"
-        ];
+        let msg_doc = leaf::var(msg_param);
+        let user_meta_doc = has_metadata
+            .then(|| leaf::var(params.get(1).cloned().unwrap_or_else(|| "Meta".to_string())));
+        let doc = self.logger_log_call_doc(level, msg_doc, user_meta_doc);
 
         Some(doc)
     }

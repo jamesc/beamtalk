@@ -291,9 +291,11 @@ fn class_var_assignment_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
 
 /// Checks if an expression is a self-send to a class method,
 /// including an explicit same-class-name receiver (`ClassName
-/// foo` from inside `ClassName`'s own class method dispatches exactly
-/// like `self foo` — `try_handle_class_reference` routes both through
-/// [`CoreErlangGenerator::generate_class_method_self_send`] identically).
+/// foo` from inside `ClassName`'s own class method). The latter binds `self`
+/// to `ClassName` rather than late-binding (BT-4317,
+/// `generate_own_class_literal_send`), but its value is the same closed,
+/// pure class-side send with its arguments bound ahead, so it has the same
+/// prelude shape as `self foo`.
 ///
 /// ADR 0118 phase 5b: without the `ClassReference` shape here,
 /// `subexpr_needs_prelude` is blind to it — a locally-declared
@@ -318,12 +320,15 @@ fn class_method_self_send_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
 }
 
 /// Whether `expr` is an explicit, unqualified reference to the class whose
-/// class method is being compiled (`C` inside `C class run => …`). Such a
-/// receiver dispatches exactly like `self` there, for every selector shape
-/// (unary, binary, keyword): the send is already running inside the class's
-/// own `gen_server:call`, so it must become a direct class-side call
+/// class method is being compiled (`C` inside `C class run => …`). For every
+/// selector shape (unary, binary, keyword) such a send takes the class-side
+/// handlers, never the operator lowering or a plain `class_send`: when the
+/// running receiver is `C` the send may be running inside `C`'s own
+/// `gen_server:call`, so it must become a direct class-side call
 /// ([`CoreErlangGenerator::generate_class_method_self_send`]), never a
-/// `class_send` back into that same `gen_server`.
+/// `class_send` back into that same `gen_server`. When the receiver is a
+/// subclass running an inherited method, it is an ordinary literal send to
+/// `C` (BT-4317: a class literal always denotes that class).
 pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
     ctx.in_class_method
         && beamtalk_core::semantic_analysis::block_facts::is_own_class_reference(
@@ -447,9 +452,10 @@ pub(super) fn binary_self_send_dispatches(op: &str) -> bool {
 /// The receiver is the dispatching self when it is:
 /// - bare `self` in an actor instance method or any class method, or
 /// - an own-class reference ([`is_own_class_reference`]) in a class method,
-///   which dispatches exactly like `self` there for every selector shape —
-///   the unary/keyword shapes already reach `try_handle_class_reference`
-///   unconditionally, so this is the one place the binary shape is admitted.
+///   which takes the class-side handlers for every selector shape (it may be
+///   the running receiver) — the unary/keyword shapes already reach
+///   `try_handle_class_reference` unconditionally, so this is the one place
+///   the binary shape is admitted.
 ///
 /// And the selector must be one that dispatches at all
 /// ([`binary_self_send_dispatches`]): a structurally lowered operator stays
@@ -591,10 +597,14 @@ pub(super) fn is_error_message_send(expr: &Expression) -> bool {
     false
 }
 
-/// Checks if an expression is `self fieldAt: <name> put: <value>` in actor context.
-/// These need state threading via maps:put, similar to field assignments.
+/// Checks if an expression is `self fieldAt: <name> put: <value>` in actor
+/// instance context. These need state threading via maps:put, similar to
+/// field assignments. Not in a class method (`ctx.in_class_method`, where an
+/// actor class's `context` is `Actor` too): there it writes a class variable
+/// in place (`beamtalk_class_vars:field_at_put`, BT-4421), exactly as
+/// [`is_self_clear_field`] defers to `clear`.
 pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    if ctx.context != CodeGenContext::Actor || ctx.in_cell_closure {
+    if ctx.context != CodeGenContext::Actor || ctx.in_class_method || ctx.in_cell_closure {
         return false;
     }
     if let Expression::MessageSend {
@@ -652,7 +662,9 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
 
 /// A class-side expression with an in-place class-variable effect whose
 /// evaluation order against its siblings must be pinned (ADR 0130): a
-/// class-variable write or a same-class self-send, in a class method.
+/// class-variable write (`self.x := v`, or reflectively `self fieldAt: k put:
+/// v` / `self clearField: k`, BT-4421) or a same-class self-send, in a class
+/// method.
 ///
 /// Nothing is threaded (a write is a `put`, a send rebinds nothing), but
 /// Core Erlang leaves the evaluation order of call arguments and tuple/list
@@ -661,7 +673,30 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
 /// order relative to the arguments around it. `subexpr_needs_prelude` and
 /// `class_method_prelude_producer` hoist these into ordered `let`s.
 pub(super) fn is_class_side_effect(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
-    class_var_assignment_shape(ctx, expr) || class_method_self_send_shape(ctx, expr)
+    class_var_assignment_shape(ctx, expr)
+        || class_var_reflective_write_shape(ctx, expr)
+        || class_method_self_send_shape(ctx, expr)
+}
+
+/// `self fieldAt: k put: v` / `self clearField: k` in a class method: an
+/// in-place class-variable write (`beamtalk_class_vars:field_at_put` /
+/// `clear`), lowered by the reflection intrinsics under the same
+/// `in_class_method` + `self` rule (`is_class_side_self_reflection`).
+fn class_var_reflective_write_shape(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool {
+    if !ctx.in_class_method {
+        return false;
+    }
+    let Expression::MessageSend {
+        receiver, selector, ..
+    } = expr
+    else {
+        return false;
+    };
+    is_self_identifier(receiver)
+        && matches!(
+            selector.well_known(),
+            Some(WellKnownSelector::FieldAtPut | WellKnownSelector::ClearField)
+        )
 }
 
 impl CoreErlangGenerator {

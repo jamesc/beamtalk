@@ -28,8 +28,9 @@ Object subclass: SsoStaleBase
     self foo
     r
 
-  // BT-3675 review: a statically bound wrapper in a loop reads the previous
-  // iteration's write.
+  // BT-3675 review: a statically bound wrapper in a loop. BT-4317: the
+  // explicit `SsoStaleBase` receiver binds `self` to the base, also when this
+  // method runs for SsoStaleSub.
   class viaReadLoop -> List =>
     #(1, 2, 3) collect: [:x | SsoStaleBase readThenFoo]
 

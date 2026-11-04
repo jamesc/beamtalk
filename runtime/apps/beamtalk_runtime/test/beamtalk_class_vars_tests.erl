@@ -713,3 +713,109 @@ check_declared_reflective_test() ->
     after
         meck:unload(beamtalk_class_metadata)
     end.
+
+%%% field_at / field_at_put (BT-4421): class-method `self fieldAt:` /
+%%% `self fieldAt:put:` in place, under the `Cls fieldAt:` rules.
+
+field_at_reads_in_place_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 3, late => nil}),
+        ?assertEqual(3, beamtalk_class_vars:field_at(self_obj(), x)),
+        %% A stored `nil` in a `late` variable is assigned (BT-4061).
+        ?assertEqual(nil, beamtalk_class_vars:field_at(self_obj(), late)),
+        %% Declared, eager, absent: `nil`.
+        ?assertEqual(nil, beamtalk_class_vars:field_at(self_obj(), a)),
+        ?assertEqual(
+            undeclared_class_variable,
+            raised_kind(fun() -> beamtalk_class_vars:field_at(self_obj(), nope) end)
+        )
+    end).
+
+field_at_unassigned_late_raises_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 0}),
+        ?assertMatch(
+            #beamtalk_error{kind = uninitialized_state_error, selector = 'fieldAt:'},
+            raised_error(fun() -> beamtalk_class_vars:field_at(self_obj(), late) end)
+        ),
+        %% The capture fallback form applies the same rule to the captured map.
+        clean(),
+        ?assertEqual(0, beamtalk_class_vars:field_at(self_obj(), x, #{x => 0})),
+        ?assertEqual(
+            uninitialized_state_error,
+            raised_kind(fun() -> beamtalk_class_vars:field_at(self_obj(), late, #{x => 0}) end)
+        )
+    end).
+
+%% The reflective declared-set rule: a known-empty own set is strict (the
+%% outside `Cls fieldAt:` rule), where `get/2` stays lenient.
+field_at_known_empty_set_is_strict_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> #{} end),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun(_) -> #{} end),
+    try
+        with_clean(fun() ->
+            beamtalk_class_vars:install(?KEY, #{}),
+            ?assertEqual(nil, beamtalk_class_vars:get(self_obj(), typo)),
+            ?assertEqual(
+                undeclared_class_variable,
+                raised_kind(fun() -> beamtalk_class_vars:field_at(self_obj(), typo) end)
+            ),
+            ?assertEqual(
+                undeclared_class_variable,
+                raised_kind(fun() -> beamtalk_class_vars:field_at_put(self_obj(), typo, 1) end)
+            ),
+            ?assertEqual(#{}, erlang:get(?KEY))
+        end)
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.
+
+field_at_put_writes_in_place_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{x => 0}),
+        ?assertEqual(1, beamtalk_class_vars:field_at_put(self_obj(), x, 1)),
+        %% A declared `late` variable's first assignment creates it.
+        ?assertEqual(2, beamtalk_class_vars:field_at_put(self_obj(), late, 2)),
+        ?assertEqual(#{x => 1, late => 2}, erlang:get(?KEY)),
+        ?assertEqual(
+            undeclared_class_variable,
+            raised_kind(fun() -> beamtalk_class_vars:field_at_put(self_obj(), nope, 1) end)
+        ),
+        ?assertEqual(#{x => 1, late => 2}, erlang:get(?KEY))
+    end).
+
+%% Unknown metadata (ClassBuilder) stays lenient, as for `put/3`.
+field_at_put_unknown_metadata_is_lenient_test() ->
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{}),
+        ?assertEqual(1, beamtalk_class_vars:field_at_put(self_obj(), anything, 1)),
+        ?assertEqual(1, beamtalk_class_vars:field_at(self_obj(), anything))
+    end).
+
+%% With no home the write is unreachable, as `put/3` is.
+field_at_put_without_key_unreachable_test() ->
+    with_clean(fun() ->
+        ?assertEqual(
+            class_state_unreachable,
+            raised_kind(fun() -> beamtalk_class_vars:field_at_put(self_obj(), x, 1) end)
+        )
+    end).
+
+field_at_non_symbol_name_raises_type_error_test() ->
+    with_clean(fun() ->
+        beamtalk_class_vars:install(?KEY, #{}),
+        ?assertMatch(
+            #beamtalk_error{kind = type_error, selector = 'fieldAt:'},
+            raised_error(fun() -> beamtalk_class_vars:field_at(self_obj(), <<"x">>) end)
+        ),
+        ?assertMatch(
+            #beamtalk_error{kind = type_error, selector = 'fieldAt:'},
+            raised_error(fun() -> beamtalk_class_vars:field_at(self_obj(), <<"x">>, #{}) end)
+        ),
+        ?assertMatch(
+            #beamtalk_error{kind = type_error, selector = 'fieldAt:put:'},
+            raised_error(fun() -> beamtalk_class_vars:field_at_put(self_obj(), "x", 1) end)
+        ),
+        ?assertEqual(#{}, erlang:get(?KEY))
+    end).

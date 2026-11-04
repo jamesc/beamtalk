@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4279: an actor whose methods read Bt4279Pt slots and use guarded
+// operators at the method root, in a to:do: loop and in an on:do: body.
+
+Actor subclass: Bt4279SlotReader
+  state: n = 0
+
+  sumOf: p :: Bt4279Pt -> Integer => p x + p y
+
+  bump: v => self.n := v + 1
+
+  n => self.n
+
+  // A coercing operator: the right operand is not statically numeric.
+  add: a to: b => self.n := a + b
+
+  div: a by: b => self.n := a / b
+
+  sumIn: p :: Bt4279Pt times: k :: Integer -> Integer =>
+    total := 0
+    1 to: k do: [:i | total := total + p x + p y]
+    total
+
+  guardedSum: p :: Bt4279Pt -> Integer => [p x + p y] on: Error do: [:e | -1]
+
+  // The slow arm still brackets: the block writes this actor field.
+  bumpVia: p :: Bt4279Pt -> Integer =>
+    q := p withBlk: [self.n := self.n + 100]
+    q runBlk
+    self.n + q x

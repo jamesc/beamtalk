@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a subclass of Bt4317OwnLiteralStateful that does not redeclare
+// `label`. `self label` from it raises `undeclared_class_variable`;
+// `Bt4317OwnLiteralStateful label` reads the parent's variable.
+
+Bt4317OwnLiteralStateful subclass: Bt4317OwnLiteralForgot

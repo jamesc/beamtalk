@@ -617,6 +617,14 @@ pub(in crate::core_erlang) enum VerifyError {
     /// verified without its ancestor frames.
     SyncedCallOnPrivateScratch { at: Span },
 
+    /// BT-4279: a [`ThreadedStmt::SyncedCall`] carries a
+    /// [`FastPath`](super::ir::FastPath) but is not a value bracket that
+    /// reloads (`result` and `load` both set, no Tier 2 rebinds): the fast
+    /// arm hands the stored `State` through as `load` and answers the bracket's
+    /// `result`, so a store-only, statement-form or Tier 2 merge bracket has
+    /// no shape for it. The emitter renders such a node as the plain bracket.
+    FastPathOnUnsplittableBracket { at: Span },
+
     /// BT-4178: a tuple-accumulator fold body resolved the actor-state map
     /// (a field read, a `^`'s carried state, a closure's capture, a nested
     /// loop's seed) to `read_from`, which is not the fold's entry state
@@ -1687,15 +1695,24 @@ impl VerifyWalk<'_> {
             // frame it sits in, exactly as the `Bind` it steps like.
             ThreadedStmt::SyncedCall {
                 store,
+                result,
                 load,
                 span,
                 on_private_scratch,
+                tier2_local_rebinds,
+                fast_path,
                 ..
             } => {
                 self.check_use(store, *span);
                 if *on_private_scratch {
                     self.errors
                         .push(VerifyError::SyncedCallOnPrivateScratch { at: *span });
+                }
+                if fast_path.is_some()
+                    && (result.is_none() || load.is_none() || !tier2_local_rebinds.is_empty())
+                {
+                    self.errors
+                        .push(VerifyError::FastPathOnUnsplittableBracket { at: *span });
                 }
                 if let Some(load) = load {
                     self.check_class_method_family(load, *span);

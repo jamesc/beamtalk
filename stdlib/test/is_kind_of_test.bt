@@ -176,7 +176,7 @@ TestCase subclass: IsKindOfTest
     @expect type
     self deny: (42 isKindOf: #Integer)
 
-  // --- BT-4410: answers and errors pinned across the direct-call lowering ---
+  // --- BT-4410: answers pinned across the direct-call lowering ---
 
   // `isKindOf:` became a direct call to the runtime intrinsic (no foreign-FFI
   // proxy). These pin the answers it gave through the proxy.
@@ -198,3 +198,24 @@ TestCase subclass: IsKindOfTest
     (Erlang beamtalk_future) resolve: future with: 7
     self assert: (future isKindOf: Integer) equals: true
     self assert: (future isKindOf: String) equals: false
+
+  // --- BT-4411: built-in class literals carry their compile-time module ---
+
+  // A literal naming a routing-fixture built-in bakes its module instead of
+  // reading it at run time; the class object must still be `=:=` to the one
+  // the runtime builds for an instance's class.
+  testBuiltinClassLiteralsMatchRuntimeClassObjects =>
+    self assert: (42 class =:= Integer)
+    self assert: (3.5 class =:= Float)
+    self assert: ("s" class =:= String)
+    self assert: (#sym class =:= Symbol)
+    self assert: (true class =:= True)
+    self assert: (false class =:= False)
+    self assert: (nil class =:= UndefinedObject)
+    self assert: ([:x | x] class =:= Block)
+    self assert: ({1, 2} class =:= Tuple)
+    self assert: (#(1) class =:= List)
+    self assert: (#{#a => 1} class =:= Dictionary)
+    self assert: ((Binary fromBytes: #(255, 254)) class =:= Binary)
+    self assert: ("s" isKindOf: String)
+    self assert: (String isKindOf: String class)
