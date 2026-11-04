@@ -9,9 +9,10 @@ values, § Literal checks, § String values, § Result class, § Runtime
 failures).
 
 > **Implemented note (2026-11-03).** Shipped as described, except: the
-> run-time error names the failing segment's type and value but not yet its
-> position (§ Runtime failures; BT-4406: codegen does not emit the Core
-> `{segment, N}` annotation, so the BEAM reports index 0). The `String`
+> run-time error reads OTP's wording, "binary construction: segment 2 of
+> type 'binary': expected a binary but got: 1", naming the 1-based source
+> segment (codegen emits the Core `{segment, N}` annotation, BT-4414), its
+> type and the value (§ Runtime failures; BT-4406). The `String`
 > unwrap is skipped only for a nested construction, not for values typed
 > `Binary` (§ String values; BT-4407). A
 > parenthesised string literal (`<<("hi")/binary>>`) is still a string
@@ -366,7 +367,7 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
 
 **Epic:** BT-4138
 **Issues:** BT-4346 (Phase 1: AST + parser + unparse) → BT-4347 (Phase 2: codegen, blocked by BT-4346) → BT-4348 (Phase 3: tests + e2e + docs, blocked by BT-4347)
-**Status:** Implemented — BT-4346 (#4782), BT-4347 (#4787), BT-4348; follow-ups BT-4406, BT-4407
+**Status:** Implemented — BT-4346 (#4782), BT-4347 (#4787), BT-4348; follow-ups BT-4406, BT-4407, BT-4414
 **Note:** BT-4142 (design + build monolith) retired as superseded by this split; BT-4143 (match-side parity) landed in #4729 and BT-4376 (`erlc` unit/float alignment) in #4759; BT-4380 amended this ADR to match them.
 
 ## References

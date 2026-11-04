@@ -11,13 +11,21 @@
 //! shared with binary patterns ([`super::binary_segments`]):
 //!
 //! ```text
-//! <<v:4, p/binary>>  →  #{#<V>(4,1,'integer',['unsigned'|['big']]),
-//!                         #<P>(('all' -| ['compiler_generated']),8,'binary',['unsigned'|['big']])}#
-//! <<n:8/unit:2>>     →  #<N>(8,2,'integer',['unsigned'|['big']])
-//! <<$A>>             →  #<65>(8,1,'integer',['unsigned'|['big']])
+//! <<v:4, p/binary>>  →  #{( #<V>(4,1,'integer',['unsigned'|['big']]) -| [{'segment', 1}] ),
+//!                         ( #<P>(('all' -| ['compiler_generated']),8,'binary',['unsigned'|['big']])
+//!                           -| [{'segment', 2}] )}#
+//! <<n:8/unit:2>>     →  ( #<N>(8,2,'integer',['unsigned'|['big']]) -| [{'segment', 1}] )
+//! <<$A>>             →  ( #<65>(8,1,'integer',['unsigned'|['big']]) -| [{'segment', 1}] )
 //! <<"hi">>           →  #<104>(8,1,…),#<105>(8,1,…)      (its UTF-8 bytes)
 //! <<1.5/float>>      →  #<63>(8,1,…),#<248>(8,1,…),…      (folded, as erlc does)
 //! ```
+//!
+//! As from `erlc`, every `#<Value>(...)` segment carries its 1-based source
+//! segment number (`{'segment', N}`), which the BEAM reports when the
+//! construction fails, so the run-time error names the segment's position
+//! (ADR 0143 § Runtime failures). Folded constant bytes cannot fail and
+//! carry none; a `utf*` string literal expanded per character numbers every
+//! character segment with its one source segment.
 //!
 //! Every segment value and size that is not a literal is an operand of the
 //! construction, evaluated left to right (value, then size) before the
@@ -59,6 +67,22 @@ fn is_raw_bitstring_by_construction(value: &Expression) -> bool {
     matches!(value.unwrap_parens(), Expression::BinaryConstruction { .. })
 }
 
+/// `( Segment -| [{'segment', N}] )`: a construction segment annotated with
+/// its 1-based source segment number, the shape `erlc +to_core` emits, so a
+/// failed construction's `error_info` cause names the segment's position.
+fn segment_numbered(segment: Document<'static>, source_segment: usize) -> Document<'static> {
+    let number = i64::try_from(source_segment).unwrap_or(i64::MAX);
+    docvec![
+        "( ",
+        segment,
+        " -| [{",
+        leaf::atom("segment"),
+        ", ",
+        leaf::int_lit(number),
+        "}] )"
+    ]
+}
+
 impl CoreErlangGenerator {
     /// Lowers a binary construction (ADR 0143) to `#{...}#`. See the module
     /// documentation for the segment shapes.
@@ -66,14 +90,26 @@ impl CoreErlangGenerator {
         &mut self,
         segments: &[BinarySegment<Expression>],
     ) -> Result<Document<'static>> {
-        let segments = expand_utf_string_literals(segments, |c, span| {
-            Expression::Literal(Literal::Character(c), span)
-        });
+        // Each source segment expanded on its own, so every expanded segment
+        // keeps the 1-based number of the source segment it came from: a
+        // `utf*` string literal expands to one segment per character, all
+        // naming the one source segment in a run-time failure.
+        let segments: Vec<(usize, BinarySegment<Expression>)> = segments
+            .iter()
+            .enumerate()
+            .flat_map(|(index, seg)| {
+                expand_utf_string_literals(std::slice::from_ref(seg), |c, span| {
+                    Expression::Literal(Literal::Character(c), span)
+                })
+                .into_iter()
+                .map(move |expanded| (index + 1, expanded))
+            })
+            .collect();
 
         // The operands, in evaluation order: each segment's value, then its
         // size, unless a literal.
         let mut operands: Vec<&Expression> = Vec::new();
-        for seg in &segments {
+        for (_, seg) in &segments {
             if seg.value.binary_literal().is_none() {
                 operands.push(&seg.value);
             }
@@ -95,7 +131,7 @@ impl CoreErlangGenerator {
 
         let mut bindings: Vec<Document<'static>> = Vec::new();
         let mut parts: Vec<Document<'static>> = Vec::new();
-        for seg in &segments {
+        for (source_segment, seg) in &segments {
             let value = if let Some((lit, _)) = seg.value.binary_literal() {
                 SegmentValue::Literal(lit)
             } else {
@@ -125,7 +161,7 @@ impl CoreErlangGenerator {
                     }
                 }),
             };
-            parts.extend(self.construction_segment(seg, value, size)?);
+            parts.extend(self.construction_segment(*source_segment, seg, value, size)?);
         }
 
         let construction = docvec![
@@ -152,8 +188,16 @@ impl CoreErlangGenerator {
     /// One construction segment's Core segments: usually one, none for an
     /// empty string literal, and one per byte for a string literal or a
     /// folded float.
+    ///
+    /// A segment that can fail at run time — every `#<Value>(...)` segment,
+    /// literal or not, as `erlc` annotates them — carries its 1-based source
+    /// segment number as `( #<V>(...) -| [{'segment', N}] )`, which the BEAM
+    /// reports in the failure's `format_bs_fail` cause (ADR 0143 § Runtime
+    /// failures). Folded constant bytes (a string literal, a constant float)
+    /// cannot fail and, as from `erlc`, carry none.
     fn construction_segment(
         &self,
+        source_segment: usize,
         seg: &BinarySegment<Expression>,
         value: SegmentValue<'_>,
         size: Option<Document<'static>>,
@@ -207,11 +251,14 @@ impl CoreErlangGenerator {
             // run time exactly as `erlc` leaves it to.
             SegmentValue::Literal(lit) => self.generate_literal(lit)?,
         };
-        Ok(vec![docvec![
-            "#<",
-            value_doc,
-            ">",
-            segment_spec_tail(seg, size, SegmentDirection::Construction)
-        ]])
+        Ok(vec![segment_numbered(
+            docvec![
+                "#<",
+                value_doc,
+                ">",
+                segment_spec_tail(seg, size, SegmentDirection::Construction)
+            ],
+            source_segment,
+        )])
     }
 }

@@ -1505,7 +1505,7 @@ bs_fail_non_binary_in_binary_segment_test() ->
         message_of(Inner)
     ),
     ?assertMatch(
-        #{reason := badarg, segment := 2, segment_type := binary, value := 7},
+        #{reason := badarg, segment := 2, segment_type := binary, failure := type, value := 7},
         Inner#beamtalk_error.details
     ).
 
@@ -1528,6 +1528,11 @@ bs_fail_non_integer_value_renders_as_print_string_test() ->
 bs_fail_negative_size_test() ->
     Inner = wrapped_failure(fun() -> bs_sized(5, -1) end),
     ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+    %% `value` is the offending size; `failure` says so.
+    ?assertMatch(
+        #{segment := 1, segment_type := integer, failure := size, value := -1},
+        Inner#beamtalk_error.details
+    ),
     ?assertEqual(
         <<
             "binary construction: segment 1 of type 'integer': "
@@ -1536,12 +1541,38 @@ bs_fail_negative_size_test() ->
         message_of(Inner)
     ).
 
-%% A large value is cut short rather than flooding the message.
+%% A large value is cut short rather than flooding the message: a String or
+%% Binary keeps a prefix, a collection renders depth-bounded.
 bs_fail_large_value_is_truncated_test() ->
-    Inner = wrapped_failure(fun() -> bs_sized(lists:seq(1, 200), 8) end),
-    Message = message_of(Inner),
-    ?assert(byte_size(Message) < 200),
-    ?assertEqual(<<"...">>, binary:part(Message, byte_size(Message), -3)).
+    List = wrapped_failure(fun() -> bs_sized(lists:seq(1, 1000000), 8) end),
+    ListMessage = message_of(List),
+    ?assert(byte_size(ListMessage) < 200),
+    ?assertNotEqual(nomatch, binary:match(ListMessage, <<"|...]">>)),
+    Long = binary:copy(<<"a">>, 1000),
+    String = wrapped_failure(fun() -> bs_sized({beamtalk_string, Long}, 8) end),
+    ?assertEqual(
+        <<
+            "binary construction: segment 1 of type 'integer': expected an integer but got: \"",
+            (binary:copy(<<"a">>, 32))/binary,
+            "\"..."
+        >>,
+        message_of(String)
+    ),
+    Binary = wrapped_failure(fun() -> bs_sized(Long, 8) end),
+    BinaryMessage = message_of(Binary),
+    ?assert(byte_size(BinaryMessage) < 200),
+    ?assertEqual(<<"...">>, binary:part(BinaryMessage, byte_size(BinaryMessage), -3)).
+
+%% A collection renders as its depth-bounded Erlang term, not its Beamtalk
+%% printString: no user printString runs on the error path.
+bs_fail_collection_renders_as_bounded_term_test() ->
+    Inner = wrapped_failure(fun() -> bs_sized([1, 2], 8) end),
+    ?assertEqual(
+        <<"binary construction: segment 1 of type 'integer': expected an integer but got: [1,2]">>,
+        message_of(Inner)
+    ),
+    Map = wrapped_failure(fun() -> bs_sized(#{'$beamtalk_class' => 'Point', x => 1}, 8) end),
+    ?assertNotEqual(nomatch, binary:match(message_of(Map), <<"'$beamtalk_class' => 'Point'">>)).
 
 %% A future nested in a container is never awaited by the formatter: the
 %% container is rendered with the bounded Erlang term format, so the error
