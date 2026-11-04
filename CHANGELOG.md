@@ -286,6 +286,8 @@
 - **Class-method `self name`, `super name`, `super superclass` now work via the class-object protocol (BT-4252)** — inside a class method, `self name`, `super name` and `super superclass` used to raise `does_not_understand` because the class-method chain doesn't hold the Behaviour protocol. These sends now fall through to the `Class → Behaviour → Object` protocol, answering for the receiving class (#4653).
 - **Class-object protocol answers from inside the class process (BT-4262)** — `self doc`, `self printString`, `self name` and other `Class`/`Behaviour` protocol sends from inside a class method running in the class's own process now work. Class-mutating protocol (`removeFromSystem`, `renameTo:`, `reload`, `removeSelector:`, etc.) is refused up front with `dispatch_error` before any side effect (#4676).
 - **Fix: binary pattern integer/char literals in `/float` segments now match (BT-4376)** — `<<1/float>>` and `<<$A/float>>` are lowered to their float equivalents at codegen time, matching `erlc`; `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8 (a conflicting explicit `unit:` is an error); new warning on a non-ASCII character literal in a default 8-bit integer segment (#4759)
+- **Binary construction (ADR 0143, BT-4346/4347/4348)** — `<<...>>` in expression position builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; `<<` is not a binary operator. Segment values may be variables, literals (integer, float, character, string) or parenthesised expressions (`<<(payload size):16>>`). String literals contribute their UTF-8 bytes by default (Beamtalk differs from `erlc` on multi-byte characters). The result is a `Binary` when the total bit size is a multiple of 8 and a `Bitstring` otherwise. The same static checks as patterns apply (misfit literals warn, conflicting specifiers error). Run-time errors name the failing segment's type and value (#4782, #4787, #4788, #4794).
+- **A loop/fold that writes an arm-local works as a value in an actor or value-type conditional arm (BT-4367)** — `c ifTrue: [m := 0. s := xs inject: 0 into: [:a :e | m := m + e. a + e]. m + s]` is accepted as a statement or assignment value in an `ifTrue:`/`ifFalse:`/`ifNil:`/`ifNotNil:` arm at the method root, instead of the BT-3913 `UnthreadedLocalWrite` error. Limits: class methods, operand/array-literal sites, `and:`/`or:` arms, and nested conditionals keep their own rules (#4769).
 
 ### Runtime
 
@@ -326,6 +328,11 @@
 - Guarded direct calls for typed sends to built-in receivers — `Integer`, `String`, `List`, `Dictionary` and other built-in-typed receivers now compile to a tag-guarded direct dispatch with a dynamic-send fallback (BT-4294, #4750)
 - Guarded direct calls for typed sends to open tagged-map classes — a send to a receiver whose static type is an open `Value`/`Object`-kind class now compiles to a tag-guarded direct dispatch (BT-4293, #4747)
 - Class references use compile-time registered names — class literals compile to `erlang:whereis('beamtalk_class_<Name>')` instead of a runtime `binary_to_atom` call; `on:do:` class-literal filters pass the name only (BT-4295, #4743)
+- Guarded direct calls for typed `String` and `Pid` receivers on non-special selectors — most selectors compile to a tag-guarded direct dispatch; the special selectors (`String`'s byte-level selectors shared with `Binary`, `Pid`'s future protocol) stay dynamic (BT-4390, #4765)
+- `obj class` on a typed receiver inlines the class-object construction behind a tag guard, avoiding the `class_of_object` lookup (BT-4127, #4786)
+- `Tuple at:` reads an in-range element inline behind a bounds guard, dropping from 4 to 3 reductions (BT-4400, #4784)
+- Actor send cost reduced: sync send drops from 140 to 89 reductions, cast from 110 to 68, by eliminating per-send bookkeeping left after BT-4113 (BT-4265, #4783)
+- Spawn family on a shadowed class reference now resolves its module at runtime via `beamtalk_class_instantiation:resolve_module_or_raise/2`, instead of pinning the compile-time module (BT-4278, #4781)
 
 ### Internal
 
@@ -363,6 +370,12 @@
 - Block and loop call sites carry real line info in stack traces (BT-4356, #4740)
 - Test and `StackFrame>>printString` trace rendering unified to one shared renderer (BT-4357, #4741)
 - ADR 0133 Phase 3: retire DENY_SET/ALLOW_SET; the 733-shape oracle reaches zero residual rows (BT-3913, #4735)
+- Block-escape validators treat shadowed class names as dynamically sent, matching codegen's existing behavior (BT-4283, #4785)
+- Cross-file abstract classes verified: typed sends stay dynamic, pinned by tests (BT-4391, #4761)
+- Codegen line annotations: cascade sends annotated per-message, loop-entry apply carries the send's line, typed annotated marker (BT-4392, #4766; BT-4401, #4780)
+- Test trace rendering: at-lines and structured frames derived from one entry list; user frames preferred over stdlib frames in snippets (BT-4402, #4778; BT-4388, #4762)
+- `source_file_from_module` handles binary attributes consistently (BT-4370, #4771)
+- Root package `class_corpus.json` no longer duplicates dependency classes (BT-4387, #4777)
 
 ### Tooling
 
@@ -398,6 +411,11 @@
 - Fix: `beamtalk lint --warnings-as-errors` now applies the package's `[diagnostics]` table, matching the REPL and build verdicts (BT-4377, #4758)
 - Fix: `workspace prune` no longer deletes a held flock lockfile, preventing double workspace starts (BT-4374, #4749)
 - Fix: VS Code extension authentication after the version handshake change (BT-4373, #4746)
+- `actor-state-abroad` lint threads cross-file actor hierarchies into `run_lint_passes`, so an actor class defined across files is analysed correctly (BT-4183, #4793)
+- `actor-state-abroad` lint: reflective field access (`fieldAt:`, `fieldAt:put:`, `clearField:`) now reports as write or read flavor instead of a generic self-send, with the same hint as direct field access (BT-4184, #4792)
+- `sync_send_in_timer_block` lint: keyword and cascade self-sends now get a generic "`!` after the full send" cast hint instead of the invalid `self update:!`; the message says "can deadlock" instead of "will deadlock" (BT-4185, #4791)
+- REPL project context loads FFI stubs from `stubs/` and resolves dependencies from the dep-graph snapshot instead of scanning `_build/deps/` listings (BT-4378, #4763)
+- Dependency graph snapshot now records every direct dependency edge; diamond-shaped dependencies (`root → {a, b}`, `a → c`, `b → c`) no longer lose `c` when `a` is removed (BT-4394, #4774)
 
 ### Standard Library
 
