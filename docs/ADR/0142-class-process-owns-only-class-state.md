@@ -220,13 +220,15 @@ end
 - **Amended (BT-4316, 2026-11-04): one read per static call target.** The
   shipped guard read the class's flag, called `function_exported/3` and
   `erlang:whereis/1` per send (row 3a: 7.03 reductions). A static send now
-  reads one `persistent_term` key per call target, `{Module, FunName}`, whose
-  value is the class reference the callee receives:
+  reads one `persistent_term` key per call target, `{Module, FunName, Tag}`
+  (`Tag` is the metaclass tag of the class the call site names), whose value
+  is the class reference the callee receives:
 
   ```erlang
-  let ClassSelf = case call 'persistent_term':'get'({'bt@app@point', 'class_origin'}, 'false') of
+  let ClassSelf = case call 'persistent_term':'get'(
+                        {'bt@app@point', 'class_origin', 'Point class'}, 'false') of
       <'false'> -> call 'beamtalk_class_shadow_flags':'static_call_target'(
-                       {'bt@app@point', 'class_origin'}, 'Point class', 'Point', 'origin', 1)
+                       {'bt@app@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
       <Ref>     -> Ref
     end
   in case ClassSelf of
@@ -235,15 +237,37 @@ end
   end
   ```
 
-  `static_call_target/5` installs the key, under the class's tag lock, only
+  `static_call_target/4` installs the key, under the class's tag lock, only
   while `direct_call_ok/2` holds, the dynamic path's in-caller owner
   (`beamtalk_class_dispatch:in_caller_owner/2`) names this class, module and
   function, the function is exported and the registered class process is
   alive. Every erase of the class's derived flag (and so every ancestor
   write) erases its static call keys, and so does the class monitor's
-  `'DOWN'`. The guard's answers are unchanged; only their cost moved from the
-  send to the metadata write. See the `beamtalk_class_shadow_flags`
-  moduledoc and `benchmarks/vs-elixir/results/bench-bt4316.md`.
+  `'DOWN'`.
+  - **The tag is part of the key.** A module is not unique to one class over
+    time: `renameTo:` keeps the module and process, and a removed class's
+    module name can be reused. A call site still naming the old class misses
+    the new class's key and asks for its own class, so it raises
+    `class_not_found` as before, instead of running with the other class's
+    reference.
+  - **Reload has no `undef` window.** A compiled module's `-on_load` hook
+    registers the class synchronously, and the VM keeps the old code current
+    until the hook returns. Both of the reload's erases therefore land while
+    the old code still exports every function a key names. Any install after
+    the second erase reads the new metadata, in which a dropped method is no
+    longer the owner, so it declines. No key names a dropped function once the
+    new code is current, so a static send of it takes the fallback, as the
+    BT-4301 per-send `function_exported/3` check ensured. A method the reload
+    adds is installed only once the new code exports it.
+  - **A declining call site costs more per send.** A site that never gets a
+    key (shadowed, class variables in the chain, another owner, a dead class)
+    runs the unlocked check on every send and then `class_send`. That costs
+    more than the old one-read decline, but less than the `class_send` it
+    leads to. A negative answer is not cached, because every change that lets
+    a site qualify would need to erase it.
+
+  See the `beamtalk_class_shadow_flags` moduledoc and
+  `benchmarks/vs-elixir/results/bench-bt4316.md`.
 
 ### 3. What moves into the caller
 

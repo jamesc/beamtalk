@@ -66,7 +66,7 @@ fn overriding_subclass_keeps_class_send() {
     // the class send.
     assert!(
         (out.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && out.contains("}, 'LoudError class', 'LoudError', "))
+            && out.contains(", 'LoudError class'}, 'LoudError', "))
             && out.contains("'beamtalk_object_class':'class_send'("),
         "a subclass overriding `class signal:` must keep a class send. Got:\n{out}"
     );

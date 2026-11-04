@@ -5,7 +5,7 @@
 // itself defines compiles to a direct call behind a run-time guard, whose
 // fallback is the dynamic `class_send`. Since BT-4316 the guard is one read of
 // the call target's static call key, installed by
-// `beamtalk_class_shadow_flags:static_call_target/5` only while
+// `beamtalk_class_shadow_flags:static_call_target/4` only while
 // `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these
 // are the regression tests for the bugs that caused:
 // - BT-4133: a class-side extension shadowing a direct-called method was
@@ -154,7 +154,10 @@ TestCase subclass: GuardedStaticCallTest
     oldPid := Erlang beamtalk_class_registry whereis_class: #GscRestart
     self assert: (Erlang erlang element: 4 of: GscRestart me) equals: oldPid
     Erlang erlang exit: oldPid with: #kill
-    newPid := self pidOf: #GscRestart other: oldPid tries: 500
+    newPid := self
+      pidOf: #GscRestart
+      other: oldPid
+      tries: 500
     self deny: newPid =:= oldPid
     self assert: (Erlang erlang element: 4 of: GscRestart me) equals: newPid
     self assert: (Erlang erlang element: 4 of: (self lookUp: #GscRestart) me) equals: newPid
@@ -166,4 +169,7 @@ TestCase subclass: GuardedStaticCallTest
     ((Erlang erlang is_pid: pid) and: [pid =/= oldPid]) ifTrue: [^pid]
     tries =:= 0 ifTrue: [^pid]
     Erlang timer sleep: 10
-    self pidOf: name other: oldPid tries: tries - 1
+    self
+      pidOf: name
+      other: oldPid
+      tries: tries - 1

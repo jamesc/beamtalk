@@ -253,7 +253,8 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
     };
     let forwarded = "'class_helper:'(ClassSelf, ";
     // BT-4316: the guarded direct call reads the call target's static call key.
-    let probe_direct = "call 'persistent_term':'get'({'bt@parser', 'class_helper:'}, 'false')";
+    let probe_direct =
+        "call 'persistent_term':'get'({'bt@parser', 'class_helper:', 'Parser class'}, 'false')";
 
     // Control: no rival, so the class-reference send in `probe` direct-calls.
     let control = compile(vec![]);

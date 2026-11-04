@@ -4457,7 +4457,7 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
     // installs it only while the guard holds.
     assert!(
         output.contains(
-            "case call 'persistent_term':'get'({'bt@test@pt', 'class_x:y:'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:'}, 'Pt class', 'Pt', 'x:y:', 3)"
+            "case call 'persistent_term':'get'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)"
         ),
         "eligible keyword ctor must be guarded by its static call key. Got:\n{output}"
     );

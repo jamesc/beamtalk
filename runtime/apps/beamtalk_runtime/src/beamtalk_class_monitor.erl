@@ -186,7 +186,10 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, #state{watched = Watched, refs 
             %% BT-4316: the class's static call keys hold this pid in the
             %% class reference they serve; erase them (and the derived flag)
             %% before any restart, so a dead pid is never served once the
-            %% death is seen, whatever the reason.
+            %% death is seen, whatever the reason. This waits on the tag
+            %% locks; their holders only do ETS and `persistent_term` reads
+            %% and writes, never a gen_server call, so they cannot block on
+            %% this monitor.
             ok = beamtalk_class_shadow_flags:invalidate(ClassName),
             case is_deliberate_stop(Reason) of
                 true -> {noreply, State1};

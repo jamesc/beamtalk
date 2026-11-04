@@ -1457,7 +1457,7 @@ walk_return_type(ClassName, Selector, Lookup) ->
 -doc """
 Ensure the static call key index exists (idempotent): a `bag` of
 `{Tag, Key}`, one row per `persistent_term` static call key
-`beamtalk_class_shadow_flags:static_call_target/5` installed for the class
+`beamtalk_class_shadow_flags:static_call_target/4` installed for the class
 whose metaclass tag is `Tag`. `beamtalk_class_shadow_flags` writes and takes
 rows only under that tag's lock, so its erase finds every installed key.
 Public, heir-protected like `ensure_backing_module_index_table/0`.
@@ -1488,10 +1488,10 @@ ensure_static_call_keys_table() ->
 
 -doc """
 Record that the static call key `Key` is installed for the class tagged `Tag`.
-Called by `beamtalk_class_shadow_flags:static_call_target/5` under the tag
+Called by `beamtalk_class_shadow_flags:static_call_target/4` under the tag
 lock, before it puts the key.
 """.
--spec record_static_call_key(atom(), {module(), atom()}) -> ok.
+-spec record_static_call_key(atom(), {module(), atom(), atom()}) -> ok.
 record_static_call_key(Tag, Key) ->
     ensure_static_call_keys_table(),
     true = ets:insert(?STATIC_CALL_KEYS, {Tag, Key}),
@@ -1502,7 +1502,7 @@ Remove and return every static call key recorded for `Tag`; `[]` when none
 (or the index does not exist yet). Called under the tag lock by
 `beamtalk_class_shadow_flags`, which erases each key.
 """.
--spec take_static_call_keys(atom()) -> [{module(), atom()}].
+-spec take_static_call_keys(atom()) -> [{module(), atom(), atom()}].
 take_static_call_keys(Tag) ->
     try ets:take(?STATIC_CALL_KEYS, Tag) of
         Rows -> [Key || {_, Key} <- Rows]

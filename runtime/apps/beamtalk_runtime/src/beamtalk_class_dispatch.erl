@@ -240,7 +240,7 @@ a hot reload's new code is current a moment before its class process publishes
 the new metadata; the raw `class_vars` input is published first
 (`beamtalk_object_class:apply_class_info/2`) to keep that window short.
 
-Exported for `beamtalk_class_shadow_flags:static_call_target/5` (BT-4316),
+Exported for `beamtalk_class_shadow_flags:static_call_target/4` (BT-4316),
 which installs a static call key only while this answer names the call
 site's own class, module and function: one rule for both paths.
 """.

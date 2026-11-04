@@ -485,7 +485,7 @@ compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
 compiles_to("3a") ->
-    "guarded direct call: one persistent_term:get of the {Mod, Fun} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
+    "guarded direct call: one persistent_term:get of the {Mod, Fun, Tag} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
 compiles_to("3b") ->
     "guarded direct call, as 3a: `class sealed` plays no part (ADR 0142, BT-4301)";
 compiles_to("3c") -> "guarded direct call, as 3a: open class (ADR 0142, BT-4301)";

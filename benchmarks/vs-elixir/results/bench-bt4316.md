@@ -5,11 +5,12 @@ guarded direct call BT-4301 introduced (ADR 0142 §2, amended). A static class
 send to a method the class itself defines now compiles to
 
 ```erlang
-let StaticSelf = case call 'persistent_term':'get'({'bt@vs_elixir_bench@vb_sealed_math', 'class_double:'}, 'false') of
+let StaticSelf = case call 'persistent_term':'get'(
+        {'bt@vs_elixir_bench@vb_sealed_math', 'class_double:', 'VbSealedMath class'}, 'false') of
     <'false'> when 'true' ->
       call 'beamtalk_class_shadow_flags':'static_call_target'(
-          {'bt@vs_elixir_bench@vb_sealed_math', 'class_double:'},
-          'VbSealedMath class', 'VbSealedMath', 'double:', 2)
+          {'bt@vs_elixir_bench@vb_sealed_math', 'class_double:', 'VbSealedMath class'},
+          'VbSealedMath', 'double:', 2)
     <StaticRef> when 'true' -> StaticRef
   end
 in case StaticSelf of
@@ -21,7 +22,7 @@ in case StaticSelf of
 end
 ```
 
-The key `{Module, FunName}` holds the class reference the callee receives as
+The key `{Module, FunName, Tag}` holds the class reference the callee receives as
 `ClassSelf`. The runtime installs it only while `direct_call_ok/2` holds, the
 dynamic path's in-caller owner names this class, module and function, the
 function is exported and the class process is alive. It erases it on every

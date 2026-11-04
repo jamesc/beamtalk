@@ -378,7 +378,7 @@ fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
     // as its fallback only.
     assert!(
         (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && code.contains("}, 'Beamtalk class', 'Beamtalk', ")),
+            && code.contains(", 'Beamtalk class'}, 'Beamtalk', ")),
         "the direct call must be guarded; got:\n{code}"
     );
 }

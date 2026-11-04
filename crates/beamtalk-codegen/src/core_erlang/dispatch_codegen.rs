@@ -3550,10 +3550,11 @@ impl CoreErlangGenerator {
     /// be variables or literals: it is spliced into both arms.
     ///
     /// ```erlang
-    /// let StaticSelf = case call 'persistent_term':'get'({'bt@point', 'class_origin'}, 'false') of
+    /// let StaticSelf = case call 'persistent_term':'get'(
+    ///         {'bt@point', 'class_origin', 'Point class'}, 'false') of
     ///     <'false'> when 'true' ->
     ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
-    ///           {'bt@point', 'class_origin'}, 'Point class', 'Point', 'origin', 1)
+    ///           {'bt@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
     ///     <StaticRef> when 'true' -> StaticRef
     ///   end
     /// in case StaticSelf of
@@ -3568,7 +3569,7 @@ impl CoreErlangGenerator {
     /// `persistent_term` read of the call target's static call key
     /// (BT-4316), whose value is the class reference the callee gets as
     /// `ClassSelf`. The runtime installs the key
-    /// (`beamtalk_class_shadow_flags:static_call_target/5`) only while
+    /// (`beamtalk_class_shadow_flags:static_call_target/4`) only while
     /// `direct_call_ok/2` holds (nothing shadows the compiled method: no
     /// class-side extension, no ADR 0084 runtime fun; neither the class nor
     /// an ancestor declares class variables), the dynamic path would run
@@ -3580,8 +3581,12 @@ impl CoreErlangGenerator {
     /// position: tail recursion through a literal class reference runs in
     /// constant stack.
     ///
-    /// The key is the call-site literal `{Module, FunName}`, passed whole to
-    /// the runtime, which never spells it. The callee gets the real class
+    /// The key is the call-site literal `{Module, FunName, Tag}`, passed whole
+    /// to the runtime, which never spells it. The metaclass tag keeps a call
+    /// site naming one class from hitting a key another class installed for
+    /// the same module (after `renameTo:`, or a removed class's module name
+    /// reused): such a site misses, and its own miss path answers for the
+    /// class it names (`class_not_found` once that class is gone). The callee gets the real class
     /// reference (its tag, its own module and its registered pid, the value a
     /// class literal evaluates to), never `nil` (BT-4037); the pid is never
     /// baked: the key is erased when the class process goes down, so a
@@ -3607,6 +3612,8 @@ impl CoreErlangGenerator {
             leaf::atom(module_name.clone()),
             ", ",
             leaf::atom(safe_fn.clone()),
+            ", ",
+            leaf::atom(tag),
             "}"
         ];
         // BT-4366: the direct call sits inside the guard `case`, so it carries
@@ -3630,8 +3637,6 @@ impl CoreErlangGenerator {
             ", 'false') of <'false'> when 'true' -> ",
             "call 'beamtalk_class_shadow_flags':'static_call_target'(",
             key_doc,
-            ", ",
-            leaf::atom(tag),
             ", ",
             leaf::atom(class_name.to_string()),
             ", ",

@@ -1683,7 +1683,7 @@ fn repl_sealed_stateless_class_method_emits_direct_call() {
     // BT-4301 (ADR 0142 §2): guarded, with `class_send` as the fallback.
     assert!(
         (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && code.contains("}, 'Facade class', 'Facade', ")),
+            && code.contains(", 'Facade class'}, 'Facade', ")),
         "Eligible send must be guarded in: {code}"
     );
 }
@@ -1697,7 +1697,7 @@ fn repl_non_sealed_class_method_emits_guarded_direct_call() {
     assert!(
         code.contains("call 'bt@facade':'class_plain'(")
             && (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-                && code.contains("}, 'Facade class', 'Facade', ")),
+                && code.contains(", 'Facade class'}, 'Facade', ")),
         "A class method of a stateless class is a guarded direct call in: {code}"
     );
 }
@@ -1763,7 +1763,7 @@ fn repl_beamtalk_class_named_emits_direct_call() {
     );
     assert!(
         (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && code.contains("}, 'Beamtalk class', 'Beamtalk', ")),
+            && code.contains(", 'Beamtalk class'}, 'Beamtalk', ")),
         "Beamtalk classNamed: must be guarded in: {code}"
     );
 }

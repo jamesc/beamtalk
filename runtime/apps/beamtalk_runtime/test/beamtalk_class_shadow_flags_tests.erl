@@ -11,6 +11,7 @@ register and unregister on the same class concurrently).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 setup_runtime() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
@@ -337,7 +338,7 @@ shadow_flag_test_() ->
     ]}.
 
 %%% ============================================================================
-%%% BT-4316: static call keys (`static_call_target/5`)
+%%% BT-4316: static call keys (`static_call_target/4`)
 %%% ============================================================================
 
 -define(HELPER, beamtalk_class_dispatch_test_helper).
@@ -379,22 +380,21 @@ with_static_class(Name, Fun) ->
         stop_static_class(Pid)
     end.
 
-static_key(Fun) -> {?HELPER, Fun}.
+static_key(Name, Fun) -> {?HELPER, Fun, beamtalk_class_registry:class_object_tag(Name)}.
 
 target(Name, Key, Selector) ->
-    Tag = beamtalk_class_registry:class_object_tag(Name),
-    beamtalk_class_shadow_flags:static_call_target(Key, Tag, Name, Selector, 1).
+    beamtalk_class_shadow_flags:static_call_target(Key, Name, Selector, 1).
 
 key_value(Key) -> beamtalk_class_shadow_flags:static_call_key_value(Key).
 
 warm(Name, Pid) ->
     Tag = beamtalk_class_registry:class_object_tag(Name),
     Ref = {beamtalk_object, Tag, ?HELPER, Pid},
-    ?assertEqual(Ref, target(Name, static_key(class_testSelf), testSelf)),
-    ?assertEqual(Ref, key_value(static_key(class_testSelf))),
+    ?assertEqual(Ref, target(Name, static_key(Name, class_testSelf), testSelf)),
+    ?assertEqual(Ref, key_value(static_key(Name, class_testSelf))),
     Ref.
 
-key_gone() -> key_value(static_key(class_testSelf)) =:= false.
+key_gone(Name) -> key_value(static_key(Name, class_testSelf)) =:= false.
 
 %% The class monitor erases asynchronously, on its 'DOWN'.
 wait_until(Pred, 0) ->
@@ -415,7 +415,7 @@ race_install_against(Name, Tag, Writer) ->
     Parent = self(),
     beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
         _ = spawn_link(fun() ->
-            Parent ! {installed, target(Name, static_key(class_testSelf), testSelf)}
+            Parent ! {installed, target(Name, static_key(Name, class_testSelf), testSelf)}
         end),
         timer:sleep(50),
         _ = spawn_link(fun() ->
@@ -432,9 +432,64 @@ race_install_against(Name, Tag, Writer) ->
         written -> ok
     after 5000 -> ?assert(false)
     end,
-    ?assert(key_gone()),
-    ?assertNot(target(Name, static_key(class_testSelf), testSelf)),
-    ?assert(key_gone()).
+    ?assert(key_gone(Name)),
+    ?assertNot(target(Name, static_key(Name, class_testSelf), testSelf)),
+    ?assert(key_gone(Name)).
+
+%% A throwaway class module for the reload test, compiled from source.
+compile_module(Module, Exports, Body) ->
+    Src = lists:flatten([
+        io_lib:format("-module(~p).~n-export([~s]).~n", [
+            Module,
+            lists:join(", ", [io_lib:format("~p/~p", [F, A]) || {F, A} <- Exports])
+        ]),
+        Body
+    ]),
+    {ok, Tokens, _} = erl_scan:string(Src),
+    Forms = [
+        begin
+            {ok, Form} = erl_parse:parse_form(FormTokens),
+            Form
+        end
+     || FormTokens <- split_forms(Tokens, [])
+    ],
+    {ok, Module, Bin} = compile:forms(Forms, []),
+    Bin.
+
+split_forms([], []) -> [];
+split_forms([{dot, _} = Dot | Rest], Acc) -> [lists:reverse([Dot | Acc]) | split_forms(Rest, [])];
+split_forms([Token | Rest], Acc) -> split_forms(Rest, [Token | Acc]).
+
+load_module_binary(Module, Bin) ->
+    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
+    ok.
+
+%% What a compiled static send does with `Key` (`guarded_class_direct_call_doc`
+%% in dispatch_codegen.rs): the key, else the miss path, else the fallback.
+static_send({Module, FunName, _Tag} = Key, Name, Selector) ->
+    Ref =
+        case persistent_term:get(Key, false) of
+            false -> beamtalk_class_shadow_flags:static_call_target(Key, Name, Selector, 1);
+            Hit -> Hit
+        end,
+    case Ref of
+        false -> fallback;
+        _ -> Module:FunName(Ref)
+    end.
+
+%% Send `Key` statically in a loop until told to stop; report every exception.
+static_sender(Key, Name, Selector, Parent, Errors) ->
+    receive
+        stop -> Parent ! {sender_errors, lists:reverse(Errors)}
+    after 0 ->
+        Errors1 =
+            try static_send(Key, Name, Selector) of
+                _ -> Errors
+            catch
+                Class:Reason -> [{Class, Reason} | Errors]
+            end,
+        static_sender(Key, Name, Selector, Parent, Errors1)
+    end.
 
 static_call_target_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
@@ -447,18 +502,18 @@ static_call_target_test_() ->
         end},
         {"declines when the call site's module or function is not the owner's", fun() ->
             with_static_class('Bt4316Mismatch', fun(_Pid) ->
-                OtherModule = {bt4316_other_module, class_testSelf},
-                OtherFun = static_key(class_testClassSelf),
+                OtherModule = {bt4316_other_module, class_testSelf, 'Bt4316Mismatch class'},
+                OtherFun = static_key('Bt4316Mismatch', class_testClassSelf),
                 ?assertNot(target('Bt4316Mismatch', OtherModule, testSelf)),
                 ?assertNot(target('Bt4316Mismatch', OtherFun, testSelf)),
                 ?assertNot(key_value(OtherModule)),
                 ?assertNot(key_value(OtherFun)),
-                ?assert(key_gone())
+                ?assert(key_gone('Bt4316Mismatch'))
             end)
         end},
         {"declines when the function is not exported", fun() ->
             with_static_class('Bt4316NotExported', fun(_Pid) ->
-                Key = static_key(class_testNotExported),
+                Key = static_key('Bt4316NotExported', class_testNotExported),
                 ?assertNot(target('Bt4316NotExported', Key, testNotExported)),
                 ?assertNot(key_value(Key))
             end)
@@ -466,24 +521,30 @@ static_call_target_test_() ->
         {"declines when the class process is gone", fun() ->
             Pid = start_static_class('Bt4316Dead', none, #{}),
             stop_static_class(Pid),
-            ?assertNot(target('Bt4316Dead', static_key(class_testSelf), testSelf)),
-            ?assert(key_gone())
+            ?assertNot(target('Bt4316Dead', static_key('Bt4316Dead', class_testSelf), testSelf)),
+            ?assert(key_gone('Bt4316Dead'))
         end},
         {"declines when shadowed or when the class declares class variables", fun() ->
             with_static_class('Bt4316Shadowed', fun(_Pid) ->
                 Tag = 'Bt4316Shadowed class',
                 ok = beamtalk_class_shadow_flags:set(extension, Tag),
                 try
-                    ?assertNot(target('Bt4316Shadowed', static_key(class_testSelf), testSelf)),
-                    ?assert(key_gone())
+                    ?assertNot(
+                        target(
+                            'Bt4316Shadowed', static_key('Bt4316Shadowed', class_testSelf), testSelf
+                        )
+                    ),
+                    ?assert(key_gone('Bt4316Shadowed'))
                 after
                     beamtalk_class_shadow_flags:clear(extension, Tag)
                 end
             end),
             Pid = start_static_class('Bt4316Stateful', none, #{count => 0}),
             try
-                ?assertNot(target('Bt4316Stateful', static_key(class_testSelf), testSelf)),
-                ?assert(key_gone())
+                ?assertNot(
+                    target('Bt4316Stateful', static_key('Bt4316Stateful', class_testSelf), testSelf)
+                ),
+                ?assert(key_gone('Bt4316Stateful'))
             after
                 stop_static_class(Pid)
             end
@@ -503,7 +564,7 @@ static_call_target_test_() ->
                         _ = warm(Name, Pid),
                         try
                             ok = Write(),
-                            ?assert(key_gone()),
+                            ?assert(key_gone(Name)),
                             ?assertEqual([], beamtalk_class_registry:take_static_call_keys(Tag))
                         after
                             beamtalk_class_shadow_flags:clear(extension, Tag),
@@ -517,7 +578,7 @@ static_call_target_test_() ->
                 _ = warm(Name, Pid),
                 _ = persistent_term:erase(Tag),
                 ok = beamtalk_class_shadow_flags:invalidate(Name),
-                ?assert(key_gone())
+                ?assert(key_gone(Name))
             end)
         end},
         {"an ancestor's write erases a descendant's static call keys", fun() ->
@@ -526,7 +587,7 @@ static_call_target_test_() ->
             try
                 _ = warm('Bt4316Leaf', Leaf),
                 ok = beamtalk_class_shadow_flags:invalidate('Bt4316Root'),
-                ?assert(key_gone())
+                ?assert(key_gone('Bt4316Leaf'))
             after
                 stop_static_class(Leaf),
                 stop_static_class(Root)
@@ -536,7 +597,7 @@ static_call_target_test_() ->
             Pid = start_static_class('Bt4316Down', none, #{}),
             _ = warm('Bt4316Down', Pid),
             stop_static_class(Pid),
-            wait_until(fun key_gone/0, 500)
+            wait_until(fun() -> key_gone('Bt4316Down') end, 500)
         end},
         {"an install racing a shadow raise never survives it", fun() ->
             Name = 'Bt4316Race',
@@ -563,5 +624,116 @@ static_call_target_test_() ->
                     beamtalk_class_metadata:put_class_variables(Name, false)
                 end
             end)
-        end}
+        end},
+        {"a call site naming a renamed class never hits the key its new name installed", fun() ->
+            %% `renameTo:` keeps the module and the process: before the key
+            %% carried the tag, the old name's call site hit the new name's
+            %% key and ran with its class reference.
+            Pid = start_static_class('Bt4316Before', none, #{}),
+            OldKey = static_key('Bt4316Before', class_testSelf),
+            NewKey = static_key('Bt4316After', class_testSelf),
+            try
+                _ = warm('Bt4316Before', Pid),
+                {ok, Pid} = beamtalk_object_class:rename('Bt4316Before', 'Bt4316After'),
+                ?assertNot(key_value(OldKey)),
+                NewRef = warm('Bt4316After', Pid),
+                ?assertEqual('Bt4316After class', NewRef#beamtalk_object.class),
+                ?assertNot(key_value(OldKey)),
+                ?assertNot(target('Bt4316Before', OldKey, testSelf)),
+                ?assertNot(key_value(OldKey)),
+                ?assertEqual(NewRef, key_value(NewKey))
+            after
+                stop_static_class(Pid)
+            end
+        end},
+        {"a call site naming a removed class never hits a key a reuse of its module installed",
+            fun() ->
+                Old = start_static_class('Bt4316Removed', none, #{}),
+                OldKey = static_key('Bt4316Removed', class_testSelf),
+                _ = warm('Bt4316Removed', Old),
+                stop_static_class(Old),
+                wait_until(fun() -> key_gone('Bt4316Removed') end, 500),
+                with_static_class('Bt4316Reused', fun(New) ->
+                    NewRef = warm('Bt4316Reused', New),
+                    ?assertEqual('Bt4316Reused class', NewRef#beamtalk_object.class),
+                    ?assertNot(key_value(OldKey)),
+                    ?assertNot(target('Bt4316Removed', OldKey, testSelf)),
+                    ?assertNot(key_value(OldKey))
+                end)
+            end},
+        {"a reload that drops a method leaves no key naming it once the new code is current",
+            fun() ->
+                %% The reloaded module's `-on_load` hook registers the class
+                %% (`update_class/2`, as a compiled module's `register_class/0`
+                %% does) while the old code is still current, then probes the
+                %% dropped method's key from inside the hook: it must be gone
+                %% and the miss path must decline before the new code becomes
+                %% current, so no static send can reach `undef`.
+                Module = bt4316_reload_mod,
+                Name = 'Bt4316Reload',
+                Tag = 'Bt4316Reload class',
+                Kept = {Module, class_kept, Tag},
+                Dropped = {Module, class_dropped, Tag},
+                Probe = {?MODULE, bt4316_reload_probe},
+                V1 = compile_module(
+                    Module,
+                    [{class_kept, 1}, {class_dropped, 1}],
+                    "class_kept(_) -> kept_v1.\nclass_dropped(_) -> dropped_v1.\n"
+                ),
+                V2 = compile_module(
+                    Module,
+                    [{class_kept, 1}, {register, 0}],
+                    io_lib:format(
+                        "-on_load(register/0).~n"
+                        "class_kept(_) -> kept_v2.~n"
+                        "register() ->~n"
+                        "    {ok, _} = beamtalk_object_class:update_class(~p, #{module => ~p,"
+                        " class_methods => #{kept => #{arity => 0}}, meta => ~p}),~n"
+                        "    persistent_term:put(~p, {"
+                        "persistent_term:get(~p, false),"
+                        " beamtalk_class_shadow_flags:static_call_target(~p, ~p, dropped, 1),"
+                        " erlang:function_exported(~p, class_dropped, 1)}),~n"
+                        "    ok.~n",
+                        [Name, Module, ?STATIC_META, Probe, Dropped, Dropped, Name, Module]
+                    )
+                ),
+                ok = load_module_binary(Module, V1),
+                {ok, Pid} = beamtalk_object_class:start(Name, #{
+                    superclass => none,
+                    module => Module,
+                    class_methods => #{kept => #{arity => 0}, dropped => #{arity => 0}},
+                    class_state => #{},
+                    meta => ?STATIC_META
+                }),
+                try
+                    ?assertEqual(kept_v1, static_send(Kept, Name, kept)),
+                    ?assertEqual(dropped_v1, static_send(Dropped, Name, dropped)),
+                    ?assertMatch(#beamtalk_object{}, key_value(Dropped)),
+                    Parent = self(),
+                    Sender = spawn_link(fun() ->
+                        static_sender(Dropped, Name, dropped, Parent, [])
+                    end),
+                    ok = load_module_binary(Module, V2),
+                    %% Inside the hook the old code still exported the dropped
+                    %% function, yet its key was gone and the miss path
+                    %% declined.
+                    ?assertEqual({false, false, true}, persistent_term:get(Probe)),
+                    ?assertNot(erlang:function_exported(Module, class_dropped, 1)),
+                    timer:sleep(20),
+                    Sender ! stop,
+                    receive
+                        {sender_errors, Errors} -> ?assertEqual([], Errors)
+                    after 5000 -> ?assert(false)
+                    end,
+                    ?assertNot(key_value(Dropped)),
+                    ?assertEqual(fallback, static_send(Dropped, Name, dropped)),
+                    ?assertEqual(kept_v2, static_send(Kept, Name, kept))
+                after
+                    _ = persistent_term:erase(Probe),
+                    stop_static_class(Pid),
+                    _ = code:purge(Module),
+                    _ = code:delete(Module),
+                    _ = code:purge(Module)
+                end
+            end}
     ]}.

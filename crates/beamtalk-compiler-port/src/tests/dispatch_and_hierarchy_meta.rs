@@ -142,7 +142,7 @@ fn inline_class_definition_trailing_send_to_sealed_facade_is_direct_call() {
     // only its fallback.
     assert!(
         (trailing.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
-            && trailing.contains("}, 'Facade class', 'Facade', ")),
+            && trailing.contains(", 'Facade class'}, 'Facade', ")),
         "Eligible trailing send must be guarded in: {trailing}"
     );
 }
