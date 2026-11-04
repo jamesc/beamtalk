@@ -84,7 +84,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
     record_static_call_key/2,
-    take_static_call_keys/1
+    take_static_call_keys/1,
+    static_call_key_tags/0
 ]).
 
 -ifdef(TEST).
@@ -1506,6 +1507,20 @@ Remove and return every static call key recorded for `Tag`; `[]` when none
 take_static_call_keys(Tag) ->
     try ets:take(?STATIC_CALL_KEYS, Tag) of
         Rows -> [Key || {_, Key} <- Rows]
+    catch
+        error:badarg -> []
+    end.
+
+-doc """
+Every class tag with at least one recorded static call key, without
+duplicates; `[]` when the index does not exist yet. Used by
+`beamtalk_class_shadow_flags:erase_all_static_call_keys/0` when a restarted
+class monitor cannot know which classes died while it was down.
+""".
+-spec static_call_key_tags() -> [atom()].
+static_call_key_tags() ->
+    try ets:foldl(fun({Tag, _}, Acc) -> Acc#{Tag => true} end, #{}, ?STATIC_CALL_KEYS) of
+        Tags -> maps:keys(Tags)
     catch
         error:badarg -> []
     end.

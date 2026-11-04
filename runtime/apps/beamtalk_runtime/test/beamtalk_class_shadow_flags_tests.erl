@@ -599,6 +599,17 @@ static_call_target_test_() ->
             stop_static_class(Pid),
             wait_until(fun() -> key_gone('Bt4316Down') end, 500)
         end},
+        {"a (re)starting class monitor erases every class's static call keys", fun() ->
+            %% A class killed while no monitor ran sent no 'DOWN', so only the
+            %% fresh monitor's init/1 can erase its dead-pid keys.
+            with_static_class('Bt4316MonitorInit', fun(Pid) ->
+                _ = warm('Bt4316MonitorInit', Pid),
+                {ok, _State} = beamtalk_class_monitor:init(#{}),
+                ?assert(key_gone('Bt4316MonitorInit')),
+                %% The next send re-installs from the live class.
+                _ = warm('Bt4316MonitorInit', Pid)
+            end)
+        end},
         {"an install racing a shadow raise never survives it", fun() ->
             Name = 'Bt4316Race',
             Tag = 'Bt4316Race class',

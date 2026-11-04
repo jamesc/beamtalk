@@ -32,7 +32,9 @@ Normal exits (`normal`, `shutdown`, `{shutdown, _}`) are deliberate stops —
 Every `'DOWN'` of a watched class, deliberate or not, first calls
 `beamtalk_class_shadow_flags:invalidate/1` (BT-4316): the class's static call
 keys serve a class reference holding the dead pid, and must go before a
-restart registers a new one.
+restart registers a new one. A class that died while no monitor was running
+sends no `'DOWN'`, so `init/1` erases every class's static call keys
+(`beamtalk_class_shadow_flags:erase_all_static_call_keys/0`).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -135,6 +137,11 @@ init(Opts) ->
         max_restarts = maps:get(max_restarts, Opts, ?DEFAULT_MAX_RESTARTS),
         window_ms = maps:get(window_ms, Opts, ?DEFAULT_WINDOW_MS)
     },
+    %% BT-4316: a class killed while no monitor was running sent no 'DOWN',
+    %% so its static call keys (which hold the dead pid) were never erased.
+    %% A fresh monitor cannot tell which classes died, so it erases them all;
+    %% each call site re-installs from the live class on its next send.
+    ok = beamtalk_class_shadow_flags:erase_all_static_call_keys(),
     %% If this monitor crashed and was restarted by beamtalk_runtime_sup, the
     %% surviving class processes are no longer watched — re-adopt them from
     %% the pg enumeration group so eager recovery is not silently lost for

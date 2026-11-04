@@ -188,6 +188,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_direct_flag_set/1,
     direct_flag_value/1,
     invalidate/1,
+    erase_all_static_call_keys/0,
     set_class_vars/2,
     mark_ready/0,
     is_ready/0,
@@ -282,6 +283,23 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
+
+-doc """
+Erase every class's derived key and static call keys, each under its tag lock
+(BT-4316). Called by a (re)starting `beamtalk_class_monitor`: a class killed
+while the monitor was down sends it no `'DOWN'`, so the per-class
+`invalidate/1` that would erase its static call keys never runs, and those
+keys would keep serving the dead pid as `ClassSelf` after lazy recovery
+restarts the class. A fresh monitor is rare, so erasing all keys is cheap; the
+next send of each call site re-installs from the live class. Must never be
+called from inside `with_tag_lock/2`.
+""".
+-spec erase_all_static_call_keys() -> ok.
+erase_all_static_call_keys() ->
+    lists:foreach(
+        fun(Tag) -> with_tag_lock(Tag, fun() -> erase_direct_flag(Tag) end) end,
+        beamtalk_class_registry:static_call_key_tags()
+    ).
 
 %% Erase one class's derived key under its tag lock, always taking the lock
 %% (see `invalidate/1`: an in-flight install may still put a stale value).
