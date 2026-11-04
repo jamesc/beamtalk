@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4075: `error:` on a workspace binding that holds a class is the class-side
+// send (`Result class>>error:`), not the `Object>>error:` raise. A binding that
+// holds an instance still raises.
+
+cls := Result
+// => Result
+
+r := cls error: #nope
+// => _
+
+r isError
+// => true
+
+r error
+// => nope
+
+n := 42
+// => 42
+
+[n error: "too big"] on: Exception do: [:e | e message]
+// => too big

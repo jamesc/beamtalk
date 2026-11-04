@@ -2366,6 +2366,11 @@ impl CoreErlangGenerator {
         if !super::expr_shape::is_self_identifier(receiver) {
             return ErrorSignalReceiver::Unknown;
         }
+        // A top-level REPL `self` is whatever the eval binds it to (the
+        // Inspector's `evaluate:` binds the inspected value, possibly a class).
+        if self.lookup_var("self").is_none() && self.context == CodeGenContext::Repl {
+            return ErrorSignalReceiver::Unknown;
+        }
         // `self` is the class object in a class method (including a
         // `ClassBuilder` class-method block), an instance everywhere else.
         if self.in_class_method() || self.builder_class_method_class().is_some() {
