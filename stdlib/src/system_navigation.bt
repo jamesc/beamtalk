@@ -264,9 +264,9 @@ sealed typed Object subclass: SystemNavigation
       inject: List new
       into: [:acc :pair |
         extClass := self resolveExtensionClass: (pair at: 1)
-        extClass isNil
-          ifTrue: [acc]
-          ifFalse: [acc add: #{#class => extClass, #selector => (pair at: 2)}]
+        extClass isNil ifTrue: [
+          acc
+        ] ifFalse: [acc add: #{#class => extClass, #selector => (pair at: 2)}]
       ]
 
   /// Validate that `aClass` is a class/metaclass object and return its name

@@ -223,8 +223,12 @@ TestCase subclass: SystemNavigationLiveWalkTest
     liveMeta := Tuple withAll: #(#'Integer class', #bt4418LiveMeta, "bt4418LiveMeta => 4")
     entries := #(gone, live, goneMeta, liveMeta)
     resolved := SystemNavigation liveExtensionsIn: entries
-    self assert: (resolved collect: [:e | e at: #class]) equals: #(Integer, Integer class)
-    self assert: (resolved collect: [:e | e at: #selector]) equals: #(#bt4418Live, #bt4418LiveMeta)
+    self assert: (resolved collect: [:e |
+      e at: #class
+    ]) equals: #(Integer, Integer class)
+    self assert: (resolved collect: [:e |
+      e at: #selector
+    ]) equals: #(#bt4418Live, #bt4418LiveMeta)
     self assert: (resolved first at: #source) equals: "bt4418Live => 2"
 
   // `extensionsBy:`'s record mapper drops pairs whose target was removed.
@@ -279,6 +283,10 @@ TestCase subclass: SystemNavigationLiveWalkTest
       classSide: true
     Erlang beamtalk_extensions unregister: #String selector: #bt4418LiveExt
     self assert: (matches collect: [:r | r at: #class]) equals: #(String)
-    self assert: (matches collect: [:r | r at: #selector]) equals: #(#bt4418LiveExt)
+    self assert: (matches collect: [:r |
+      r at: #selector
+    ]) equals: #(#bt4418LiveExt)
     self assert: (byPkg collect: [:r | r at: #class]) equals: #(String)
-    self assert: (byPkg collect: [:r | r at: #selector]) equals: #(#bt4418LiveExt)
+    self assert: (byPkg collect: [:r |
+      r at: #selector
+    ]) equals: #(#bt4418LiveExt)
