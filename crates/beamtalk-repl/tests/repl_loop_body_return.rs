@@ -26,9 +26,16 @@
 //!    repro before the fix;
 //! 3. runs on a BEAM against the runtime, in eval and trace mode, and answers
 //!    the value and the bindings [`expected`] says.
+//!
+//! Both corpora hold rows whose `^` runs an `ensure:` cleanup that writes a
+//! binding (BT-4312): the cleanup's write reaches the eval's boundary with the
+//! throw (proof 3), and with the `ensure:` relay switched off
+//! (`ensure_nlr_relay::fault::without_relay`) every such row, and no other,
+//! fails with `VerifyError::EnsureCleanupLostOnNlr`.
 
 mod common;
 
+use beamtalk_codegen::core_erlang::ensure_nlr_relay::fault::without_relay;
 use beamtalk_codegen::core_erlang::repl_nlr::boundary_fault::without_boundary;
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
@@ -122,6 +129,13 @@ const POSITIONS: &[(&str, &str, Step)] = &[
     (
         "ensure: block",
         "w := w + x. [x == 2 ifTrue: [^w]] ensure: [nil]",
+        |x, w| (w + x, (x == 2).then_some(w + x)),
+    ),
+    // The cleanup runs in every iteration, the one the `^` ends included: its
+    // write reaches the eval's boundary with the throw.
+    (
+        "ensure: cleanup writes",
+        "[x == 2 ifTrue: [^w + x]] ensure: [w := w + x]",
         |x, w| (w + x, (x == 2).then_some(w + x)),
     ),
     (
@@ -260,43 +274,137 @@ fn all_rows() -> Vec<Row> {
     rows
 }
 
+/// What the `ensure:` cleanups a shape's `^` runs through on its way to the
+/// eval's boundary do to `w`, from the value `w` has when the `^` runs
+/// (`None`: no cleanup writes `w`).
+type Cleanup = Option<fn(i64) -> i64>;
+
 /// BT-4312: the shapes of a `^` outside any loop, `{V}` its value: whether
-/// the shape is a bare `^` (a statement of the input itself) and whether it
-/// fires. The guard reads `x`, which every row starts at 0.
-const ROOT_SHAPES: &[(&str, &str, bool)] = &[
-    ("root", "^{V}", true),
-    ("arm", "x == 0 ifTrue: [^{V}]", true),
-    ("ifFalse: arm", "x == 1 ifFalse: [^{V}]", true),
+/// it fires, and what the `ensure:` cleanups it runs through write. The guard
+/// reads `x`, which every row starts at 0. A cleanup's writes reach the
+/// boundary with the throw, in every scope: `w := 0. [^5] ensure: [w := 9]`
+/// leaves `w` at 9, as the bare `^` did before BT-4312.
+const ROOT_SHAPES: &[(&str, &str, bool, Cleanup)] = &[
+    ("root", "^{V}", true, None),
+    ("arm", "x == 0 ifTrue: [^{V}]", true, None),
+    ("ifFalse: arm", "x == 1 ifFalse: [^{V}]", true, None),
     (
         "two-armed, first",
         "x == 0 ifTrue: [^{V}] ifFalse: [0]",
         true,
+        None,
     ),
     (
         "two-armed, second",
         "x == 1 ifTrue: [0] ifFalse: [^{V}]",
         true,
+        None,
     ),
-    ("nested arm", "x == 0 ifTrue: [x < 5 ifTrue: [^{V}]]", true),
-    ("and: block", "(x == 0 and: [^{V}]) ifTrue: [0]", true),
-    ("or: block", "(x == 1 or: [^{V}]) ifTrue: [0]", true),
-    ("ifNil: arm", "nil ifNil: [^{V}]", true),
-    ("ifNotNil: arm", "x ifNotNil: [:v | ^{V}]", true),
-    ("lookup arm", "#{#a => 1} at: #b ifAbsent: [^{V}]", true),
-    ("tryDo: block", "Result tryDo: [^{V}]", true),
-    ("evaluated block", "[^{V}] value", true),
+    (
+        "nested arm",
+        "x == 0 ifTrue: [x < 5 ifTrue: [^{V}]]",
+        true,
+        None,
+    ),
+    ("and: block", "(x == 0 and: [^{V}]) ifTrue: [0]", true, None),
+    ("or: block", "(x == 1 or: [^{V}]) ifTrue: [0]", true, None),
+    ("ifNil: arm", "nil ifNil: [^{V}]", true, None),
+    ("ifNotNil: arm", "x ifNotNil: [:v | ^{V}]", true, None),
+    (
+        "lookup arm",
+        "#{#a => 1} at: #b ifAbsent: [^{V}]",
+        true,
+        None,
+    ),
+    ("tryDo: block", "Result tryDo: [^{V}]", true, None),
+    ("evaluated block", "[^{V}] value", true, None),
     (
         "arm in an evaluated block",
         "[x == 0 ifTrue: [^{V}]] value",
         true,
+        None,
     ),
-    ("protected block", "[^{V}] on: Error do: [:e | 0]", true),
-    ("handler", "[1 / 0] on: Error do: [:e | ^{V}]", true),
-    ("ensure: block", "[^{V}] ensure: [nil]", true),
-    ("ensure: cleanup", "[0] ensure: [^{V}]", true),
-    ("match: arm", "x match: [0 -> ^{V}; _ -> nil]", true),
-    ("operand", "#[0, (x == 0 ifTrue: [^{V}])]", true),
-    ("never fires", "x == 5 ifTrue: [^{V}]", false),
+    (
+        "protected block",
+        "[^{V}] on: Error do: [:e | 0]",
+        true,
+        None,
+    ),
+    ("handler", "[1 / 0] on: Error do: [:e | ^{V}]", true, None),
+    ("ensure: block", "[^{V}] ensure: [nil]", true, None),
+    ("ensure: cleanup", "[0] ensure: [^{V}]", true, None),
+    ("match: arm", "x match: [0 -> ^{V}; _ -> nil]", true, None),
+    ("operand", "#[0, (x == 0 ifTrue: [^{V}])]", true, None),
+    ("never fires", "x == 5 ifTrue: [^{V}]", false, None),
+    // The `ensure:` cleanups the throw runs write a binding.
+    (
+        "ensure: cleanup writes",
+        "[^{V}] ensure: [w := 9]",
+        true,
+        Some(|_| 9),
+    ),
+    (
+        "ensure: cleanup reads and writes",
+        "[^{V}] ensure: [w := w + 100]",
+        true,
+        Some(|w| w + 100),
+    ),
+    (
+        "ensure: cleanup loop",
+        "[^{V}] ensure: [#(1, 2) do: [:y | w := w + y]]",
+        true,
+        Some(|w| w + 3),
+    ),
+    (
+        "ensure: cleanup arm",
+        "[^{V}] ensure: [x == 0 ifTrue: [w := w + 100]]",
+        true,
+        Some(|w| w + 100),
+    ),
+    // An outer cleanup that read `w` would be rejected (ADR 0133: its
+    // protected block writes `w` and holds a `^`), so it only writes.
+    (
+        "nested ensure: cleanups",
+        "[[^{V}] ensure: [w := w + 100]] ensure: [w := 7]",
+        true,
+        Some(|_| 7),
+    ),
+    (
+        "ensure: inside a non-writing ensure:",
+        "[[^{V}] ensure: [w := w + 100]] ensure: [nil]",
+        true,
+        Some(|w| w + 100),
+    ),
+    (
+        "ensure: in a cleanup",
+        "[^{V}] ensure: [[w := w + 100] ensure: [w := w * 2]]",
+        true,
+        Some(|w| (w + 100) * 2),
+    ),
+    (
+        "on:do: inside ensure:",
+        "[[^{V}] on: Error do: [:e | 0]] ensure: [w := 9]",
+        true,
+        Some(|_| 9),
+    ),
+    (
+        "ensure: inside on:do:",
+        "[[^{V}] ensure: [w := 9]] on: Error do: [:e | 0]",
+        true,
+        Some(|_| 9),
+    ),
+    (
+        "ensure: in an arm",
+        "x == 0 ifTrue: [[^{V}] ensure: [w := w + 100]]",
+        true,
+        Some(|w| w + 100),
+    ),
+    (
+        "ensure: in an evaluated block",
+        "[[x == 0 ifTrue: [^{V}]] ensure: [w := w + 100]] value",
+        true,
+        Some(|w| w + 100),
+    ),
 ];
 
 /// BT-4312: a position of the `^` (`{R}`) in the input.
@@ -379,19 +487,21 @@ const ROOT_CONTEXTS: &[RootContext] = &[
 struct RootRow {
     row: Row,
     final_root: bool,
+    /// The `^` runs an `ensure:` cleanup that writes a binding.
+    cleanup_writes: bool,
 }
 
 /// Every BT-4312 row: each shape in each context. The `^` answers `w + 10`.
 fn root_rows() -> Vec<RootRow> {
     let mut rows = Vec::new();
-    for (shape_name, shape, fires) in ROOT_SHAPES {
+    for (shape_name, shape, fires, cleanup) in ROOT_SHAPES {
         for ctx in ROOT_CONTEXTS {
             let source = ctx.template.replace("{R}", &shape.replace("{V}", "w + 10"));
             let expected = if *fires {
                 Expected {
                     fired: true,
                     value: Some(ctx.w_at + 10),
-                    w: ctx.w_at,
+                    w: cleanup.map_or(ctx.w_at, |f| f(ctx.w_at)),
                     x: Some(0),
                 }
             } else {
@@ -410,6 +520,7 @@ fn root_rows() -> Vec<RootRow> {
                     expected,
                 },
                 final_root,
+                cleanup_writes: cleanup.is_some(),
             });
         }
     }
@@ -761,6 +872,45 @@ fn repl_root_and_arm_returns_answer_like_a_method() {
     assert!(
         failures.is_empty(),
         "{} REPL root or arm `^` run(s) disagree with the method semantics:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// BT-4312: proof 2 for the `ensure:` relay. Without it (the catch re-raises
+/// the throw after the cleanup, as before the fix), every row whose `^` runs
+/// an `ensure:` cleanup that writes a binding fails
+/// `VerifyError::EnsureCleanupLostOnNlr`, the check that fails on the repro
+/// before the fix, and no other row does. Proof 3 (the BEAM runs above) shows
+/// the cleanup's write reaches the eval's boundary with the relay.
+#[test]
+fn ensure_cleanups_a_return_runs_need_their_relay() {
+    let root = root_rows();
+    let loops = rows();
+    let all = root.iter().map(|r| (&r.row, r.cleanup_writes)).chain(
+        loops
+            .iter()
+            .map(|r| (r, r.name.contains("ensure: cleanup writes"))),
+    );
+    let mut failures = Vec::new();
+    let mut relayed = 0;
+    for (row, writes) in all {
+        let report = without_relay(|| verifier_report(&row.source));
+        if writes != report.contains("EnsureCleanupLostOnNlr") {
+            failures.push(format!(
+                "{}: without the relay, expected EnsureCleanupLostOnNlr: {writes}, got {report}",
+                row.name
+            ));
+        }
+        relayed += usize::from(writes);
+    }
+    assert!(
+        relayed >= 80,
+        "too few rows run a writing cleanup: {relayed}"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} row(s) disagree:\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );

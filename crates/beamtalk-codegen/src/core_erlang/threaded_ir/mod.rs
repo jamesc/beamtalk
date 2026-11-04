@@ -96,10 +96,10 @@ pub(super) use emit::{
 pub(super) use ir::CallSiteLine;
 pub(super) use ir::RebindFrameKind;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
-    VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureNlrRelay,
+    FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
+    UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.
@@ -122,7 +122,9 @@ pub(super) use verify::{
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
-pub(super) use verify::{CatchRestoreDefect, ScopeKind, verify, verify_in_scope};
+pub(super) use verify::{
+    CatchRestoreDefect, EnsureRelayDefect, ScopeKind, verify, verify_in_scope,
+};
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

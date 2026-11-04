@@ -15,10 +15,10 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId,
-    LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
-    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
-    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureNlrRelay,
+    FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason,
+    ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -485,6 +485,26 @@ pub(in crate::core_erlang) enum VerifyError {
     /// or arm `^` (BT-4312).
     ReplReturnWithoutBoundary { at: Span },
 
+    /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
+    /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
+    /// an `ensure:` is not a boundary, so a write its cleanup makes reaches
+    /// whichever boundary the in-flight NLR or exception reaches. For an
+    /// error the cleanup runs and the error propagates (the boundary that
+    /// catches it decides what is kept). A `^` carries the scope's state to
+    /// its boundary in the throw (the REPL's bindings map, an actor's
+    /// `State`, a value type's `Self`; a class method carries none, its class
+    /// variables are written in place), so the catch must run the cleanup from
+    /// that carried state and resume the throw with the cleanup's result.
+    /// Fires when the cleanup advances the carried family, or the scope's
+    /// state lives in the actor-state cell, and the node has no relay
+    /// ([`EnsureRelayDefect::NoRelay`]) or its relay re-throws anything but
+    /// the cleanup's result ([`EnsureRelayDefect::RethrowsStaleState`]). The
+    /// repro: `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
+    /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
+    /// gap), and an actor method's `[^1] ensure: [self.n := 9]` never kept
+    /// `n`.
+    EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
+
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
     /// the condition slot hands the condition's version back into the loop's
@@ -737,6 +757,16 @@ pub(in crate::core_erlang) enum ClassMethodDefect {
     /// [`VerifyError::UnbracketedUserCodeSend`] shape), not by the structural
     /// walk: the repack's seed is not in any node for the walk to check.
     TupleAccRepackFromAmbientState,
+}
+
+/// What is wrong with an [`ThreadedStmt::EnsureCatch`]'s `$bt_nlr` clause
+/// ([`VerifyError::EnsureCleanupLostOnNlr`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum EnsureRelayDefect {
+    /// The scope's own throw is re-raised untouched.
+    NoRelay,
+    /// The relay re-throws a state other than the cleanup's result.
+    RethrowsStaleState,
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -1110,6 +1140,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::OnDoCatch { .. }
+            | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
@@ -1792,6 +1823,21 @@ impl VerifyWalk<'_> {
                         .push(VerifyError::CatchFilterNotClosed { at: *span });
                 }
             }
+            ThreadedStmt::EnsureCatch {
+                token,
+                carry,
+                cleanup_final,
+                relay,
+                span,
+                ..
+            } => {
+                if let Some(defect) =
+                    check_ensure_relay(token.is_some(), *carry, *cleanup_final, relay.as_ref())
+                {
+                    self.errors
+                        .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
+                }
+            }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
                 self.check_class_method_family(state, *span);
@@ -1832,6 +1878,33 @@ impl VerifyWalk<'_> {
             }
         }
     }
+}
+
+/// BT-4312 obligation of one [`ThreadedStmt::EnsureCatch`]: when a `^` of
+/// the scope can cross it (`has_token`) carrying state its cleanup writes (a
+/// cleanup that advances the carried family, or any cleanup when the state is
+/// the live cell), the relay must re-throw the cleanup's result.
+fn check_ensure_relay(
+    has_token: bool,
+    carry: Option<NlrCarry>,
+    cleanup_final: Option<usize>,
+    relay: Option<&EnsureNlrRelay>,
+) -> Option<EnsureRelayDefect> {
+    let carry = carry.filter(|_| has_token)?;
+    let expected = match (carry, cleanup_final) {
+        (NlrCarry::Live, _) => None,
+        (NlrCarry::StateAcc | NlrCarry::SelfVt, Some(version)) => Some(version),
+        (NlrCarry::StateAcc | NlrCarry::SelfVt, None) => return None,
+    };
+    let Some(relay) = relay else {
+        return Some(EnsureRelayDefect::NoRelay);
+    };
+    let fresh = match (&relay.rethrow, expected) {
+        (RethrowSlot::Version(found), Some(version)) => *found == version,
+        (RethrowSlot::Live(_), None) => true,
+        _ => false,
+    };
+    (!fresh).then_some(EnsureRelayDefect::RethrowsStaleState)
 }
 
 /// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:

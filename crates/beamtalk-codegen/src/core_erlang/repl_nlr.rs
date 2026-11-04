@@ -104,6 +104,14 @@ impl CoreErlangGenerator {
         threaded_ir::render(&stmts, &mut ctx)
     }
 
+    /// The eval's NLR token, when the input holds a `^` that throws to it.
+    pub(in crate::core_erlang) fn repl_eval_token(&self) -> Option<String> {
+        if !self.is_repl_mode() {
+            return None;
+        }
+        self.repl_context.as_ref()?.eval_boundary.token.clone()
+    }
+
     /// The token the REPL `^` at `span` throws to: the eval's, when `span` is
     /// one of the `^`s that throw to it. `None` for every other `^`, which
     /// answers its value where it stands. Such a `^` with no token is

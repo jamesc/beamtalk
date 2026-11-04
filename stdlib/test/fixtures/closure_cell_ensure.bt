@@ -67,3 +67,35 @@ Actor subclass: ClosureCellEnsure
       ] ensure: [rec record: self.n]
     ] on: Error do: [:e | nil]
     self.n
+
+  n => self.n
+
+  // BT-4312: a cleanup that a `^` runs keeps its writes: the throw resumes
+  // with the cleanup's state, so the method's boundary answers it.
+  cleanupWriteAfterReturn =>
+    [^1] ensure: [self.n := 9]
+    0
+
+  cleanupReadsTheBodysWriteAfterReturn =>
+    [
+      self.n := 5
+      ^1
+    ] ensure: [self.n := self.n + 100]
+    0
+
+  nestedCleanupsAfterReturn =>
+    [[^1] ensure: [self.n := self.n + 100]] ensure: [self.n := self.n * 2]
+    0
+
+  cleanupInALoopAfterReturn =>
+    #(1, 2, 3) do: [:i | [i == 2 ifTrue: [^i]] ensure: [self.n := self.n + i]]
+    0
+
+  cleanupInADynamicLoopAfterReturn: xs =>
+    xs do: [:i | [i == 2 ifTrue: [^i]] ensure: [self.n := self.n + i]]
+    0
+
+  cleanupInAClosureAfterReturn =>
+    b := [[^1] ensure: [self.n := 9]]
+    b value
+    0

@@ -118,6 +118,27 @@ error, as the loop-body case was. The verifier error is renamed
 `VerifyError::ReplReturnWithoutBoundary`. `in_closure` is unchanged: a `^` in
 a stored closure answers its value where it stands.
 
+**An `ensure:` cleanup run by a `^` keeps its writes.** An `ensure:` is not a
+boundary, so a write its cleanup makes reaches whichever boundary the
+in-flight NLR or exception reaches. The invariant, for every scope kind: on an
+error the cleanup runs and the error propagates (the catching boundary decides
+what is kept). On a `^` of the scope, whose throw carries the scope's state to
+its boundary (the REPL's bindings map, an actor method's `State`, a value-type
+method's `Self`; the cell in an actor closure or merged Tier 2 fun; nothing in a
+class method, whose class variables are written in place), the catch runs the
+cleanup from the carried state and resumes the throw with the cleanup's
+result. That holds wherever the `ensure:` sits: a statement, a conditional
+arm, a loop or fold body, an `on:do:` arm, another `ensure:`'s cleanup (each
+relay hands the next one out its result), a stored closure, up to the method's
+or the eval's boundary. A `^` of another scope is re-raised as it came. The
+catch re-raised the original throw before, so its boundary answered the state
+at the `^`: `w := 0. [^5] ensure: [w := 9]` left `w` at 0 once this amendment
+made that `^` a throw (BT-4288's loop-body `^` had the same gap), and an actor
+method's `[^1] ensure: [self.n := 9]` never kept `n`. The catch is one
+`ThreadedStmt::EnsureCatch` node (`ensure_nlr_relay.rs`), and
+`VerifyError::EnsureCleanupLostOnNlr` fails a cleanup that writes the carried
+state with no relay.
+
 ## Decision
 
 Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.

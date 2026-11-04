@@ -10,8 +10,9 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    FrameId, LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt,
-    ThreadingMode, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureNlrRelay, FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -269,6 +270,20 @@ pub(in crate::core_erlang) fn render(
                 cell.as_ref(),
                 try_region,
                 clauses,
+            )),
+            ThreadedStmt::EnsureCatch {
+                vars,
+                token,
+                carry,
+                relay,
+                other,
+                ..
+            } => docs.push(render_ensure_catch(
+                vars,
+                token.as_ref(),
+                *carry,
+                relay.as_ref(),
+                other,
             )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
                 "let ",
@@ -646,6 +661,81 @@ fn render_on_do_catch(
         }
     }
     Document::Vec(docs)
+}
+
+/// Renders one [`ThreadedStmt::EnsureCatch`]: `catch <Type, Error, Stack> ->`
+/// and, with a relay, a `case` whose first clause matches the scope's own
+/// `$bt_nlr` throw, runs the relay's cleanup from the state it carries and
+/// resumes the throw with the cleanup's result; every other exception (and a
+/// foreign token's throw) takes `other`. Without a relay the catch is `other`
+/// alone, the shape every `ensure:` had before BT-4312.
+fn render_ensure_catch(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: Option<NlrCarry>,
+    relay: Option<&EnsureNlrRelay>,
+    other: &Document<'static>,
+) -> Document<'static> {
+    let head = docvec![
+        "catch <",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        ", ",
+        leaf::var(vars.stack_var.clone()),
+        "> -> ",
+    ];
+    let (Some(relay), Some(token), Some(carry)) = (relay, token, carry) else {
+        return docvec![head, other.clone()];
+    };
+    let rethrow = match &relay.rethrow {
+        RethrowSlot::Version(version) => {
+            let family = match carry {
+                NlrCarry::SelfVt => "Self",
+                NlrCarry::StateAcc | NlrCarry::Live => "StateAcc",
+            };
+            leaf::var(super::super::util::versioned_var(family, *version))
+        }
+        RethrowSlot::Live(doc) => doc.clone(),
+    };
+    let store = if relay.cell_store {
+        docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
+    } else {
+        Document::Nil
+    };
+    docvec![
+        head,
+        "case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of <{'throw', {'$bt_nlr', ",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_val_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_carried_var.clone()),
+        "}}> when call 'erlang':'=:='(",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(token.name().to_string()),
+        ") -> ",
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " ",
+        store,
+        "call 'erlang':'throw'({'$bt_nlr', ",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_val_var.clone()),
+        ", ",
+        rethrow,
+        "}) <",
+        leaf::var(vars.other_pair_var.clone()),
+        "> when 'true' -> ",
+        other.clone(),
+        " end",
+    ]
 }
 
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {

@@ -963,7 +963,10 @@ reports the same message at the same span. No operation is surface-specific.
   assignment to `x` never completes"). A `^` in a stored closure
   (`b := [:x | ^x]`) is unchanged: it answers its value where it stands. The
   verdict is the analyser's, so CLI/LSP/MCP diagnostics for the same
-  top-level expressions change together.
+  top-level expressions change together. An `ensure:` cleanup that such a `^`
+  runs keeps its writes: `w := 0`, then `[^5] ensure: [w := 9]` answers 5 and
+  leaves `w` at 9, as the bare `^` did. The same fix keeps an actor field a
+  cleanup writes while a method's `^` unwinds (it was dropped before).
 
 ### `internal:` ThreadedIr verifier warning (ADR 0111 Addendum 17, BT-3724)
 

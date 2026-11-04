@@ -109,6 +109,23 @@ true ifTrue: [^3]
 [^55] ensure: [0]
 // => 55
 
+// The `ensure:` cleanup a `^` runs keeps its writes: the throw takes them to
+// the eval's boundary (before the fix `w` stayed 0, and 1).
+w := 0
+// => 0
+
+[^5] ensure: [w := 9]
+// => 5
+
+w
+// => 9
+
+w := 1. [^w + 10] ensure: [w := w + 100]. w := 0
+// => 11
+
+w
+// => 101
+
 b2 := [:x | ^x]
 // => _
 
