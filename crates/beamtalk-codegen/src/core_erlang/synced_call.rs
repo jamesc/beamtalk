@@ -1224,6 +1224,10 @@ impl CoreErlangGenerator {
             _ => 0,
         };
         self.synced.window_receivers.push(receiver);
+        // BT-4279: an offer never outlives its window. Emitters offer only
+        // after their operand windows have closed, so one still pending here
+        // came from a lowering that failed before `synced_call_value`.
+        self.synced.pending_fast_path = None;
         Some(SyncWindow(()))
     }
 
