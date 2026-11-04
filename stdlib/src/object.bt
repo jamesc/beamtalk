@@ -409,7 +409,11 @@ ProtoObject subclass: Object
   isKindOf: aClass :: Behaviour -> Boolean =>
     // `self class includesBehaviour: aClass`, answered from the class table
     // in the caller rather than by messaging class processes (BT-4065).
-    (Erlang beamtalk_behaviour_intrinsics) objectIsKindOf: self of: aClass
+    // Lowered to a direct `beamtalk_behaviour_intrinsics:objectIsKindOf/2`
+    // call (BT-4410): the intrinsic answers a boolean and raises only
+    // structured errors, so the foreign-FFI wrapper (result coercion,
+    // `error:*` wrapping) has nothing to do and is skipped.
+    @primitive "isKindOf:"
 
   // === Error handling & dispatch ===
 
