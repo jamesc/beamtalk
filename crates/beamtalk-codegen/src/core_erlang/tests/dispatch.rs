@@ -1446,6 +1446,124 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
     );
 }
 
+/// BT-4075: the body of method `name` in `code` (up to the next top-level fun).
+fn method_body<'a>(code: &'a str, name: &str) -> &'a str {
+    let start = code
+        .match_indices(&format!("\n'{name}'/"))
+        .map(|(at, _)| at + 1)
+        .find(|&at| {
+            code[at..]
+                .lines()
+                .next()
+                .is_some_and(|l| l.contains(" = fun "))
+        })
+        .unwrap_or_else(|| panic!("no method {name}:\n{code}"));
+    let rest = &code[start..];
+    let end = rest[1..].find("\n'").map_or(rest.len(), |i| i + 1);
+    &rest[..end]
+}
+
+#[test]
+fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
+    // `obj error:` with an untyped receiver: a class object whose class side
+    // understands `error:` takes the ordinary send (`Result class>>error:`),
+    // anything else raises in place.
+    let code = codegen("Object subclass: Probe\n  raise: msg via: obj => obj error: msg\n");
+    let body = method_body(&code, "raise:via:");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "untyped `error:` receiver must be guarded by class_object_understands:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_message_dispatch':'send'(") && body.contains("'error:', ["),
+        "class-object branch must send `error:`:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "instance branch must keep the user_error raise:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_instance_method_stays_unguarded_intrinsic() {
+    let code = codegen("Object subclass: Probe\n  boom => self error: \"x\"\n");
+    let body = method_body(&code, "boom");
+    assert!(
+        body.contains("'user_error'"),
+        "`self error:` in an instance method must raise user_error:\n{body}"
+    );
+    assert!(
+        !body.contains("class_object_understands"),
+        "`self` in an instance method is never a class object:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
+    // `self` in a class method is a class object: a class-side `error:` takes a
+    // class-side self-send, otherwise `Object>>error:` raises as before.
+    let code = codegen("Object subclass: Probe\n  class boom => self error: \"x\"\n");
+    let body = method_body(&code, "class_boom");
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
+        "class-method `self error:` must be guarded:\n{body}"
+    );
+    assert!(
+        body.contains("'beamtalk_class_dispatch':'class_self_send'("),
+        "class-method `self error:` must self-send, not go through the class process:\n{body}"
+    );
+    assert!(
+        body.contains("'user_error'"),
+        "class-method `self error:` without a class-side `error:` must still raise:\n{body}"
+    );
+}
+
+#[test]
+fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
+    // A class object's class-side `error:` answers a value, so an actor
+    // method ending in `obj error: msg` must reply with it (no bare
+    // never-returns emission), and the send may run user code, so it is
+    // bracketed like any other call. `self error:` keeps the bare raise.
+    let code = codegen(
+        "Actor subclass: Probe\n  state: n = 0\n  raise: msg via: obj => obj error: msg\n  boom => self error: \"x\"\n",
+    );
+    let guarded = code
+        .lines()
+        .find(|l| l.contains("'class_object_understands'("))
+        .unwrap_or_else(|| panic!("no guarded error: send:\n{code}"));
+    assert!(
+        guarded.contains("{'reply', _Result, "),
+        "`obj error:` as the last statement must reply with its answer:\n{guarded}"
+    );
+    assert!(
+        guarded.contains("'beamtalk_actor_state':'store'("),
+        "`obj error:` may run user code, so it must be bracketed:\n{guarded}"
+    );
+    let raise = code
+        .lines()
+        .find(|l| l.contains("'user_error'") && !l.contains("class_object_understands"))
+        .unwrap_or_else(|| panic!("no bare `self error:` raise:\n{code}"));
+    assert!(
+        !raise.contains("'reply'"),
+        "`self error:` never returns, so it gets no reply tuple:\n{raise}"
+    );
+}
+
+#[test]
+fn test_bt4075_actor_logger_error_last_statement_replies() {
+    // `Logger error:` answers nil: as the last statement it must reply, not
+    // be emitted bare as a never-returning `error:`.
+    let code = codegen("Actor subclass: Probe\n  state: n = 0\n  log: msg => Logger error: msg\n");
+    let line = code
+        .lines()
+        .find(|l| l.contains("'beamtalk_logging_config':'log'"))
+        .unwrap_or_else(|| panic!("no Logger log call:\n{code}"));
+    assert!(
+        line.contains("{'reply', _Result, "),
+        "`Logger error:` as the last statement must reply:\n{line}"
+    );
+}
+
 #[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
@@ -2368,10 +2486,21 @@ fn test_field_names_actor_uses_sync_send() {
     );
 }
 
+/// True when `code` delegates `selector` to `beamtalk_message_dispatch:send/3`.
+fn has_message_dispatch_send_for_selector(code: &str, selector: &str) -> bool {
+    code.match_indices("'beamtalk_message_dispatch':'send'(")
+        .any(|(idx, _)| {
+            let end = (idx + 200).min(code.len());
+            code[idx..end].contains(selector)
+        })
+}
+
 #[test]
-fn test_field_at_actor_uses_sync_send() {
-    // fieldAt: on an actor receiver must use sync_send.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:' atom.
+fn test_field_at_object_receiver_uses_message_dispatch() {
+    // BT-4148: a `#beamtalk_object{}` receiver of `fieldAt:` may be an actor
+    // instance OR a class object; only `beamtalk_message_dispatch:send/3`
+    // (`classify_receiver`) tells them apart. A direct `sync_send` sent a
+    // class object the actor message shape and crashed its gen_server.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2380,8 +2509,12 @@ fn test_field_at_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldAt:'"),
-        "fieldAt: on actor must call sync_send with 'fieldAt:' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
+        "fieldAt: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:'"),
+        "fieldAt: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2391,12 +2524,16 @@ fn test_field_at_actor_uses_sync_send() {
         !code.contains("'beamtalk_future':'new'"),
         "fieldAt: must not allocate a future. Got:\n{code}"
     );
+    // The primitive-receiver error stays inline.
+    assert!(
+        code.contains("'immutable_value'"),
+        "fieldAt: must keep its inline immutable_value error for primitives. Got:\n{code}"
+    );
 }
 
 #[test]
-fn test_field_at_put_actor_uses_sync_send() {
-    // fieldAt:put: on an actor receiver must use sync_send.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldAt:put:' atom.
+fn test_field_at_put_object_receiver_uses_message_dispatch() {
+    // BT-4148: as `fieldAt:` above, for `fieldAt:put:`.
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2405,8 +2542,12 @@ fn test_field_at_put_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldAt:put:'"),
-        "fieldAt:put: on actor must call sync_send with 'fieldAt:put:' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
+        "fieldAt:put: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:put:'"),
+        "fieldAt:put: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -2415,6 +2556,36 @@ fn test_field_at_put_actor_uses_sync_send() {
     assert!(
         !code.contains("'beamtalk_future':'new'"),
         "fieldAt:put: must not allocate a future. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'immutable_value'"),
+        "fieldAt:put: must keep its inline immutable_value error for primitives. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_field_at_class_receiver_uses_message_dispatch() {
+    // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
+    // class route through `beamtalk_message_dispatch:send/3`, which reaches
+    // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
+    let src = concat!(
+        "Object subclass: Holder\n",
+        "  classState: count = 0\n\n",
+        "  probe => Holder fieldAt: #count\n",
+        "  poke => Holder fieldAt: #count put: 3\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
+        "Cls fieldAt: must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
+        "Cls fieldAt:put: must go through beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldAt:"),
+        "Cls fieldAt:[put:] must not sync_send to the class pid. Got:\n{code}"
     );
 }
 
@@ -3025,6 +3196,70 @@ fn test_sealed_method_logger_call_tags_own_selector() {
 }
 
 #[test]
+fn test_logger_call_site_routes_through_runtime_string_unwrap() {
+    // BT-4321: a Beamtalk String is the tagged `{beamtalk_string, Bin}` term,
+    // which OTP's `~ts` cannot format. Call-site `Logger` sends must go through
+    // `beamtalk_logging_config:log/3` (which unwraps message and metadata), never
+    // straight into `logger:log`.
+    let src = concat!(
+        "Object subclass: Svc\n\n",
+        "  run =>\n",
+        "    Logger error: \"boom\"\n",
+        "    Logger warn: \"retry\" metadata: #{\"attempt\" => 2}\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("'logger':'log'"),
+        "Logger sends must not call logger:log directly (BT-4321). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_logging_config':'log'('error', "),
+        "Logger error: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_logging_config':'log'('warning', "),
+        "Logger warn:metadata: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_selector' => 'run'"),
+        "Injected metadata must still carry the caller's selector. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_logger_intrinsic_bodies_route_through_runtime_string_unwrap() {
+    // BT-4321: the `@intrinsic logger*` method bodies (reached through
+    // `perform:` and other dynamic sends) previously passed the tagged String
+    // straight to `logger:log/3` as its message. They share the call-site
+    // lowering now.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../stdlib/src/logger.bt"
+    ))
+    .expect("stdlib/src/logger.bt should be readable");
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@stdlib@logger").with_stdlib_mode(true),
+    )
+    .expect("logger.bt codegen should succeed");
+    assert!(
+        !code.contains("'logger':'log'"),
+        "Logger intrinsic bodies must not call logger:log directly (BT-4321). Got:\n{code}"
+    );
+    for level in ["debug", "info", "warning", "error"] {
+        let needle = format!("call 'beamtalk_logging_config':'log'('{level}', ");
+        assert_eq!(
+            code.matches(&needle).count(),
+            2,
+            "expected the plain and metadata: `{level}` bodies to lower to \
+             beamtalk_logging_config:log/3. Got:\n{code}"
+        );
+    }
+}
+
+#[test]
 fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     // A self-send passing a stateful block argument — one that captures
     // and mutates an outer local, e.g. a user-defined HOM invocation like
@@ -3095,6 +3330,76 @@ fn test_class_literal_uses_compile_time_registered_name() {
             && output.contains("{'beamtalk_object', 'Point class', "),
         "the class object takes its module and pid at run time. Got:\n{output}"
     );
+}
+
+/// BT-4411: a literal naming a built-in whose routing-fixture row pins its
+/// own module (`String`) builds the class object with that module baked in:
+/// the pid is still the run-time `whereis` result and `class_not_found` is
+/// unchanged, but there is no `module_name_safe/1` lookup.
+#[test]
+fn test_builtin_class_literal_bakes_pinned_module() {
+    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+    let output = generator
+        .generate_class_reference("String")
+        .unwrap()
+        .to_pretty_string();
+    let shape = regex::Regex::new(
+        r"(?s)case call 'erlang':'whereis'\('beamtalk_class_String'\) of\s*<'undefined'> when 'true' -> .*'class_not_found', 'String'.*<([\w@]+)> when 'true' -> \{'beamtalk_object', 'String class', 'bt@stdlib@string', ([\w@]+)\}\s*end",
+    )
+    .unwrap();
+    let caps = shape
+        .captures(&output)
+        .unwrap_or_else(|| panic!("unexpected String literal shape. Got:\n{output}"));
+    assert_eq!(
+        &caps[1], &caps[2],
+        "the class object carries the looked-up pid"
+    );
+    assert!(
+        !output.contains("module_name_safe"),
+        "a pinned built-in must not look its module up. Got:\n{output}"
+    );
+}
+
+/// BT-4411: only a fixture row whose `target_module` *is* the class's own
+/// module is baked. `ErlangModule` routes to `beamtalk_erlang_proxy`, which is
+/// not its class module, so its literal keeps the run-time lookup, as does
+/// every built-in without a target module (`Character`, `Boolean`).
+#[test]
+fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
+    for class in ["ErlangModule", "Character", "Boolean", "Object"] {
+        let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+        let output = generator
+            .generate_class_reference(class)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'beamtalk_object_class':'module_name_safe'("),
+            "{class} must keep the run-time module lookup. Got:\n{output}"
+        );
+    }
+}
+
+/// BT-4411: every fixture row with a `target_module` that names a stdlib
+/// class module is one the compiler resolves to that same module, so the
+/// bake actually applies to it (a drift in either would silently fall back
+/// to the run-time lookup).
+#[test]
+fn test_every_stdlib_pinned_row_is_its_class_module() {
+    let generator = CoreErlangGenerator::new("bt@my_app@main");
+    for row in crate::core_erlang::routing::rows() {
+        let Some(target) = row.target_module else {
+            continue;
+        };
+        if !target.starts_with("bt@stdlib@") {
+            continue;
+        }
+        assert_eq!(
+            generator.compiled_module_name(row.class),
+            target,
+            "{} pins {target}",
+            row.class
+        );
+    }
 }
 
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
@@ -3526,9 +3831,9 @@ fn test_class_method_self_send_in_sealed_class_is_guarded() {
 }
 
 /// BT-4301: an explicit own-class reference (`OpenCls foo`) binds the method
-/// to the named class, never late-bound on the receiver, which stays
-/// `ClassSelf`: the guard checks only shadows on the named class, and its
-/// fallback resolves `foo` from the named class.
+/// to the named class, never late-bound on the receiver. In the receiver-is-
+/// `OpenCls` arm (BT-4317) the guard checks only shadows on the named class,
+/// and its fallback resolves `foo` from the named class.
 #[test]
 fn test_class_method_explicit_class_reference_binds_the_named_class() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
@@ -3539,13 +3844,113 @@ fn test_class_method_explicit_class_reference_binds_the_named_class() {
     );
     assert!(
         code.contains("call 'test':'class_foo'(ClassSelf)"),
-        "the guarded arm passes the receiver. Got:\n{code}"
+        "the guarded arm passes the receiver, which is OpenCls in this arm. Got:\n{code}"
     );
     assert!(
         code.contains(
             "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('OpenCls', 'foo', [], ClassSelf)"
         ),
         "the fallback resolves from the named class. Got:\n{code}"
+    );
+}
+
+/// BT-4317: a class literal always denotes that class. `Base who` inside a
+/// class method of `Base` cases on the running receiver's tag: the own-class
+/// direct path when it is `Base` (no `gen_server:call` into the running
+/// class process), the ordinary literal class send to `Base` otherwise (an
+/// inherited method running for a subclass), so `who` runs with
+/// `self == Base` either way. The argument is bound once ahead of the `case`
+/// and both arms read the same variable.
+#[test]
+fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
+    let src = "Object subclass: Base\n  class who: x => x\n\n  class run => Base who: 1 + 2\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_run'/1 = fun")
+        .expect("class_run function present");
+    let run = &code[start..];
+    let end = run[1..].find("\n'").map_or(run.len(), |e| e + 1);
+    let run = &run[..end];
+    let tag_case = run
+        .find("case call 'erlang':'element'(2, ClassSelf) of <'Base class'> when 'true' ->")
+        .unwrap_or_else(|| panic!("the send cases on the receiver tag. Got:\n{run}"));
+    let literal_arm = tag_case
+        + run[tag_case..]
+            .find("<_> when 'true' -> let _StaticSelf")
+            .unwrap_or_else(|| panic!("the other arm is the literal class send. Got:\n{run}"));
+    let own_arm = &run[tag_case..literal_arm];
+    assert!(
+        own_arm.contains("call 'test':'class_who:'(ClassSelf, ")
+            && own_arm.contains("'class_self_dispatch_local'('Base', 'who:', ["),
+        "the Base arm is the own-class direct path. Got:\n{own_arm}"
+    );
+    assert!(
+        !own_arm.contains("'class_send'"),
+        "the Base arm never sends to its own class process. Got:\n{own_arm}"
+    );
+    let literal = &run[literal_arm..];
+    assert!(
+        literal.contains("'class_who:', 'Base class'}, 'false')")
+            && literal.contains("'static_call_target'(")
+            && literal.contains(":'class_who:'(_StaticSelf")
+            && literal.contains("'class_send'(_ClassPid"),
+        "the literal arm is the guarded direct call with Base's own reference. Got:\n{literal}"
+    );
+    assert_eq!(
+        run.matches("call 'erlang':'+'(").count(),
+        1,
+        "the argument is compiled once, before the case. Got:\n{run}"
+    );
+    assert!(
+        run.find("call 'erlang':'+'(").unwrap() < tag_case,
+        "the argument is bound ahead of the case. Got:\n{run}"
+    );
+}
+
+/// BT-4317: own-class sends nested in block arguments grow linearly. Each
+/// send's arguments (here a block holding the next send) are compiled once,
+/// ahead of its receiver-tag `case`, so the innermost body appears once and
+/// each send emits one own-class guard and one literal-send guard.
+#[test]
+fn test_nested_own_class_sends_in_block_args_compile_once() {
+    let src = "Object subclass: Base\n  class foo => 1\n\n  class at: k section: aBlock => aBlock value\n\n  class go => Base at: 1 section: [Base at: 2 section: [Base at: 3 section: [Base foo]]]\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_go'/1 = fun")
+        .expect("class_go function present");
+    let go = &code[start..];
+    let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
+    let go = &go[..end];
+    assert_eq!(
+        go.matches("'class_self_direct_ok'").count(),
+        4,
+        "one own-class guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("'beamtalk_class_shadow_flags':'static_call_target'(")
+            .count(),
+        4,
+        "one literal-send guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("<'Base class'> when 'true'").count(),
+        4,
+        "one receiver-tag case per send. Got:\n{go}"
+    );
+}
+
+/// BT-4317: `self foo` still late-binds to the receiver: no receiver-tag case.
+#[test]
+fn test_self_send_in_class_method_has_no_receiver_tag_case() {
+    let src = "Object subclass: Base\n  class who => 1\n\n  class run => self who\n";
+    let code = codegen_source(src);
+    assert!(
+        !code.contains("case call 'erlang':'element'(2, ClassSelf) of <'Base class'>"),
+        "self sends are not own-class literal sends. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_self_send'(ClassSelf, 'who', [])"),
+        "self who walks from the receiver. Got:\n{code}"
     );
 }
 
@@ -4144,6 +4549,59 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
     );
 }
 
+/// BT-4421: class-method `self fieldAt:` / `self fieldAt:put:` read and write
+/// the class variable in place (`field_at` / `field_at_put` helper calls), on
+/// an Actor class too (whose class methods share `CodeGenContext::Actor`), at
+/// body level, in a block (a read takes the block's capture, ADR 0130 §5)
+/// and as an operand — never a `class_send` back into the class's own
+/// `gen_server`, nor the instance-side state-threaded `fieldAt:put:`.
+#[test]
+fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
+    let src = concat!(
+        "Actor subclass: CvFieldAtInPlace\n",
+        "  classState: total = 0\n\n",
+        "  class readTotal => self fieldAt: #total\n\n",
+        "  class writeTotal: v =>\n",
+        "    self fieldAt: #total put: v\n",
+        "    self.total\n\n",
+        "  class sumInto: items =>\n",
+        "    items do: [:each | self fieldAt: #total put: (self fieldAt: #total) + each]\n",
+        "    nil\n\n",
+        "  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'field_at'(ClassSelf, "),
+        "a method-level fieldAt: is a field_at/2 helper call. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "),
+        "fieldAt:put: is a field_at_put/3 helper call. Got:\n{code}"
+    );
+    // The `do:` block reads with `fieldAt:`, so it binds a capture and its
+    // read is the 3-arity captured-fallback form.
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'capture'(ClassSelf, "),
+        "a block that reads with fieldAt: binds a capture. Got:\n{code}"
+    );
+    let three_arity_read = code
+        .split("call 'beamtalk_class_vars':'field_at'(ClassSelf, ")
+        .skip(1)
+        .any(|rest| {
+            let args = &rest[..rest.find(')').unwrap_or(rest.len())];
+            args.contains(", ")
+        });
+    assert!(
+        three_arity_read,
+        "the block's fieldAt: read passes its capture. Got:\n{code}"
+    );
+    // (The selectors still appear in the class's xref metadata.)
+    assert!(
+        !code.contains("'fieldAt:', [") && !code.contains("'fieldAt:put:', ["),
+        "no fieldAt: message send or state-threaded fieldAt:put:. Got:\n{code}"
+    );
+}
+
 // --- direct Value construction (cross-class `new` / keyword ctors) ---
 //
 // An unqualified class reference in a fresh generator is never an
@@ -4281,15 +4739,24 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("call 'beamtalk_class_shadow_flags':'direct_call_ok'('Pt class', 'Pt')"),
-        "eligible keyword ctor must be guarded. Got:\n{output}"
-    );
+    // BT-4316: the hit path is one read of the call target's static call key,
+    // whose value is the class reference; a miss asks the runtime, which
+    // installs it only while the guard holds.
     assert!(
         output.contains(
-            "call 'bt@test@pt':'class_x:y:'({'beamtalk_object', 'Pt class', 'bt@test@pt', "
+            "case call 'persistent_term':'get'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)"
         ),
-        "eligible keyword ctor must call class_x:y:/3 with the class reference. Got:\n{output}"
+        "eligible keyword ctor must be guarded by its static call key. Got:\n{output}"
+    );
+    // The direct call is the case's last arm, in tail position, passed the
+    // key's value as `ClassSelf`. No `try` wraps it.
+    assert!(
+        output.contains("<_> when 'true' -> call 'bt@test@pt':'class_x:y:'(_StaticSelf"),
+        "eligible keyword ctor must call class_x:y:/3 with the key's class reference. Got:\n{output}"
+    );
+    assert!(
+        output.contains("of <'false'> when 'true' -> let _ClassPid"),
+        "a declined key falls back to class_send. Got:\n{output}"
     );
     assert!(
         output.contains("'beamtalk_object_class':'class_send'("),
@@ -4299,12 +4766,16 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         !output.contains("'nil'"),
         "no `nil` class self (BT-4037). Got:\n{output}"
     );
-    // A removed method (`removeSelector:`, a reload) answers what the dynamic
-    // send answers instead of `undef`: an unexported function takes the
-    // `class_send` fallback. No `try` wraps the call (it stays a tail call).
+    // The hit path calls nothing else: no flag read, no `function_exported/3`,
+    // no `whereis` outside the fallback (the runtime checks them at install).
     assert!(
-        output.contains("case call 'erlang':'function_exported'('bt@test@pt', 'class_x:y:', 3) of <'true'> when 'true' -> call 'bt@test@pt':'class_x:y:'("),
-        "the direct call is guarded by function_exported. Got:\n{output}"
+        !output.contains("direct_call_ok") && !output.contains("function_exported"),
+        "the hit path is the key read only. Got:\n{output}"
+    );
+    assert_eq!(
+        output.matches("call 'bt@test@pt':'class_x:y:'(").count(),
+        1,
+        "the direct call appears once. Got:\n{output}"
     );
     assert!(
         !output.contains("try "),

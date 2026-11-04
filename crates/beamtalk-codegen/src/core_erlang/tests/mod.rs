@@ -152,15 +152,27 @@ pub(crate) fn parse_normalised(
     (module, diagnostics)
 }
 
+/// Parse `src` as a single-class Beamtalk module and run codegen with an explicit module name.
+///
+/// Use this when the generated module name matters (e.g. supervisor tests that assert on
+/// `'bt@leaf'` or actor tests that use a name like `"stopper"`).  For tests that do not
+/// care about the module name, prefer [`codegen`], which hard-codes `"test"`.
+pub(crate) fn codegen_named(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new(module_name),
+    )
+    .expect("codegen should succeed")
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
 /// boilerplate across every sub-module.
 pub(crate) fn codegen(src: &str) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new("test"))
-        .expect("codegen should succeed")
+    codegen_named(src, "test")
 }
 
 /// BT-4244: asserts that every runtime send of `selector` in `code` (outside the

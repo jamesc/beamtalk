@@ -108,6 +108,9 @@ pub enum WellKnownSelector {
     /// receiver is *not* a class literal that defines its own class-side `error:`.
     /// `try_generate_error_signaling` already short-circuits on
     /// `Expression::ClassReference { .. }`, leaving the `Logger` codegen path intact.
+    /// Any other receiver not known to be an instance (`self` in a class method,
+    /// a variable) is a class-side send when, at run time, it is a class object
+    /// whose class side understands `error:` (BT-4075).
     Error,
 
     // --- Object reflection ---
@@ -368,6 +371,31 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
         "to:do:" | "inject:into:" => arg_index == 1,
         "to:by:do:" => arg_index == 2,
         "ifTrue:ifFalse:" => arg_index == 0 || arg_index == 1,
+        _ => false,
+    }
+}
+
+/// BT-4075: whether an `error:` send to `receiver` can be statically known to
+/// be the `Object>>error:` raise, which never returns and runs no user code.
+///
+/// Only a bare `self` or a literal (`0 error: "boom"`) can be: any other
+/// receiver may be a class object whose class side defines `error:`
+/// (`Result class>>error:`, `Logger class>>error:`), and then `error:` is an
+/// ordinary send that answers a value. This is the syntactic half of the rule,
+/// and every consumer that needs to know whether `error:` returns starts from
+/// it. Code generation refines it with the method context, since `self` in a
+/// class method or a top-level REPL `self` may also be a class object
+/// (`CoreErlangGenerator::error_signal_receiver_kind`).
+///
+/// `block_facts::operands_not_sequenced` does not ask: it stops at the operands
+/// of every `error:` send, whatever the receiver
+/// (`UnsequencedOperand::ErrorSend`). That over-approximation is safe, because
+/// the `error:` lowering sequences its own operands for every receiver kind.
+#[must_use]
+pub fn is_error_signal_instance_receiver(receiver: &super::Expression) -> bool {
+    match receiver {
+        super::Expression::Identifier(id) => id.name == "self",
+        super::Expression::Literal(..) => true,
         _ => false,
     }
 }

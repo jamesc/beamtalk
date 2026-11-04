@@ -158,6 +158,10 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
         "class-method-process-resource",
         DiagnosticCategory::ClassMethodProcessResource,
     ),
+    (
+        "class-var-reflection-shadowing",
+        DiagnosticCategory::ClassVarReflectionShadowing,
+    ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
     (
@@ -604,6 +608,7 @@ fn expect_category_unchecked(
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
         | ExpectCategory::ClassMethodProcessResource
+        | ExpectCategory::ClassVarReflectionShadowing
         | ExpectCategory::FfiNestedString
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
@@ -923,6 +928,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassMethodProcessResource)
                 )
                 | (
+                    ExpectCategory::ClassVarReflectionShadowing,
+                    Some(DiagnosticCategory::ClassVarReflectionShadowing)
+                )
+                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1124,6 +1133,7 @@ match-arm-block = "off"
 class-state-abroad = "off"
 class-process-ffi = "off"
 class-method-process-resource = "off"
+class-var-reflection-shadowing = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 handleinfo-no-catch-all = "error"

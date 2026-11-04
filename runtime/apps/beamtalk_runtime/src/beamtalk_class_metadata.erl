@@ -528,6 +528,11 @@ owning class mirrors them here after every change to its own state
 Per-field `ets:update_element/3` on an existing row; never touches the identity
 fields or `has_runtime_class_methods`. A missing row (class torn down) or table
 is a no-op, like `put_direct_constructors/2`.
+
+A write that lands invalidates `beamtalk_class_derived_cache` itself (BT-4281):
+the `{declared_fields, Class}` memo is derived from `instance_variables`, and
+must not rely on `publish_reflection/1` happening to call
+`put_method_records/3` afterwards.
 """.
 -spec put_reflection(class_name(), #{
     instance_methods := [selector()],
@@ -542,13 +547,18 @@ put_reflection(Name, #{
     class_method_return_types := ClassMethodReturnTypes
 }) ->
     try
-        ets:update_element(?TABLE, Name, [
+        Updated = ets:update_element(?TABLE, Name, [
             {#class_metadata.instance_methods, InstanceMethods},
             {#class_metadata.instance_variables, InstanceVariables},
             {#class_metadata.method_return_types, MethodReturnTypes},
             {#class_metadata.class_method_return_types, ClassMethodReturnTypes}
         ]),
-        ok
+        %% BT-4281: `instance_variables` feeds the `{declared_fields, Class}`
+        %% memo; flush after the write lands, and only when a row was written.
+        case Updated of
+            true -> beamtalk_class_derived_cache:invalidate();
+            false -> ok
+        end
     catch
         error:badarg -> ok
     end.

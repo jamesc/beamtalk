@@ -51,6 +51,12 @@ enum IntrinsicBody {
     OnDo,
     /// `ensure` — Block's `ensure:`.
     Ensure,
+    /// `error` — `Object>>error:`. The call site raises inline
+    /// (`try_generate_error_signaling`), but generic dispatch reaches the
+    /// compiled body: `perform: #error:`, and a class object without a
+    /// class-side `error:` through the class-object protocol fallthrough
+    /// (BT-4417). The body is the same raise, so every route agrees.
+    Error,
     /// `erlangApply` — DNU-forwarding Erlang interop intrinsic.
     ErlangApply,
     /// `erlangModuleLookup` — same shape as `ErlangApply`, different target module.
@@ -147,7 +153,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("futureAwaitForever", IntrinsicBody::Placeholder),
     ("onDo", IntrinsicBody::OnDo),
     ("ensure", IntrinsicBody::Ensure),
-    ("error", IntrinsicBody::Placeholder),
+    ("error", IntrinsicBody::Error),
     ("erlangModuleLookup", IntrinsicBody::ErlangModuleLookup),
     ("erlangApply", IntrinsicBody::ErlangApply),
     ("classBuilderRegister", IntrinsicBody::ClassBuilderRegister),
@@ -192,7 +198,7 @@ impl CoreErlangGenerator {
                 return Ok(self.render_intrinsic_body(body, name, &class_name, span));
             }
 
-            // Logger intrinsics — generate inline logger:log/3 calls.
+            // Logger intrinsics — generate beamtalk_logging_config:log/3 calls.
             // These are the method bodies for logger.bt's @intrinsic declarations.
             // Direct `Logger warn:` calls are intercepted at the call site by
             // try_generate_logger_intrinsic (which injects the caller's class/selector
@@ -402,6 +408,20 @@ impl CoreErlangGenerator {
             IntrinsicBody::OnDo => self.generate_on_do_structural_fallback(class_name),
             IntrinsicBody::Ensure => self.generate_ensure_structural_fallback(class_name),
 
+            IntrinsicBody::Error => {
+                let msg_param = self
+                    .current_method_params
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Message".to_string());
+                let self_var = if self.in_class_method() {
+                    "ClassSelf"
+                } else {
+                    "Self"
+                };
+                self.object_error_raise_doc(self_var, &msg_param)
+            }
+
             // Erlang interop DNU intrinsics — forward selector/args to
             // the handler module's dispatch/3 rather than passing the intrinsic name.
             // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -521,7 +541,8 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates inline `logger:log/3` code for Logger @intrinsic bodies.
+    /// Generates the Logger @intrinsic method bodies as
+    /// `beamtalk_logging_config:log/3` calls (see `logger_log_call_doc`).
     ///
     /// Maps intrinsic names to OTP logger levels:
     /// - `loggerDebug` / `loggerDebugMeta` → `debug`
@@ -552,62 +573,10 @@ impl CoreErlangGenerator {
             .cloned()
             .unwrap_or_else(|| "Message".to_string());
 
-        let ctx_class = self.class_name();
-        let ctx_selector = self
-            .current_method_selector
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let metadata_map_doc = docvec![
-            "~{",
-            "'domain' => ['beamtalk' | ['user']], ",
-            "'beamtalk_class' => ",
-            leaf::atom(ctx_class),
-            ", ",
-            "'beamtalk_selector' => ",
-            leaf::atom(ctx_selector),
-            "}~",
-        ];
-
-        let discard_var = self.fresh_temp_var("LogOk");
-
-        let log_call_doc = if has_metadata {
-            let meta_param = params.get(1).cloned().unwrap_or_else(|| "Meta".to_string());
-            let merge_var = self.fresh_temp_var("LogMeta");
-            docvec![
-                "let ",
-                leaf::var(merge_var.clone()),
-                " = call 'maps':'merge'(",
-                leaf::var(meta_param),
-                ", ",
-                metadata_map_doc,
-                ") in call 'logger':'log'(",
-                leaf::atom(level.to_string()),
-                ", ",
-                leaf::var(msg_param),
-                ", ",
-                leaf::var(merge_var),
-                ")"
-            ]
-        } else {
-            docvec![
-                "call 'logger':'log'(",
-                leaf::atom(level.to_string()),
-                ", ",
-                leaf::var(msg_param),
-                ", ",
-                metadata_map_doc,
-                ")"
-            ]
-        };
-
-        let doc = docvec![
-            "let ",
-            leaf::var(discard_var),
-            " = ",
-            log_call_doc,
-            " in 'nil'"
-        ];
+        let msg_doc = leaf::var(msg_param);
+        let user_meta_doc = has_metadata
+            .then(|| leaf::var(params.get(1).cloned().unwrap_or_else(|| "Meta".to_string())));
+        let doc = self.logger_log_call_doc(level, msg_doc, user_meta_doc);
 
         Some(doc)
     }

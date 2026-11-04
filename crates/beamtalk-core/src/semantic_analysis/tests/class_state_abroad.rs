@@ -740,6 +740,48 @@ fn has_field_probe_of_an_undeclared_name_claims_no_variable() {
     );
 }
 
+/// BT-4421: `self fieldAt: #n` in a class method reads the class variable in
+/// place (through the block's capture abroad), so it is a read like `self.n`.
+#[test]
+fn field_at_read_is_a_read_named_with_field_at() {
+    let d = only("  class a => [self fieldAt: #n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("block reads class variable n of Counter with `fieldAt:` and is"),
+        "{}",
+        d[0].message
+    );
+    let d = only("  class a => [:k | self fieldAt: k]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("block reads a class variable of Counter with `fieldAt:` and is"),
+        "{}",
+        d[0].message
+    );
+    // A literal name that is no class variable reads nothing abroad.
+    let d = only("  class a => [self fieldAt: #nope]\n");
+    assert!(d.is_empty(), "{d:?}");
+    // Direct and reflective reads of the same variable, plus a probe: the
+    // variable is named once (BT-4428).
+    let d = only("  class a => [self.n printString. self fieldAt: #n. self hasField: #m]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains(
+            "block reads class variable n of Counter and probes its class state with \
+             `hasField: #m` and is"
+        ),
+        "{}",
+        d[0].message
+    );
+    assert!(
+        !d[0].message.contains("with `fieldAt:`"),
+        "{}",
+        d[0].message
+    );
+}
+
 #[test]
 fn reads_and_probes_are_both_named() {
     let d = only("  class a => [self.n printString. self hasField: #m]\n");
@@ -772,6 +814,84 @@ fn first_write_is_named_in_source_order() {
         "{}",
         d[0].message
     );
+    let d = only("  class a => Driver each: [self bump. self fieldAt: #n put: 1]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("writes class variables through 'bump'"),
+        "{}",
+        d[0].message
+    );
+}
+
+/// BT-4428: since BT-4421 a class-method `self fieldAt: #n put: v` writes the
+/// class variable in place, like `self.n := v`, so abroad it raises
+/// `class_state_unreachable`: rule (b) counts it.
+#[test]
+fn reflective_field_at_put_in_a_block_run_abroad_warns() {
+    let d = only("  class a => Driver each: [self fieldAt: #n put: 1]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains(
+            "block writes class variable 'n' of Counter with `fieldAt:put:` and is passed to \
+             'Driver each:'"
+        ),
+        "{}",
+        d[0].message
+    );
+    assert!(
+        d[0].message.contains("class_state_unreachable"),
+        "{}",
+        d[0].message
+    );
+    // A computed name may name a class variable.
+    let d = only("  class a => Driver each: [:k | self fieldAt: k put: 1]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("block writes a class variable of Counter with `fieldAt:put:`"),
+        "{}",
+        d[0].message
+    );
+    // Nested, and the first write in source order wins.
+    let d = only("  class a => Driver each: [[self fieldAt: #n put: 1]. self.n := 2]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].message.contains("`fieldAt:put:`"), "{}", d[0].message);
+    // An undeclared literal name raises `undeclared_class_variable` wherever
+    // it runs: not an abroad hazard.
+    let d = only("  class a => Driver each: [self fieldAt: #nope put: 1]\n");
+    assert!(d.is_empty(), "{d:?}");
+    // A cascade message re-enters the class process as an ordinary send
+    // (BT-4423), and a block that stays home never warns.
+    let d = only("  class a => Driver each: [self fieldAt: #n put: 1; yourself]\n");
+    assert!(d.is_empty(), "{d:?}");
+    let d = only("  class a => OpenStateless each: [self fieldAt: #n put: 1]\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// BT-4428: `self clearField: #n` removes the class variable in place, so
+/// abroad it raises `class_state_unreachable`, whatever name it gives.
+#[test]
+fn reflective_clear_field_in_a_block_run_abroad_warns() {
+    let d = only("  class a => Driver each: [self clearField: #n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains(
+            "block clears class variable 'n' of Counter with `clearField:` and is passed to \
+             'Driver each:'"
+        ),
+        "{}",
+        d[0].message
+    );
+    assert!(
+        d[0].message.contains("class_state_unreachable"),
+        "{}",
+        d[0].message
+    );
+    let d = only("  class a => Driver each: [self clearField: #nope]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    let d = only("  class a => Driver each: [self clearField: #n!]\n");
+    assert!(d.is_empty(), "a cast is an ordinary send: {d:?}");
 }
 
 // ---- shadowed class names (BT-4283) ---------------------------------------

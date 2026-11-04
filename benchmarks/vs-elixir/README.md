@@ -155,9 +155,12 @@ share of each figure.
 
 ### What matches or beats Elixir
 
-- **A `class sealed` method on a sealed class (3a)** compiles to a direct
-  `Mod:'class_double:'(nil, 21)` and costs exactly what `Math.double(21)` costs.
-  This is the static-dispatch target, and it already exists for one case.
+- **A `class sealed` method on a sealed class (3a)** compiled (in the table
+  above) to an unguarded `Mod:'class_double:'(nil, 21)` and cost exactly what
+  `Math.double(21)` costs. Since BT-4301 every static class send (3a-3c) is a
+  guarded direct call; since BT-4316 its hit path is one `persistent_term`
+  read of the call target's key, whose value is the class reference passed as
+  `ClassSelf`: see `results/bench-bt4316.md` for the current figures.
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.
 - **`collect:`, `inject:into:` and a `do:` that assigns nothing (6c-6e)**
@@ -428,3 +431,17 @@ side, main → PR. Rows not listed did not move.
   always-on aggregate (an ETS read, three `atomics:add`s and two
   `atomics:get`s), the actor-state/`From`/pending-action process-dictionary
   cells and the receiver's context restore.
+- **BT-4281** adds row 2c (`VbPoint new: #{#x => a, #y => 4}` against
+  `struct!(Point, %{x: a, y: 4})`) and memoises each class's declared-field
+  set, which `new:`/`spawnWith:` check an initialiser map against
+  (`check_init_args/5`, BT-4030), under `{declared_fields, Class}` in the
+  derived cache. Before, every construction walked VbPoint → Value → Object →
+  ProtoObject, reading each level's metadata row and `__beamtalk_meta/0`
+  (9 rounds each, the dev build, a shared 4-scheduler Linux container at load
+  average 13 to 16, so compare ns only within one run;
+  `results/bench-bt4281-{before,after}.md`, profiles in
+  `results/profile-bt4281-{before,after}.md`). Beamtalk side, before →
+  after: 2c 146 red / 175 w / 7.0 µs → **37.1 / 130 / 1.7 µs** (Elixir
+  26.0 / 36). Calls per op: 95 → 27; `own_declared_fields/1`,
+  `declared_fields_walk/3`, `read_meta_detailed/1` and `lookup_superclass/1`
+  (4 each before) no longer appear. Row 2b is unchanged (7.05 red / 11 w).

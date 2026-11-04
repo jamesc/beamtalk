@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, '__is_slot'/1, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'Snapshot', 'Value'}, {'AnnotatedLocalVarDemo', 'Value'}],
      'type' =
@@ -26,6 +26,10 @@ call 'maps':'get'('eventId', Self)
 
 'withEventId:'/2 = fun (Self, NewVal) ->
     call 'maps':'put'('eventId', NewVal, Self)
+
+
+'__is_slot'/1 = fun (IsSlotSelector) ->
+    case IsSlotSelector of <_> when 'true' -> 'false' end
 
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

@@ -7,7 +7,7 @@
 //!
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
-use super::{param, wrap_string_result};
+use super::{call_self_p0, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -167,11 +167,20 @@ pub(crate) fn generate_proto_object_bif(
 /// Object primitive implementations.
 ///
 /// Object is the root class — methods here are inherited by all objects.
-pub(crate) fn generate_object_bif(
-    _selector: &str,
-    _params: &[String],
-) -> Option<Document<'static>> {
-    None
+///
+/// `isKindOf:` (BT-4410) calls the runtime intrinsic directly: it answers a
+/// boolean and raises only `#beamtalk_error{}`, so the foreign-FFI wrapper
+/// (`beamtalk_erlang_proxy:direct_call/4` and its result coercion) did
+/// nothing for it but cost four calls per send.
+pub(crate) fn generate_object_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "isKindOf:" => Some(call_self_p0(
+            "beamtalk_behaviour_intrinsics",
+            "objectIsKindOf",
+            param(params, 0, "_Class"),
+        )),
+        _ => None,
+    }
 }
 
 /// `Value` primitive implementations (ADR 0094, Phase 2).
@@ -446,7 +455,7 @@ mod tests {
     // generate_object_bif tests
 
     #[test]
-    fn test_object_always_returns_none() {
+    fn test_object_unknown_returns_none() {
         assert_eq!(doc_to_string(generate_object_bif("anything", &[])), None);
         assert_eq!(doc_to_string(generate_object_bif("size", &[])), None);
     }

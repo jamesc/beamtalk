@@ -1848,13 +1848,8 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call(
     {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
 ) ->
-    %% ADR 0124 §1/§4i/B4: a declared-`late` class variable is an error when
-    %% unassigned, agreeing with the instance-side direct read
-    %% (`generate_late_field_read`) — keyed on *declared* late. Any other
-    %% absent name goes through the shared declared-set rule below (BT-3807):
-    %% undeclared raises `undeclared_class_variable` as a method-body read
-    %% does, and a class with unknown metadata (ClassBuilder) answers `nil`.
-    %% The metadata is read once for both decisions.
+    %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
+    %% `read_class_var/4`, shared with `Cls fieldAt:` (BT-4148).
     %%
     %% Replies `{error, Error}` rather than raising here: this
     %% `handle_call` clause runs directly in the class gen_server's own
@@ -1867,33 +1862,9 @@ handle_call(
     %% caller with a catchable error, so it is never called directly.
     %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
     %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
-    Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
-    case class_var_declared_late(Kinds, Name) of
-        true ->
-            %% BT-4061: presence — not value — is assignment (ADR 0124 §2,
-            %% as amended). The presence question is `class_var_assigned/2`,
-            %% shared with the `has_class_var` clause below, so the raising
-            %% read and `hasField:` cannot drift apart again.
-            case class_var_assigned(ClassVars, Name) of
-                true ->
-                    {reply, maps:get(Name, ClassVars), State};
-                false ->
-                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
-                        State}
-            end;
-        false ->
-            %% BT-3807: an absent name follows the method-body read rule
-            %% (`beamtalk_class_vars:check_declared/2`, own-only); unknown
-            %% metadata (ClassBuilder) stays lenient and answers nil.
-            case maps:find(Name, ClassVars) of
-                {ok, Value} ->
-                    {reply, Value, State};
-                error ->
-                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds) of
-                        ok -> {reply, nil, State};
-                        {error, _} = Err -> {reply, Err, State}
-                    end
-            end
+    case read_class_var(ClassName, ClassVars, Name, in_process) of
+        {ok, Value} -> {reply, Value, State};
+        {error, _} = Err -> {reply, Err, State}
     end;
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},
@@ -1901,9 +1872,10 @@ handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = Clas
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}};
 handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises. Shared with `get_class_var`'s
-    %% declared-`late` branch above (BT-4061).
-    {reply, class_var_assigned(ClassVars, Name), State};
+    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
+    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
+    %% declared-`late` branch (`read_in/4`, BT-4061).
+    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
 handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
     %% the instance-side intrinsic's `clearField: -> Self` convention.
@@ -2038,29 +2010,34 @@ notify_compiler_server_register(ClassName, Meta) ->
     end.
 
 -doc """
-True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
-`ClassName` itself (class variables are not inherited, BT-3801) — the class-side
-counterpart to `beamtalk_reflection`'s `declared_late/2`, over the kinds read by
-`beamtalk_class_metadata:class_var_kinds_or_unknown/1` (`unknown` is not late).
-Keyed on *declared* late: an undeclared name is not late and falls through to
-the `check_declared/3` branch of `get_class_var`.
+Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
+`{ok, Value}`, or `{error, Error}` (built, not raised, so the class gen_server
+can reply with it instead of crashing). The rule itself is
+`beamtalk_class_vars:read_in/4`, shared with the in-process `self fieldAt: #x`
+of a class method (BT-4421), so the gen_server's `get_class_var`, the outside
+`Cls fieldAt: #x` (BT-4148) and the inside read cannot drift apart.
 """.
--spec class_var_declared_late(unknown | #{atom() => eager | late}, atom()) -> boolean().
-class_var_declared_late(unknown, _Name) ->
-    false;
-class_var_declared_late(Kinds, Name) ->
-    maps:get(Name, Kinds, eager) =:= late.
+-spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+read_class_var(ClassName, ClassVars, Name, Caller) ->
+    beamtalk_class_vars:read_in(ClassName, ClassVars, Name, Caller).
 
 -doc """
-Presence test for a class variable in a class-state map (BT-4061): the one
-"is this variable assigned" helper, shared by `get_class_var`'s
-declared-`late` branch and the `has_class_var` clause, so the raising read
-and `hasField:` cannot drift apart again. Presence — not value — is
-assignment (ADR 0124 §2, as amended): a stored `nil` is assigned.
+Write class variable `Name` into the class-state map `ClassVars` of
+`ClassName` for the `Cls fieldAt: #x put: v` reflection send (BT-4148):
+`{ok, NewClassVars}`, or `{error, Error}` (built, not raised).
+
+**Checked**, unlike the out-of-band `{set_class_var, ...}` runtime-API call
+(ADR 0124). The rule is `beamtalk_class_vars:check_write/3`, shared with the
+in-process `self fieldAt: #x put: v` of a class method (BT-4421).
 """.
--spec class_var_assigned(map(), atom()) -> boolean().
-class_var_assigned(ClassVars, Name) ->
-    maps:is_key(Name, ClassVars).
+-spec write_class_var(class_name(), map(), atom(), term()) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
+write_class_var(ClassName, ClassVars, Name, Value) ->
+    case beamtalk_class_vars:check_write(ClassName, ClassVars, Name) of
+        ok -> {ok, ClassVars#{Name => Value}};
+        {error, _} = Err -> Err
+    end.
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
@@ -2080,20 +2057,18 @@ ownership when there is no session context to fall back to (tier 1).
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
-%% ADR 0124 §1/§4i/B4: `Cls hasField:`/`Cls clearField:` reach the class
-%% gen_server here, ahead of the local-class-method/superclass-chain/DNU
-%% priority order below — like `fieldAt:`/`fieldAt:put:` on an instance
-%% (`sealed` on `Object`, ADR 0035), these are reflection primitives, not
-%% overridable class methods. `ClassVars` lives in `State` directly, so
-%% neither needs `handle_class_method_call/6`'s method-lookup machinery;
-%% `has_class_var`/`clear_class_var`'s own `handle_call` clauses provide the
-%% identical read/write for `beamtalk_object_class:has_class_var/2` /
-%% `clear_class_var/2`'s direct-message-shape callers, so this clause is the
-%% ordinary-message-send route to the SAME two operations, not a third
-%% implementation of them (CLAUDE.md's no-duplicate-implementations rule
-%% notwithstanding — `maps:is_key/2`/`maps:remove/2` are the whole
-%% operation, so there is nothing to extract into a shared helper beyond
-%% the builtin itself).
+%% ADR 0124 §1/§4i/B4, BT-4148: `Cls hasField:`, `Cls clearField:`,
+%% `Cls fieldAt:` and `Cls fieldAt:put:` reach the class gen_server here,
+%% ahead of the local-class-method/superclass-chain/DNU priority order below.
+%% Like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
+%% 0035), these are reflection primitives, not overridable class methods.
+%% `ClassVars` lives in `State` directly, so none of them needs
+%% `handle_class_method_call/6`'s method-lookup machinery. `has`/`clear` are
+%% the same operations as the `has_class_var`/`clear_class_var` `handle_call`
+%% clauses (`maps:is_key/2`/`maps:remove/2` are the whole operation); `get`
+%% shares `read_class_var/4` with `get_class_var`; and `put` is the checked
+%% counterpart (`write_class_var/4`) of the deliberately unchecked
+%% `set_class_var`.
 dispatch_class_method(Selector, Args, From, State, Restore) ->
     case class_var_reflection_op(Selector, Args) of
         {has, Name} ->
@@ -2114,19 +2089,45 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
             beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
             NewState = State#class_state{class_state = NewClassVars},
             {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
+        {get, Name} ->
+            %% BT-4148: `Cls fieldAt: #x` — the `get_class_var` read rule
+            %% (`read_class_var/4`, reflective form). An error is replied as `{error, Error}`,
+            %% which the caller (`class_method_result/4`) raises in its own
+            %% process, so the class gen_server survives it.
+            Restore(),
+            #class_state{name = ClassName, class_state = ClassVars} = State,
+            {reply, read_class_var(ClassName, ClassVars, Name, reflective), State};
+        {put, Name, Value} ->
+            %% BT-4148: `Cls fieldAt: #x put: v` — a checked write
+            %% (`write_class_var/4` records why). Answers the assigned value,
+            %% like instance-side `fieldAt:put:`.
+            Restore(),
+            #class_state{name = ClassName, class_state = ClassVars} = State,
+            case write_class_var(ClassName, ClassVars, Name, Value) of
+                {ok, NewClassVars} ->
+                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+                    {reply, {ok, Value}, State#class_state{class_state = NewClassVars}};
+                {error, _} = Err ->
+                    {reply, Err, State}
+            end;
         none ->
             dispatch_class_method_lookup(Selector, Args, From, State, Restore)
     end.
 
 -doc """
 The class-variable reflection sends `dispatch_class_method/5` answers from the
-class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x`, ADR
-0124 §1/§4i/B4), or `none` for every other send. The single decision behind
-both `dispatch_class_method/5` and `is_class_var_reflection_send/2`.
+class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x` /
+`Cls fieldAt: #x` / `Cls fieldAt: #x put: v`, ADR 0124 §1/§4i/B4, BT-4148), or
+`none` for every other send. The single decision behind
+`dispatch_class_method/5`, `is_class_var_reflection_send/2` and
+`is_class_var_reflection_selector/1`.
 """.
--spec class_var_reflection_op(atom(), list()) -> {has | clear, atom()} | none.
+-spec class_var_reflection_op(atom(), list()) ->
+    {has | clear | get, atom()} | {put, atom(), term()} | none.
 class_var_reflection_op('hasField:', [Name]) when is_atom(Name) -> {has, Name};
 class_var_reflection_op('clearField:', [Name]) when is_atom(Name) -> {clear, Name};
+class_var_reflection_op('fieldAt:', [Name]) when is_atom(Name) -> {get, Name};
+class_var_reflection_op('fieldAt:put:', [Name, Value]) when is_atom(Name) -> {put, Name, Value};
 class_var_reflection_op(_Selector, _Args) -> none.
 
 -doc """
@@ -2147,7 +2148,9 @@ selector alone, so it declines these selectors outright.
 """.
 -spec is_class_var_reflection_selector(atom()) -> boolean().
 is_class_var_reflection_selector(Selector) ->
-    class_var_reflection_op(Selector, [Selector]) =/= none.
+    %% Any atom stands in for the Symbol name; `put`'s value is unconstrained.
+    Args = lists:duplicate(beamtalk_class_builder:selector_arity(Selector), Selector),
+    class_var_reflection_op(Selector, Args) =/= none.
 
 -spec dispatch_class_method_lookup(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)

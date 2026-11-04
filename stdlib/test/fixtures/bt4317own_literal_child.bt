@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a stateless subclass of Bt4317OwnLiteralBase. It overrides `tag`,
+// which `self tag` reaches and `Bt4317OwnLiteralBase tag` does not.
+
+Bt4317OwnLiteralBase subclass: Bt4317OwnLiteralChild
+
+  class tag -> Symbol => #childOverride

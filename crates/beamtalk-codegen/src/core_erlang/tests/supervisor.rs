@@ -817,20 +817,13 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
     );
 }
 
-/// Compile `src` (its first class is the one compiled) to Core Erlang.
-fn compile_source(src: &str, module_name: &str) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    generate_module(&module, CodegenOptions::new(module_name)).expect("codegen should succeed")
-}
-
 #[test]
 fn test_class_ref_spawn_family_on_supervisor_lowers_to_class_start() {
     // ADR 0135 §1: `ClassRef spawn…` on a supervisor class starts the tree in
     // the caller through the runtime start helper, never the actor spawn
     // intrinsic (a supervisor module has no `spawn/0,1`) nor class dispatch.
     let src = "Object subclass: Foo\n  a => Leaf spawn\n  b => Leaf spawnWith: #{#n => 1}\n  c => Leaf spawnAs: #leaf\n  d => Leaf spawnWith: 1 as: #leaf\n  e => Pool spawn\n\nSupervisor subclass: Leaf\n  childSpecs => #()\n\nDynamicSupervisor subclass: Pool\n  childClass => Leaf\n";
-    let code = compile_source(src, "foo");
+    let code = codegen_named(src, "foo");
     for selector in ["'spawn'", "'spawnWith:'", "'spawnAs:'", "'spawnWith:as:'"] {
         assert!(
             code.contains(&format!(
@@ -856,7 +849,7 @@ fn test_spawn_monitored_on_supervisor_lowers_to_class_start() {
     // `self` in a class method) reach class_start/4, which raises a clear
     // unsupported error.
     let src = "Object subclass: Foo\n  a => Leaf spawnMonitored\n  b => Leaf spawnMonitoredWith: #{#n => 1}\n\nSupervisor subclass: Leaf\n  childSpecs => #()\n";
-    let code = compile_source(src, "foo");
+    let code = codegen_named(src, "foo");
     for selector in ["'spawnMonitored', []", "'spawnMonitoredWith:', ["] {
         assert!(
             code.contains(&format!(
@@ -872,7 +865,7 @@ fn test_spawn_monitored_on_supervisor_lowers_to_class_start() {
 
     let src =
         "Supervisor subclass: Leaf\n  class one => self spawnMonitored\n  childSpecs => #()\n";
-    let code = compile_source(src, "bt@leaf");
+    let code = codegen_named(src, "bt@leaf");
     assert!(
         code.contains("'spawnMonitored', []"),
         "self spawnMonitored in a supervisor class method must lower to class_start. Got:\n{code}"
@@ -889,7 +882,7 @@ fn test_spawn_monitored_on_actor_keeps_actor_intrinsics() {
     // from the sender; `self spawnMonitored` in a class method lowers to
     // class_self_spawn_monitored.
     let src = "Object subclass: Foo\n  a => Counter spawnMonitored\n  b => Counter spawnMonitoredWith: #{#n => 1}\n\nActor subclass: Counter\n  state: n = 0\n";
-    let code = compile_source(src, "foo");
+    let code = codegen_named(src, "foo");
     assert!(
         code.contains("call 'bt@counter':'spawn_monitored'()"),
         "Got:\n{code}"
@@ -901,7 +894,7 @@ fn test_spawn_monitored_on_actor_keeps_actor_intrinsics() {
     assert!(!code.contains("'class_start'"), "Got:\n{code}");
 
     let src = "Actor subclass: Counter\n  state: n = 0\n  class make => self spawnMonitored\n  class makeWith: m => self spawnMonitoredWith: m\n";
-    let code = compile_source(src, "bt@counter");
+    let code = codegen_named(src, "bt@counter");
     assert_eq!(
         code.matches("call 'beamtalk_class_instantiation':'class_self_spawn_monitored'(")
             .count(),
@@ -918,7 +911,7 @@ fn test_spawn_monitored_on_actor_keeps_actor_intrinsics() {
 fn test_class_ref_spawn_on_actor_keeps_actor_intrinsic() {
     let src =
         "Object subclass: Foo\n  a => Counter spawn\n\nActor subclass: Counter\n  state: n = 0\n";
-    let code = compile_source(src, "foo");
+    let code = codegen_named(src, "foo");
     assert!(
         code.contains("call 'bt@counter':'spawn'()"),
         "an actor receiver keeps the spawn intrinsic. Got:\n{code}"
@@ -932,7 +925,7 @@ fn test_self_spawn_family_in_supervisor_class_method_lowers_to_class_start() {
     // starts an instance of the receiving class (resolved from `ClassSelf`)
     // through the runtime start helper, not `class_self_spawn`.
     let src = "Supervisor subclass: Leaf\n  class make: n => self spawnWith: n\n  class one => self spawn\n  childSpecs => #()\n";
-    let code = compile_source(src, "bt@leaf");
+    let code = codegen_named(src, "bt@leaf");
     assert!(
         code.contains(
             "call 'beamtalk_supervisor':'class_start'(call 'beamtalk_primitive':'class_name_from_tag'("

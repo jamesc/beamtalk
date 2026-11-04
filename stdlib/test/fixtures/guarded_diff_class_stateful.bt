@@ -13,3 +13,10 @@ Object subclass: GuardedDiffClassStateful
   class bump -> Integer =>
     self.hits := self.hits + 1
     self.hits
+
+  // BT-4317: an explicit own-class send reads this class's variable, also
+  // when the method runs for a subclass; `peekOf:` is the same send with the
+  // class held in a variable.
+  class ownLiteralPeek -> Integer => GuardedDiffClassStateful peek
+
+  class peekOf: cls -> Integer => cls peek

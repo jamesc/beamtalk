@@ -4,7 +4,10 @@
 Accepted (2026-10-20); Proposed 2026-10-20; Amended 2026-10-21 (self-send
 exception after Phase 0, BT-4007; snapshot away and simple `call_foreign/3`
 after review); Amended 2026-10-26 (stateless loops bracket the
-guarded-operator slow path, BT-4121)
+guarded-operator slow path, BT-4121); Amended 2026-11-04 (a guarded send's
+fast path skips the bracket, BT-4279)
+
+> **Amended 2026-11-04 (BT-4279), guarded fast paths.** A bracketed send whose emitter guards it with a test that proves the send then runs no user code skips the store and the reload on that arm; every other arm keeps the bracket. Two sources qualify: the operator guard's bare-BIF arm (including integer `+ - *` under the number-on-the-left coercion, which never raise), and a unary send to a typed tagged Value whose loaded module's generated `__is_slot/1` says the selector is still the auto getter (`maps:get/2`). The run-time `__is_slot/1` check is what keeps this sound across a reload that turns a getter into a method. Design note: [Actor State Cell](../development/actor-state-cell.md) §4.
 
 > **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), blocks in class methods.** A block passed to a class method is inside the actor whenever that method runs in the caller: every class method of a class whose chain declares no class variables, sealed or not, except the process-bound selectors (`new`, `spawn`, `startLink`, ...). Such a block sees and writes the actor's live state, and the `actor-state-abroad` lint no longer warns at it. A class method of a class that keeps its process (class variables in its chain, or a process-bound selector) still runs the block away. The lint reads `ClassHierarchy::runs_class_method_in_caller`, the rule codegen uses, instead of the retired `direct_class_methods` set.
 

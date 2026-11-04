@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: a class whose `tag` is shadowed by a class-side extension
+// (own_class_literal_send_test.bt), so `Bt4317OwnLiteralShadowed tag` takes
+// the dynamic fallback rather than the guarded direct call.
+
+Value subclass: Bt4317OwnLiteralShadowed
+
+  class tag -> Symbol => #compiled
+
+  class who -> Symbol => Bt4317OwnLiteralShadowed tag

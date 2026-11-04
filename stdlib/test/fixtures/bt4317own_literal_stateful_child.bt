@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4317: redeclares `label` (class variables are own-only, ADR 0130) with
+// its own value, so a read shows whose variable it is.
+
+Bt4317OwnLiteralStateful subclass: Bt4317OwnLiteralStatefulChild
+  classState: label :: Symbol = #child

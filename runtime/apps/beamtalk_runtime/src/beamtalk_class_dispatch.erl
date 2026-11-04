@@ -42,7 +42,9 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     handle_class_method_call/6,
     handle_async_dispatch/5,
     class_understands_class_selector/2,
-    find_class_method_from_class/2
+    class_object_understands/2,
+    find_class_method_from_class/2,
+    in_caller_owner/2
 ]).
 
 -type selector() :: atom().
@@ -56,6 +58,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
+-export_type([owner/0]).
 
 -doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
@@ -236,6 +239,10 @@ relies on a derived flag having been erased. As for every metadata-driven path,
 a hot reload's new code is current a moment before its class process publishes
 the new metadata; the raw `class_vars` input is published first
 (`beamtalk_object_class:apply_class_info/2`) to keep that window short.
+
+Exported for `beamtalk_class_shadow_flags:static_call_target/4` (BT-4316),
+which installs a static call key only while this answer names the call
+site's own class, module and function: one rule for both paths.
 """.
 -spec in_caller_owner(pid(), selector()) -> owner() | decline.
 in_caller_owner(ClassPid, Selector) when node(ClassPid) =:= node() ->
@@ -1892,6 +1899,24 @@ superclass_from_ets(ClassName) ->
         {ok, Super} -> Super;
         not_found -> none
     end.
+
+-doc """
+Is `Receiver` a class object whose own class side understands `Selector`
+(`class_understands_class_selector/2`)? Answers `false` for any other value,
+including a class object that only reaches `Selector` through the generic
+`Class`/`Behaviour`/`Object` protocol.
+
+BT-4075: guards the `error:` intrinsic. `Object>>error:` raises, but a class
+object with a class-side `error:` (`Result class>>error:`, `Logger
+class>>error:`) must receive the send instead, so codegen asks this before
+raising when the receiver is not statically known to be an instance.
+""".
+-spec class_object_understands(term(), selector()) -> boolean().
+class_object_understands(#beamtalk_object{class = Tag} = Receiver, Selector) ->
+    beamtalk_class_registry:is_class_object(Receiver) andalso
+        class_understands_class_selector(beamtalk_primitive:class_name_from_tag(Tag), Selector);
+class_object_understands(_Receiver, _Selector) ->
+    false.
 
 -doc """
 Test whether `ClassName`'s own metaclass tag understands `Selector`

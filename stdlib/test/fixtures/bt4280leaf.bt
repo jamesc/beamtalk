@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: the receiver class of actor_inherited_target_test.bt.
+
+Bt4280Mid subclass: Bt4280Leaf
+  state: n = 0
+
+  arm =>
+    self.stash := [self.n := self.n + 1]
+    nil
+
+  count => self.n

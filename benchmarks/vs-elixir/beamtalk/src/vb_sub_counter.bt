@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Row 7e (BT-4280): an open VbCounter subclass with no methods, so every
+// send to it reaches its dispatch/4 default arm and is inherited.
+VbCounter subclass: VbSubCounter

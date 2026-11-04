@@ -354,6 +354,8 @@ impl CoreErlangGenerator {
                 docs.push(Self::generate_slot_setter(field));
                 docs.push(Document::Str("\n"));
             }
+            docs.push(Self::generate_is_slot(&auto.getters));
+            docs.push(Document::Str("\n"));
         }
 
         // Generate dispatch/3 and has_method/1 for all value types
@@ -452,6 +454,8 @@ impl CoreErlangGenerator {
                 let with_sel = AutoSlotMethods::with_star_selector(field);
                 parts.push(leaf::fname(with_sel, 2));
             }
+            // BT-4279: the slot-read fast path's question.
+            parts.push(leaf::fname("__is_slot".to_string(), 1));
             if let Some(ref kw_sel) = auto.keyword_constructor {
                 let num_slots = class.state.len();
                 let arity = num_slots + 1; // ClassSelf + N slot args

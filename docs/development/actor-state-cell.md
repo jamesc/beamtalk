@@ -174,6 +174,25 @@ through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
+**The one direct inherited exit (BT-4280).** Before the extension lookup, the
+default arm asks `beamtalk_dispatch:inherited_target/2` for a memoised verdict
+(derived-cache key `{inherited_target, Class, Selector}`). It answers
+`{compiled, Owner, Module}` only when there is no extension on the class or its
+superclass for the selector, `resolve_owner/2` finds an owner from the
+superclass, and the owner's `__beamtalk_meta/0` has
+`'threads_actor_state' => 'true'` and lists the selector among its own
+methods. The arm then calls `beamtalk_dispatch:invoke_resolved/6` directly,
+with no `call_foreign/3`. This is the run-time twin of the static
+`CompiledSelfSend` rule (§1): a compiled actor method stores its own threaded
+`State` before every call that may run user code and on exit, so it never
+relies on the cell being current at entry. The flag comes from the same Rust
+predicate, `ClassHierarchy::threads_actor_state`, that decides
+`CompiledSelfSend`. Every other answer is `slow` and takes the path above
+unchanged; every source that changes the answer (extension install or
+removal, a method write or `removeSelector:`, a reload, a class removal)
+flushes the derived cache. The `dispatch/4` exit test allows `invoke_resolved/6`
+only under the `{'compiled', ...}` arm.
+
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and
 returns the fun's own `{reply, R, NewState}` unless the cell changed during the
 call (always on, every build): if the answer is the exact entry state, the cell
@@ -278,6 +297,37 @@ unmarked and is exempt only where the type checker shows every argument is a
 `String`. The emitter and the verifier read the same mark, so there is no
 second list to keep in step. An unmarked primitive is bracketed, which costs
 about 10 ns and is never wrong.
+
+**Guarded fast paths (BT-4279).** A third source exempts one *arm* of a
+bracketed send rather than the send. When the emitter guards the send with a
+test that, when it holds, proves the send runs no user code, the
+`SyncedCall` node carries that test as a `FastPath`. It renders as one `case`:
+the test's `true` arm answers the fast value and hands the stored `State`
+through as the reload, with no store and no `take`; every other arm stores,
+runs the whole guarded send and reloads, exactly as the plain bracket. The
+node's version step (store to load) is unchanged, so every existing verifier
+rule still applies; `FastPathOnUnsplittableBracket` fails for a fast path on a
+bracket that has no value or no reload (the store-only self-send form) or a
+Tier 2 merge. The bracket decision itself is untouched: a fast path changes
+how a bracket renders, never whether a site brackets, and a loop that holds no
+whole `State` still brackets at the loop (§4b), never at the site.
+
+Two emitters offer one, each only for the send its innermost window owns:
+
+- **The operator guard** (`operators.rs`): its bare-BIF arm under the
+  guard's own test (`is_number`, or number-or-binary for comparisons); and,
+  where the true arm is the number-on-the-left coercion `try`/`catch` (whose
+  `catch` dispatches a reflected selector), integer `+ - *` under
+  `is_integer` on both operands, which never raise. A coercing `/` has none.
+- **A typed slot read** (`dispatch_codegen.rs`): a unary send to a receiver
+  typed as a tagged Value class that declares a field of that name. The test
+  is the exact class tag plus the loaded module's generated `__is_slot/1`,
+  which answers `true` only for the selectors whose `dispatch/3` clause is the
+  auto getter; the fast value is `maps:get/2`. Because the answer comes from
+  the module loaded at run time, a reload that turns the getter into a method
+  (which might run a block that writes this actor's fields) is seen at the
+  next send, and the send takes the bracketed arm. A module compiled before
+  `__is_slot/1` existed fails the export check and is always bracketed.
 
 #4447 needed an un-publish wherever a state change was discarded. Here the
 method body is the source of truth between sync points and the cell is the

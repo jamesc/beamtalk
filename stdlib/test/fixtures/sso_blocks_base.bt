@@ -101,7 +101,9 @@ Object subclass: SsoBlocksBase
   // stays home (ADR 0142 §3; before ADR 0142 it ran in the driver's process).
   class viaForeign -> Integer => SsoBlocksDriver each: [self tick]
 
-  // Statically bound sends whose callee's own `self foo:` late-binds.
+  // Statically bound sends whose callee's own `self foo:` late-binds (from
+  // the callee's `self`: the receiver for `self sealedWrapper`, the base for
+  // the explicit `SsoBlocksBase wrapper`, BT-4317).
   class wrapper -> Integer => self foo: 1
 
   class sealed sealedWrapper -> Integer => self foo: 1

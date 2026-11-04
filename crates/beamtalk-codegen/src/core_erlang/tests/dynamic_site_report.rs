@@ -25,6 +25,31 @@ fn report(src: &str) -> Vec<String> {
         .collect()
 }
 
+/// The dynamic-dispatch hints of compiling `src` with diagnostics on, after
+/// the full analysis pass (`analyse_full`) — needed for anything the plain
+/// self-sufficient path does not register, such as a module's type aliases.
+fn report_full(src: &str) -> Vec<String> {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let analysis = beamtalk_core::semantic_analysis::analyse_full(
+        &module,
+        beamtalk_core::semantic_analysis::AnalysisContext::default(),
+    );
+    let result = crate::core_erlang::generate_module_with_warnings(
+        &module,
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_analysis(analysis)
+            .with_codegen_diagnostics(true),
+    )
+    .expect("codegen should succeed");
+    result
+        .warnings
+        .into_iter()
+        .map(|w| w.message.to_string())
+        .filter(|m| m.contains("dynamic dispatch"))
+        .collect()
+}
+
 /// The one hint for `selector`.
 fn hint_for(src: &str, selector: &str) -> String {
     let hints = report(src);
@@ -273,4 +298,56 @@ fn tuple_type_pattern_rejects_every_reserved_tag() {
         );
     }
     super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn alias_typed_builtin_send_is_converted() {
+    // BT-4412: a receiver declared through a type alias of a single-route
+    // built-in carries `Aliased` provenance; it takes the same guarded direct
+    // call as the unaliased type instead of reporting `untyped`.
+    let hints = report_full(concat!(
+        "type Pair = Tuple(Integer, Integer)\n",
+        "type Opts = Dictionary(Symbol, Integer)\n\n",
+        "Object subclass: Caller\n",
+        "  first: p :: Pair => p at: 1\n",
+        "  put: d :: Opts => d at: #k put: 1\n",
+    ));
+    assert!(
+        !hints
+            .iter()
+            .any(|h| h.starts_with("Send 'at:'") || h.starts_with("Send 'at:put:'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn alias_typed_value_class_send_is_converted() {
+    // BT-4412: an alias naming a tagged-map Value class is trusted like the
+    // class name itself.
+    let hints = report_full(concat!(
+        "type Point = OpenPoint\n\n",
+        "Object subclass: Caller\n",
+        "  run: p :: Point => p frobnicate\n\n",
+        "Value subclass: OpenPoint\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn alias_of_a_union_stays_dynamic() {
+    // BT-4412: trusting `Aliased` does not widen anything else — an alias
+    // whose expansion is a union is not a single `Known` class.
+    let hints = report_full(concat!(
+        "type Either = Integer | String\n\n",
+        "Object subclass: Caller\n",
+        "  run: v :: Either => v frobnicate\n",
+    ));
+    assert!(
+        hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
 }

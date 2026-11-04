@@ -150,6 +150,19 @@ impl MethodDefinition {
         )
     }
 
+    /// The span of the declaration head: from the start of the method up to
+    /// its first body statement, or the whole method when the body is empty.
+    ///
+    /// [`Self::span`] covers the body too, which for a multi-line body
+    /// underlines far more than a declaration-site diagnostic is about.
+    /// Narrowing to the head puts the caret on the selector.
+    #[must_use]
+    pub fn head_span(&self) -> Span {
+        self.body.first().map_or(self.span, |first| {
+            Span::new(self.span.start(), first.expression.span().start())
+        })
+    }
+
     /// The primitive name when the method body is exactly one quoted
     /// `@primitive "<name>"` pragma (e.g. `class signal: msg => @primitive
     /// "classSignal:"`), else `None`.

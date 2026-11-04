@@ -1,0 +1,104 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4316 (ADR 0142 §2, amended): a static class send's hit path reads one
+// `persistent_term` key per call target, whose value is the `ClassSelf` the
+// callee receives. These are the workspace halves of the BUnit rows in
+// stdlib/test/guarded_static_call_test.bt: each warms the key through a call
+// site compiled before the change (`Gsk*Caller run`), redefines the target
+// class, then checks the old call site answers what a dynamic send (the class
+// held in a variable) answers. They need a live workspace, which BUnit does
+// not have.
+
+Object subclass: GskTarget
+  class answer => #v1
+// => "GskTarget"
+
+Object subclass: GskCaller
+  class run => GskTarget answer
+// => "GskCaller"
+
+GskCaller run
+// => v1
+
+// ===========================================================================
+// A REDEFINITION THAT CHANGES THE METHOD IS SEEN BY THE WARMED CALL SITE
+// ===========================================================================
+
+Object subclass: GskTarget
+  class answer => #v2
+// => "GskTarget"
+
+GskCaller run
+// => v2
+
+target := GskTarget
+// => GskTarget
+
+target answer
+// => v2
+
+// ===========================================================================
+// (c) A REDEFINITION WITHOUT THE METHOD: does_not_understand, NOT undef
+// ===========================================================================
+
+Object subclass: GskTarget
+  class other => #other
+// => "GskTarget"
+
+[GskCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+[target answer] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// And `removeSelector:` of a class-body method, after a fresh warm-up.
+Object subclass: GskTarget
+  class answer => #v3
+// => "GskTarget"
+
+GskCaller run
+// => v3
+
+GskTarget class removeSelector: #answer
+// => GskTarget class
+
+[GskCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+[target answer] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// (d) A SUPERCLASS THAT GAINS classState: ON RELOAD: THE WARMED CALL SITE
+// TAKES THE CLASS PROCESS, AS THE DYNAMIC SEND DOES
+// ===========================================================================
+
+Object subclass: GskParent
+  class tag => #parent
+// => "GskParent"
+
+GskParent subclass: GskChild
+  class whoRuns => Erlang erlang self
+// => "GskChild"
+
+Object subclass: GskChildCaller
+  class run => GskChild whoRuns
+// => "GskChildCaller"
+
+GskChildCaller run == Erlang erlang self
+// => true
+
+Object subclass: GskParent
+  classState: count :: Integer = 0
+  class tag => #parent
+// => "GskParent"
+
+GskChildCaller run == Erlang erlang self
+// => false
+
+child := GskChild
+// => GskChild
+
+child whoRuns == Erlang erlang self
+// => false
