@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FieldAtClassVarInsideActor — test fixture for BT-4421 (ADR 0124 §4i,
+// ADR 0130 §2)
+//
+// `self fieldAt:` / `self fieldAt:put:` inside a class method read and write
+// the class variables in place, like `self.x` / `self.x :=`, instead of
+// sending the class's own gen_server a re-entrant `class_send`
+// (`dispatch_error`). Kept as its own class so the lifecycle test that drives
+// it owns its long-lived class gen_server's class variables.
+
+Actor subclass: FieldAtClassVarInsideActor
+  late classState: current :: Integer
+  classState: total :: Integer = 0
+
+  class readTotal => self fieldAt: #total
+
+  class readCurrent => self fieldAt: #current
+
+  class read: name => self fieldAt: name
+
+  // Not the last statement: a body-level write, then a `self.x` read sees it.
+  class writeTotal: value =>
+    self fieldAt: #total put: value
+    self.total
+
+  // Last statement: answers the assigned value.
+  class write: name value: value => self fieldAt: name put: value
+
+  class writeCurrentThenRead: value =>
+    self fieldAt: #current put: value
+    self.current
+
+  // Inside a block evaluated at home (a non-inlined `do:` closure).
+  class sumInto: items =>
+    items do: [:each | self fieldAt: #total put: (self fieldAt: #total) + each]
+    self fieldAt: #total
+
+  // Source order: the write in the left operand is seen by the right one.
+  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)
+
+  class getCurrent => self.current
+
+  class getTotal => self.total

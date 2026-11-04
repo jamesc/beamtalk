@@ -1742,7 +1742,9 @@ outside, `SomeClass fieldAt: #x` reads a class variable (an unassigned
 put: v` writes one, answering `v`. Both raise `undeclared_class_variable`
 for a name the class does not declare, including on a class that declares
 no class variables at all, so a typo neither reads `nil` nor creates a
-variable.
+variable. Inside a class method, `self fieldAt: #x` and `self fieldAt: #x
+put: v` read and write in place, like `self.x` and `self.x := v`, under
+the same rules.
 
 **Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
 legitimate dependency injection (substituting a value for a slot normally

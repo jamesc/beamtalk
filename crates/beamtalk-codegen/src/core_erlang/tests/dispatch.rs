@@ -4315,6 +4315,59 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
     );
 }
 
+/// BT-4421: class-method `self fieldAt:` / `self fieldAt:put:` read and write
+/// the class variable in place (`field_at` / `field_at_put` helper calls), on
+/// an Actor class too (whose class methods share `CodeGenContext::Actor`), at
+/// body level, in a block (a read takes the block's capture, ADR 0130 §5)
+/// and as an operand — never a `class_send` back into the class's own
+/// gen_server, nor the instance-side state-threaded `fieldAt:put:`.
+#[test]
+fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
+    let src = concat!(
+        "Actor subclass: CvFieldAtInPlace\n",
+        "  classState: total = 0\n\n",
+        "  class readTotal => self fieldAt: #total\n\n",
+        "  class writeTotal: v =>\n",
+        "    self fieldAt: #total put: v\n",
+        "    self.total\n\n",
+        "  class sumInto: items =>\n",
+        "    items do: [:each | self fieldAt: #total put: (self fieldAt: #total) + each]\n",
+        "    nil\n\n",
+        "  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'field_at'(ClassSelf, "),
+        "a method-level fieldAt: is a field_at/2 helper call. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "),
+        "fieldAt:put: is a field_at_put/3 helper call. Got:\n{code}"
+    );
+    // The `do:` block reads with `fieldAt:`, so it binds a capture and its
+    // read is the 3-arity captured-fallback form.
+    assert!(
+        code.contains("call 'beamtalk_class_vars':'capture'(ClassSelf, "),
+        "a block that reads with fieldAt: binds a capture. Got:\n{code}"
+    );
+    let three_arity_read = code
+        .split("call 'beamtalk_class_vars':'field_at'(ClassSelf, ")
+        .skip(1)
+        .any(|rest| {
+            let args = &rest[..rest.find(')').unwrap_or(rest.len())];
+            args.contains(", ")
+        });
+    assert!(
+        three_arity_read,
+        "the block's fieldAt: read passes its capture. Got:\n{code}"
+    );
+    // (The selectors still appear in the class's xref metadata.)
+    assert!(
+        !code.contains("'fieldAt:', [") && !code.contains("'fieldAt:put:', ["),
+        "no fieldAt: message send or state-threaded fieldAt:put:. Got:\n{code}"
+    );
+}
+
 // --- direct Value construction (cross-class `new` / keyword ctors) ---
 //
 // An unqualified class reference in a fresh generator is never an

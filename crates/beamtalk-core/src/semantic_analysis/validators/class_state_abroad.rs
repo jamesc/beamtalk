@@ -465,8 +465,8 @@ fn shape_clause(shape: EscapeShape) -> String {
     }
 }
 
-/// Rule (a): `block` reads class state (a class variable, a `hasField:`
-/// probe, or both) and is `how`.
+/// Rule (a): `block` reads class state (a class variable, directly or with
+/// `fieldAt:`, a `hasField:` probe, or both) and is `how`.
 fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
@@ -474,37 +474,48 @@ fn reads_diagnostic(
     how: &str,
 ) -> Diagnostic {
     let class = ctx.class_name;
-    let vars = accesses
-        .reads
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join(", ");
+    // `self.n` reads and reflective `fieldAt:` reads (BT-4421), joined:
+    // ``reads class variable n of Counter and class variable m with `fieldAt:` ``.
+    let direct = (!accesses.reads.is_empty()).then(|| {
+        let vars = accesses
+            .reads
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("class variable {vars}")
+    });
+    let reads = match (direct, accesses.field_at_read_noun("class variable")) {
+        (None, None) => None,
+        (Some(direct), None) => Some(format!("reads {direct} of {class}")),
+        (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),
+        (Some(direct), Some(refl)) => Some(format!(
+            "reads {direct} of {class} and {refl} with `fieldAt:`"
+        )),
+    };
     let (what, captured, hint) = if accesses.has_field_probes.is_empty() {
         (
-            format!("reads class variable {vars} of {class}"),
+            reads.unwrap_or_default(),
             "reads the values captured at creation",
             "Read the class variable into a local before building the block, or have the \
              block call a class method that returns it (ADR 0130 §5)",
         )
     } else {
         let probe = probe_clause(&accesses.has_field_probes);
-        if vars.is_empty() {
+        if let Some(reads) = reads {
+            (
+                format!("{reads} and probes its class state with {probe}"),
+                "reads the values captured at creation",
+                "Read the class variable and evaluate the `hasField:` test into locals before \
+                 building the block, or have the block call a class method that does (ADR \
+                 0130 §5)",
+            )
+        } else {
             (
                 format!("probes the class state of {class} with {probe}"),
                 "sees the class variables as they were at creation",
                 "Evaluate the `hasField:` test into a local before building the block, or \
                  have the block call a class method that makes it (ADR 0130 §5)",
-            )
-        } else {
-            (
-                format!(
-                    "reads class variable {vars} of {class} and probes its class state with {probe}"
-                ),
-                "reads the values captured at creation",
-                "Read the class variable and evaluate the `hasField:` test into locals before \
-                 building the block, or have the block call a class method that does (ADR \
-                 0130 §5)",
             )
         }
     };
