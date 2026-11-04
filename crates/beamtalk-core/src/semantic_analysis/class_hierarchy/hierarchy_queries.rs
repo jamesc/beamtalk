@@ -43,6 +43,24 @@ impl ClassHierarchy {
         chain
     }
 
+    /// Whether `class_name`'s compiled instance methods thread actor `State`
+    /// (ADR 0137 amended §1): a non-native class below `Actor` (not `Actor`
+    /// itself, whose methods are compiled without actor `State`).
+    ///
+    /// The one rule behind the static `CompiledSelfSend` and `super`-send
+    /// classifications and the `'threads_actor_state'` flag in
+    /// `__beamtalk_meta/0`, which `beamtalk_dispatch:inherited_target/2` reads
+    /// at run time (BT-4280), so the Rust and Erlang sides cannot disagree.
+    #[must_use]
+    pub fn threads_actor_state(&self, class_name: &str) -> bool {
+        self.get_class(class_name).is_some_and(|c| !c.is_native)
+            && class_name != "Actor"
+            && self
+                .superclass_chain(class_name)
+                .iter()
+                .any(|c| c.as_str() == "Actor")
+    }
+
     /// Returns the names of all classes whose immediate superclass is
     /// `class_name`.
     ///

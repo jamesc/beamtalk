@@ -117,6 +117,8 @@ come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error valu
     put/3,
     check_declared/2,
     check_declared/3,
+    check_declared/4,
+    check_declared_reflective/2,
     clear/2,
     has/2,
     has/3,
@@ -544,9 +546,39 @@ branch) reads the metadata once.
 -spec check_declared(atom(), atom(), unknown | #{atom() => eager | late}) ->
     ok | {error, #beamtalk_error{}}.
 check_declared(Class, Name, KindsOrUnknown) ->
+    check_declared(Class, Name, KindsOrUnknown, in_process).
+
+-doc """
+The declared-set rule for a reflection send from outside the class:
+`Cls fieldAt: #x` / `Cls fieldAt: #x put: v` (BT-4148). The
+same rule as `check_declared/2`, except that a KNOWN-empty own set is strict.
+That leniency exists for an inherited class method running through a subclass,
+and a reflective send from outside has no such caller, so it would only let a
+typo read `nil` from, or create a variable on, a class that declares none. `unknown` metadata
+(ClassBuilder) stays lenient.
+""".
+-spec check_declared_reflective(atom(), atom()) -> ok | {error, #beamtalk_error{}}.
+check_declared_reflective(Class, Name) ->
+    check_declared(
+        Class, Name, beamtalk_class_metadata:class_var_kinds_or_unknown(Class), reflective
+    ).
+
+-doc """
+The declared-set rule with an explicit caller, against kinds already read.
+`in_process` is `check_declared/3`; `reflective` is
+`check_declared_reflective/2`'s strict known-empty form. The class gen_server's
+`read_class_var/4` passes its caller through here so the reflective read and
+write share one rule.
+""".
+-spec check_declared(
+    atom(), atom(), unknown | #{atom() => eager | late}, in_process | reflective
+) -> ok | {error, #beamtalk_error{}}.
+check_declared(Class, Name, KindsOrUnknown, Caller) ->
     case KindsOrUnknown of
         unknown ->
             ok;
+        Kinds when map_size(Kinds) =:= 0, Caller =:= reflective ->
+            {error, beamtalk_class_var_errors:undeclared_error(Class, Name)};
         Kinds when map_size(Kinds) =:= 0 ->
             case maps:is_key(Name, beamtalk_class_metadata:inherited_class_var_kinds(Class)) of
                 true -> {error, beamtalk_class_var_errors:undeclared_error(Class, Name)};

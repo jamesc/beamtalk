@@ -174,6 +174,25 @@ through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
+**The one direct inherited exit (BT-4280).** Before the extension lookup, the
+default arm asks `beamtalk_dispatch:inherited_target/2` for a memoised verdict
+(derived-cache key `{inherited_target, Class, Selector}`). It answers
+`{compiled, Owner, Module}` only when there is no extension on the class or its
+superclass for the selector, `resolve_owner/2` finds an owner from the
+superclass, and the owner's `__beamtalk_meta/0` has
+`'threads_actor_state' => 'true'` and lists the selector among its own
+methods. The arm then calls `beamtalk_dispatch:invoke_resolved/6` directly,
+with no `call_foreign/3`. This is the run-time twin of the static
+`CompiledSelfSend` rule (§1): a compiled actor method stores its own threaded
+`State` before every call that may run user code and on exit, so it never
+relies on the cell being current at entry. The flag comes from the same Rust
+predicate, `ClassHierarchy::threads_actor_state`, that decides
+`CompiledSelfSend`. Every other answer is `slow` and takes the path above
+unchanged; every source that changes the answer (extension install or
+removal, a method write or `removeSelector:`, a reload, a class removal)
+flushes the derived cache. The `dispatch/4` exit test allows `invoke_resolved/6`
+only under the `{'compiled', ...}` arm.
+
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and
 returns the fun's own `{reply, R, NewState}` unless the cell changed during the
 call (always on, every build): if the answer is the exact entry state, the cell

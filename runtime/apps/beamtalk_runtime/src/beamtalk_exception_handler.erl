@@ -373,8 +373,9 @@ nothing to successful dispatch.
 `Context` may also carry the caught `stacktrace` (`ensure_wrapped/2,3,4` add
 it). It refines a `badarg` raised by a failed binary construction: the
 message then names the failing segment and value from the `format_bs_fail`
-`error_info` the BEAM attached (ADR 0143 § Runtime failures, BT-4406), e.g.
-`binary construction: segment 2 of type 'binary': expected a binary but got: 1`.
+`error_info` the BEAM attached (ADR 0143 § Runtime failures, BT-4406,
+BT-4414), e.g. for `<<16:8, v/binary>>` with `v := 7`:
+`binary construction: segment 2 of type 'binary': expected a binary but got: 7`.
 Any other `badarg` keeps its generic message.
 """.
 -spec wrap_raw(term(), map()) -> map().
@@ -557,10 +558,17 @@ A construction that fails raises a bare `badarg`; the BEAM attaches an
 message core and the `details` to record; otherwise `none`, and the `badarg`
 keeps its generic "invalid argument" message.
 
-The text is OTP's own (`format_bs_fail/2`), with values rendered as Beamtalk
-`printString`s. The segment index is the one the compiler annotated; an
-unannotated segment reports index 0, which is left out of the message rather
-than shown as a position.
+The text is OTP's own (`format_bs_fail/2`), with scalar values rendered as
+Beamtalk `printString`s (see `bs_fail_value/1`). The segment index is the
+1-based source segment number the compiler annotated (BT-4414); a segment
+without that annotation reports index 0, which is left out of the message
+rather than shown as a position.
+
+`details` records `segment_type`, `failure` (OTP's failure kind: `type`
+when the value does not fit the segment's type, `size` for a bad size, and
+`unit`, `short`, `no_float` or `invalid` otherwise), `value` (the offending
+size for a `size` failure, the segment value otherwise) and, when known,
+`segment`.
 """.
 -spec binary_construction_failure(map()) -> {ok, binary(), map()} | none.
 binary_construction_failure(#{stacktrace := [{_M, _F, _A, Location} = Frame | Rest]}) when
@@ -570,7 +578,7 @@ binary_construction_failure(#{stacktrace := [{_M, _F, _A, Location} = Frame | Re
         #{
             module := erl_erts_errors,
             function := format_bs_fail,
-            cause := {Index, Type, _Error, Value}
+            cause := {Index, Type, Error, Value}
         } = ErrorInfo when is_integer(Index), is_atom(Type) ->
             Printer = ErrorInfo#{pretty_printer => fun bs_fail_value/1},
             Frame1 = setelement(4, Frame, [
@@ -586,7 +594,7 @@ binary_construction_failure(#{stacktrace := [{_M, _F, _A, Location} = Frame | Re
                 end,
             case Formatted of
                 #{general := General} ->
-                    Details0 = #{segment_type => Type, value => Value},
+                    Details0 = #{segment_type => Type, failure => Error, value => Value},
                     {Text, Details} =
                         case Index of
                             0 -> {strip_unknown_segment(General, Type), Details0};
@@ -612,43 +620,55 @@ strip_unknown_segment(General, Type) ->
         Rest -> [io_lib:format("'~ts' segment: ", [Type]), Rest]
     end.
 
-%% Render a failing segment's value as its Beamtalk `printString`, bounded so
-%% a large binary or collection cannot flood the message. Never crashes and
-%% never blocks: an error formatter must not itself fail or wait. A value
-%% holding a future at any depth is rendered with the bounded Erlang term
-%% format, because `printString` would await the future.
+%% Render a failing segment's value for the message, bounded so a large
+%% binary or collection cannot flood it. A scalar — an integer, float, atom
+%% (Symbol, `nil`, `true`, `false`), a String, or a bitstring capped to
+%% ?BS_FAIL_VALUE_BYTES bytes — renders as its Beamtalk `printString`, whose
+%% primitive printing runs no user code. Anything else (a list, tuple or map,
+%% including a Value Object or a future, a pid, a fun) renders with the
+%% Erlang term format limited to depth 20 (`~0tP`). So the formatter runs no
+%% user `printString`, never awaits a future, and its cost is bounded by the
+%% capped scalar and the depth limit, not by the size of the value. It never
+%% crashes: a `printString` that fails falls back to the term format.
 -define(BS_FAIL_VALUE_BYTES, 32).
 -define(BS_FAIL_VALUE_CHARS, 80).
+-define(BS_FAIL_VALUE_DEPTH, 20).
 -spec bs_fail_value(term()) -> unicode:chardata().
 bs_fail_value(Value) when is_bitstring(Value), byte_size(Value) > ?BS_FAIL_VALUE_BYTES ->
     <<Prefix:?BS_FAIL_VALUE_BYTES/binary, _/bitstring>> = Value,
     [bs_fail_value(Prefix), <<"...">>];
+bs_fail_value({beamtalk_string, Bytes}) when
+    is_binary(Bytes), byte_size(Bytes) > ?BS_FAIL_VALUE_BYTES
+->
+    <<Prefix:?BS_FAIL_VALUE_BYTES/binary, _/binary>> = Bytes,
+    [bs_fail_value({beamtalk_string, Prefix}), <<"...">>];
 bs_fail_value(Value) ->
     Printed =
-        case holds_future(Value) of
+        case bs_fail_scalar(Value) of
             true ->
-                iolist_to_binary(io_lib:format("~0tP", [Value, 20]));
-            false ->
                 try
                     beamtalk_primitive:print_string(Value)
                 catch
-                    _:_ -> iolist_to_binary(io_lib:format("~0tP", [Value, 20]))
-                end
+                    _:_ -> bs_fail_term(Value)
+                end;
+            false ->
+                bs_fail_term(Value)
         end,
     bs_fail_truncate(Printed).
 
-%% True if `Term` contains a future at any depth (lists, including improper
-%% ones, tuples and maps).
--spec holds_future(term()) -> boolean().
-holds_future({beamtalk_future, _}) ->
-    true;
-holds_future([H | T]) ->
-    holds_future(H) orelse holds_future(T);
-holds_future(T) when is_tuple(T) -> lists:any(fun holds_future/1, tuple_to_list(T));
-holds_future(M) when is_map(M) ->
-    lists:any(fun({K, V}) -> holds_future(K) orelse holds_future(V) end, maps:to_list(M));
-holds_future(_) ->
+%% A value `bs_fail_value/1` renders as its `printString`: one whose printing
+%% runs no user code and costs at most its (capped) size.
+-spec bs_fail_scalar(term()) -> boolean().
+bs_fail_scalar(Value) when is_integer(Value); is_float(Value); is_atom(Value) -> true;
+bs_fail_scalar(Value) when is_bitstring(Value) -> byte_size(Value) =< ?BS_FAIL_VALUE_BYTES;
+bs_fail_scalar({beamtalk_string, Bytes}) when is_binary(Bytes) ->
+    byte_size(Bytes) =< ?BS_FAIL_VALUE_BYTES;
+bs_fail_scalar(_) ->
     false.
+
+-spec bs_fail_term(term()) -> binary().
+bs_fail_term(Value) ->
+    iolist_to_binary(io_lib:format("~0tP", [Value, ?BS_FAIL_VALUE_DEPTH])).
 
 -spec bs_fail_truncate(unicode:chardata()) -> unicode:chardata().
 bs_fail_truncate(Printed) ->

@@ -63,6 +63,8 @@ super(Selector, Args, Self, State, CurrentClass)
     lookup/5,
     super/5,
     super_value/4,
+    inherited_target/2,
+    invoke_resolved/6,
     responds_to/2,
     invoke_extension/6,
     check_extension/2
@@ -190,6 +192,77 @@ super(Selector, Args, Self, State, CurrentClass) ->
                             lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
                     end
             end
+    end.
+
+-doc """
+BT-4280: the memoised verdict for an inherited send to an actor instance.
+
+A compiled actor class's `dispatch/4` default arm asks this first. It answers
+`{compiled, Owner, Module}` when the send of `Selector` to an instance of
+`ClassName` reaches a compiled method of an actor class that threads its own
+`State` (ADR 0137 amended §1: it stores before every call that may run user
+code and on exit), so the arm may call `invoke_resolved/6` directly instead of
+`super/5` under `beamtalk_actor_state:call_foreign/3`. It answers `slow` for
+everything else, and the arm then takes today's path byte for byte: an
+extension on `ClassName` or its superclass, an owner that is not a compiled
+`State`-threading actor class (`Object`, `Actor`, a native or Value class, an
+extension on an ancestor between, a runtime-patched standalone method), and
+does-not-understand.
+
+Memoised in the derived cache under `{inherited_target, Class, Selector}`, so
+it is invalidated by every source that invalidates `resolve_owner/2`: an
+extension install or removal, a method write or removal, a reload and a class
+removal. An out-of-band purge is caught by the export check on a hit. An
+unregistered class is answered `slow` and not cached.
+""".
+-spec inherited_target(class_name(), selector()) -> {compiled, class_name(), module()} | slow.
+inherited_target(ClassName, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {inherited_target, ClassName, Selector},
+        fun() -> compute_inherited_target(ClassName, Selector) end,
+        fun
+            ({compiled, _, Module}) -> erlang:function_exported(Module, dispatch, 4);
+            (slow) -> true
+        end
+    ).
+
+-spec compute_inherited_target(class_name(), selector()) ->
+    {cache | nocache, {compiled, class_name(), module()} | slow}.
+compute_inherited_target(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
+        not_found ->
+            {nocache, slow};
+        {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
+            Verdict =
+                case
+                    check_extension(ClassName, Selector) =:= not_found andalso
+                        check_extension(Super, Selector) =:= not_found andalso
+                        resolve_owner(Super, Selector)
+                of
+                    {owner, Owner, Module} ->
+                        case threads_actor_state(Module, Selector) of
+                            true -> {compiled, Owner, Module};
+                            false -> slow
+                        end;
+                    _ ->
+                        slow
+                end,
+            {cache, Verdict};
+        {ok, _} ->
+            {cache, slow}
+    end.
+
+%% The owner's compiled module says (codegen flag `threads_actor_state`, set
+%% from the same Rust predicate as the static `CompiledSelfSend` rule) that
+%% its methods thread actor `State`, and lists `Selector` among its own
+%% compiled methods.
+-spec threads_actor_state(module(), selector()) -> boolean().
+threads_actor_state(Module, Selector) ->
+    case beamtalk_class_metadata:read_meta(Module) of
+        {ok, #{threads_actor_state := true, method_info := MethodInfo}} when is_map(MethodInfo) ->
+            is_map_key(Selector, MethodInfo);
+        _ ->
+            false
     end.
 
 -doc """

@@ -450,16 +450,22 @@ impl ClassInfo {
     }
 
     /// Whether `selector` is a class-variable reflection send (`hasField:`,
-    /// `clearField:`): the class process answers it from its own state ahead
-    /// of the class-method lookup (`beamtalk_object_class:
-    /// is_class_var_reflection_selector/1`), so a class method of that name is
-    /// never what a send reaches and is never direct-call eligible.
+    /// `clearField:`, `fieldAt:`, `fieldAt:put:`; BT-4148): the class process
+    /// answers it from its own state ahead of the class-method lookup
+    /// (`beamtalk_object_class:is_class_var_reflection_selector/1`), so a
+    /// class method of that name is never what a send reaches and is never
+    /// direct-call eligible. Both sides are pinned to
+    /// `runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json`.
     #[must_use]
     pub fn is_class_var_reflection_selector(selector: &str) -> bool {
+        use crate::ast::WellKnownSelector;
         matches!(
-            crate::ast::WellKnownSelector::from_name(selector),
+            WellKnownSelector::from_name(selector),
             Some(
-                crate::ast::WellKnownSelector::HasField | crate::ast::WellKnownSelector::ClearField
+                WellKnownSelector::HasField
+                    | WellKnownSelector::ClearField
+                    | WellKnownSelector::FieldAt
+                    | WellKnownSelector::FieldAtPut
             )
         )
     }
