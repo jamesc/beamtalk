@@ -13,6 +13,9 @@ introspection.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% logger handler callback for log_unwraps_string_metadata_test/0.
+-export([log/2]).
+
 %%====================================================================
 %% Setup / teardown
 %%====================================================================
@@ -941,3 +944,170 @@ install_test_file_handler_with_file() ->
 remove_test_file_handler() ->
     _ = logger:remove_handler(beamtalk_file_log),
     ok.
+
+%%====================================================================
+%% log/3 — Logger sends with String content (BT-4321)
+%%====================================================================
+
+-define(BT_4321_DOMAIN, [beamtalk, user, bt_4321]).
+
+-doc "Forward each log event to the test process (handler callback).".
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {bt_4321_log_event, LogEvent},
+    ok.
+
+-doc "Handler filters that pass only this suite's own domain.".
+bt_4321_filters() ->
+    [{bt_4321_only, {fun logger_filters:domain/2, {log, equal, ?BT_4321_DOMAIN}}}].
+
+-doc "Run `Body` with the primary level at `all`, restoring it afterwards.".
+with_all_levels(Body) ->
+    #{level := OldLevel} = logger:get_primary_config(),
+    ok = logger:set_primary_config(level, all),
+    try
+        Body()
+    after
+        ok = logger:set_primary_config(level, OldLevel)
+    end.
+
+-doc "Run `Body` with a capturing handler that forwards events to this process.".
+with_capture_handler(HandlerId, Body) ->
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        config => #{parent => self()},
+        level => all,
+        filter_default => stop,
+        filters => bt_4321_filters()
+    }),
+    try
+        with_all_levels(Body)
+    after
+        _ = logger:remove_handler(HandlerId)
+    end.
+
+-doc """
+BT-4321: a `Logger` send with a tagged `String` message, filed through a
+`logger_std_h` file handler, renders as a clean `<level>: <text>` line at
+every level, with and without metadata — never a `FORMAT ERROR` dump.
+""".
+log_renders_tagged_string_through_std_h_test() ->
+    {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
+    File = binary_to_list(
+        iolist_to_binary([
+            TmpDir,
+            "/bt_4321_log_",
+            integer_to_list(erlang:unique_integer([positive])),
+            ".log"
+        ])
+    ),
+    HandlerId = bt_4321_std_h_test_handler,
+    ok = logger:add_handler(HandlerId, logger_std_h, #{
+        config => #{file => File},
+        level => all,
+        filter_default => stop,
+        filters => bt_4321_filters(),
+        formatter => {logger_formatter, #{template => [level, ": ", msg, "\n"]}}
+    }),
+    Meta = #{domain => ?BT_4321_DOMAIN},
+    UserMeta = #{
+        {beamtalk_string, <<"reason">>} => {beamtalk_string, <<"timeout">>},
+        {beamtalk_string, <<"attempt">>} => 2
+    },
+    Levels = [debug, info, warning, error],
+    try
+        with_all_levels(fun() ->
+            lists:foreach(
+                fun(Level) ->
+                    Text = <<"boom ", (atom_to_binary(Level))/binary>>,
+                    ?assertEqual(
+                        nil,
+                        beamtalk_logging_config:log(Level, {beamtalk_string, Text}, Meta)
+                    ),
+                    ?assertEqual(
+                        nil,
+                        beamtalk_logging_config:log(
+                            Level,
+                            {beamtalk_string, <<Text/binary, " meta">>},
+                            maps:merge(UserMeta, Meta)
+                        )
+                    )
+                end,
+                Levels
+            )
+        end),
+        ok = logger_std_h:filesync(HandlerId),
+        {ok, Contents} = file:read_file(File),
+        ?assertEqual(nomatch, binary:match(Contents, <<"FORMAT ERROR">>)),
+        ?assertEqual(nomatch, binary:match(Contents, <<"beamtalk_string">>)),
+        Expected = iolist_to_binary([
+            [
+                [atom_to_binary(L), ": boom ", atom_to_binary(L), "\n"],
+                [atom_to_binary(L), ": boom ", atom_to_binary(L), " meta\n"]
+            ]
+         || L <- Levels
+        ]),
+        ?assertEqual(Expected, Contents)
+    after
+        _ = logger:remove_handler(HandlerId),
+        _ = file:delete(File)
+    end.
+
+-doc """
+BT-4321: String keys and values in Logger metadata reach OTP as bare
+binaries, so formatters (e.g. `beamtalk_json_formatter`) see text, not tagged
+tuples. Non-String values and the injected atom keys pass through unchanged.
+""".
+log_unwraps_string_metadata_test() ->
+    with_capture_handler(bt_4321_capture_test_handler, fun() ->
+        nil = beamtalk_logging_config:log(
+            error,
+            {beamtalk_string, <<"failed">>},
+            #{
+                domain => ?BT_4321_DOMAIN,
+                beamtalk_class => 'Svc',
+                {beamtalk_string, <<"reason">>} => {beamtalk_string, <<"timeout">>},
+                {beamtalk_string, <<"tags">>} => [{beamtalk_string, <<"a">>}],
+                {beamtalk_string, <<"attempt">>} => 2
+            }
+        ),
+        receive
+            {bt_4321_log_event, #{level := error, msg := {Format, Args}, meta := M}} ->
+                ?assertEqual(<<"failed">>, iolist_to_binary(io_lib:format(Format, Args))),
+                ?assertEqual(<<"timeout">>, maps:get(<<"reason">>, M)),
+                ?assertEqual([<<"a">>], maps:get(<<"tags">>, M)),
+                ?assertEqual(2, maps:get(<<"attempt">>, M)),
+                ?assertEqual('Svc', maps:get(beamtalk_class, M))
+        after 1000 ->
+            ?assert(false)
+        end
+    end).
+
+-doc """
+BT-4321: a level below the primary level files nothing (and answers `nil`).
+""".
+log_filtered_level_files_nothing_test() ->
+    with_capture_handler(bt_4321_filtered_test_handler, fun() ->
+        ok = logger:set_primary_config(level, error),
+        nil = beamtalk_logging_config:log(
+            debug, {beamtalk_string, <<"quiet">>}, #{domain => ?BT_4321_DOMAIN}
+        ),
+        receive
+            {bt_4321_log_event, Event} -> ?assertEqual(no_event, Event)
+        after 100 ->
+            ok
+        end
+    end).
+
+-doc """
+BT-4321: a non-text message (e.g. an Integer reaching a Logger body through
+`perform:`) is printed with `~tp` rather than failing the `~ts` format.
+""".
+log_non_string_message_formats_cleanly_test() ->
+    with_capture_handler(bt_4321_non_string_test_handler, fun() ->
+        nil = beamtalk_logging_config:log(info, 42, #{domain => ?BT_4321_DOMAIN}),
+        receive
+            {bt_4321_log_event, #{msg := {Format, Args}}} ->
+                ?assertEqual(<<"42">>, iolist_to_binary(io_lib:format(Format, Args)))
+        after 1000 ->
+            ?assert(false)
+        end
+    end).
