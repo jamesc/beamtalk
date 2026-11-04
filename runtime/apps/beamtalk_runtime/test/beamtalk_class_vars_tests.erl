@@ -684,3 +684,32 @@ with_snapshot_never_touches_home_test() ->
             stop_fake_class(Pid)
         end
     end).
+
+%% BT-4148: the reflective (outside `Cls fieldAt:put:`) form of the declared-set
+%% rule is strict for a KNOWN-empty own set — no inherited class method is
+%% writing, so the in-process leniency does not apply — while unknown
+%% metadata (ClassBuilder) stays lenient and a declared name passes.
+check_declared_reflective_test() ->
+    meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+    meck:expect(beamtalk_class_metadata, inherited_class_var_kinds, fun(_) -> #{} end),
+    try
+        meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> #{} end),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = undeclared_class_variable}},
+            beamtalk_class_vars:check_declared_reflective(?C, typo)
+        ),
+        %% The in-process rule stays lenient for the same known-empty set.
+        ?assertEqual(ok, beamtalk_class_vars:check_declared(?C, typo)),
+        meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) ->
+            #{x => eager}
+        end),
+        ?assertEqual(ok, beamtalk_class_vars:check_declared_reflective(?C, x)),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = undeclared_class_variable}},
+            beamtalk_class_vars:check_declared_reflective(?C, typo)
+        ),
+        meck:expect(beamtalk_class_metadata, class_var_kinds_or_unknown, fun(_) -> unknown end),
+        ?assertEqual(ok, beamtalk_class_vars:check_declared_reflective(?C, typo))
+    after
+        meck:unload(beamtalk_class_metadata)
+    end.

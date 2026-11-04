@@ -2059,8 +2059,12 @@ Decision: **checked**, like an in-process class-method write
 (ADR 0124). `fieldAt:put:` is a user-facing reflection send, so it must not
 silently create a variable the class does not declare: a name already in the
 map writes unchecked, and a creating write applies the shared declared-set rule
-(`beamtalk_class_vars:check_declared/2`). No type check is applied, matching
-instance-side `fieldAt:put:`.
+in its strict, reflective form (`beamtalk_class_vars:check_declared_reflective/2`):
+a class with a known-empty own set (no `classState:` at all) raises
+`undeclared_class_variable` too, since the known-empty leniency exists only for
+inherited class methods, which an outside send is not. Unknown metadata
+(ClassBuilder) stays lenient. No type check is applied, matching instance-side
+`fieldAt:put:`.
 """.
 -spec write_class_var(class_name(), map(), atom(), term()) ->
     {ok, map()} | {error, #beamtalk_error{}}.
@@ -2068,7 +2072,7 @@ write_class_var(ClassName, ClassVars, Name, Value) ->
     Declared =
         case maps:is_key(Name, ClassVars) of
             true -> ok;
-            false -> beamtalk_class_vars:check_declared(ClassName, Name)
+            false -> beamtalk_class_vars:check_declared_reflective(ClassName, Name)
         end,
     case Declared of
         ok -> {ok, ClassVars#{Name => Value}};
@@ -2119,10 +2123,10 @@ ownership when there is no session context to fall back to (tier 1).
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
 %% ADR 0124 §1/§4i/B4: `Cls hasField:`/`Cls clearField:` (and, BT-4148,
-%% `Cls fieldAt:`/`Cls fieldAt:put:`) reach the class gen_server here, ahead of the local-class-method/superclass-chain/DNU
-%% priority order below — like `fieldAt:`/`fieldAt:put:` on an instance
-%% (`sealed` on `Object`, ADR 0035), these are reflection primitives, not
-%% overridable class methods. `ClassVars` lives in `State` directly, so
+%% `Cls fieldAt:`/`Cls fieldAt:put:`) reach the class gen_server here, ahead
+%% of the local-class-method/superclass-chain/DNU priority order below —
+%% like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
+%% 0035), these are reflection primitives, not overridable class methods. `ClassVars` lives in `State` directly, so
 %% neither needs `handle_class_method_call/6`'s method-lookup machinery;
 %% `has_class_var`/`clear_class_var`'s own `handle_call` clauses provide the
 %% identical read/write for `beamtalk_object_class:has_class_var/2` /

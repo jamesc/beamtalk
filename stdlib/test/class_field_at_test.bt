@@ -7,6 +7,7 @@
 //
 // Fixtures:
 //   stdlib/test/fixtures/field_at_class_var_outside_actor.bt
+//   stdlib/test/fixtures/field_at_no_class_vars_holder.bt
 
 TestCase subclass: ClassFieldAtTest
 
@@ -39,6 +40,23 @@ TestCase subclass: ClassFieldAtTest
     self deny: (FieldAtClassVarOutsideActor hasField: #nope)
     // Still alive after every error above.
     self assert: FieldAtClassVarOutsideActor getCurrent equals: 7
+
+  // A class that declares no class variables: a write from outside cannot
+  // create one (the known-empty leniency is only for inherited class
+  // methods), and the class keeps answering.
+  testClassFieldAtPutOnClassWithoutClassVarsRaises =>
+    self should: [
+      FieldAtNoClassVarsHolder fieldAt: #typo put: 1
+    ] raise: #undeclared_class_variable
+    self deny: (FieldAtNoClassVarsHolder hasField: #typo)
+    self assert: FieldAtNoClassVarsHolder answer equals: 42
+
+  testObjectFieldAtPutOfUndeclaredNameRaises =>
+    self should: [
+      Object fieldAt: #typo put: 1
+    ] raise: #undeclared_class_variable
+    self deny: (Object hasField: #typo)
+    self assert: Object name equals: #Object
 
   // Primitive receivers keep the intrinsic's inline `immutable_value` error,
   // hint included (`fieldAt:put:` on a literal is a compile-time error;

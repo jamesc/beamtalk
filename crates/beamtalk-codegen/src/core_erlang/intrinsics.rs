@@ -2963,8 +2963,9 @@ impl CoreErlangGenerator {
                         // a hand-rolled receiver check cannot tell a
                         // class-object `#beamtalk_object{}` apart from an
                         // actor-instance one, so it would send a live class
-                        // gen_server the wrong message shape and crash it. A value/primitive receiver reaches
-                        // the class's own `dispatch/3`, whose `clearField:`
+                        // gen_server the wrong message shape and crash it.
+                        // A value/primitive receiver reaches the class's
+                        // own `dispatch/3`, whose `clearField:`
                         // arm always raises `immutable_value` (added
                         // unconditionally, not only for `ClassKind::Value`
                         // — see `generate_primitive_dispatch`), so no

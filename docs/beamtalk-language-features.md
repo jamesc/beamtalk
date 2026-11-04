@@ -1741,9 +1741,9 @@ outside, `SomeClass fieldAt: #x` reads a class variable with the same rules
 as a class-method read (an unassigned `late` one raises
 `uninitialized_state_error`, an undeclared name raises
 `undeclared_class_variable`), and `SomeClass fieldAt: #x put: v` writes one,
-answering `v`; the write is checked like a class-method write, so it raises
-`undeclared_class_variable` rather than create a name the class does not
-declare.
+answering `v`. The write is checked: it raises `undeclared_class_variable`
+rather than create a name the class does not declare, including on a class
+that declares no class variables at all.
 
 **Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
 legitimate dependency injection (substituting a value for a slot normally
