@@ -342,12 +342,11 @@ Full declared field set for `Class`: own, inherited, and `late` names.
 Walks the superclass chain over ETS-only metadata reads
 (`lookup_instance_variables/1`, `lookup_superclass/1`, plus each level's
 own `__beamtalk_meta/0` `fields` when it has published none) — deliberately
-no `gen_server:call`,
-which issued from `init/1` while the spawning class server is still inside
-its own `{spawn, ...}` handler would deadlock the two against each other
-(the same reason `publish_reflection/1` exists). A level's published
-variables come from the same compiled meta `fields` list its registration
-passed in, so preferring them rejects no valid name.
+no `gen_server:call`, which issued from `init/1` while the spawning class
+server is still inside its own `{spawn, ...}` handler would deadlock the two
+against each other (the same reason `publish_reflection/1` exists). A
+level's published variables come from the same compiled meta `fields` list
+its registration passed in, so preferring them rejects no valid name.
 
 Every level of a class being instantiated is registered by the time this
 runs: a module's `on_load` `register_class/0` re-raises failures instead
