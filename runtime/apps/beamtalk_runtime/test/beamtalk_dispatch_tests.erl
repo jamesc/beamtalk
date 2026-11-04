@@ -2124,7 +2124,7 @@ test_inherited_target_compiled() ->
         beamtalk_dispatch:inherited_target('LoggingCounter', decrement)
     ).
 
-%% `printString` resolves to Object, which does not thread actor State.
+%% BT-4280: `printString` resolves to Object, an owner without the actor-State flag.
 test_inherited_target_object_owned_slow() ->
     ok = ensure_counter_loaded(),
     ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
