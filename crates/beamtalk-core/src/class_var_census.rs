@@ -338,7 +338,10 @@ mod tests {
     fn parse_corpus_source_returns_none_on_parse_error() {
         // An unclosed block is a parse error; the function must return None.
         let result = parse_corpus_source("bad.bt", "Object subclass: Foo\n  class bad => [\n");
-        assert!(result.is_none(), "expected None for a source with parse errors");
+        assert!(
+            result.is_none(),
+            "expected None for a source with parse errors"
+        );
     }
 
     #[test]
