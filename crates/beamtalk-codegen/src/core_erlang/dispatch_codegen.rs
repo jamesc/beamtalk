@@ -1825,8 +1825,8 @@ impl CoreErlangGenerator {
     /// [`Self::generate_class_method_self_send`] runs it directly in this
     /// process: for a class with class variables that process is `Base`'s own,
     /// and a `class_send` would `gen_server:call` itself. Otherwise the send is
-    /// exactly the one `Base foo` compiles to outside `Base`
-    /// ([`Self::generate_class_method_call`]): in the caller for a stateless
+    /// the ordinary literal class send ([`Self::generate_class_method_call`]):
+    /// in the caller for a stateless
     /// chain, in `Base`'s class process (not the one running) when the chain
     /// declares class variables. The arguments are bound once, ahead of the
     /// `case`, and both arms read the same variables.

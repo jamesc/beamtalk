@@ -3772,6 +3772,37 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
     );
 }
 
+/// BT-4317: own-class sends nested in block arguments grow linearly. Each
+/// send's arguments (here a block holding the next send) are compiled once,
+/// ahead of its receiver-tag `case`, so the innermost body appears once and
+/// each send emits one own-class guard and one literal-send guard.
+#[test]
+fn test_nested_own_class_sends_in_block_args_compile_once() {
+    let src = "Object subclass: Base\n  class foo => 1\n\n  class at: k section: aBlock => aBlock value\n\n  class go => Base at: 1 section: [Base at: 2 section: [Base at: 3 section: [Base foo]]]\n";
+    let code = codegen_source(src);
+    let start = code
+        .find("'class_go'/1 = fun")
+        .expect("class_go function present");
+    let go = &code[start..];
+    let end = go[1..].find("\n'").map_or(go.len(), |e| e + 1);
+    let go = &go[..end];
+    assert_eq!(
+        go.matches("'class_self_direct_ok'").count(),
+        4,
+        "one own-class guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("'direct_call_ok'('Base class', 'Base')").count(),
+        4,
+        "one literal-send guard per send. Got:\n{go}"
+    );
+    assert_eq!(
+        go.matches("<'Base class'> when 'true'").count(),
+        4,
+        "one receiver-tag case per send. Got:\n{go}"
+    );
+}
+
 /// BT-4317: `self foo` still late-binds to the receiver: no receiver-tag case.
 #[test]
 fn test_self_send_in_class_method_has_no_receiver_tag_case() {
