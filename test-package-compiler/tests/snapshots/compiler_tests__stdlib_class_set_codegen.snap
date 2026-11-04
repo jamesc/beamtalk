@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/2, 'add:'/2, 'remove:'/2, 'union:'/2, 'intersection:'/2, 'difference:'/2, 'isSubsetOf:'/2, 'asList'/1, 'fromList:'/2, 'do:'/2, 'elements'/1, 'withElements:'/2, 'class_elements:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'stdlib_class_set' ['new'/0, 'new'/1, 'size'/1, 'isEmpty'/1, 'includes:'/2, 'add:'/2, 'remove:'/2, 'union:'/2, 'intersection:'/2, 'difference:'/2, 'isSubsetOf:'/2, 'asList'/1, 'fromList:'/2, 'do:'/2, 'elements'/1, 'withElements:'/2, '__is_slot'/1, 'class_elements:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'Set', 'Value'}],
      'type' =
@@ -61,6 +61,10 @@ case call 'erlang':'is_function'(_block@9, 2) of <'true'> when 'true' -> let _Er
 
 'withElements:'/2 = fun (Self, NewVal) ->
     call 'maps':'put'('elements', NewVal, Self)
+
+
+'__is_slot'/1 = fun (IsSlotSelector) ->
+    case IsSlotSelector of <'elements'> when 'true' -> 'true' <_> when 'true' -> 'false' end
 
 
 'dispatch'/3 = fun (Selector, Args, Self) ->

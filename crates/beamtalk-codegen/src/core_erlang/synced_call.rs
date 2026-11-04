@@ -283,6 +283,27 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
     /// before those names are in scope. Empty outside a probe.
     pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
+    /// BT-4279: the receiver of the send each open window brackets
+    /// (innermost last), by address: an emitter offers a fast path only for
+    /// the send its window owns, never for a nested send it happens to
+    /// compile inside the window. `0` for a window that brackets no send.
+    pub(in crate::core_erlang) window_receivers: Vec<usize>,
+    /// BT-4279: a fast path the owning send's emitter offered, keyed by its
+    /// receiver's address, for [`CoreErlangGenerator::synced_call_value`] to
+    /// attach to the bracket it builds: the fast path and the call without
+    /// its operand bindings.
+    pub(in crate::core_erlang) pending_fast_path: Option<(usize, PendingFastPath)>,
+}
+
+/// BT-4279: a fast path offered by a guarded send's emitter
+/// ([`CoreErlangGenerator::offer_fast_path`]).
+#[derive(Debug)]
+pub(in crate::core_erlang) struct PendingFastPath {
+    pub(in crate::core_erlang) fast_path: super::threaded_ir::FastPath,
+    /// The guarded send without its operand bindings (those are
+    /// [`FastPath::bindings`](super::threaded_ir::FastPath)), bracketed on
+    /// the slow arm.
+    pub(in crate::core_erlang) slow_call: Document<'static>,
 }
 
 impl SyncedCallState {
@@ -296,6 +317,8 @@ impl SyncedCallState {
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
             probe_locals: std::cell::RefCell::default(),
+            window_receivers: Vec::new(),
+            pending_fast_path: None,
         }
     }
 }
@@ -866,6 +889,7 @@ impl CoreErlangGenerator {
             span,
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
+            fast_path: None,
         }
     }
 
@@ -924,6 +948,7 @@ impl CoreErlangGenerator {
             span,
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
+            fast_path: None,
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
@@ -961,6 +986,7 @@ impl CoreErlangGenerator {
             span,
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: self.in_private_scratch,
+            fast_path: None,
         };
         // Today's only caller checks `conditional_fallback_brackets()` first,
         // which excludes a private scratch map. The verify guards a future
@@ -1188,11 +1214,62 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Option<SyncWindow> {
-        if !self.is_sync_site(expr.unwrap_parens()) {
+        let inner = expr.unwrap_parens();
+        if !self.is_sync_site(inner) {
             return None;
         }
         self.synced.window_depth += 1;
+        let receiver = match inner {
+            Expression::MessageSend { receiver, .. } => Self::expr_address(receiver),
+            _ => 0,
+        };
+        self.synced.window_receivers.push(receiver);
+        // BT-4279: an offer never outlives its window. Emitters offer only
+        // after their operand windows have closed, so one still pending here
+        // came from a lowering that failed before `synced_call_value`.
+        self.synced.pending_fast_path = None;
         Some(SyncWindow(()))
+    }
+
+    /// The address that identifies a send by its receiver node (BT-4279).
+    fn expr_address(receiver: &Expression) -> usize {
+        std::ptr::from_ref(receiver) as usize
+    }
+
+    /// BT-4279: offers a fast path for the send whose receiver is `receiver`:
+    /// `test` holds only when the send runs no user code, `fast` is then its
+    /// value, `bindings` binds the operands both read and `slow_call` is the
+    /// whole guarded send without those bindings. Taken only when the
+    /// innermost open window brackets this very send and it holds a whole
+    /// `State` (a loop that holds none brackets at the loop instead); every
+    /// other offer is dropped, and the send is bracketed as usual.
+    pub(in crate::core_erlang) fn offer_fast_path(
+        &mut self,
+        receiver: &Expression,
+        bindings: Document<'static>,
+        test: Document<'static>,
+        fast: Document<'static>,
+        slow_call: Document<'static>,
+    ) {
+        if self.synced.window_receivers.last().copied() != Some(Self::expr_address(receiver))
+            || self.loop_holds_no_whole_state()
+        {
+            return;
+        }
+        let fast_path = super::threaded_ir::FastPath {
+            bindings,
+            test,
+            fast,
+            slow_result: self.fresh_temp_var("SyncedSlow"),
+            slow_state: self.fresh_temp_var("SyncedSlowState"),
+        };
+        self.synced.pending_fast_path = Some((
+            Self::expr_address(receiver),
+            PendingFastPath {
+                fast_path,
+                slow_call,
+            },
+        ));
     }
 
     /// The [`UserCodeCall`] class of `inner` (paren-unwrapped).
@@ -1255,6 +1332,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn close_sync_window(&mut self, window: SyncWindow) {
         let SyncWindow(()) = window;
         self.synced.window_depth -= 1;
+        self.synced.window_receivers.pop();
     }
 
     /// Core-var rebinds for a merged Tier 2 call's captured locals
@@ -1297,7 +1375,19 @@ impl CoreErlangGenerator {
         frame: FrameId,
         version_before: usize,
     ) -> ThreadedValue {
-        let span = expr.unwrap_parens().span();
+        let inner = expr.unwrap_parens();
+        let span = inner.span();
+        // BT-4279: the fast path the owning send's emitter offered, if any.
+        let offered = self
+            .synced
+            .pending_fast_path
+            .take()
+            .and_then(|(key, pending)| match inner {
+                Expression::MessageSend { receiver, .. } if Self::expr_address(receiver) == key => {
+                    Some(pending)
+                }
+                _ => None,
+            });
         let ValueRef::Doc(call) = tv.value else {
             self.record_gap(Self::send_label(expr), span);
             return tv;
@@ -1371,6 +1461,13 @@ impl CoreErlangGenerator {
         self.next_state_var();
         let load = VersionedVar::new(VersionPrefix::State, self.state_version(), frame);
         let result = self.fresh_temp_var("Synced");
+        // BT-4279: a value bracket with no Tier 2 rebinds takes the offered
+        // fast path; its call is then the guarded send without the operand
+        // bindings, which render ahead of the guard.
+        let (call, fast_path) = match offered {
+            Some(pending) if !tier2_merged => (pending.slow_call, Some(pending.fast_path)),
+            _ => (call, None),
+        };
         prelude.push(ThreadedStmt::SyncedCall {
             store,
             call,
@@ -1379,6 +1476,7 @@ impl CoreErlangGenerator {
             span,
             tier2_local_rebinds,
             on_private_scratch: self.in_private_scratch,
+            fast_path,
         });
         ThreadedValue {
             prelude,

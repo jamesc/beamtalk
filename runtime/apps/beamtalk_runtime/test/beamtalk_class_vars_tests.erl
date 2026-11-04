@@ -802,6 +802,34 @@ field_at_put_without_key_unreachable_test() ->
         )
     end).
 
+%% BT-4428: the declared-set check comes first, so with no home an undeclared
+%% name raises `undeclared_class_variable`, a declared one
+%% `class_state_unreachable`.
+field_at_put_undeclared_wins_over_no_home_test() ->
+    with_declared(fun() ->
+        ?assertEqual(
+            undeclared_class_variable,
+            raised_kind(fun() -> beamtalk_class_vars:field_at_put(self_obj(), nope, 1) end)
+        ),
+        ?assertEqual(
+            class_state_unreachable,
+            raised_kind(fun() -> beamtalk_class_vars:field_at_put(self_obj(), x, 1) end)
+        )
+    end).
+
+%% BT-4428: a creating write reads the class metadata once (`check_write/3`),
+%% not again in `put/3`'s declared-set check.
+field_at_put_creating_write_reads_metadata_once_test() ->
+    with_declared(fun() ->
+        beamtalk_class_vars:install(?KEY, #{}),
+        meck:reset(beamtalk_class_metadata),
+        ?assertEqual(1, beamtalk_class_vars:field_at_put(self_obj(), x, 1)),
+        ?assertEqual(
+            1, meck:num_calls(beamtalk_class_metadata, class_var_kinds_or_unknown, '_')
+        ),
+        ?assertEqual(#{x => 1}, erlang:get(?KEY))
+    end).
+
 field_at_non_symbol_name_raises_type_error_test() ->
     with_clean(fun() ->
         beamtalk_class_vars:install(?KEY, #{}),

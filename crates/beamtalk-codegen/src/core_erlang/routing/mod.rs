@@ -127,6 +127,19 @@ pub(in crate::core_erlang) fn type_test(class: &str) -> Option<Guard> {
         .and_then(|row| row.guard)
 }
 
+/// The module the fixture row for `class` names as its `target_module`, if
+/// it has one (BT-4411). A class literal may bake this module into its class
+/// object only when it is also the class's own compiled module: a stdlib
+/// built-in's module can be neither removed nor redefined into another
+/// module, and the runtime half of the fixture
+/// (`beamtalk_tagged_map_routing_conformance_tests`) checks the live class's
+/// module against it. A row whose target is not its class module
+/// (`ErlangModule`, routed to `beamtalk_erlang_proxy`) is excluded by that
+/// comparison at the call site.
+pub(in crate::core_erlang) fn pinned_class_module(class: &str) -> Option<&'static str> {
+    row(class).and_then(|row| row.target_module)
+}
+
 /// Whether instances of `class` are never `'$beamtalk_class'`-tagged maps
 /// carrying their own name, so a class-tag guard on them could never match
 /// (BT-4069). Every row except the supervisor family: a supervisor row's

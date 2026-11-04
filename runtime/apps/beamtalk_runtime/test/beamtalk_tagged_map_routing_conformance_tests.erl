@@ -65,6 +65,8 @@ routing_conformance_test_() ->
         {"the exception root and its subclasses dispatch to the exception module",
             fun exception_family_routed/0},
         {"every sample reaches its target module", fun samples_reach_target_module/0},
+        {"a pinned class-module row's live class module is its target module",
+            fun pinned_class_modules_are_live_class_modules/0},
         {"target_module:dispatch/3 answers like the dynamic send",
             fun target_dispatch_matches_dynamic_send/0},
         {"String special selectors equal the runtime's shared-selector set",
@@ -248,6 +250,29 @@ samples_reach_target_module() ->
             ?assertMatch([{Target, dispatch, [printString, [], Sample]} | _], Calls, ClassBin)
         end,
         routed_samples()
+    ).
+
+%% BT-4411: a class literal naming a row whose `target_module` is the class's
+%% own module bakes that module into the class object instead of reading it
+%% with `module_name_safe/1`. That is sound only while the live class's
+%% module is the fixture's: check it for every such row, so the baked object
+%% is `=:=` to the one the run-time lookup builds. A `proxy_routed` row's
+%% target is the native proxy, not its class module, and is never baked.
+pinned_class_modules_are_live_class_modules() ->
+    Rows = [
+        {binary_to_atom(C, utf8), binary_to_atom(T, utf8)}
+     || #{<<"class">> := C, <<"target_module">> := T, <<"representation">> := R} <- rows(),
+        T =/= null,
+        R =/= <<"proxy_routed">>
+    ],
+    ?assertNotEqual([], Rows),
+    lists:foreach(
+        fun({Class, Target}) ->
+            Pid = beamtalk_class_registry:whereis_class(Class),
+            ?assert(is_pid(Pid), Class),
+            ?assertEqual(Target, beamtalk_object_class:module_name_safe(Pid), Class)
+        end,
+        Rows
     ).
 
 %% The routing-level differential send: for a value the row's guard accepts

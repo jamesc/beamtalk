@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4279: the tagged Value whose auto getters bt4279slot_reader.bt reads
+// on the slot-read fast path; `blk` lets a reader hand it a block.
+
+sealed Value subclass: Bt4279Pt
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+  field: blk :: Dynamic = nil
+
+  // A user-written method: never a slot read.
+  runBlk -> Object => self.blk value

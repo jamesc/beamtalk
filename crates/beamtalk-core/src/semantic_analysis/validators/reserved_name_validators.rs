@@ -27,7 +27,7 @@ use crate::ast::{Expression, Identifier, MethodDefinition, Module};
 use crate::ast_walker::walk_module;
 use crate::semantic_analysis::class_hierarchy::ClassInfo;
 use crate::semantic_analysis::extract_pattern_bindings;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// The reserved-namespace prefix. Codegen-internal state keys
 /// (`__local__<name>`, `__methods__`, `__class_mod__`) all begin with a double
@@ -224,8 +224,11 @@ fn push_class_var_reflection_shadowing(
         )
         .with_hint(format!(
             "Rename it. `{selector}` sent to a class is class-variable reflection, which \
-             the class process serves before looking up class methods."
-        )),
+             the class process serves before looking up class methods. If the method is \
+             deliberate (it takes a non-Symbol argument), suppress this with \
+             `@expect class_var_reflection_shadowing`."
+        ))
+        .with_category(DiagnosticCategory::ClassVarReflectionShadowing),
     );
 }
 
@@ -470,6 +473,90 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|d| d.message.contains("class method `fieldAt:` is shadowed")),
+            "{diagnostics:?}"
+        );
+    }
+
+    /// Full pipeline: analysis plus `@expect` suppression.
+    fn reflection_shadowing_after_expect(source: &str) -> Vec<Diagnostic> {
+        let module = parse_bt(source);
+        let mut diagnostics = crate::semantic_analysis::analyse(&module).diagnostics;
+        crate::compilation::diagnostics_policy::apply_expect_directives(&module, &mut diagnostics);
+        diagnostics
+    }
+
+    fn is_reflection_shadowing(diagnostic: &Diagnostic) -> bool {
+        diagnostic.category == Some(DiagnosticCategory::ClassVarReflectionShadowing)
+    }
+
+    #[test]
+    fn reflection_shadowing_carries_its_category() {
+        let diagnostics =
+            reflection_shadowing_for("Object subclass: Reg\n  class fieldAt: key => key\n");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert!(is_reflection_shadowing(&diagnostics[0]), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn expect_category_name_round_trips() {
+        let name = "class_var_reflection_shadowing";
+        let category = crate::ast::ExpectCategory::ClassVarReflectionShadowing;
+        assert_eq!(crate::ast::ExpectCategory::from_name(name), Some(category));
+        assert_eq!(category.as_str(), name);
+        assert!(crate::ast::ExpectCategory::valid_names().contains(&name));
+    }
+
+    #[test]
+    fn expect_class_var_reflection_shadowing_suppresses_the_warning() {
+        for source in [
+            "Object subclass: Reg\n  @expect class_var_reflection_shadowing\n  \
+             class fieldAt: index :: Integer => index\n",
+            "Object subclass: Reg\n  class at: index => index\n  \
+             @expect class_var_reflection_shadowing \"index-based\"\n  \
+             class fieldAt: index :: Integer put: value => value\n",
+        ] {
+            let diagnostics = reflection_shadowing_after_expect(source);
+            assert!(
+                !diagnostics.iter().any(is_reflection_shadowing),
+                "{source}: {diagnostics:?}"
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("stale @expect")),
+                "{source}: the directive matched: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn expect_class_var_reflection_shadowing_without_the_warning_is_stale() {
+        let diagnostics = reflection_shadowing_after_expect(
+            "Object subclass: Reg\n  @expect class_var_reflection_shadowing\n  \
+             class at: index => index\n",
+        );
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("stale @expect class_var_reflection_shadowing")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn package_diagnostics_table_turns_the_warning_off() {
+        use crate::compilation::diagnostics_policy::{
+            apply_diagnostics_table, parse_diagnostics_table,
+        };
+        let module = parse_bt("Object subclass: Reg\n  class fieldAt: key => key\n");
+        let diagnostics = crate::semantic_analysis::analyse(&module).diagnostics;
+        assert!(diagnostics.iter().any(is_reflection_shadowing));
+        let value: toml::Value =
+            toml::from_str("class-var-reflection-shadowing = \"off\"").unwrap();
+        let table = parse_diagnostics_table(Some(&value)).unwrap();
+        let diagnostics = apply_diagnostics_table(diagnostics, &table);
+        assert!(
+            !diagnostics.iter().any(is_reflection_shadowing),
             "{diagnostics:?}"
         );
     }
