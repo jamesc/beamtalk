@@ -516,8 +516,8 @@ pub fn compute_diagnostics_with_known_vars(
 /// simultaneously otherwise. [`apply_expect_directives_excluding_lint_only`]
 /// is the staleness entry point for every pipeline that does not run lint
 /// passes; only `beamtalk lint` itself (and any other caller that actually
-/// calls `run_lint_passes` first, e.g. the MCP server's own lint-equivalent
-/// path) should keep calling plain [`apply_expect_directives`], which
+/// runs the lint passes, e.g. the MCP server's own lint-equivalent path —
+/// both through `run_post_analysis_lint_pipeline`'s lint hook) should keep calling plain [`apply_expect_directives`], which
 /// validates every category unconditionally.
 ///
 /// [`DiagnosticCategory::Lint`] is here for the same reason: every

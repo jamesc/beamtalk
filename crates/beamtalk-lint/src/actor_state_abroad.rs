@@ -64,9 +64,14 @@
 //! `Timer` block. Only a literal receiver is seen: `blk fork` on a variable
 //! is missed.
 //!
-//! Shapes the lint does not see: a subclass whose actor ancestor is declared
-//! in another file (each file is linted as its own module, so the subclass
-//! resolves non-actor); a block handed to a `Future` (runtime-only, no
+//! Cross-file classes resolve through the hierarchy `beamtalk lint` and the
+//! MCP lint tool hand in (BT-4183): a subclass whose actor ancestor is
+//! declared in another file is an actor, `Sub spawn` against it is an actor
+//! receiver, and a standalone definition for an out-of-file actor is checked.
+//! Called module-locally ([`crate::run_lint_passes`]), those classes resolve
+//! non-actor and are skipped.
+//!
+//! Shapes the lint does not see: a block handed to a `Future` (runtime-only, no
 //! hierarchy entry); `parallelCollect:` (an instance send on an unknown
 //! receiver — the lint judges sends by receiver, except `Timer`/`Parallel`
 //! via the hierarchy's `spawns_block` mark); a `super` send in the block
@@ -75,8 +80,8 @@
 //! field access through a local bound to `self` (only a literal `self`
 //! receiver is a reflective access: an alias send is an ordinary message and
 //! warns as a self-send); a block reaching an actor held in a field or
-//! parameter not typed as another actor class, or an actor behind `unwrap`/`value`; and a standalone definition
-//! for a class outside this module.
+//! parameter not typed as another actor class, or an actor behind
+//! `unwrap`/`value`.
 //!
 //! **Category.** These diagnostics carry
 //! `DiagnosticCategory::ActorStateAbroad`: site-level `@expect
@@ -84,7 +89,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::{LintPass, async_cast_hint, hierarchy_for_lint};
+use crate::{LintContext, LintPass, async_cast_hint};
 use beamtalk_core::ast::{
     Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement, Literal,
     MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
@@ -102,10 +107,11 @@ use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 pub(crate) struct ActorStateAbroadPass;
 
 impl LintPass for ActorStateAbroadPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        // See `hierarchy_for_lint` doc comment for why this is needed
-        // instead of `class.class_kind`.
-        check_module(module, &hierarchy_for_lint(module), diagnostics);
+    fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+        // `ctx.hierarchy`, not `class.class_kind` (see `LintPass`): on the
+        // lint surfaces it is the cross-file hierarchy, so an actor ancestor
+        // declared in another file resolves (BT-4183).
+        check_module(module, ctx.hierarchy, diagnostics);
     }
 }
 
@@ -174,7 +180,7 @@ struct ClassCtx<'a> {
 /// The mutable instance fields of an actor class: `None` when `class_name`
 /// is not an actor. Value types and plain objects have no actor cell, so a
 /// block written in one has no away hazard; a standalone definition for a
-/// class outside this module resolves non-actor too and is skipped.
+/// class the hierarchy does not know resolves non-actor too and is skipped.
 ///
 /// `field:` (immutable) declarations visible in this module are excluded:
 /// data that cannot change reads the same anywhere, so warning on it would
@@ -1846,7 +1852,7 @@ Actor subclass: Counter
     fn only_with_shadowed(body: &str, shadowed: &[&str]) -> Vec<Diagnostic> {
         let (module, parse_diags) = parse(lex_with_eof(&format!("{HEADER}{body}")));
         assert!(parse_diags.is_empty(), "{parse_diags:?}");
-        let mut hierarchy = crate::hierarchy_for_lint(&module);
+        let mut hierarchy = crate::module_hierarchy_for_test(&module);
         hierarchy.set_shadowed_class_names(shadowed.iter().map(|&n| n.into()).collect());
         let mut diagnostics = Vec::new();
         super::check_module(&module, &hierarchy, &mut diagnostics);
@@ -1888,7 +1894,7 @@ Actor subclass: Counter
   viaSelf => self class each: [self.n := 1]
 ";
         let (module, _) = parse(lex_with_eof(src));
-        let mut hierarchy = crate::hierarchy_for_lint(&module);
+        let mut hierarchy = crate::module_hierarchy_for_test(&module);
         hierarchy.set_shadowed_class_names(std::iter::once("SealedCounter".into()).collect());
         let mut diagnostics = Vec::new();
         super::check_module(&module, &hierarchy, &mut diagnostics);
@@ -2107,10 +2113,74 @@ Actor subclass: Counter
 
     #[test]
     fn standalone_unknown_class_quiet() {
-        // A standalone definition for a class outside this module resolves
-        // non-actor and is skipped.
+        // A standalone definition for a class the hierarchy does not know
+        // resolves non-actor and is skipped.
         let d = abroad("Ghost >> m => Timer after: 1 do: [self.n := 1]\n");
         assert!(d.is_empty(), "{d:?}");
+    }
+
+    // ---- cross-file hierarchy (BT-4183) ------------------------------------
+
+    /// `source` linted through `run_lint_passes_with_hierarchy` against its
+    /// module-local hierarchy with `other_file`'s classes injected the way
+    /// `analyse_full` injects a package's out-of-file classes
+    /// (`add_from_beam_meta`), filtered to this pass's diagnostics.
+    fn abroad_with_other_file(source: &str, other_file: &str) -> Vec<Diagnostic> {
+        use beamtalk_core::semantic_analysis::ClassHierarchy;
+        let (other, other_diags) = parse(lex_with_eof(other_file));
+        assert!(other_diags.is_empty(), "{other_diags:?}");
+        let (module, parse_diags) = parse(lex_with_eof(source));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let mut hierarchy = crate::module_hierarchy_for_test(&module);
+        hierarchy.add_from_beam_meta(ClassHierarchy::extract_class_infos(&other));
+        crate::run_lint_passes_with_hierarchy(&module, &hierarchy)
+            .into_iter()
+            .filter(|d| {
+                d.category
+                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::ActorStateAbroad)
+            })
+            .collect()
+    }
+
+    const BASE_FILE: &str = "Actor subclass: Base\n  state: count = 0\n";
+
+    #[test]
+    fn out_of_file_actor_ancestor_warns() {
+        let src = "Base subclass: Sub\n  startLate => Timer after: 100 do: [self.count := 1]\n";
+        let d = abroad_with_other_file(src, BASE_FILE);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("count") && d[0].message.contains("Timer after:do:"),
+            "{}",
+            d[0].message
+        );
+        // Module-local only, `Base` is unknown and `Sub` resolves non-actor.
+        assert!(abroad(src).is_empty(), "module-local lint must stay quiet");
+    }
+
+    #[test]
+    fn out_of_file_actor_subclass_spawn_is_actor_receiver() {
+        // `Sub spawn` resolves `Sub` as an actor through its out-of-file
+        // ancestor, so a block handed to the spawned instance is abroad.
+        let src = "Base subclass: Sub\n  run: aBlock => aBlock value\n\n\
+                   Actor subclass: Counter\n  state: n = 0\n\n\
+                   poke =>\n    s := Sub spawn\n    s run: [self.n := 1]\n";
+        let d = abroad_with_other_file(src, BASE_FILE);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(
+            d[0].message.contains("handed to another actor by 'run:'"),
+            "{}",
+            d[0].message
+        );
+        assert!(abroad(src).is_empty(), "module-local lint must stay quiet");
+    }
+
+    #[test]
+    fn standalone_definition_for_out_of_file_actor_warns() {
+        let src = "Base >> startLate => Timer after: 1 do: [self.count := 1]\n";
+        let d = abroad_with_other_file(src, BASE_FILE);
+        assert_eq!(d.len(), 1, "{d:?}");
+        assert!(abroad(src).is_empty(), "module-local lint must stay quiet");
     }
 
     // ── @expect actor_state_abroad suppression ─────────────────────────────
@@ -2122,7 +2192,7 @@ Actor subclass: Counter
         let tokens = lex_with_eof(src);
         let (module, _) = parse(tokens);
         let mut diags = Vec::new();
-        crate::LintPass::check(&super::ActorStateAbroadPass, &module, &mut diags);
+        crate::check_parsed(&super::ActorStateAbroadPass, &module, &mut diags);
         // Apply @expect directives
         beamtalk_core::compilation::diagnostics_policy::apply_expect_directives(
             &module, &mut diags,

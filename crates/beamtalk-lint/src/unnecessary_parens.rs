@@ -22,7 +22,7 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
-use crate::{LintPass, LintTree};
+use crate::{LintContext, LintPass, LintTree};
 use beamtalk_core::ast::{BinarySegment, Block, Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::for_each_expr_seq;
 use beamtalk_core::source_analysis::Diagnostic;
@@ -37,7 +37,7 @@ impl LintPass for UnnecessaryParensPass {
         LintTree::Parsed
     }
 
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for_each_expr_seq(module, |seq| {
             for stmt in seq {
                 check_expr(&stmt.expression, diagnostics);

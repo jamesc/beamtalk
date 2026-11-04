@@ -333,12 +333,12 @@ pub use beamtalk_core::compilation::diagnostics_policy::{
 ///
 /// Given an already-constructed `AnalysisContext` (callers build this differently — the CLI
 /// and MCP each pass a different set of pre-loaded protocols, aliases, and extensions), this
-/// function runs the five shared steps that both surfaces need:
+/// function runs the shared steps that both surfaces need:
 ///
 /// 1. `analyse_full` → keep categorised diagnostics plus every `Error` (an
 ///    uncategorised structural error fails `build` and a REPL load, so a lint
 ///    gate that dropped it would pass a file neither accepts — BT-4377) →
-///    extend `diags`
+///    extend `diags`; then `lint_passes(&class_hierarchy)` → extend `diags`
 /// 2. `check_class_file_name_agreement` → extend `diags`
 /// 3. `apply_expect_directives` → suppress matching `@expect` annotations
 /// 4. `check_near_miss_dividers` → append near-miss section-divider diagnostics
@@ -350,9 +350,15 @@ pub use beamtalk_core::compilation::diagnostics_policy::{
 /// Returns the `ClassHierarchy` from step 1 for callers that need it (e.g. MCP's type-coverage
 /// computation). Callers that don't need it can discard it.
 ///
-/// `run_lint_passes` (from `beamtalk_lint`) is intentionally left to callers: `beamtalk-lint`
-/// is not a dependency of `beamtalk-language-service`, and both CLI and MCP call it
-/// themselves before building `AnalysisContext`.
+/// `lint_passes` is the hook through which the caller runs the dedicated lint
+/// passes (`beamtalk_lint::run_lint_passes_with_hierarchy`) against step 1's
+/// cross-file hierarchy (BT-4183): the out-of-file classes `analyse_full`
+/// injected are visible to the lints at no extra hierarchy build, and the
+/// lint diagnostics still pass through `@expect` (step 3) and the
+/// `[diagnostics]` table (step 5). It is a hook rather than a direct call
+/// because `beamtalk-lint` is not a dependency of `beamtalk-language-service`
+/// (ADR 0117). The LSP and the REPL do not use this pipeline and never run
+/// the lint passes.
 pub fn run_post_analysis_lint_pipeline(
     module: &beamtalk_core::ast::Module,
     source: &str,
@@ -360,12 +366,16 @@ pub fn run_post_analysis_lint_pipeline(
     file_stem: Option<&str>,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
     diags: &mut Vec<beamtalk_core::source_analysis::Diagnostic>,
+    lint_passes: impl FnOnce(
+        &beamtalk_core::semantic_analysis::ClassHierarchy,
+    ) -> Vec<beamtalk_core::source_analysis::Diagnostic>,
 ) -> beamtalk_core::semantic_analysis::ClassHierarchy {
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     let class_hierarchy = analysis_result.class_hierarchy;
     diags.extend(analysis_result.diagnostics.into_iter().filter(|d| {
         d.category.is_some() || d.severity == beamtalk_core::source_analysis::Severity::Error
     }));
+    diags.extend(lint_passes(&class_hierarchy));
     diags.extend(
         beamtalk_core::semantic_analysis::module_validator::check_class_file_name_agreement(
             module, file_stem,

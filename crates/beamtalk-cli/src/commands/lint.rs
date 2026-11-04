@@ -100,19 +100,21 @@ fn collect_diagnostics(
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.`) and
-    // parse errors, plus AST-level lint passes. Parse errors are kept so a
+    // parse errors. Parse errors are kept so a
     // file with a syntax error — which fails `build` and a REPL load — is
     // reported here too and fails the `--warnings-as-errors` gate (BT-4377).
     let mut lint_diags: Vec<_> = parse_diags
         .into_iter()
         .filter(|d| matches!(d.severity, Severity::Lint | Severity::Error))
         .collect();
-    lint_diags.extend(beamtalk_lint::run_lint_passes(module));
 
-    // Run semantic analysis, apply @expect directives, and check near-miss
-    // section dividers. The shared helper performs all four steps:
-    // analyse_full (filtered by category.is_some()), check_class_file_name_agreement,
-    // apply_expect_directives, and check_near_miss_dividers.
+    // Run semantic analysis, the AST-level lint passes, apply @expect
+    // directives, and check near-miss section dividers. The shared helper
+    // performs every step: analyse_full (filtered by category.is_some()),
+    // the lint passes against analyse_full's cross-file hierarchy (BT-4183:
+    // an actor ancestor declared in another file resolves),
+    // check_class_file_name_agreement, apply_expect_directives,
+    // check_near_miss_dividers, and the [diagnostics] table.
     //
     // Pass cross-file class info so lint sees the same class hierarchy as build,
     // matching diagnostics for actor instantiation, type errors, etc.
@@ -151,6 +153,7 @@ fn collect_diagnostics(
         file_stem,
         diagnostics_overrides,
         &mut lint_diags,
+        |hierarchy| beamtalk_lint::run_lint_passes_with_hierarchy(module, hierarchy),
     );
 
     lint_diags

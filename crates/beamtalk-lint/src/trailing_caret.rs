@@ -14,7 +14,7 @@
 //! increment => count + 1
 //! ```
 
-use crate::LintPass;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{Expression, MethodDefinition, Module};
 use beamtalk_core::source_analysis::Diagnostic;
 
@@ -22,7 +22,7 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct TrailingCaretPass;
 
 impl LintPass for TrailingCaretPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for method in module.all_methods() {
             check_method(method, diagnostics);
         }

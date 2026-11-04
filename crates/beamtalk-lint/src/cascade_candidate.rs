@@ -21,7 +21,7 @@
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
 
-use crate::LintPass;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, Expression, ExpressionStatement, Identifier, Module,
 };
@@ -32,7 +32,7 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct CascadeCandidatePass;
 
 impl LintPass for CascadeCandidatePass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         // Skip module.expressions — top-level sequences are used in bootstrap-test
         // files as individual test assertions (each paired with its own `// =>`
         // comment). Converting those to a cascade would change the semantics
