@@ -679,6 +679,13 @@ pub enum DiagnosticCategory {
     /// (`self()`, the process dictionary, process flags) (BT-4302).
     /// Suppressible with `@expect class_method_process_resource`.
     ClassMethodProcessResource,
+    /// A class-side method named after a class-variable reflection selector
+    /// (`fieldAt:`, `fieldAt:put:`, `hasField:`, `clearField:`), which the
+    /// class process answers itself whenever the name argument is a Symbol,
+    /// so such a send never reaches the method (BT-4422). A warning, not an
+    /// error: a non-Symbol argument still reaches it. Suppressible with
+    /// `@expect class_var_reflection_shadowing`.
+    ClassVarReflectionShadowing,
     /// A block literal that reads or writes a `state:` field of its actor,
     /// probes with `hasField:`, or makes a synchronous `self` send, and is
     /// passed to `Timer`, to a send whose receiver is statically another

@@ -198,6 +198,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ClassStateAbroad => "ClassStateAbroad",
         DiagnosticCategory::ClassProcessFfi => "ClassProcessFfi",
         DiagnosticCategory::ClassMethodProcessResource => "ClassMethodProcessResource",
+        DiagnosticCategory::ClassVarReflectionShadowing => "ClassVarReflectionShadowing",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
@@ -433,6 +434,10 @@ mod tests {
             (
                 DiagnosticCategory::ClassMethodProcessResource,
                 "ClassMethodProcessResource",
+            ),
+            (
+                DiagnosticCategory::ClassVarReflectionShadowing,
+                "ClassVarReflectionShadowing",
             ),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (DiagnosticCategory::FfiNestedString, "FfiNestedString"),

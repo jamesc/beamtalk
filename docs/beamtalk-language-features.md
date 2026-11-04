@@ -1749,7 +1749,10 @@ lenient — `SomeClass fieldAt: #typo` answers `nil` and `SomeClass fieldAt:
 four selectors itself whenever the name argument is a Symbol, a class-side
 method named `hasField:`, `clearField:`, `fieldAt:` or `fieldAt:put:` is
 never reached by such a send; the compiler warns at its declaration
-(rename it). Inside a class method, `self fieldAt: #x`
+(`class-var-reflection-shadowing`; rename it). A non-Symbol argument still
+reaches the method, so a deliberate `class fieldAt: index :: Integer` is
+legitimate: put `@expect class_var_reflection_shadowing` above it, or set
+`class-var-reflection-shadowing = "off"` under `[diagnostics]`. Inside a class method, `self fieldAt: #x`
 and `self fieldAt: #x put: v` read and write in place, like `self.x` and
 `self.x := v`, under the same rules.
 
@@ -8226,6 +8229,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `class_state_abroad` | A block that reads or writes its class's variables where it runs outside an invocation of that class (ADR 0130 §5) |
 | `class_process_ffi` | A class-side method that runs in its class's process (its class or an ancestor declares class variables) and directly calls process-sensitive FFI (`gen_tcp:accept`, `controlling_process`, `erlang:self`, …) (BT-4031) |
 | `class_method_process_resource` | A class-side method that runs in the caller's process (no class variables in its chain, ADR 0142) directly creates a resource tied to the caller (`ets:new`, `open_port`, `link`, `monitor`, timers, …) or acts on the caller (`self()`, the process dictionary, `process_flag`) (BT-4302) |
+| `class_var_reflection_shadowing` | A class-side method named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which the class process answers itself for a Symbol argument (BT-4422, BT-4426) |
 | `ffi_nested_string` | A `String` nested in a collection argument (`List(String)`, `Dictionary` keys/values, `Tuple`) to a stock Erlang call reaches it tagged; an Erlang comparison against raw binaries misses (BT-4243, see [Strings at the FFI boundary](beamtalk-native-erlang.md#strings-at-the-ffi-boundary)) |
 | `actor_state_abroad` | A block that touches its actor's state where it runs outside the actor's process (ADR 0137) *(lint-only, see below)* |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |
