@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4280: the workspace half of stdlib/test/actor_inherited_target_test.bt.
+// An inherited send to an actor instance takes the memoised direct call to
+// the compiled owner (`beamtalk_dispatch:inherited_target/2`). A live patch
+// that reloads the owner with a new body, and `removeSelector:` of the
+// owner's method, must each be seen by the next send: both flush the derived
+// cache the verdict lives in. Both need a live workspace.
+
+Actor subclass: InhTargetReplRoot
+  answer -> String => "original"
+// => "InhTargetReplRoot"
+
+InhTargetReplRoot subclass: InhTargetReplLeaf
+// => "InhTargetReplLeaf"
+
+leaf := InhTargetReplLeaf spawn
+// => Actor(InhTargetReplLeaf, _)
+
+leaf answer
+// => "original"
+
+leaf answer
+// => "original"
+
+// Removing the owner's method: the inherited send is now does-not-understand.
+InhTargetReplRoot removeSelector: #answer
+// => InhTargetReplRoot
+
+([leaf answer] on: Error do: [:e | e kind]) == #does_not_understand
+// => true
+
+// A live patch reloads the owner with a new body: the next send runs it.
+InhTargetReplRoot >> answer => "patched"
+// => "InhTargetReplRoot>>answer"
+
+leaf answer
+// => "patched"
+
+leaf stop
+// => _

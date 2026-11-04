@@ -43,8 +43,8 @@ names.
 
 `key/1`, `assert_absent/1`, `install/2` and `uninstall/1` are the invocation
 entry points' API and take a class *name* (or the key). The access helpers
-(`get`, `get_late`, `put`, `clear`, `has`, `capture`, `with_snapshot`) take
-the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
+(`get`, `get_late`, `put`, `clear`, `has`, `field_at`, `field_at_put`,
+`capture`, `with_snapshot`) take the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
 `'Name class'`) and derive the key from its tag; a `nil` or non-class-object
 receiver is an internal error. On the success path the receiver check is only
 the record match (`class_tag/1`): the class name, which costs a tag-to-name
@@ -115,6 +115,12 @@ come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error valu
     get_late/2,
     get_late/3,
     put/3,
+    field_at/2,
+    field_at/3,
+    field_at_put/3,
+    read_in/4,
+    check_write/3,
+    has_value/2,
     check_declared/2,
     check_declared/3,
     check_declared/4,
@@ -263,6 +269,115 @@ put(ClassSelf, Name, Value) ->
             %% class-method funs raise the `runtime_fun` shadow flag, which keeps
             %% the class process (`beamtalk_class_shadow_flags:direct_call_ok/2`).
             beamtalk_class_var_errors:raise_unreachable(tag_to_name(Tag), Name, write)
+    end.
+
+-doc """
+`self fieldAt: Name` in a class method (BT-4421): the in-place counterpart of
+the outside `Cls fieldAt: #x` send (BT-4148), which would otherwise reach the
+class's own gen_server re-entrantly (`dispatch_error`). The name is dynamic, so
+the read rule is applied at run time by `read_in/4` in its `reflective` form,
+the one the class gen_server applies to `Cls fieldAt:`: a declared-`late`
+variable raises `uninitialized_state_error` when unassigned, an undeclared
+name raises `undeclared_class_variable`. A name present in the map answers
+its value without reading the metadata. A non-Symbol name raises
+`type_error`.
+""".
+-spec field_at(class_self(), term()) -> term().
+field_at(ClassSelf, Name) when is_atom(Name) ->
+    Tag = class_tag(ClassSelf),
+    field_value(Tag, Name, current_map(Tag, Name));
+field_at(ClassSelf, Name) ->
+    raise_field_name_type(ClassSelf, 'fieldAt:', Name).
+
+-doc "`field_at/2` with a creation-time capture fallback (ADR 0130 §5).".
+-spec field_at(class_self(), term(), map() | none) -> term().
+field_at(ClassSelf, Name, Captured) when is_atom(Name) ->
+    Tag = class_tag(ClassSelf),
+    field_value(Tag, Name, map_or_captured(Tag, Name, Captured));
+field_at(ClassSelf, Name, _Captured) ->
+    raise_field_name_type(ClassSelf, 'fieldAt:', Name).
+
+-doc """
+`self fieldAt: Name put: Value` in a class method (BT-4421): `put/3` (the
+write `self.x := v` makes, so the read-only and unreachable rules are the
+same) after the `Cls fieldAt: #x put: v` declared-set check (`check_write/3`):
+a name not already in the map must be declared, and a class with no
+`classState:` at all cannot have one created on it. Answers `Value`.
+""".
+-spec field_at_put(class_self(), term(), term()) -> term().
+field_at_put(ClassSelf, Name, Value) when is_atom(Name) ->
+    Tag = class_tag(ClassSelf),
+    Map =
+        case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
+            Live when is_map(Live) -> Live;
+            _ -> #{}
+        end,
+    case has_value(Map, Name) of
+        true -> ok;
+        %% Only a creating write derives the class name (off the hot path).
+        false -> ok = raise_on_error(check_write(tag_to_name(Tag), Map, Name))
+    end,
+    put(ClassSelf, Name, Value);
+field_at_put(ClassSelf, Name, _Value) ->
+    raise_field_name_type(ClassSelf, 'fieldAt:put:', Name).
+
+-doc """
+The class-variable read rule over a class-state map `Map` of `Class`:
+`{ok, Value}`, or `{error, Error}` with the structured error *built, not
+raised*, so the class gen_server can reply with it instead of crashing. The one
+read rule behind the class gen_server's `get_class_var` clause, the outside
+`Cls fieldAt: #x` send (BT-4148) and the inside `self fieldAt: #x`
+(`field_at/2`, BT-4421).
+
+A declared-`late` class variable is an error when unassigned, agreeing with
+the instance-side direct read (`generate_late_field_read`) — keyed on
+*declared* late, and presence (`has_value/2`), not value, is assignment
+(BT-4061). Any other absent name goes through the declared-set rule
+(`check_declared/4`, BT-3807): undeclared is `undeclared_class_variable`, and
+a class with unknown metadata (ClassBuilder) answers `nil`. The metadata is
+read once for both decisions.
+
+`Caller` selects the declared-set rule's form: `in_process` (the
+known-empty leniency) for `get_class_var`, `reflective` (strict) for the
+`fieldAt:` reflection sends.
+""".
+-spec read_in(atom(), map(), atom(), in_process | reflective) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+read_in(Class, Map, Name, Caller) ->
+    Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(Class),
+    case declared_late(Kinds, Name) of
+        true ->
+            case has_value(Map, Name) of
+                true -> {ok, maps:get(Name, Map)};
+                false -> {error, beamtalk_class_var_errors:uninitialized_error(Class, Name)}
+            end;
+        false ->
+            case maps:find(Name, Map) of
+                {ok, Value} ->
+                    {ok, Value};
+                error ->
+                    case check_declared(Class, Name, Kinds, Caller) of
+                        ok -> {ok, nil};
+                        {error, _} = Err -> Err
+                    end
+            end
+    end.
+
+-doc """
+The declared-set check of a `fieldAt:put:` write of `Name` into the
+class-state map `Map` of `Class` (BT-4148, BT-4421): `ok` for a name already
+in the map; otherwise the strict, reflective form of the declared-set rule
+(`check_declared_reflective/2`), so the reflective write cannot silently
+create a variable the class does not declare, and a class with a known-empty
+own set (no `classState:` at all) cannot have one created on it. Unknown
+metadata (ClassBuilder) stays lenient. No type check is applied, matching
+instance-side `fieldAt:put:`.
+""".
+-spec check_write(atom(), map(), atom()) -> ok | {error, #beamtalk_error{}}.
+check_write(Class, Map, Name) ->
+    case has_value(Map, Name) of
+        true -> ok;
+        false -> check_declared_reflective(Class, Name)
     end.
 
 -doc """
@@ -511,6 +626,42 @@ late_value(Tag, Name, Map) ->
 -spec has_value(map(), atom()) -> boolean().
 has_value(Map, Name) ->
     maps:is_key(Name, Map).
+
+%% `field_at/2`'s answer from the resolved map: a present name is its value
+%% (what `read_in/4` answers for it either way), a miss applies `read_in/4`'s
+%% reflective rule.
+-spec field_value(atom(), atom(), map()) -> term().
+field_value(Tag, Name, Map) ->
+    case maps:find(Name, Map) of
+        {ok, Value} ->
+            Value;
+        error ->
+            case read_in(tag_to_name(Tag), Map, Name, reflective) of
+                {ok, Value} -> Value;
+                {error, Error} -> beamtalk_error:raise(Error)
+            end
+    end.
+
+%% A class-variable name is a Symbol; `fieldAt:`/`fieldAt:put:` with any other
+%% name raises `type_error` (the `Cls fieldAt:` send from outside has no
+%% class-variable path for it either).
+-spec raise_field_name_type(class_self(), atom(), term()) -> no_return().
+raise_field_name_type(ClassSelf, Selector, _Name) ->
+    beamtalk_error:raise_type_error(
+        tag_to_name(class_tag(ClassSelf)), Selector, <<"Class variable names are Symbols">>
+    ).
+
+-spec raise_on_error(ok | {error, #beamtalk_error{}}) -> ok.
+raise_on_error(ok) -> ok;
+raise_on_error({error, Error}) -> beamtalk_error:raise(Error).
+
+%% True when `Name` is declared `late` by the class itself (class variables
+%% are not inherited, BT-3801); `unknown` metadata declares nothing late.
+-spec declared_late(unknown | #{atom() => eager | late}, atom()) -> boolean().
+declared_late(unknown, _Name) ->
+    false;
+declared_late(Kinds, Name) ->
+    maps:get(Name, Kinds, eager) =:= late.
 
 -spec assert_declared(atom(), atom()) -> ok.
 assert_declared(Class, Name) ->

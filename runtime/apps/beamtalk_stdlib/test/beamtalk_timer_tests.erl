@@ -371,50 +371,48 @@ send_every_unregistered_name_stops_test() ->
     T = beamtalk_timer:'send:to:every:'(tick, Obj, 10),
     wait_for_exit(maps:get(pid, T), 1000).
 
-%% Steady delivery: a running timer delivers about one tick per period.
+%% Steady delivery: a running timer keeps ticking, and never early.
 %%
-%% Despite its name, this is not the drift guard: with only a lower bound
-%% (`N >= 8` in 10 periods) a timer that slipped a little every period would
-%% still pass. Phase-keeping is pinned without any timing by
-%% `next_deadline_test_` (each deadline is computed from the previous
-%% deadline, never from "now"), and missed-tick handling by
+%% Despite its name, this is not the drift guard. Phase-keeping is pinned
+%% without any timing by `next_deadline_test_` (each deadline is computed from
+%% the previous deadline, never from "now"), and missed-tick handling by
 %% `send_every_skips_missed_ticks_test`. The name is kept so existing flake
 %% history and CI logs (BT-4249, #4734) still find it (BT-4382).
 %%
-%% Synchronised on observable conditions, not guessed sleeps (BT-4249): the
-%% first tick proves the timer is inside send_loop with a deadline, then the
-%% test counts ticks until 10 deadlines elapse on the monotonic clock. A
-%% descheduled test process extends the wait instead of silently eating a
-%% fixed `timer:sleep/1` window, so loaded runners no longer fail the count.
-%% Only a lower bound is asserted: missed-tick bursts are pinned by
-%% `send_every_skips_missed_ticks_test`'s `=< 1`, and the count prints on
-%% failure so the next flake log names N directly.
+%% Load-independent by construction (BT-4249). Counting ticks in a time
+%% window cannot work: when the timer process is descheduled its missed ticks
+%% are skipped by design, so a loaded runner legitimately delivers fewer (the
+%% `N >= 8` bound failed on the macOS nightly for exactly that reason). What
+%% holds under any load:
+%%   1. liveness: each of the next ticks arrives within a generous timeout;
+%%   2. never early: the loop's first deadline is at least `T0 + Ms` and
+%%      deadlines strictly increase by whole periods, so the k-th received
+%%      tick (1-based) cannot arrive before `T0 + k * Ms`. A burst or a loop
+%%      that ignores its deadline fails this.
 send_every_does_not_drift_test() ->
     Ms = 20,
+    T0 = erlang:monotonic_time(millisecond),
     T = beamtalk_timer:'send:to:every:'(tick, self(), Ms),
-    receive
-        tick -> ok
-    after 1000 -> ?assert(false, "no first tick")
-    end,
-    Deadline = erlang:monotonic_time(millisecond) + 10 * Ms,
-    N = count_ticks_until(Deadline, 0),
+    Arrivals = [
+        receive
+            tick -> erlang:monotonic_time(millisecond)
+        after 5000 -> ?assert(false, io_lib:format("tick ~p never arrived", [K]))
+        end
+     || K <- lists:seq(1, 5)
+    ],
     ?assert(beamtalk_timer:cancel(T)),
-    ?assert(N >= 8, io_lib:format("only ~p ticks in 10 periods", [N])).
-
-%% Drain ticks until the monotonic clock reaches Deadline (ms), then return
-%% the count. Unlike `timer:sleep(N)` + `count_ticks/1`, a descheduled test
-%% process still observes the full window: the deadline is on the clock, not
-%% in the sleeper.
-count_ticks_until(Deadline, N) ->
-    case Deadline - erlang:monotonic_time(millisecond) of
-        Left when Left > 0 ->
-            receive
-                tick -> count_ticks_until(Deadline, N + 1)
-            after Left -> count_ticks_until(Deadline, N)
-            end;
-        _ ->
-            N + count_ticks(0)
-    end.
+    flush_ticks(),
+    lists:foreach(
+        fun({K, At}) ->
+            ?assert(
+                At >= T0 + K * Ms,
+                io_lib:format("tick ~p arrived ~p ms after start, before its ~p ms phase point", [
+                    K, At - T0, K * Ms
+                ])
+            )
+        end,
+        lists:zip(lists:seq(1, 5), Arrivals)
+    ).
 
 %% Ticks missed while the timer process is descheduled are skipped, not
 %% replayed as a burst.

@@ -60,12 +60,14 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoExplicitSub bar equals: 1
     self assert: SsoExplicitSub barSelf equals: 2
 
-  // `Base baz` calls `Base bar` statically, but the receiver is Sub: the nested
-  // `self foo` still reaches Sub's override and its class-var write is kept.
-  testClassSideStaticBaseCallKeepsNestedOverrideAndClassVarWrite =>
+  // BT-4317: `Base baz` run for Sub sends `Base bar`, and a class literal
+  // always denotes that class, so `bar` runs with `self == Base`: its nested
+  // `self foo` reaches Base's `foo`, not Sub's override, and Sub's class
+  // variable is untouched.
+  testClassSideStaticBaseCallBindsTheNamedClass =>
     before := SsoNestedSub hits
-    self assert: SsoNestedSub baz equals: 2
-    self assert: SsoNestedSub hits equals: before + 1
+    self assert: SsoNestedSub baz equals: 1
+    self assert: SsoNestedSub hits equals: before
 
   testClassSideSealedSelectorInOpenClassKeepsNestedOverrideWrite =>
     before := SsoNestedSub hits

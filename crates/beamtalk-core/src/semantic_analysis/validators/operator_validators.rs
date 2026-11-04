@@ -42,7 +42,7 @@
 //! bodies for the same reason it ignores every other one. They are exempt.
 
 use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};
-use crate::source_analysis::{Diagnostic, Span, is_equality_operator};
+use crate::source_analysis::{Diagnostic, is_equality_operator};
 
 /// Reject method declarations for operators that codegen never
 /// dispatches, so they cannot be written as silently-dead code.
@@ -88,7 +88,7 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
                  Per ADR 0002 the compiler lowers `{op}` directly to Erlang's `{op}` \
                  operator, with no method dispatch"
             ),
-            operator_span(method),
+            method.head_span(),
         )
         .with_hint(
             "Rename it to `equals:` (declared on `Object`, defaulting to `=:=`), or to a \
@@ -110,17 +110,6 @@ fn is_primitive_declaration(method: &MethodDefinition) -> bool {
         method.body.as_slice(),
         [stmt] if matches!(stmt.expression, Expression::Primitive { .. })
     )
-}
-
-/// The span to anchor the diagnostic on: the declaration head only.
-///
-/// `method.span` covers the whole declaration including the body, which for a
-/// multi-line body underlines far more than the mistake. Narrow it to the first
-/// line so the caret sits on the selector.
-fn operator_span(method: &MethodDefinition) -> Span {
-    method.body.first().map_or(method.span, |first| {
-        Span::new(method.span.start(), first.expression.span().start())
-    })
 }
 
 #[cfg(test)]

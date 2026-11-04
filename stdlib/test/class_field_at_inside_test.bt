@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for BT-4421 (ADR 0124 §4i, ADR 0130 §2): `self fieldAt:` /
+// `self fieldAt:put:` inside a class method read and write the class
+// variables in place, matching `self.x` / `self.x :=`, with no re-entrant
+// `class_send` (`dispatch_error`).
+//
+// Fixture: stdlib/test/fixtures/field_at_class_var_inside_actor.bt
+
+TestCase subclass: ClassFieldAtInsideTest
+
+  // One test drives the fixture class through the whole lifecycle: its class
+  // variables live in one long-lived class gen_server, never reset between
+  // test methods, so several methods on the same class would be
+  // order-dependent.
+  testClassFieldAtInsideClassMethodLifecycle =>
+    // Eager class variable: read in place.
+    self assert: FieldAtClassVarInsideActor readTotal equals: 0
+    // Unassigned `late` class variable: raises, like `self.current`.
+    self should: [
+      FieldAtClassVarInsideActor readCurrent
+    ] raise: #uninitialized_state_error
+    self should: [
+      FieldAtClassVarInsideActor getCurrent
+    ] raise: #uninitialized_state_error
+    // Writes in place; a later `self.x` in the same method sees them.
+    self assert: (FieldAtClassVarInsideActor writeTotal: 3) equals: 3
+    self assert: FieldAtClassVarInsideActor getTotal equals: 3
+    self assert: (FieldAtClassVarInsideActor writeCurrentThenRead: 7) equals: 7
+    self assert: FieldAtClassVarInsideActor readCurrent equals: 7
+    self assert: (FieldAtClassVarInsideActor write: #total value: 10) equals: 10
+    self assert: (FieldAtClassVarInsideActor read: #total) equals: 10
+    // Inside a closure run at home.
+    self assert: (FieldAtClassVarInsideActor sumInto: #(1, 2, 3)) equals: 16
+    self assert: FieldAtClassVarInsideActor getTotal equals: 16
+    // A write in one operand is seen by the operand after it.
+    self assert: FieldAtClassVarInsideActor orderedSum equals: 10
+    // Undeclared names: the read and the (checked) write both raise, as
+    // `Cls fieldAt:` from outside does.
+    self should: [
+      FieldAtClassVarInsideActor read: #nope
+    ] raise: #undeclared_class_variable
+    self should: [
+      FieldAtClassVarInsideActor write: #nope value: 1
+    ] raise: #undeclared_class_variable
+    self deny: (FieldAtClassVarInsideActor hasField: #nope)
+    // The class process survived every error above.
+    self assert: FieldAtClassVarInsideActor getTotal equals: 5

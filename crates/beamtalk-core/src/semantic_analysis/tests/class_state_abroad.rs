@@ -740,6 +740,42 @@ fn has_field_probe_of_an_undeclared_name_claims_no_variable() {
     );
 }
 
+/// BT-4421: `self fieldAt: #n` in a class method reads the class variable in
+/// place (through the block's capture abroad), so it is a read like `self.n`.
+#[test]
+fn field_at_read_is_a_read_named_with_field_at() {
+    let d = only("  class a => [self fieldAt: #n]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("block reads class variable n of Counter with `fieldAt:` and is"),
+        "{}",
+        d[0].message
+    );
+    let d = only("  class a => [:k | self fieldAt: k]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message
+            .contains("block reads a class variable of Counter with `fieldAt:` and is"),
+        "{}",
+        d[0].message
+    );
+    // A literal name that is no class variable reads nothing abroad.
+    let d = only("  class a => [self fieldAt: #nope]\n");
+    assert!(d.is_empty(), "{d:?}");
+    // Direct and reflective reads together, plus a probe.
+    let d = only("  class a => [self.n printString. self fieldAt: #n. self hasField: #m]\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(
+        d[0].message.contains(
+            "reads class variable n of Counter and class variable n with `fieldAt:` and \
+             probes its class state with `hasField: #m`"
+        ),
+        "{}",
+        d[0].message
+    );
+}
+
 #[test]
 fn reads_and_probes_are_both_named() {
     let d = only("  class a => [self.n printString. self hasField: #m]\n");

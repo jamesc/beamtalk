@@ -155,6 +155,25 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | cls noSuch: 1 classSelector: 2]
       on: GuardedDiffClassLeaf
 
+  // BT-4317: inside an inherited class method, an explicit own-class send
+  // (`GuardedDiffClassRoot receiverName`, compiled statically) answers what
+  // the same send to the class held in a variable answers: the named class
+  // is `self`, and its class variables are read, whichever subclass the
+  // calling method runs for.
+  testOwnClassLiteralSendInInheritedMethod =>
+    outcome := self
+      classSend: #ownLiteralFromSubclass
+      literal: [GuardedDiffClassLeaf ownLiteralReceiverName]
+      dynamic: [:cls | GuardedDiffClassLeaf receiverNameOf: cls]
+      on: GuardedDiffClassRoot
+    self assert: outcome equals: #(#returned, #GuardedDiffClassRoot)
+    outcome := self
+      classSend: #ownLiteralClassVariable
+      literal: [GuardedDiffClassForgot ownLiteralPeek]
+      dynamic: [:cls | GuardedDiffClassForgot peekOf: cls]
+      on: GuardedDiffClassStateful
+    self assert: (outcome at: 1) equals: #returned
+
   // A sealed, stateless class: a method that is not `class sealed` (runs in
   // the class process today) and one that is (direct-called today).
   testSealedClassSends =>

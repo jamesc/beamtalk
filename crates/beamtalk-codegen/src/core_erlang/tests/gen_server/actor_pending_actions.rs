@@ -46,15 +46,9 @@ fn assert_dispatching_callbacks_wrapped(code: &str) -> usize {
     dispatching
 }
 
-fn generate(src: &str, module_name: &str) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    generate_module(&module, CodegenOptions::new(module_name)).expect("codegen should succeed")
-}
-
 #[test]
 fn test_dispatching_callbacks_apply_pending_actions() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Actor subclass: Stopper\n",
             "  state: value = 0\n\n",
@@ -70,7 +64,7 @@ fn test_dispatching_callbacks_apply_pending_actions() {
 
 #[test]
 fn test_server_handle_info_applies_pending_actions() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: InfoStopper\n\n",
             "  handleInfo: msg => self stopWith: msg\n",
@@ -89,7 +83,7 @@ fn test_server_handle_info_applies_pending_actions() {
 /// the same `safe_dispatch(CastSelector, CastArgs, State)` case a cast uses.
 #[test]
 fn test_handle_continue_runs_queued_continuation_like_a_cast() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Actor subclass: Continuer\n",
             "  state: value = 0\n\n",
@@ -130,7 +124,7 @@ fn test_handle_continue_runs_queued_continuation_like_a_cast() {
 /// `initialize` still fails the start — through `ack_initialized/2`.
 #[test]
 fn test_initialize_step_acks_starter_after_pending_actions() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Actor subclass: Acker\n",
             "  state: value = 0\n\n",
@@ -168,7 +162,7 @@ fn test_initialize_step_acks_starter_after_pending_actions() {
 /// (BT-3958, ADR 0134), which drops the whole queue.
 #[test]
 fn test_dispatch_error_arms_discard_continuations_or_crash() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: Discarder\n\n",
             "  handleInfo: msg => self continueWith: #noop\n\n",
@@ -218,7 +212,7 @@ fn test_dispatch_error_arms_discard_continuations_or_crash() {
 /// dispatching it; `handle_continue`'s own step is not guarded.
 #[test]
 fn test_mailbox_entries_guard_continuation_requests() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Actor subclass: Guarded\n",
             "  state: value = 0\n\n",
@@ -250,7 +244,7 @@ fn test_mailbox_entries_guard_continuation_requests() {
 /// instead of self-dispatching into `ProtoObject`'s method body.
 #[test]
 fn test_self_perform_with_timeout_lowers_to_send4() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Actor subclass: Performer\n\n",
             "  later => self perform: #continueWith: withArguments: #(#bump) timeout: 1000\n\n",
@@ -275,7 +269,7 @@ const ENCODE_TAGGED: &str =
 /// (on the success and error paths alike, since the result is bound first).
 #[test]
 fn test_handle_call_installs_and_uninstalls_call_from_around_dispatch() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: Parker\n",
             "  state: value = 0\n\n",
@@ -305,7 +299,7 @@ fn test_handle_call_installs_and_uninstalls_call_from_around_dispatch() {
 /// return value; only the success arm consults it.
 #[test]
 fn test_handle_call_success_arm_checks_deferred_before_encode() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: Parker\n",
             "  state: value = 0\n\n",
@@ -331,7 +325,7 @@ fn test_handle_call_success_arm_checks_deferred_before_encode() {
 /// after deferring replies the error to its caller instead of hanging it.
 #[test]
 fn test_handle_call_error_arm_discards_deferred_flag() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: Parker\n",
             "  state: value = 0\n\n",
@@ -363,7 +357,7 @@ fn test_handle_call_error_arm_discards_deferred_flag() {
 /// continuation dispatches have no caller to defer.
 #[test]
 fn test_only_handle_call_installs_call_from() {
-    let code = generate(
+    let code = codegen_named(
         concat!(
             "Server subclass: Parker\n",
             "  state: value = 0\n\n",

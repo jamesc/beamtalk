@@ -15,7 +15,7 @@
 // Use a workspace variable to pass the wrong-typed arg so the compile-time
 // symbol validator does not reject it before runtime.
 badIndex := "hello"
-// => _
+// => "hello"
 
 [#(1, 2, 3) at: badIndex] on: TypeError do: [:e | e stackTrace class]
 // => List

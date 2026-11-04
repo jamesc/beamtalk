@@ -526,6 +526,16 @@ pub struct ClassVarAccesses {
     /// message is not a probe: a cascade dispatches every message, the first
     /// included, as an ordinary send, never through the `HasField` intrinsic.
     pub has_field_probes: std::collections::BTreeSet<HasFieldProbe>,
+    /// Variables read reflectively as `self fieldAt: #name`, sorted (BT-4184,
+    /// BT-4421): in a class method this lowers to an in-place read
+    /// (`beamtalk_class_vars:field_at`, through a capture abroad), on an actor
+    /// a read of the cell. A literal name outside `vars` reads the same
+    /// anywhere and is left out, as a `self.name` of a non-variable is. Not a
+    /// cascade message or a cast, which are ordinary sends.
+    pub field_at_reads: std::collections::BTreeSet<String>,
+    /// Whether some `self fieldAt: k` read has a computed argument (it may
+    /// name a variable).
+    pub computed_field_at_read: bool,
 }
 
 /// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
@@ -562,7 +572,34 @@ impl ClassVarAccesses {
     /// (outside a direct-called method) and the lint's read rule considers.
     #[must_use]
     pub fn reads_class_state(&self) -> bool {
-        !self.reads.is_empty() || !self.has_field_probes.is_empty()
+        !self.reads.is_empty() || !self.has_field_probes.is_empty() || self.reads_with_field_at()
+    }
+
+    /// Whether the block makes a reflective `self fieldAt:` read
+    /// ([`Self::field_at_reads`], [`Self::computed_field_at_read`]).
+    #[must_use]
+    pub fn reads_with_field_at(&self) -> bool {
+        !self.field_at_reads.is_empty() || self.computed_field_at_read
+    }
+
+    /// The `fieldAt:` reads as a noun phrase: `{noun} n, m`, or `a {noun}`
+    /// when only computed reads were seen; `None` when there are none. How
+    /// the `class-state-abroad` and `actor-state-abroad` lints name them.
+    #[must_use]
+    pub fn field_at_read_noun(&self, noun: &str) -> Option<String> {
+        if !self.field_at_reads.is_empty() {
+            let names = self
+                .field_at_reads
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!("{noun} {names}"))
+        } else if self.computed_field_at_read {
+            Some(format!("a {noun}"))
+        } else {
+            None
+        }
     }
 }
 
@@ -614,6 +651,21 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                     _ => HasFieldProbe::Computed,
                 };
                 accesses.has_field_probes.insert(probed);
+            }
+            WalkEvent::Send(send)
+                if send.site == SendSite::Plain
+                    && !send.is_cast
+                    && is_self_reference(send.receiver)
+                    && send.selector.well_known() == Some(WellKnownSelector::FieldAt) =>
+            {
+                match send.arguments.first() {
+                    Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
+                        if vars.contains(name.as_str()) {
+                            accesses.field_at_reads.insert(name.to_string());
+                        }
+                    }
+                    _ => accesses.computed_field_at_read = true,
+                }
             }
             _ => {}
         });
@@ -4443,6 +4495,33 @@ mod tests {
         assert!(!acc.reads_class_state(), "{acc:?}");
         // Not to `self`: not a probe of the class-variable home.
         let acc = cv_accesses("[:o | o hasField: #n]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_field_at_is_a_read_of_a_named_variable() {
+        let acc = cv_accesses("[self fieldAt: #n]");
+        assert_eq!(acc.field_at_reads, names(&["n"]));
+        assert!(acc.reads_class_state());
+        assert!(acc.reads.is_empty(), "not a `self.n` read: {acc:?}");
+        assert_eq!(
+            acc.field_at_read_noun("class variable").as_deref(),
+            Some("class variable n")
+        );
+        // A literal name that is no variable reads the same anywhere.
+        let acc = cv_accesses("[self fieldAt: #nope]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // A computed name may name one.
+        let acc = cv_accesses("[:k | self fieldAt: k]");
+        assert!(acc.computed_field_at_read && acc.reads_class_state());
+        assert_eq!(acc.field_at_read_noun("field").as_deref(), Some("a field"));
+        // A write is not a read; a cascade message or another receiver is
+        // an ordinary send.
+        let acc = cv_accesses("[self fieldAt: #n put: 1]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        let acc = cv_accesses("[self fieldAt: #n; fieldAt: #m]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        let acc = cv_accesses("[:o | o fieldAt: #n]");
         assert!(!acc.reads_class_state(), "{acc:?}");
     }
 

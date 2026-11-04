@@ -34,6 +34,8 @@ sealed Object subclass: VbBench
 
   class counter -> VbCounter => VbCounter spawn
 
+  class subCounter -> VbSubCounter => VbSubCounter spawn
+
   class adder -> Block(Integer, Integer) => [:x | x + 1]
 
   class list100 -> List(Integer) => (1 to: 100) asList
@@ -82,6 +84,13 @@ sealed Object subclass: VbBench
   class construct: n :: Integer a: a :: Integer -> Object =>
     last := nil
     n timesRepeat: [last := VbPoint x: a y: 4]
+    last
+
+  // `new:` with a map: the generated `new/1` validates the keys against the
+  // class's declared fields (`check_init_args/5`, BT-4030; memoised, BT-4281).
+  class constructMap: n :: Integer a: a :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := VbPoint new: #{#x => a, #y => 4}]
     last
 
   // === 3. Class-side method: sealed (static) vs open ===
@@ -197,6 +206,16 @@ sealed Object subclass: VbBench
   class actorProbe: n :: Integer c: c :: VbCounter -> Boolean =>
     last := false
     n timesRepeat: [last := c probe]
+    last
+
+  class actorViaSelfSub: n :: Integer c: c :: VbSubCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
+    last
+
+  class actorViaSelf: n :: Integer c: c :: VbCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
     last
 
   // `n` casts, then one sync call so every cast has been handled.
