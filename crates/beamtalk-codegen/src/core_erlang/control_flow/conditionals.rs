@@ -64,6 +64,7 @@ use super::super::threaded_ir::{
     ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::LocalWrite;
 use super::StateAccFallbackReason;
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
@@ -2569,7 +2570,7 @@ impl CoreErlangGenerator {
     /// assignment of it ([`Self::local_has_scratch_slot`]), stepping the
     /// frame's current `State` version; nothing for a local the frame does not
     /// carry.
-    fn push_local_slot_put(
+    pub(super) fn push_local_slot_put(
         &mut self,
         stmts: &mut Vec<ThreadedStmt>,
         frame: FrameId,
@@ -3010,11 +3011,9 @@ impl CoreErlangGenerator {
                         // for `{a, b} :=` instead of a plain local
                         // assignment). Lower the field write through its own
                         // real-`Bind` producer C1 uses, then destructure the
-                        // pattern from the already-evaluated assigned value —
-                        // `generate_destructure_bindings_from_var` is the
-                        // established "RHS already evaluated" entry point
-                        // (`DestructureAssignmentControlFlow`'s own sibling
-                        // shape uses the same idiom in `gen_server/methods.rs`).
+                        // pattern from the already-evaluated assigned value
+                        // (`lower_destructure_bind_from_var`, which writes
+                        // each name to the arm's slot, BT-4439).
                         if let Some(field_write) = self.local_assign_field_write(value) {
                             let field_val_var = self.lower_field_assignment_bind(
                                 field_write,
@@ -3022,23 +3021,29 @@ impl CoreErlangGenerator {
                                 span,
                                 &mut stmts,
                             )?;
-                            let binding_docs = self
-                                .generate_destructure_bindings_from_var(pattern, &field_val_var)?;
-                            for d in binding_docs {
-                                stmts.push(ThreadedStmt::Statement(d, span));
-                            }
+                            let _ = self.lower_destructure_bind_from_var(
+                                pattern,
+                                &field_val_var,
+                                frame,
+                                span,
+                                &mut stmts,
+                                &|_| LocalWrite::Slot,
+                            )?;
                             if is_last {
                                 // BT-3889: the arm answers the right-hand side.
                                 last_result = Some(ValueRef::Var(field_val_var));
                             }
                         } else {
-                            let (binding_docs, rhs_var) = self
-                                .generate_destructure_bindings_sequenced(
-                                    pattern, value, frame, &mut stmts,
-                                )?;
-                            for d in binding_docs {
-                                stmts.push(ThreadedStmt::Statement(d, span));
-                            }
+                            // BT-4439: each name is written to the arm's
+                            // slot, as C2 writes `name := ...`.
+                            let (rhs_var, _) = self.lower_destructure_bind(
+                                pattern,
+                                value,
+                                frame,
+                                span,
+                                &mut stmts,
+                                &|_| LocalWrite::Slot,
+                            )?;
                             if is_last {
                                 last_result = Some(ValueRef::Var(rhs_var));
                             }
@@ -3331,11 +3336,15 @@ impl CoreErlangGenerator {
                             ],
                             span,
                         ));
-                        let binding_docs =
-                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
-                        for d in binding_docs {
-                            stmts.push(ThreadedStmt::Statement(d, span));
-                        }
+                        // BT-4439: each name is written to the arm's slot.
+                        let _ = self.lower_destructure_bind_from_var(
+                            pattern,
+                            &actual_val,
+                            frame,
+                            span,
+                            &mut stmts,
+                            &|_| LocalWrite::Slot,
+                        )?;
                         if is_last {
                             last_result = Some(ValueRef::Var(actual_val));
                         }
@@ -3376,11 +3385,15 @@ impl CoreErlangGenerator {
                             span,
                         });
                         self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
-                        let binding_docs =
-                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
-                        for d in binding_docs {
-                            stmts.push(ThreadedStmt::Statement(d, span));
-                        }
+                        // BT-4439: each name is written to the arm's slot.
+                        let _ = self.lower_destructure_bind_from_var(
+                            pattern,
+                            &actual_val,
+                            frame,
+                            span,
+                            &mut stmts,
+                            &|_| LocalWrite::Slot,
+                        )?;
                         if is_last {
                             last_result = Some(ValueRef::Var(actual_val));
                         }

@@ -364,3 +364,130 @@ TestCase subclass: DestructuringTest
     // Array with one element, no positional, rest gets it all
     #[...items] := #[42]
     self assert: items equals: #[42]
+
+  // === Destructuring writes an outer local in a threaded body (BT-4439) ===
+  // Each name a destructuring binds is written as `w := ...` writes it in
+  // the same body: the loop, arm or block threads the new value out.
+  testDestructuringWritesOuterLocalInDo =>
+    w := 5
+    #(1, 2, 3) do: [:x | #(w, _) := #(w + x, 0)]
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalAfterRebindInDo =>
+    w := 5
+    #(1, 2, 3)
+      do: [:x |
+        w := w + 1
+        #(w, _) := #(w + x, 0)
+      ]
+    self assert: w equals: 14
+
+  testDestructuringWritesOuterLocalBeforeRebindInDo =>
+    w := 5
+    #(1, 2, 3)
+      do: [:x |
+        #(w, _) := #(w + x, 0)
+        w := w + 1
+      ]
+    self assert: w equals: 14
+
+  testDestructuringWritesOuterLocalInCollect =>
+    w := 5
+    r := #(1, 2, 3)
+      collect: [:x |
+        #(w, _) := #(w + x, 0)
+        x
+      ]
+    self assert: r equals: #(1, 2, 3)
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalInInject =>
+    w := 5
+    r := #(1, 2, 3)
+      inject: 0
+      into: [:a :x |
+        #(w, _) := #(w + x, 0)
+        a + x
+      ]
+    self assert: r equals: 6
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalAsLastInCollect =>
+    w := 5
+    r := #(1, 2, 3) collect: [:x | #(w, _) := #(w + x, x)]
+    self assert: r equals: #(#(6, 1), #(8, 2), #(11, 3))
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalInWhileTrue =>
+    w := 5
+    x := 0
+    [x < 3]
+      whileTrue: [
+        x := x + 1
+        #(w, _) := #(w + x, 0)
+      ]
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalInToDo =>
+    w := 5
+    1 to: 3 do: [:x | #(w, _) := #(w + x, 0)]
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalInArm =>
+    w := 5
+    w > 0 ifTrue: [#(w, _) := #(w + 1, 0)]
+    self assert: w equals: 6
+
+  testDestructuringWritesOuterLocalInArmInLoop =>
+    w := 5
+    #(1, 2, 3) do: [:x | x > 1 ifTrue: [#(w, _) := #(w + x, 0)]]
+    self assert: w equals: 10
+
+  testDestructuringWritesOuterLocalInProtectedBlock =>
+    w := 5
+    [#(w, _) := #(w + 1, 0)] on: Error do: [:e | 0]
+    self assert: w equals: 6
+
+  testDestructuringWritesOuterLocalInProtectedBlockInLoop =>
+    w := 5
+    #(1, 2, 3) do: [:x | [#(w, _) := #(w + x, 0)] on: Error do: [:e | 0]]
+    self assert: w equals: 11
+
+  testDestructuringWritesOuterLocalBeforeEnsureInLoop =>
+    w := 5
+    #(1, 2, 3)
+      do: [:x |
+        #(w, _) := #(w + x, 0)
+        [nil] ensure: [w := w + 100]
+      ]
+    self assert: w equals: 311
+
+  testDestructuringWritesOuterLocalInEvaluatedBlock =>
+    w := 5
+    [#(w, _) := #(w + 1, 0)] value
+    self assert: w equals: 6
+
+  testTupleDestructuringWritesOuterLocalInTimesRepeat =>
+    // The next iteration reads the destructured write.
+    t := 0
+    n := 0
+    3
+      timesRepeat: [
+        n := n + 1
+        {_, t} := {#ok, t + n}
+      ]
+    self assert: t equals: 6
+
+  testDestructuringWritesTwoOuterLocalsInDo =>
+    w := 5
+    v := 0
+    #(1, 2, 3) do: [:x | #(w, v) := #(w + x, v + 1)]
+    self assert: w equals: 11
+    self assert: v equals: 3
+
+  testDestructuringRestWritesOuterLocalInDo =>
+    w := 0
+    rest := nil
+    #(1, 2) do: [:x | #[w, ...rest] := #[w + x, x, x]]
+    self assert: w equals: 3
+    self assert: rest equals: #[2, 2]

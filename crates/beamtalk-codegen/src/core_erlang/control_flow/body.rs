@@ -23,6 +23,7 @@ use super::super::threaded_ir::{
     self, BindOp, FoldCarry, FrameId, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
+use super::LocalWrite;
 use super::list_ops::BodyKind;
 use super::plan::ThreadingPlan;
 use crate::core_erlang::threading_analysis::ThreadedLocals;
@@ -497,6 +498,30 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// BT-4439: how this loop or fold body writes a local a destructuring
+    /// assignment binds — the write its local-var assignment branch performs
+    /// for `name := ...`: a plain `let` for a block local (outside the REPL,
+    /// and not one of the loop's threaded locals), a rebind in the argument
+    /// chain when the body threads its locals as loop parameters (`direct`),
+    /// the scratch-slot `Put` otherwise.
+    fn loop_body_local_write<'p>(
+        &self,
+        plan: &'p ThreadingPlan,
+        direct: bool,
+    ) -> impl Fn(&str) -> LocalWrite + use<'p> {
+        let repl = self.is_repl_mode();
+        let direct = direct || plan.use_direct_params;
+        move |name| {
+            if !repl && !plan.threaded_locals.iter().any(|t| t == name) {
+                LocalWrite::Plain
+            } else if direct {
+                LocalWrite::Direct
+            } else {
+                LocalWrite::Slot
+            }
+        }
+    }
+
     /// [`Self::lower_letrec_body`]'s per-statement loop, once the body's
     /// local-producer sites are set.
     fn lower_letrec_body_statements(
@@ -557,11 +582,11 @@ impl CoreErlangGenerator {
                     expr, plan, is_last, frame, span, &mut stmts,
                 )?;
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                let (binding_docs, _) = self
-                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
-                for d in binding_docs {
-                    stmts.push(ThreadedStmt::Statement(d, span));
-                }
+                // BT-4439: each name is written as
+                // `lower_letrec_local_var_assignment` writes `name := ...`.
+                let write_of = self.loop_body_local_write(plan, plan.use_hybrid_params);
+                let _ = self
+                    .lower_destructure_bind(pattern, value, frame, span, &mut stmts, &write_of)?;
             } else {
                 self.lower_letrec_non_assign_expr(
                     &mut stmts,
@@ -986,11 +1011,13 @@ impl CoreErlangGenerator {
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
                 has_plain_lets = true;
-                let (binding_docs, rhs_var) = self
-                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
-                for d in binding_docs {
-                    stmts.push(ThreadedStmt::Statement(d, span));
-                }
+                // BT-4439: each name is written as the local-var assignment
+                // branch above writes `name := ...`.
+                let write_of =
+                    self.loop_body_local_write(plan, plan.use_tuple_acc || plan.use_hybrid_params);
+                let (rhs_var, wrote) = self
+                    .lower_destructure_bind(pattern, value, frame, span, &mut stmts, &write_of)?;
+                has_mutations |= wrote;
                 if is_last {
                     self.lower_destructure_last_expr(
                         &mut stmts,
