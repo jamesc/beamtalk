@@ -32,7 +32,7 @@ pub(crate) fn generate_character_bif(
             "call 'beamtalk_character':'print_string'(Self)",
         ))),
         // Identity
-        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        "hash" => Some(super::phash2_doc("Self")),
         // Predicates — delegate to runtime module
         "isLetter" => Some(Document::Str("call 'beamtalk_character':'is_letter'(Self)")),
         "isDigit" => Some(Document::Str("call 'beamtalk_character':'is_digit'(Self)")),

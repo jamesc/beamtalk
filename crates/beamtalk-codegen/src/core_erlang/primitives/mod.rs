@@ -56,6 +56,27 @@ pub(crate) const PRINT_STRING: Document<'static> = Document::Str(
     "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
 );
 
+/// `call 'erlang':'phash2'(<var>)` — the one lowering of `hash`, shared by
+/// the `hash` call-site intrinsic (`try_generate_object_identity`), the
+/// compiled `Object>>hash` method body (`IntrinsicBody::Hash`, reached via
+/// generic dispatch such as `perform: #hash`, BT-4432) and the quoted
+/// `@primitive "hash"` bodies, so every route answers the same value.
+pub(crate) fn phash2_doc(var: impl Into<String>) -> Document<'static> {
+    docvec!["call 'erlang':'phash2'(", leaf::var(var.into()), ")"]
+}
+
+/// `call 'beamtalk_reflection':'field_names'(<var>)` — the one lowering of
+/// a value's `fieldNames`, shared by the generated value-type dispatch arm
+/// and the compiled `Object>>fieldNames` method body
+/// (`IntrinsicBody::FieldNames`, BT-4432).
+pub(crate) fn field_names_doc(var: impl Into<String>) -> Document<'static> {
+    docvec![
+        "call 'beamtalk_reflection':'field_names'(",
+        leaf::var(var.into()),
+        ")"
+    ]
+}
+
 /// Generates Core Erlang for a selector-based primitive implementation.
 ///
 /// Returns `Some(code)` if a direct implementation was emitted, `None` if

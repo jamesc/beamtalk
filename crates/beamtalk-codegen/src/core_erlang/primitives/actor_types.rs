@@ -31,7 +31,7 @@ pub(crate) fn generate_opaque_bif(
         // identity types (Pid/Port/Reference) `=/=` is equivalent to `/=`.
         "=/=" => binary_bif("=/=", params),
         "asString" => Some(wrap_string_result(Document::Str(to_string_fn))),
-        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        "hash" => Some(super::phash2_doc("Self")),
         _ => extra_selector(selector, params),
     }
 }

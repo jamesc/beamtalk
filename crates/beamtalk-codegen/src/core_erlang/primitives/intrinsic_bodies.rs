@@ -57,6 +57,19 @@ enum IntrinsicBody {
     /// class-side `error:` through the class-object protocol fallthrough
     /// (BT-4417). The body is the same raise, so every route agrees.
     Error,
+    /// `hash` — `Object>>hash`. The call site inlines `erlang:phash2/1`
+    /// (`try_generate_object_identity`), but generic dispatch (`perform:
+    /// #hash`) reaches the compiled body. As a `Placeholder` the body
+    /// re-dispatched `hash` to itself and looped forever (BT-4432); it is
+    /// the same `phash2` call as the call site, via `primitives::phash2_doc`.
+    Hash,
+    /// `fieldNames` — `Object>>fieldNames`. Every dispatch path answers
+    /// `fieldNames` before method lookup (the generated value-type dispatch
+    /// arm, `beamtalk_object_ops` for actors), so this body is not reached
+    /// today; but as a `Placeholder` it would re-dispatch `fieldNames` to
+    /// itself (the BT-4432 `hash` loop), so it is the value arm's own
+    /// `beamtalk_reflection:field_names/1` call instead.
+    FieldNames,
     /// `erlangApply` — DNU-forwarding Erlang interop intrinsic.
     ErlangApply,
     /// `erlangModuleLookup` — same shape as `ErlangApply`, different target module.
@@ -77,7 +90,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("dynamicSend", IntrinsicBody::Placeholder),
     ("dynamicSendWithArgs", IntrinsicBody::Placeholder),
     ("respondsTo", IntrinsicBody::Placeholder),
-    ("fieldNames", IntrinsicBody::Placeholder),
+    ("fieldNames", IntrinsicBody::FieldNames),
     ("fieldAt", IntrinsicBody::Placeholder),
     ("fieldAtPut", IntrinsicBody::Placeholder),
     // ADR 0124 §1/B4: both call-site-intercepted (`try_generate_object_reflection`
@@ -87,7 +100,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("hasField", IntrinsicBody::Placeholder),
     ("clearField", IntrinsicBody::Placeholder),
     ("printString", IntrinsicBody::Placeholder),
-    ("hash", IntrinsicBody::Placeholder),
+    ("hash", IntrinsicBody::Hash),
     ("conditional", IntrinsicBody::Placeholder),
     ("conditionalTrue", IntrinsicBody::Placeholder),
     ("conditionalFalse", IntrinsicBody::Placeholder),
@@ -195,6 +208,22 @@ impl CoreErlangGenerator {
         // rationale behind that particular shape.
         if !is_quoted {
             if let Some((_, body)) = INTRINSIC_BODIES.iter().find(|(n, _)| *n == name) {
+                // A placeholder body re-dispatches the intrinsic *name*. When
+                // the enclosing method's selector is that same name, the
+                // dispatch resolves back to this very method and loops
+                // forever under generic dispatch (`perform:`) — BT-4432,
+                // `Object>>hash`. Such an intrinsic needs a real
+                // `IntrinsicBody`, so fail the build instead.
+                if matches!(body, IntrinsicBody::Placeholder)
+                    && self.current_method_selector.as_deref() == Some(name)
+                {
+                    return Err(CodeGenError::Internal(format!(
+                        "@intrinsic {name} in method `{name}` of {class_name} has only a \
+                         placeholder body, which would re-dispatch `{name}` to itself and \
+                         loop forever under generic dispatch; give it a real \
+                         IntrinsicBody (see BT-4432)"
+                    )));
+                }
                 return Ok(self.render_intrinsic_body(body, name, &class_name, span));
             }
 
@@ -414,13 +443,16 @@ impl CoreErlangGenerator {
                     .first()
                     .cloned()
                     .unwrap_or_else(|| "Message".to_string());
-                let self_var = if self.in_class_method() {
-                    "ClassSelf"
-                } else {
-                    "Self"
-                };
-                self.object_error_raise_doc(self_var, &msg_param)
+                // `@intrinsic error` is declared only on instance-side
+                // `Object>>error:`, so the receiver is always `Self`.
+                self.object_error_raise_doc("Self", &msg_param)
             }
+
+            // `@intrinsic hash` is declared only on instance-side
+            // `Object>>hash`, so the receiver is always `Self`.
+            IntrinsicBody::Hash => primitives::phash2_doc("Self"),
+            // Likewise instance-side only (`Object>>fieldNames`).
+            IntrinsicBody::FieldNames => primitives::field_names_doc("Self"),
 
             // Erlang interop DNU intrinsics — forward selector/args to
             // the handler module's dispatch/3 rather than passing the intrinsic name.
@@ -483,6 +515,11 @@ impl CoreErlangGenerator {
     /// through the call-site interception — e.g.
     /// `[42] perform: #value withArguments: #()` — resolves to this
     /// placeholder and raises `does_not_understand` for the intrinsic name.
+    /// Worse, when the enclosing method's selector *is* the intrinsic name
+    /// (as `Object>>hash` was for `@intrinsic hash`), the dispatch resolves
+    /// back to this same method and loops forever (BT-4432);
+    /// `generate_primitive` rejects that combination with
+    /// `CodeGenError::Internal`.
     ///
     /// [`IntrinsicBody`]'s variants short-circuit before reaching here for
     /// the concrete cases that would otherwise miscompile through this
