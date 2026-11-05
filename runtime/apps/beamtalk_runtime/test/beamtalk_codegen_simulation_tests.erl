@@ -47,6 +47,16 @@ callbacks do not implement, so no compiled source construct reaches it.
 See also: beamtalk_actor for the runtime implementation
 """.
 -include_lib("eunit/include/eunit.hrl").
+
+%% `wait_for_class('Actor', ...)` budget. Tests that wait run under an
+%% explicit EUnit timeout (`TEST_TIMEOUT_S`) because EUnit's default 5 s
+%% per-test timeout is no longer than this wait, so a slow stdlib load
+%% was reported as `cancelled` instead of `class_not_registered` (BT-4427).
+-define(ACTOR_WAIT_MS, 5000).
+-define(TEST_TIMEOUT_S, 30).
+-if(?ACTOR_WAIT_MS >= ?TEST_TIMEOUT_S * 1000).
+-error("beamtalk_codegen_simulation_tests: ACTOR_WAIT_MS exceeds TEST_TIMEOUT_S").
+-endif.
 -include("beamtalk.hrl").
 
 %%% ===========================================================================
@@ -1205,8 +1215,11 @@ actor_spawn_chain_test() ->
 %% so this is the first point 'Actor' must actually be present —
 %% wait_for_class/2 makes that a deterministic precondition instead of an
 %% incidental side effect of how many slower tests ran first.
-method_not_found_error_test() ->
-    wait_for_class('Actor', 5000),
+method_not_found_error_test_() ->
+    {timeout, ?TEST_TIMEOUT_S, fun method_not_found_error/0}.
+
+method_not_found_error() ->
+    wait_for_class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
 
@@ -1654,8 +1667,11 @@ extension_coexists_with_regular_methods_test() ->
 %% See method_not_found_error_test's comment — the DNU fallback
 %% walks the class hierarchy up to 'Actor', so wait for it deterministically
 %% rather than relying on enough earlier tests having run first.
-unregistered_extension_gives_dnu_test() ->
-    wait_for_class('Actor', 5000),
+unregistered_extension_gives_dnu_test_() ->
+    {timeout, ?TEST_TIMEOUT_S, fun unregistered_extension_gives_dnu/0}.
+
+unregistered_extension_gives_dnu() ->
+    wait_for_class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try

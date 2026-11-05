@@ -1965,7 +1965,7 @@ impl LanguageService for SimpleLanguageService {
         let protocol_registry = self
             .project_index
             .protocol_registry_for(file, &file_data.module);
-        crate::queries::completion_provider::compute_completions_with_aliases(
+        crate::queries::completion_provider::compute_completions_with_registries(
             &file_data.module,
             &file_data.source,
             position,
@@ -1973,7 +1973,7 @@ impl LanguageService for SimpleLanguageService {
             current_package.as_deref(),
             self.native_types.as_deref(),
             Some(self.project_index.alias_registry()),
-            Some(&protocol_registry),
+            Some(protocol_registry),
         )
     }
 
@@ -1996,19 +1996,26 @@ impl LanguageService for SimpleLanguageService {
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
             Some(self.project_index.alias_registry()),
-            Some(&protocol_registry),
+            Some(protocol_registry),
         )
     }
 
     fn signature_help(&self, file: &Utf8PathBuf, position: Position) -> Option<SignatureHelp> {
         let file_data = self.get_file(file)?;
 
+        // ADR 0144: the file's protocol registry, as for completion and
+        // hover, so a `P class` receiver shows its `class` requirement.
+        let protocol_registry = self
+            .project_index
+            .protocol_registry_for(file, &file_data.module);
         crate::queries::signature_help_provider::compute_signature_help(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
+            Some(protocol_registry),
+            Some(self.project_index.alias_registry()),
         )
     }
 

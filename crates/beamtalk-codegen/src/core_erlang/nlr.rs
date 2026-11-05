@@ -285,7 +285,7 @@ impl CoreErlangGenerator {
             }
             NlrSlot::ClassMethod => leaf::atom("nil"),
             NlrSlot::Repl => leaf::var(self.current_state_var()),
-            NlrSlot::CellClosure => self.cell_view_doc(),
+            NlrSlot::CellClosure => self.cell_nlr_state_doc(),
             // A direct-params loop binds no `StateAcc`: its body cannot write
             // `State`, so the throw carries the state the loop captured on entry
             // (BT-3562's `current_field_read_state_var`). BT-4121: unless the
