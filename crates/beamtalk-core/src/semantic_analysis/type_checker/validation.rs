@@ -1338,10 +1338,12 @@ impl TypeChecker {
     /// ([`Self::check_arg_sendability`]), which upgrades a
     /// `HandleScoped(#node)` argument to a Warning when the receiver is
     /// known-remote (silent otherwise, unchanged from ADR 0103).
-    /// `receiver_is_self` marks a `self`/`super` receiver: an actor's
-    /// self-send runs in its own process, so its arguments cross no process
-    /// boundary and are exempt from the sendability check (ADR 0103,
-    /// BT-4447).
+    /// `receiver_is_self` marks a `self`/`super` receiver, exempt from the
+    /// sendability check (ADR 0103, BT-4447): a self-send never moves its
+    /// argument away from the owning actor. At home it runs in the actor's
+    /// own process; from a block running away from home (ADR 0137) it
+    /// messages the owner back. A block that carries the handle away is the
+    /// escape, and ADR 0137's away-from-home rules report it, not this check.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_argument_types_with_known_remote(
         &mut self,
@@ -1389,9 +1391,9 @@ impl TypeChecker {
     ) {
         // ADR 0103: sendability of actor message arguments and `spawnWith:`
         // map values. Independent of the handler's declared parameter types, so
-        // they run before the method lookup / early returns below. An actor's
-        // self-send stays in its own process, so it is not a message boundary
-        // (BT-4447).
+        // they run before the method lookup / early returns below. A
+        // self-send never moves its argument away from the owning actor, so
+        // it is exempt (BT-4447; see `check_argument_types_with_known_remote`).
         let receiver_is_actor = hierarchy.is_actor_subclass(class_name);
         self.check_arg_sendability(
             selector,

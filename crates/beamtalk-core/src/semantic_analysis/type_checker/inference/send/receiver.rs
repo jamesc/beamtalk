@@ -712,8 +712,7 @@ impl TypeChecker {
                     Some(env),
                     type_args,
                     receiver_known_remote.as_ref(),
-                    Self::is_self_receiver(receiver.unwrap_parens())
-                        || matches!(receiver.unwrap_parens(), Expression::Super(_)),
+                    Self::is_self_or_super(receiver),
                 );
             }
 

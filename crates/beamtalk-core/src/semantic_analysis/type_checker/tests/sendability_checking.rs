@@ -292,3 +292,23 @@ fn actor_send_of_port_to_another_actor_still_warns() {
         "a send to another actor crosses a process boundary: {diags:?}"
     );
 }
+
+#[test]
+fn actor_self_send_in_escaping_block_is_exempt() {
+    // Pins the exemption for a block that may run away from home (ADR
+    // 0137): its self-send messages the owning actor back, so the handle
+    // returns to its owner. Revisit this test, deliberately, if away-from-home
+    // self-send lowering changes.
+    let src = "Actor subclass: Ticker\n  \
+        arm: p :: Port -> Nil =>\n    \
+        Timer every: 1000 do: [self tick: p]\n    \
+        nil\n\n  \
+        tick: p :: Port -> Nil => nil\n";
+    let diags = check_source(src);
+    assert!(
+        !sendability_warnings(&diags)
+            .iter()
+            .any(|d| d.message.contains("passed in an actor message")),
+        "the self-send inside the escaping block is exempt: {diags:?}"
+    );
+}
