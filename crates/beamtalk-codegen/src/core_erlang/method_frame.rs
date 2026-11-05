@@ -65,6 +65,8 @@ pub(in crate::core_erlang) struct MethodFrame<'a> {
     prev_selector: Option<String>,
     /// The method span current before `enter` (BT-4059 peel scope).
     prev_method_span: Option<beamtalk_core::source_analysis::Span>,
+    /// The method identity current before `enter` (BT-4415 guard keys).
+    prev_guard_method: Option<super::guard_returns::MethodKey>,
     boundary: MethodBoundary,
     /// `(source_text, source_path)` in effect before `enter` swapped in a
     /// flattened provision's protocol source (ADR 0127 §3); `None` when the
@@ -113,6 +115,9 @@ impl<'a> MethodFrame<'a> {
             .current_method_selector
             .replace(selector_name.to_string());
         let prev_method_span = generator.current_method_span.replace(method.span);
+        let prev_guard_method = generator
+            .current_guard_method
+            .replace(super::guard_returns::MethodKey::of(method));
 
         if boundary == MethodBoundary::ClassMethod {
             generator.bind_var("self", CLASS_SELF_VAR);
@@ -156,6 +161,7 @@ impl<'a> MethodFrame<'a> {
                 generator,
                 prev_selector,
                 prev_method_span,
+                prev_guard_method,
                 boundary,
                 prev_source,
                 outer_body: Some(outer_body),
@@ -193,6 +199,7 @@ impl Drop for MethodFrame<'_> {
         }
         self.generator.current_method_selector = self.prev_selector.take();
         self.generator.current_method_span = self.prev_method_span.take();
+        self.generator.current_guard_method = self.prev_guard_method.take();
         if let Some((text, path)) = self.prev_source.take() {
             self.generator.source_text = text;
             self.generator.source_path = path;

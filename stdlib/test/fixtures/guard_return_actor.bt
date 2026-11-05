@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4415: GuardReturnActor — guard-style early returns (`cond ifTrue: [^v]` at a
+// method's top level) compiled as direct returns.
+
+Actor subclass: GuardReturnActor
+  state: count :: Integer = 0
+
+  bump: x :: Integer =>
+    self.count := self.count + 1
+    x > 10 ifTrue: [^#big]
+    self.count := self.count + x
+    #small
+
+  early: x =>
+    x ifTrue: [^#early]
+    self.count := self.count + 1
+    #late
+
+  count => self.count

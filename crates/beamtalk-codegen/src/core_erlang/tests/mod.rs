@@ -320,6 +320,7 @@ mod field_write_sites;
 mod fold_locals_carried_corpus;
 mod fresh_temp_namespace;
 mod gen_server;
+mod guard_returns;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
 mod inline_block_local_in_loop_corpus;

@@ -138,6 +138,7 @@ mod expressions;
 mod field_types;
 mod gen_server;
 pub(in crate::core_erlang) mod generator;
+mod guard_returns;
 mod intrinsics;
 mod method_frame;
 pub mod module_shell;
