@@ -154,10 +154,22 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # too. We `{:reply, …}` on the same event so CodeMirror resolves its async
   # tooltip source; an unreachable workspace, a denied op, a missing session, or
   # nothing-to-show all degrade to an empty string (no tooltip is shown).
-  def handle_event("hover", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
+  # `before` (lines above) and `suffix` (text after the hovered token) are the
+  # optional editor context that lets a hovered keyword part resolve its send's
+  # full keyword selector (BT-4343); a non-string is treated as absent.
+  def handle_event("hover", %{"code" => code} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) and is_binary(code) do
     hover =
-      case Facade.dispatch(:hover, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
+      case Facade.dispatch(
+             :hover,
+             %{
+               session_pid: pid,
+               code: code,
+               before: string_param(params, "before"),
+               suffix: string_param(params, "suffix")
+             },
+             RequestContext.build(socket)
+           ) do
         {:ok, docs} when is_binary(docs) -> docs
         _ -> ""
       end
@@ -1697,6 +1709,14 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     case MethodEditor.active_tab(assigns) do
       %{kind: :def, class: class} -> class
       _ -> nil
+    end
+  end
+
+  # An optional string event param; absent or non-string reads as "".
+  defp string_param(params, key) do
+    case Map.get(params, key) do
+      s when is_binary(s) -> s
+      _ -> ""
     end
   end
 end

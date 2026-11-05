@@ -408,6 +408,21 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       assert hover =~ "Counter"
     end
 
+    test "hover accepts the optional editor context (BT-4343), ignoring non-strings" do
+      socket = base_socket()
+
+      for context <- [%{"before" => "x := 1\n", "suffix" => " options: #()"}, %{"suffix" => 42}] do
+        assert {:reply, %{"hover" => hover}, ^socket} =
+                 SystemBrowser.handle_event(
+                   "hover",
+                   Map.put(context, "code", "Counter fetch:"),
+                   socket
+                 )
+
+        assert hover =~ "Counter"
+      end
+    end
+
     test "hover with no session_pid replies with an empty string" do
       socket = base_socket(%{session_pid: nil})
 
