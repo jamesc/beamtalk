@@ -46,6 +46,7 @@ use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::sync::Arc;
 /// Returns `true` if the class is internal and belongs to a different package
 /// than `current_package` (ADR 0071).
 ///
@@ -140,7 +141,7 @@ pub fn compute_completions(
     current_package: Option<&str>,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Vec<Completion> {
-    compute_completions_with_aliases(
+    compute_completions_with_registries(
         module,
         source,
         position,
@@ -152,25 +153,30 @@ pub fn compute_completions(
     )
 }
 
-/// Like [`compute_completions`], additionally offering type alias names
-/// alongside class/protocol names in type-annotation position when a
-/// project-wide `AliasRegistry` is available (ADR 0108 Phase 8).
+/// Like [`compute_completions`], additionally taking the project-wide
+/// registries — the counterpart of hover's
+/// `infer_types_and_returns_with_registries` threading.
 ///
-/// A separate function — rather than adding the parameter to
+/// A separate function — rather than adding the parameters to
 /// [`compute_completions`] directly — keeps that function's signature
 /// source-compatible with every existing caller and test.
 /// `alias_registry = None` and `protocol_registry = None` behave identically
 /// to [`compute_completions`].
 ///
+/// `alias_registry` offers type alias names alongside class/protocol names
+/// in type-annotation position (ADR 0108 Phase 8).
+///
 /// `protocol_registry` is the file's protocol registry (cross-file protocols
 /// plus the module's own), so a receiver typed `P class` completes `P`'s
 /// `class` requirements and then the class-object protocol (ADR 0144).
-/// With `None`, only the module's own protocols are registered.
+/// With `None`, only the module's own protocols are registered. It is an
+/// `Arc` so the registry built once per request is shared with the type
+/// pass rather than deep-cloned again (BT-4450).
 #[must_use]
 // Each registry is independent project context, threaded straight through to
 // the shared type pass (`enrich_hierarchy_with_inferred_returns`).
 #[allow(clippy::too_many_arguments)]
-pub fn compute_completions_with_aliases(
+pub fn compute_completions_with_registries(
     module: &Module,
     source: &str,
     position: Position,
@@ -178,7 +184,7 @@ pub fn compute_completions_with_aliases(
     current_package: Option<&str>,
     native_types: Option<&NativeTypeRegistry>,
     alias_registry: Option<&AliasRegistry>,
-    protocol_registry: Option<&ProtocolRegistry>,
+    protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
     let offset = match position.to_byte_offset(source) {
@@ -3193,7 +3199,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let alias_registry = alias_registry_for(&module, &hierarchy);
 
-        let completions = compute_completions_with_aliases(
+        let completions = compute_completions_with_registries(
             &module,
             source,
             Position::new(3, 20),
@@ -3249,7 +3255,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let completions = compute_completions_with_aliases(
+        let completions = compute_completions_with_registries(
             &module,
             source,
             Position::new(1, 20),
@@ -3307,7 +3313,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let completions = compute_completions_with_aliases(
+        let completions = compute_completions_with_registries(
             &module,
             source,
             Position::new(1, 20),

@@ -624,3 +624,20 @@ Object subclass: Caller
         );
     }
 }
+
+/// BT-4450: a caller that already holds the registry in an `Arc` (the
+/// language service builds one per completion/hover request) shares it with
+/// the checker — no second deep clone of every `ProtocolInfo`.
+#[test]
+fn set_protocol_registry_shares_the_callers_arc() {
+    let registry = std::sync::Arc::new(ProtocolRegistry::new());
+    let mut checker = TypeChecker::new();
+    checker.set_protocol_registry(std::sync::Arc::clone(&registry));
+    assert!(
+        std::sync::Arc::ptr_eq(
+            checker.protocol_registry().expect("registry is set"),
+            &registry
+        ),
+        "the checker holds the caller's registry, not a copy"
+    );
+}

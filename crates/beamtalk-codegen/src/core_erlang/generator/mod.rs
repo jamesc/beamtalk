@@ -30,10 +30,10 @@ pub(in crate::core_erlang) use context::{
 };
 
 use crate::core_erlang::control_flow::LoopMode;
+use crate::core_erlang::erlang_types::ModuleName;
 use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
 use crate::core_erlang::sequencing;
 use crate::core_erlang::threaded_ir::VersionCounter;
-use crate::core_erlang::util::to_module_name;
 use crate::core_erlang::variable_context::VariableContext;
 use beamtalk_cerl_doc::{Document, INDENT, docvec, leaf, line, nest};
 use beamtalk_core::source_analysis::Diagnostic;
@@ -773,14 +773,7 @@ impl CoreErlangGenerator {
         // Call dispatch/3 on the actor's own Erlang module (same name as the backing
         // gen_server, e.g. `beamtalk_subprocess`). The actor module is responsible
         // for exporting `dispatch/3` to handle class-side @primitive methods.
-        // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
-        // `BeamtalkRuntime` → `beamtalk_runtime`), use it as-is.
-        let snake_name = to_module_name(&self.class_name());
-        let actor_module_name = if snake_name.starts_with("beamtalk_") {
-            snake_name
-        } else {
-            format!("beamtalk_{snake_name}")
-        };
+        let actor_module = ModuleName::instance(&self.class_name());
         docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->",
             nest(
@@ -789,7 +782,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "call ",
-                        leaf::atom(actor_module_name),
+                        leaf::atom(actor_module.name()),
                         ":'dispatch'(Selector, Args, Self)",
                     ],
                 ]

@@ -85,6 +85,7 @@ pub(in crate::core_erlang) mod actor_state_helper {
     pub const REFRESH_CARRIED: (&str, u32) = ("refresh_carried", 2);
     pub const CAPTURE: (&str, u32) = ("capture", 2);
     pub const VIEW: (&str, u32) = ("view", 2);
+    pub const NLR_STATE: (&str, u32) = ("nlr_state", 2);
     pub const GET: (&str, u32) = ("get", 3);
     pub const PUT: (&str, u32) = ("put", 3);
     pub const SUPER_SEND: (&str, u32) = ("super_send", 5);
@@ -103,6 +104,7 @@ pub(in crate::core_erlang) mod actor_state_helper {
         REFRESH_CARRIED,
         CAPTURE,
         VIEW,
+        NLR_STATE,
         GET,
         PUT,
         SUPER_SEND,
@@ -275,17 +277,33 @@ impl CoreErlangGenerator {
     /// `beamtalk_actor_state:view(Self, Capture)`: the state map a read sees,
     /// the cell at home and the creation-time capture away.
     pub(in crate::core_erlang) fn cell_view_doc(&self) -> Document<'static> {
-        let capture = self
-            .actor_closure_capture()
-            .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
-        actor_state_call(actor_state_helper::VIEW, vec![leaf::var("Self"), capture])
+        actor_state_call(
+            actor_state_helper::VIEW,
+            vec![leaf::var("Self"), self.closure_capture_doc()],
+        )
+    }
+
+    /// `beamtalk_actor_state:nlr_state(Self, Capture)`: the state an actor
+    /// closure's `^` throw carries. The cell at home; away the creation-time
+    /// capture stamped with its own actor, so a dynamic `Block>>ensure:` relay
+    /// in another actor of the same class never takes that actor's cell for
+    /// it (BT-4448, `refresh_carried/2`).
+    pub(in crate::core_erlang) fn cell_nlr_state_doc(&self) -> Document<'static> {
+        actor_state_call(
+            actor_state_helper::NLR_STATE,
+            vec![leaf::var("Self"), self.closure_capture_doc()],
+        )
+    }
+
+    /// The closure's creation-time capture variable, or `'none'`.
+    fn closure_capture_doc(&self) -> Document<'static> {
+        self.actor_closure_capture()
+            .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()))
     }
 
     /// A read of field `name` inside an actor closure.
     pub(in crate::core_erlang) fn cell_field_read_doc(&self, name: &str) -> Document<'static> {
-        let capture = self
-            .actor_closure_capture()
-            .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
+        let capture = self.closure_capture_doc();
         actor_state_call(
             actor_state_helper::GET,
             vec![leaf::var("Self"), leaf::atom(name.to_string()), capture],
@@ -300,9 +318,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         args_doc: Document<'static>,
     ) -> Document<'static> {
-        let capture = self
-            .actor_closure_capture()
-            .map_or_else(|| Document::Str("'none'"), |c| leaf::var(c.to_string()));
+        let capture = self.closure_capture_doc();
         actor_state_call(
             actor_state_helper::SUPER_SEND,
             vec![
