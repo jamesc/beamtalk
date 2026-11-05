@@ -1248,7 +1248,7 @@ loader_integration_test_() ->
             %% Each calls `meck:new(beamtalk_repl_loader, [passthrough])`,
             %% which recompiles the 7.2k-line loader (about 1 s), then does
             %% four real compiles plus a fan-out reload and rollback through
-            %% the meck proxy: about 3 s on an idle machine. Under CPU load
+            %% the meck proxy: 3-4.5 s on an idle machine. Under CPU load
             %% that passes EUnit's default 5 s, and the kill skips the
             %% `meck:unload/1` cleanup, cancelling the fixture teardown too.
             {"protocol reload rollback merges ambient protocol sources",
