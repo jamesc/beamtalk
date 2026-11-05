@@ -19,13 +19,19 @@ TestCase subclass: RemoveRuntimeClassMethodTest
   install: name :: Symbol selector: sel :: Symbol fun: aBlock :: Block =>
     pid := Erlang beamtalk_class_registry whereis_class: name
     @expect type
-    Erlang beamtalk_object_class put_class_method: pid selector: sel fun: aBlock
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: sel
+      fun: aBlock
 
   // A fun over a compiled method: removing it brings the compiled one back,
   // for static and dynamic sends alike, and it stays a local class method.
   testRemovingAFunRestoresTheCompiledMethod =>
     self assert: Bt4438Own answer equals: #compiled
-    self install: #Bt4438Own selector: #answer fun: [:classSelf | #fromRuntimeFun]
+    self
+      install: #Bt4438Own
+      selector: #answer
+      fun: [:classSelf | #fromRuntimeFun]
     [
       self assert: Bt4438Own answer equals: #fromRuntimeFun
       self assert: (Bt4438Own class includesSelector: #answer)
@@ -36,8 +42,14 @@ TestCase subclass: RemoveRuntimeClassMethodTest
 
   // A second fun over the first: removal still restores the compiled method.
   testRemovingAFunPutTwiceRestoresTheCompiledMethod =>
-    self install: #Bt4438Own selector: #answer fun: [:classSelf | #first]
-    self install: #Bt4438Own selector: #answer fun: [:classSelf | #second]
+    self
+      install: #Bt4438Own
+      selector: #answer
+      fun: [:classSelf | #first]
+    self
+      install: #Bt4438Own
+      selector: #answer
+      fun: [:classSelf | #second]
     [
       self assert: Bt4438Own answer equals: #second
     ] ensure: [Bt4438Own class removeSelector: #answer]
@@ -48,20 +60,28 @@ TestCase subclass: RemoveRuntimeClassMethodTest
   // absent and not understood.
   testRemovingANewSelectorLeavesItAbsent =>
     self deny: (Bt4438Own class includesSelector: #extra)
-    self install: #Bt4438Own selector: #extra fun: [:classSelf | #extra]
+    self
+      install: #Bt4438Own
+      selector: #extra
+      fun: [:classSelf | #extra]
     self assert: (Bt4438Own class includesSelector: #extra)
     self assert: (self lookUp: #Bt4438Own) extra equals: #extra
     removed := Bt4438Own class removeSelector: #extra ifAbsent: [#absent]
     self assert: removed equals: Bt4438Own class
     self deny: (Bt4438Own class includesSelector: #extra)
-    self assert: (Bt4438Own class removeSelector: #extra ifAbsent: [#absent]) equals: #absent
+    self assert: (Bt4438Own class removeSelector: #extra ifAbsent: [
+      #absent
+    ]) equals: #absent
     self should: [(self lookUp: #Bt4438Own) extra] raise: #does_not_understand
 
   // A fun on an ancestor: removing it there restores what the subclass
   // inherits.
   testRemovingAFunOnAnAncestorRestoresTheSubclass =>
     self assert: Bt4438Child answer equals: #parent
-    self install: #Bt4438Parent selector: #answer fun: [:classSelf | classSelf name]
+    self
+      install: #Bt4438Parent
+      selector: #answer
+      fun: [:classSelf | classSelf name]
     [
       self assert: Bt4438Child answer equals: #Bt4438Child
     ] ensure: [Bt4438Parent class removeSelector: #answer]
