@@ -957,6 +957,13 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// What the scope's own throw carries, `None` when it carries no
         /// state a cleanup can write (a class method).
         carry: Option<NlrCarry>,
+        /// The construct's scratch map is private (`~{}~`): it sits in a
+        /// frame with no `State` chain (a direct-params loop body, a class or
+        /// value-type method), so an inlined cleanup's writes to it die with
+        /// the scope whatever boundary the throw reaches
+        /// ([`NlrCarry::writable_by_cleanup`]). Always `false` for a closure
+        /// cleanup, which has no scratch map.
+        private_scratch: bool,
         cleanup: EnsureCleanup,
         relay: Option<EnsureNlrRelay>,
         other: Document<'static>,
@@ -1644,6 +1651,20 @@ pub(in crate::core_erlang) enum NlrCarry {
     Foreign,
 }
 
+impl NlrCarry {
+    /// Whether an `ensure:` cleanup can write the state this throw carries,
+    /// given whether the construct's scratch map is private
+    /// ([`ThreadedStmt::EnsureCatch`]'s `private_scratch`). The REPL's
+    /// bindings and an actor method's `State` are threaded as the construct's
+    /// `StateAcc`; where that is a private scratch map the cleanup's writes
+    /// die with the scope, so there is nothing to relay. The one rule both
+    /// the `ensure:` lowering and
+    /// [`verify`](super::verify::verify) read.
+    pub(in crate::core_erlang) fn writable_by_cleanup(self, private_scratch: bool) -> bool {
+        !(private_scratch && matches!(self, Self::Bindings | Self::ActorState))
+    }
+}
+
 /// BT-4312: how the cleanup of an [`ThreadedStmt::EnsureCatch`] runs, which
 /// decides what it can write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1688,9 +1709,9 @@ pub(in crate::core_erlang) enum RethrowSlot {
     /// from the site's bindings. Never right for a relay: in a merged Tier 2
     /// fun it re-flushes the captured locals as bound at the `ensure:`, not as
     /// the `^` carried them (BT-4122). Only the test-only
-    /// `ensure_nlr_relay::fault::rebuild_at_site` builds it, to show the
-    /// verifier rejects it.
-    #[cfg_attr(not(any(test, feature = "test")), allow(dead_code))]
+    /// `ensure_nlr_relay::fault::RelayFault::RebuildAtSite` builds it, to
+    /// show the verifier rejects it, so it exists only in test builds.
+    #[cfg(any(test, feature = "test"))]
     SiteState(Document<'static>),
 }
 

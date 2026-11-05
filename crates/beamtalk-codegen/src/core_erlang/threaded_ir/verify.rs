@@ -507,7 +507,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// the cleanup's result ([`EnsureRelayDefect::RethrowsStaleState`]), or,
     /// where the state lives in the cell, a state rebuilt from the `ensure:`
     /// site's bindings instead of from the carried one
-    /// ([`EnsureRelayDefect::RebuildsCarriedStateAtSite`]). The repros:
+    /// (`EnsureRelayDefect::RebuildsCarriedStateAtSite`, test builds). The repros:
     /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
     /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
     /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
@@ -791,6 +791,8 @@ pub(in crate::core_erlang) enum EnsureRelayDefect {
     /// ([`RethrowSlot::SiteState`]) instead of the carried state with the
     /// cell over it: in a merged Tier 2 fun that re-flushes the captured
     /// locals as bound at the `ensure:`, dropping the values the `^` carried.
+    /// Test builds only, with the one node shape that has it.
+    #[cfg(any(test, feature = "test"))]
     RebuildsCarriedStateAtSite,
 }
 
@@ -1860,13 +1862,15 @@ impl VerifyWalk<'_> {
             ThreadedStmt::EnsureCatch {
                 token,
                 carry,
+                private_scratch,
                 cleanup,
                 relay,
                 span,
                 ..
             } => {
+                let carry = carry.filter(|carry| carry.writable_by_cleanup(*private_scratch));
                 if let Some(defect) =
-                    check_ensure_relay(token.is_some(), *carry, *cleanup, relay.as_ref())
+                    check_ensure_relay(token.is_some(), carry, *cleanup, relay.as_ref())
                 {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
@@ -1966,6 +1970,7 @@ fn check_ensure_relay(
     };
     match (&relay.rethrow, &expected) {
         (found, expected) if found == expected => None,
+        #[cfg(any(test, feature = "test"))]
         (RethrowSlot::SiteState(_), RethrowSlot::CellOverCarried) => {
             Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
         }

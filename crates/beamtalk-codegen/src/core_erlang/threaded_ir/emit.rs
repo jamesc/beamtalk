@@ -775,6 +775,7 @@ fn render_ensure_catch(
                 leaf::var(vars.nlr_carried_var.clone()),
             ],
         ),
+        #[cfg(any(test, feature = "test"))]
         RethrowSlot::SiteState(doc) => doc.clone(),
     };
     // `refresh_carried/2` compares the carried state with the cell as it was

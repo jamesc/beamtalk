@@ -113,6 +113,32 @@ struct ArmEntry {
     locals: Vec<String>,
 }
 
+/// The state an `on:do:` / `ensure:` / `tryDo:` scratch map starts from
+/// ([`CoreErlangGenerator::exception_body_outer_state`]).
+struct ExceptionOuterState {
+    /// Bound ahead of the construct's seed (the cell `take` of a bracketed
+    /// region), else [`Document::Nil`].
+    prefix: Document<'static>,
+    /// The variable the scratch map starts from, or the empty map literal
+    /// when it is private.
+    state: String,
+    /// The scratch map is private (`~{}~`): the construct sits in a frame
+    /// with no `State` chain (a class or value-type method, a direct-params
+    /// loop body), so its writes to it die with the construct.
+    private_scratch: bool,
+}
+
+impl ExceptionOuterState {
+    /// A scratch map that continues the enclosing `state`.
+    fn continues(prefix: Document<'static>, state: String) -> Self {
+        Self {
+            prefix,
+            state,
+            private_scratch: false,
+        }
+    }
+}
+
 impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {
         match state_version {
@@ -767,7 +793,11 @@ impl CoreErlangGenerator {
         // the protected body of an `on:do:` producer: a loop, fold, conditional
         // or exception in it rebinds its locals into that frame.
         let arm = self.exception_arm_frame(&[body], true);
-        let (outer_prefix, current_state) = self.exception_body_outer_state(body.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            ..
+        } = self.exception_body_outer_state(body.span);
         let (seed_doc, base_state) = self.seed_conditional_locals(&[body], &current_state);
         let seed_doc = docvec![outer_prefix, seed_doc];
         let families = ThreadedFamilies::default();
@@ -881,7 +911,7 @@ impl CoreErlangGenerator {
     fn exception_body_outer_state(
         &mut self,
         at: beamtalk_core::source_analysis::Span,
-    ) -> (Document<'static>, String) {
+    ) -> ExceptionOuterState {
         // ADR 0131 §2 (`MethodBody (REPL)` row): the REPL root threads its
         // bindings map, so the construct continues it (as a REPL conditional or
         // loop does) and its element 2 is the next bindings map.
@@ -892,7 +922,7 @@ impl CoreErlangGenerator {
         // private there as in a class method.
         if self.closure_scratch_continues_state(self.current_frame()) {
             return match self.actor_state_source(StateReadSite::ExceptionBodyOuterState, at) {
-                ActorStateSource::Var(var) => (Document::Nil, var),
+                ActorStateSource::Var(var) => ExceptionOuterState::continues(Document::Nil, var),
                 ActorStateSource::Cell => {
                     let take_var = self.fresh_temp_var("TakeOuter");
                     let prefix = docvec![
@@ -902,7 +932,7 @@ impl CoreErlangGenerator {
                         threaded_ir::cell_take_call(),
                         " in "
                     ];
-                    (prefix, take_var)
+                    ExceptionOuterState::continues(prefix, take_var)
                 }
             };
         }
@@ -911,9 +941,13 @@ impl CoreErlangGenerator {
             .get(&self.current_frame())
             .is_none_or(|frame| frame.kind.extends_state_chain());
         if (self.in_actor_instance_context() && state_chain) || self.is_repl_mode() {
-            (Document::Nil, self.current_state_var())
+            ExceptionOuterState::continues(Document::Nil, self.current_state_var())
         } else {
-            (Document::Nil, "~{}~".to_string())
+            ExceptionOuterState {
+                prefix: Document::Nil,
+                state: "~{}~".to_string(),
+                private_scratch: true,
+            }
         }
     }
 
@@ -966,7 +1000,11 @@ impl CoreErlangGenerator {
         // Bind exception class
         let ex_class_code = self.on_do_filter_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
-        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            private_scratch,
+        } = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by either the
         // try (receiver) block or the handler block — only one of the two ever
         // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
@@ -1065,7 +1103,7 @@ impl CoreErlangGenerator {
         // exhaustive fallback.
         // (A frame with no `State` chain holds a private scratch map as its outer
         // state; the cell's pre-region version is then the enclosing `State`.)
-        let pre_region_state = if current_state.starts_with('~') {
+        let pre_region_state = if private_scratch {
             self.state_var_to_store()
         } else {
             current_state.clone()
@@ -1196,7 +1234,7 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            carry,
+            (carry, false),
             EnsureCleanup::Closure { writes_cell },
             relay,
             other,
@@ -1366,7 +1404,11 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
 
         // Rename current state to StateAcc
-        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            private_scratch,
+        } = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by the try
         // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
         // (see `generate_on_do_with_mutations`) so a local written only
@@ -1391,7 +1433,7 @@ impl CoreErlangGenerator {
         // ADR 0137 §5: entering the `ensure:` stores the current `State` to the
         // cell, so a closure the protected body runs reads it, and the cleanup an
         // error runs starts from it.
-        let cell_boundary = self.synced_calls_active() && !current_state.starts_with('~');
+        let cell_boundary = self.synced_calls_active() && !private_scratch;
         let entry_store = if cell_boundary {
             docvec![
                 "let _ = ",
@@ -1465,7 +1507,7 @@ impl CoreErlangGenerator {
             cleanup_block,
             &families,
             arm.as_ref(),
-            (cell_boundary, current_state.starts_with('~')),
+            (cell_boundary, private_scratch),
             outer_version,
             receiver_block.span,
         )?;
@@ -1530,10 +1572,10 @@ impl CoreErlangGenerator {
         // carried family is what the scope's throw carries (`NlrSlot`), and
         // nothing where this construct's scratch map is private (a
         // direct-params loop body, a class method): its writes die with the
-        // scope whatever the boundary answers.
-        let carry = self.nlr_slot().carry().filter(|carry| {
-            !matches!(carry, NlrCarry::Bindings | NlrCarry::ActorState) || !private_scratch
-        });
+        // scope whatever the boundary answers. The node records the carry and
+        // `private_scratch` as they are; the verifier applies the same rule.
+        let scope_carry = self.nlr_slot().carry();
+        let carry = scope_carry.filter(|carry| carry.writable_by_cleanup(private_scratch));
         let cleanup_final = match carry {
             Some(NlrCarry::Bindings | NlrCarry::ActorState) => {
                 (error_arm.state_version > 0).then_some(error_arm.state_version)
@@ -1565,7 +1607,7 @@ impl CoreErlangGenerator {
                 carried_var,
                 ..triple
             },
-            carry,
+            (scope_carry, private_scratch),
             EnsureCleanup::Inlined {
                 final_version: cleanup_final,
                 writes_cell,
@@ -1650,8 +1692,12 @@ impl CoreErlangGenerator {
                 }
             }
             NlrCarry::SelfVt => {
-                if let Some(prefix) = families.as_slice().first() {
-                    self.set_family_version(prefix, 0);
+                // The seed below binds the bare `Self` to the carried one, so
+                // the cleanup's arm mints `Self1`, `Self2`, … from there. Looked
+                // up by name: `families` is ordered, and `SelfVt` need not be
+                // its first member.
+                if families.contains(&VersionPrefix::SelfVt) {
+                    self.set_family_version(&VersionPrefix::SelfVt, 0);
                 }
                 let cleanup = self.generate_exception_body_with_threading(
                     cleanup_block,
@@ -1885,7 +1931,7 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            Some(NlrCarry::Foreign),
+            (Some(NlrCarry::Foreign), false),
             EnsureCleanup::Closure { writes_cell: true },
             Some(relay),
             other,

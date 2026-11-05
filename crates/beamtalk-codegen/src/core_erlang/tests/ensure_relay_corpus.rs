@@ -59,14 +59,30 @@ const SCOPES: &[Scope] = &[
 impl Scope {
     /// The class header (one class per module) and the field the cleanups
     /// write.
+    /// write. Each class has a `bump` the indirect shapes send to `self`:
+    /// it writes the field where the scope can (BT-4433).
     fn class(self) -> (&'static str, &'static str) {
         match self {
-            Self::ActorMethod => ("Actor subclass: Bt4312RelayActor\n  state: n = 0\n", "n"),
-            Self::ActorClosure => ("Actor subclass: Bt4312RelayClosure\n  state: n = 0\n", "n"),
-            Self::MergedTier2Fun => ("Actor subclass: Bt4312RelayMerged\n  state: n = 0\n", "n"),
-            Self::ValueTypeMethod => ("Value subclass: Bt4312RelayValue\n  field: k = 0\n", "k"),
+            Self::ActorMethod => (
+                "Actor subclass: Bt4312RelayActor\n  state: n = 0\n  bump => self.n := self.n + 1\n",
+                "n",
+            ),
+            Self::ActorClosure => (
+                "Actor subclass: Bt4312RelayClosure\n  state: n = 0\n  bump => self.n := self.n + 1\n",
+                "n",
+            ),
+            Self::MergedTier2Fun => (
+                "Actor subclass: Bt4312RelayMerged\n  state: n = 0\n  bump => self.n := self.n + 1\n",
+                "n",
+            ),
+            // A value type's `bump` answers a new value; it cannot rebind the
+            // sender's `Self`.
+            Self::ValueTypeMethod => (
+                "Value subclass: Bt4312RelayValue\n  field: k = 0\n  bump => self withK: self.k + 1\n",
+                "k",
+            ),
             Self::ClassMethod => (
-                "Object subclass: Bt4312RelayClass\n  classState: n = 0\n",
+                "Object subclass: Bt4312RelayClass\n  classState: n = 0\n  class bump => self.n := self.n + 1\n",
                 "n",
             ),
         }
@@ -108,6 +124,12 @@ enum Cleanup {
     Inlined { writes: bool },
     /// An operand is not a block literal: the cleanup is a closure.
     Closure,
+    /// BT-4433: both operands are block literals and the cleanup writes the
+    /// field only indirectly, through a self-send (`self bump`) or a stored
+    /// block it runs (`c0 value`). Which of these the cleanup's
+    /// `writes_cell` sees is the `block_touches_actor_state` heuristic's
+    /// call; the oracle says what the program does.
+    Indirect,
 }
 
 /// The `ensure:` shapes, `{F}` a write of the scope's field. A shape with
@@ -145,6 +167,16 @@ const SHAPES: &[(&str, &str, Cleanup)] = &[
         Cleanup::Closure,
     ),
     (
+        "literal, writing through a self-send",
+        "[^1] ensure: [self bump]",
+        Cleanup::Indirect,
+    ),
+    (
+        "literal, running a stored block that writes",
+        "c0 := [{F}]. [^1] ensure: [c0 value]",
+        Cleanup::Indirect,
+    ),
+    (
         "stored cleanup inside a literal one",
         "c0 := [{F}]. [[^1] ensure: c0] ensure: [{F}]",
         Cleanup::Closure,
@@ -159,13 +191,16 @@ const SHAPES: &[(&str, &str, Cleanup)] = &[
 /// its `State` to before it threw. A value type's `Self` is written only by
 /// an inlined cleanup (a closure cannot rebind it, and one that assigns a
 /// field is rejected), and a class method's throw carries nothing (its class
-/// variables are written in place).
+/// variables are written in place). An indirect write (BT-4433) lands in the
+/// actor-state cell, like a closure's: a self-send's callee and a stored
+/// block both write the actor's state there; a value type's self-send
+/// answers a new value and leaves the sender's `Self` as it was.
 fn relay_needed(scope: Scope, cleanup: Cleanup) -> bool {
     match (scope, cleanup) {
         (_, Cleanup::Inlined { writes: false })
         | (Scope::ClassMethod, _)
-        | (Scope::ValueTypeMethod, Cleanup::Closure) => false,
-        (_, Cleanup::Inlined { writes: true } | Cleanup::Closure) => true,
+        | (Scope::ValueTypeMethod, Cleanup::Closure | Cleanup::Indirect) => false,
+        (_, Cleanup::Inlined { writes: true } | Cleanup::Closure | Cleanup::Indirect) => true,
     }
 }
 
@@ -302,6 +337,21 @@ fn ensure_relay_corpus_compiles_and_relays() {
             }
         }
     }
+    // BT-4433: every actor-scope cell whose cleanup writes only indirectly
+    // compiles, so proofs 1 and 2 cover the heuristic its `writes_cell` reads.
+    let indirect = compiled
+        .iter()
+        .filter(|(c, _)| c.cleanup == Cleanup::Indirect && relay_needed(c.scope, c.cleanup))
+        .count();
+    let indirect_shapes = SHAPES
+        .iter()
+        .filter(|(_, _, c)| *c == Cleanup::Indirect)
+        .count();
+    assert_eq!(
+        indirect,
+        3 * POSITIONS.len() * indirect_shapes,
+        "an indirect-write actor cell does not compile"
+    );
     assert!(
         compiled.len() >= SCOPES.len() * POSITIONS.len() * SHAPES.len() * 4 / 5,
         "the corpus has thinned out: {}",
