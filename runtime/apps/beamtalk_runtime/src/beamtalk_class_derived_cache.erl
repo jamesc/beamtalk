@@ -65,8 +65,8 @@ default dispatch arm asks first (`beamtalk_dispatch:inherited_target/2`):
 compiled `State`-threading method directly (an actor's `dispatch/4` arm),
 `{value, Owner, Module}` when it may call the owner's state-less `dispatch/3`
 directly (a value-type `dispatch/3` arm), else `slow`. All are cached (an
-unregistered class is not), and a hit re-checks the module's `dispatch/4`
-(`compiled`) or `dispatch/3` (`value`) export.
+unregistered class is not), and a `compiled` hit re-checks the module's
+`dispatch/4` export (a `value` hit needs no check; its remote call loads it).
 
 ## Invalidation
 

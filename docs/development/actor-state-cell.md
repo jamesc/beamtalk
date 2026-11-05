@@ -190,9 +190,9 @@ predicate, `ClassHierarchy::threads_actor_state`, that decides
 `CompiledSelfSend`. Every other answer takes the path above unchanged: `slow`,
 and `{value, Owner, Module}`, the verdict for an owner whose methods take no
 actor `State` (such as `Object`), which a value type's `dispatch/3` default arm
-uses to call that owner's `dispatch/3` directly (BT-4260). Every source that changes the answer (extension install or
-removal, a method write or `removeSelector:`, a reload, a class removal)
-flushes the derived cache. The `dispatch/4` exit test allows `invoke_resolved/6`
+uses to call that owner's `dispatch/3` directly (BT-4260). Every source
+that changes the answer (extension install or removal, a method write or
+`removeSelector:`, a reload, a class removal) flushes the derived cache. The `dispatch/4` exit test allows `invoke_resolved/6`
 only under the `{'compiled', ...}` arm.
 
 `call_foreign/3` stores `State` to the cell, invokes the fun with it, and

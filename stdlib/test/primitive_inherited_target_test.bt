@@ -15,6 +15,10 @@
 
 TestCase subclass: PrimitiveInheritedTargetTest
 
+  // Installs node-wide `isKindOf:` extensions on String/Binary/Collection/
+  // Value; run serially so concurrently running test classes never see them.
+  class serial -> Boolean => true
+
   typedKind: s :: String => s isKindOf: String
 
   dynamicKind: s => s isKindOf: String
