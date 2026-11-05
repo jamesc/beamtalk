@@ -827,10 +827,9 @@ pub(crate) fn collect_all_alias_infos(
 ///
 /// `build_class_index`'s production path calls
 /// `collect_project_protocol_and_alias_infos` directly to extract both kinds
-/// in one scan; this standalone single-purpose wrapper is kept for tests
-/// that only care about protocols (mirrors `collect_project_alias_infos`,
-/// which stays in production use via `compile_dependency_with_context`).
-#[allow(dead_code)] // Used by tests; production path uses the combined extractor above
+/// in one scan; `beamtalk test` calls this protocol-only wrapper per package
+/// (BT-4446), since it already collects aliases with
+/// `collect_project_alias_infos`.
 pub(crate) fn collect_project_protocol_infos(
     source_files: &[Utf8PathBuf],
 ) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
