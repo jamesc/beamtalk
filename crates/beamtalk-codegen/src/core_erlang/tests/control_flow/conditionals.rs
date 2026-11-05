@@ -190,6 +190,10 @@ fn test_return_wrapped_field_write_in_if_true_threads_state() {
         "    flag ifTrue: [\n",
         "      ^ (self.total := self.total + 10)\n",
         "    ]\n",
+        // BT-4415: a `^` inside a real closure keeps the method's NLR
+        // frame, so the `ifTrue:` branch still throws (without it the guard
+        // compiles as a direct return, `tests/guard_returns.rs`).
+        "    #[] do: [:e | ^e]\n",
         "    self.total\n",
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);

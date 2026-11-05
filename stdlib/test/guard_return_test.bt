@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4415: a `^` inside an inlined conditional at a method's top level is a
+// direct early return (no NLR frame). Behaviour must match the NLR form:
+// the returned value, the fall-through value, and actor state written before
+// the return.
+
+TestCase subclass: GuardReturnTest
+
+  testIfTrueGuards =>
+    self assert: (GuardReturnObject sign: 5) equals: 1
+    self assert: (GuardReturnObject sign: -5) equals: -1
+    self assert: (GuardReturnObject sign: 0) equals: 0
+
+  testIfNilGuard =>
+    self assert: (GuardReturnObject orDefault: nil) equals: #default
+    self assert: (GuardReturnObject orDefault: 3) equals: 3
+
+  testIfFalseGuard =>
+    self assert: (GuardReturnObject describe: 1) equals: "some"
+    self assert: (GuardReturnObject describe: nil) equals: "none"
+
+  testTwoBranchGuardKeepsLocalRebind =>
+    self assert: (GuardReturnObject local: 6) equals: 12
+    self assert: (GuardReturnObject local: 2) equals: 105
+
+  testClassSideGuard =>
+    self assert: (GuardReturnObject canon: nil) equals: "nil"
+    self assert: (GuardReturnObject canon: 42) equals: "42"
+
+  testTailMatchArmReturn =>
+    self assert: (GuardReturnObject classify: 0) equals: #zero
+    self assert: (GuardReturnObject classify: 1) equals: #other
+
+  testActorGuardKeepsStateWrittenBeforeReturn =>
+    a := GuardReturnActor spawn
+    self assert: (a bump: 20) equals: #big
+    self assert: a count equals: 1
+    self assert: (a bump: 2) equals: #small
+    self assert: a count equals: 4
+
+  testValueGuard =>
+    v := GuardReturnValue new
+    self assert: (v clamp: -3) n equals: 0
+    self assert: (v clamp: 30) n equals: 9
+    self assert: (v clamp: 4) n equals: 4

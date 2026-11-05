@@ -523,6 +523,11 @@ pub struct CoreErlangGenerator {
     /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) a
     /// `ClassBuilder` block method's operands were recorded under (BT-4059).
     pub(in crate::core_erlang) current_method_span: Option<beamtalk_core::source_analysis::Span>,
+    /// The bodies, as written, of the methods whose guard-style `^`s
+    /// codegen compiles as direct returns (BT-4415, `guard_returns`), keyed
+    /// by method span: [`Self::as_written_method_source`] reflects these,
+    /// not the rewritten bodies. Empty when nothing was rewritten.
+    pub(in crate::core_erlang) guard_rewritten_bodies: super::guard_returns::RewrittenBodies,
 }
 
 /// `method`'s reflected source: its text as written, with the operand
@@ -552,6 +557,15 @@ impl CoreErlangGenerator {
         &self,
         method: &beamtalk_core::ast::MethodDefinition,
     ) -> String {
+        if let Some(body) = self.guard_rewritten_bodies.get(&method.span) {
+            let mut written = method.clone();
+            written.body.clone_from(body);
+            return as_written_method_source(
+                &written,
+                &self.peeled_parens,
+                beamtalk_core::ast::normalize::PeelScope::of_method(method),
+            );
+        }
         as_written_method_source(
             method,
             &self.peeled_parens,
@@ -645,6 +659,7 @@ impl CoreErlangGenerator {
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
+            guard_rewritten_bodies: super::guard_returns::RewrittenBodies::new(),
         }
     }
 

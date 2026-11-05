@@ -13,6 +13,7 @@
 //! (`compute_direct_call_eligible`, `is_actor_class`) live here too.
 
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::guard_returns;
 use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
 };
@@ -371,6 +372,22 @@ pub fn generate_module_with_warnings(
         module,
         "generate_module_with_warnings",
     );
+
+    // BT-4415: compile guard-style early returns (`c ifTrue: [^v]. rest`)
+    // as direct returns, on a clone, after every rewrite above. The tree
+    // changed, so the facts derived from it are recomputed over the clone;
+    // reflected method source keeps the bodies as written.
+    let guard_rewritten_storage;
+    let module: &Module = if guard_returns::has_guard_returns(module) {
+        let mut owned = module.clone();
+        generator.guard_rewritten_bodies = guard_returns::rewrite_guard_returns(&mut owned);
+        generator.semantic_facts =
+            beamtalk_core::semantic_analysis::compute_semantic_facts(&owned);
+        guard_rewritten_storage = owned;
+        &guard_rewritten_storage
+    } else {
+        module
+    };
 
     // Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {

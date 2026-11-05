@@ -933,6 +933,8 @@ Object subclass: Validator
 
 `^` at the top level of a method body is an early return (the method exits immediately). `^` inside a block argument causes the *method* to exit with that value.
 
+Guard clauses like `Validator>>validate:` above cost nothing extra. A `^` inside an inlined conditional (`ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`, `ifNil:`, `ifNotNil:` and their two-branch forms) at the method's top level compiles to a plain branch, as if written `x isNil ifTrue: ["missing"] ifFalse: [...]`. Only a `^` inside a real closure (`do:`, `detect:`, a stored block) needs the non-local-return throw/catch, and a method that has one compiles all its `^`s that way.
+
 ### Abstract and Stub Methods
 
 Empty method bodies are a **compile-time error**. Use one of these two explicit forms instead:

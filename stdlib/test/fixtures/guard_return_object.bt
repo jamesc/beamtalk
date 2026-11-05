@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4415: GuardReturnObject — guard-style early returns (`cond ifTrue: [^v]` at a
+// method's top level) compiled as direct returns.
+
+Object subclass: GuardReturnObject
+  class sign: x =>
+    x > 0 ifTrue: [^1]
+    x < 0 ifTrue: [^-1]
+    0
+
+  class orDefault: x =>
+    x ifNil: [^#default]
+    x
+
+  class describe: x =>
+    x isNil ifFalse: [^"some"]
+    "none"
+
+  class local: x =>
+    y := x * 2
+    y > 10 ifTrue: [^y] ifFalse: [y := y + 1]
+    y + 100
+
+  class sealed canon: x =>
+    x isNil ifTrue: [^"nil"]
+    x printString
+
+  class classify: x =>
+    x match: [0 -> ^#zero; _ -> #other]

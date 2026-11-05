@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4415: GuardReturnValue — guard-style early returns (`cond ifTrue: [^v]` at a
+// method's top level) compiled as direct returns.
+
+Value subclass: GuardReturnValue
+  field: n :: Integer = 0
+
+  clamp: x =>
+    x < 0 ifTrue: [^self withN: 0]
+    x > 9 ifTrue: [^self withN: 9]
+    self withN: x
