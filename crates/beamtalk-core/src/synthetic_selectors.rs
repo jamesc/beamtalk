@@ -78,6 +78,30 @@ pub fn keyword_constructor_selector<'a>(slot_names: impl IntoIterator<Item = &'a
     sel
 }
 
+/// The keyword constructor a value class's compilation synthesizes, if any:
+/// [`keyword_constructor_selector`] over the class's *own* slots, unless the
+/// class declares no slots or `user_defines_class_side` reports that the
+/// class already defines that selector class-side.
+///
+/// The one decision behind codegen's emission, the hierarchy's synthesized
+/// `MethodInfo` and its `auto_ctors` anchor, and the stdlib builtins
+/// generator (BT-4132): a drift between them mints direct calls to functions
+/// the class's module does not export. `user_defines_class_side` must see
+/// user methods only — after synthesis the selector is in the class-side
+/// surface too, so a re-check could not tell synthesis from a collision.
+#[must_use]
+pub fn synthesized_keyword_constructor<'a>(
+    slot_names: impl IntoIterator<Item = &'a str>,
+    user_defines_class_side: impl FnOnce(&str) -> bool,
+) -> Option<String> {
+    let sel = keyword_constructor_selector(slot_names);
+    if sel.is_empty() || user_defines_class_side(&sel) {
+        None
+    } else {
+        Some(sel)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +124,24 @@ mod tests {
     #[test]
     fn keyword_constructor_multiple_slots() {
         assert_eq!(keyword_constructor_selector(["x", "y"].into_iter()), "x:y:");
+    }
+
+    #[test]
+    fn synthesized_keyword_constructor_rules() {
+        assert_eq!(
+            synthesized_keyword_constructor(["x", "y"], |_| false).as_deref(),
+            Some("x:y:")
+        );
+        assert_eq!(
+            synthesized_keyword_constructor(std::iter::empty(), |_| false),
+            None,
+            "no slots, no keyword constructor"
+        );
+        assert_eq!(
+            synthesized_keyword_constructor(["x"], |sel| sel == "x:"),
+            None,
+            "a user class-side method with the selector suppresses synthesis"
+        );
     }
 
     #[test]

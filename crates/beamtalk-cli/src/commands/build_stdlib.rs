@@ -354,7 +354,29 @@ fn compile_all_stdlib_files(
         )?;
         core_files.push(core_file);
     }
+    mark_value_subclasses(&mut class_metadata);
     Ok((core_files, class_metadata, protocol_modules))
+}
+
+/// Set each class's [`ClassMeta::is_value_subclass`] from the superclass
+/// links of every stdlib class (BT-4132), with the hierarchy's own rule
+/// (`superclass_chain_includes_value`). An indirect Value subclass's parse
+/// says `Object` (e.g. `Collection(E) subclass: Bag(E)`); its chain, which
+/// spans files, says `Value`, as `apply_class_kind_writeback` decides for
+/// codegen.
+fn mark_value_subclasses(class_metadata: &mut [ClassMeta]) {
+    let superclass_of: std::collections::HashMap<String, String> = class_metadata
+        .iter()
+        .filter(|m| m.superclass_name != "none")
+        .map(|m| (m.class_name.clone(), m.superclass_name.clone()))
+        .collect();
+    for meta in class_metadata.iter_mut() {
+        meta.is_value_subclass =
+            beamtalk_core::semantic_analysis::class_hierarchy::superclass_chain_includes_value(
+                Some(meta.superclass_name.as_str()).filter(|s| *s != "none"),
+                |name| superclass_of.get(name).map(String::as_str),
+            );
+    }
 }
 
 /// Remove all `.beam` and `.app` files from the ebin directory.
@@ -848,9 +870,17 @@ struct ClassMeta {
     /// The bare symbol text (e.g. `"process"`), or `None` when undeclared.
     handle_scope: Option<String>,
     /// Synthesized keyword constructor selector, if any — the
-    /// `auto_ctors` anchor decision, captured by
-    /// `synthesize_value_auto_methods` against user methods only.
+    /// `auto_ctors` anchor decision, made against user methods only
+    /// (`synthetic_selectors::synthesized_keyword_constructor`). Captured for
+    /// every class: an indirect Value subclass is only known to be one once
+    /// every file's metadata is in ([`mark_value_subclasses`]).
     auto_kw: Option<String>,
+    /// Whether the class compiles as a Value: its superclass chain, over all
+    /// stdlib classes, reaches `Value` (BT-4132). The post-writeback kind,
+    /// not the AST kind `class_kind` (which is `Value` only for a direct
+    /// `Value subclass:`). Set by [`mark_value_subclasses`] once every file's
+    /// metadata is collected; it gates the `auto_ctors` anchor.
+    is_value_subclass: bool,
 }
 
 /// Sort class metadata by class name — every generated-artifact writer
@@ -1017,12 +1047,10 @@ fn synthesize_value_auto_methods(
     }
 
     // Auto keyword constructor on the class side: `field1:field2:...`
-    let kw_sel: String = beamtalk_core::synthetic_selectors::keyword_constructor_selector(
+    let kw_sel: String = beamtalk_core::synthetic_selectors::synthesized_keyword_constructor(
         class.state.iter().map(|s| s.name.name.as_str()),
-    );
-    if user_class_selectors.contains(&kw_sel) {
-        return None;
-    }
+        |sel| user_class_selectors.contains(sel),
+    )?;
     let arity = class.state.len();
     let param_types = class
         .state
@@ -1523,12 +1551,17 @@ fn extract_class_metadata(
     let class_name = class.name.name.to_string();
 
     // Synthesize auto-generated methods for Value subclasses with state,
-    // capturing the keyword-constructor decision for the anchor.
+    // capturing the keyword-constructor decision for the anchor. Every other
+    // class records the same decision without synthesis: whether it is an
+    // indirect Value subclass is only known once all files are read.
     let auto_kw =
         if class.class_kind == beamtalk_core::ast::ClassKind::Value && !class.state.is_empty() {
             synthesize_value_auto_methods(class, &class_name, &mut methods, &mut class_methods)
         } else {
-            None
+            beamtalk_core::synthetic_selectors::synthesized_keyword_constructor(
+                class.state.iter().map(|s| s.name.name.as_str()),
+                |sel| class_methods.iter().any(|m| m.selector == sel),
+            )
         };
 
     // Mark Timer methods that spawn their block argument
@@ -1583,6 +1616,8 @@ fn extract_class_metadata(
         superclass_type_args,
         handle_scope: class.handle_scope.as_ref().map(|s| s.name.to_string()),
         auto_kw,
+        // Decided across files by `mark_value_subclasses`.
+        is_value_subclass: false,
     })
 }
 
@@ -2049,11 +2084,13 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
             .map_or_else(|| "None".to_string(), |s| format!("Some(\"{s}\".into())")),
     );
 
-    // Constructor synthesis record, mirroring `from_class_definition`:
-    // `Some` iff the AST kind is `Value`. The keyword decision comes from
-    // `meta.auto_kw` (captured at synthesis time): `meta.class_methods`
+    // Constructor synthesis record, the hierarchy's rule
+    // (`ClassInfo::record_constructor_anchor`, BT-4132): `Some` iff the class
+    // compiles as a Value, direct or indirect (`meta.is_value_subclass`, the
+    // post-writeback kind; not the AST kind). The keyword decision comes from
+    // `meta.auto_kw` (captured before synthesis): `meta.class_methods`
     // already holds the synthesized keyword itself.
-    let auto_ctors = if meta.class_kind == beamtalk_core::ast::ClassKind::Value {
+    let auto_ctors = if meta.is_value_subclass {
         match &meta.auto_kw {
             Some(sel) => {
                 format!("Some(AutoConstructors {{ keyword_constructor: Some(\"{sel}\".into()) }})")
@@ -3327,6 +3364,7 @@ mod tests {
             superclass_type_args: vec![],
             handle_scope: None,
             auto_kw: None,
+            is_value_subclass: false,
         }
     }
 
@@ -3367,12 +3405,15 @@ mod tests {
         // a Value meta emits a populated anchor from the captured
         // keyword decision (`auto_kw`), `keyword_constructor: None` when
         // synthesis produced nothing, and a bare `None` anchor for
-        // non-Value kinds. The decision must be captured at synthesis
+        // non-Value classes. The decision must be captured at synthesis
         // time: by emission, `class_methods` also holds the synthesized
         // keyword itself, so re-checking it here would always (wrongly)
-        // report a user collision.
+        // report a user collision. BT-4132: the gate is the post-writeback
+        // kind (`is_value_subclass`), so an indirect Value subclass whose
+        // AST kind is `Object` is anchored too.
         let mut meta = sample_class_meta();
-        meta.class_kind = beamtalk_core::ast::ClassKind::Value;
+        meta.class_kind = beamtalk_core::ast::ClassKind::Object;
+        meta.is_value_subclass = true;
         meta.auto_kw = Some("x:y:".to_string());
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -3389,67 +3430,124 @@ mod tests {
             "a Value with no keyword keeps an empty anchor. Got:\n{code}"
         );
 
-        meta.class_kind = beamtalk_core::ast::ClassKind::Object;
+        meta.is_value_subclass = false;
         meta.auto_kw = Some("x:y:".to_string());
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
         assert!(
             code.contains("auto_ctors: None"),
-            "non-Value kinds emit a bare None anchor. Got:\n{code}"
+            "non-Value classes emit a bare None anchor. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_mark_value_subclasses_follows_chain_across_files() {
+        // BT-4132: `Collection(E) subclass: Bag(E)` parses as `Object`; its
+        // chain (which spans files) reaches `Value`, so it is anchored like
+        // a direct `Value subclass:`. `Value` itself and non-Value chains
+        // are not; a cycle terminates.
+        let named = |name: &str, superclass: &str| {
+            let mut m = sample_class_meta();
+            m.class_name = name.to_string();
+            m.superclass_name = superclass.to_string();
+            m
+        };
+        let mut metas = vec![
+            named("ProtoObject", "none"),
+            named("Object", "ProtoObject"),
+            named("Value", "Object"),
+            named("Collection", "Value"),
+            named("Bag", "Collection"),
+            named("Actor", "Object"),
+            named("Loop1", "Loop2"),
+            named("Loop2", "Loop1"),
+        ];
+        mark_value_subclasses(&mut metas);
+        let flags: Vec<(&str, bool)> = metas
+            .iter()
+            .map(|m| (m.class_name.as_str(), m.is_value_subclass))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("ProtoObject", false),
+                ("Object", false),
+                ("Value", false),
+                ("Collection", true),
+                ("Bag", true),
+                ("Actor", false),
+                ("Loop1", false),
+                ("Loop2", false),
+            ]
         );
     }
 
     #[test]
     fn test_synthesized_keyword_agrees_with_anchor() {
-        // The generator's keyword-constructor copy must agree with the
-        // hierarchy anchor, or `generated_builtins.rs` and fresh
-        // extraction disagree about synthesized constructors.
-        let cases: &[&str] = &[
-            "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n",
-            "Value subclass: Empty\n",
-            "Value subclass: Pt\n  field: x = 0\n  class x: v => Pt new\n",
-            "Value subclass: Pt\n  field: x = 0\n  class new => Pt x: 1\n",
-            "Object subclass: Box\n  field: x = 0\n",
+        // The generator's anchor (`is_value_subclass` + `auto_kw`, from the
+        // real per-file `extract_class_metadata` and the cross-file
+        // `mark_value_subclasses`) must agree with the hierarchy's
+        // `auto_ctors`, or `generated_builtins.rs` and fresh extraction
+        // disagree about synthesized constructors. BT-4132: indirect Value
+        // subclasses (whose AST kind is `Object`) included.
+        let cases: &[&[&str]] = &[
+            &["Value subclass: Pt\n  field: x = 0\n  field: y = 0\n"],
+            &["Value subclass: Empty\n"],
+            &["Value subclass: Pt\n  field: x = 0\n  class x: v => Pt new\n"],
+            &["Value subclass: Pt\n  field: x = 0\n  class new => Pt x: 1\n"],
+            &["Object subclass: Box\n  field: x = 0\n"],
+            &[
+                "Value subclass: Base\n  field: x = 0\n",
+                "Base subclass: Leaf\n  field: y = 0\n",
+            ],
+            &[
+                "Value subclass: Base\n",
+                "Base subclass: Leaf\n  field: y = 0\n  class y: v => Leaf new\n",
+            ],
+            &[
+                "Value subclass: Base\n  field: x = 0\n",
+                "Base subclass: Leaf\n",
+            ],
+            &[
+                "Object subclass: Plain\n",
+                "Plain subclass: Leaf\n  field: y = 0\n",
+            ],
         ];
-        for src in cases {
-            let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
-            let class = module
-                .classes
-                .first()
-                .expect("fixture should declare a class");
-            let mut methods: Vec<MethodMeta> =
-                class.methods.iter().map(method_def_to_meta).collect();
-            let mut class_methods: Vec<MethodMeta> =
-                class.class_methods.iter().map(method_def_to_meta).collect();
-            // Mirror `extract_class_metadata`'s gate: synthesis only runs
-            // for `Value` kinds with state.
-            let auto_kw = if class.class_kind == beamtalk_core::ast::ClassKind::Value
-                && !class.state.is_empty()
-            {
-                synthesize_value_auto_methods(
-                    class,
-                    class.name.name.as_str(),
-                    &mut methods,
-                    &mut class_methods,
-                )
-            } else {
-                None
-            };
+        let no_protocols = std::collections::HashMap::new();
+        for files in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let mut metas: Vec<ClassMeta> = files
+                .iter()
+                .enumerate()
+                .map(|(i, src)| {
+                    let path = Utf8PathBuf::from_path_buf(dir.path().join(format!("c{i}.bt")))
+                        .expect("utf8 temp path");
+                    fs::write(&path, src).expect("write fixture");
+                    extract_class_metadata(&path, &format!("bt@stdlib@c{i}"), &no_protocols)
+                        .expect("extract fixture metadata")
+                })
+                .collect();
+            mark_value_subclasses(&mut metas);
+            let combined = files.concat();
+            let module = beamtalk_core::test_helpers::test_support::parse_bt(&combined);
             let hierarchy =
                 beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
                     .0
                     .expect("fixture hierarchy should build");
-            let anchor = hierarchy
-                .get_class(class.name.name.as_str())
-                .expect("class should be present")
-                .auto_ctors
-                .as_ref()
-                .and_then(|auto| auto.keyword_constructor.clone());
-            assert_eq!(
-                auto_kw.as_deref(),
-                anchor.as_deref(),
-                "generator and anchor must agree. Source:\n{src}"
-            );
+            for meta in &metas {
+                let generated = meta.is_value_subclass.then(|| meta.auto_kw.clone());
+                let anchor = hierarchy
+                    .get_class(meta.class_name.as_str())
+                    .expect("class should be present")
+                    .auto_ctors
+                    .as_ref()
+                    .map(|auto| auto.keyword_constructor.as_ref().map(ToString::to_string));
+                assert_eq!(
+                    generated, anchor,
+                    "generator and anchor must agree for {}. Sources:\n{combined}",
+                    meta.class_name
+                );
+            }
         }
     }
 
@@ -3477,6 +3575,7 @@ mod tests {
             superclass_type_args: vec![],
             handle_scope: None,
             auto_kw: None,
+            is_value_subclass: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -3584,6 +3683,7 @@ mod tests {
                 superclass_type_args: vec![],
                 handle_scope: None,
                 auto_kw: None,
+                is_value_subclass: false,
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -3607,6 +3707,7 @@ mod tests {
                 superclass_type_args: vec![],
                 handle_scope: None,
                 auto_kw: None,
+                is_value_subclass: false,
             },
         ];
 
@@ -4774,6 +4875,7 @@ mod tests {
             superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
             handle_scope: None,
             auto_kw: None,
+            is_value_subclass: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);

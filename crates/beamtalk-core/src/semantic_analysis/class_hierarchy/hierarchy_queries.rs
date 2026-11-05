@@ -479,11 +479,18 @@ impl ClassHierarchy {
     /// synthesized.
     pub(crate) fn propagate_class_kind(&mut self, module: &Module) {
         // Collect names of classes that need is_value = true but don't have it yet.
+        // A class an earlier run already fixed is skipped: re-synthesizing
+        // would find its keyword constructor present and misread it as a
+        // user collision, clearing the recorded keyword decision.
         let classes_to_fix: Vec<EcoString> = module
             .classes
             .iter()
             .filter(|class| {
                 class.class_kind != ClassKind::Value
+                    && self
+                        .classes
+                        .get(class.name.name.as_str())
+                        .is_some_and(|info| !info.is_value)
                     && self.is_value_subclass(class.name.name.as_str())
             })
             .map(|class| class.name.name.clone())
@@ -495,18 +502,29 @@ impl ClassHierarchy {
             }
         }
 
-        // Synthesize auto-slot methods for newly-discovered Value subclasses.
+        // Synthesize auto-slot methods for newly-discovered Value subclasses
+        // and record their constructor anchor (BT-4132): codegen gives them
+        // full value treatment (`apply_class_kind_writeback`), so they are as
+        // eligible for direct construction as a direct `Value subclass:`.
         // We need the AST `ClassDefinition` for slot info, so look it up.
-        // Discard the keyword decision: without a `Value` AST kind these
-        // classes keep a `None` anchor and take the slow path.
+        // `Value` itself (reached here when compiling `value.bt`) is not a
+        // Value subclass: it keeps its methods and its `None` anchor.
         for class in &module.classes {
             if classes_to_fix.contains(&class.name.name) {
+                let anchored = self
+                    .classes
+                    .get(class.name.name.as_str())
+                    .is_some_and(|info| self.ancestors_include_value(info.superclass.as_ref()));
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
-                    let _ = Self::add_value_auto_methods(
-                        class,
-                        &mut info.methods,
-                        &mut info.class_methods,
-                    );
+                    if anchored {
+                        info.synthesize_value_surface(class);
+                    } else {
+                        let _ = Self::add_value_auto_methods(
+                            class,
+                            &mut info.methods,
+                            &mut info.class_methods,
+                        );
+                    }
                 }
             }
         }
@@ -573,7 +591,7 @@ impl ClassHierarchy {
                 (slot_data, existing_instance, existing_class)
             {
                 let info = self.classes.get_mut(class_name.as_str()).unwrap();
-                Self::synthesize_auto_methods_from_state(
+                let keyword_decision = Self::synthesize_auto_methods_from_state(
                     class_name,
                     &slots,
                     &inst_sels,
@@ -581,6 +599,15 @@ impl ClassHierarchy {
                     &mut info.methods,
                     &mut info.class_methods,
                 );
+                // BT-4132: anchor only where the stored state determines the
+                // keyword decision, and never over an anchor the info already
+                // carries (e.g. a generated stdlib builtin's, decided from its
+                // AST); otherwise leave `None` (fail closed).
+                if info.auto_ctors.is_none() {
+                    if let KeywordDecision::Known(keyword_constructor) = keyword_decision {
+                        info.record_constructor_anchor(keyword_constructor);
+                    }
+                }
             }
         }
         self.rebuild_all_indexes();
@@ -588,21 +615,11 @@ impl ClassHierarchy {
 
     /// Check if the superclass chain includes Value.
     pub(super) fn ancestors_include_value(&self, superclass: Option<&EcoString>) -> bool {
-        let mut current = superclass.map(ToString::to_string);
-        let mut visited = HashSet::new();
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if name == "Value" {
-                return true;
-            }
-            current = self
-                .classes
-                .get(name.as_str())
-                .and_then(|info| info.superclass.as_ref().map(ToString::to_string));
-        }
-        false
+        superclass_chain_includes_value(superclass.map(EcoString::as_str), |name| {
+            self.classes
+                .get(name)
+                .and_then(|info| info.superclass.as_deref())
+        })
     }
 
     /// Constructor direct-call eligibility for the named class.
@@ -743,6 +760,12 @@ impl ClassHierarchy {
     ///
     /// This is the `ClassInfo`-only equivalent of `add_value_auto_methods` which
     /// works from the AST `ClassDefinition`.
+    ///
+    /// Returns the keyword decision (BT-4132): known for a slot-less class
+    /// (no keyword constructor) and when the keyword constructor was
+    /// synthesized here; ambiguous when the class side already holds the
+    /// selector, which may be a user method or an earlier synthesis, so the
+    /// caller leaves the anchor unset.
     pub(super) fn synthesize_auto_methods_from_state(
         class_name: &EcoString,
         slots: &[(EcoString, Option<DeclaredType>)],
@@ -750,7 +773,7 @@ impl ClassHierarchy {
         existing_class_selectors: &HashSet<EcoString>,
         instance_methods: &mut Vec<MethodInfo>,
         class_methods: &mut Vec<MethodInfo>,
-    ) {
+    ) -> KeywordDecision {
         for (slot_name, slot_type) in slots {
             // Auto-getter
             if !existing_instance_selectors.contains(slot_name) {
@@ -791,29 +814,34 @@ impl ClassHierarchy {
             }
         }
 
-        // Keyword constructor (class method)
-        if !slots.is_empty() {
-            let kw_sel: EcoString =
-                EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
-                    slots.iter().map(|(name, _)| name.as_str()),
-                ));
-            if !existing_class_selectors.contains(&kw_sel) {
-                class_methods.push(MethodInfo {
-                    selector: kw_sel,
-                    arity: slots.len(),
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(DeclaredType::simple(class_name.clone())),
-                    param_types: vec![None; slots.len()],
-                    doc: Some(EcoString::from("*(compiler-generated)*")),
-                    origin: None,
-                    primitive: None,
-                });
-            }
+        // Keyword constructor (class method). Without the AST, a selector
+        // already on the class side is either a user collision or an earlier
+        // synthesis: the keyword decision is not derivable, so no anchor.
+        if slots.is_empty() {
+            return KeywordDecision::Known(None);
         }
+        let Some(kw_sel) = crate::synthetic_selectors::synthesized_keyword_constructor(
+            slots.iter().map(|(name, _)| name.as_str()),
+            |sel| existing_class_selectors.contains(sel),
+        ) else {
+            return KeywordDecision::Ambiguous;
+        };
+        let kw_sel = EcoString::from(kw_sel);
+        class_methods.push(MethodInfo {
+            selector: kw_sel.clone(),
+            arity: slots.len(),
+            kind: MethodKind::Primary,
+            defined_in: class_name.clone(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(DeclaredType::simple(class_name.clone())),
+            param_types: vec![None; slots.len()],
+            doc: Some(EcoString::from("*(compiler-generated)*")),
+            origin: None,
+            primitive: None,
+        });
+        KeywordDecision::Known(Some(kw_sel))
     }
 
     /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
@@ -1213,17 +1241,12 @@ impl ClassHierarchy {
         }
 
         // Auto keyword constructor on the class side (e.g., `x:y:`)
-        if class.state.is_empty() {
-            return None;
-        }
         let kw_sel: EcoString =
-            EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
+            EcoString::from(crate::synthetic_selectors::synthesized_keyword_constructor(
                 class.state.iter().map(|s| s.name.name.as_str()),
-            ));
+                |sel| user_class_selectors.contains(sel),
+            )?);
         let arity = class.state.len();
-        if user_class_selectors.contains(&kw_sel) {
-            return None;
-        }
         let args_desc: String = class
             .state
             .iter()
@@ -1254,4 +1277,42 @@ impl ClassHierarchy {
         });
         Some(kw_sel)
     }
+}
+
+/// Whether the superclass chain starting at `superclass` reaches `Value`,
+/// following `superclass_of` and stopping at a cycle or an unknown class: the
+/// strict "is a Value subclass" test over a class's ancestors (`Value` itself
+/// does not pass, since its own chain never reaches it).
+///
+/// Shared by [`ClassHierarchy`]'s propagation passes and the stdlib builtins
+/// generator (`build_stdlib.rs`), which has only its per-file metadata, not a
+/// hierarchy: both anchor the constructor record on this rule (BT-4132).
+pub fn superclass_chain_includes_value<'a>(
+    superclass: Option<&'a str>,
+    superclass_of: impl Fn(&str) -> Option<&'a str>,
+) -> bool {
+    let mut current = superclass;
+    let mut visited = HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name) {
+            break;
+        }
+        if name == "Value" {
+            return true;
+        }
+        current = superclass_of(name);
+    }
+    false
+}
+
+/// A Value class's synthesized keyword-constructor decision as
+/// [`ClassHierarchy::synthesize_auto_methods_from_state`] can derive it from
+/// stored state (BT-4132).
+pub(super) enum KeywordDecision {
+    /// The decision is known: the synthesized selector, or `None` when the
+    /// class has no keyword constructor.
+    Known(Option<EcoString>),
+    /// The class side already holds the selector (a user method or an
+    /// earlier synthesis): not derivable, so no anchor.
+    Ambiguous,
 }

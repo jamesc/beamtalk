@@ -45,16 +45,6 @@ impl AutoSlotMethods {
     pub(super) fn with_star_selector(field_name: &str) -> String {
         beamtalk_core::synthetic_selectors::with_star_selector(field_name)
     }
-
-    /// Returns the keyword constructor selector for the given slot names.
-    ///
-    /// E.g. `["x", "y"]` → `"x:y:"`. Delegates to the shared naming authority in
-    /// [`beamtalk_core::synthetic_selectors`].
-    fn keyword_selector(slots: &[String]) -> String {
-        beamtalk_core::synthetic_selectors::keyword_constructor_selector(
-            slots.iter().map(String::as_str),
-        )
-    }
 }
 
 /// Computes which slot methods to auto-generate for a `Value subclass:` class.
@@ -95,21 +85,12 @@ pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoS
         .map(|s| s.name.name.to_string())
         .collect();
 
-    let keyword_constructor = if class.state.is_empty() {
-        None
-    } else {
-        let all_slots: Vec<String> = class
-            .state
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
-        let sel = AutoSlotMethods::keyword_selector(&all_slots);
-        if user_class_selectors.contains(&sel) {
-            None
-        } else {
-            Some(sel)
-        }
-    };
+    // The shared decision (BT-4132): the hierarchy's `auto_ctors` anchor and
+    // the stdlib builtins generator make the same call.
+    let keyword_constructor = beamtalk_core::synthetic_selectors::synthesized_keyword_constructor(
+        class.state.iter().map(|s| s.name.name.as_str()),
+        |sel| user_class_selectors.contains(sel),
+    );
 
     Some(AutoSlotMethods {
         getters,

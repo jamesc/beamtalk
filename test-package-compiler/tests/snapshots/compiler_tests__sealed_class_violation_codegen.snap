@@ -204,6 +204,7 @@ let _BinLeft@1 = Self in let _BinRight@2 = 2 in case call 'erlang':'is_number'(_
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'direct_constructors' => ['new', 'new:'],
       'defines_user_class_new1' => 'false'
     }~
         }~
@@ -242,6 +243,7 @@ let _BinLeft@1 = Self in let _BinRight@2 = 2 in case call 'erlang':'is_number'(_
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'direct_constructors' => ['new', 'new:'],
       'defines_user_class_new1' => 'false'
     }~
 
