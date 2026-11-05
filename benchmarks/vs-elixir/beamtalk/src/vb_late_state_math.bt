@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Rows 3g/3h (BT-4431): compiled with no class state, so a literal send to
+// `double:` is a guarded static call. The harness then publishes "declares
+// class variables" for it (`beamtalk_class_metadata:put_class_variables/2`,
+// the write a reload adding `classState:` makes), so the static call key is
+// never installed and every send declines to the class process.
+Object subclass: VbLateStateMath
+
+  class double: x :: Integer -> Integer => x * 2

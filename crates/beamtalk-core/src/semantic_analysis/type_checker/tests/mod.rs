@@ -9,6 +9,7 @@
 mod common;
 
 mod actor_construction_definite_assignment;
+mod adr0144_protocol_metatypes;
 mod adr_0104_integration;
 mod arg_return_checking;
 mod argument_check_matrix;

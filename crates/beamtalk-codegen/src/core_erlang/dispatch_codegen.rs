@@ -1501,8 +1501,12 @@ impl CoreErlangGenerator {
                 && self.is_supervisor_class(&name.name)
             {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
-                let module_doc =
-                    self.class_reference_spawn_module_doc(&name.name, pkg, &selector_atom);
+                let module_doc = self.class_reference_spawn_module_doc(
+                    &name.name,
+                    pkg,
+                    &selector_atom,
+                    SpawnTargetKind::Supervisor,
+                );
                 let doc = self.generate_supervisor_class_start(
                     leaf::atom(name.name.to_string()),
                     module_doc,
@@ -2332,13 +2336,45 @@ impl CoreErlangGenerator {
     /// implementing this amendment). `Selector` names the call for the
     /// structured error `resolve_module_or_raise/2` raises on a metadata miss.
     pub(super) fn class_self_module_doc(selector_atom: &str) -> Document<'static> {
-        docvec![
-            "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
-            Self::class_self_name_doc(),
-            ", ",
-            leaf::atom(selector_atom),
-            ")"
-        ]
+        Self::class_module_lookup_doc(Self::class_self_name_doc(), selector_atom, None)
+    }
+
+    /// The call-time module lookup shared by the `ClassSelf` instantiation
+    /// intrinsics ([`Self::class_self_module_doc`], `spawn_kind = None`) and
+    /// spawn-family sends to a shadowed class reference
+    /// ([`Self::class_reference_spawn_module_doc`], `spawn_kind = Some(_)`):
+    ///
+    /// ```erlang
+    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'(Name, 'new')
+    /// call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(Name, 'spawn', 'actor')
+    /// ```
+    ///
+    /// The spawn form also checks that the runtime class is the kind the
+    /// emitted call shape needs (BT-4404), raising a structured error instead
+    /// of a raw `undef` when a last-wins shadowing class is a different kind.
+    fn class_module_lookup_doc(
+        name_doc: Document<'static>,
+        selector_atom: &str,
+        spawn_kind: Option<SpawnTargetKind>,
+    ) -> Document<'static> {
+        match spawn_kind {
+            None => docvec![
+                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                name_doc,
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ")"
+            ],
+            Some(kind) => docvec![
+                "call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(",
+                name_doc,
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ", ",
+                leaf::atom(kind.runtime_atom()),
+                ")"
+            ],
+        }
     }
 
     /// Lowers instantiation-like selectors (`new`, `spawn`, `spawnAs:`, ...) into
@@ -2457,12 +2493,16 @@ impl CoreErlangGenerator {
     /// ([`Self::is_shadowed_class`]) is one last-wins runtime class, so the
     /// compile-time package's module is not necessarily the one a dynamic
     /// send reaches: the module is resolved at call time from the class
-    /// registry instead, exactly as the class-side `self spawn` family does
-    /// ([`Self::class_self_module_doc`]) —
+    /// registry instead, through the same lookup helper as the class-side
+    /// `self spawn` family ([`Self::class_module_lookup_doc`]) —
     ///
     /// ```erlang
-    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'('Counter', 'spawn')
+    /// call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'('Counter', 'spawn', 'actor')
     /// ```
+    ///
+    /// The trailing kind lets the runtime reject a winning class of a
+    /// different kind (an actor where a supervisor start was compiled, a
+    /// Value class, …) with a structured error (BT-4404).
     ///
     /// The spawn itself stays in the caller (a dynamic `class_send` would
     /// start it inside the class `gen_server`, and has no monitored-spawn
@@ -2474,20 +2514,22 @@ impl CoreErlangGenerator {
 
     /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is
     /// looked up at call time rather than pinned.
+    ///
+    /// `kind` is the call shape the caller emits around the module; the
+    /// runtime lookup checks the winning class can take it (BT-4404).
     fn class_reference_spawn_module_doc(
         &self,
         class_name: &str,
         package: Option<&str>,
         selector_atom: &str,
+        kind: SpawnTargetKind,
     ) -> Document<'static> {
         if self.spawn_module_resolved_at_runtime(class_name, package) {
-            docvec![
-                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+            Self::class_module_lookup_doc(
                 leaf::atom(class_name.to_string()),
-                ", ",
-                leaf::atom(selector_atom.to_string()),
-                ")"
-            ]
+                selector_atom,
+                Some(kind),
+            )
         } else {
             leaf::atom(self.compiled_module_name_qualified(class_name, package))
         }
@@ -3363,7 +3405,12 @@ impl CoreErlangGenerator {
         init_args: Option<&Expression>,
         variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let module_expr = self.class_reference_spawn_module_doc(class_name, package, selector_atom);
+        let module_expr = self.class_reference_spawn_module_doc(
+            class_name,
+            package,
+            selector_atom,
+            SpawnTargetKind::Actor,
+        );
         // An atom is used as-is; a runtime lookup is bound once, since the
         // REPL arm names the module twice.
         let (module_binding, module_doc): (Option<(String, Document<'static>)>, Document<'static>) =
@@ -4201,6 +4248,27 @@ impl CoreErlangGenerator {
 /// → runtime `undef`).
 pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
     arity == 0 && selector_atom == "class_name"
+}
+
+/// The call shape a spawn-family send to a class reference was lowered to,
+/// passed to `beamtalk_class_instantiation:resolve_spawn_module_or_raise/3`
+/// so a shadowed class resolved at call time is checked against it (BT-4404).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpawnTargetKind {
+    /// `Module:spawn/0,1` or `Module:spawn_monitored/0,1`: needs an actor.
+    Actor,
+    /// `beamtalk_supervisor:class_start/4`: needs a supervisor.
+    Supervisor,
+}
+
+impl SpawnTargetKind {
+    /// The `Kind` atom the runtime helper takes.
+    fn runtime_atom(self) -> &'static str {
+        match self {
+            Self::Actor => "actor",
+            Self::Supervisor => "supervisor",
+        }
+    }
 }
 
 /// The class-side spawn-family selectors that start a supervisor instance

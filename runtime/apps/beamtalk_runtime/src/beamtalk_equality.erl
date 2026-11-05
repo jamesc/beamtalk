@@ -57,11 +57,13 @@ argument (`each equals: item`) — matching `Collection>>includes:` and the
 Smalltalk convention.
 """.
 
--export([eq/2, member/2, scan/2]).
+-export([eq/2, member/2, scan/2, primitive_equals/2]).
 
 %% Dispatch targets are resolved at runtime from compiled stdlib modules.
 % elp:fixme W0048 intentional suppression for dynamic dispatch
--dialyzer({nowarn_function, [eq/2, dispatch_equals/2]}).
+-dialyzer({nowarn_function, [eq/2, dispatch_equals/2, primitive_equals/2]}).
+
+-include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
@@ -115,9 +117,114 @@ scan([Elem | Rest], Item) ->
 scan([], _Item) ->
     false.
 
+-doc """
+An `equals:` *send* to a primitive receiver (BT-4416).
+
+`beamtalk_message_dispatch:send/3` routes `Receiver equals: Arg` here when
+`Receiver` is a primitive value (`Integer`, `Float`, `Binary`, `String`,
+`Symbol`, `Boolean`, `nil`, `List`, `Block`, `Bitstring`). The full dynamic
+send walks the receiver's dispatch chain — `Binary` → `Collection` → `Value`
+→ `Object` — with an extension-registry probe at every level, ~0.8µs per
+call, to arrive at `Object>>equals:`, which is `=:=`.
+
+Two shortcuts, both preserving the send's answer:
+
+1. **Raw hit.** By the reflexivity contract above, `X =:= Y` implies
+   `X equals: Y`, so a raw hit answers `true` with no dispatch at all.
+2. **Raw miss, default `equals:`.** If no class on the receiver's chain
+   overrides `equals:` — no compiled method below `Object` and no extension
+   at any level — the send would run `Object>>equals:`, i.e. `=:=`, which
+   just answered `false`. Whether the chain is default is memoised per class
+   in `beamtalk_class_derived_cache`, which every extension `register`/
+   `unregister` and every class write flushes, so an override installed later
+   is seen by the next send.
+
+Anything else — an override exists, or the chain is not yet published —
+takes the ordinary primitive send.
+""".
+-spec primitive_equals(term(), term()) -> term().
+primitive_equals(X, Y) when X =:= Y ->
+    true;
+primitive_equals(X, Y) ->
+    case default_equals(beamtalk_primitive:class_of(X)) of
+        true -> false;
+        false -> beamtalk_primitive:send(X, 'equals:', [Y])
+    end.
+
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
+
+-doc """
+True if an instance of `Class` runs `Object>>equals:` — nothing on its
+superclass chain below `Object` defines `equals:` or has it as an extension.
+
+Mirrors the order a compiled primitive `dispatch/3` resolves a selector in:
+at each class, its own methods first, then its extensions, then the
+superclass. The answer is memoised in `beamtalk_class_derived_cache`, and a
+`true` answer additionally in the calling process's dictionary, tagged with
+the cache generation read before computing it: a hot `equals:` loop then
+costs a generation read and a `get/1` rather than an ETS read, and any class
+write or extension (un)registration bumps the generation, which turns every
+per-process memo into a miss. Until every class on the chain has published
+its method records (early bootstrap, an unregistered class) the answer is
+`false`, which sends.
+""".
+-spec default_equals(atom()) -> boolean().
+default_equals(Class) ->
+    Gen = beamtalk_class_derived_cache:generation(),
+    MemoKey = {?MODULE, default_equals, Class},
+    case get(MemoKey) of
+        Gen when Gen =/= undefined ->
+            true;
+        _ ->
+            Default = beamtalk_class_derived_cache:fetch({default_equals, Class}, fun() ->
+                case equals_owner(Class) of
+                    unpublished -> {nocache, false};
+                    Owner -> {cache, Owner =:= 'Object'}
+                end
+            end),
+            case Default andalso Gen =/= undefined of
+                true -> put(MemoKey, Gen);
+                false -> ok
+            end,
+            Default
+    end.
+
+%% The class whose `equals:` an instance of `Class` runs, `{extension, C}` for
+%% an extension on `C`, `none` if the chain defines none, or `unpublished`.
+-spec equals_owner(atom()) -> atom() | {extension, atom()} | unpublished.
+equals_owner(Class) ->
+    StepFun = fun(Name, _Depth) ->
+        case beamtalk_class_metadata:lookup_method_record(Name, instance, 'equals:') of
+            {ok, _} ->
+                {found, Name};
+            not_found ->
+                case beamtalk_extensions:has(Name, 'equals:') of
+                    true ->
+                        {found, {extension, Name}};
+                    false ->
+                        case
+                            {
+                                beamtalk_class_metadata:lookup_instance_methods(Name),
+                                beamtalk_class_metadata:lookup_superclass(Name)
+                            }
+                        of
+                            {{ok, _}, {ok, Root}} when Root =:= none; Root =:= nil -> not_found;
+                            {{ok, _}, {ok, Super}} -> {next, Super};
+                            _ -> {found, unpublished}
+                        end
+                end
+        end
+    end,
+    try beamtalk_hierarchy:walk_ancestors(Class, StepFun, ?MAX_HIERARCHY_DEPTH + 1) of
+        {found, Owner} -> Owner;
+        not_found -> none;
+        {max_depth_exceeded, _} -> unpublished
+    catch
+        %% Extension or metadata table not created yet (early bootstrap).
+        error:badarg -> unpublished
+    end.
 
 -doc """
 Whether sending `equals:` to `X` is meaningful and safe.

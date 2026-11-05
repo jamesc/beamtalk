@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, '__is_slot'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'sealed_class_violation' ['new'/0, 'new'/1, 'doubled'/1, '__is_slot'/1, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'MyInt', 'Integer'}],
      'spec' =
@@ -66,11 +66,72 @@ let _BinLeft@1 = Self in let _BinRight@2 = 2 in case call 'erlang':'is_number'(_
         <'doubled'> when 'true' ->
             call 'sealed_class_violation':'doubled'(Self)
         <_Other> when 'true' ->
-            case call 'beamtalk_extensions':'lookup'('MyInt', Selector) of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    apply ExtFun(Args, Self)
-                <'not_found'> when 'true' ->
-                    call 'bt@stdlib@integer':'dispatch'(Selector, Args, Self)
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'%'> when 'true' -> 'slow'
+                <'*'> when 'true' -> 'slow'
+                <'**'> when 'true' -> 'slow'
+                <'+'> when 'true' -> 'slow'
+                <'-'> when 'true' -> 'slow'
+                <'/'> when 'true' -> 'slow'
+                <'/='> when 'true' -> 'slow'
+                <'<'> when 'true' -> 'slow'
+                <'<='> when 'true' -> 'slow'
+                <'=/='> when 'true' -> 'slow'
+                <'=:='> when 'true' -> 'slow'
+                <'>'> when 'true' -> 'slow'
+                <'>='> when 'true' -> 'slow'
+                <'abs'> when 'true' -> 'slow'
+                <'asFloat'> when 'true' -> 'slow'
+                <'asString'> when 'true' -> 'slow'
+                <'bitAnd:'> when 'true' -> 'slow'
+                <'bitNot'> when 'true' -> 'slow'
+                <'bitOr:'> when 'true' -> 'slow'
+                <'bitShift:'> when 'true' -> 'slow'
+                <'bitXor:'> when 'true' -> 'slow'
+                <'ceiling'> when 'true' -> 'slow'
+                <'div:'> when 'true' -> 'slow'
+                <'exp'> when 'true' -> 'slow'
+                <'factorial'> when 'true' -> 'slow'
+                <'floor'> when 'true' -> 'slow'
+                <'gcd:'> when 'true' -> 'slow'
+                <'isDigit'> when 'true' -> 'slow'
+                <'isEven'> when 'true' -> 'slow'
+                <'isLetter'> when 'true' -> 'slow'
+                <'isLowercase'> when 'true' -> 'slow'
+                <'isOdd'> when 'true' -> 'slow'
+                <'isUppercase'> when 'true' -> 'slow'
+                <'isWhitespace'> when 'true' -> 'slow'
+                <'lcm:'> when 'true' -> 'slow'
+                <'ln'> when 'true' -> 'slow'
+                <'log'> when 'true' -> 'slow'
+                <'log10'> when 'true' -> 'slow'
+                <'log2'> when 'true' -> 'slow'
+                <'negated'> when 'true' -> 'slow'
+                <'printString'> when 'true' -> 'slow'
+                <'raisedTo:'> when 'true' -> 'slow'
+                <'roundTo:'> when 'true' -> 'slow'
+                <'rounded'> when 'true' -> 'slow'
+                <'sqrt'> when 'true' -> 'slow'
+                <'squared'> when 'true' -> 'slow'
+                <'timesRepeat:'> when 'true' -> 'slow'
+                <'to:'> when 'true' -> 'slow'
+                <'to:by:'> when 'true' -> 'slow'
+                <'to:by:do:'> when 'true' -> 'slow'
+                <'to:do:'> when 'true' -> 'slow'
+                <'truncateTo:'> when 'true' -> 'slow'
+                <'truncated'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('MyInt', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('MyInt', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@integer':'dispatch'(Selector, Args, Self)
+                    end
             end
     end
 
@@ -88,6 +149,16 @@ let _BinLeft@1 = Self in let _BinRight@2 = 2 in case call 'erlang':'is_number'(_
             case call 'beamtalk_extensions':'has'('MyInt', Selector) of
                 <'true'> when 'true' -> 'true'
                 <'false'> when 'true' -> call 'bt@stdlib@integer':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'doubled']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('MyInt', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
             end
     end
 

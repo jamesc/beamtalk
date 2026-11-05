@@ -820,7 +820,7 @@ Both containers use `=:=` for identity, so they agree with each other and with `
 
 The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
 
-An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss, and so does an `equals:` send to a primitive receiver (`Integer`, `Binary`, `String`, `Symbol`, …): a raw hit answers `true` without dispatch, and a raw miss answers `false` without dispatch unless the receiver's class chain overrides `equals:` (for a primitive, through an extension).
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
@@ -1082,6 +1082,12 @@ also auto-indexed for `SystemNavigation` source-text queries.
 with the same `>>` patcher used for instance methods (see *Live Patching* and
 *Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
 The class-side dispatch path picks up the new class method immediately (ADR 0084).
+Separately, a runtime class-method fun (a builder `classMethods:` fun, or one
+installed from Erlang with `beamtalk_object_class:put_class_method/3,4`) is
+removable: `X class removeSelector: #sel` takes it back and restores the
+compiled method it replaced, if any (BT-4438; see *Removing methods* below).
+This does not apply to a `>>` live edit like the one above: that recompiles the
+class, so `removeSelector:` removes the edited method outright.
 
 > The grammar form (`Object subclass: …`) remains the idiomatic way to define a
 > class in source. The programmatic builder is for tooling, REPL exploration, and
@@ -1955,6 +1961,18 @@ klass instanceCount         // resolves class-side method
 // instance of that class; on an *abstract* class (e.g. `Collection`,
 // `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
 
+// <Protocol> class — a protocol metatype annotation (ADR 0144). For a
+// protocol `P`, `P class` is the class object of *any* class conforming to
+// `P`: `C class <: P class` iff `C conformsTo: P` (the same structural check,
+// open-world rules included). Sends resolve against `P`'s `class`
+// requirements (typed from their declared signatures), then the class-object
+// protocol every class answers (`name`, `printString`, `respondsTo:`, …).
+// `new` / `basicNew` infer `P` unless `P` declares `class new`. A value that
+// *is* a protocol object is typed `:: Protocol`. See Class Method Requirements.
+field: transport :: Transport class = TCPTransport
+// `self.transport send: s data: d` is checked against `Transport`'s
+// `class send:data:` requirement and typed `Result(Nil, Object)`.
+
 // Block parameter annotations — accepted by the parser and preserved by
 // `beamtalk fmt`. A union (or `&`/`\` chain) needs grouping parens so its
 // `|` doesn't swallow the block's own `|` parameter separator.
@@ -2312,6 +2330,32 @@ Protocol define: Serializable
 ```
 
 A class conforms to `Serializable` only if it has both the instance method `asString` and the class method `fromString:`. This is useful for factory methods, singleton patterns, and other class-level contracts.
+
+**Classes as strategies: `P class` (ADR 0144).** To hold a *class* that implements a protocol's class-side contract — a class passed around as a strategy — type it `P class`. It denotes the class object of any class conforming to `P`:
+
+```text
+C class <: P class      iff      C conformsTo: P
+```
+
+```beamtalk
+Protocol define: Transport
+  class send: socket :: Object data: data :: Object -> Result(Nil, Object)
+  class close: socket :: Object -> Result(Nil, Object)
+
+Value subclass: Socket
+  field: socket :: Object
+  field: transport :: Transport class = TCPTransport   // any conforming class
+
+  send: data :: Object -> Result(Nil, Object) =>
+    result := self.transport send: self.socket data: data  // checked, typed
+    result isOk ifTrue: [self countSent: data]               // `isOk` on Result
+    result
+```
+
+- Assigning or passing a class that does not conform warns, naming the missing selectors: `Integer class does not conform to Transport class` / `missing: class send:data:, class close:`. Classes the checker cannot see completely (a `doesNotUnderstand:` override, a cross-file superclass) conform, as for `:: P`.
+- A send to a `P class` value resolves against `P`'s `class` requirements (including those of protocols it extends), using their declared parameter and return types, then against the class-object protocol (`Class` → `Behaviour` → `Object`). Anything else is reported as not understood.
+- `P class` flows into `:: Class`, `:: Behaviour` and `:: Object`; the reverse is a narrowing and warns. `P class | Nil` narrows after `isNil` checks, `P class & Q class` requires both, and `P class` flows into `Q class` when every selector in `Q`'s type (required and provided on the instance side, required on the class side) is also in `P`'s — e.g. when `P` extends `Q`.
+- Like every metatype, `P class` is name-only: `Collection class` is valid, `Collection(E) class` is not. The type is erased at run time; class-side sends through it stay dynamic sends.
 
 ### Type Parameter Bounds
 
@@ -5255,6 +5299,27 @@ String >> shout => self uppercase ++ "!"
 "hi" shout                     // => "HI!"
 String removeSelector: #shout
 "hi" respondsTo: #shout        // => false
+```
+
+On the class side, `removeSelector:` also removes a runtime class-method fun
+(ADR 0084) installed with `beamtalk_object_class:put_class_method/3,4`. It
+checks the extension registry first, then the runtime fun, then the compiled
+class method: the order dispatch resolves them. Removing the fun gives the
+selector back what it had before the first fun replaced it: the class's
+compiled method, or nothing, so the send falls through to an inherited method
+or `does_not_understand`. A static send compiled while the fun was installed
+takes the restored method on its next call. `X class includesSelector: #sel`
+answers `true` while such a fun is installed (BT-4438):
+
+```erlang
+%% Erlang side: hot-patch a class method, then take the patch back.
+ok = beamtalk_object_class:put_class_method(Pid, answer, fun(_ClassSelf) -> patched end).
+```
+
+```beamtalk
+Counter answer                          // => #patched
+Counter class removeSelector: #answer
+Counter answer                          // the compiled method's answer again
 ```
 
 **The bare form raises; `removeSelector:ifAbsent:` is the paired escape

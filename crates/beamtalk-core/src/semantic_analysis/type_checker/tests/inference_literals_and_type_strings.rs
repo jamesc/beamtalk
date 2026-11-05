@@ -419,8 +419,13 @@ fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
     env.set_local("self", InferredType::known("Supervisor"));
     let var_key = EnvKey::self_field("strategy");
 
-    let result =
-        TypeChecker::resolve_narrowing_variable_type(&var_key, &env, &hierarchy, Some(&registry));
+    let result = TypeChecker::resolve_narrowing_variable_type(
+        &var_key,
+        &env,
+        &hierarchy,
+        Some(&registry),
+        None,
+    );
     match result {
         InferredType::Union { members, .. } => {
             assert_eq!(members.len(), 2);
@@ -432,6 +437,7 @@ fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
 
     // Without the registry, the field's raw type name stays opaque — the
     // fallback this test guards against regressing back to.
-    let unresolved = TypeChecker::resolve_narrowing_variable_type(&var_key, &env, &hierarchy, None);
+    let unresolved =
+        TypeChecker::resolve_narrowing_variable_type(&var_key, &env, &hierarchy, None, None);
     assert_eq!(unresolved, InferredType::known("RestartStrategy"));
 }

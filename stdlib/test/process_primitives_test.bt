@@ -161,15 +161,20 @@ TestCase subclass: ProcessPrimitivesTest
   testForkedNonLocalReturnExitsWithForkReason =>
     // The block waits on an Ets gate so the monitor below is established
     // before the `^` fires; otherwise the DOWN could carry `noproc`.
+    // `watch:` is a synchronous call, so the monitor exists once it returns.
+    // The fork's gate bound (30 s) is far longer than any plausible delay
+    // before the gate opens, so under load it never gives up early and
+    // fires `^` before the monitor is in place (BT-4425). It stays bounded
+    // so a failed test does not leave the fork polling forever.
     table := Ets new: #forkNlrGate type: #set
     watcher := HandleInfoCounter spawn
     pid := [
-      50 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]
+      3000 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]
       ^42
     ] fork
     ref := watcher watch: pid
     table at: #go put: true
-    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]
+    500 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]
     msg := watcher getLastMsg
     self assert: (msg at: 1) equals: #DOWN
     self assert: (msg at: 2) =:= ref

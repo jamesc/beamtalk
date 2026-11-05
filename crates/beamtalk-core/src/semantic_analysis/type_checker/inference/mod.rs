@@ -426,7 +426,10 @@ impl TypeChecker {
                 .any(|s| matches!(s.expression, Expression::Primitive { .. }))
         {
             match &body_type {
-                InferredType::Known { .. } | InferredType::Meta { .. } | InferredType::Never => {
+                InferredType::Known { .. }
+                | InferredType::Meta { .. }
+                | InferredType::ProtocolMeta { .. }
+                | InferredType::Never => {
                     self.method_return_types.insert(
                         (class_name.clone(), method.selector.name(), is_class_method),
                         body_type.clone(),
@@ -650,7 +653,7 @@ impl TypeChecker {
                                     type_resolver::resolve_declared_type(
                                         &field_type,
                                         &type_resolver::SubstitutionMap::new(),
-                                        None,
+                                        self.protocol_registry.as_ref(),
                                         self.alias_registry.as_ref(),
                                         TypeStringContext::Declared,
                                     )
@@ -716,7 +719,7 @@ impl TypeChecker {
                                 result = type_resolver::resolve_declared_type(
                                     &field_type,
                                     &type_resolver::SubstitutionMap::new(),
-                                    None,
+                                    self.protocol_registry.as_ref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
                                 );

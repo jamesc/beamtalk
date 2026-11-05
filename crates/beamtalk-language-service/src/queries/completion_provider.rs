@@ -930,6 +930,9 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
         InferredType::Union { .. }
         | InferredType::Dynamic(_)
         | InferredType::Never
+        // A `P class` protocol metatype (ADR 0144) names no single class;
+        // completing its `class` requirements is a separate change (BT-4436).
+        | InferredType::ProtocolMeta { .. }
         // A `Negation` (`Symbol \ #foo`) has no single receiver side (ADR 0102).
         | InferredType::Negation { .. }
         // Nor does an `Intersection` (`P1 & P2`, ADR 0102) — it has no

@@ -48,6 +48,10 @@ sealed Object subclass: VbBench
 
   class openMathClass => VbOpenMath
 
+  class lateStateMathClass => VbLateStateMath
+
+  class shadowedMathClass => VbShadowedMath
+
   // === Loop overhead ===
   class baseline: n :: Integer -> Integer =>
     last := 0
@@ -126,6 +130,23 @@ sealed Object subclass: VbBench
   class statefulClassMethod: n :: Integer -> Integer =>
     last := 0
     n timesRepeat: [last := VbStatefulMath double: 21]
+    last
+
+  // BT-4431: static call sites whose guard keeps declining. The compiler
+  // emits the guarded direct call (it sees no class state and no shadow), but
+  // the runtime declines every send: VbLateStateMath gains class variables
+  // after compilation (the harness publishes them, as a reload adding
+  // `classState:` does), and a class-side extension shadows VbShadowedMath's
+  // `double:`. Each miss runs `static_call_target/4`'s unlocked check before
+  // the fallback; the dynamic sends of rows 3h and 3j are the controls.
+  class lateStateClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbLateStateMath double: 21]
+    last
+
+  class shadowedClassMethod: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbShadowedMath double: 21]
     last
 
   // === 4. Dynamic send, receiver of unknown static type ===

@@ -662,6 +662,142 @@ static_call_target_test_() ->
                 stop_static_class(Root)
             end
         end},
+        {"removing a runtime fun restores the compiled method and its static key", fun() ->
+            %% BT-4438: `X class removeSelector:` undoes `put_class_method`:
+            %% the compiled function is the body again, the gate closes once
+            %% no funs remain, and a warmed key re-installs on the next miss.
+            Name = 'Bt4438Own',
+            with_static_class(Name, fun(Pid) ->
+                Key = static_key(Name, class_testClassSelf),
+                Ref = target(Name, Key, testClassSelf),
+                ?assertMatch(#beamtalk_object{}, Ref),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, testClassSelf, fun(_ClassSelf) -> from_runtime_fun end
+                ),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, testClassSelf, fun(_ClassSelf) -> from_second_fun end
+                ),
+                ?assertEqual(
+                    from_second_fun, beamtalk_class_dispatch:class_send(Pid, testClassSelf, [])
+                ),
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Pid, testClassSelf)
+                ),
+                ?assertEqual(absent, beamtalk_object_class:remove_class_method(Pid, testClassSelf)),
+                ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(Name)),
+                ?assertNot(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
+                ?assert(
+                    lists:member(testClassSelf, beamtalk_object_class:local_class_methods(Pid))
+                ),
+                ?assertEqual(Ref, beamtalk_class_dispatch:class_send(Pid, testClassSelf, [])),
+                ?assertEqual(Ref, target(Name, Key, testClassSelf)),
+                ?assertEqual(Ref, key_value(Key))
+            end)
+        end},
+        {"removing an inherited owner's runtime fun restores the descendant", fun() ->
+            %% BT-4438: the fun was a selector the root's class table gained;
+            %% removing it erases the descendant's key with the root's, and
+            %% the descendant's send resolves to the compiled method again.
+            Root = start_static_class('Bt4438FunRoot', none, #{}),
+            Leaf = start_inheriting_class('Bt4438FunLeaf', 'Bt4438FunRoot'),
+            try
+                Key = static_key('Bt4438FunLeaf', class_testClassSelf),
+                Ref = target('Bt4438FunLeaf', Key, testClassSelf),
+                ok = beamtalk_object_class:put_class_method(
+                    Root, extraSelector, fun(_ClassSelf) -> extra end
+                ),
+                ok = beamtalk_object_class:put_class_method(
+                    Root, testClassSelf, fun(_ClassSelf) -> from_runtime_fun end
+                ),
+                ?assertEqual(
+                    from_runtime_fun, beamtalk_class_dispatch:class_send(Leaf, testClassSelf, [])
+                ),
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Root, testClassSelf)
+                ),
+                %% Another fun remains, so the gate stays open.
+                ?assert(beamtalk_class_metadata:has_runtime_class_methods('Bt4438FunRoot')),
+                ?assertEqual(Ref, beamtalk_class_dispatch:class_send(Leaf, testClassSelf, [])),
+                ?assertEqual(Ref, target('Bt4438FunLeaf', Key, testClassSelf)),
+                ?assertEqual(Ref, key_value(Key)),
+                %% A selector the class never had compiled is gone outright.
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Root, extraSelector)
+                ),
+                ?assertNot(
+                    lists:member(extraSelector, beamtalk_object_class:local_class_methods(Root))
+                ),
+                ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('Bt4438FunRoot'))
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"removing a put over a builder fun restores the builder fun", fun() ->
+            %% BT-4438: the first put stashes whatever it replaced, a
+            %% builder-seeded fun included; removal reinstalls it and the gate
+            %% stays open.
+            {module, ?HELPER} = code:ensure_loaded(?HELPER),
+            Name = 'Bt4438Builder',
+            {ok, Pid} = beamtalk_object_class:start(Name, #{
+                superclass => none,
+                module => ?HELPER,
+                class_methods => maps:put(
+                    builderAnswer,
+                    #{block => fun(_ClassSelf) -> from_builder end, arity => 1},
+                    ?STATIC_METHODS
+                ),
+                class_state => #{},
+                meta => ?STATIC_META
+            }),
+            try
+                ?assertEqual(
+                    from_builder, beamtalk_class_dispatch:class_send(Pid, builderAnswer, [])
+                ),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, builderAnswer, fun(_ClassSelf) -> from_put end
+                ),
+                ?assertEqual(from_put, beamtalk_class_dispatch:class_send(Pid, builderAnswer, [])),
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Pid, builderAnswer)
+                ),
+                ?assertEqual(
+                    from_builder, beamtalk_class_dispatch:class_send(Pid, builderAnswer, [])
+                ),
+                ?assert(beamtalk_class_metadata:has_runtime_class_methods(Name)),
+                %% With no stash left, removing the builder fun drops it.
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Pid, builderAnswer)
+                ),
+                ?assertNot(
+                    lists:member(builderAnswer, beamtalk_object_class:local_class_methods(Pid))
+                ),
+                ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(Name))
+            after
+                stop_static_class(Pid)
+            end
+        end},
+        {"a reload that carries a put fun over keeps what it hid", fun() ->
+            %% BT-4438: a reload naming no class methods keeps the put fun, so
+            %% removing it afterwards still restores the compiled method.
+            Name = 'Bt4438Reload',
+            with_static_class(Name, fun(Pid) ->
+                Ref = beamtalk_class_dispatch:class_send(Pid, testClassSelf, []),
+                ok = beamtalk_object_class:put_class_method(
+                    Pid, testClassSelf, fun(_ClassSelf) -> from_runtime_fun end
+                ),
+                {ok, _} = beamtalk_object_class:update_class(Name, #{
+                    superclass => none, module => ?HELPER, meta => ?STATIC_META
+                }),
+                ?assertEqual(
+                    from_runtime_fun, beamtalk_class_dispatch:class_send(Pid, testClassSelf, [])
+                ),
+                ?assertEqual(
+                    removed, beamtalk_object_class:remove_class_method(Pid, testClassSelf)
+                ),
+                ?assertEqual(Ref, beamtalk_class_dispatch:class_send(Pid, testClassSelf, []))
+            end)
+        end},
         {"a caller-safe raise key needs the defining module to list the selector", fun() ->
             %% BT-4270: the hit arm raises as the method body would, without
             %% calling it, so the key also needs the body to be a caller-safe

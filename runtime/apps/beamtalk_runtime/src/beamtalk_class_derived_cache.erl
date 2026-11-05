@@ -66,12 +66,14 @@ or `respondsTo:` probe), so the table holds up to one row per class and
 selector atom sent through that path; selectors are existing atoms, and the
 next class write flushes them all. The `defining_method` key caches hits
 only; a miss re-walks so errors keep their exact shape.
-`inherited_target` (BT-4280) is the verdict a compiled actor class's
-`dispatch/4` default arm asks first (`beamtalk_dispatch:inherited_target/2`):
+`inherited_target` (BT-4280, BT-4260) is the verdict a compiled class's
+default dispatch arm asks first (`beamtalk_dispatch:inherited_target/2`):
 `{compiled, Owner, Module}` when an inherited send may call the owner's
-compiled `State`-threading method directly, else `slow`. Both are cached
-(an unregistered class is not), and a `compiled` hit re-checks the module's
-`dispatch/4` export.
+compiled `State`-threading method directly (an actor's `dispatch/4` arm),
+`{value, Owner, Module}` when it may call the owner's state-less `dispatch/3`
+directly (a value-type `dispatch/3` arm), else `slow`. All are cached (an
+unregistered class is not), and a `compiled` hit re-checks the module's
+`dispatch/4` export (a `value` hit needs no check; its remote call loads it).
 
 ## Invalidation
 
@@ -127,6 +129,7 @@ so they share an owner and heir and are lost together.
     invalidate/0,
     fetch/2,
     fetch/3,
+    generation/0,
     inherits_from/2
 ]).
 
@@ -233,6 +236,22 @@ fetch_valid(Key, Compute, Valid) ->
             catch
                 error:badarg -> element(2, Compute())
             end
+    end.
+
+-doc """
+The current cache generation, or `undefined` before `new/0`.
+
+Every `invalidate/0` bumps it, so a caller that memoises a derived fact
+somewhere cheaper than this module's ETS table (BT-4416: a per-process memo
+on the `equals:` send path, where one ETS read is most of the cost) can tag
+the memo with the generation read *before* computing it and treat a
+mismatch as a miss.
+""".
+-spec generation() -> integer() | undefined.
+generation() ->
+    case persistent_term:get(?GEN_KEY, undefined) of
+        undefined -> undefined;
+        Ref -> atomics:get(Ref, 1)
     end.
 
 -doc """

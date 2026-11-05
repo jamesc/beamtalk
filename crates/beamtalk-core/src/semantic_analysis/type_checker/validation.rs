@@ -38,6 +38,7 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
+use super::types::ClassObjectType;
 use super::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
 };
@@ -1365,7 +1366,6 @@ impl TypeChecker {
     }
 
     #[allow(clippy::too_many_arguments)] // arg_exprs + env + known-remote needed for origin tracing
-    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
     fn check_argument_types_impl(
         &mut self,
         class_name: &EcoString,
@@ -1405,15 +1405,6 @@ impl TypeChecker {
             return;
         }
 
-        // A class literal (e.g. `TestCase`) is a class value whose
-        // runtime type flows through the metaclass tower
-        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
-        // instance-side chain fails, re-check via `Metaclass` so parameters
-        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
-        // accept any class literal. Hoisted out of the loop since it's
-        // constant across all arguments.
-        let metaclass_name: EcoString = "Metaclass".into();
-
         // Substitution map from `class_name`'s (or its declaring
         // superclass's, if `method` is inherited) generic type-param names
         // to the receiver's concrete `receiver_type_args` — e.g. `Dictionary
@@ -1450,7 +1441,49 @@ impl TypeChecker {
             .map(|(param, ty)| (param, Self::widen_singleton_type_arg(&ty)))
             .collect();
 
-        for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
+        self.check_args_against_param_types(
+            class_name,
+            selector,
+            arg_types,
+            &method.param_types,
+            &class_subst,
+            span,
+            hierarchy,
+            arg_exprs,
+            env,
+        );
+    }
+
+    /// The per-argument half of [`Self::check_argument_types`]: checks each
+    /// argument type against its declared parameter type (`None` = unchecked),
+    /// after substituting the receiver's generic type params via `class_subst`.
+    /// `class_name` is the receiver as the diagnostics name it — a class, or a
+    /// protocol metatype `P class` whose `class` requirement supplies
+    /// `param_types` (ADR 0144).
+    #[allow(clippy::too_many_arguments)] // arg_exprs + env needed for origin tracing
+    #[allow(clippy::too_many_lines)] // includes the class-literal subtyping arm
+    pub(super) fn check_args_against_param_types(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arg_types: &[InferredType],
+        param_types: &[Option<DeclaredType>],
+        class_subst: &HashMap<EcoString, InferredType>,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        arg_exprs: Option<&[Expression]>,
+        env: Option<&super::TypeEnv>,
+    ) {
+        // A class literal (e.g. `TestCase`) is a class value whose
+        // runtime type flows through the metaclass tower
+        // (Metaclass → Class → Behaviour → Object → ProtoObject). When the
+        // instance-side chain fails, re-check via `Metaclass` so parameters
+        // declared `:: Behaviour` / `:: Class` / `:: Object` / `:: ProtoObject`
+        // accept any class literal. Hoisted out of the loop since it's
+        // constant across all arguments.
+        let metaclass_name: EcoString = "Metaclass".into();
+
+        for (i, (arg_ty, expected)) in arg_types.iter().zip(param_types.iter()).enumerate() {
             let Some(expected_declared) = expected else {
                 continue;
             };
@@ -1481,11 +1514,11 @@ impl TypeChecker {
             let expected_declared_str: EcoString = expected_declared.to_string().into();
             let substituted_expected;
             let expected_ty: &EcoString = if !class_subst.is_empty()
-                && Self::type_string_references_class_param(&expected_declared_str, &class_subst)
+                && Self::type_string_references_class_param(&expected_declared_str, class_subst)
             {
                 substituted_expected = super::TypeChecker::resolve_type_param(
                     expected_declared,
-                    &class_subst,
+                    class_subst,
                     &HashMap::new(),
                     hierarchy,
                 )
@@ -1657,10 +1690,7 @@ impl TypeChecker {
                             .push(diag.with_category(DiagnosticCategory::Type));
                     }
                 }
-                InferredType::Meta {
-                    class_name: meta_class,
-                    ..
-                } => {
+                InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                     // ADR 0083: a metatype value `C class` is an instance of the
                     // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
                     // It satisfies a parameter whose declared type is `Class`,
@@ -1668,29 +1698,35 @@ impl TypeChecker {
                     // (the runtime class of a class object) is assignable to.
                     // We model the metatype's own type as `Class` for the
                     // hierarchy walk, so e.g. `:: Behaviour` accepts it but
-                    // `:: Integer` does not.
+                    // `:: Integer` does not. ADR 0144: a `P class` parameter
+                    // accepts `C class` iff `C` conforms to `P`.
+                    let Some(class_object) = ClassObjectType::of(arg_ty) else {
+                        continue;
+                    };
                     let compat = Self::metatype_assignable_to(
-                        meta_class,
+                        class_object,
                         &expected_structural,
                         hierarchy,
+                        self.protocol_registry.as_ref(),
                         Self::is_type_compatible,
                     );
                     if !compat {
                         let param_pos = i + 1;
-                        let actual_display: EcoString = format!("{meta_class} class").into();
                         let expected_display = expected_display.clone();
-                        self.diagnostics.push(
-                            Diagnostic::warning(
-                                format!(
-                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
-                                ),
-                                span,
-                            )
-                            .with_hint(format!(
-                                "Expected {expected_display} (or a subclass), got {actual_display}"
-                            ))
-                            .with_category(DiagnosticCategory::Type),
+                        let diag = Self::metatype_mismatch_diagnostic(
+                            class_object,
+                            &expected_structural,
+                            hierarchy,
+                            self.protocol_registry.as_ref(),
+                            format!(
+                                "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
+                            ),
+                            format!(
+                                "Expected {expected_display} (or a subclass), got {class_object}"
+                            ),
+                            span,
                         );
+                        self.diagnostics.push(diag);
                     }
                 }
                 InferredType::Union { members, .. } => {
@@ -1876,6 +1912,7 @@ impl TypeChecker {
                 // compiler can't narrow `body_type`'s type in this arm.
                 InferredType::Never
                 | InferredType::Meta { .. }
+                | InferredType::ProtocolMeta { .. }
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. }
                 | InferredType::Known { .. } => {}
@@ -1998,6 +2035,7 @@ impl TypeChecker {
             // 0102) declared return type has no single `Known` body
             // shape to compare against here; skip conservatively too.
             InferredType::Meta { .. }
+            | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
@@ -2054,6 +2092,7 @@ impl TypeChecker {
             }),
             InferredType::Never => false,
             InferredType::Meta { .. }
+            | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => true,
@@ -2807,35 +2846,36 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            InferredType::Meta {
-                class_name: meta_class,
-                ..
-            } => {
+            InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                 // ADR 0083: a class object `C class` is assignable to a field
                 // declared `:: Class` / `:: Behaviour` / `:: Object` (the
                 // metaclass tower). Model the metatype as `Class` for the
-                // assignability walk.
-                let value_display: EcoString = format!("{meta_class} class").into();
+                // assignability walk. ADR 0144: `:: P class` accepts it iff
+                // `C` conforms to `P`.
+                let Some(class_object) = ClassObjectType::of(value_ty) else {
+                    return;
+                };
                 if !Self::metatype_assignable_to(
-                    meta_class,
+                    class_object,
                     &declared_type,
                     hierarchy,
+                    self.protocol_registry.as_ref(),
                     Self::is_assignable_to,
                 ) {
                     let declared_display = declared_display.clone();
-                    self.diagnostics.push(
-                        Diagnostic::warning(
-                            format!(
-                                "Type mismatch: field `{}` declared as {declared_display}, got {value_display}",
-                                field.name
-                            ),
-                            span,
-                        )
-                        .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!(
-                            "Expected {declared_display} but assigning {value_display}"
-                        )),
+                    let diag = Self::metatype_mismatch_diagnostic(
+                        class_object,
+                        &declared_type,
+                        hierarchy,
+                        self.protocol_registry.as_ref(),
+                        format!(
+                            "Type mismatch: field `{}` declared as {declared_display}, got {class_object}",
+                            field.name
+                        ),
+                        format!("Expected {declared_display} but assigning {class_object}"),
+                        span,
                     );
+                    self.diagnostics.push(diag);
                 }
             }
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
@@ -3557,31 +3597,35 @@ impl TypeChecker {
                 }
                 // A class object as the default (`state: k :: Foo class =
                 // Bar`): the slot rule `check_field_assignment` applies
-                // (BT-4206).
-                InferredType::Meta {
-                    class_name: meta_class,
-                    ..
-                } if !Self::metatype_assignable_to(
-                    meta_class,
-                    &declared_type,
-                    hierarchy,
-                    Self::is_assignable_to,
-                ) =>
-                {
-                    let value_display: EcoString = format!("{meta_class} class").into();
-                    self.diagnostics.push(
-                        Diagnostic::warning(
-                            format!(
-                                "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
-                                decl.name.name
-                            ),
-                            decl.span,
-                        )
-                        .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!(
-                            "Default value type {value_display} is not compatible with {declared_display}"
-                        )),
+                // (BT-4206), including ADR 0144 protocol metatypes.
+                InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
+                    let Some(class_object) = ClassObjectType::of(&inferred) else {
+                        continue;
+                    };
+                    if Self::metatype_assignable_to(
+                        class_object,
+                        &declared_type,
+                        hierarchy,
+                        self.protocol_registry.as_ref(),
+                        Self::is_assignable_to,
+                    ) {
+                        continue;
+                    }
+                    let diag = Self::metatype_mismatch_diagnostic(
+                        class_object,
+                        &declared_type,
+                        hierarchy,
+                        self.protocol_registry.as_ref(),
+                        format!(
+                            "Type mismatch: state `{}` declared as {declared_display}, default is {class_object}",
+                            decl.name.name
+                        ),
+                        format!(
+                            "Default value type {class_object} is not compatible with {declared_display}"
+                        ),
+                        decl.span,
                     );
+                    self.diagnostics.push(diag);
                 }
                 // Dynamic / Never / Negation / Intersection defaults — skip
                 // conservatively, matching `check_field_assignment`.
@@ -3590,49 +3634,188 @@ impl TypeChecker {
         }
     }
 
-    /// Whether a class object `C class` (`Meta{C}`) may flow into a slot or
+    /// Whether a class object — `C class` (`Meta{C}`) or a protocol metatype
+    /// `P class` (`ProtocolMeta{P}`, ADR 0144) — may flow into a slot or
     /// parameter declared `declared_type` (BT-4199).
     ///
     /// A union declared type accepts it iff some top-level member does
-    /// (BT-4206: `:: Integer | Foo class` does not accept `Integer class`).
-    /// A declared `X class` member is covariant: `C class` is accepted iff
-    /// `C` is `X` or a subclass of it. Any other member models the metatype
-    /// as `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
+    /// (BT-4206: `:: Integer | Foo class` does not accept `Integer class`);
+    /// an intersection member (`P class & Q class`, ADR 0102) iff every part
+    /// does. A declared `X class` part is covariant: for a class `X`,
+    /// `C class` is accepted iff `C` is `X` or a subclass of it; for a
+    /// protocol `X` (ADR 0144), `C class` is accepted iff
+    /// [`ProtocolRegistry::check_conformance`]`(C, X)` is `Ok` (the one
+    /// structural conformance rule, open-world gate included) and `C` is not
+    /// itself a protocol, and `P class` iff
+    /// [`ProtocolInfo::subsumes_conformance_to`](crate::semantic_analysis::protocol_registry::ProtocolInfo::subsumes_conformance_to)`(P, X)`. Any other part models the class object as
+    /// `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
     /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
     /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
     /// for an argument, as for every other argument type. A type-parameter
-    /// member accepts it.
+    /// part accepts it.
     pub(super) fn metatype_assignable_to(
-        meta_class: &EcoString,
+        value: ClassObjectType<'_>,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
         tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
     ) -> bool {
         let members = crate::semantic_analysis::string_utils::split_top_level(declared_type, '|');
         let union = members.len() > 1;
         members.iter().any(|member| {
-            let member = member.trim();
-            if let Some(declared_base) = member.strip_suffix(" class") {
-                if super::is_type_var_placeholder(declared_base.trim(), hierarchy) {
-                    return true;
-                }
-                let declared_base: EcoString = declared_base.into();
-                return Self::is_assignable_to(meta_class, &declared_base, hierarchy);
-            }
-            // A type-parameter member (`T | Nil`, `T class`) cannot be judged until the
-            // class is instantiated: accept, as `is_type_compatible` does.
-            if super::is_type_var_placeholder(member, hierarchy) {
+            crate::semantic_analysis::string_utils::split_top_level(member, '&')
+                .iter()
+                .all(|part| {
+                    Self::metatype_assignable_to_part(
+                        value,
+                        part.trim(),
+                        union,
+                        hierarchy,
+                        protocol_registry,
+                        tower,
+                    )
+                })
+        })
+    }
+
+    /// One `|`/`&`-free part of [`Self::metatype_assignable_to`]'s declared
+    /// type.
+    fn metatype_assignable_to_part(
+        value: ClassObjectType<'_>,
+        part: &str,
+        union: bool,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
+    ) -> bool {
+        if let Some(declared_base) = part.strip_suffix(" class") {
+            let declared_base = declared_base.trim();
+            if super::is_type_var_placeholder(declared_base, hierarchy) {
                 return true;
             }
-            let member: EcoString = if union {
-                Self::resolve_type_keyword_static(member)
-            } else {
-                member.into()
+            if let Some(registry) =
+                protocol_registry.filter(|r| Self::is_protocol_type(declared_base, hierarchy, r))
+            {
+                return match value {
+                    // A protocol literal is the protocol object, not the
+                    // class object of a conformer; `check_conformance` would
+                    // wave it through the open-world gate (no hierarchy entry).
+                    ClassObjectType::Class(class_name) => {
+                        !registry.has_protocol(class_name)
+                            && registry
+                                .check_conformance(class_name, declared_base, hierarchy)
+                                .is_ok()
+                    }
+                    ClassObjectType::Protocol(protocol_name) => {
+                        match (registry.get(protocol_name), registry.get(declared_base)) {
+                            (Some(value_protocol), Some(declared_protocol)) => {
+                                value_protocol.subsumes_conformance_to(declared_protocol, registry)
+                            }
+                            _ => false,
+                        }
+                    }
+                };
+            }
+            return match value {
+                ClassObjectType::Class(class_name) => {
+                    Self::is_assignable_to(class_name, &declared_base.into(), hierarchy)
+                }
+                // The class object of *some* conformer is not provably a
+                // subclass of any one named class.
+                ClassObjectType::Protocol(_) => false,
             };
-            let class_name_ty: EcoString = "Class".into();
-            tower(&class_name_ty, &member, hierarchy)
-        })
+        }
+        // A type-parameter part (`T | Nil`, `T class`) cannot be judged until the
+        // class is instantiated: accept, as `is_type_compatible` does.
+        if super::is_type_var_placeholder(part, hierarchy) {
+            return true;
+        }
+        let part: EcoString = if union {
+            Self::resolve_type_keyword_static(part)
+        } else {
+            part.into()
+        };
+        let class_name_ty: EcoString = "Class".into();
+        tower(&class_name_ty, &part, hierarchy)
+    }
+
+    /// ADR 0144: when a class object `C class` fails
+    /// [`Self::metatype_assignable_to`] because of a declared protocol
+    /// metatype part `P class`, the protocol and the selectors `C` is
+    /// missing (as [`ProtocolRegistry::check_conformance`] reports them —
+    /// class-side ones prefixed `class `). `None` when no declared `P class`
+    /// part is involved, so the caller keeps its plain type-mismatch wording.
+    pub(super) fn protocol_metatype_nonconformance(
+        class_name: &EcoString,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> Option<(EcoString, Vec<EcoString>)> {
+        let registry = protocol_registry?;
+        crate::semantic_analysis::string_utils::split_top_level(declared_type, '|')
+            .iter()
+            .flat_map(|member| crate::semantic_analysis::string_utils::split_top_level(member, '&'))
+            .filter_map(|part| part.trim().strip_suffix(" class").map(str::trim))
+            .filter(|base| Self::is_protocol_type(base, hierarchy, registry))
+            .find_map(|base| {
+                registry
+                    .check_conformance(class_name, base, hierarchy)
+                    .err()
+                    .map(|missing| (EcoString::from(base), missing))
+            })
+    }
+
+    /// The diagnostic for a class object that does not fit a declared slot,
+    /// field default or parameter type: the ADR 0144 conformance wording
+    /// (`<C> class does not conform to <P> class`, listing the missing
+    /// selectors) when a declared `P class` part is the cause, otherwise the
+    /// caller's own type-mismatch `message` and `hint`.
+    pub(super) fn metatype_mismatch_diagnostic(
+        value: ClassObjectType<'_>,
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+        message: String,
+        hint: String,
+        span: Span,
+    ) -> Diagnostic {
+        let nonconformance = match value {
+            ClassObjectType::Class(class_name) => Self::protocol_metatype_nonconformance(
+                class_name,
+                declared_type,
+                hierarchy,
+                protocol_registry,
+            ),
+            ClassObjectType::Protocol(_) => None,
+        };
+        match nonconformance {
+            Some((protocol, missing)) => Self::protocol_metatype_nonconformance_diagnostic(
+                &value.to_string(),
+                &protocol,
+                &missing,
+                span,
+            ),
+            None => Diagnostic::warning(message, span)
+                .with_hint(hint)
+                .with_category(DiagnosticCategory::Type),
+        }
+    }
+
+    /// The ADR 0144 conformance warning: `<C> class does not conform to <P>
+    /// class`, with the missing selectors (class-side ones prefixed `class `).
+    pub(super) fn protocol_metatype_nonconformance_diagnostic(
+        value_display: &str,
+        protocol: &str,
+        missing: &[EcoString],
+        span: Span,
+    ) -> Diagnostic {
+        Diagnostic::warning(
+            format!("{value_display} does not conform to {protocol} class"),
+            span,
+        )
+        .with_category(DiagnosticCategory::Type)
+        .with_hint(format!("missing: {}", missing.join(", ")))
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.
@@ -4006,6 +4189,16 @@ impl TypeChecker {
         mismatch: &AssignmentTypeMismatch,
         span: Span,
     ) {
+        if let Some((protocol, missing)) = &mismatch.nonconformance {
+            self.diagnostics
+                .push(Self::protocol_metatype_nonconformance_diagnostic(
+                    &mismatch.inferred_display,
+                    protocol,
+                    missing,
+                    span,
+                ));
+            return;
+        }
         self.diagnostics.push(
             Diagnostic::warning(
                 format!(
@@ -4312,7 +4505,13 @@ impl TypeChecker {
             // member to check; the flagship "parameter declared `P1 & P2`"
             // case is handled by splitting `expected_protocol` in
             // `check_protocol_conformance_in_expr`, not here.
+            //
+            // A `P class` argument (ADR 0144) is the class object of *some*
+            // conformer of `P`; which class it is — and so whether its class
+            // side answers `Q`'s instance-side selectors — is unknown here,
+            // so skip conservatively (open world, ADR 0100).
             InferredType::Never
+            | InferredType::ProtocolMeta { .. }
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
         }
@@ -4595,6 +4794,7 @@ impl TypeChecker {
                 // it against one member of the intersection risks a false
                 // positive when a *different* member is the one that conforms.
                 InferredType::Meta { .. }
+                | InferredType::ProtocolMeta { .. }
                 | InferredType::Dynamic(_)
                 | InferredType::Never
                 | InferredType::Negation { .. }
