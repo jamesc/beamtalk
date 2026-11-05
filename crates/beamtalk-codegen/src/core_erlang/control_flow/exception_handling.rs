@@ -569,8 +569,11 @@ impl CoreErlangGenerator {
         };
 
         if receiver_needs || handler_needs {
-            if let (Expression::Block(recv_block), Expression::Block(handler_block)) =
-                (receiver, handler)
+            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
+            if let Some((recv_block, handler_block)) =
+                beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                    receiver, handler,
+                )
             {
                 return self.generate_on_do_with_mutations(
                     recv_block,
@@ -1125,8 +1128,11 @@ impl CoreErlangGenerator {
         };
 
         if receiver_needs || cleanup_needs {
-            if let (Expression::Block(recv_block), Expression::Block(cleanup_block)) =
-                (receiver, cleanup)
+            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
+            if let Some((recv_block, cleanup_block)) =
+                beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                    receiver, cleanup,
+                )
             {
                 return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
             }

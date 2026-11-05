@@ -1934,17 +1934,35 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
 /// [`exception_arm_blocks`] and codegen's `generate_on_do`/`generate_ensure`
 /// lower in place. Any other such send compiles its literal block as a
 /// closure. The one rule behind [`LocalThreadingConstruct::inlined`] and the
-/// ADR 0133 escape check (`validators/local_threading.rs`).
+/// ADR 0133 escape check (`validators/local_threading.rs`); codegen's
+/// generators decide through [`inlined_exception_blocks`], which it reads.
 #[must_use]
 pub fn exception_send_inlined(
     selector: &str,
     receiver: &Expression,
     arguments: &[Expression],
 ) -> bool {
-    matches!(receiver, Expression::Block(_))
-        && crate::state_threading_selectors::state_threaded_block_arg_indices(selector)
-            .iter()
-            .all(|&i| matches!(arguments.get(i), Some(Expression::Block(_))))
+    match crate::state_threading_selectors::state_threaded_block_arg_indices(selector) {
+        &[handler_index] => arguments
+            .get(handler_index)
+            .is_some_and(|handler| inlined_exception_blocks(receiver, handler).is_some()),
+        _ => false,
+    }
+}
+
+/// BT-4430: the protected body and the handler or cleanup of an
+/// `on:do:`/`ensure:` when the send is inlined ([`exception_send_inlined`]):
+/// both are bare block literals. `None` when either is not, and codegen's
+/// `generate_on_do`/`generate_ensure` compile the send's blocks as closures.
+#[must_use]
+pub fn inlined_exception_blocks<'a>(
+    receiver: &'a Expression,
+    handler: &'a Expression,
+) -> Option<(&'a Block, &'a Block)> {
+    match (receiver, handler) {
+        (Expression::Block(protected), Expression::Block(handler)) => Some((protected, handler)),
+        _ => None,
+    }
 }
 
 /// BT-4288 / BT-4312: the `^`s of a top-level scope (a REPL input), by where
@@ -1953,8 +1971,8 @@ pub fn exception_send_inlined(
 /// (`beamtalk-codegen`'s `repl_nlr.rs`, through [`repl_eval_returns`]) read.
 ///
 /// A block is *run in place* when it is a block of a
-/// [`local_threading_construct`] that codegen threads today
-/// ([`LocalThreadingConstruct::is_threaded_today`]): a conditional arm, an
+/// [`local_threading_construct`] whose blocks run during the send
+/// ([`LocalThreadingConstruct::runs_in_place`]): a conditional arm, an
 /// evaluated or protected block (`value`, `on:do:`, `ensure:`), a loop or
 /// fold body. Any other block literal is a *closure* (stored, passed to a
 /// method, ...).
