@@ -1500,6 +1500,16 @@ impl TypeChecker {
             let Some(expected_declared) = expected else {
                 continue;
             };
+            if let Some(arg) = arg_exprs.and_then(|exprs| exprs.get(i)) {
+                self.check_list_literal_elements(
+                    class_name,
+                    selector,
+                    i + 1,
+                    arg,
+                    expected_declared,
+                    hierarchy,
+                );
+            }
             // Resolve a declared parameter type that names one of
             // the receiver's own generic type params — bare (`V`) or nested
             // (`List(E)`, `Dictionary(K, V)`) — to its concrete substituted
@@ -1802,6 +1812,198 @@ impl TypeChecker {
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. } => {}
             }
+        }
+    }
+
+    /// BT-4385: when `arg` is a non-empty list literal
+    /// and the parameter declared `expected_declared` takes a list with a
+    /// concrete element type, the literal's elements and that element type.
+    /// The argument is then judged element by element
+    /// ([`Self::check_list_literal_elements`]), and the whole-argument
+    /// variance check (`check_variance_in_expr`) leaves it alone, so one
+    /// mistake gets one warning.
+    ///
+    /// The declared type may be `List(E)`, an alias of it, or a union with
+    /// exactly one `List` arm (`List(RegexOption) | Nil`). It is `None`, and
+    /// the argument keeps the whole-argument checks, when `E` mentions:
+    /// - a type param of the receiver class or a superclass (`E` on
+    ///   `List>>++`, `Item` on a user `Box(Item)`), resolved to `Dynamic`
+    ///   here, or a method-local type variable (`T`);
+    /// - a protocol: conformance is structural, and the per-element
+    ///   assignability rule is nominal (BT-4482).
+    ///
+    /// A cons literal (`#(a | rest)`) is judged too: each head is an
+    /// element, and the tail's own element type (`E'` of its `List(E')`) is
+    /// checked against `E` as one more entry.
+    pub(super) fn list_literal_element_expectation<'a>(
+        &mut self,
+        arg: &'a Expression,
+        expected_declared: &DeclaredType,
+        class_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<ListLiteralElements<'a>> {
+        // `ast::normalize` (BT-4059) already peeled parens off a send argument.
+        let Expression::ListLiteral { elements, tail, .. } = arg else {
+            return None;
+        };
+        if elements.is_empty() {
+            return None;
+        }
+        let class_type_params: type_resolver::SubstitutionMap =
+            std::iter::once(EcoString::from(class_name))
+                .chain(hierarchy.superclass_chain(class_name))
+                .filter_map(|name| hierarchy.get_class(&name))
+                .flat_map(|info| info.type_params.iter().cloned())
+                .map(|param| (param, InferredType::Dynamic(DynamicReason::Unknown)))
+                .collect();
+        let (resolved, alias_deps) = type_resolver::resolve_declared_type_with_alias_deps(
+            expected_declared,
+            &class_type_params,
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_ref(),
+            super::TypeStringContext::Declared,
+        );
+        self.referenced_aliases.extend(alias_deps);
+        let list_element = |ty: &InferredType| match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "List" && type_args.len() == 1 => Some(type_args[0].clone()),
+            _ => None,
+        };
+        let element = match &resolved {
+            InferredType::Union { members, .. } => {
+                let mut arms = members.iter().filter_map(list_element);
+                let first = arms.next()?;
+                if arms.next().is_some() {
+                    return None;
+                }
+                first
+            }
+            other => list_element(other)?,
+        };
+        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+            return None;
+        }
+        Some(ListLiteralElements {
+            elements,
+            tail: tail.as_deref(),
+            element,
+        })
+    }
+
+    /// Whether a declared list element type is left to the whole-argument
+    /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
+    /// or mentions a type variable placeholder or a protocol anywhere in it.
+    fn element_type_is_unjudged(
+        ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                super::is_type_var_placeholder(class_name, hierarchy)
+                    || hierarchy.is_protocol_class(class_name)
+                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
+                    || type_args.iter().any(|arg| {
+                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
+                    })
+            }
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+            InferredType::Meta { .. }
+            | InferredType::ProtocolMeta { .. }
+            | InferredType::Never
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => false,
+        }
+    }
+
+    /// BT-4385: a list literal `#(...)` passed to a parameter declared
+    /// `List(E)` checks each element against `E`, by the same rule as an
+    /// annotated local ([`Self::detect_assignment_type_mismatch`]). The
+    /// argument's own joined `List(E')` type cannot carry this: a joined
+    /// element type loses which element is wrong, and the nominal argument
+    /// check compares only the `List` base. Which arguments are judged, and
+    /// against what, is [`Self::list_literal_element_expectation`].
+    fn check_list_literal_elements(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        param_pos: usize,
+        arg: &Expression,
+        expected_declared: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some(ListLiteralElements {
+            elements,
+            tail,
+            element: element_declared,
+        }) = self.list_literal_element_expectation(arg, expected_declared, class_name, hierarchy)
+        else {
+            return;
+        };
+        let element_declared = &element_declared;
+        // Each head, then the tail's element type (`E'` of its `List(E')`).
+        let entries = elements
+            .iter()
+            .enumerate()
+            .map(|(j, element)| {
+                (
+                    format!("Element {}", j + 1),
+                    element.span(),
+                    self.type_map.get(element.span()).cloned(),
+                )
+            })
+            .chain(tail.map(|tail| {
+                (
+                    "Each tail element".to_string(),
+                    tail.span(),
+                    self.type_map.get(tail.span()).map(Self::tail_element_type),
+                )
+            }))
+            .collect::<Vec<_>>();
+        for (label, span, element_ty) in entries {
+            let Some(element_ty) = element_ty else {
+                continue;
+            };
+            let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                &element_ty,
+                element_declared,
+                hierarchy,
+                self.protocol_registry.as_deref(),
+            ) else {
+                continue;
+            };
+            let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
+                Self::protocol_metatype_nonconformance_diagnostic(
+                    &mismatch.inferred_display,
+                    protocol,
+                    missing,
+                    span,
+                )
+            } else {
+                Diagnostic::warning(
+                    format!(
+                        "{label} of argument {param_pos} of '{selector}' on {class_name} expects {}, got {}",
+                        mismatch.declared_display, mismatch.inferred_display
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Every element of the list must be assignable to {}",
+                    mismatch.declared_display
+                ))
+            };
+            self.diagnostics.push(diag);
         }
     }
 
@@ -4937,4 +5139,15 @@ impl ComparisonArgKind {
             Self::Symbol => arg_ty == "Symbol" || arg_ty.starts_with('#'),
         }
     }
+}
+
+/// BT-4385: a list-literal argument judged element by element — see
+/// [`TypeChecker::list_literal_element_expectation`].
+pub(super) struct ListLiteralElements<'a> {
+    /// The literal's heads.
+    elements: &'a [Expression],
+    /// A cons literal's tail (`rest` in `#(a | rest)`).
+    tail: Option<&'a Expression>,
+    /// The declared element type `E` of the parameter's `List(E)`.
+    element: InferredType,
 }
