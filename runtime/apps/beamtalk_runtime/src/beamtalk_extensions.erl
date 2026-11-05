@@ -91,7 +91,6 @@ itself.
     getSource/2,
     conflicts/0,
     has/2,
-    ever_extended/1,
     safe_xref/1
 ]).
 
@@ -226,7 +225,7 @@ register(Class, Selector, Fun, Owner, Source) when
     ok = validate_class_side_arity(Class, Selector, Fun),
     %% BT-4473: raised before the row can be seen, so a reader that misses
     %% the flag cannot also see the extension.
-    note_extended(Selector),
+    beamtalk_default_method:note_override(Class, Selector),
 
     %% BT-3669: flag transitions and row writes for one tag are serialized under
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
@@ -282,30 +281,6 @@ register(Class, Selector, Fun, Owner, Source) when
     %% is already the metaclass tag in that case) — see its doc.
     index_extension_xref(Class, Selector, Source),
     ok.
-
--doc """
-Whether an extension defining `Selector` (on any class, either side) has ever
-been registered on this node (BT-4473). One `persistent_term` read.
-
-The flag is raised before the extension's row is written and is never lowered:
-`unregister/2,3` and `purge_class/1` leave it set. A `false` answer therefore
-proves that no extension anywhere answers `Selector`; a `true` one only that
-one may. Callers that answer an `Object` method without dispatch use it as
-the cheap half of their override check (see
-`beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`). One key per distinct
-selector ever extended, written once: a new `persistent_term` key triggers no
-global GC (only an update or erase does).
-""".
--spec ever_extended(atom()) -> boolean().
-ever_extended(Selector) ->
-    persistent_term:get({?MODULE, ever_extended, Selector}, false).
-
--spec note_extended(atom()) -> ok.
-note_extended(Selector) ->
-    case ever_extended(Selector) of
-        true -> ok;
-        false -> persistent_term:put({?MODULE, ever_extended, Selector}, true)
-    end.
 
 -doc """
 ADR 0130 §3: a class-side extension fun is `fun(Args, ClassSelf)`, arity 2.

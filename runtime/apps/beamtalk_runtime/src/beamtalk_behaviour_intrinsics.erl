@@ -991,15 +991,16 @@ compiler resolved to a sealed built-in with an exact representation test
 (BT-4473), and `TestAnswer` is that test applied to `Receiver` — the same test
 a `binding :: Class` match arm uses, from the shared routing fixture.
 
-For a plain value — anything but an actor, class object or supervisor handle
-(`#beamtalk_object{}`, `beamtalk_supervisor` tuples), a future, or a
-`'$beamtalk_class'`-tagged map — the class is one of the stdlib's, whose
-chains define no `isKindOf:` below `Object` (the compiler checks this before
-emitting the call). So when no extension has ever defined `isKindOf:`
-(`beamtalk_extensions:ever_extended/1`), the send would run
-`Object>>isKindOf:`, and its answer is `TestAnswer`: a value passes the test
-exactly when its class is `Behaviour` or one of its (stdlib, sealed)
-subclasses. Everything else takes the ordinary send, unchanged.
+For a plain value — anything but an actor, class object or supervisor handle,
+a future (any tuple headed by one of those reserved tags), or a map the
+runtime treats as tagged (`beamtalk_tagged_map:is_tagged/1`) — the class is one
+of the stdlib's built-ins. So while no class other than `Object` has ever
+defined `isKindOf:`, compiled or as an extension
+(`beamtalk_default_method:overridden_anywhere/1`, which also covers code
+compiled against an older stdlib), the send would run `Object>>isKindOf:`, and
+its answer is `TestAnswer`: a value passes the test exactly when its class is
+`Behaviour` or one of its (stdlib, sealed) subclasses. Everything else takes
+the ordinary send, unchanged.
 
 The caller evaluates `Behaviour` but this path does not look at it, so a dead
 or restarting class process does not change the answer here, as it does not
@@ -1007,23 +1008,27 @@ for a `binding :: Class` match arm.
 """.
 -spec isKindOfBuiltin(term(), term(), boolean()) -> term().
 isKindOfBuiltin(Receiver, Behaviour, TestAnswer) ->
-    case plain_value(Receiver) andalso not beamtalk_extensions:ever_extended('isKindOf:') of
+    case
+        plain_value(Receiver) andalso not beamtalk_default_method:overridden_anywhere('isKindOf:')
+    of
         true -> TestAnswer;
         false -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
     end.
 
 %% A value whose class is a stdlib built-in reached without dispatch to user
-%% code: not one of the routing fixture's reserved tuple shapes other than
-%% `String` (an actor or class object, a supervisor handle, a future) and not
-%% a tagged map (a Value, an Object-kind instance, the native proxy). Pinned to
+%% code: not a tuple headed by one of the routing fixture's reserved tags other
+%% than `String`'s (an actor or class object, a supervisor handle, a future,
+%% whatever its size) and not a map the runtime treats as tagged (a Value, an
+%% Object-kind instance, a `'__class_mod__'` map, the native proxy). Pinned to
 %% the fixture's `reserved_tuple_tags` by
 %% `beamtalk_tagged_map_routing_conformance_tests`.
 -spec plain_value(term()) -> boolean().
-plain_value({beamtalk_object, _, _, _}) -> false;
-plain_value({beamtalk_supervisor, _, _, _}) -> false;
-plain_value({beamtalk_future, _}) -> false;
-plain_value(Map) when is_map(Map) -> not is_map_key('$beamtalk_class', Map);
-plain_value(_) -> true.
+plain_value(Tuple) when is_tuple(Tuple), tuple_size(Tuple) >= 1 ->
+    not lists:member(element(1, Tuple), [beamtalk_object, beamtalk_supervisor, beamtalk_future]);
+plain_value(Map) when is_map(Map) ->
+    not beamtalk_tagged_map:is_tagged(Map);
+plain_value(_) ->
+    true.
 
 %% `objectIsKindOf/2`'s decided answer for an instance of `C`, when `C` runs
 %% `Object>>isKindOf:`; `overridden` (cached: the next class write or

@@ -1193,9 +1193,13 @@ impl CoreErlangGenerator {
     /// reaches this module's `dispatch/3` (see [`Self::typed_tagged_target`]),
     /// which answers the selector from that arm before its default arm — so
     /// no extension or superclass is consulted, and nothing installed later
-    /// can change that. The function is called locally, so it is the same
-    /// module version as the `dispatch/3` it stands for: a reload replaces
-    /// caller and callee together.
+    /// can change that. The function is called locally, so caller and callee
+    /// are always the same module version and the arm shape (the NLR pair)
+    /// this unit compiled against is the one it calls. One difference from
+    /// `dispatch/3`, whose arms are remote calls: code still running in the
+    /// old version after a reload (a long loop, an old block) keeps calling
+    /// the old method, where `dispatch/3` would have reached the new one.
+    /// Calls made after the reload, from new code, reach the new method.
     fn own_dispatch_arm(
         &self,
         class_name: &str,

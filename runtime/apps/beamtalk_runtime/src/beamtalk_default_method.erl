@@ -17,7 +17,10 @@ does this for `equals:` (BT-4416) and
 `beamtalk_behaviour_intrinsics:primitiveIsKindOf/2` for `isKindOf:` (BT-4473).
 
 `is_default/2` answers that question; `owner/2` is the walk behind it, for a
-caller that folds the answer into a derived-cache entry of its own. The walk
+caller that folds the answer into a derived-cache entry of its own.
+`overridden_anywhere/1` is the node-wide, one-read version for a watched
+selector: whether any class other than `Object` has ever defined it, compiled
+or as an extension. The walk
 follows the order a compiled primitive `dispatch/3` resolves a selector in: at
 each class, its own methods first, then its extensions, then the superclass. A `sealed` method
 does not make the walk unnecessary: an extension may still define the
@@ -26,7 +29,12 @@ selector on a subclass.
 
 -include("beamtalk.hrl").
 
--export([is_default/2, owner/2]).
+-export([is_default/2, owner/2, overridden_anywhere/1, note_override/2, note_overrides/2]).
+
+%% The selectors whose override anywhere below `Object` is tracked by
+%% `overridden_anywhere/1` (BT-4473): those a caller answers without dispatch
+%% on the strength of that flag.
+-define(WATCHED, ['isKindOf:']).
 
 -doc """
 True if an instance of `Class` runs `Object>>Selector`: nothing on its
@@ -102,3 +110,47 @@ owner(Class, Selector) ->
         %% Extension or metadata table not created yet (early bootstrap).
         error:badarg -> unpublished
     end.
+
+-doc """
+Whether a watched selector (`isKindOf:`) has ever been defined on this node by
+a class other than `Object`, as a compiled instance method or as an extension
+on any class (BT-4473). One `persistent_term` read; `true` for a selector that
+is not watched.
+
+The flag is raised before the defining record or extension row is written
+(`note_override/2`) and is never lowered: removing the override leaves it set.
+So `false` proves that every class's chain runs `Object`'s method for the
+selector; `true` only that one may not. A caller that answers `Object`'s
+method without dispatch on the strength of a `false` uses it as its whole
+override check (`beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`).
+""".
+-spec overridden_anywhere(atom()) -> boolean().
+overridden_anywhere(Selector) ->
+    case lists:member(Selector, ?WATCHED) of
+        true -> persistent_term:get({?MODULE, overridden, Selector}, false);
+        false -> true
+    end.
+
+-doc """
+Record that `Class` defines `Selector` (a compiled method or an extension):
+raise `overridden_anywhere/1` for a watched selector, unless `Class` is
+`Object`. Called before the definition becomes visible. A watched selector's
+key is written once, so `persistent_term` sees at most one write per watched
+selector per node.
+""".
+-spec note_override(atom(), atom()) -> ok.
+note_override('Object', _Selector) ->
+    ok;
+note_override(_Class, Selector) ->
+    case lists:member(Selector, ?WATCHED) andalso not overridden_anywhere(Selector) of
+        true -> persistent_term:put({?MODULE, overridden, Selector}, true);
+        false -> ok
+    end.
+
+-doc "`note_override/2` for each watched selector among `Records`' keys.".
+-spec note_overrides(atom(), #{atom() => term()}) -> ok.
+note_overrides(Class, Records) ->
+    lists:foreach(
+        fun(Selector) -> note_override(Class, Selector) end,
+        [S || S <- ?WATCHED, is_map_key(S, Records)]
+    ).
