@@ -15,8 +15,8 @@
 // Shared by `cm_editor.js` (Workspace + method editors) and `repl_input.js`
 // (REPL composer), mirroring the cm_autocomplete.js structure: each passes a
 // `requestHover({code, before, suffix}) => Promise<string>` callback resolving
-// to the docs markdown (an empty string means "nothing to show", so no tooltip
-// opens).
+// to the rendered docs HTML (an empty string means "nothing to show", so no
+// tooltip opens).
 
 import { hoverTooltip } from "@codemirror/view"
 
@@ -31,7 +31,7 @@ const TOKEN = /[A-Za-z0-9_]/
 const CONTEXT_LINES = 10
 
 // Build the hover extension. `requestHover({code, before, suffix})` must return
-// a Promise<string> — the hover markdown (an empty string when there is nothing
+// a Promise<string> — the hover docs HTML (an empty string when there is nothing
 // to show). `code` is the line up to and including the hovered token; `before`
 // (the lines above) and `suffix` (the text after the token) let the backend
 // recover a keyword send's FULL selector (`fetch:` in `X fetch: a options: b`
@@ -69,12 +69,13 @@ export function backendHover(requestHover) {
       create() {
         const dom = document.createElement("div")
         dom.className = "cm-hover-doc"
-        // The docs are the same plain text `:help` shows in the REPL, so render
-        // verbatim in a <pre> via textContent — no markdown/HTML interpretation,
-        // which also keeps live doc text from injecting markup into the page.
-        const pre = document.createElement("pre")
-        pre.textContent = docs
-        dom.appendChild(pre)
+        // The reply is HTML rendered server-side by `BtAttach.DocFormat`
+        // (BT-4344): the `:help` layout preformatted, a method's doc-comment
+        // as formatted docs (`## Options` → heading + bullets). DocFormat
+        // HTML-escapes every piece of author text and emits only its own tags,
+        // so live doc text cannot inject markup — the same contract the System
+        // Browser doc block relies on when it renders this HTML.
+        dom.innerHTML = docs
         return { dom }
       },
     }

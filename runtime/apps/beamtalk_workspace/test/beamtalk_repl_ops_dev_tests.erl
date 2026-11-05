@@ -588,6 +588,75 @@ hover_docs_unclassifiable_receiver_method_is_empty_test() ->
     ).
 
 %%====================================================================
+%% hover_markdown/2: `:help` text → tooltip Markdown (BT-4344)
+%%====================================================================
+
+hover_markdown_method_keeps_doc_comment_markdown_test() ->
+    %% The `:help` header block becomes an indented code block; the `///`
+    %% doc-comment after the first blank line passes through untouched, so its
+    %% `## Options` heading and bullets render in the tooltip.
+    Help = <<
+        "== Fetcher >> fetch:options: ==\n"
+        "  fetch: url options: opts\n\n"
+        "Fetch a URL.\n\n"
+        "## Options\n"
+        "- `timeout` - milliseconds"
+    >>,
+    ?assertEqual(
+        <<
+            "    == Fetcher >> fetch:options: ==\n"
+            "      fetch: url options: opts\n\n"
+            "Fetch a URL.\n\n"
+            "## Options\n"
+            "- `timeout` - milliseconds"
+        >>,
+        beamtalk_repl_ops_dev:hover_markdown(method, Help)
+    ).
+
+hover_markdown_method_without_doc_is_all_preformatted_test() ->
+    ?assertEqual(
+        <<"    == Integer >> foo ==\n    (inherited from Number)\n      foo">>,
+        beamtalk_repl_ops_dev:hover_markdown(
+            method, <<"== Integer >> foo ==\n(inherited from Number)\n  foo">>
+        )
+    ).
+
+hover_markdown_class_is_all_preformatted_test() ->
+    %% Class docs interleave the header, class comment and method listing line
+    %% by line, so the whole text stays preformatted — blank lines stay blank.
+    ?assertEqual(
+        <<"    == Counter < Object ==\n    A counter.\n\n    More.\n    Instance methods:\n      increment">>,
+        beamtalk_repl_ops_dev:hover_markdown(
+            class,
+            <<"== Counter < Object ==\nA counter.\n\nMore.\nInstance methods:\n  increment">>
+        )
+    ).
+
+hover_markdown_empty_is_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(method, <<>>)),
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(class, <<>>)).
+
+hover_markdown_pins_the_help_method_layout_test() ->
+    %% hover_markdown/2 relies on beamtalk_repl_docs:format_method_output/4
+    %% laying out a header block with no blank line inside it (header, modifier
+    %% and inherited lines, signature), then `\n\n` and the doc-comment. Feed
+    %% it the real formatter's output with every optional header line present:
+    %% the whole header is preformatted, the doc-comment passes through as is.
+    DocText = <<"Fetch a URL.\n\n## Options\n- `timeout` - milliseconds">>,
+    Help = beamtalk_repl_docs:format_method_output(
+        'Fetcher',
+        <<"fetch:options:">>,
+        'Object',
+        {<<"fetch: url options: opts">>, DocText, true, true}
+    ),
+    Md = beamtalk_repl_ops_dev:hover_markdown(method, Help),
+    [Head, Doc] = binary:split(Md, <<"\n\n">>),
+    HeadLines = binary:split(Head, <<"\n">>, [global]),
+    ?assertEqual(4, length(HeadLines)),
+    ?assert(lists:all(fun(L) -> binary:part(L, 0, 4) =:= <<"    ">> end, HeadLines)),
+    ?assertEqual(DocText, Doc).
+
+%%====================================================================
 %% keyword_send_at/3 + hover_docs/4: keyword-selector hover (BT-4343)
 %%====================================================================
 
