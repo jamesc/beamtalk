@@ -73,7 +73,7 @@ pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 // these has a production caller outside
 // its own defining submodule, so re-exporting them unconditionally would be
 // an unused-import warning under `-D warnings` in a non-test build.
-#[cfg(test)]
+// `beamtalk test` pre-loads package and dependency protocols (BT-4446).
 pub(crate) use class_index::{collect_all_protocol_infos, collect_project_protocol_infos};
 #[cfg(test)]
 pub(crate) use native::{

@@ -15,6 +15,7 @@
 //! to end; these tests pin the emitted Core Erlang.
 
 use super::*;
+use crate::core_erlang::threaded_ir;
 
 const PATH: &str = "runner.bt";
 
@@ -154,9 +155,12 @@ const DISPATCH_CALL_PREFIXES: [&str; 3] = [
 
 /// Whether a `letrec` function name is a loop's: the generic fallbacks'
 /// gensym'd `_LoopN` (BT-4392) or the static name a `ThreadedIr`-lowered
-/// loop carries (`while`, `loop`, `repeat`; BT-4401).
+/// loop carries (BT-4401). Both come from the producers' own constants
+/// (BT-4405), so a new static loop name cannot be silently missed.
 fn is_loop_fn(name: &str) -> bool {
-    name.starts_with("_Loop") || matches!(name, "while" | "loop" | "repeat")
+    name.strip_prefix('_')
+        .is_some_and(|rest| rest.starts_with(threaded_ir::LOOP_FN_STEM))
+        || threaded_ir::STATIC_LOOP_FNS.contains(&name)
 }
 
 /// Byte offsets of each `letrec` loop's entry `apply 'FnName'/N` (BT-4392,
@@ -543,9 +547,22 @@ fn threaded_ir_loops_annotate_their_entry_apply() {
         "    sum\n",
     );
     let code = codegen_with_lines(src);
-    let entries = loop_entry_applies(&code);
-    assert_eq!(entries.len(), 3, "expected 3 loop entries in:\n{code}");
-    for (at, line) in entries.into_iter().zip([4, 5, 6]) {
+    assert_loop_entry_lines(&code, &[4, 5, 6]);
+    assert!(unannotated_dispatch_calls(&code).is_empty(), "{code}");
+    assert_compiles_through_erlc("runner", &code);
+}
+
+/// Every `letrec` loop entry in `code`, in source order, is wrapped in its own
+/// annotation naming the matching line of `lines` — one entry per line.
+fn assert_loop_entry_lines(code: &str, lines: &[u32]) {
+    let entries = loop_entry_applies(code);
+    assert_eq!(
+        entries.len(),
+        lines.len(),
+        "expected {} loop entries in:\n{code}",
+        lines.len()
+    );
+    for (at, &line) in entries.into_iter().zip(lines) {
         let rest = &code[at..];
         let close = rest.find(") -|").expect("annotation after loop entry");
         assert!(
@@ -554,8 +571,6 @@ fn threaded_ir_loops_annotate_their_entry_apply() {
             &rest[..rest.len().min(80)]
         );
     }
-    assert!(unannotated_dispatch_calls(&code).is_empty(), "{code}");
-    assert_compiles_through_erlc("runner", &code);
 }
 
 /// BT-4401: the same for the `StateAcc` loops of an actor mutating its state
@@ -572,8 +587,7 @@ fn threaded_ir_state_loops_annotate_their_entry_apply() {
         "    self.n\n",
     );
     let code = codegen_with_lines(src);
-    let entries = loop_entry_applies(&code);
-    assert!(!entries.is_empty(), "expected loops in:\n{code}");
+    assert_loop_entry_lines(&code, &[4, 5, 6]);
     assert!(unannotated_dispatch_calls(&code).is_empty(), "{code}");
     assert_compiles_through_erlc("runner", &code);
 }

@@ -387,3 +387,30 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
         failures.join("\n\n")
     );
 }
+
+/// BT-4429: `Block>>ensure:` reached dynamically (`perform:`) compiles to the
+/// structural fallback in the Block method, where every `^` is foreign. The
+/// real stdlib `Block` relays every `$bt_nlr` throw with the cell over the
+/// carried state when it was the cell's, through `erlc`; with the relay off
+/// (the fallback before the fix) it fails `EnsureCleanupLostOnNlr`.
+#[test]
+fn block_ensure_fallback_relays_a_foreign_throw() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/src/block.bt");
+    let src = std::fs::read_to_string(path).expect("stdlib/src/block.bt");
+    let code = compile(&src).expect("Block compiles with the verifier on");
+    assert!(
+        code.contains("call 'beamtalk_actor_state':'snapshot'()")
+            && code.contains("call 'beamtalk_actor_state':'refresh_carried'("),
+        "Block>>ensure: relays no foreign `^`:\n{code}"
+    );
+    if erlc_available() {
+        assert_compiles_through_erlc("test", &code);
+    }
+    let report = with_fault(RelayFault::NoRelay, || compile(&src)).err();
+    assert!(
+        report
+            .as_deref()
+            .is_some_and(|r| r.contains("EnsureCleanupLostOnNlr") && r.contains("NoRelay")),
+        "without the relay, expected EnsureCleanupLostOnNlr, got {report:?}"
+    );
+}

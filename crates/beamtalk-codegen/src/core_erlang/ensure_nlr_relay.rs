@@ -35,6 +35,17 @@
 //! - **A `^` of another scope** (a block created by another method) carries
 //!   that scope's state, not this one's: it takes the error path and is
 //!   re-raised as it came.
+//! - **`Block>>ensure:` reached dynamically** (`perform:`, BT-4429). Its
+//!   structural-fallback body runs in the Block method, where every `^` is of
+//!   another scope and its state kind is known only at run time
+//!   ([`NlrCarry::Foreign`]). The cleanup is a closure, so it writes only the
+//!   cell: the relay matches every `$bt_nlr` throw, snapshots the cell before
+//!   the cleanup, and resumes the throw with the cell over the carried state
+//!   when the carried state was the cell's
+//!   (`beamtalk_actor_state:refresh_carried/2`,
+//!   [`RethrowSlot::CellIfCarried`]); any other state (the REPL's bindings, a
+//!   value type's `Self`, another actor's state) a closure cannot write, and
+//!   resumes as it came.
 //!
 //! The same holds at every nesting: a statement, a conditional arm, a loop or
 //! fold body, an `on:do:` arm or another `ensure:` cleanup (whose relay hands
@@ -120,6 +131,12 @@ impl CoreErlangGenerator {
                 None => nlr_var(self, "EnsureCarried"),
             },
             other_pair_var: nlr_var(self, "EnsureOther"),
+            cell_snapshot_var: match &relay {
+                Some(relay) if relay.rethrow == RethrowSlot::CellIfCarried => {
+                    self.fresh_temp_var("EnsureCellSnap")
+                }
+                _ => String::new(),
+            },
             type_var: triple.type_var,
             error_var: triple.error_var,
             stack_var: triple.stack_var,

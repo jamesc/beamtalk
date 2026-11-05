@@ -145,10 +145,45 @@ Actor subclass: ClosureCellEnsure
     b value
     0
 
-  // PIN-BUG BT-4429: `Block>>ensure:` reached by `perform:` runs in the
-  // Block method, where the `^` is a foreign throw: its catch re-raises the
-  // state the `^` carried, so the cleanup's write is lost.
+  // BT-4429: `Block>>ensure:` reached by `perform:` runs in the Block
+  // method, where the `^` is a foreign throw: its catch resumes it with the
+  // cell the cleanup wrote, since the throw carried the cell's state.
   performedCleanupAfterReturn =>
     c := [self.n := 9]
     [^1] perform: #ensure: withArguments: #(c)
+    0
+
+  performedCleanupOverTheBodysWriteAfterReturn =>
+    c := [self.n := self.n + 100]
+    [
+      self.n := 5
+      ^1
+    ] perform: #ensure: withArguments: #(c)
+    0
+
+  nestedPerformedCleanupsAfterReturn =>
+    c1 := [self.n := self.n + 100]
+    c2 := [self.n := self.n * 2]
+    [
+      [^1] perform: #ensure: withArguments: #(c1)
+    ] perform: #ensure: withArguments: #(c2)
+    0
+
+  performedInsideCompiledCleanupsAfterReturn =>
+    c1 := [self.n := self.n + 100]
+    [[^1] perform: #ensure: withArguments: #(c1)] ensure: [self.n := self.n * 2]
+    0
+
+  compiledInsidePerformedCleanupsAfterReturn =>
+    c2 := [self.n := self.n * 2]
+    [
+      [^1] ensure: [self.n := self.n + 100]
+    ] perform: #ensure: withArguments: #(c2)
+    0
+
+  performedCleanupInALoopAfterReturn =>
+    c := [self.n := self.n + 1]
+    #(1, 2, 3) do: [:i |
+      [i == 2 ifTrue: [^i]] perform: #ensure: withArguments: #(c)
+    ]
     0

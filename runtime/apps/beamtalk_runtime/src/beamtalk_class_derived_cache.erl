@@ -59,12 +59,14 @@ or `respondsTo:` probe), so the table holds up to one row per class and
 selector atom sent through that path; selectors are existing atoms, and the
 next class write flushes them all. The `defining_method` key caches hits
 only; a miss re-walks so errors keep their exact shape.
-`inherited_target` (BT-4280) is the verdict a compiled actor class's
-`dispatch/4` default arm asks first (`beamtalk_dispatch:inherited_target/2`):
+`inherited_target` (BT-4280, BT-4260) is the verdict a compiled class's
+default dispatch arm asks first (`beamtalk_dispatch:inherited_target/2`):
 `{compiled, Owner, Module}` when an inherited send may call the owner's
-compiled `State`-threading method directly, else `slow`. Both are cached
-(an unregistered class is not), and a `compiled` hit re-checks the module's
-`dispatch/4` export.
+compiled `State`-threading method directly (an actor's `dispatch/4` arm),
+`{value, Owner, Module}` when it may call the owner's state-less `dispatch/3`
+directly (a value-type `dispatch/3` arm), else `slow`. All are cached (an
+unregistered class is not), and a `compiled` hit re-checks the module's
+`dispatch/4` export (a `value` hit needs no check; its remote call loads it).
 
 ## Invalidation
 

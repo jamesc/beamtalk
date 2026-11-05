@@ -417,8 +417,9 @@ selectorProviderFromName(ClassName, Selector) ->
 %% Does this exact class (not an ancestor) define `Selector`? The published
 %% local selector list answers it. A compiled value class's `has_method/1`
 %% delegates to its superclass's module, and `has_method_local/2` falls back to
-%% that probe for a module without `has_method_local/1` (every value class), so
-%% it would credit an inherited stdlib method to the user's subclass.
+%% that probe for a module without `has_method_local/1` (a value class compiled
+%% before BT-4260), so it would credit an inherited stdlib method to the
+%% user's subclass.
 -spec defines_selector_locally(atom(), pid(), atom()) -> boolean().
 defines_selector_locally(ClassName, ClassPid, Selector) ->
     case beamtalk_class_metadata:lookup_instance_methods(ClassName) of

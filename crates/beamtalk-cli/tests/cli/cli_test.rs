@@ -191,6 +191,52 @@ fn test_resolves_cross_file_trait_provided_method_bt_3673() {
     );
 }
 
+/// BT-4446: `beamtalk test` must pre-load the package's `src/` protocols
+/// as `beamtalk build` does, so a test file resolves `P class` (ADR 0144)
+/// against the protocol's `class` requirements. Before, the protocol was
+/// unknown in test compilation and `g :: Salutation class := Bonjour` failed as
+/// a plain type mismatch under `--warnings-as-errors`.
+#[test]
+fn test_file_resolves_src_protocol_metatype_bt_4446() {
+    let project = cli_common::fixture_project();
+    let header = "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
+    std::fs::write(
+        project.path().join("src/salutation.bt"),
+        format!("{header}Protocol define: Salutation\n  class greet: n :: Integer -> String\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/bonjour.bt"),
+        format!(
+            "{header}sealed Object subclass: Bonjour\n  \
+             class sealed greet: n :: Integer -> String => \"bonjour {{n printString}}\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("test/SalutationTest.bt"),
+        format!(
+            "{header}TestCase subclass: SalutationTest\n\
+             \n\
+             \x20\x20run: g :: Salutation class -> String => g greet: 1\n\
+             \n\
+             \x20\x20testArgument => self assert: (self run: Bonjour) equals: \"bonjour 1\"\n\
+             \n\
+             \x20\x20testLocal =>\n\
+             \x20\x20\x20\x20g :: Salutation class := Bonjour\n\
+             \x20\x20\x20\x20self assert: (g greet: 2) equals: \"bonjour 2\"\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "--warnings-as-errors"])
+        .assert()
+        .success()
+        .stdout(contains("0 failed"));
+}
+
 /// BT-4152: `beamtalk test` emits fixture modules unqualified
 /// (`bt@<stem>`) while stamping the fixture's own class with
 /// `package = Some(current_package)`. A sealed fixture Value whose

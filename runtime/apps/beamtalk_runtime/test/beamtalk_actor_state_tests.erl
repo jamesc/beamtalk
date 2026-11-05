@@ -302,6 +302,50 @@ refresh_away_answers_the_accumulator_unchanged_test() ->
     Acc = #{a => 1, '__local__x' => 5},
     ?assertEqual(Acc, beamtalk_actor_state:refresh(foreign_obj(), Acc)).
 
+%% BT-4429: `Block>>ensure:` reached by `perform:` cannot know what a `^` carries.
+refresh_carried_resumes_the_cells_own_state_with_the_cleanups_writes_test() ->
+    Carried = #{n => 0, '__local__x' => 5},
+    with_cell(#{n => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ok = beamtalk_actor_state:put(self_obj(), n, 9),
+        ?assertEqual(
+            #{n => 9, '__local__x' => 5},
+            beamtalk_actor_state:refresh_carried(Snap, Carried)
+        )
+    end).
+
+refresh_carried_leaves_a_state_that_is_not_the_cells_alone_test() ->
+    Bindings = #{w => 0},
+    with_cell(#{n => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ok = beamtalk_actor_state:put(self_obj(), n, 9),
+        ?assertEqual(Bindings, beamtalk_actor_state:refresh_carried(Snap, Bindings))
+    end).
+
+refresh_carried_without_a_cell_answers_the_carried_state_test() ->
+    ?assertEqual(#{n => 0}, beamtalk_actor_state:refresh_carried(undefined, #{n => 0})),
+    ?assertEqual(nil, beamtalk_actor_state:refresh_carried(undefined, nil)).
+
+refresh_carried_ignores_local_scratch_on_either_side_test() ->
+    with_cell(#{n => 0, '__local__y' => 1}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ok = beamtalk_actor_state:put(self_obj(), n, 9),
+        ?assertMatch(
+            #{n := 9},
+            beamtalk_actor_state:refresh_carried(Snap, #{n => 0})
+        )
+    end).
+
+refresh_carried_leaves_a_non_map_carried_state_alone_test() ->
+    with_cell(#{n => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ?assertEqual(nil, beamtalk_actor_state:refresh_carried(Snap, nil))
+    end).
+
+refresh_carried_leaves_another_actors_cell_alone_test() ->
+    Snap = {spawn(fun() -> ok end), #{n => 0}},
+    ?assertEqual(#{n => 0}, beamtalk_actor_state:refresh_carried(Snap, #{n => 0})).
+
 call_foreign_stores_the_state_and_answers_the_funs_answer_test() ->
     State = #{n => 1},
     Fun = fun(Arg) -> {reply, {saw, beamtalk_actor_state:take(), Arg}, State} end,
