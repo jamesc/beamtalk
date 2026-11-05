@@ -27,6 +27,11 @@ receiver's method has unwound rather than inside it.
 
 -export([if_true/1, if_false/1]).
 
+%% The block `block_called/2` hands the receiver only ever throws: that is how
+%% its call is observed, so Dialyzer's "created fun only terminates with
+%% explicit exception" is expected there.
+-dialyzer({nowarn_function, [block_called/2]}).
+
 -doc """
 The branch `c ifTrue: [^v]. rest` takes: `true` returns `v`, `false` runs the
 rest.
