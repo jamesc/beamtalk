@@ -49,6 +49,9 @@ requests, "type"-keyed responses) has been removed.
     %% shared with `beamtalk_ws_handler`'s `reload_check` push frame so the
     %% two wire shapes can never drift apart.
     encode_reload_finding/1,
+    %% The one place a warning list becomes JSON (BT-4449), shared with
+    %% `beamtalk_repl_json`'s warning-carrying encoders.
+    maybe_add_warnings/2,
     undefined_to_null/1,
     get_op/1,
     get_id/1,
@@ -72,6 +75,13 @@ requests, "type"-keyed responses) has been removed.
 
 -type protocol_msg() :: #protocol_msg{}.
 -export_type([protocol_msg/0]).
+
+%% A warning a response carries. The compiler port sends structured
+%% `#{message, hint?}` maps (BT-4449: the diagnostic's hint kept as its own
+%% field); warnings the runtime raises itself (class collisions, ...) are
+%% plain message binaries.
+-type warning() :: binary() | beamtalk_compiler_port:warning().
+-export_type([warning/0]).
 
 %%% Decoding
 
@@ -132,7 +142,7 @@ encode_result(Value, Msg, TermToJson, Output) ->
     encode_result(Value, Msg, TermToJson, Output, []).
 
 -doc "Encode a successful result response with captured stdout and warnings.".
--spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [binary()]) ->
+-spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [warning()]) ->
     binary().
 encode_result(Value, Msg, TermToJson, Output, Warnings) ->
     JsonValue = TermToJson(Value),
@@ -151,7 +161,7 @@ it as its own process exit code. `value` is `null` — `Program exit:` does not
 return a value. The session shell has already terminated by the time this is
 encoded; the shared node stays up.
 """.
--spec encode_script_exit(non_neg_integer(), protocol_msg(), binary(), [binary()]) -> binary().
+-spec encode_script_exit(non_neg_integer(), protocol_msg(), binary(), [warning()]) -> binary().
 encode_script_exit(Code, Msg, Output, Warnings) ->
     Base = base_response(Msg),
     Full = Base#{
@@ -174,7 +184,7 @@ encode_error(Reason, Msg, FormatError, Output) ->
     encode_error(Reason, Msg, FormatError, Output, []).
 
 -doc "Encode an error response with captured stdout and warnings.".
--spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()]) ->
+-spec encode_error(term(), protocol_msg(), fun((term()) -> binary()), binary(), [warning()]) ->
     binary().
 encode_error(Reason, Msg, FormatError, Output, Warnings) ->
     encode_error(Reason, Msg, FormatError, Output, Warnings, #{}).
@@ -184,7 +194,7 @@ Encode an error response with captured stdout, warnings, and extra metadata fiel
 Metadata may include `<<"line">>' and `<<"hint">>' for compile errors.
 """.
 -spec encode_error(
-    term(), protocol_msg(), fun((term()) -> binary()), binary(), [binary()], map()
+    term(), protocol_msg(), fun((term()) -> binary()), binary(), [warning()], map()
 ) -> binary().
 encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
     Message = FormatError(Reason),
@@ -233,7 +243,7 @@ Encode a loaded file response with warnings.
 Warnings are class collision warnings from loading classes that
 shadow classes already registered from a different module.
 """.
--spec encode_loaded([map()], protocol_msg(), fun((term()) -> term()), [binary()]) -> binary().
+-spec encode_loaded([map()], protocol_msg(), fun((term()) -> term()), [warning()]) -> binary().
 encode_loaded(Classes, Msg, _TermToJson, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
     Base = base_response(Msg),
@@ -431,7 +441,7 @@ Encode a trace result response.
 The response includes a `steps' array where each entry has `src' and `value' fields.
 """.
 -spec encode_trace_result(
-    [{binary(), term()}], protocol_msg(), fun((term()) -> term()), binary(), [binary()]
+    [{binary(), term()}], protocol_msg(), fun((term()) -> term()), binary(), [warning()]
 ) -> binary().
 encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
     JsonSteps = [
@@ -534,7 +544,7 @@ Encode a show-codegen response.
 Carries the generated Core Erlang source and any compiler warnings for the
 `show-codegen` op.
 """.
--spec encode_codegen(binary(), [binary()], protocol_msg()) -> binary().
+-spec encode_codegen(binary(), [warning()], protocol_msg()) -> binary().
 encode_codegen(CoreErlang, Warnings, Msg) ->
     Base = base_response(Msg),
     Result = Base#{<<"core_erlang">> => CoreErlang, <<"status">> => [<<"done">>]},
@@ -609,7 +619,7 @@ Encode a load-project response.
 per-file and dependency-activation error maps, `Summary` the human-readable
 reload summary, and `Warnings` any class-collision warnings.
 """.
--spec encode_load_project([binary()], [map()], binary(), [binary()], protocol_msg()) -> binary().
+-spec encode_load_project([binary()], [map()], binary(), [warning()], protocol_msg()) -> binary().
 encode_load_project(Classes, Errors, Summary, Warnings, Msg) ->
     Base = base_response(Msg),
     Response = Base#{
@@ -665,7 +675,35 @@ maybe_add_output(Map, <<>>) ->
 maybe_add_output(Map, Output) when is_binary(Output) ->
     Map#{<<"output">> => Output}.
 
--doc "Add warnings field to response map only when non-empty.".
--spec maybe_add_warnings(map(), [binary()]) -> map().
-maybe_add_warnings(Map, []) -> Map;
-maybe_add_warnings(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
+-doc """
+Add the warning fields to a response map, only when there are warnings.
+
+`warnings` is always the list of message strings, so a client that only
+reads messages keeps working. When any warning carries a hint (BT-4449),
+`warning_details` is added too: one `{"message", "hint"?}` object per
+warning, in the same order as `warnings`. Hint *rendering* is each client's
+job; this only carries the field.
+""".
+-spec maybe_add_warnings(map(), [warning()]) -> map().
+maybe_add_warnings(Map, []) ->
+    Map;
+maybe_add_warnings(Map, Warnings) ->
+    WithMessages = Map#{<<"warnings">> => [warning_message(W) || W <- Warnings]},
+    case lists:any(fun warning_has_hint/1, Warnings) of
+        true -> WithMessages#{<<"warning_details">> => [warning_detail(W) || W <- Warnings]};
+        false -> WithMessages
+    end.
+
+-spec warning_message(warning()) -> binary().
+warning_message(#{message := Message}) -> Message;
+warning_message(Message) when is_binary(Message) -> Message.
+
+-spec warning_has_hint(warning()) -> boolean().
+warning_has_hint(#{hint := _}) -> true;
+warning_has_hint(_) -> false.
+
+-spec warning_detail(warning()) -> map().
+warning_detail(#{message := Message, hint := Hint}) ->
+    #{<<"message">> => Message, <<"hint">> => Hint};
+warning_detail(W) ->
+    #{<<"message">> => warning_message(W)}.

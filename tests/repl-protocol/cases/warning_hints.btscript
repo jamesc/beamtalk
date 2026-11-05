@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for warning hints (BT-4449): a compile warning carries its
+// diagnostic hint as its own field through the REPL protocol
+// (`warning_details`), on the standalone method-definition path
+// (`compile_method`, merged with the class's recompile warnings). The inline
+// class-definition path is covered by `class_side_protocol_types.btscript`.
+//
+// REPL-protocol cases share one workspace session, so every name here is
+// prefixed `Bt4449`.
+
+Object subclass: Bt4449Probe
+  ping => 1
+// => "Bt4449Probe"
+
+Bt4449Probe >> probe => "abc" sizee
+// => WARNING: does not understand 'sizee' HINT: Did you mean 'size'?

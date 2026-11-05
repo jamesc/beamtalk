@@ -24,6 +24,60 @@ async fn evaluate_returns_value_and_output() {
 }
 
 #[tokio::test]
+async fn evaluate_renders_warning_with_its_hint() {
+    // BT-4449: `warnings` stays message strings; the hint arrives in
+    // `warning_details` and is shown on its own `Hint:` line.
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "value": "Client",
+        "warnings": ["Udp class does not conform to Transport class", "plain"],
+        "warning_details": [
+            {"message": "Udp class does not conform to Transport class",
+             "hint": "missing: class defaultPort"},
+            {"message": "plain"}
+        ]
+    })))
+    .await;
+    let result = mcp
+        .evaluate(Parameters(EvaluateParams {
+            code: "Value subclass: Client".to_string(),
+            trace: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(false));
+    let text = call_text(&result);
+    assert!(
+        text.contains(
+            "Warning: Udp class does not conform to Transport class\nHint: missing: class defaultPort"
+        ),
+        "expected the hint under the warning in {text:?}"
+    );
+    assert!(text.contains("Warning: plain"), "{text:?}");
+}
+
+#[tokio::test]
+async fn evaluate_error_still_renders_warnings_with_hints() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "error": "boom",
+        "status": ["done", "error"],
+        "warnings": ["w"],
+        "warning_details": [{"message": "w", "hint": "h"}]
+    })))
+    .await;
+    let result = mcp
+        .evaluate(Parameters(EvaluateParams {
+            code: "x".to_string(),
+            trace: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = call_text(&result);
+    assert!(text.contains("Error: boom"), "{text:?}");
+    assert!(text.contains("Warning: w\nHint: h"), "{text:?}");
+}
+
+#[tokio::test]
 async fn evaluate_trace_renders_steps() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
         "steps": [{"src": "1 + 2", "value": "3"}]

@@ -984,6 +984,49 @@ the response `warnings` only when a finding exists (BT-3778), and
 `.btscript` test-expression compilation prints it to stderr. Other codegen
 warnings are still not forwarded.
 
+### Warning hints (BT-4449)
+
+A compile warning carries its message and, when the diagnostic has one, its
+hint as **separate fields** end to end — never one string. The hint is often
+the useful part: ADR 0144's `X class does not conform to P class` puts
+`missing: class defaultPort` there, and the protocol-conformance warning puts
+`Missing required method(s): …` there.
+
+- **Compiler port → workspace:** every warning is a `#{message => Bin}` map
+  with `hint => Bin` only when present (`beamtalk_compiler_port:warning()`),
+  built by the one `respond::build_warning_terms` for every response shape
+  (expression, inline class/protocol/alias, file compile, method compile).
+  Warnings the runtime raises itself (class collisions) stay plain binaries.
+  The Erlang side only carries the field; it formats no hint.
+- **REPL protocol (JSON):** `warnings` stays a list of message strings, so an
+  old client keeps working. When any warning has a hint, `warning_details`
+  is added: one `{"message", "hint"?}` object per warning, same order
+  (`beamtalk_repl_protocol:maybe_add_warnings/2`, the only JSON encoder of
+  warnings). Rust clients read both through `ReplResponse::warning_entries()`.
+- **Rendering** (`beamtalk_repl_protocol::format::format_warning_entry`): the
+  hint is a `Hint: <hint>` line under the warning, as an error's hint is under
+  `Error:`, and unpainted like it. CLI REPL eval (`⚠` bullet style) indents
+  it two spaces to sit under the message text; `:sync` and
+  `:show-codegen` (`Warning:` style) and MCP `evaluate`, `load_file` and
+  `show_codegen` put it at column 0:
+
+  ```text
+  ⚠ Udp class does not conform to Transport class
+    Hint: missing: class defaultPort
+
+  Warning: Udp class does not conform to Transport class
+  Hint: missing: class defaultPort
+  ```
+
+  MCP `evaluate` now lists an eval's compile warnings (one `Warning:` block
+  each, after the value — or after the `Error:` block when the eval failed),
+  as the CLI REPL does; before BT-4449 it dropped them.
+- **LiveView attach:** `BtAttach.Workspace.eval/2` returns each warning as
+  `%{message: String.t(), hint: String.t() | nil}`. The attach UI does not
+  display eval warnings yet (surface-specific gap, pre-existing; BT-4471).
+- **LSP:** unaffected — it publishes its own `Diagnostic`s, whose hints it
+  already shows; it never reads the port's REPL warnings.
+
 ### Cross-file trait provisions in the checker's `ClassInfo` (ADR 0127, BT-3668, BT-3673)
 
 A class that `uses:` a trait declared in *another* file only has the trait's

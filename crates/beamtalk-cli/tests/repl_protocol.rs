@@ -40,7 +40,7 @@ mod cli_common;
 use beamtalk_cli::repl_startup;
 use beamtalk_core::source_analysis::is_input_complete;
 use beamtalk_core::unparse::escape_string_literal;
-use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake};
+use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, Warning, handshake};
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -943,8 +943,8 @@ impl Drop for ProcessManager {
 /// Client for communicating with the REPL via WebSocket.
 struct ReplClient {
     ws: WebSocket<TcpStream>,
-    /// Last warnings from evaluation (for WARNING: assertions)
-    last_warnings: Vec<String>,
+    /// Last warnings from evaluation, each with its hint (for WARNING: assertions)
+    last_warnings: Vec<Warning>,
     /// Last loaded path for :reload support (path, `is_directory`)
     last_loaded_path: Option<(String, bool)>,
 }
@@ -1084,10 +1084,7 @@ impl ReplClient {
         let response = self.read_repl_response()?;
 
         // Extract warnings if present
-        self.last_warnings.clear();
-        if let Some(ref warnings) = response.warnings {
-            self.last_warnings.clone_from(warnings);
-        }
+        self.last_warnings = response.warning_entries();
 
         if response.is_error() {
             let message = response.error_message().unwrap_or("Unknown error");
@@ -1123,10 +1120,7 @@ impl ReplClient {
         let response = self.read_repl_response()?;
 
         // Extract warnings from load response (class collision warnings)
-        self.last_warnings.clear();
-        if let Some(ref warnings) = response.warnings {
-            self.last_warnings.clone_from(warnings);
-        }
+        self.last_warnings = response.warning_entries();
 
         if response.is_error() {
             let message = response.error_message().unwrap_or("Unknown error");
@@ -1896,17 +1890,30 @@ fn run_test_file_opts(
             Ok(result) => {
                 // Check if this is a WARNING assertion
                 if case.expected.starts_with("WARNING:") {
-                    let expected_warning = case.expected.strip_prefix("WARNING:").unwrap().trim();
-                    if client
-                        .last_warnings
-                        .iter()
-                        .any(|w| w.contains(expected_warning))
-                    {
+                    // WARNING:<msg> [HINT:<hint>] — some warning's message
+                    // contains <msg> and, when given, that same warning's
+                    // hint contains <hint> (BT-4449).
+                    let spec = case.expected.strip_prefix("WARNING:").unwrap();
+                    let (expected_warning, expected_hint) = match spec.split_once(" HINT:") {
+                        Some((msg, hint)) => (msg.trim(), Some(hint.trim())),
+                        None => (spec.trim(), None),
+                    };
+                    if client.last_warnings.iter().any(|w| {
+                        w.message.contains(expected_warning)
+                            && expected_hint
+                                .is_none_or(|h| w.hint.as_deref().is_some_and(|wh| wh.contains(h)))
+                    }) {
                         pass_count += 1;
                     } else {
                         failures.push(format!(
-                            "{file_name}:{}: `{}` expected warning containing `{}`, got warnings: {:?}",
-                            case.line, case.expression, expected_warning, client.last_warnings
+                            "{file_name}:{}: `{}` expected warning containing `{}`{}, got warnings: {:?}",
+                            case.line,
+                            case.expression,
+                            expected_warning,
+                            expected_hint
+                                .map(|h| format!(" with hint containing `{h}`"))
+                                .unwrap_or_default(),
+                            client.last_warnings
                         ));
                     }
                 } else if case.expected.starts_with("NO-WARNING:") {
@@ -1914,7 +1921,11 @@ fn run_test_file_opts(
                     // Guards against spurious diagnostics surviving a successful
                     // eval (e.g. the recurring `Unresolved class Workspace`).
                     let banned = case.expected.strip_prefix("NO-WARNING:").unwrap().trim();
-                    if let Some(hit) = client.last_warnings.iter().find(|w| w.contains(banned)) {
+                    if let Some(hit) = client
+                        .last_warnings
+                        .iter()
+                        .find(|w| w.message.contains(banned))
+                    {
                         failures.push(format!(
                             "{file_name}:{}: `{}` expected NO warning containing `{}`, got: {hit:?}",
                             case.line, case.expression, banned

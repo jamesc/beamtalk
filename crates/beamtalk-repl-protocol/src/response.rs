@@ -118,9 +118,17 @@ pub struct ReplResponse {
     pub state: Option<serde_json::Value>,
 
     // --- Diagnostics ---
-    /// Compilation warnings.
+    /// Compilation warnings — message strings only. Kept as plain strings so
+    /// a client that predates [`Self::warning_details`] keeps working; read
+    /// warnings through [`Self::warning_entries`] to get their hints too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
+
+    /// The same warnings as [`Self::warnings`], in the same order, each with
+    /// its diagnostic hint as a separate field (BT-4449). The server sends
+    /// this only when at least one warning has a hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning_details: Option<Vec<Warning>>,
 
     /// Line number (1-based) of a compile error in the submitted snippet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -184,6 +192,24 @@ pub struct ReplResponse {
 }
 
 impl ReplResponse {
+    /// Every warning in this response, with its hint when it has one:
+    /// [`Self::warning_details`] when the server sent it, otherwise
+    /// [`Self::warnings`] as hint-less entries.
+    #[must_use]
+    pub fn warning_entries(&self) -> Vec<Warning> {
+        if let Some(details) = &self.warning_details {
+            return details.clone();
+        }
+        self.warnings
+            .iter()
+            .flatten()
+            .map(|message| Warning {
+                message: message.clone(),
+                hint: None,
+            })
+            .collect()
+    }
+
     /// Check if this is an error response (either legacy or current format).
     pub fn is_error(&self) -> bool {
         if self.response_type.as_deref() == Some("error") {
@@ -232,6 +258,16 @@ impl ReplResponse {
             None => String::new(),
         }
     }
+}
+
+/// One compilation warning with its optional hint (`warning_details` entry).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Warning {
+    /// The warning message (also listed in the response's `warnings`).
+    pub message: String,
+    /// The diagnostic's hint, e.g. `missing: class defaultPort`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 /// Information about a running actor, deserialized from REPL JSON.
@@ -299,6 +335,52 @@ mod tests {
         assert!(!resp.is_error());
         assert_eq!(resp.value_string(), "42");
         assert_eq!(resp.id.as_deref(), Some("msg-001"));
+    }
+
+    #[test]
+    fn warning_entries_fall_back_to_plain_warnings() {
+        let json = r#"{"value":1,"warnings":["a","b"],"status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resp.warning_entries(),
+            vec![
+                Warning {
+                    message: "a".to_string(),
+                    hint: None
+                },
+                Warning {
+                    message: "b".to_string(),
+                    hint: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn warning_entries_prefer_warning_details_with_hints() {
+        // BT-4449: `warnings` stays message strings for old clients;
+        // `warning_details` carries the hint.
+        let json = r#"{"value":1,"warnings":["m","n"],
+            "warning_details":[{"message":"m","hint":"h"},{"message":"n"}],
+            "status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            resp.warnings.as_deref(),
+            Some(&["m".to_string(), "n".to_string()][..])
+        );
+        assert_eq!(
+            resp.warning_entries(),
+            vec![
+                Warning {
+                    message: "m".to_string(),
+                    hint: Some("h".to_string())
+                },
+                Warning {
+                    message: "n".to_string(),
+                    hint: None
+                },
+            ]
+        );
     }
 
     #[test]

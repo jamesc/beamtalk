@@ -406,9 +406,11 @@ load_class_module(ClassInfo, Expression, State) ->
     end.
 
 -doc "Recompile and reload a class after a standalone method definition.".
--spec reload_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec reload_method_definition(
+    map(), [beamtalk_repl_protocol:warning()], string(), beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 reload_method_definition(MethodInfo, Warnings, Expression, State) ->
     #{class_name := ClassNameBin} = MethodInfo,
     case is_protocol_name(ClassNameBin) of
@@ -427,9 +429,11 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
             reload_class_method_definition(MethodInfo, Warnings, Expression, State)
     end.
 
--spec reload_class_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec reload_class_method_definition(
+    map(), [beamtalk_repl_protocol:warning()], string(), beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 reload_class_method_definition(MethodInfo, Warnings, Expression, State) ->
     #{class_name := ClassNameBin} = MethodInfo,
     ExistingSource = beamtalk_workspace_meta:get_class_source(ClassNameBin),
@@ -1635,7 +1639,7 @@ compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName, Prebu
 %% reduce to — see `compile_reload_source/4`'s own doc for the shapes this
 %% translates between.
 -spec handle_compile_reload_result(
-    {ok, protocol_definition, map(), [binary()]}
+    {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, binary(), [map()], atom()}
     | {error, term()},
     string(),
@@ -2206,10 +2210,10 @@ protocol_reload_install_failed_error(Who, Reason) ->
 %% wraps all compiler calls in wrap_compiler_errors, preventing compiler crashes
 %% from propagating as exits that would kill the REPL process.
 -spec recompile_with_method(
-    string(), map(), string(), [binary()], beamtalk_repl_state:state()
+    string(), map(), string(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     CombinedSource = ClassSource ++ "\n" ++ Expression,
     %% Source may carry non-Latin1 characters (em dash, arrows, smart quotes in
@@ -2278,11 +2282,11 @@ patched class stays flushable + revertable.
     durable | ephemeral,
     binary(),
     human | agent,
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 install_method(
     ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, Warnings, State
 ) ->
@@ -2309,12 +2313,12 @@ on the wrong side. Otherwise identical to `install_method/8`.
     durable | ephemeral,
     binary(),
     human | agent,
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state(),
     boolean()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 install_method(
     ClassNameBin,
     SelectorBin,
@@ -2365,12 +2369,12 @@ install_method(
     durable | ephemeral,
     binary(),
     human | agent,
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state(),
     boolean()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 install_class_method(
     ClassNameBin,
     SelectorBin,
@@ -2411,12 +2415,12 @@ install_class_method(
     durable | ephemeral,
     binary(),
     human | agent,
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state(),
     boolean()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 install_method_with_source(
     ClassNameBin,
     SelectorBin,
@@ -4392,8 +4396,8 @@ to_rewrite_site(#{class := Class, source_file := SourceFile, new_text := NewText
 -spec load_recompiled_method(
     binary(), atom(), list(), map(), string(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 load_recompiled_method(
     Binary,
     ModName,
@@ -4534,10 +4538,15 @@ provisions (not supported in v1, ADR 0127 §13), and a protocol with no tracked
 source (defined inline at the REPL rather than loaded from a file).
 """.
 -spec patch_protocol_provision(
-    binary(), binary(), binary(), map(), [binary()], beamtalk_repl_state:state()
+    binary(),
+    binary(),
+    binary(),
+    map(),
+    [beamtalk_repl_protocol:warning()],
+    beamtalk_repl_state:state()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 patch_protocol_provision(ProtocolBin, SelectorBin, MethodSource, Opts, Warnings, State) ->
     case patch_protocol_provision_edit(ProtocolBin, SelectorBin, MethodSource, Opts) of
         ok ->

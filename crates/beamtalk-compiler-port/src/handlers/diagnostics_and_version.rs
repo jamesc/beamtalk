@@ -93,6 +93,7 @@ pub(crate) fn handle_diagnostics(request: &Map) -> Term {
 pub(crate) fn diag_info(d: &beamtalk_core::source_analysis::Diagnostic) -> DiagInfo {
     DiagInfo {
         message: d.message.to_string(),
+        hint: d.hint.as_ref().map(ToString::to_string),
         severity: d.severity.as_str().to_string(),
         category: diag_category(d),
         start: d.span.start(),

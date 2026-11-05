@@ -36,6 +36,8 @@
 //! - [`load_project_parity`] — BT-4322: `compile` typechecks a file with
 //!   its own project's aliases, FFI specs, and `[diagnostics]` table,
 //!   like `beamtalk build`
+//! - [`warning_hints`] — BT-4449: each warning is a `#{message, hint?}`
+//!   map, the diagnostic hint kept as its own field
 
 use super::*;
 // The compiler port's crate-root `main.rs` no longer imports the full ETF
@@ -128,6 +130,40 @@ pub(crate) fn response_field_str_list(term: &Term, key: &str) -> Option<Vec<Stri
     None
 }
 
+/// Decode a response's `warnings` field — one `#{message, hint?}` map per
+/// warning (BT-4449) — back into [`crate::diagnostics::Warning`]s. Panics if
+/// the response has no `warnings` list or an entry is not that shape.
+pub(crate) fn response_warnings(term: &Term) -> Vec<crate::diagnostics::Warning> {
+    let Term::Map(map) = term else {
+        panic!("Expected map response: {term:?}");
+    };
+    let Some(Term::List(list)) = map_get(map, "warnings") else {
+        panic!("Expected warnings list: {term:?}");
+    };
+    list.elements
+        .iter()
+        .map(|w| {
+            let Term::Map(wm) = w else {
+                panic!("Expected warning map, got: {w:?}");
+            };
+            crate::diagnostics::Warning {
+                message: map_get(wm, "message")
+                    .and_then(term_to_string)
+                    .unwrap_or_else(|| panic!("warning without message: {w:?}")),
+                hint: map_get(wm, "hint").and_then(term_to_string),
+            }
+        })
+        .collect()
+}
+
+/// The `message` of every warning in a response (see [`response_warnings`]).
+pub(crate) fn response_warning_messages(term: &Term) -> Vec<String> {
+    response_warnings(term)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
+}
+
 /// Default is 512 cases for standard CI; override via `PROPTEST_CASES` env var
 /// for nightly extended runs (e.g., `PROPTEST_CASES=10000`).
 pub(crate) fn proptest_config() -> ProptestConfig {
@@ -154,3 +190,4 @@ mod type_alias_declarations;
 mod type_aliases;
 mod type_string_wire_fidelity;
 mod verifier_warnings;
+mod warning_hints;

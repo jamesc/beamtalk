@@ -49,6 +49,12 @@ verification that BEAM can invoke the Rust compiler via a port.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% A compiler warning as the port sends it (BT-4449): the diagnostic's
+%% message, plus its hint as a separate field when it has one. Never folded
+%% into one string here — each REPL surface renders the hint itself.
+-type warning() :: #{message := binary(), hint => binary()}.
+-export_type([warning/0]).
+
 -doc """
 Open a port to the compiler binary.
 Finds the binary relative to the project root or via PATH.
@@ -80,7 +86,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -104,7 +110,7 @@ inline class definitions correctly resolve inherited types and module names
 from already-loaded files.
 """.
 -spec compile_expression(port(), binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -214,13 +220,13 @@ Same request format as `compile_expression/4' but sends the
 `{Result, FinalState}'.
 """.
 -spec compile_expression_trace(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [warning()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
     compile_expression_trace(Port, Source, ModuleName, KnownVars, #{}).
 
 -doc "Compile in trace mode with optional compilation options.".
 -spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [warning()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
     SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
     ModuleIndex = maps:get(class_module_index, Options, #{}),
@@ -1627,7 +1633,7 @@ responses (ADR 0108 Phase 8). Diagnostics in error responses are maps with
 `message', `line', and optional `hint'.
 """.
 -spec handle_response(map()) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}

@@ -61,11 +61,10 @@ Bt4436Client new url
 // A non-conforming class warns
 // ===========================================================================
 //
-// `Bt4436Udp` answers `scheme` but not `defaultPort`. The REPL protocol's
-// `warnings` carry each diagnostic's message; the missing selectors are in
-// its hint (`missing: class defaultPort`), which the type checker's own test
-// asserts (`non_conforming_class_warns_with_missing_class_selectors`). Here
-// the missing selector is shown through the class itself.
+// `Bt4436Udp` answers `scheme` but not `defaultPort`. The warning names the
+// missing selectors in its hint (`missing: class defaultPort`), which the
+// REPL protocol carries as its own field (BT-4449) and the CLI shows on a
+// `Hint:` line under the warning.
 
 Object subclass: Bt4436Udp
   class scheme -> String => "udp"
@@ -73,7 +72,7 @@ Object subclass: Bt4436Udp
 
 Value subclass: Bt4436BadClient
   field: transport :: Bt4436Transport class = Bt4436Udp
-// => WARNING: Bt4436Udp class does not conform to Bt4436Transport class
+// => WARNING: Bt4436Udp class does not conform to Bt4436Transport class HINT: missing: class defaultPort
 
 Bt4436Udp respondsTo: #defaultPort
 // => false

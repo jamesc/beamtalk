@@ -4,6 +4,7 @@
 //! `reindent_method_source`, `compile_expression_trace`, `resolve_completion_type` edge cases, class-hierarchy builtin skipping, `derive_class_module_name` overrides, inline/protocol-only class-definition module naming, and standalone method-definition signature reporting.
 
 use super::*;
+use crate::diagnostics::Warning;
 
 // --- reindent_method_source tests ---
 
@@ -411,14 +412,18 @@ fn with_verifier_warnings_appends_internal_messages() {
 
     let verifier = Diagnostic::warning("internal: x: [Foo]", Span::new(0, 1))
         .with_category(DiagnosticCategory::InternalVerifier);
-    let all = crate::respond::with_verifier_warnings(&["existing".to_string()], &[verifier]);
+    let existing = [Warning::message_only("existing")];
+    let all = crate::respond::with_verifier_warnings(&existing, &[verifier]);
     assert_eq!(
         all,
-        vec!["existing".to_string(), "internal: x: [Foo]".to_string()]
+        vec![
+            Warning::message_only("existing"),
+            Warning::message_only("internal: x: [Foo]"),
+        ]
     );
     assert_eq!(
-        crate::respond::with_verifier_warnings(&["existing".to_string()], &[]),
-        vec!["existing".to_string()]
+        crate::respond::with_verifier_warnings(&existing, &[]),
+        existing.to_vec()
     );
 }
 
@@ -431,7 +436,7 @@ fn with_verifier_warnings_drops_opt_in_codegen_hints() {
     let hint = Diagnostic::hint("dynamic dispatch: foo", Span::new(0, 1))
         .with_category(DiagnosticCategory::CodegenReport);
     assert_eq!(
-        crate::respond::with_verifier_warnings(&["existing".to_string()], &[hint]),
-        vec!["existing".to_string()]
+        crate::respond::with_verifier_warnings(&[Warning::message_only("existing")], &[hint]),
+        vec![Warning::message_only("existing")]
     );
 }
