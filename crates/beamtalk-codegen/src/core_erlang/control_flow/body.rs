@@ -500,10 +500,10 @@ impl CoreErlangGenerator {
 
     /// BT-4439: how this loop or fold body writes a local a destructuring
     /// assignment binds — the write its local-var assignment branch performs
-    /// for `name := ...`: a plain `let` for a block local outside the REPL
-    /// that the loop does not thread, a rebind in the argument chain when the
-    /// body threads its locals as loop parameters (`direct`), the scratch-slot
-    /// `Put` otherwise.
+    /// for `name := ...`: a plain `let` for a block local (outside the REPL,
+    /// and not one of the loop's threaded locals), a rebind in the argument
+    /// chain when the body threads its locals as loop parameters (`direct`),
+    /// the scratch-slot `Put` otherwise.
     fn loop_body_local_write<'p>(
         &self,
         plan: &'p ThreadingPlan,
