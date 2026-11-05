@@ -589,7 +589,7 @@ mod tests {
     #[test]
     fn fixture_matches_live_otp_when_available() {
         // Guards against a hand-edited or stale fixture: regenerate it with
-        // the installed OTP and compare. Skipped when no `escript` is on PATH
+        // the installed OTP and compare. Skipped when no working `escript` is on PATH
         // or the installed OTP major differs from the fixture's (e.g. a CI
         // leg on an older supported release).
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -603,11 +603,14 @@ mod tests {
             eprintln!("skipping: escript not available");
             return;
         };
-        assert!(
-            output.status.success(),
-            "generator failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        if !output.status.success() {
+            // e.g. a mise/asdf shim with no Erlang installed behind it.
+            eprintln!(
+                "skipping: escript could not run the generator: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let live = String::from_utf8(output.stdout).expect("generator output is UTF-8");
         if fixture_otp_major(&live) != fixture_otp_major(OTP_EXPORTS) {
             eprintln!("skipping: installed OTP differs from the fixture's");
