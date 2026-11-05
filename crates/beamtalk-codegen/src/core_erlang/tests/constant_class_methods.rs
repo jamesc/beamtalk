@@ -5,7 +5,7 @@
 //! one integer literal answers the literal in place, but only behind a
 //! run-time key, `{constant_value, Value, Module, Fun, Tag}`: the runtime
 //! installs it only while a direct call would run that compiled method and
-//! the defining module's `constant_class_methods` metadata still maps the
+//! the class's published `constant_class_methods` metadata still maps the
 //! selector to `Value`, else the call site takes the dynamic `class_send`. So
 //! a later extension, runtime fun, `removeSelector:` or reload is honoured.
 

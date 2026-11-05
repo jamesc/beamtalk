@@ -3874,9 +3874,10 @@ impl CoreErlangGenerator {
     /// The guard is the contract (ADR 0025 amendment): the runtime installs
     /// the key only while every condition of a direct-call key holds (the
     /// dynamic path would run exactly `module_name`'s compiled function in
-    /// the caller) and the defining module's current `__beamtalk_meta/0`
-    /// maps the selector to this same value under `constant_class_methods`
-    /// (`beamtalk_class_shadow_flags`, `key_body_holds/3`). A class-side
+    /// the caller) and the class's published metadata row maps the selector
+    /// to this same value (`constant_class_methods`, published from the
+    /// module's `__beamtalk_meta/0` on registration and reload;
+    /// `beamtalk_class_shadow_flags`, `key_body_holds/4`). A class-side
     /// extension, a runtime fun (`put_class_method`), `removeSelector:` or a
     /// reload that changes the body erases or declines the key, and the send
     /// then answers what the dynamic send answers. Sealing plays no part: the

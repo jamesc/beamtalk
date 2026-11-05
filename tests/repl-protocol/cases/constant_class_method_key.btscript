@@ -3,7 +3,7 @@
 
 // BT-4363: a class-literal send of a class-side method whose whole body is
 // one integer literal answers the literal in place, behind a constant-value
-// static call key that the runtime installs only while the defining module's
+// static call key that the runtime installs only while the class's published
 // metadata still certifies that literal. These are the workspace halves of
 // stdlib/test/constant_class_method_test.bt: each warms the key through a call
 // site compiled before the change (`CckCaller run`), redefines the target

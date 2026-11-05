@@ -540,9 +540,9 @@ impl CoreErlangGenerator {
     /// ([`MethodDefinition::literal_integer_body`](beamtalk_core::ast::MethodDefinition::literal_integer_body)),
     /// mapped to that integer. A class-literal send of such a selector
     /// answers the integer in place behind a constant-value key, which the
-    /// runtime installs only while the defining module's current metadata
-    /// maps the selector to that same value, so a reload that changes or
-    /// drops the body ends the inlining. Omitted when the class has none.
+    /// runtime installs only while the class's metadata row, published from
+    /// this entry on registration and reload, maps the selector to that same
+    /// value, so a reload that changes or drops the body ends the inlining. Omitted when the class has none.
     fn meta_constant_class_methods_entry(class: &ClassDefinition) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for method in &class.class_methods {

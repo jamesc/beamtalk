@@ -5,7 +5,7 @@
 // integer literal (`Errors protocolError` with `class protocolError => 1`)
 // answers the literal in place, behind a static call key
 // (`{constant_value, Value, Module, FunName, Tag}`) that the runtime installs
-// only while a direct call would run that method and the defining module's
+// only while a direct call would run that method and the class's published
 // metadata still certifies the body is that literal. These check the inlined
 // answer and that what the dynamic path answers still wins after warm-up. (The
 // reload cases, a changed literal, a dropped method and `removeSelector:` of a
@@ -88,3 +88,24 @@ TestCase subclass: ConstantClassMethodTest
     ] ensure: [Bt4363ConstFun class removeSelector: #answer]
     self assert: Bt4363ConstFun answer equals: 1
     self assert: (self lookUp: #Bt4363ConstFun) answer equals: 1
+
+  // Conformance: for every loaded class, each unary class-side selector its
+  // published row certifies (`constant_class_methods`, what the hit arm
+  // answers) answers that very integer through the dynamic send, which runs
+  // the compiled method. Guards the Rust certification
+  // (`MethodDefinition::literal_integer_body`) against drifting from what the
+  // method's codegen actually returns.
+  testEveryCertifiedConstantIsWhatItsMethodAnswers =>
+    checked := Beamtalk allClasses
+      inject: 0
+      into: [:count :cls |
+        constants := Erlang beamtalk_class_metadata lookup_constant_class_methods: cls name
+        (constants keys reject: [:sel | sel asString includesSubstring: ":"])
+          inject: count
+          into: [:n :sel |
+            self assert: (cls perform: sel) equals: (constants at: sel)
+            n + 1
+          ]
+      ]
+    // At least this file's fixtures and stdlib's own constants were checked.
+    self assert: checked >= 6
