@@ -1,0 +1,86 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4473: two shortcuts for `isKindOf:`.
+//
+// - `x isKindOf: C`, with `C` a sealed built-in class literal, is lowered to
+//   C's representation test (`beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`).
+// - A dynamic `isKindOf:` send to a primitive receiver skips the dispatch
+//   chain (`primitiveIsKindOf/2`).
+//
+// Each test checks the lowered literal form against the dynamic form
+// (`kind:of:` takes the class as a value, so it is never lowered) over values
+// of every representation. No `isKindOf:` override is defined here: one
+// would turn the lowered fast path off for the whole run. Another test in the
+// suite does register one (`primitive_inherited_target_test.bt`), so in a full
+// run these assertions may only exercise the send fallback; they hold either
+// way. Both branches, and the override case, are covered in EUnit
+// (`beamtalk_tagged_map_routing_conformance_tests`).
+
+TestCase subclass: PrimitiveIsKindOfTest
+
+  kind: value :: Object of: aClass :: Behaviour -> Boolean =>
+    value isKindOf: aClass
+
+  samples -> List(Object) =>
+    #(42, 1.5, "ab", #ab, nil, true, false, #(1, 2), [:x |
+      x
+    ], {1, 2}, (Dictionary new at: #a put: 1), $a, (Erlang erlang list_to_binary: #(255)))
+
+  testIntegerLiteralAgreesWithSend =>
+    self samples do: [:v |
+      self assert: (v isKindOf: Integer) equals: (self kind: v of: Integer)
+    ]
+
+  testFloatLiteralAgreesWithSend =>
+    self samples do: [:v |
+      self assert: (v isKindOf: Float) equals: (self kind: v of: Float)
+    ]
+
+  testStringLiteralAgreesWithSend =>
+    self samples do: [:v |
+      self assert: (v isKindOf: String) equals: (self kind: v of: String)
+    ]
+
+  testBinaryLiteralAgreesWithSend =>
+    self samples do: [:v |
+      self assert: (v isKindOf: Binary) equals: (self kind: v of: Binary)
+    ]
+
+  testSymbolLiteralAgreesWithSend =>
+    self samples do: [:v |
+      self assert: (v isKindOf: Symbol) equals: (self kind: v of: Symbol)
+    ]
+
+  testNilAndBooleanLiteralsAgreeWithSend =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: UndefinedObject) equals: (self kind: v of: UndefinedObject)
+        self assert: (v isKindOf: Boolean) equals: (self kind: v of: Boolean)
+        self assert: (v isKindOf: True) equals: (self kind: v of: True)
+      ]
+
+  testCollectionLiteralsAgreeWithSend =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: List) equals: (self kind: v of: List)
+        self assert: (v isKindOf: Tuple) equals: (self kind: v of: Tuple)
+        self assert: (v isKindOf: Dictionary) equals: (self kind: v of: Dictionary)
+        self assert: (v isKindOf: Block) equals: (self kind: v of: Block)
+      ]
+
+  testExpectedAnswers =>
+    self assert: (42 isKindOf: Integer)
+    self assert: ($a isKindOf: Integer)
+    self assert: ("ab" isKindOf: Binary)
+    self deny: ("ab" isKindOf: Symbol)
+    self deny: (#ab isKindOf: String)
+    self deny: (nil isKindOf: String)
+    self assert: (self kind: 42 of: Number)
+    self assert: (self kind: 42 of: Object)
+    self deny: (self kind: 42 of: Integer class)
+
+  testNonPlainValuesSend =>
+    // A TestCase instance is not a plain value: it takes the ordinary send.
+    self deny: (self isKindOf: Integer)
+    self assert: (self kind: self of: TestCase)

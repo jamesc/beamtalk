@@ -80,6 +80,12 @@ routing_conformance_test_() ->
             fun supervisor_special_selectors_skip_lookup/0},
         {"observable dynamic_only reasons still hold", fun dynamic_only_reasons_hold/0},
         {"reserved tuple tags are never Tuples", fun reserved_tuples_are_not_tuples/0},
+        {"isKindOfBuiltin treats only String among reserved tuples as a plain value",
+            fun reserved_tuples_are_not_plain_values/0},
+        {"with no override, isKindOfBuiltin answers the test for plain values only",
+            fun is_kind_of_builtin_answers_test_without_override/0},
+        {"an isKindOf: override below Object makes isKindOfBuiltin send",
+            fun is_kind_of_override_makes_builtin_send/0},
         {"rewritten selectors are rewritten before classification",
             fun rewritten_selectors_are_rewritten/0}
     ]}.
@@ -224,6 +230,86 @@ reserved_tuples_are_not_tuples() ->
         end,
         Tags
     ).
+
+%% BT-4473: `beamtalk_behaviour_intrinsics:isKindOfBuiltin/3` answers the
+%% compiler's representation test only for a plain value; every other reserved
+%% shape (an actor or class object, a supervisor handle, a future) must send,
+%% and so must a tagged map. A new reserved tag in the fixture fails here until
+%% `plain_value/1` decides it.
+reserved_tuples_are_not_plain_values() ->
+    #{<<"reserved_tuple_tags">> := Tags} = fixture(),
+    lists:foreach(
+        fun(#{<<"tag">> := TagBin}) ->
+            Tag = binary_to_atom(TagBin, utf8),
+            ?assertEqual(
+                Tag =:= beamtalk_string,
+                beamtalk_behaviour_intrinsics:plain_value(reserved_sample(Tag)),
+                TagBin
+            )
+        end,
+        Tags
+    ),
+    ?assertNot(beamtalk_behaviour_intrinsics:plain_value(#{'$beamtalk_class' => 'Point'})),
+    %% Whatever the runtime treats as tagged is not plain.
+    ?assertNot(beamtalk_behaviour_intrinsics:plain_value(#{'__class_mod__' => 1, foo => 1})),
+    %% A reserved head of any size is not plain (`class_of/1` does not route
+    %% it to `Tuple`).
+    ?assertNot(beamtalk_behaviour_intrinsics:plain_value({beamtalk_object, 1, 2})),
+    ?assert(beamtalk_behaviour_intrinsics:plain_value({a, 1})),
+    ?assert(beamtalk_behaviour_intrinsics:plain_value(#{a => 1})).
+
+%% BT-4473: the branch the BUnit run may never reach (another test registers
+%% an `isKindOf:` extension node-wide): with the flag down, a plain value gets
+%% the compiler's test answer, which agrees with the send for every routed
+%% sample; a non-plain value (a class object) still sends.
+is_kind_of_builtin_answers_test_without_override() ->
+    lists:foreach(
+        fun({#{<<"class">> := ClassBin}, Sample, _Target}) ->
+            Class = binary_to_atom(ClassBin, utf8),
+            K = beamtalk_class_registry:resolve_class_object(Class),
+            Sent = beamtalk_message_dispatch:send(Sample, 'isKindOf:', [K]),
+            ?assertEqual(
+                Sent,
+                beamtalk_behaviour_intrinsics:kind_of_builtin(Sample, K, Sent, false),
+                ClassBin
+            ),
+            ?assertEqual(
+                not Sent,
+                beamtalk_behaviour_intrinsics:kind_of_builtin(Sample, K, not Sent, false),
+                ClassBin
+            )
+        end,
+        routed_samples()
+    ),
+    IntegerClass = beamtalk_class_registry:resolve_class_object('Integer'),
+    ?assertEqual(
+        false,
+        beamtalk_behaviour_intrinsics:kind_of_builtin(IntegerClass, IntegerClass, true, false)
+    ).
+
+%% BT-4473: once any class below `Object` defines `isKindOf:` (here an
+%% extension on `Port`), `isKindOfBuiltin/3` stops answering the compiler's
+%% test and sends, so the override runs. The flag is node-wide and never
+%% lowered, so this test leaves it raised for the rest of the run, which only
+%% sends more.
+is_kind_of_override_makes_builtin_send() ->
+    Port = hd(erlang:ports()),
+    PortClass = beamtalk_class_registry:resolve_class_object('Port'),
+    Ext = fun(_Args, _Self) -> overridden end,
+    ok = beamtalk_extensions:register('Port', 'isKindOf:', Ext, bt4473_test),
+    try
+        ?assert(beamtalk_default_method:overridden_anywhere('isKindOf:')),
+        ?assertEqual(
+            overridden,
+            beamtalk_behaviour_intrinsics:isKindOfBuiltin(Port, PortClass, true)
+        )
+    after
+        beamtalk_extensions:unregister('Port', 'isKindOf:')
+    end,
+    %% Unwatched selectors always count as overridden; `Object` itself never
+    %% raises the flag.
+    ?assert(beamtalk_default_method:overridden_anywhere('printString')),
+    ok = beamtalk_default_method:note_override('Object', 'isKindOf:').
 
 reserved_sample(beamtalk_string) ->
     {beamtalk_string, <<"s">>};

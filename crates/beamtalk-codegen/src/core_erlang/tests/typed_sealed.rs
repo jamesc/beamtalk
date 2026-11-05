@@ -266,9 +266,9 @@ fn open_value_self_send_sends_direct() {
         "  field: x :: Integer = 0\n",
         "  doubled -> Integer => self x * 2\n",
     ));
+    // BT-4473: the own class's arm is called directly, as a local call.
     assert!(
-        code.contains("<'OpenPoint'> when 'true' ->")
-            && code.contains("call 'test':'dispatch'('x'"),
+        code.contains("<'OpenPoint'> when 'true' ->") && code.contains("apply 'x'/1("),
         "an open Value self-send should take the guarded direct call. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
@@ -1019,7 +1019,7 @@ fn own_sealed_class_without_a_rival_sends_direct() {
         "    w frobnicate\n",
     ));
     assert!(
-        code.contains("'dispatch'('frobnicate'"),
+        code.contains("apply 'frobnicate'/1("),
         "an unshadowed own sealed class should direct-call. Got:\n{code}"
     );
 }
@@ -1044,7 +1044,7 @@ fn own_sealed_class_recompiled_over_its_live_self_sends_direct() {
     )
     .expect("codegen should succeed");
     assert!(
-        code.contains("call 'bt@live@ambient_widget':'dispatch'('frobnicate'"),
+        code.contains("apply 'frobnicate'/1("),
         "recompiling a class over its own live entry should still direct-call. Got:\n{code}"
     );
 }
@@ -1312,8 +1312,9 @@ fn own_class_redefined_into_new_module_targets_the_emitted_module() {
         crate::core_erlang::CodegenOptions::new("bt@pt").with_class_module_index(index),
     )
     .expect("codegen should succeed");
+    // BT-4473: a local call of the arm's function, so always this module.
     assert!(
-        code.contains("call 'bt@pt':'dispatch'('x'"),
+        code.contains("apply 'x'/1("),
         "typed send must target the unit's own emitted module. Got:\n{code}"
     );
     assert!(

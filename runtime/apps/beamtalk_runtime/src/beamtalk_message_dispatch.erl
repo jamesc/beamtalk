@@ -60,6 +60,19 @@ See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messagi
 """.
 -export([send/3, send/4, cast/3, send_number_coercion/4]).
 
+%% A receiver whose dynamic send is answered by its class's compiled
+%% `dispatch/3` in the caller: a raw-term primitive or a `String`. The fast
+%% `send/3` clauses for `Object` selectors (`equals:`, BT-4416; `isKindOf:`,
+%% BT-4473) apply to exactly these receivers.
+-define(IS_PRIMITIVE_RECEIVER(R),
+    (is_number(R) orelse
+        is_atom(R) orelse
+        is_bitstring(R) orelse
+        is_list(R) orelse
+        is_function(R) orelse
+        (is_tuple(R) andalso tuple_size(R) =:= 2 andalso element(1, R) =:= beamtalk_string))
+).
+
 %% Every send classifies its receiver: inline the classification so an actor
 %% send pays no local calls for it (BT-4265).
 -compile({inline, [classify_receiver/1, is_actor/1, is_actor_ref/1]}).
@@ -119,19 +132,19 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
         {error, Error} ->
             beamtalk_exception_handler:reraise(Error)
     end;
-send(Receiver, 'equals:', [Arg]) when
-    is_number(Receiver);
-    is_atom(Receiver);
-    is_bitstring(Receiver);
-    is_list(Receiver);
-    is_function(Receiver);
-    is_tuple(Receiver), tuple_size(Receiver) =:= 2, element(1, Receiver) =:= beamtalk_string
-->
+send(Receiver, 'equals:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
     %% BT-4416: `=:=` fast path for `equals:` on a primitive receiver, which
     %% otherwise walks the whole dispatch chain to reach `Object>>equals:`.
     %% An override on the receiver's class — compiled or an extension — still
     %% wins; see `beamtalk_equality:primitive_equals/2`.
     beamtalk_equality:primitive_equals(Receiver, Arg);
+send(Receiver, 'isKindOf:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
+    %% BT-4473: `isKindOf:` on a primitive receiver, which otherwise walks the
+    %% dispatch chain (and an `inherited_target` lookup) to reach
+    %% `Object>>isKindOf:`. An override on the receiver's chain — compiled or
+    %% an extension — still wins; see
+    %% `beamtalk_behaviour_intrinsics:primitiveIsKindOf/2`.
+    beamtalk_behaviour_intrinsics:primitiveIsKindOf(Receiver, Arg);
 send(Receiver, Selector, Args) ->
     case classify_receiver(Receiver) of
         primitive ->

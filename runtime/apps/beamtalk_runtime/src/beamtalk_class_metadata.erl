@@ -675,6 +675,12 @@ record for a still-present selector, never a gap.
 """.
 -spec put_method_records(class_name(), side(), #{selector() => method_record()}) -> ok.
 put_method_records(Name, Side, Records) ->
+    %% BT-4473: a watched selector defined below `Object` is raised before
+    %% the record can be seen (`beamtalk_default_method:note_override/2`).
+    case Side of
+        instance -> beamtalk_default_method:note_overrides(Name, Records);
+        class -> ok
+    end,
     write_method_records(Name, Side, Records),
     %% BT-4071: `beamtalk_method_resolver:instance_method_info/2` memoises
     %% instance-side resolution from these records; invalidate after the write

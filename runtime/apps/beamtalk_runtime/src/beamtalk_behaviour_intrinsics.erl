@@ -93,6 +93,8 @@ that the Behaviour/Class libraries can rely on.
     classClass/1,
     %% BT-4065: `Object>>isKindOf:` in the caller, no class-process sends
     objectIsKindOf/2,
+    primitiveIsKindOf/2,
+    isKindOfBuiltin/3,
     %% ADR 0036: Metaclass primitives
     metaclassThisClass/1,
     metaclassSuperclass/1,
@@ -149,7 +151,7 @@ that the Behaviour/Class libraries can rely on.
 ]).
 
 -ifdef(TEST).
--export([rewrite_after_identity_move/4]).
+-export([rewrite_after_identity_move/4, plain_value/1, kind_of_builtin/4]).
 -endif.
 
 %%% ============================================================================
@@ -946,6 +948,112 @@ objectIsKindOf(Receiver, Behaviour) ->
         other ->
             is_kind_of_by_send(Receiver, Behaviour)
     end.
+
+-doc """
+An `isKindOf:` *send* to a primitive receiver (BT-4473).
+
+`beamtalk_message_dispatch:send/3` routes `Receiver isKindOf: Arg` here when
+`Receiver` is a raw-term primitive or a `String`. The full dynamic send walks
+the receiver's dispatch chain — its class's `dispatch/3`, an
+`inherited_target` lookup, then `Object`'s `dispatch/3` — to arrive at
+`Object>>isKindOf:`, i.e. `objectIsKindOf/2`, whose answer is one more
+derived-cache lookup.
+
+Here one lookup answers both questions: under `{primitive_is_kind_of, C,
+Behaviour}` the derived cache keeps the decided `objectIsKindOf/2` answer for
+an instance of `C`, recorded only when nothing on `C`'s chain overrides
+`isKindOf:` (no compiled method below `Object` and no extension at any level,
+`beamtalk_default_method:owner/2`), and validated on every hit by the same
+class-pid liveness check the `is_kind_of` entry uses. Every class write and
+every extension (un)registration flushes it. Anything else — an override, an
+unpublished chain, an argument that is not a canonical class or metaclass
+object — takes the ordinary primitive send.
+""".
+-spec primitiveIsKindOf(term(), term()) -> term().
+primitiveIsKindOf(Receiver, #beamtalk_object{pid = BPid} = Behaviour) when is_pid(BPid) ->
+    C = beamtalk_primitive:class_of(Receiver),
+    case
+        beamtalk_class_derived_cache:fetch(
+            {primitive_is_kind_of, C, Behaviour},
+            fun() -> decide_primitive_is_kind_of(C, Behaviour) end,
+            fun primitive_kind_of_valid/1
+        )
+    of
+        {kind_of, Answer, _, _} -> Answer;
+        _SendIt -> beamtalk_primitive:send(Receiver, 'isKindOf:', [Behaviour])
+    end;
+primitiveIsKindOf(Receiver, Behaviour) ->
+    beamtalk_primitive:send(Receiver, 'isKindOf:', [Behaviour]).
+
+-doc """
+`Receiver isKindOf: Behaviour` where `Behaviour` is a class literal the
+compiler resolved to a sealed built-in with an exact representation test
+(BT-4473), and `TestAnswer` is that test applied to `Receiver` — the same test
+a `binding :: Class` match arm uses, from the shared routing fixture.
+
+For a plain value — anything but an actor, class object or supervisor handle,
+a future (any tuple headed by one of those reserved tags), or a map the
+runtime treats as tagged (`beamtalk_tagged_map:is_tagged/1`) — the class is one
+of the stdlib's built-ins. So while no class other than `Object` has ever
+defined `isKindOf:`, compiled or as an extension
+(`beamtalk_default_method:overridden_anywhere/1`, which also covers code
+compiled against an older stdlib), the send would run `Object>>isKindOf:`, and
+its answer is `TestAnswer`: a value passes the test exactly when its class is
+`Behaviour` or one of its (stdlib, sealed) subclasses. Everything else takes
+the ordinary send, unchanged.
+
+The caller evaluates `Behaviour` but this path does not look at it, so a dead
+or restarting class process does not change the answer here, as it does not
+for a `binding :: Class` match arm.
+""".
+-spec isKindOfBuiltin(term(), term(), boolean()) -> term().
+isKindOfBuiltin(Receiver, Behaviour, TestAnswer) ->
+    kind_of_builtin(
+        Receiver,
+        Behaviour,
+        TestAnswer,
+        beamtalk_default_method:overridden_anywhere('isKindOf:')
+    ).
+
+%% `isKindOfBuiltin/3` with the node-wide override flag passed in, so tests
+%% can check both branches whatever the flag holds in their node.
+-spec kind_of_builtin(term(), term(), boolean(), boolean()) -> term().
+kind_of_builtin(Receiver, Behaviour, TestAnswer, Overridden) ->
+    case not Overridden andalso plain_value(Receiver) of
+        true -> TestAnswer;
+        false -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
+    end.
+
+%% A value whose class is a stdlib built-in reached without dispatch to user
+%% code: not a tuple headed by one of the routing fixture's reserved tags other
+%% than `String`'s (an actor or class object, a supervisor handle, a future,
+%% whatever its size) and not a map the runtime treats as tagged (a Value, an
+%% Object-kind instance, a `'__class_mod__'` map, the native proxy). Pinned to
+%% the fixture's `reserved_tuple_tags` by
+%% `beamtalk_tagged_map_routing_conformance_tests`.
+-spec plain_value(term()) -> boolean().
+plain_value(Tuple) when is_tuple(Tuple), tuple_size(Tuple) >= 1 ->
+    not lists:member(element(1, Tuple), [beamtalk_object, beamtalk_supervisor, beamtalk_future]);
+plain_value(Map) when is_map(Map) ->
+    not beamtalk_tagged_map:is_tagged(Map);
+plain_value(_) ->
+    true.
+
+%% `objectIsKindOf/2`'s decided answer for an instance of `C`, when `C` runs
+%% `Object>>isKindOf:`; `overridden` (cached: the next class write or
+%% extension change flushes it) when something on the chain overrides it.
+-spec decide_primitive_is_kind_of(atom(), #beamtalk_object{}) ->
+    {cache, {kind_of, boolean(), pid(), pid()} | overridden} | {nocache, undecided}.
+decide_primitive_is_kind_of(C, Behaviour) ->
+    case beamtalk_default_method:owner(C, 'isKindOf:') of
+        'Object' -> decide_instance_is_kind_of(C, Behaviour);
+        unpublished -> {nocache, undecided};
+        _Override -> {cache, overridden}
+    end.
+
+-spec primitive_kind_of_valid({kind_of, boolean(), pid(), pid()} | overridden) -> boolean().
+primitive_kind_of_valid(overridden) -> true;
+primitive_kind_of_valid(Decided) -> kind_of_pids_alive(Decided).
 
 %% The memoised decision for an instance of class `C` (see the doc above):
 %% the `class C` rows of the table.

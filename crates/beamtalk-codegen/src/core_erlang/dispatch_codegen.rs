@@ -1090,19 +1090,33 @@ impl CoreErlangGenerator {
             TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
             TypedSendTarget::Builtin(route) => route.target_module.to_string(),
         };
+        // BT-4473: a send to an instance of this unit's own class whose
+        // selector one of its `dispatch/3` method arms answers calls that
+        // arm's function directly; every other tagged target, and every
+        // built-in route, calls `dispatch/3`.
+        let own_arm = match target {
+            TypedSendTarget::Tagged(tagged) => {
+                self.own_dispatch_arm(&tagged.class_name, &selector_atom, arguments.len())
+            }
+            TypedSendTarget::Builtin(_) => None,
+        };
+        let direct_call = match own_arm {
+            Some(arm) => self.own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
+            None => docvec![
+                "call ",
+                leaf::atom(module_name),
+                ":'dispatch'(",
+                leaf::atom(selector_atom.clone()),
+                ", [",
+                args_list_doc.clone(),
+                "], ",
+                leaf::var(receiver_var.clone()),
+                ")",
+            ],
+        };
         // BT-4366: both calls sit inside the type-test `case`, so each carries
         // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(docvec![
-            "call ",
-            leaf::atom(module_name),
-            ":'dispatch'(",
-            leaf::atom(selector_atom.clone()),
-            ", [",
-            args_list_doc.clone(),
-            "], ",
-            leaf::var(receiver_var.clone()),
-            ")",
-        ]);
+        let direct_doc = self.annotate_current_send_call(direct_call);
         let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
@@ -1166,6 +1180,79 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// BT-4473: the own-class `dispatch/3` method arm that answers
+    /// `selector` with `arity` arguments for an instance of `class_name`, when
+    /// `class_name` is the class this unit compiles and the code being
+    /// generated is that class's own (not an extension body re-scoped to
+    /// another class).
+    ///
+    /// Why calling the arm's function is the send: behind the class-tag guard
+    /// the receiver is an instance of exactly this class, so the dynamic send
+    /// reaches this module's `dispatch/3` (see [`Self::typed_tagged_target`]),
+    /// which answers the selector from that arm before its default arm — so
+    /// no extension or superclass is consulted, and nothing installed later
+    /// can change that. The function is called locally, so caller and callee
+    /// are always the same module version and the arm shape (the NLR pair)
+    /// this unit compiled against is the one it calls. One difference from
+    /// `dispatch/3`, whose arms are remote calls: code still running in the
+    /// old version after a reload (a long loop, an old block) keeps calling
+    /// the old method, where `dispatch/3` would have reached the new one.
+    /// Calls made after the reload, from new code, reach the new method.
+    fn own_dispatch_arm(
+        &self,
+        class_name: &str,
+        selector: &str,
+        arity: usize,
+    ) -> Option<super::value_type_codegen::OwnDispatchArm> {
+        self.own_class_module(class_name)?;
+        if self.class_name() != class_name {
+            return None;
+        }
+        self.class_context
+            .as_ref()?
+            .own_dispatch_arms
+            .get(selector)
+            .copied()
+            .filter(|arm| arm.arity == arity)
+    }
+
+    /// BT-4473: the local call of an own-class method arm's function —
+    /// `apply 'sel'/N(R, A1, …)`, with a `{Result, State}` pair unwrapped as
+    /// the arm unwraps it.
+    fn own_arm_call_doc(
+        &mut self,
+        selector: &str,
+        arm: super::value_type_codegen::OwnDispatchArm,
+        receiver_var: &str,
+        arg_vars: &[String],
+    ) -> Document<'static> {
+        let mut call_args: Vec<Document<'static>> = vec![leaf::var(receiver_var.to_string())];
+        call_args.extend(arg_vars.iter().map(|var| leaf::var(var.clone())));
+        let call = docvec![
+            "apply ",
+            leaf::fname(selector.to_string(), arm.arity + 1),
+            "(",
+            Self::join_docs_with_commas(call_args),
+            ")",
+        ];
+        if !arm.nlr_pair {
+            return call;
+        }
+        let result = self.fresh_temp_var("OwnArmR");
+        let state = self.fresh_temp_var("OwnArmS");
+        docvec![
+            "case ",
+            call,
+            " of <{",
+            leaf::var(result.clone()),
+            ", ",
+            leaf::var(state),
+            "}> when 'true' -> ",
+            leaf::var(result),
+            " end",
+        ]
     }
 
     /// BT-4279: whether `class_name` is a Value class that declares a field

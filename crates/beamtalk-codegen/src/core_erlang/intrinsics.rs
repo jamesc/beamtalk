@@ -23,10 +23,12 @@
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
 use super::control_flow::SoloBoolean;
+use super::control_flow::{PureArm, SoloAnswer};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, primitives};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
+use beamtalk_core::semantic_analysis::ClassHierarchy;
 
 /// Hint shown when a structural intrinsic reached via generic dispatch
 /// (`perform:`/`perform:withArguments:`) can't tell — from an
@@ -1940,7 +1942,123 @@ impl CoreErlangGenerator {
         if let Some(doc) = self.try_generate_object_reflection(receiver, selector, arguments)? {
             return Ok(Some(doc));
         }
+        if let Some(doc) = self.try_generate_builtin_is_kind_of(receiver, selector, arguments)? {
+            return Ok(Some(doc));
+        }
         Ok(None)
+    }
+
+    /// BT-4473: `x isKindOf: C` where `C` is a class literal naming a
+    /// sealed built-in whose instances (with its subclasses') are exactly the
+    /// values passing its routing-fixture type test — the test a
+    /// `binding :: C` match arm uses ([`routing::type_test`]). Lowers to the
+    /// test applied to `x`, handed to
+    /// `beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`:
+    ///
+    /// ```erlang
+    /// let R = <x> in let K = <C> in
+    /// call 'beamtalk_behaviour_intrinsics':'isKindOfBuiltin'(R, K,
+    ///     case <C's test on R> of <'true'> -> 'true' <'false'> -> 'false' end)
+    /// ```
+    ///
+    /// The runtime answers the test only for a plain value (no actor, class
+    /// object, supervisor handle, future or tagged map) while no extension
+    /// has ever defined `isKindOf:`; anything else is the ordinary send. That
+    /// is sound because a plain value's class is a stdlib built-in, and no
+    /// built-in below `Object` defines `isKindOf:` — checked here against the
+    /// class hierarchy, so a stdlib override would turn this lowering off.
+    ///
+    /// `self`/`super` and class-literal receivers keep their own lowering
+    /// (the same exclusion as [`Self::try_generate_pure_boolean_conditional`]):
+    /// an actor's `self`, or a class literal inside a class method of a class
+    /// with class variables, would make the fallback send a call back into
+    /// the process the method is running in.
+    fn try_generate_builtin_is_kind_of(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if !matches!(selector.well_known(), Some(WellKnownSelector::IsKindOf)) {
+            return Ok(None);
+        }
+        let [class_arg] = arguments else {
+            return Ok(None);
+        };
+        if matches!(
+            receiver,
+            Expression::Super(_) | Expression::ClassReference { .. }
+        ) || super::expr_shape::is_self_identifier(receiver)
+        {
+            return Ok(None);
+        }
+        let Some(test) = self.builtin_kind_test(class_arg) else {
+            return Ok(None);
+        };
+        let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
+        let recv_doc = seq.next();
+        let class_doc = seq.next();
+        let recv_var = self.fresh_temp_var("KindOfRecv");
+        let class_var = self.fresh_temp_var("KindOfClass");
+        let test_doc = self.render_type_test(
+            test,
+            &recv_var,
+            Document::Str("'true'"),
+            &Document::Str("'false'"),
+        );
+        let call_doc = docvec![
+            "let ",
+            leaf::var(recv_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(class_var.clone()),
+            " = ",
+            class_doc,
+            " in call 'beamtalk_behaviour_intrinsics':'isKindOfBuiltin'(",
+            leaf::var(recv_var),
+            ", ",
+            leaf::var(class_var),
+            ", ",
+            test_doc,
+            ")",
+        ];
+        Ok(Some(seq.close(self, call_doc, "KindOfRes")))
+    }
+
+    /// BT-4473: the routing-fixture type test of `class_arg` when it is an
+    /// unqualified class literal naming a sealed built-in that has one, and
+    /// no built-in class other than `Object` defines `isKindOf:` — the
+    /// conditions [`Self::try_generate_builtin_is_kind_of`] relies on.
+    fn builtin_kind_test(&self, class_arg: &Expression) -> Option<super::routing::Guard> {
+        let Expression::ClassReference {
+            name,
+            package: None,
+            ..
+        } = class_arg
+        else {
+            return None;
+        };
+        let class_name = name.name.as_str();
+        if !ClassHierarchy::is_builtin_class(class_name) || self.is_shadowed_class(class_name) {
+            return None;
+        }
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        if !hierarchy.get_class(class_name)?.is_sealed {
+            return None;
+        }
+        let overridden = hierarchy.classes().iter().any(|(owner, info)| {
+            owner.as_str() != "Object"
+                && ClassHierarchy::is_builtin_class(owner)
+                && info
+                    .methods
+                    .iter()
+                    .any(|m| m.defined_in == *owner && m.selector == "isKindOf:")
+        });
+        if overridden {
+            return None;
+        }
+        super::routing::type_test(class_name)
     }
 
     /// Generates code for nil-testing protocol methods.
@@ -3316,6 +3434,22 @@ impl CoreErlangGenerator {
                         }
                     }
                 }
+            }
+        }
+
+        // BT-4473: `R not` — `True>>not`/`False>>not` are compiled methods of
+        // sealed stdlib classes, answered by their `dispatch/3` arm before any
+        // extension, so a `true`/`false` receiver's answer is fixed. Any
+        // other receiver takes the wildcard arm's ordinary send.
+        if let MessageSelector::Unary(name) = selector {
+            if name.as_str() == "not" && arguments.is_empty() {
+                return Ok(Some(self.generate_pure_boolean_case(
+                    receiver,
+                    "not",
+                    PureArm::Answer(SoloAnswer::Literal(false)),
+                    PureArm::Answer(SoloAnswer::Literal(true)),
+                    &[],
+                )?));
             }
         }
 

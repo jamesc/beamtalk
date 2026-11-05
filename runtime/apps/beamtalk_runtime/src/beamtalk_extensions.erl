@@ -223,6 +223,9 @@ register(Class, Selector, Fun, Owner, Source) when
 ->
     Key = {Class, Selector},
     ok = validate_class_side_arity(Class, Selector, Fun),
+    %% BT-4473: raised before the row can be seen, so a reader that misses
+    %% the flag cannot also see the extension.
+    beamtalk_default_method:note_override(Class, Selector),
 
     %% BT-3669: flag transitions and row writes for one tag are serialized under
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
