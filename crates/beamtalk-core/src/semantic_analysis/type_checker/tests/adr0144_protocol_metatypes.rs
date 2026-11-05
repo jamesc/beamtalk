@@ -637,6 +637,12 @@ Object subclass: Caller
   literal: flag :: Boolean =>
     w :: Wire class | Nil := flag ifTrue: [Wire] ifFalse: [nil]
     w
+  narrowLiteral: flag :: Boolean =>
+    w :: Wire class := flag ifTrue: [Wire] ifFalse: [nil]
+    w
+  widenWithNil: flag :: Boolean =>
+    w :: Wire class := flag ifTrue: [Tcp] ifFalse: [nil]
+    w
   nonconformer: flag :: Boolean =>
     w :: Wire class | Nil := flag ifTrue: [Integer] ifFalse: [nil]
     w
@@ -649,6 +655,8 @@ Object subclass: Caller
     f :: Dynamic := Integer
     g :: Dynamic := 3
     h :: Object := Wire
+    i :: Tcp class := flag ifTrue: [Tcp] ifFalse: [nil]
+    k :: Tcp class | Nil := flag ifTrue: [Tcp] ifFalse: [3]
     a
 ",
     );
@@ -671,6 +679,14 @@ Object subclass: Caller
             .any(|d| d.message.contains("Wire class | Nil")),
         "the protocol literal in a union is refused: {diags:#?}"
     );
+    assert!(
+        !at("w :: Wire class := flag ifTrue: [Wire]").is_empty(),
+        "narrowing a union carrying the protocol literal to `Wire class` is refused: {diags:#?}"
+    );
+    assert!(
+        !at("w :: Wire class := flag ifTrue: [Tcp]").is_empty(),
+        "`Tcp class | Nil` into `Wire class` neither widens nor narrows: {diags:#?}"
+    );
     let nonconformer = at("ifTrue: [Integer] ifFalse: [nil]\n    w");
     assert!(
         nonconformer.iter().any(|d| d
@@ -683,6 +699,6 @@ Object subclass: Caller
         diags
             .iter()
             .all(|d| source[..d.span.start() as usize].lines().count() < fine),
-        "conformers, `Object` and `Class` accept class objects in a union: {diags:#?}"
+        "conformers, `Object`, `Class`, `Dynamic` and narrowing accept class objects in a union: {diags:#?}"
     );
 }
