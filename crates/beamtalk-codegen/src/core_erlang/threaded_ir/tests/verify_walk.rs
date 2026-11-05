@@ -720,3 +720,59 @@ fn verify_condition_hand_back_does_not_carry_self() {
         }]
     );
 }
+
+// ── BT-4460: ConstructLocalsRereadOpaquely ──────────────────────────
+
+/// An arm that extracts a nested construct's state carrier with an opaque
+/// `element(2, ...)` `Bind`, then rereads the construct's locals out of it.
+fn reread_arm(locals: &[&str]) -> Vec<ThreadedStmt> {
+    let frame = FrameId::new(1);
+    vec![build_branch_arm(
+        frame,
+        Vec::new(),
+        vec![
+            ThreadedStmt::Statement(docvec!["let _Tuple = {7, StateAcc} in "], span()),
+            ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, 1, frame),
+                source: VersionedVar::new(VersionPrefix::State, 0, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec!["call 'erlang':'element'(2, _Tuple)"])),
+                span: span(),
+            },
+            ThreadedStmt::StateCarrierReread {
+                locals: locals.iter().map(ToString::to_string).collect(),
+                doc: docvec!["let M = call 'maps':'get'('__local__m', StateAcc1) in "],
+                span: Span::new(3, 9),
+            },
+            ThreadedStmt::Return(
+                ValueRef::Var("M".to_string()),
+                VersionedVar::new(VersionPrefix::State, 1, frame),
+                span(),
+            ),
+        ],
+    )]
+}
+
+#[test]
+fn a_construct_reread_of_its_locals_is_reported() {
+    assert_eq!(
+        verify(&reread_arm(&["m"])),
+        vec![VerifyError::ConstructLocalsRereadOpaquely {
+            locals: vec!["m".to_string()],
+            at: Span::new(3, 9),
+        }]
+    );
+}
+
+#[test]
+fn a_reread_of_no_locals_is_silent() {
+    assert_eq!(verify(&reread_arm(&[])), Vec::new());
+}
+
+#[test]
+fn the_reread_renders_its_document_verbatim() {
+    let text = lower_and_render(&reread_arm(&["m"])).to_pretty_string();
+    assert!(
+        text.contains("let M = call 'maps':'get'('__local__m', StateAcc1) in "),
+        "{text}"
+    );
+}

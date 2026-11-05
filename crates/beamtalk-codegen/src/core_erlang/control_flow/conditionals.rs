@@ -2662,15 +2662,22 @@ impl CoreErlangGenerator {
     /// ([`Self::branch_threaded_locals`]: none for an arm that writes only
     /// locals of its own).
     ///
-    /// BT-3949: it registers its statements' loop and fold producer sites
-    /// ([`Self::plain_arm_producer_site_exprs`]): a loop or fold that is a
-    /// producer there (the statement itself, or one at a sequenced operand
-    /// site of it — a map-literal value, an array element, a keyword
-    /// argument) is lowered through its `ConstructTuple` and family `Bind`s
-    /// into this frame. Without them a construct that threads a family (an
-    /// actor fold whose block self-sends) at an operand site was compiled in
-    /// place, and its `{Value, State}` carrier became the operand's value
-    /// (`ConstructCarrierInPlace`).
+    /// BT-3949 / BT-4460: it registers its statements' producer sites by the
+    /// rule a producer's arm uses (`with_body_producer_sites` with `arm`), so
+    /// whatever is a producer at one of them is lowered into this frame
+    /// through its `ConstructTuple`, family `Bind`s and `LocalRebind`s: a loop
+    /// or fold (the statement itself, or one at a sequenced operand site of it
+    /// — a map-literal value, an array element, a keyword argument), and a
+    /// nested conditional, `ifNil:`, `and:`/`or:`, `match:` or
+    /// `on:do:`/`ensure:` that writes a local of the arm. Without them a
+    /// construct that threads a family (an actor fold whose block self-sends)
+    /// at an operand site was compiled in place, and its `{Value, State}`
+    /// carrier became the operand's value (`ConstructCarrierInPlace`); and a
+    /// nested construct writing an arm-local was compiled in place and its
+    /// locals reread out of its state carrier
+    /// (`ConstructLocalsRereadOpaquely`), which in an actor left the
+    /// arm-local's scratch key in the actor's state and crashed a loop in a
+    /// nested `on:do:`/`ensure:` body (`invalid argument`).
     ///
     /// Must be called inside [`Self::with_branch_context`].
     fn generate_plain_arm(&mut self, block: &Block) -> Result<(Document<'static>, usize)> {
@@ -2683,6 +2690,8 @@ impl CoreErlangGenerator {
             threads: arm.threads.clone(),
         };
         let body = super::super::util::collect_body_exprs(&block.body);
+        #[cfg(test)]
+        let _plain = super::super::threaded_expr::fault::PlainArmScope::enter(true);
         self.with_rebind_frame(rebind, |this| {
             // Test-only fault (`PlainArmOpaqueProducers`): the producer sites
             // BT-3949 registers, withheld.
@@ -2692,10 +2701,10 @@ impl CoreErlangGenerator {
                     super::super::threaded_expr::fault::LocalRebindFault::PlainArmOpaqueProducers,
                 )
             {
-                return this.generate_conditional_arm_statements(block, Some(&arm), true);
+                return this.generate_conditional_arm_statements(block, Some(&arm));
             }
-            this.with_plain_arm_producer_sites(&body, |this| {
-                this.generate_conditional_arm_statements(block, Some(&arm), true)
+            this.with_body_producer_sites(&body, false, true, |this| {
+                this.generate_conditional_arm_statements(block, Some(&arm))
             })
         })
     }
@@ -2713,7 +2722,7 @@ impl CoreErlangGenerator {
         let body = super::super::util::collect_body_exprs(&block.body);
         self.with_repl_arm_rebind_frame(|this| {
             this.with_repl_arm_producer_sites(&body, |this| {
-                this.generate_conditional_arm_statements(block, None, false)
+                this.generate_conditional_arm_statements(block, None)
             })
         })
     }
@@ -2741,9 +2750,11 @@ impl CoreErlangGenerator {
             threads: arm.threads.clone(),
         };
         let body = super::super::util::collect_body_exprs(&block.body);
+        #[cfg(test)]
+        let _plain = super::super::threaded_expr::fault::PlainArmScope::enter(false);
         self.with_rebind_frame(rebind, |this| {
             this.with_body_producer_sites(&body, false, true, |this| {
-                this.generate_conditional_arm_statements(block, Some(arm), false)
+                this.generate_conditional_arm_statements(block, Some(arm))
             })
         })
     }
@@ -2751,17 +2762,13 @@ impl CoreErlangGenerator {
     /// The arm lowering behind [`Self::generate_conditional_branch_inline`]
     /// (`arm: None`, the legacy arm: its nested constructs unpack their own
     /// tuples) and [`Self::generate_conditional_arm`] (`arm: Some`, a
-    /// `BranchArm` frame whose nested producers rebind by it).
-    ///
-    /// `plain` says the arm is a plain arm ([`Self::generate_plain_arm`]), whose
-    /// producer sites are [`Self::plain_arm_producer_site_exprs`], rather than
-    /// a producer's arm, whose sites are every arm-frame site.
+    /// `BranchArm` frame whose nested producers rebind by it, a plain arm's
+    /// included: [`Self::generate_plain_arm`]).
     #[allow(clippy::too_many_lines)]
     fn generate_conditional_arm_statements(
         &mut self,
         block: &Block,
         arm: Option<&ArmFrame>,
-        plain: bool,
     ) -> Result<(Document<'static>, usize)> {
         let frame = self.current_branch_frame();
         self.push_scope();
@@ -2803,11 +2810,7 @@ impl CoreErlangGenerator {
                 &expr.unwrap_parens()
             };
             if arm.is_some() {
-                producer_sites.extend(if plain {
-                    self.plain_arm_producer_sites(expr)
-                } else {
-                    self.frame_producer_sites(expr, false, true)
-                });
+                producer_sites.extend(self.frame_producer_sites(expr, false, true));
             }
             // Classified with the shared classifier just before the statement
             // is lowered, so a local bound earlier in this arm is live when a
@@ -3490,6 +3493,12 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
+                        // BT-4460: unreachable with a non-empty set in a method
+                        // arm (every arm registers a nested construct writing
+                        // an arm-local as a producer, lowered above); the
+                        // verifier reports a reread that carries a local
+                        // (`ConstructLocalsRereadOpaquely`). Removed with the
+                        // helper by BT-4462.
                         self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
                     }
                 }
@@ -3700,14 +3709,15 @@ impl CoreErlangGenerator {
     /// A rebind read is never itself a version mutation (Rule 1) — always a
     /// `Statement`, never a `Bind`.
     ///
-    /// ADR 0131 Phase 3c (BT-3822): reached only from the legacy arm of a
-    /// conditional that is not a local-threading producer (it writes no outer
-    /// local, so no `BranchArm` frame is registered), whose nested loop or
-    /// fold writes a local *of that arm*; pinned by
-    /// `adr0131cond_non_producer_test.bt`. A conditional in a loop or fold
-    /// body that writes an outer local is a producer in that frame and never
-    /// gets here. Deleting this (BT-3833) needs the arms of every non-producer
-    /// conditional to be frames too (follow-up).
+    /// ADR 0131 Phase 3c (BT-3822): reached only from an arm that compiled a
+    /// nested construct writing a local *of that arm* in place instead of
+    /// lowering it as a producer. Since BT-4460 every arm frame, a plain arm
+    /// included (`generate_plain_arm`), registers that construct as a
+    /// producer, so a method arm never gets here: the reread is a
+    /// [`ThreadedStmt::StateCarrierReread`], which the verifier reports
+    /// wherever it carries a local (`ConstructLocalsRereadOpaquely`), so
+    /// `just verify-threaded-ir` and the BT-4460 grid assert it is
+    /// unreachable. The helper and its callers go with BT-4462.
     fn push_control_flow_threaded_var_rereads(
         &mut self,
         source_expr: &Expression,
@@ -3723,7 +3733,14 @@ impl CoreErlangGenerator {
         let new_state_name = self.current_state_var();
         let re_reads = self.rebind_threaded_vars_from_state(&threaded_vars, &new_state_name);
         if !re_reads.is_empty() {
-            stmts.push(ThreadedStmt::Statement(Document::Vec(re_reads), span));
+            // BT-4460: typed, so the verifier reports the construct whose
+            // locals reached the arm without a `LocalRebind`
+            // (`ConstructLocalsRereadOpaquely`).
+            stmts.push(ThreadedStmt::StateCarrierReread {
+                locals: threaded_vars,
+                doc: Document::Vec(re_reads),
+                span,
+            });
         }
     }
 

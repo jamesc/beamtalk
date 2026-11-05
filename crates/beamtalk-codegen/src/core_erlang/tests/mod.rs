@@ -343,6 +343,7 @@ mod module_info;
 mod nlr;
 mod paren_peel_guard;
 mod paren_transparency;
+mod plain_arm_nested_construct_corpus;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;

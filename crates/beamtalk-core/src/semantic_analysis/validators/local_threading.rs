@@ -1570,9 +1570,12 @@ struct FrameSites {
     arm: bool,
     /// Whether the arm is a *plain* arm: an arm of a conditional that is not
     /// a producer (it writes no outer local), a `BranchArm` frame that codegen
-    /// registers loop and fold producer sites in (`generate_plain_arm`,
-    /// BT-3949). Only a loop or fold is a producer there; a nested
-    /// conditional, `on:do:` or `match:` keeps its own lowering.
+    /// registers every arm-frame producer site in (`generate_plain_arm`,
+    /// BT-3949, BT-4460): a loop or fold, and a nested conditional, `on:do:`
+    /// or `match:` that writes a local of the arm
+    /// (`arm_frame_conditional_producer`). It differs from a
+    /// producer's arm only in the positions a loop or fold is accepted at
+    /// (`check_construct`'s plain-arm position check).
     plain: bool,
 }
 
@@ -2166,8 +2169,9 @@ impl<'d> Walker<'d> {
 
     /// Whether `expr` is a conditional with block-literal arms that is not a
     /// local-threading producer here, so its arms are *plain* `BranchArm`
-    /// frames in which a loop or fold is a producer (`generate_plain_arm`,
-    /// BT-3911, BT-3949). Restricted to what a runtime differential proves
+    /// frames in which a loop or fold, and a nested conditional, `on:do:` or
+    /// `match:` writing an arm-local, is a producer (`generate_plain_arm`,
+    /// BT-3911, BT-3949, BT-4460; `bt4460plain_arm_nested_grid_test.bt`). Restricted to what a runtime differential proves
     /// (`stdlib/test/bt4367arm_local_grid_test.bt`: the arm against the same
     /// body at the method root, over every selector in
     /// [`PLAIN_ARM_SELECTORS`] x five positions x five body shapes x actor and
@@ -2296,14 +2300,12 @@ impl<'d> Walker<'d> {
     /// body included (ADR 0131 Phase 3b and 3c, BT-3817/BT-3822), at one of the
     /// statement's sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
-        // A plain arm registers only loop and fold sites in codegen
-        // (`with_plain_arm_producer_sites`): a conditional, `on:do:` or
-        // `match:` nested in one keeps its own lowering and is not a producer
-        // there, however it writes the arm's locals. Letting it count made a
-        // loop in a nested `on:do:` body silently drop its write (BT-4367).
-        if self.in_plain_arm() {
-            return false;
-        }
+        // BT-4460: a plain arm registers every arm-frame site in codegen
+        // (`generate_plain_arm`), as a producer's arm does, so a
+        // conditional, `on:do:` or `match:` nested in one is a producer there
+        // by this same rule, and its own arms are frames in which a nested
+        // loop keeps its write (the BT-4367 drop came from the two sides
+        // disagreeing about exactly this).
         let Some(kind) = self.root_method_kind() else {
             return false;
         };

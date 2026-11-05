@@ -1114,6 +1114,10 @@ impl CoreErlangGenerator {
                 // `rebind_threaded_vars_from_state` with `conditionals.rs`'s
                 // `push_control_flow_threaded_var_rereads`, which does the same
                 // rebind for the `ThreadedIr`-rendered conditional-arm path.
+                // BT-4460 leaves this fold-body reread an opaque `Statement`: only
+                // the arm reread (`push_control_flow_threaded_var_rereads`) is
+                // shown unreachable and typed `StateCarrierReread`; this one
+                // goes with the legacy helpers in BT-4462.
                 if let Some(inner_vars) = inner_threaded_vars {
                     for d in self.rebind_threaded_vars_from_state(&inner_vars, &new_state) {
                         stmts.push(ThreadedStmt::Statement(d, span));
