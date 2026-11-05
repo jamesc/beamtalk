@@ -124,11 +124,11 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   is a metatype that resolves to Dynamic here so
 ///   that existing patterns like `x class = Foo` keep working; the call-site
 ///   metatype wrapping lives in the caller.
-/// * [`TypeAnnotation::ClassOf`] — returns `Dynamic(Unknown)`. The
-///   `<ClassName> class` metatype names the metaclass of a specific
-///   class hierarchy; like `Self class` it resolves to Dynamic so that
-///   class-side methods on the named class (e.g. `Actor class >> isSupervisor`)
-///   flow through without false DNU warnings.
+/// * [`TypeAnnotation::ClassOf`] — `<ClassName> class` resolves to the
+///   metatype `Meta{ClassName}` (ADR 0083); `<Protocol> class` for a protocol
+///   in `protocol_registry` resolves to the protocol metatype
+///   `ProtocolMeta{Protocol}`, the class object of any conforming class
+///   (ADR 0144).
 /// * [`TypeAnnotation::Singleton`] — `#name` becomes `Known("#name", [])`,
 ///   matching the existing singleton-as-Symbol-subtype convention.
 ///
@@ -137,7 +137,8 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 /// annotation resolves, not during.
 ///
 /// `protocol_registry` (ADR 0102 §1/§3) is threaded through purely
-/// for [`TypeAnnotation::Intersection`] resolution — every other variant
+/// for [`TypeAnnotation::Intersection`] resolution and to recognise a
+/// protocol metatype in [`TypeAnnotation::ClassOf`] — every other variant
 /// ignores it. Pass `None` when no registry is available (the annotation
 /// still resolves; `&`-typed protocol intersections just won't recognise a
 /// protocol name and will conservatively fall to `Never`, matching
@@ -613,6 +614,19 @@ fn resolve_declared_type_inner(
                 protocol_registry,
             )
         }
+        DeclaredType::ClassOf(class_name)
+            if protocol_registry.is_some_and(|r| r.has_protocol(class_name)) =>
+        {
+            // ADR 0144: `<Protocol> class` is the class object of *any* class
+            // conforming to the protocol — not the metatype of the protocol
+            // object (that value is typed `:: Protocol`). Protocols and
+            // classes share one namespace (a collision is a compile error),
+            // so a registered protocol name is never also a class here.
+            InferredType::ProtocolMeta {
+                protocol_name: class_name.clone(),
+                provenance: declared_type_provenance(ctx),
+            }
+        }
         DeclaredType::ClassOf(class_name) => {
             // ADR 0083: `<ClassName> class` is the metatype of the named class.
             // The name is carried directly in the annotation, so resolve it to a
@@ -693,6 +707,7 @@ fn stamp_substituted_provenance(mut ty: InferredType) -> InferredType {
         InferredType::Known { provenance, .. }
         | InferredType::Union { provenance, .. }
         | InferredType::Meta { provenance, .. }
+        | InferredType::ProtocolMeta { provenance, .. }
         | InferredType::Negation { provenance, .. }
         | InferredType::Intersection { provenance, .. }
             if !matches!(provenance, TypeProvenance::Aliased { .. }) =>

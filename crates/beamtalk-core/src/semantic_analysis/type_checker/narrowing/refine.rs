@@ -18,6 +18,7 @@
 use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
@@ -207,12 +208,18 @@ impl TypeChecker {
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
         alias_registry: Option<&AliasRegistry>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> NarrowingInfo {
         if !info.is_result_ok_check && !info.is_result_error_check {
             return info;
         }
-        let current_ty =
-            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy, alias_registry);
+        let current_ty = Self::resolve_narrowing_variable_type(
+            &info.variable,
+            env,
+            hierarchy,
+            alias_registry,
+            protocol_registry,
+        );
         let is_result = matches!(
             &current_ty,
             InferredType::Known { class_name, .. }
@@ -257,12 +264,18 @@ impl TypeChecker {
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
         alias_registry: Option<&AliasRegistry>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> NarrowingInfo {
         let Some(eq) = info.singleton_eq.clone() else {
             return info;
         };
-        let current_ty =
-            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy, alias_registry);
+        let current_ty = Self::resolve_narrowing_variable_type(
+            &info.variable,
+            env,
+            hierarchy,
+            alias_registry,
+            protocol_registry,
+        );
 
         let matched = InferredType::known(eq.singleton.as_type_name().clone());
         let provenance = TypeProvenance::Inferred(Span::default());
@@ -319,12 +332,7 @@ impl TypeChecker {
         let Some(ClassTestInfo { class_name, .. }) = info.class_test.clone() else {
             return info;
         };
-        let current_ty = Self::resolve_narrowing_variable_type(
-            &info.variable,
-            env,
-            hierarchy,
-            self.alias_registry.as_ref(),
-        );
+        let current_ty = self.narrowing_variable_type(&info.variable, env, hierarchy);
         let refined_info = Self::compute_class_narrowing(
             info,
             &current_ty,

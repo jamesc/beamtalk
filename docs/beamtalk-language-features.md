@@ -1961,6 +1961,18 @@ klass instanceCount         // resolves class-side method
 // instance of that class; on an *abstract* class (e.g. `Collection`,
 // `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
 
+// <Protocol> class — a protocol metatype annotation (ADR 0144). For a
+// protocol `P`, `P class` is the class object of *any* class conforming to
+// `P`: `C class <: P class` iff `C conformsTo: P` (the same structural check,
+// open-world rules included). Sends resolve against `P`'s `class`
+// requirements (typed from their declared signatures), then the class-object
+// protocol every class answers (`name`, `printString`, `respondsTo:`, …).
+// `new` / `basicNew` infer `P` unless `P` declares `class new`. A value that
+// *is* a protocol object is typed `:: Protocol`. See Class Method Requirements.
+field: transport :: Transport class = TCPTransport
+// `self.transport send: s data: d` is checked against `Transport`'s
+// `class send:data:` requirement and typed `Result(Nil, Object)`.
+
 // Block parameter annotations — accepted by the parser and preserved by
 // `beamtalk fmt`. A union (or `&`/`\` chain) needs grouping parens so its
 // `|` doesn't swallow the block's own `|` parameter separator.
@@ -2318,6 +2330,32 @@ Protocol define: Serializable
 ```
 
 A class conforms to `Serializable` only if it has both the instance method `asString` and the class method `fromString:`. This is useful for factory methods, singleton patterns, and other class-level contracts.
+
+**Classes as strategies: `P class` (ADR 0144).** To hold a *class* that implements a protocol's class-side contract — a class passed around as a strategy — type it `P class`. It denotes the class object of any class conforming to `P`:
+
+```text
+C class <: P class      iff      C conformsTo: P
+```
+
+```beamtalk
+Protocol define: Transport
+  class send: socket :: Object data: data :: Object -> Result(Nil, Object)
+  class close: socket :: Object -> Result(Nil, Object)
+
+Value subclass: Socket
+  field: socket :: Object
+  field: transport :: Transport class = TCPTransport   // any conforming class
+
+  send: data :: Object -> Result(Nil, Object) =>
+    result := self.transport send: self.socket data: data  // checked, typed
+    result isOk ifTrue: [self countSent: data]               // `isOk` on Result
+    result
+```
+
+- Assigning or passing a class that does not conform warns, naming the missing selectors: `Integer class does not conform to Transport class` / `missing: class send:data:, class close:`. Classes the checker cannot see completely (a `doesNotUnderstand:` override, a cross-file superclass) conform, as for `:: P`.
+- A send to a `P class` value resolves against `P`'s `class` requirements (including those of protocols it extends), using their declared parameter and return types, then against the class-object protocol (`Class` → `Behaviour` → `Object`). Anything else is reported as not understood.
+- `P class` flows into `:: Class`, `:: Behaviour` and `:: Object`; the reverse is a narrowing and warns. `P class | Nil` narrows after `isNil` checks, `P class & Q class` requires both, and `P class` flows into `Q class` when every selector in `Q`'s type (required and provided on the instance side, required on the class side) is also in `P`'s — e.g. when `P` extends `Q`.
+- Like every metatype, `P class` is name-only: `Collection class` is valid, `Collection(E) class` is not. The type is erased at run time; class-side sends through it stay dynamic sends.
 
 ### Type Parameter Bounds
 

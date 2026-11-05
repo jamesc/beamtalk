@@ -90,6 +90,7 @@ impl TypeChecker {
                         env,
                         hierarchy,
                         self.alias_registry.as_ref(),
+                        self.protocol_registry.as_ref(),
                     )
                 })
                 .map(|info| {
@@ -98,6 +99,7 @@ impl TypeChecker {
                         env,
                         hierarchy,
                         self.alias_registry.as_ref(),
+                        self.protocol_registry.as_ref(),
                     )
                 })
                 .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
@@ -199,12 +201,7 @@ impl TypeChecker {
             // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
             // narrowed type too, closing the gap where only receiver
             // positions were narrowed.
-            let current_ty = Self::resolve_narrowing_variable_type(
-                &var_key,
-                env,
-                hierarchy,
-                self.alias_registry.as_ref(),
-            );
+            let current_ty = self.narrowing_variable_type(&var_key, env, hierarchy);
             let non_nil_ty = Self::non_nil_type(&current_ty);
             vec![self.infer_block_with_narrowing(
                 arg,
@@ -519,13 +516,41 @@ impl TypeChecker {
             // return type. Only overrides a Dynamic result, never a concrete
             // class-side answer.
             if matches!(class_side, InferredType::Dynamic(_)) {
-                if let Some(ty) =
-                    Self::class_object_tower_return(&selector_name, hierarchy, meta_class)
-                {
+                if let Some(ty) = Self::class_object_tower_return(
+                    &selector_name,
+                    hierarchy,
+                    &InferredType::meta(meta_class.clone()),
+                ) {
                     return ty;
                 }
             }
             return class_side;
+        }
+
+        // ADR 0144: a `P class` receiver is the class object of some class
+        // conforming to protocol `P`. Resolve against `P`'s `class`
+        // requirements, then the class-object protocol every class answers.
+        if let InferredType::ProtocolMeta {
+            ref protocol_name, ..
+        } = receiver_ty
+        {
+            if let MessageSelector::Binary(op) = selector {
+                if is_equality_operator(op) {
+                    return InferredType::known("Boolean");
+                }
+            }
+            if selector.well_known() == Some(WellKnownSelector::Class) {
+                return InferredType::known("Metaclass");
+            }
+            return self.infer_protocol_meta_send(
+                protocol_name,
+                &selector_name,
+                &arg_types,
+                arguments,
+                span,
+                hierarchy,
+                env,
+            );
         }
 
         // Set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
@@ -954,6 +979,137 @@ impl TypeChecker {
         })
     }
 
+    /// ADR 0144: type a send to a `P class` receiver — the class object of
+    /// some class conforming to protocol `P`. Resolution order:
+    ///
+    /// 1. `P`'s `class` requirements, including those of protocols `P`
+    ///    extends ([`ProtocolInfo::all_class_requirements`]): arguments are
+    ///    checked against the requirement's declared parameter types and the
+    ///    result is its declared return type (`Self` is an instance of some
+    ///    conformer, i.e. `P`; `Self class` is `P class`). A signature naming
+    ///    one of the protocol's type parameters is unchecked (`Dynamic`).
+    /// 2. `new` / `basicNew` with no such requirement: an instance of some
+    ///    conformer, `P`.
+    /// 3. The class-object protocol every class object answers
+    ///    (`Metaclass` → `Class` → `Behaviour` → `Object`), as for a `Meta`
+    ///    receiver (ADR 0083).
+    ///
+    /// A selector found in none of these is reported as not understood, at
+    /// the hint severity a `:: P` instance receiver uses.
+    ///
+    /// [`ProtocolInfo::all_class_requirements`]: crate::semantic_analysis::protocol_registry::ProtocolInfo::all_class_requirements
+    #[allow(clippy::too_many_arguments)]
+    fn infer_protocol_meta_send(
+        &mut self,
+        protocol_name: &EcoString,
+        selector: &str,
+        arg_types: &[InferredType],
+        arguments: &[Expression],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+    ) -> InferredType {
+        let Some((requirement, type_params)) = self.protocol_registry.as_ref().and_then(|r| {
+            r.get(protocol_name).map(|info| {
+                (
+                    info.all_class_requirements(r)
+                        .into_iter()
+                        .find(|req| req.selector.as_str() == selector)
+                        .cloned(),
+                    info.all_type_params(r),
+                )
+            })
+        }) else {
+            // Not a registered protocol (no registry threaded): unknown.
+            return InferredType::Dynamic(DynamicReason::Unknown);
+        };
+        let receiver_display: EcoString = format!("{protocol_name} class").into();
+        let instance_ty = InferredType::known(protocol_name.clone());
+
+        if let Some(requirement) = requirement {
+            let param_types: Vec<Option<DeclaredType>> = requirement
+                .param_types
+                .iter()
+                .map(|ty| {
+                    ty.as_deref()
+                        .map(DeclaredType::parse)
+                        .filter(|ty| !ty.mentions_any(&type_params))
+                })
+                .collect();
+            self.check_args_against_param_types(
+                &receiver_display,
+                selector,
+                arg_types,
+                &param_types,
+                &std::collections::HashMap::new(),
+                span,
+                hierarchy,
+                Some(arguments),
+                Some(env),
+            );
+            let Some(ref ret) = requirement.return_type else {
+                return InferredType::Dynamic(DynamicReason::UnannotatedReturn);
+            };
+            let ret_ty = DeclaredType::parse(ret);
+            if ret_ty.mentions_any(&type_params) {
+                return InferredType::Dynamic(DynamicReason::Unknown);
+            }
+            return match ret_ty {
+                DeclaredType::SelfType => instance_ty,
+                DeclaredType::SelfClass => InferredType::protocol_meta(protocol_name.clone()),
+                _ => type_resolver::resolve_declared_type(
+                    &ret_ty,
+                    &type_resolver::merge_substitutions(
+                        &type_resolver::SubstitutionMap::new(),
+                        &type_resolver::SubstitutionMap::new(),
+                        Some(&instance_ty),
+                    ),
+                    self.protocol_registry.as_ref(),
+                    self.alias_registry.as_ref(),
+                    TypeStringContext::Declared,
+                ),
+            };
+        }
+
+        if matches!(selector, "new" | "basicNew") {
+            return instance_ty;
+        }
+
+        if hierarchy.resolves_selector("Metaclass", selector) {
+            let metaclass: EcoString = "Metaclass".into();
+            self.check_argument_types(
+                &metaclass,
+                selector,
+                arg_types,
+                span,
+                hierarchy,
+                false,
+                Some(arguments),
+                Some(env),
+                &[],
+            );
+            return Self::class_object_tower_return(
+                selector,
+                hierarchy,
+                &InferredType::protocol_meta(protocol_name.clone()),
+            )
+            .unwrap_or(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
+        }
+
+        self.emit_unknown_selector_warning(
+            protocol_name,
+            protocol_name,
+            selector,
+            span,
+            hierarchy,
+            true,
+            Severity::Hint,
+            None,
+            None,
+        );
+        InferredType::Dynamic(DynamicReason::DynamicReceiver)
+    }
+
     /// ADR 0083: resolve a selector against the metaclass *tower* (the instance
     /// protocol a class object inherits: `Metaclass → Class → Behaviour →
     /// Object → ProtoObject`) and return its declared return type as an
@@ -966,16 +1122,17 @@ impl TypeChecker {
     /// tower or carries no return annotation (the caller keeps the Dynamic
     /// fallback). Resolution starts at `Metaclass` so the whole chain is walked.
     ///
-    /// `receiver_meta` is the concrete metatype of the receiver class object
-    /// (`Meta{C}`). When the tower method returns `Self` / `Self class` — e.g.
-    /// the identity method `Object>>yourself -> Self` — the receiver *is* the
-    /// class object, so the result stays `Meta{C}` (this keeps
+    /// `receiver_class_object` is the type of the receiver class object
+    /// (`Meta{C}`, or `ProtocolMeta{P}` for ADR 0144). When the tower method
+    /// returns `Self` / `Self class` — e.g. the identity method
+    /// `Object>>yourself -> Self` — the receiver *is* the class object, so the
+    /// result stays that type (this keeps
     /// `aClass yourself new` resolving class-side rather than collapsing to
     /// Dynamic).
     pub(in crate::semantic_analysis::type_checker) fn class_object_tower_return(
         selector: &str,
         hierarchy: &ClassHierarchy,
-        receiver_meta: &EcoString,
+        receiver_class_object: &InferredType,
     ) -> Option<InferredType> {
         let method = hierarchy.find_method("Metaclass", selector)?;
         let ret_ty = method.return_type.as_ref()?;
@@ -984,7 +1141,7 @@ impl TypeChecker {
         // preserve the concrete metatype rather than dropping to Dynamic — this
         // keeps tower identity methods (`yourself`) chainable class-side.
         if matches!(ret_ty, DeclaredType::SelfType | DeclaredType::SelfClass) {
-            return Some(InferredType::meta(receiver_meta.clone()));
+            return Some(receiver_class_object.clone());
         }
         if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
         {
