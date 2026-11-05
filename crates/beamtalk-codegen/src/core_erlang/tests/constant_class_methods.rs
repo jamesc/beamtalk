@@ -83,8 +83,9 @@ fn constant_sends_answer_the_literal_only_behind_a_constant_value_key() {
         let body = function_body(&out, method);
         let key = format!("{{'constant_value', {value}, 'bt@errs', '{fun}', 'Errs class'}}");
         assert!(
-            body.contains(&format!("call 'persistent_term':'get'({key}, 'false')")),
-            "`{method}` reads its constant-value key. Got:\n{body}"
+            body.contains("call 'persistent_term':'get'('Errs class static calls', ~{}~)")
+                && body.contains(&format!("<~{{{key} := ")),
+            "`{method}` reads its constant-value target in the class's static call map. Got:\n{body}"
         );
         let miss =
             format!("call 'beamtalk_class_shadow_flags':'static_call_target'({key}, 'Errs', ");

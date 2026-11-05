@@ -375,7 +375,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
             &resolved_deps,
             Some(format),
         )
-        .0
+        .registry
         .map(std::sync::Arc::new)
     } else if is_stdlib_lint_target {
         super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)

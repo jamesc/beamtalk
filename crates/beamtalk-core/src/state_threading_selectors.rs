@@ -256,6 +256,20 @@ pub fn is_conditional_selector(sel: &str) -> bool {
         || matches!(sel, "and:" | "or:")
 }
 
+/// BT-4451: whether a send of `sel` with `arguments` is a conditional the
+/// compiler inlines — a [`is_conditional_selector`] selector whose arguments
+/// are all literal blocks (what codegen's conditional intrinsics match). Any
+/// other conditional-selector send (`c ifTrue: x`, the FFI call
+/// `Erlang m ifTrue: c`) is an ordinary send: the sequencing rule covers its
+/// receiver and arguments like any other send's. The one predicate behind
+/// codegen's conditional-receiver and send-children recognizers and the
+/// analysis site walk (`block_facts::unsequenced_operand_holder`), so the two
+/// walks agree on which operands are sequenced.
+#[must_use]
+pub fn is_inlined_conditional_send(sel: &str, arguments: &[Expression]) -> bool {
+    is_conditional_selector(sel) && arguments.iter().all(|a| matches!(a, Expression::Block(_)))
+}
+
 /// ADR 0118 §Decision 7: the single "which selectors thread which
 /// block-argument positions" table. `beamtalk-core::ast::well_known::is_state_threaded_block_arg`
 /// (consulted by `beamtalk-codegen`'s `block_arg_for_selector`) and (via a

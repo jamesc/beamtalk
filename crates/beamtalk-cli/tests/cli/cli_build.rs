@@ -82,15 +82,47 @@ fn build_types_ffi_through_project_stubs_like_load_project() {
         .success()
         .stderr(contains("inferred as Dynamic").not());
 
-    // `--force`: the incremental cache does not key on the stub tier, so an
-    // unchanged source would otherwise be skipped (BT-4393).
+    // A plain (non-`--force`) rebuild: the incremental cache keys on the stub
+    // tiers, so removing `stubs/` recompiles the unchanged source (BT-4393).
     std::fs::remove_dir_all(project.path().join("stubs")).expect("remove stubs/");
     cli_common::beamtalk()
         .current_dir(project.path())
-        .args(["build", "--force"])
+        .arg("build")
         .assert()
         .failure()
         .stderr(contains("inferred as Dynamic").and(contains("untyped")));
+}
+
+#[test]
+fn plain_rebuild_follows_stub_edits() {
+    // BT-4393: editing a stub between two plain `beamtalk build` runs must
+    // recompile the (unchanged) source against the new stub, not replay the
+    // previous build's verdict.
+    let project = cli_common::copied_fixture_project("tests/parity/projects/stubbed_ffi");
+    let stub = project.path().join("stubs/stubbed_ffi_native.bt");
+    let original = std::fs::read_to_string(&stub).expect("read stub");
+    let build = || {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .arg("build")
+            .assert()
+    };
+
+    build()
+        .success()
+        .stderr(contains("inferred as Dynamic").not());
+
+    // The stub no longer declares `answer/0`, so the call is untyped again.
+    std::fs::write(&stub, original.replace("answer ->", "renamed ->")).expect("edit stub");
+    build()
+        .failure()
+        .stderr(contains("inferred as Dynamic").and(contains("untyped")));
+
+    // Restoring the stub brings the clean verdict back.
+    std::fs::write(&stub, &original).expect("restore stub");
+    build()
+        .success()
+        .stderr(contains("inferred as Dynamic").not());
 }
 
 #[test]

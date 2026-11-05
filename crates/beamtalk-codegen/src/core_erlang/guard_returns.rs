@@ -39,7 +39,7 @@
 //! method's result. Over a tail body:
 //!
 //! - **Guard.** A non-last statement that is an inlined conditional with
-//!   literal block arguments (the [`is_conditional_selector`] table, less
+//!   literal block arguments ([`is_inlined_conditional_send`], less
 //!   `and:`/`or:`), where exactly one branch slot *falls through* (is absent,
 //!   or a block whose last statement is not a `^`) and every other branch
 //!   ends in a `^`, absorbs the statements after it: they become the tail of
@@ -95,7 +95,7 @@ use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::semantic_analysis::facts::body_has_block_nlr;
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::state_threading_selectors::{
-    StructuralBinary, is_conditional_selector, structural_binary,
+    StructuralBinary, is_inlined_conditional_send, structural_binary,
 };
 use ecow::EcoString;
 
@@ -405,13 +405,12 @@ fn selector_of(parts: &[KeywordPart]) -> String {
 }
 
 /// Whether `parts`/`arguments` name an inlined `ifTrue:`/`ifNil:`-family
-/// conditional (the shared [`is_conditional_selector`] table, less
-/// `and:`/`or:`) with literal block arguments.
+/// conditional with literal block arguments (the shared
+/// [`is_inlined_conditional_send`], less `and:`/`or:`).
 fn is_inlined_conditional(parts: &[KeywordPart], arguments: &[Expression]) -> bool {
     let selector = selector_of(parts);
-    is_conditional_selector(&selector)
-        && !matches!(selector.as_str(), "and:" | "or:")
-        && arguments.iter().all(|a| matches!(a, Expression::Block(_)))
+    !matches!(selector.as_str(), "and:" | "or:")
+        && is_inlined_conditional_send(&selector, arguments)
 }
 
 /// Whether `expr` is `true` or `false` whatever it evaluates: a Boolean

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4316 (ADR 0142 §2, amended): a static class send's hit path reads one
-// `persistent_term` key per call target, whose value is the `ClassSelf` the
-// callee receives. These are the workspace halves of the BUnit rows in
+// `persistent_term` key, its class's static call map (one key per class since
+// BT-4442), whose value for the call target is the `ClassSelf` the callee
+// receives. These are the workspace halves of the BUnit rows in
 // stdlib/test/guarded_static_call_test.bt: each warms the key through a call
 // site compiled before the change (`Gsk*Caller run`), redefines the target
 // class, then checks the old call site answers what a dynamic send (the class

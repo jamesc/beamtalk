@@ -316,6 +316,7 @@ mod evaluated_block_grid_corpus;
 mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
+mod ffi_conditional_selector_corpus;
 mod field_assignment_value_position;
 mod field_write_sites;
 mod fold_locals_carried_corpus;

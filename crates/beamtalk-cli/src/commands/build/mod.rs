@@ -64,7 +64,7 @@ pub(crate) use sources::{
 };
 #[cfg(test)]
 pub(crate) use stubs::{
-    distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
+    StubLayer, distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
 };
 pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 
@@ -218,7 +218,11 @@ fn execute_build_passes(
         options.stdlib_mode,
     );
     // ADR 0075 full resolution chain over the auto-extracted registry.
-    let (native_type_registry, stub_diagnostics) = resolve_package_type_registry(
+    let stubs::ResolvedTypeRegistry {
+        registry: native_type_registry,
+        diagnostics: stub_diagnostics,
+        stub_inputs_hash,
+    } = resolve_package_type_registry(
         &env.project_root,
         auto_extract_registry,
         &dep_ctx.resolved_deps,
@@ -259,6 +263,7 @@ fn execute_build_passes(
             file_protocol_uses,
             protocol_hashes,
             trait_surface_hash: index.trait_surface_hash.clone(),
+            stub_inputs_hash,
         },
     );
 

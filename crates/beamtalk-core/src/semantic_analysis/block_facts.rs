@@ -3855,7 +3855,13 @@ pub fn unsequenced_operand_holder(expr: &Expression) -> Option<UnsequencedOperan
                     },
                 );
             }
-            if crate::state_threading_selectors::is_conditional_selector(&selector.name()) {
+            // BT-4451: only an inlined conditional (literal block arguments)
+            // holds its receiver back; any other conditional-selector send is
+            // a plain send whose operands codegen sequences.
+            if crate::state_threading_selectors::is_inlined_conditional_send(
+                &selector.name(),
+                arguments,
+            ) {
                 return Some(UnsequencedOperand::ConditionalReceiver);
             }
             operands_not_sequenced(receiver, selector, arguments)

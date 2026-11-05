@@ -302,6 +302,48 @@ end
     a user `new:` is honoured by already-loaded descendants without
     recompiling them. BT-4126's reload warning becomes informational.
   - Static `new:` stays on `class_send`; its fast path is the dynamic one.
+- **Amended (BT-4442, 2026-11-05): one static call key per class.** Each
+  `persistent_term` update (a put, or an erase of a present key) waits for
+  thread progress on every scheduler, about 0.1 to 0.3 ms, and OTP has no
+  batch erase. With one key per call target, a metadata write on a base class
+  paid one erase per warm target in the class and every descendant: 122 ms
+  for 50 subclasses × 10 targets (`results/bench-bt4431.md`). The targets of
+  one class now share one key, the atom `'<Name> class static calls'`, whose
+  value maps each installed call-site key (the literals above, unchanged) to
+  its class reference:
+
+  ```erlang
+  let ClassSelf = case call 'persistent_term':'get'('Point class static calls', ~{}~) of
+      <~{{'bt@app@point', 'class_origin', 'Point class'} := Ref}~> -> Ref
+      <_> -> call 'beamtalk_class_shadow_flags':'static_call_target'(
+                 {'bt@app@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
+    end
+  in ...as above...
+  ```
+
+  - **Cost model.** An erase of a class's keys is at most two updates (the
+    derived flag and the map), however many targets are warm, so
+    `invalidate/1` over N descendants is at most 2(N+1) updates. Installing a
+    target is one update (the class's map is copied with the target added),
+    as before; a target already present is never rewritten. But every install
+    after a class's first replaces a present value, which, like an erase,
+    releases a literal area that each process's heap is checked against; a
+    put of a new key did not. The cost moves from the writer's synchronous
+    erase to the lazy re-warm, and grows with the node's process count and
+    heap sizes. The 50 × 10 case
+    falls to about 20 ms, the cost of the 50 × 1 case
+    (`results/bench-bt4442.md`).
+  - **The hit path stays one read.** The map match is a BEAM instruction, not
+    a call, and rows 3a-3c stay at 3 reductions. The key is an atom because
+    hashing a tuple `persistent_term` key is the dearer part of the read: a
+    `{Name, Tag}` tuple key with the map match measured ~36 ns per hit, the
+    atom key ~21 ns, against ~26 ns for the per-target tuple key it replaces.
+    The spaces keep it apart from any module's key and from every class tag.
+  - **Targets are erased together.** Any write that could change one target
+    erases the class's whole map; the next send of each call site
+    re-installs its own target. Erasing only the descendants or targets a
+    write can affect was rejected: every eraser would have to classify its
+    write, and one missed case would run a stale function.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

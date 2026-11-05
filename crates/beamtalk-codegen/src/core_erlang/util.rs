@@ -96,6 +96,22 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
     s
 }
 
+/// Builds the name of a class's static call key (BT-4442),
+/// `"{class_name} class static calls"`: the one `persistent_term` key a
+/// static class send to `class_name` reads, whose value maps each installed
+/// call-site key to its class reference. An atom, because hashing an atom
+/// `persistent_term` key is much cheaper than hashing a tuple one; the spaces
+/// keep it from colliding with a module's key or a class tag (no class name
+/// contains a space). The runtime spells it in
+/// `beamtalk_class_shadow_flags:static_calls_key/1`;
+/// `GuardedStaticCallTest>>testCallSiteReadsTheRuntimesPerClassKey`
+/// (`stdlib/test/guarded_static_call_test.bt`) fails if the two differ.
+pub(super) fn static_calls_key(class_name: &str) -> String {
+    let mut s = metaclass_tag(class_name);
+    s.push_str(" static calls");
+    s
+}
+
 /// The name a class's process is registered under,
 /// `"beamtalk_class_{class_name}"` (`beamtalk_class_registry:registry_name/1`).
 /// Built at compile time so a static call site looks the class's pid up with
@@ -1051,13 +1067,32 @@ impl CoreErlangGenerator {
     /// operand the sequencing rule leaves to the conditional's own lowering.
     pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
-            receiver, selector, ..
+            receiver,
+            selector,
+            arguments,
+            ..
         } = expr
         else {
             return None;
         };
-        beamtalk_core::state_threading_selectors::is_conditional_selector(selector.name().as_str())
-            .then_some(receiver.as_ref())
+        Self::is_conditional_send(selector, arguments).then_some(receiver.as_ref())
+    }
+
+    /// BT-4451: whether a send of `selector` with `arguments` is a conditional
+    /// the compiler lowers in place — the shared
+    /// [`beamtalk_core::state_threading_selectors::is_inlined_conditional_send`],
+    /// behind [`Self::conditional_send_receiver`] (whose receiver the
+    /// conditional's lowering threads) and [`Self::sequenced_send_children`]
+    /// (which leaves a conditional opaque). Any other conditional-selector send
+    /// is a covered send: `Erlang beamtalk_guard_return ifTrue: c` is an FFI
+    /// call whose `Erlang <module>` receiver `try_handle_erlang_interop`
+    /// consumes structurally, so sequencing it ahead registered a value
+    /// nothing read back ("never substituted").
+    fn is_conditional_send(selector: &MessageSelector, arguments: &[Expression]) -> bool {
+        beamtalk_core::state_threading_selectors::is_inlined_conditional_send(
+            selector.name().as_str(),
+            arguments,
+        )
     }
 
     /// The children the sequencing rule applies to when `expr` (already
@@ -1089,9 +1124,7 @@ impl CoreErlangGenerator {
         else {
             return None;
         };
-        if beamtalk_core::state_threading_selectors::is_conditional_selector(
-            selector.name().as_str(),
-        ) {
+        if Self::is_conditional_send(selector, arguments) {
             return None;
         }
         let mut children = Vec::with_capacity(arguments.len() + 1);
