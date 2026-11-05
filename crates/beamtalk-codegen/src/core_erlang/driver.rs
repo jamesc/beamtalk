@@ -484,6 +484,7 @@ impl CoreErlangGenerator {
         module: &Module,
     ) {
         self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
+        self.add_explicit_class_new_verdicts(hierarchy, module);
         if let Some(class) = module.classes.first() {
             self.own_direct_constructors = self.own_direct_constructors_for(&class.name.name);
             self.own_stdlib_trait_methods = self.own_stdlib_trait_methods_for(hierarchy, class);
@@ -491,6 +492,36 @@ impl CoreErlangGenerator {
                 self.overrides_collection_selector_for(hierarchy, class);
             self.own_overrides_species_construction =
                 self.overrides_species_construction_for(hierarchy, class);
+        }
+    }
+
+    /// BT-4464: mark `direct_new0` for each class compiled here whose own
+    /// explicit class-side `new` may build in the caller
+    /// (`ClassHierarchy::explicit_class_new_builds_in_caller`, which needs the
+    /// method body and so only answers for classes with their AST in hand).
+    /// The verdict reaches the class's baked `direct_constructors` (so a
+    /// dynamic `X new` from any module builds in the caller behind the
+    /// BT-4409 guard) and this module's own static `X new` sites.
+    fn add_explicit_class_new_verdicts(
+        &mut self,
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        module: &Module,
+    ) {
+        for class in &module.classes {
+            if !hierarchy.explicit_class_new_builds_in_caller(class) {
+                continue;
+            }
+            let class_name = class.name.name.to_string();
+            let module_name = EcoString::from(self.compiled_module_name(&class_name));
+            self.direct_call_eligible
+                .entry(class_name)
+                .or_insert_with(|| DirectCallClassInfo {
+                    module_name,
+                    selectors: std::collections::HashSet::new(),
+                    direct_new0: false,
+                    direct_new1: false,
+                })
+                .direct_new0 = true;
         }
     }
 

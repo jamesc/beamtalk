@@ -288,6 +288,15 @@ end
     then takes the fallback, and the class process's `{new, _}` handler runs
     it. An ancestor's class-side `new` extension does not shadow the class's
     own synthesized `new`, as on the class-process lookup.
+- **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
+  whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
+  with literal arguments) or `self delegate` on a `native:` class bakes `new`
+  into `direct_constructors` too (`ClassHierarchy::
+  explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
+  class variables in its chain. Its `new/0` is `class_new('undefined')`, which
+  is all the `{new, []}` handler would run, so the guarded direct call is the
+  same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
+  it; a body that sends to `self` (`self basicNew`) does not.
   - **The `new:` chain fact is decided at run time.** Rust bakes a per-class
     fact into `__beamtalk_meta/0`, `defines_user_class_new1`: "this class
     defines a class-side `new:` that is user code". `Value` is exempt, because

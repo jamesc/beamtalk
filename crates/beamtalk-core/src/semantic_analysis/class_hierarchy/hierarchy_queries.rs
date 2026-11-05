@@ -694,6 +694,78 @@ impl ClassHierarchy {
         result
     }
 
+    /// BT-4464: whether `class`'s own explicit class-side `new` may build in
+    /// the caller, the explicit-constructor counterpart of the synthesized
+    /// `new0` verdict of [`Self::direct_constructors`].
+    ///
+    /// A class that defines `class new => <body>` (and no instance-side
+    /// `new`) compiles a `new/0` that delegates to the body
+    /// (`generate_delegating_new` in codegen: `class_new('undefined')`), and
+    /// the class process's `{new, []}` handler only ever calls that `new/0`.
+    /// So the class process adds nothing but a serialisation point whenever
+    /// the body does not need it: the body is a single statement that is
+    ///
+    /// - `self delegate` on a `native:` class (lowered to
+    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module), or
+    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals,
+    ///
+    /// so it reads no `self`, no class variable and nothing from the class
+    /// process's dictionary (`basicNew` does, which is why a body sending to
+    /// `self` is never eligible). The class must also be concrete, compile as
+    /// a non-actor, have a fully known surface and no class variables in its
+    /// chain. Like the synthesized verdict this only makes the class eligible
+    /// to *try* the direct path: codegen bakes it into `direct_constructors`
+    /// and every direct `new` is guarded at run time (BT-4409,
+    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`), so a class-side
+    /// extension or ADR 0084 runtime fun of `new` still reaches the class
+    /// process. As for any in-caller class method (ADR 0142), a resource the
+    /// FFI creates belongs to the caller.
+    #[must_use]
+    pub fn explicit_class_new_builds_in_caller(&self, class: &ClassDefinition) -> bool {
+        fn primary_new(
+            methods: &[crate::ast::MethodDefinition],
+        ) -> Option<&crate::ast::MethodDefinition> {
+            methods
+                .iter()
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "new")
+        }
+        let class_name = class.name.name.as_str();
+        if class.is_abstract
+            || self.compiles_as_actor(class)
+            || self.chain_has_class_variables(class_name)
+            || self
+                .get_class(class_name)
+                .is_none_or(|info| info.surface_incomplete)
+        {
+            return false;
+        }
+        if primary_new(&class.methods).is_some() {
+            return false;
+        }
+        let Some(new_method) = primary_new(&class.class_methods) else {
+            return false;
+        };
+        if class.backing_module.is_some() && new_method.is_self_delegate() {
+            return true;
+        }
+        let [stmt] = new_method.body.as_slice() else {
+            return false;
+        };
+        match &stmt.expression {
+            crate::ast::Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some()
+                    && arguments
+                        .iter()
+                        .all(|arg| matches!(arg, crate::ast::Expression::Literal(..)))
+            }
+            _ => false,
+        }
+    }
+
     /// Whether any ancestor of the named class defines a class-side `new:`
     /// that is real user code ([`Self::defines_user_class_new1`], asked of
     /// each ancestor).

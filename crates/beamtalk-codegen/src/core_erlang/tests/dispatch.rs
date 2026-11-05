@@ -4889,6 +4889,32 @@ fn test_value_with_custom_new_omits_it_from_baked_constructors() {
     );
 }
 
+/// BT-4464: an explicit class-side `new` that is a plain FFI forward (the
+/// `Reference new` shape) bakes a direct `new` verdict, so a dynamic
+/// `Tag new` builds in the caller behind the BT-4409 guard, and the
+/// module's own static `Tag new` takes the guarded `Module:new()` call.
+#[test]
+fn test_explicit_ffi_class_new_bakes_direct_new() {
+    let src = "sealed Object subclass: Tag\n\n  class sealed new -> Tag => (Erlang erlang) make_ref\n\n  class fresh -> Tag => Tag new\n";
+    let code = codegen_source(src);
+    assert!(
+        code.contains("'direct_constructors' => ['new']"),
+        "an FFI-forward class `new` bakes a direct `new` verdict. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'new', 'Tag class'}, 'false')"),
+        "the module's own static `Tag new` uses the guarded constructor key. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+
+    // A body that sends to `self` keeps the class process.
+    let basic = codegen_source("Object subclass: Tag\n\n  class new => self basicNew\n");
+    assert!(
+        !basic.contains("'direct_constructors' => ['new'"),
+        "`self basicNew` must not bake a direct `new` verdict. Got:\n{basic}"
+    );
+}
+
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
     // actor classes have no constructor anchor, so no key is

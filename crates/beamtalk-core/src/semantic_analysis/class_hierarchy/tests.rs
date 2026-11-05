@@ -4275,3 +4275,102 @@ fn field_at_class_methods_are_not_direct_call_eligible() {
     assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
     assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
 }
+
+/// BT-4464: `ClassHierarchy::explicit_class_new_builds_in_caller` over the
+/// first class of `source`.
+fn bt4464_explicit_new_verdict(source: &str) -> bool {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module)
+        .0
+        .expect("fixture hierarchy should build");
+    h.explicit_class_new_builds_in_caller(&module.classes[0])
+}
+
+#[test]
+fn explicit_class_new_ffi_forward_builds_in_caller() {
+    // The `Reference new` shape (stdlib/src/reference.bt).
+    assert!(bt4464_explicit_new_verdict(
+        "sealed Object subclass: Tag\n  class sealed new -> Tag => (Erlang erlang) make_ref\n"
+    ));
+    // Sealing plays no part (ADR 0142); literal arguments are fine.
+    assert!(bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => (Erlang erlang) phash2: 42\n"
+    ));
+}
+
+#[test]
+fn explicit_class_new_native_self_delegate_builds_in_caller() {
+    // The `Queue new` / `Random new` shape.
+    assert!(bt4464_explicit_new_verdict(
+        "Value subclass: Q native: my_queue\n  class sealed new -> Q => self delegate\n"
+    ));
+    // `self delegate` without a backing module is the sentinel error, not a
+    // forward: leave it on the class process.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Q\n  class new => self delegate\n"
+    ));
+}
+
+#[test]
+fn explicit_class_new_reading_class_or_args_stays_on_class_process() {
+    // `self basicNew` reads the class process's dictionary.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => self basicNew\n"
+    ));
+    // A non-literal argument may read `self` or a class variable.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => (Erlang erlang) list_to_atom: self name\n"
+    ));
+    // More than one statement is not a plain forward.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new =>\n    (Erlang erlang) make_ref.\n    (Erlang erlang) make_ref\n"
+    ));
+    // No explicit class-side `new` at all.
+    assert!(!bt4464_explicit_new_verdict("Object subclass: Tag\n"));
+}
+
+#[test]
+fn explicit_class_new_needs_a_concrete_stateless_class() {
+    assert!(!bt4464_explicit_new_verdict(
+        "abstract Object subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
+    ));
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  classState: count = 0\n  class new => (Erlang erlang) make_ref\n"
+    ));
+    assert!(!bt4464_explicit_new_verdict(
+        "Actor subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
+    ));
+    // An instance-side `new` replaces `new/0`: nothing to call directly.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  new => self\n  class new => (Erlang erlang) make_ref\n"
+    ));
+}
+
+/// The stdlib classes BT-4464 moves off the class process: pinned by parsing
+/// their real sources, so a body change that leaves the rule is caught here.
+#[test]
+fn explicit_class_new_stdlib_audit() {
+    for (file, expected) in [
+        ("reference.bt", true),
+        ("random.bt", true),
+        ("queue.bt", true),
+        ("announcer.bt", true),
+        // `@primitive "metaclassNew"` builds a metaclass: not a plain forward.
+        ("metaclass.bt", false),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../stdlib/src")
+            .join(file);
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let tokens = crate::source_analysis::lex_with_eof(&source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::with_builtins();
+        assert_eq!(
+            h.explicit_class_new_builds_in_caller(&module.classes[0]),
+            expected,
+            "{file}"
+        );
+    }
+}
