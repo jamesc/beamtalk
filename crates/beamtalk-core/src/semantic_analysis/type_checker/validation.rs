@@ -1814,7 +1814,7 @@ impl TypeChecker {
         }
     }
 
-    /// BT-4385: when `arg` (parens unwrapped) is a non-empty list literal
+    /// BT-4385: when `arg` is a non-empty list literal
     /// and the parameter declared `expected_declared` takes a list with a
     /// concrete element type, the literal's elements and that element type.
     /// The argument is then judged element by element
@@ -1839,7 +1839,8 @@ impl TypeChecker {
         class_name: &str,
         hierarchy: &ClassHierarchy,
     ) -> Option<(&'a [Expression], InferredType)> {
-        let Expression::ListLiteral { elements, .. } = arg.unwrap_parens() else {
+        // `ast::normalize` (BT-4059) already peeled parens off a send argument.
+        let Expression::ListLiteral { elements, .. } = arg else {
             return None;
         };
         if elements.is_empty() {
