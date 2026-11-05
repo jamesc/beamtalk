@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4432: a stdlib method whose body is `@intrinsic <name>` is inlined at a
+// direct send, but `perform:` runs its compiled body. `Object>>hash`'s body
+// used to re-dispatch `hash` to itself and loop forever. These tests pin that
+// `perform:` of each intrinsic-backed Object selector answers what the direct
+// send answers, on a value instance, primitives, a class object and an actor.
+//
+// Fixtures: stdlib/test/fixtures/value_point.bt, stdlib/test/fixtures/counter.bt
+
+TestCase subclass: PerformPlaceholderIntrinsicsTest
+
+  testHashViaPerformOnValueInstance =>
+    p := ValuePoint x: 3 y: 4
+    self assert: (p perform: #hash) equals: p hash
+
+  testHashViaPerformOnPrimitives =>
+    self assert: (42 perform: #hash) equals: 42 hash
+    self assert: ("abc" perform: #hash) equals: "abc" hash
+
+  testHashViaPerformOnClassObject =>
+    self assert: (ValuePoint perform: #hash) equals: ValuePoint hash
+
+  testHashViaPerformOnActor =>
+    c := Counter spawn
+    self assert: (c perform: #hash) equals: c hash
+    c stop
+
+  testReflectionViaPerformOnValueInstance =>
+    p := ValuePoint x: 3 y: 4
+    self assert: (p perform: #respondsTo: withArguments: #(#x)) equals: (p respondsTo: #x)
+    self assert: (p perform: #fieldNames) equals: p fieldNames
+    self assert: (p perform: #fieldAt: withArguments: #(#y)) equals: (p fieldAt: #y)
+    self assert: (p perform: #hasField: withArguments: #(#x)) equals: (p hasField: #x)
+    self assert: (p perform: #hasField: withArguments: #(#z)) equals: (p hasField: #z)
+
+  testReflectionViaPerformOnClassObject =>
+    self assert: (ValuePoint perform: #respondsTo: withArguments: #(#name)) equals: (ValuePoint respondsTo: #name)
+    // A class object has no instance fields. Compared with a literal: the
+    // direct `ValuePoint fieldNames` send mis-lowers for a class object
+    // (it `sync_send`s to the class process), tracked separately.
+    self assert: (ValuePoint perform: #fieldNames) equals: #()
+    self assert: (ValuePoint perform: #hasField: withArguments: #(#x)) equals: (ValuePoint hasField: #x)
+
+  testPerformViaPerformOnValueInstance =>
+    p := ValuePoint x: 3 y: 4
+    self assert: (p perform: #perform: withArguments: #(#x)) equals: (p perform: #x)
+    self assert: (p perform: #perform:withArguments: withArguments: #(#fieldAt:, #(#y))) equals: (p perform: #fieldAt: withArguments: #(#y))
+    self assert: (p perform: #perform: withArguments: #(#hash)) equals: p hash
+
+  testPerformViaPerformOnClassObject =>
+    self assert: (ValuePoint perform: #perform: withArguments: #(#name)) equals: (ValuePoint perform: #name)
+    self assert: (ValuePoint perform: #perform:withArguments: withArguments: #(#respondsTo:, #(#new))) equals: (ValuePoint perform: #respondsTo: withArguments: #(#new))
