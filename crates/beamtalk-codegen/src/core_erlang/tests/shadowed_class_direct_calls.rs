@@ -287,8 +287,11 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
 // shadowed unqualified reference resolves the module at call time instead of
 // pinning the compile-time one.
 
+// BT-4404: the lookup also names the call shape it was lowered to, so the
+// runtime can raise a structured error when the winning class is a
+// different kind.
 const RUNTIME_MODULE_LOOKUP: &str =
-    "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(";
+    "call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(";
 
 fn counter_reference(package: Option<&str>) -> Expression {
     Expression::ClassReference {
@@ -340,7 +343,9 @@ fn spawn_family_on_shadowed_class_resolves_module_at_runtime() {
 
         let output = send_spawn(selector, true, None, false);
         assert!(
-            output.contains(&format!("{RUNTIME_MODULE_LOOKUP}'Counter', '{selector}')")),
+            output.contains(&format!(
+                "{RUNTIME_MODULE_LOOKUP}'Counter', '{selector}', 'actor')"
+            )),
             "shadowed `Counter {selector}` must resolve its module at runtime. Got:\n{output}"
         );
         assert!(
@@ -378,7 +383,7 @@ fn supervisor_start_on_shadowed_class_resolves_module_at_runtime() {
     assert!(
         output.contains(&format!(
             "call 'beamtalk_supervisor':'class_start'('Counter', \
-             {RUNTIME_MODULE_LOOKUP}'Counter', 'spawnWith:'), 'spawnWith:', ["
+             {RUNTIME_MODULE_LOOKUP}'Counter', 'spawnWith:', 'supervisor'), 'spawnWith:', ["
         )),
         "shadowed supervisor start must resolve its module at runtime. Got:\n{output}"
     );
