@@ -80,6 +80,7 @@ functions that call OTP APIs from the caller's process context.
     spec_to_otp/1,
     spec_to_otp/2,
     is_supervisor/1,
+    spawn_kind/1,
     register_root/1,
     get_root/0,
     ensure_root_table/0,
@@ -2258,18 +2259,42 @@ early exit already makes the common case constant-time.
 """.
 -spec is_supervisor(atom()) -> boolean().
 is_supervisor(ClassName) ->
+    spawn_kind(ClassName) =:= supervisor.
+
+-doc """
+The spawnable kind of a class, from one walk of its superclass chain:
+
+- `supervisor` — a `Supervisor`/`DynamicSupervisor` (subclass);
+- `actor` — an `Actor` (subclass); the two hierarchies are disjoint
+  (`Supervisor` and `DynamicSupervisor` are `Object` subclasses);
+- `none` — the chain reaches `Object` (or a root class) without either;
+- `unknown` — the chain could not be followed to a decision: an ancestor has
+  no metadata row (removed, renamed, or not yet loaded) or the walk hit the
+  depth guard. Callers must not read `unknown` as "not spawnable".
+
+Shared by `is_supervisor/1` and the shadowed spawn-module lookup
+(`beamtalk_class_instantiation:resolve_spawn_module_or_raise/3`, BT-4404).
+""".
+-spec spawn_kind(atom()) -> supervisor | actor | none | unknown.
+spawn_kind(ClassName) ->
     Step = fun
         (Base, _Depth) when Base =:= 'Supervisor'; Base =:= 'DynamicSupervisor' ->
-            {found, true};
-        (Root, _Depth) when Root =:= 'Actor'; Root =:= 'Object' ->
-            not_found;
+            {found, supervisor};
+        ('Actor', _Depth) ->
+            {found, actor};
+        ('Object', _Depth) ->
+            {found, none};
         (Class, _Depth) ->
             case beamtalk_class_metadata:lookup_superclass(Class) of
+                {ok, none} -> {found, none};
                 {ok, Super} -> {next, Super};
                 not_found -> not_found
             end
     end,
-    beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) =:= {found, true}.
+    case beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) of
+        {found, Kind} -> Kind;
+        _ -> unknown
+    end.
 
 -doc """
 Register the OTP application root supervisor.

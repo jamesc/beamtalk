@@ -422,3 +422,16 @@ fn shadowed_spawn_family_module_compiles_through_erlc() {
     );
     super::assert_compiles_through_erlc("caller", &code);
 }
+
+#[test]
+fn class_self_module_lookup_keeps_the_unchecked_two_arity_helper() {
+    // BT-4404 shares one lookup builder between the `ClassSelf` intrinsics
+    // and class-reference spawns; only the latter may carry the kind check.
+    let doc = CoreErlangGenerator::class_self_module_doc("spawn").to_pretty_string();
+    assert!(
+        doc.starts_with("call 'beamtalk_class_instantiation':'resolve_module_or_raise'(")
+            && doc.ends_with(", 'spawn')")
+            && !doc.contains(RUNTIME_MODULE_LOOKUP),
+        "the ClassSelf lookup must stay resolve_module_or_raise/2. Got:\n{doc}"
+    );
+}

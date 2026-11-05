@@ -936,13 +936,23 @@ confused supervisor start):
   (a Value or Object class has no spawn family at all);
 - `instantiation_error` when the class is the other spawnable kind (an actor
   where a supervisor start was compiled, or vice versa).
+
+An ancestor chain that cannot be followed (`beamtalk_supervisor:spawn_kind/1`
+answers `unknown`: an ancestor row removed, renamed or not loaded yet) is not
+treated as a mismatch: the module is answered and the emitted call runs as it
+did before this check.
 """.
 -spec resolve_spawn_module_or_raise(class_name(), atom(), actor | supervisor) -> module().
 resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
     case beamtalk_class_metadata:lookup_module(ClassName) of
         {ok, Module} ->
-            case spawn_kind_of(ClassName) of
+            case beamtalk_supervisor:spawn_kind(ClassName) of
                 Kind ->
+                    Module;
+                unknown ->
+                    %% An incomplete ancestor chain (an ancestor row removed,
+                    %% renamed or not loaded yet) decides nothing: keep the
+                    %% pre-check behaviour and let the emitted call run.
                     Module;
                 none ->
                     raise_wrapped(
@@ -963,35 +973,23 @@ resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
             )
     end.
 
-%% The spawnable kind of a runtime class: `supervisor` for a
-%% `Supervisor`/`DynamicSupervisor` subclass, `actor` for an `Actor`
-%% subclass (the two hierarchies are disjoint), `none` otherwise.
--spec spawn_kind_of(class_name()) -> actor | supervisor | none.
-spawn_kind_of(ClassName) ->
-    case beamtalk_supervisor:is_supervisor(ClassName) of
-        true ->
-            supervisor;
-        false ->
-            case beamtalk_class_registry:inherits_from(ClassName, 'Actor') of
-                true -> actor;
-                false -> none
-            end
-    end.
-
--spec spawn_kind_mismatch_error(class_name(), atom(), actor | supervisor, actor | supervisor) ->
+-spec spawn_kind_mismatch_error(
+    class_name(), atom(), actor | supervisor, actor | supervisor
+) ->
     #beamtalk_error{}.
 spawn_kind_mismatch_error(ClassName, Selector, Expected, Actual) ->
+    Name = atom_to_binary(ClassName, utf8),
     Hint = iolist_to_binary([
-        <<"This send was compiled against a different package's ">>,
-        atom_to_binary(ClassName, utf8),
-        <<", which is ">>,
-        kind_phrase(Expected),
+        <<"This send was compiled as ">>,
+        call_shape_phrase(Expected),
         <<", but the loaded ">>,
-        atom_to_binary(ClassName, utf8),
+        Name,
         <<" is ">>,
         kind_phrase(Actual),
-        <<". Qualify the class with its package (pkg@">>,
-        atom_to_binary(ClassName, utf8),
+        <<" (more than one package declares ">>,
+        Name,
+        <<"). Qualify the class with its package (pkg@">>,
+        Name,
         <<") to pick one.">>
     ]),
     beamtalk_error:with_details(
@@ -1001,6 +999,9 @@ spawn_kind_mismatch_error(ClassName, Selector, Expected, Actual) ->
         ),
         #{expected_kind => Expected, actual_kind => Actual}
     ).
+
+call_shape_phrase(actor) -> <<"an actor spawn">>;
+call_shape_phrase(supervisor) -> <<"a supervisor start">>.
 
 kind_phrase(actor) -> <<"an Actor">>;
 kind_phrase(supervisor) -> <<"a Supervisor">>.
