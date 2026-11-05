@@ -11,7 +11,7 @@
 //! state carrier (`push_control_flow_threaded_var_rereads`), which
 //! `VerifyError::ConstructLocalsRereadOpaquely` now reports.
 //!
-//! The corpus is the generated BUnit grid's own fixtures
+//! The corpus is the generated `BUnit` grid's own fixtures
 //! (`scripts/gen-bt4460-plain-arm-nested-grid.py`): nested selector x
 //! statement position x write placement x writer, in actor, value-type and
 //! `Object` class-side methods. Each method is compiled on its own: every one

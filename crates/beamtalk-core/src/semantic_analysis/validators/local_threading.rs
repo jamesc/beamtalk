@@ -2301,7 +2301,7 @@ impl<'d> Walker<'d> {
     /// statement's sites.
     fn arm_frame_conditional_producer(&self, expr: &Expression) -> bool {
         // BT-4460: a plain arm registers every arm-frame site in codegen
-        // (`with_plain_arm_producer_sites`), as a producer's arm does, so a
+        // (`generate_plain_arm`), as a producer's arm does, so a
         // conditional, `on:do:` or `match:` nested in one is a producer there
         // by this same rule, and its own arms are frames in which a nested
         // loop keeps its write (the BT-4367 drop came from the two sides

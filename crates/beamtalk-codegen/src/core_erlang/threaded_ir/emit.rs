@@ -240,10 +240,12 @@ pub(in crate::core_erlang) fn render(
             // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
-            ThreadedStmt::Statement(doc, _) => docs.push(doc.clone()),
+            //
             // BT-4460: the legacy reread renders like a `Statement`; its
             // `locals` are for the verifier.
-            ThreadedStmt::StateCarrierReread { doc, .. } => docs.push(doc.clone()),
+            ThreadedStmt::Statement(doc, _) | ThreadedStmt::StateCarrierReread { doc, .. } => {
+                docs.push(doc.clone());
+            }
             // BT-3863: the fold accumulator renders like a `Statement`; its
             // `carry` is for the verifier.
             ThreadedStmt::FoldAccumulator { value, .. } => docs.push(value.clone()),

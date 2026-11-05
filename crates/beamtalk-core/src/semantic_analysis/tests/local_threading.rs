@@ -1435,7 +1435,7 @@ fn arm_local_producer_as_assign_value_is_accepted_in_actor_and_value_methods() {
 /// BT-4460: a conditional, `on:do:` or `match:` nested in a plain arm is a
 /// producer there by the arm-frame rule (`arm_frame_conditional_producer`), as
 /// codegen's plain arm registers every arm-frame site
-/// (`with_plain_arm_producer_sites`). Its own arms are then frames, so a loop
+/// (`generate_plain_arm`). Its own arms are then frames, so a loop
 /// in one that writes a local of the plain arm is a producer of that frame, as
 /// an operand or as an assigned value. Before BT-4460 the two sides disagreed:
 /// these were rejected (BT-4367 review), because a loop in a nested `on:do:`
