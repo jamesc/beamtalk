@@ -1528,6 +1528,68 @@ impl TypeChecker {
         out
     }
 
+    /// BT-4444: a `value`-family send (`value:`, `value:value:`, …) directly
+    /// to a block literal checks each argument against the matching
+    /// parameter's `:: T` annotation, by the same rule as an annotated local
+    /// ([`Self::detect_assignment_type_mismatch`]) — so `C class` / `P class`
+    /// metatype parameters judge a class-object argument by conformance.
+    ///
+    /// Unannotated parameters are not checked (their type is the pushed or
+    /// `Dynamic` type, never a declaration), and an arity mismatch is left
+    /// to the runtime, as elsewhere for block arity.
+    pub(in crate::semantic_analysis::type_checker) fn check_block_literal_value_args(
+        &mut self,
+        receiver: &Expression,
+        receiver_ty: &InferredType,
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Expression::Block(block) = receiver.unwrap_parens() else {
+            return;
+        };
+        if arguments.is_empty()
+            || arguments.len() != block.parameters.len()
+            || !selector
+                .well_known()
+                .is_some_and(WellKnownSelector::is_block_value)
+        {
+            return;
+        }
+        // The literal's own inferred `Block(P…, R)` carries each annotation
+        // already resolved (aliases, protocols, metatypes).
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = receiver_ty
+        else {
+            return;
+        };
+        if class_name != "Block" {
+            return;
+        }
+        for (i, param) in block.parameters.iter().enumerate() {
+            if param.type_annotation.is_none() {
+                continue;
+            }
+            let (Some(declared), Some(arg_ty), Some(arg)) =
+                (type_args.get(i), arg_types.get(i), arguments.get(i))
+            else {
+                continue;
+            };
+            if let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                arg_ty,
+                declared,
+                hierarchy,
+                self.protocol_registry.as_ref(),
+            ) {
+                self.emit_assignment_type_mismatch(&mismatch, arg.span());
+            }
+        }
+    }
+
     /// The parameter types of the (single) `Block(P…, R)` arm of an expected
     /// type — `Block(...)` itself, or a union with exactly one `Block`
     /// member (mirrors [`Self::find_block_arm`] on `InferredType`).

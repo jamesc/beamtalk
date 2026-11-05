@@ -223,6 +223,17 @@ impl TypeChecker {
             )
         };
 
+        // BT-4444: `[:x :: T | ...] value: arg` — check each argument
+        // against the literal's annotated parameter types.
+        self.check_block_literal_value_args(
+            receiver,
+            &receiver_ty,
+            selector,
+            arguments,
+            &arg_types,
+            hierarchy,
+        );
+
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
         //
