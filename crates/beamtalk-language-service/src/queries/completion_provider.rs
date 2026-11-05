@@ -322,7 +322,7 @@ fn compute_erlang_completions(
     // Also check by walking the AST for a ClassReference("Erlang") near cursor
     if detect_erlang_class_context(module, trimmed, offset) {
         let mut completions = Vec::new();
-        for module_info in erlang_modules::COMMON_MODULES {
+        for module_info in erlang_modules::CURATED_MODULES {
             completions.push(
                 Completion::new(module_info.name, CompletionKind::Module)
                     .with_detail(format!("Erlang module: {}", module_info.name))
