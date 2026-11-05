@@ -12,6 +12,22 @@ telemetry handler callbacks, and telemetry_poller VM stats.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
+%% `wait_until/1` polling budget (~5 s).
+-define(WAIT_TRIES, 250).
+-define(WAIT_SLEEP_MS, 20).
+%% Tests that poll with `wait_until/1` (directly or via `take_store_direct/0`)
+%% run under this explicit EUnit timeout via `?_timed/1`: EUnit's default
+%% 5 s per-test timeout is no longer than one polling budget, so a slow run
+%% would be killed as `cancelled` before the poll could assert (BT-4427).
+-define(TEST_TIMEOUT_S, 30).
+%% Worst case per test: `per_actor_stats_need_tracing_test_`'s first case
+%% polls twice.
+-define(MAX_WAITS_PER_TEST, 2).
+-if(?MAX_WAITS_PER_TEST * ?WAIT_TRIES * ?WAIT_SLEEP_MS >= ?TEST_TIMEOUT_S * 1000).
+-error("beamtalk_trace_store_tests: wait budget exceeds TEST_TIMEOUT_S").
+-endif.
+-define(_timed(Expr), {timeout, ?TEST_TIMEOUT_S, ?_test(Expr)}).
+
 %%====================================================================
 %% Setup/Teardown
 %%====================================================================
@@ -712,7 +728,7 @@ crash_recovery_preserves_exact_counts_test_() ->
     {setup, fun setup/0, fun crash_cleanup/1, fun(_State) ->
         [
             {"graceful restart preserves aggregates exactly",
-                ?_test(begin
+                ?_timed(begin
                     take_store_direct(),
                     TestPid = seed_crash_test_data(),
                     gen_server:stop(beamtalk_trace_store),
@@ -721,7 +737,7 @@ crash_recovery_preserves_exact_counts_test_() ->
                     assert_seeded_data_intact(TestPid)
                 end)},
             {"kill preserves aggregates exactly",
-                ?_test(begin
+                ?_timed(begin
                     take_store_direct(),
                     TestPid = seed_crash_test_data(),
                     StorePid = whereis(beamtalk_trace_store),
@@ -2052,7 +2068,7 @@ agg_footprint() ->
     }.
 
 -doc "Poll `Fun` until it answers true (or fail after ~5 s).".
-wait_until(Fun) -> wait_until(Fun, 250).
+wait_until(Fun) -> wait_until(Fun, ?WAIT_TRIES).
 wait_until(Fun, 0) ->
     ?assert(Fun());
 wait_until(Fun, Tries) ->
@@ -2060,7 +2076,7 @@ wait_until(Fun, Tries) ->
         true ->
             ok;
         false ->
-            timer:sleep(20),
+            timer:sleep(?WAIT_SLEEP_MS),
             wait_until(Fun, Tries - 1)
     end.
 
@@ -2175,7 +2191,7 @@ per_actor_stats_need_tracing_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         [
             {"class totals survive actor death; per-pid rows are swept",
-                ?_test(begin
+                ?_timed(begin
                     beamtalk_trace_store:enable(),
                     Spawn = fun() ->
                         spawn(fun() ->
@@ -2300,7 +2316,7 @@ per_actor_stats_need_tracing_test_() ->
                     Pid ! stop
                 end)},
             {"a stop event does not sweep a live actor; its exit does",
-                ?_test(begin
+                ?_timed(begin
                     %% Cases share one setup: start clean.
                     beamtalk_trace_store:clear(),
                     beamtalk_trace_store:enable(),
@@ -2393,7 +2409,7 @@ idle_process() ->
 sweep_reclaims_dead_pid_rows_test_() ->
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         {"rows a caller re-creates for a dead pid are swept again",
-            ?_test(begin
+            ?_timed(begin
                 beamtalk_trace_store:enable(),
                 Pid = idle_process(),
                 beamtalk_trace_store:record_dispatch(Pid, first, 10, ok, sync, 'Late'),
