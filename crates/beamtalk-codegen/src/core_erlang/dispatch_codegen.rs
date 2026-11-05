@@ -1522,18 +1522,8 @@ impl CoreErlangGenerator {
         // `spawn/0,1` / `spawn_monitored/0,1` in the calling process — so a
         // monitored spawn's monitor belongs to the sender. Only match
         // ClassReference, not Identifier.
-        //
-        // BT-4443: a class the compiler knows is not spawnable (a Value or
-        // Object class on a fully-known chain) has no `spawn/0,1` to call —
-        // the direct call would fail with a raw `undef`, and the type
-        // checker's class-side does-not-understand is only a lint. Such a
-        // send takes the ordinary class-send route instead, where the
-        // runtime raises the same structured `does_not_understand` as the
-        // dynamic and shadowed routes.
         if let Expression::ClassReference { name, package, .. } = receiver {
-            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len())
-                .filter(|_| !self.is_known_non_spawnable_class(&name.name))
-            {
+            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len()) {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
                 let doc = self.generate_actor_spawn_qualified(
                     &name.name,
@@ -2499,7 +2489,8 @@ impl CoreErlangGenerator {
     /// known and reaches neither `Actor` nor a supervisor base (BT-4443). An
     /// unknown class or an incomplete chain is not proof, matching the
     /// runtime's `beamtalk_supervisor:spawn_kind/1` treating `unknown` as
-    /// "decides nothing".
+    /// "decides nothing". The hierarchy is keyed by bare name, so callers
+    /// only ask this of an unqualified reference.
     fn is_known_non_spawnable_class(&self, class_name: &str) -> bool {
         !self.is_supervisor_class(class_name)
             && self.class_hierarchy.as_ref().is_some_and(|h| {
@@ -2533,8 +2524,19 @@ impl CoreErlangGenerator {
     /// start it inside the class `gen_server`, and has no monitored-spawn
     /// clause). A package-qualified reference (`json@Counter spawn`) names
     /// its module explicitly and keeps it.
+    ///
+    /// BT-4443: an unqualified reference to a class the compiler knows is
+    /// not spawnable ([`Self::is_known_non_spawnable_class`]) resolves at
+    /// call time too. A pinned `Module:spawn/0` on a Value or Object class
+    /// would fail with a raw `undef` (the type checker's class-side
+    /// does-not-understand is only a lint, not a build error), whereas the
+    /// lookup raises the same structured `does_not_understand` as the dynamic
+    /// route (`beamtalk_class_instantiation:do_handle_spawn/5`) — and still
+    /// spawns in the caller if the class has since been redefined as an
+    /// actor.
     fn spawn_module_resolved_at_runtime(&self, class_name: &str, package: Option<&str>) -> bool {
-        package.is_none() && self.is_shadowed_class(class_name)
+        package.is_none()
+            && (self.is_shadowed_class(class_name) || self.is_known_non_spawnable_class(class_name))
     }
 
     /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is

@@ -438,23 +438,23 @@ fn class_self_module_lookup_keeps_the_unchecked_two_arity_helper() {
 
 // --- spawn family on a known non-spawnable class (BT-4443) -----------------
 //
-// A Value or Object class has no `spawn/0,1`, so the direct call the spawn
-// intrinsic emits would fail with a raw `undef`. When the compiler can prove
-// the class is not spawnable (fully-known chain reaching neither `Actor` nor
-// a supervisor base), the send takes the ordinary class-send route, where the
-// runtime raises a structured `does_not_understand`. An unknown class or an
-// incomplete chain proves nothing and keeps the direct call.
+// A Value or Object class has no `spawn/0,1`, so a pinned direct call would
+// fail with a raw `undef`. When the compiler can prove the class is not
+// spawnable (fully-known chain reaching neither `Actor` nor a supervisor
+// base), an unqualified reference resolves its module at call time through
+// the same kind-checked lookup as a shadowed one, which raises a structured
+// `does_not_understand` — and the spawn stays in the caller. An unknown
+// class or an incomplete chain proves nothing and keeps the pinned call.
 
-/// `Caller` with one spawn-family send per method to `Target`, compiled
-/// against `target` (named `Target`).
-fn spawn_sends_to(target: ClassInfo) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
-        "Object subclass: Caller\n",
-        "  a => Target spawn\n",
-        "  b => Target spawnWith: #{}\n",
-        "  c => Target spawnMonitored\n",
-        "  d => Target spawnMonitoredWith: #{}\n",
-    ));
+/// `Caller` with one spawn-family send per method to `<prefix>Target`,
+/// compiled against `target` (named `Target`).
+fn spawn_sends_to(target: ClassInfo, prefix: &str) -> String {
+    let source = format!(
+        "Object subclass: Caller\n  a => {prefix}Target spawn\n  \
+         b => {prefix}Target spawnWith: #{{}}\n  c => {prefix}Target spawnMonitored\n  \
+         d => {prefix}Target spawnMonitoredWith: #{{}}\n"
+    );
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     generate_module(
         &module,
@@ -474,39 +474,56 @@ fn target_class(superclass: &str, is_value: bool) -> ClassInfo {
     }
 }
 
-const TARGET_DIRECT_SPAWN: [&str; 2] = [
-    "call 'bt@target':'spawn'(",
-    "call 'bt@target':'spawn_monitored'(",
+const SPAWN_SELECTORS: [&str; 4] = [
+    "spawn",
+    "spawnWith:",
+    "spawnMonitored",
+    "spawnMonitoredWith:",
 ];
 
 #[test]
-fn spawn_family_on_known_non_spawnable_class_is_a_class_send() {
+fn spawn_family_on_known_non_spawnable_class_resolves_module_with_kind_check() {
     for (superclass, is_value) in [("Value", true), ("Object", false)] {
-        let code = spawn_sends_to(target_class(superclass, is_value));
-        for direct in TARGET_DIRECT_SPAWN {
+        let code = spawn_sends_to(target_class(superclass, is_value), "");
+        for selector in SPAWN_SELECTORS {
             assert!(
-                !code.contains(direct),
-                "a {superclass} class has no spawn entry point to call. Got:\n{code}"
+                code.contains(&format!(
+                    "{RUNTIME_MODULE_LOOKUP}'Target', '{selector}', 'actor')"
+                )),
+                "`Target {selector}` on a {superclass} class must resolve its module \
+                 with the kind check. Got:\n{code}"
             );
         }
         assert!(
-            code.matches(CLASS_SEND).count() >= 4,
-            "every spawn-family send to a {superclass} class must be a class send. Got:\n{code}"
+            !code.contains("'bt@target'") && !code.contains(CLASS_SEND),
+            "a {superclass} class must neither pin its module nor leave the caller. \
+             Got:\n{code}"
         );
     }
 }
 
 #[test]
-fn spawn_family_on_actor_or_unprovable_class_keeps_the_direct_call() {
+fn spawn_family_on_actor_or_unprovable_class_keeps_the_pinned_module() {
     // Positive control (an actor) and an incomplete chain (an ancestor not in
     // scope), which proves nothing about the class's kind.
     for superclass in ["Actor", "NotInScopeBase"] {
-        let code = spawn_sends_to(target_class(superclass, false));
-        for direct in TARGET_DIRECT_SPAWN {
-            assert!(
-                code.contains(direct),
-                "`Target` under {superclass} must keep its direct spawn call. Got:\n{code}"
-            );
-        }
+        let code = spawn_sends_to(target_class(superclass, false), "");
+        assert!(
+            code.contains("call 'bt@target':'spawn'(")
+                && code.contains("call 'bt@target':'spawn_monitored'(")
+                && !code.contains(RUNTIME_MODULE_LOOKUP),
+            "`Target` under {superclass} must keep its pinned spawn call. Got:\n{code}"
+        );
     }
+}
+
+#[test]
+fn qualified_spawn_on_known_non_spawnable_class_keeps_its_named_module() {
+    // The hierarchy is keyed by bare name, so it proves nothing about the
+    // class a package-qualified reference names.
+    let code = spawn_sends_to(target_class("Value", true), "json@");
+    assert!(
+        code.contains("call 'bt@json@target':'spawn'(") && !code.contains(RUNTIME_MODULE_LOOKUP),
+        "a package-qualified spawn keeps its named module. Got:\n{code}"
+    );
 }

@@ -92,15 +92,21 @@ spawn_selector(monitored, _) -> 'spawnMonitoredWith:'.
 %% route instead of an `undef` caught from `erlang:apply/3`. Checked before
 %% the abstract flag: an abstract Value class does not understand `spawn`
 %% either. `unknown` (an ancestor chain that cannot be followed) decides
-%% nothing and keeps the pre-check behaviour, as on the shadowed route.
+%% nothing and keeps the pre-check behaviour, as on the shadowed route. On
+%% the dynamic route `class_send/3` has already asked `spawn_kind/1` (through
+%% `is_supervisor/1`) in the caller; this second ask runs in the class
+%% process and stops at the first deciding ancestor (one or two ETS reads
+%% for an `Actor` subclass), which is cheaper than threading the answer
+%% through the `{spawn, Args}` protocol.
 %%
 %% The unshadowed static route (`Point spawn` compiled to `Point:spawn/0`)
 %% never reaches this function, and the type checker's class-side
 %% does-not-understand is only a lint, not a build error, so it is not enough
-%% on its own: codegen emits that direct call only for a class it cannot
-%% prove is a non-actor, and lowers a send to a class it knows is a Value or
-%% Object class through the dynamic route instead, which lands here
-%% (`DispatchCodegen::try_handle_spawn_await`).
+%% on its own: codegen pins that direct call only for a class it cannot prove
+%% is a non-actor, and resolves the module of a class it knows is a Value or
+%% Object class at call time through `resolve_spawn_module_or_raise/3`
+%% instead, which raises the same error
+%% (`DispatchCodegen::spawn_module_resolved_at_runtime`).
 -spec do_handle_spawn(spawn_variant(), list(), class_name(), atom(), boolean()) ->
     {ok, #beamtalk_object{} | {#beamtalk_object{}, reference()}} | {error, term()}.
 do_handle_spawn(Variant, Args, ClassName, Module, IsAbstract) ->
