@@ -831,3 +831,23 @@ Object subclass: Factory
         "a class object is not an instance: {diags:#?}"
     );
 }
+
+#[test]
+fn protocol_literal_return_fits_protocol_and_object() {
+    let source = wire_source(
+        r"
+Object subclass: Factory
+  proto -> Protocol => Wire
+  anything -> Object => Wire
+  take: p :: Protocol => p
+  pass => self take: Wire
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        return_diagnostics(&diags, &source, "proto").is_empty()
+            && return_diagnostics(&diags, &source, "anything").is_empty()
+            && return_diagnostics(&diags, &source, "pass").is_empty(),
+        "the protocol object is a `Protocol`: {diags:#?}"
+    );
+}

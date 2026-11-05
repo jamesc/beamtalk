@@ -3732,7 +3732,9 @@ impl TypeChecker {
     /// itself a protocol, and `P class` iff
     /// [`ProtocolInfo::subsumes_conformance_to`](crate::semantic_analysis::protocol_registry::ProtocolInfo::subsumes_conformance_to)`(P, X)`. Any other part models the class object as
     /// `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
-    /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
+    /// `Behaviour` / `Object` accept it, `Integer` does not; a protocol
+    /// literal (`Meta{P}` for a registered protocol) is modelled as
+    /// `Protocol` instead — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
     /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
     /// for an argument, as for every other argument type. A type-parameter
@@ -3819,8 +3821,17 @@ impl TypeChecker {
         } else {
             part.into()
         };
-        let class_name_ty: EcoString = "Class".into();
-        tower(&class_name_ty, &part, hierarchy)
+        // A protocol literal (`Meta{P}` for a registered protocol `P`) is a
+        // `Protocol` object, not a class (BT-4440): `:: Protocol` accepts it.
+        let runtime_class: EcoString = match value {
+            ClassObjectType::Class(name)
+                if protocol_registry.is_some_and(|r| r.has_protocol(name)) =>
+            {
+                "Protocol".into()
+            }
+            _ => "Class".into(),
+        };
+        tower(&runtime_class, &part, hierarchy)
     }
 
     /// ADR 0144: when a class object `C class` fails
