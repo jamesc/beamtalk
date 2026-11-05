@@ -21,7 +21,10 @@
 //! `Module:module_info(exports)` on the OTP release pinned in `.tool-versions`
 //! (regenerate with `scripts/gen-otp-curated-exports.escript`). Adding a
 //! function here means adding all of its arities; adding a module means
-//! regenerating the fixture.
+//! regenerating the fixture. Arities are those of the pinned release; an
+//! arity added in a later OTP release needs a fixture regeneration (and the
+//! `fixture_was_generated_on_the_pinned_otp_major` test forces one when
+//! `.tool-versions` moves).
 
 /// An Erlang module with its curated exports.
 #[derive(Debug)]
@@ -31,7 +34,8 @@ pub struct ErlangModuleInfo {
     /// Brief description of the module.
     pub description: &'static str,
     /// Exported functions as `(name, arity)` pairs, sorted by name then
-    /// arity. Every real arity of each listed function is present.
+    /// arity. Every arity of each listed function that the pinned OTP
+    /// release exports is present.
     pub exports: &'static [(&'static str, u8)],
 }
 
@@ -552,6 +556,68 @@ mod tests {
             "curated FFI exports disagree with OTP (every listed function must \
              list every real arity, or `arity_mismatch` flags valid calls):\n  {}",
             problems.join("\n  ")
+        );
+    }
+
+    /// OTP major in the fixture's `# OTP <major> exports ...` header.
+    fn fixture_otp_major(text: &str) -> &str {
+        text.lines()
+            .next()
+            .and_then(|l| l.strip_prefix("# OTP "))
+            .and_then(|l| l.split_whitespace().next())
+            .expect("fixture header is `# OTP <major> exports ...`")
+    }
+
+    #[test]
+    fn fixture_was_generated_on_the_pinned_otp_major() {
+        // The fixture's arities are those of one OTP release; it must be the
+        // one `.tool-versions` pins, so a toolchain bump forces regeneration.
+        let tool_versions = include_str!("../../../.tool-versions");
+        let pinned = tool_versions
+            .lines()
+            .find_map(|l| l.strip_prefix("erlang "))
+            .and_then(|v| v.trim().split('.').next())
+            .expect(".tool-versions pins `erlang <version>`");
+        assert_eq!(
+            fixture_otp_major(OTP_EXPORTS),
+            pinned,
+            "fixture OTP major differs from .tool-versions; {}",
+            regenerate_hint()
+        );
+    }
+
+    #[test]
+    fn fixture_matches_live_otp_when_available() {
+        // Guards against a hand-edited or stale fixture: regenerate it with
+        // the installed OTP and compare. Skipped when no `escript` is on PATH
+        // or the installed OTP major differs from the fixture's (e.g. a CI
+        // leg on an older supported release).
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut mods: Vec<&str> = CURATED_MODULES.iter().map(|m| m.name).collect();
+        mods.sort_unstable();
+        let Ok(output) = std::process::Command::new("escript")
+            .arg(root.join("scripts/gen-otp-curated-exports.escript"))
+            .args(&mods)
+            .output()
+        else {
+            eprintln!("skipping: escript not available");
+            return;
+        };
+        assert!(
+            output.status.success(),
+            "generator failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let live = String::from_utf8(output.stdout).expect("generator output is UTF-8");
+        if fixture_otp_major(&live) != fixture_otp_major(OTP_EXPORTS) {
+            eprintln!("skipping: installed OTP differs from the fixture's");
+            return;
+        }
+        // Line-wise, so a CRLF checkout of the fixture (Windows) still matches.
+        assert!(
+            live.lines().eq(OTP_EXPORTS.lines()),
+            "fixture differs from live OTP exports; {}",
+            regenerate_hint()
         );
     }
 
