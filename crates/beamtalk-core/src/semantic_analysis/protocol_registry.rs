@@ -52,6 +52,9 @@ pub struct ProtocolMethodRequirement {
 pub struct ReturnTypeMismatch {
     /// The requirement's selector (e.g. `asString`).
     pub selector: EcoString,
+    /// `true` for a `class` requirement, resolved against the class's
+    /// class-side methods (BT-4441); `false` for an instance requirement.
+    pub class_side: bool,
     /// The class whose method the selector resolves to.
     pub defined_in: EcoString,
     /// The resolved method's declared return type.
@@ -267,22 +270,69 @@ impl ProtocolInfo {
     /// `missing_conformance_selectors` checks a class against — so a protocol
     /// that `extending:`s `other` qualifies, and so does one that merely
     /// restates `other`'s requirements.
+    ///
+    /// Return types count too (BT-4441): every requirement of `other`, on
+    /// either side, that declares a return type must be matched by a
+    /// requirement of this protocol whose declared return type refines it —
+    /// the same covariance rule a class satisfying a requirement meets
+    /// ([`ProtocolRegistry::conformance_return_type_mismatches`],
+    /// [`TypeChecker::is_return_type_refinement`]). A requirement of this
+    /// protocol with no declared return type promises nothing, so it does
+    /// not refine a declared one. A return type naming a type parameter of
+    /// either protocol has no substitution context here and is not judged.
     #[must_use]
     pub fn subsumes_conformance_to(
         &self,
         other: &ProtocolInfo,
         registry: &ProtocolRegistry,
+        hierarchy: &ClassHierarchy,
     ) -> bool {
         let instance = self.all_conformance_selectors(registry);
         let class_side = self.all_required_class_selectors(registry);
-        other
+        let selectors_subsumed = other
             .all_conformance_selectors(registry)
             .iter()
             .all(|sel| instance.contains(sel))
             && other
                 .all_required_class_selectors(registry)
                 .iter()
-                .all(|sel| class_side.contains(sel))
+                .all(|sel| class_side.contains(sel));
+        if !selectors_subsumed {
+            return false;
+        }
+        let mut type_params = self.all_type_params(registry);
+        type_params.extend(other.all_type_params(registry));
+        let refines = |mine: Vec<&ProtocolMethodRequirement>,
+                       theirs: Vec<&ProtocolMethodRequirement>| {
+            theirs.iter().all(|req| {
+                let Some(ref expected) = req.return_type else {
+                    return true;
+                };
+                let expected = DeclaredType::parse(expected);
+                if expected.mentions_any(&type_params) {
+                    return true;
+                }
+                // Selector presence was checked above; a provided-only
+                // selector has no requirement (and no declared return type).
+                let Some(own) = mine.iter().find(|r| r.selector == req.selector) else {
+                    return false;
+                };
+                own.return_type
+                    .as_deref()
+                    .map(DeclaredType::parse)
+                    .is_some_and(|actual| {
+                        actual.mentions_any(&type_params)
+                            || TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy)
+                    })
+            })
+        };
+        refines(
+            self.all_requirements(registry),
+            other.all_requirements(registry),
+        ) && refines(
+            self.all_class_requirements(registry),
+            other.all_class_requirements(registry),
+        )
     }
 
     /// The type parameters of this protocol and of every protocol it
@@ -758,7 +808,9 @@ impl ProtocolRegistry {
     /// protocol or of any protocol it extends (no substitution context here). A mismatch that an
     /// override introduces by widening an inherited, conforming return type
     /// is skipped: the override check reports it once at the definition.
-    /// Instance side only.
+    /// Both sides: `class` requirements are judged against the class's
+    /// class-side methods (BT-4441), with no override skip (the override
+    /// check judges instance methods only).
     #[must_use]
     pub fn conformance_return_type_mismatches(
         &self,
@@ -812,8 +864,34 @@ impl ProtocolRegistry {
             }
             mismatches.push(ReturnTypeMismatch {
                 selector: req.selector.clone(),
+                class_side: false,
                 defined_in: method.defined_in.clone(),
                 actual: actual.clone(),
+                expected,
+            });
+        }
+        for req in protocol.all_class_requirements(self) {
+            let Some(ref req_rt) = req.return_type else {
+                continue;
+            };
+            let expected = DeclaredType::parse(req_rt);
+            if expected.mentions_any(&type_params) {
+                continue;
+            }
+            let Some(method) = hierarchy.find_class_method(class_name, &req.selector) else {
+                continue;
+            };
+            let Some(actual) = method.return_type else {
+                continue;
+            };
+            if TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy) {
+                continue;
+            }
+            mismatches.push(ReturnTypeMismatch {
+                selector: req.selector.clone(),
+                class_side: true,
+                defined_in: method.defined_in,
+                actual,
                 expected,
             });
         }

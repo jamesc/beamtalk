@@ -1343,7 +1343,8 @@ impl TypeChecker {
     /// argument away from the owning actor. At home it runs in the actor's
     /// own process; from a block running away from home (ADR 0137) it
     /// messages the owner back. A block that carries the handle away is the
-    /// escape, and ADR 0137's away-from-home rules report it, not this check.
+    /// escape, and ADR 0103's block-capture check (boundary #2) reports it,
+    /// not this check.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_argument_types_with_known_remote(
         &mut self,
@@ -3794,9 +3795,8 @@ impl TypeChecker {
                     }
                     ClassObjectType::Protocol(protocol_name) => {
                         match (registry.get(protocol_name), registry.get(declared_base)) {
-                            (Some(value_protocol), Some(declared_protocol)) => {
-                                value_protocol.subsumes_conformance_to(declared_protocol, registry)
-                            }
+                            (Some(value_protocol), Some(declared_protocol)) => value_protocol
+                                .subsumes_conformance_to(declared_protocol, registry, hierarchy),
                             _ => false,
                         }
                     }
@@ -4520,20 +4520,22 @@ impl TypeChecker {
                         ) {
                             let ReturnTypeMismatch {
                                 selector,
+                                class_side,
                                 defined_in,
                                 actual,
                                 expected,
                             } = mismatch;
+                            let side = if class_side { " class" } else { "" };
                             self.diagnostics.push(
                                 Diagnostic::warning(
                                     format!(
-                                        "{class_name}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
+                                        "{class_name}{side}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
                                     ),
                                     span,
                                 )
                                 .with_category(DiagnosticCategory::Type)
                                 .with_hint(format!(
-                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
+                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}{side}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
                                 )),
                             );
                         }
