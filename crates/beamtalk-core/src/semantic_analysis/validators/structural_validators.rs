@@ -559,7 +559,7 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
 
                 // Check if this function has known arities.
                 let known: Vec<usize> =
-                    crate::ffi_exports::known_arities(&module_name, &function_name)
+                    crate::ffi_exports::known_arities(module_name, &function_name)
                         .into_iter()
                         .map(usize::from)
                         .collect();
@@ -1170,6 +1170,20 @@ mod tests {
             assert!(
                 diags.is_empty(),
                 "{module_name}:{function}/{arity} should not warn, got: {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_every_curated_ffi_module_is_a_known_otp_module() {
+        // BT-4371: a module the curated export table (and so LSP completion)
+        // offers must not trip the unresolved-FFI lint.
+        let none = std::collections::HashSet::new();
+        for module_info in crate::ffi_exports::CURATED_MODULES {
+            assert!(
+                is_known_erlang_module(module_info.name, &none),
+                "curated FFI module `{}` is missing from KNOWN_OTP_MODULES",
+                module_info.name
             );
         }
     }
