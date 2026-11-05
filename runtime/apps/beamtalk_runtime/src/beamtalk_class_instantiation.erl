@@ -40,6 +40,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     abstract_class_error/2,
     resolve_is_abstract_or_raise/2,
     resolve_module_or_raise/2,
+    resolve_spawn_module_or_raise/3,
     check_init_args/5,
     %% ADR 0123 §3: shared with beamtalk_shape_migration's reconcile step —
     %% a Value class has no init/1, so its declared-field defaults are
@@ -908,6 +909,106 @@ resolve_module_or_raise(ClassName, Selector) ->
             ),
             error(Wrapped)
     end.
+
+-doc """
+Resolve the module for a spawn-family send to an unqualified, shadowed class
+reference (BT-4278, BT-4404), and check the runtime class can take the call
+shape codegen emitted.
+
+A shadowed class name is one last-wins runtime class, so the class that wins
+at call time need not be the kind the compiler saw in its own package's
+`ClassInfo`. Codegen fixes two things at compile time from that `ClassInfo`:
+whether the send is an actor spawn (`Module:spawn/0,1` /
+`Module:spawn_monitored/0,1`) or a supervisor start
+(`beamtalk_supervisor:class_start/4`). `Kind` names which one was emitted:
+
+- `actor` needs a non-supervisor `Actor` subclass;
+- `supervisor` needs a `Supervisor` or `DynamicSupervisor` subclass.
+
+Raises (never answers a module that would then fail with a raw `undef` or a
+confused supervisor start):
+
+- `class_not_found` when the class has no metadata row — unlike the
+  `ClassSelf` path (`resolve_module_or_raise/2`), a class reference can reach
+  a miss in ordinary situations (the class was removed after compiling the
+  caller), so it is not reported as an internal bug;
+- `does_not_understand` when the class is neither an actor nor a supervisor
+  (a Value or Object class has no spawn family at all);
+- `instantiation_error` when the class is the other spawnable kind (an actor
+  where a supervisor start was compiled, or vice versa).
+
+An ancestor chain that cannot be followed (`beamtalk_supervisor:spawn_kind/1`
+answers `unknown`: an ancestor row removed, renamed or not loaded yet) is not
+treated as a mismatch: the module is answered and the emitted call runs as it
+did before this check.
+""".
+-spec resolve_spawn_module_or_raise(class_name(), atom(), actor | supervisor) -> module().
+resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, Module} ->
+            case beamtalk_supervisor:spawn_kind(ClassName) of
+                Kind ->
+                    Module;
+                unknown ->
+                    %% An incomplete ancestor chain (an ancestor row removed,
+                    %% renamed or not loaded yet) decides nothing: keep the
+                    %% pre-check behaviour and let the emitted call run.
+                    Module;
+                none ->
+                    raise_wrapped(
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(does_not_understand, ClassName, Selector),
+                            <<"Only Actor and Supervisor classes can be spawned">>
+                        )
+                    );
+                Other ->
+                    raise_wrapped(spawn_kind_mismatch_error(ClassName, Selector, Kind, Other))
+            end;
+        not_found ->
+            raise_wrapped(
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(class_not_found, ClassName, Selector),
+                    <<"The class is not loaded; it may have been removed after this code was compiled">>
+                )
+            )
+    end.
+
+-spec spawn_kind_mismatch_error(
+    class_name(), atom(), actor | supervisor, actor | supervisor
+) ->
+    #beamtalk_error{}.
+spawn_kind_mismatch_error(ClassName, Selector, Expected, Actual) ->
+    Name = atom_to_binary(ClassName, utf8),
+    Hint = iolist_to_binary([
+        <<"This send was compiled as ">>,
+        call_shape_phrase(Expected),
+        <<", but the loaded ">>,
+        Name,
+        <<" is ">>,
+        kind_phrase(Actual),
+        <<" (more than one package declares ">>,
+        Name,
+        <<"). Qualify the class with its package (pkg@">>,
+        Name,
+        <<") to pick one.">>
+    ]),
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(instantiation_error, ClassName, Selector),
+            Hint
+        ),
+        #{expected_kind => Expected, actual_kind => Actual}
+    ).
+
+call_shape_phrase(actor) -> <<"an actor spawn">>;
+call_shape_phrase(supervisor) -> <<"a supervisor start">>.
+
+kind_phrase(actor) -> <<"an Actor">>;
+kind_phrase(supervisor) -> <<"a Supervisor">>.
+
+-spec raise_wrapped(#beamtalk_error{}) -> no_return().
+raise_wrapped(Error) ->
+    error(beamtalk_exception_handler:ensure_wrapped(Error)).
 
 -doc """
 Resolve a class's `is_abstract` flag for a class-method self-send
