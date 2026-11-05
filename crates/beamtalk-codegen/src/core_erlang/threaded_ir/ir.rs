@@ -1704,6 +1704,8 @@ pub(in crate::core_erlang) enum RethrowSlot {
     /// cleanup ran, bound by the render ahead of the relay's seed: the
     /// carried state with the cell's fields over it when it was the cell's
     /// state, else the carried state untouched ([`NlrCarry::Foreign`]).
+    /// BT-4448: an away closure's capture is stamped with its own actor
+    /// (`nlr_state/2`), so another actor's equal state is never the cell's.
     CellIfCarried,
     /// The state a fresh `^` at the `ensure:` site would carry, rebuilt there
     /// from the site's bindings. Never right for a relay: in a merged Tier 2

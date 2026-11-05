@@ -136,6 +136,15 @@ TestCase subclass: ActorClosureCellTest
     self assert: c performedCleanupOverTheBodysWriteAfterReturn equals: 1
     self assert: c n equals: 105
 
+  // BT-4448: a `^` block run away from home, by another actor of the same
+  // class in an equal state, keeps its own actor's state: the peer's
+  // cleanup write is not taken for it.
+  testPerformedEnsureInAPeerDoesNotTakeThePeersState =>
+    a := ClosureCellEnsure spawn
+    b := ClosureCellEnsure spawn
+    self assert: (a returnThroughPeer: b) equals: 1
+    self assert: a n equals: 0
+
   testNestedPerformedEnsureCleanupWritesSurviveAnEarlyReturn =>
     c := ClosureCellEnsure spawn
     self assert: c nestedPerformedCleanupsAfterReturn equals: 1

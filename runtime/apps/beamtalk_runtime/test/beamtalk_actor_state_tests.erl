@@ -346,6 +346,37 @@ refresh_carried_leaves_another_actors_cell_alone_test() ->
     Snap = {spawn(fun() -> ok end), #{n => 0}},
     ?assertEqual(#{n => 0}, beamtalk_actor_state:refresh_carried(Snap, #{n => 0})).
 
+%% BT-4448: an away closure's `^` carries its own actor's capture, stamped with
+%% that actor's pid, which can equal another same-class actor's cell.
+nlr_state_at_home_answers_the_cell_unstamped_test() ->
+    with_cell(#{n => 1}, fun() ->
+        ?assertEqual(#{n => 1}, beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}))
+    end).
+
+nlr_state_away_stamps_the_capture_with_its_actor_test() ->
+    Away = foreign_obj(),
+    Carried = beamtalk_actor_state:nlr_state(Away, #{n => 0}),
+    ?assertEqual(#{n => 0}, beamtalk_actor:strip_local_temps(Carried)),
+    ?assertNotEqual(#{n => 0}, Carried).
+
+refresh_carried_leaves_another_actors_away_capture_alone_test() ->
+    Carried = beamtalk_actor_state:nlr_state(foreign_obj(), #{n => 0}),
+    with_cell(#{n => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ok = beamtalk_actor_state:put(self_obj(), n, 9),
+        ?assertEqual(Carried, beamtalk_actor_state:refresh_carried(Snap, Carried))
+    end).
+
+refresh_carried_resumes_this_actors_own_away_capture_with_the_cell_test() ->
+    %% No cell installed: this actor's own closure is away, so its capture is
+    %% stamped with this process.
+    Own = beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}),
+    with_cell(#{n => 0}, fun() ->
+        Snap = beamtalk_actor_state:snapshot(),
+        ok = beamtalk_actor_state:put(self_obj(), n, 9),
+        ?assertMatch(#{n := 9}, beamtalk_actor_state:refresh_carried(Snap, Own))
+    end).
+
 call_foreign_stores_the_state_and_answers_the_funs_answer_test() ->
     State = #{n => 1},
     Fun = fun(Arg) -> {reply, {saw, beamtalk_actor_state:take(), Arg}, State} end,
