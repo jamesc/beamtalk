@@ -41,6 +41,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     put_method/4,
     put_class_method/3,
     put_class_method/4,
+    remove_class_method/2,
     instance_variables/1,
     is_sealed/1,
     is_typed/1,
@@ -100,6 +101,15 @@ and join the `beamtalk_classes` pg group for enumeration.
     is_sealed => boolean()
 }.
 
+%% BT-4438: what a selector held on the class side before a runtime fun
+%% replaced it. Each key is present only if the class had that entry.
+-type shadowed_class_method() :: #{
+    info => method_info(),
+    source => binary(),
+    signature => binary(),
+    return_type => meta_type_repr()
+}.
+
 -record(class_state, {
     name :: class_name(),
     module :: atom(),
@@ -144,7 +154,11 @@ and join the `beamtalk_classes` pg group for enumeration.
     %% field here uses, so a ClassBuilder `shapeVersion:` (ClassInfo, no
     %% compiled meta) and a compiled `shapeVersion:` header clause (Meta)
     %% both answer correctly from the same `shape_version/1` accessor.
-    shape_version = 1 :: pos_integer()
+    shape_version = 1 :: pos_integer(),
+    %% BT-4438: the class-side bookkeeping a runtime fun (`put_class_method`)
+    %% replaced, keyed by selector, so `remove_class_method` can restore it.
+    %% Recorded by the first put over a selector; a reload (disk wins) drops it.
+    shadowed_class_methods = #{} :: #{selector() => shadowed_class_method()}
 }).
 
 %%====================================================================
@@ -970,6 +984,18 @@ put_class_method(ClassPid, Selector, Fun, Source) ->
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
 
 -doc """
+Remove a class-side runtime fun installed by `put_class_method/3,4` (BT-4438).
+
+The inverse of `put_class_method/4`: the selector gets back whatever the class
+held for it before the first runtime fun replaced it (its compiled method, or
+nothing, so dispatch falls through to an inherited method or DNU). Answers
+`absent` when `Selector` has no runtime fun on this class.
+""".
+-spec remove_class_method(pid(), selector()) -> removed | absent.
+remove_class_method(ClassPid, Selector) ->
+    gen_server:call(ClassPid, {remove_class_method, Selector}).
+
+-doc """
 ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
 `selector_arity + 1`. Any other arity is refused here with the structured error
 `beamtalk_class_builder:validate_class_method_arities/2` produces (the same rule
@@ -1647,6 +1673,7 @@ handle_call(
     MethodInfo = #{block => Fun, arity => Arity},
     NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
     NewState = State#class_state{
+        shadowed_class_methods = remember_shadowed_class_method(Selector, State),
         class_methods = NewClassMethods,
         class_method_source = maps:put(Selector, Source, State#class_state.class_method_source),
         class_method_signatures = maps:remove(
@@ -1680,6 +1707,18 @@ handle_call(
     %% descendant walked through it.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
+%% BT-4438: remove a class-side runtime fun -- the inverse of
+%% {put_class_method, ...}. Restores what the first put over `Selector`
+%% replaced (see `remember_shadowed_class_method/2`), or drops the selector
+%% when the class had nothing there, so dispatch falls through to the
+%% compiled export, an inherited method, or DNU.
+handle_call({remove_class_method, Selector}, _From, #class_state{name = ClassName} = State) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        error ->
+            {reply, absent, State};
+        {ok, _} ->
+            {reply, removed, do_remove_class_method(Selector, State)}
+    end;
 %% Update class metadata after redefinition (hot reload).
 %% Validation (shadowing + collision) delegated to beamtalk_class_registry.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
@@ -2725,6 +2764,99 @@ warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
     end.
 
 -doc """
+BT-4438: record what `Selector` held on the class side before a runtime fun
+replaces it, so `remove_class_method/2` can restore it. Only the first put
+over a selector records anything: a later put replaces a runtime fun, and
+removing that must still restore the compiled method the first put hid.
+""".
+-spec remember_shadowed_class_method(selector(), #class_state{}) ->
+    #{selector() => shadowed_class_method()}.
+remember_shadowed_class_method(
+    Selector, #class_state{shadowed_class_methods = Shadowed} = State
+) ->
+    case maps:is_key(Selector, Shadowed) of
+        true ->
+            Shadowed;
+        false ->
+            Entries = [
+                {info, State#class_state.class_methods},
+                {source, State#class_state.class_method_source},
+                {signature, State#class_state.class_method_signatures},
+                {return_type, State#class_state.class_method_return_types}
+            ],
+            Previous = maps:from_list([
+                {Key, Value}
+             || {Key, Map} <- Entries, {ok, Value} <- [maps:find(Selector, Map)]
+            ]),
+            maps:put(Selector, Previous, Shadowed)
+    end.
+
+-doc """
+BT-4438: undo `{put_class_method, ...}` for `Selector`, whose runtime fun the
+caller has found installed. The same metadata writes as the put, in the order
+that keeps a concurrent dispatch from resolving a selector with no body:
+publish the restored selector set, then drop (or restore) the fun, then close
+the gate if this class has no runtime funs left.
+""".
+-spec do_remove_class_method(selector(), #class_state{}) -> #class_state{}.
+do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
+    %% ADR 0142 §2: a class-metadata write -- erase the derived direct-call
+    %% flags and static call keys of this class and its descendants first.
+    beamtalk_class_shadow_flags:invalidate(ClassName),
+    Previous = maps:get(Selector, State#class_state.shadowed_class_methods, #{}),
+    Restore = fun(Key, Map) ->
+        case maps:find(Key, Previous) of
+            {ok, Value} -> maps:put(Selector, Value, Map);
+            error -> maps:remove(Selector, Map)
+        end
+    end,
+    OldClassMethods = State#class_state.class_methods,
+    NewClassMethods = Restore(info, OldClassMethods),
+    NewState = State#class_state{
+        shadowed_class_methods = maps:remove(Selector, State#class_state.shadowed_class_methods),
+        class_methods = NewClassMethods,
+        class_method_source = Restore(source, State#class_state.class_method_source),
+        class_method_signatures = Restore(signature, State#class_state.class_method_signatures),
+        class_method_return_types = Restore(
+            return_type, State#class_state.class_method_return_types
+        )
+    },
+    Funs = maps:filter(fun(_, Info) -> is_runtime_fun_info(Info) end, NewClassMethods),
+    case maps:find(Selector, Funs) of
+        {ok, RestoredFun} ->
+            %% The first put replaced a builder-installed fun: put it back.
+            beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, RestoredFun),
+            beamtalk_class_metadata:set_runtime_class_methods(
+                ClassName, maps:keys(NewClassMethods)
+            );
+        error ->
+            beamtalk_class_metadata:set_class_method_selectors(
+                ClassName, maps:keys(NewClassMethods)
+            ),
+            beamtalk_class_metadata:delete_class_method_fun(ClassName, Selector),
+            case maps:size(Funs) of
+                0 -> beamtalk_class_metadata:reset_runtime_class_methods(ClassName);
+                _ -> ok
+            end
+    end,
+    %% BT-4301 pattern: erase again now that the change is visible, so a flag
+    %% derived from the half-written state in between does not survive.
+    beamtalk_class_shadow_flags:invalidate(ClassName),
+    warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods),
+    case maps:find(source, Previous) of
+        {ok, Source} -> put_method_xref(ClassName, true, Selector, Source);
+        error -> safe_xref(fun() -> beamtalk_xref:purge_method(ClassName, true, Selector) end)
+    end,
+    ok = publish_reflection(NewState),
+    notify_hot_patch(NewState),
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
+    NewState.
+
+-spec is_runtime_fun_info(term()) -> boolean().
+is_runtime_fun_info(Info) ->
+    is_map(Info) andalso maps:is_key(block, Info).
+
+-doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
 ADR 0084: picks out the entries that carry a `block` (runtime/builder
@@ -2734,10 +2866,7 @@ entries leave the gate flag false so their dispatch never reads the funs table.
 """.
 -spec seed_runtime_class_methods(class_name(), map()) -> ok.
 seed_runtime_class_methods(ClassName, ClassMethods) ->
-    Funs = maps:filter(
-        fun(_Selector, Info) -> is_map(Info) andalso maps:is_key(block, Info) end,
-        ClassMethods
-    ),
+    Funs = maps:filter(fun(_Selector, Info) -> is_runtime_fun_info(Info) end, ClassMethods),
     case maps:size(Funs) of
         0 ->
             ok;
@@ -2969,6 +3098,9 @@ apply_class_info(State, ClassInfo) ->
         superclass = NewSuperclass,
         instance_methods = NewInstanceMethods,
         class_methods = NewClassMethods,
+        %% BT-4438: disk wins -- the reload re-seeded the runtime funs from
+        %% `NewClassMethods`, so nothing a removal could restore remains.
+        shadowed_class_methods = #{},
         fields = maps:get(
             fields,
             Meta,

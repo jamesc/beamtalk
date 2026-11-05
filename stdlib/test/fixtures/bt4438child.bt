@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4438: inherits `class answer` from Bt4438Parent. See
+// remove_runtime_class_method_test.bt.
+
+Bt4438Parent subclass: Bt4438Child

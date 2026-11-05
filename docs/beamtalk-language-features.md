@@ -1082,6 +1082,10 @@ also auto-indexed for `SystemNavigation` source-text queries.
 with the same `>>` patcher used for instance methods (see *Live Patching* and
 *Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
 The class-side dispatch path picks up the new class method immediately (ADR 0084).
+A runtime class-method fun (a builder `classMethods:` fun, or one installed with
+`beamtalk_object_class:put_class_method/3,4`) is removable:
+`Counter class removeSelector: #reset` takes it back and restores the compiled
+method it replaced, if any (BT-4438; see *Removing methods* below).
 
 > The grammar form (`Object subclass: …`) remains the idiomatic way to define a
 > class in source. The programmatic builder is for tooling, REPL exploration, and
@@ -5255,6 +5259,27 @@ String >> shout => self uppercase ++ "!"
 "hi" shout                     // => "HI!"
 String removeSelector: #shout
 "hi" respondsTo: #shout        // => false
+```
+
+On the class side, `removeSelector:` also removes a runtime class-method fun
+(ADR 0084) installed with `beamtalk_object_class:put_class_method/3,4`. It
+checks the extension registry first, then the runtime fun, then the compiled
+class method: the order dispatch resolves them. Removing the fun gives the
+selector back what it had before the first fun replaced it: the class's
+compiled method, or nothing, so the send falls through to an inherited method
+or `does_not_understand`. A static send compiled while the fun was installed
+takes the restored method on its next call. `X class includesSelector: #sel`
+answers `true` while such a fun is installed (BT-4438):
+
+```erlang
+%% Erlang side: hot-patch a class method, then take the patch back.
+ok = beamtalk_object_class:put_class_method(Pid, answer, fun(_ClassSelf) -> patched end).
+```
+
+```beamtalk
+Counter answer                          // => #patched
+Counter class removeSelector: #answer
+Counter answer                          // the compiled method's answer again
 ```
 
 **The bare form raises; `removeSelector:ifAbsent:` is the paired escape
