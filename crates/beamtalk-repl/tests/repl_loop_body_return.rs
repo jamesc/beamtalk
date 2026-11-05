@@ -138,6 +138,37 @@ const POSITIONS: &[(&str, &str, Step)] = &[
         "[x == 2 ifTrue: [^w + x]] ensure: [w := w + x]",
         |x, w| (w + x, (x == 2).then_some(w + x)),
     ),
+    // BT-4424: the cleanup writes a binding the loop body wrote before the
+    // `ensure:`, which the body binds in the generated code: the cleanup
+    // reads it back on entry as a member of the bindings map, the frame it
+    // runs over (it tripped `LocalRebindModeMismatch` before the fix).
+    (
+        "ensure: cleanup writes a loop-written binding",
+        "w := w + x. [x == 2 ifTrue: [^w]] ensure: [w := w + 100]",
+        |x, w| (w + x + 100, (x == 2).then_some(w + x)),
+    ),
+    (
+        "ensure: cleanup writes a loop-written binding, never fires",
+        "w := w + x. [x == 5 ifTrue: [^w]] ensure: [w := w + 100]",
+        |x, w| (w + x + 100, None),
+    ),
+    // BT-4424: the protected block writes the binding too; the cleanup reads
+    // the protected block's write, not the value bound before the `ensure:`.
+    // (Its scope holds a `^`, so the writing cleanup keeps its relay.)
+    (
+        "ensure: cleanup writes after its protected block writes a loop-written binding",
+        "w := w + x. [w := w * 2] ensure: [w := w + 100]. x == 5 ifTrue: [^w]",
+        |x, w| ((w + x) * 2 + 100, None),
+    ),
+    // BT-4424 review: the cleanup writes a binding the body bound without
+    // writing it to the bindings map (a destructured name, BT-4439): its
+    // scratch slot is seeded under the binding's own key, so the cleanup's
+    // read of it never misses (`badkey`).
+    (
+        "ensure: cleanup writes a destructured binding",
+        "#(v, b) := #(x, 0). [x == 5 ifTrue: [^w]] ensure: [v := v + 1. w := w + v]",
+        |x, w| (w + x + 1, None),
+    ),
     (
         "match: arm",
         "w := w + x. x match: [2 -> ^w; _ -> nil]",

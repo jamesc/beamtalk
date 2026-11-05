@@ -2404,7 +2404,7 @@ impl CoreErlangGenerator {
                     .iter()
                     .map(|local| ThreadedLocalSlot {
                         local: local.clone(),
-                        slot: CarrierSlot::Key(Self::local_state_key(local)),
+                        slot: CarrierSlot::Key(self.local_scratch_key(local)),
                         value_var: self.fresh_temp_var(local),
                     })
                     .collect();

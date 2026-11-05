@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4424: a loop-body `ensure:` whose cleanup writes a local the loop body
+// also writes, in a value-type method and a class method. See
+// bt4424ensure_loop_rebind_test.bt.
+
+Value subclass: Bt4424EnsureLoopValue
+
+  class cleanupWrites =>
+    w := 0
+    1
+      to: 3
+      do: [:x |
+        w := w + x
+        [x == 2] ensure: [w := w + 100]
+      ]
+    w
+
+  class protectedAndCleanupWrite =>
+    w := 0
+    x := 0
+    [x < 3]
+      whileTrue: [
+        x := x + 1
+        w := w + x
+        [w := w * 2] ensure: [w := w + 100]
+      ]
+    w
+
+  cleanupWrites =>
+    w := 0
+    #(1, 2, 3)
+      do: [:x |
+        w := w + x
+        [x == 2] ensure: [w := w + 100]
+      ]
+    w
+
+  protectedAndCleanupWrite =>
+    w := 0
+    #(1, 2, 3)
+      do: [:x |
+        w := w + x
+        [w := w * 2] ensure: [w := w + 100]
+      ]
+    w
