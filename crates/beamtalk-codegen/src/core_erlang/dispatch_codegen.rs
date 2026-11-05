@@ -2493,12 +2493,16 @@ impl CoreErlangGenerator {
     /// ([`Self::is_shadowed_class`]) is one last-wins runtime class, so the
     /// compile-time package's module is not necessarily the one a dynamic
     /// send reaches: the module is resolved at call time from the class
-    /// registry instead, exactly as the class-side `self spawn` family does
-    /// ([`Self::class_self_module_doc`]) —
+    /// registry instead, through the same lookup helper as the class-side
+    /// `self spawn` family ([`Self::class_module_lookup_doc`]) —
     ///
     /// ```erlang
-    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'('Counter', 'spawn')
+    /// call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'('Counter', 'spawn', 'actor')
     /// ```
+    ///
+    /// The trailing kind lets the runtime reject a winning class of a
+    /// different kind (an actor where a supervisor start was compiled, a
+    /// Value class, …) with a structured error (BT-4404).
     ///
     /// The spawn itself stays in the caller (a dynamic `class_send` would
     /// start it inside the class `gen_server`, and has no monitored-spawn
