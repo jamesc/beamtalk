@@ -1023,7 +1023,7 @@ the useful part: ADR 0144's `X class does not conform to P class` puts
   as the CLI REPL does; before BT-4449 it dropped them.
 - **LiveView attach:** `BtAttach.Workspace.eval/2` returns each warning as
   `%{message: String.t(), hint: String.t() | nil}`. The attach UI does not
-  display eval warnings yet (surface-specific gap, pre-existing).
+  display eval warnings yet (surface-specific gap, pre-existing; BT-4471).
 - **LSP:** unaffected — it publishes its own `Diagnostic`s, whose hints it
   already shows; it never reads the port's REPL warnings.
 
