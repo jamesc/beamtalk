@@ -518,11 +518,11 @@ compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoi
 compiles_to("2c") ->
     "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
 compiles_to("2d") ->
-    "guarded static `new` (BT-4409): one persistent_term:get of the {bt@stdlib@bag, new, Tag} key, then bt@stdlib@bag:new() in the caller (BT-4132 anchors indirect Values)";
+    "guarded static `new` (BT-4409): one persistent_term:get of the class's static call key, its {bt@stdlib@bag, new, Tag} target matched in the map (BT-4442), then bt@stdlib@bag:new() in the caller (BT-4132 anchors indirect Values)";
 compiles_to("2e") ->
     "guarded direct keyword constructor: one persistent_term:get of the static call key, then VbLeaf:'w:'(ClassRef, A) (BT-4132)";
 compiles_to("3a") ->
-    "guarded direct call: one persistent_term:get of the {Mod, Fun, Tag} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
+    "guarded direct call: one persistent_term:get of the class's static call key (an atom), its {Mod, Fun, Tag} target matched in the map to ClassRef (BT-4316, BT-4442), then Mod:'class_double:'(ClassRef, 21)";
 compiles_to("3b") ->
     "guarded direct call, as 3a: `class sealed` plays no part (ADR 0142, BT-4301)";
 compiles_to("3c") -> "guarded direct call, as 3a: open class (ADR 0142, BT-4301)";
@@ -533,11 +533,11 @@ compiles_to("3e") ->
 compiles_to("3f") ->
     "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
 compiles_to("3g") ->
-    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
+    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
 compiles_to("3h") ->
     "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
 compiles_to("3i") ->
-    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
+    "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
 compiles_to("3j") ->
     "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
@@ -761,7 +761,8 @@ print_counts(Counts, N) ->
 %% static call keys, on an idle node, beside 10k idle processes and beside one
 %% busy process per scheduler. Between rounds every
 %% key is re-installed through `static_call_target/4`, as the next static send
-%% of each call site would. Prints a markdown table of median and min µs.
+%% of each call site would; that re-warm is timed too (BT-4442). Prints a
+%% markdown table of median and min µs.
 %%
 %% Args: [] or [Rounds].
 -define(INV_MOD, vs_bench_inv_methods).
@@ -785,8 +786,8 @@ invalidate(Args) ->
     io:format("# load average: ~s~n", [string:trim(os:cmd("uptime"))]),
     io:format("# rounds ~p~n~n", [Rounds]),
     io:format("| background | subclasses N | keys per subclass K | keys erased | "
-              "rounds | invalidate/1 median us | min us |~n", []),
-    io:format("|---|--:|--:|--:|--:|--:|--:|~n", []),
+              "rounds | invalidate/1 median us | min us | re-warm median us |~n", []),
+    io:format("|---|--:|--:|--:|--:|--:|--:|--:|~n", []),
     Shapes = [{0, 0}, {1, 1}, {1, 10}, {50, 0}, {50, 1}, {50, 10}],
     Schedulers = erlang:system_info(schedulers_online),
     %% An erase waits for every scheduler to pass a thread-progress point, so
@@ -830,17 +831,20 @@ inv_shape(Load, N, K, Rounds) ->
     SubPids = [inv_start(Sub, RootName) || Sub <- Subs],
     try
         Keys = [{Sub, I} || Sub <- Subs, I <- lists:seq(1, K)],
-        Times = [
+        Samples = [
             begin
-                ok = inv_warm(Keys),
+                {WarmUs, ok} = timer:tc(fun() -> inv_warm(Keys) end),
+                true = lists:all(fun inv_key_present/1, Keys),
                 {Us, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(RootName) end),
                 false = lists:any(fun inv_key_present/1, Keys),
-                Us
+                {Us, WarmUs}
             end
          || _ <- lists:seq(1, Rounds)
         ],
-        io:format("| ~s | ~p | ~p | ~p | ~p | ~p | ~p |~n", [
-            Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times)
+        Times = [Us || {Us, _} <- Samples],
+        WarmTimes = [WarmUs || {_, WarmUs} <- Samples],
+        io:format("| ~s | ~p | ~p | ~p | ~p | ~p | ~p | ~p |~n", [
+            Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times), median(WarmTimes)
         ])
     after
         [catch gen_server:stop(P, normal, 5000) || P <- [Root | SubPids]]
@@ -872,7 +876,7 @@ inv_sel(I) -> list_to_atom("m" ++ integer_to_list(I)).
 inv_key({Sub, I}) ->
     {?INV_MOD, class_fn(inv_sel(I)), beamtalk_class_registry:class_object_tag(Sub)}.
 
-inv_key_present(SubI) -> persistent_term:get(inv_key(SubI), false) =/= false.
+inv_key_present(SubI) -> beamtalk_class_shadow_flags:static_call_key_value(inv_key(SubI)) =/= false.
 
 %% Install every key the way a static send's miss path does.
 inv_warm(Keys) ->

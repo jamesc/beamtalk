@@ -93,10 +93,28 @@ TestCase subclass: GuardedStaticCallTest
     self deny: guardOff
     self assert: viaFallback equals: GscClassSelf
 
+  // BT-4442: the compiled call site reads the per-class key the runtime
+  // writes (`beamtalk_class_shadow_flags:static_calls_key/1`). With the
+  // class's guard off, the miss path declines to the fallback, so a static
+  // send answers a value planted in the runtime-spelled key only if the call
+  // site reads that very key.
+  testCallSiteReadsTheRuntimesPerClassKey =>
+    self assert: GscClassSelf me equals: GscClassSelf
+    mapKey := Erlang beamtalk_class_shadow_flags static_calls_key: #'GscClassSelf class'
+    warmed := Erlang persistent_term get: mapKey with: nil
+    self deny: warmed isNil
+    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true
+    Erlang persistent_term put: mapKey with: (Erlang maps map: [:k :v | #planted] with: warmed)
+    viaKey := GscClassSelf me
+    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
+    self assert: viaKey equals: #planted
+    self assert: GscClassSelf me equals: GscClassSelf
+
   // === BT-4316: the static call key ===
   //
-  // A static send's hit path is one `persistent_term` read of a key per call
-  // target, whose value is the class reference passed as `ClassSelf`. Each
+  // A static send's hit path is one `persistent_term` read of the class's
+  // static call map (one key per class since BT-4442), whose value for the
+  // call target is the class reference passed as `ClassSelf`. Each
   // test below warms that key with a static send first, then changes what the
   // dynamic path answers and checks the static send answers the same. (The
   // reload cases, a dropped method and a superclass that gains `classState:`

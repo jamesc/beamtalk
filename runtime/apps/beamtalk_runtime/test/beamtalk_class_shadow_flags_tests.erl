@@ -432,6 +432,10 @@ warm(Name, Pid) ->
 
 key_gone(Name) -> key_value(static_key(Name, class_testSelf)) =:= false.
 
+%% Whether the class's per-class static call key (BT-4442) is installed.
+class_map_present(Tag) ->
+    persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag), false) =/= false.
+
 %% The class monitor erases asynchronously, on its 'DOWN'.
 wait_until(Pred, 0) ->
     ?assert(Pred());
@@ -500,13 +504,14 @@ load_module_binary(Module, Bin) ->
     {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
     ok.
 
-%% What a compiled static send does with `Key` (`guarded_class_direct_call_doc`
-%% in dispatch_codegen.rs): the key, else the miss path, else the fallback.
-static_send({Module, FunName, _Tag} = Key, Name, Selector) ->
+%% What a compiled static send does with `Key` (`keyed_static_send_doc` in
+%% dispatch_codegen.rs): the target in its class's per-class map (BT-4442),
+%% else the miss path, else the fallback.
+static_send({Module, FunName, Tag} = Key, Name, Selector) ->
     Ref =
-        case persistent_term:get(Key, false) of
-            false -> beamtalk_class_shadow_flags:static_call_target(Key, Name, Selector, 1);
-            Hit -> Hit
+        case persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag), #{}) of
+            #{Key := Hit} -> Hit;
+            _ -> beamtalk_class_shadow_flags:static_call_target(Key, Name, Selector, 1)
         end,
     case Ref of
         false -> fallback;
@@ -601,7 +606,10 @@ static_call_target_test_() ->
                         try
                             ok = Write(),
                             ?assert(key_gone(Name)),
-                            ?assertEqual([], beamtalk_class_registry:take_static_call_keys(Tag))
+                            ?assertNot(class_map_present(Tag)),
+                            ?assertNot(
+                                lists:member(Tag, beamtalk_class_registry:static_call_key_tags())
+                            )
                         after
                             beamtalk_class_shadow_flags:clear(extension, Tag),
                             beamtalk_class_shadow_flags:clear(runtime_fun, Name),
@@ -617,6 +625,42 @@ static_call_target_test_() ->
                 ?assert(key_gone(Name))
             end)
         end},
+        {"two targets on one class share one key: an erase takes both, a re-warm brings back one",
+            fun() ->
+                %% BT-4442: one `persistent_term` key per class, its value a
+                %% map of call-site key => class reference.
+                Name = 'Bt4442TwoTargets',
+                Tag = 'Bt4442TwoTargets class',
+                with_static_class(Name, fun(Pid) ->
+                    Self = static_key(Name, class_testSelf),
+                    ClassSelf = static_key(Name, class_testClassSelf),
+                    Ref = {beamtalk_object, Tag, ?HELPER, Pid},
+                    ?assertEqual(Ref, target(Name, Self, testSelf)),
+                    ?assertEqual(Ref, target(Name, ClassSelf, testClassSelf)),
+                    ?assertEqual(
+                        #{Self => Ref, ClassSelf => Ref},
+                        persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag))
+                    ),
+                    %% A target already present is answered, not rewritten.
+                    Map = persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag)),
+                    ?assertEqual(Ref, target(Name, Self, testSelf)),
+                    ?assert(
+                        erts_debug:same(
+                            Map,
+                            persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag))
+                        )
+                    ),
+                    ok = beamtalk_class_shadow_flags:invalidate(Name),
+                    ?assertNot(key_value(Self)),
+                    ?assertNot(key_value(ClassSelf)),
+                    ?assertNot(class_map_present(Tag)),
+                    ?assertEqual(Ref, target(Name, Self, testSelf)),
+                    ?assertEqual(Ref, key_value(Self)),
+                    ?assertNot(key_value(ClassSelf)),
+                    ok = beamtalk_class_shadow_flags:invalidate(Name),
+                    ?assertNot(class_map_present(Tag))
+                end)
+            end},
         {"installs an inherited owner's function with the receiving class as ClassSelf", fun() ->
             %% BT-4270: a class-literal signal send keys `{DefiningModule,
             %% FunName, ReceiverTag}`; the value is the dynamic path's
@@ -986,7 +1030,7 @@ static_call_target_test_() ->
                         "    {ok, _} = beamtalk_object_class:update_class(~p, #{module => ~p,"
                         " class_methods => #{kept => #{arity => 0}}, meta => ~p}),~n"
                         "    persistent_term:put(~p, {"
-                        "persistent_term:get(~p, false),"
+                        "beamtalk_class_shadow_flags:static_call_key_value(~p),"
                         " beamtalk_class_shadow_flags:static_call_target(~p, ~p, dropped, 1),"
                         " erlang:function_exported(~p, class_dropped, 1)}),~n"
                         "    ok.~n",
