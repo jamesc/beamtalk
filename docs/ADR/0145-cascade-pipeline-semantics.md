@@ -34,13 +34,19 @@ Value subclass: Point
 
 ```beamtalk
 p := Point x: 1 y: 2
-p withX: 5; withY: 10      // => a Point(1, 10) — the withX: result was dropped
+p withX: 5; withY: 10      // => Point(x: 1, y: 10) — the withX: result was dropped
 ```
 
 `withX:`'s result is computed and discarded, and the cascade answers
 `p withY: 10`. Nothing warns. The same trap applies to every built-in value
 whose "update" messages answer a copy: `Dictionary at:put:`, `List` /
 `String` building messages, `Integer max:`, and every user `Value subclass:`.
+
+Verified on `main` (2026-11-05) with a throwaway BUnit test: the cascade
+above answers `Point(x: 1, y: 10)`; `#{} at: #a put: 1; at: #b put: 2` answers
+a one-entry dictionary; and a `TestCase` whose `setUp` is
+`self withA: 1; withB: 2` runs its tests with `a = 0` — compiled without
+any warning.
 
 ADR 0042 § Cascade Semantics recorded the problem and a leading candidate —
 **cascade-as-pipeline on values** (each message sent to the *previous
@@ -111,6 +117,14 @@ only readable *correct* alternative is a run of temp locals.
   `Integer` (`0 max: 1; max: (…)`) or use the `x printString; yourself`
   idiom. None cascades `with*:` on a value — authors have learned to avoid
   the trap, at the cost of the nesting above.
+- **How often the nesting occurs.** A rough grep for a left-nested keyword
+  send used as the receiver of another keyword send finds 5 lines in
+  `stdlib/src`, 1 in `examples/`, and a few dozen in `stdlib/test` (most
+  are `self assert: ((x foo: y) bar: z)`-shaped, two levels deep); only
+  about 7 are `with*:` chains. Inside this repository, deep chains are
+  uncommon. The motivating case comes from an application
+  (beamtalk-buccaneer) whose request-state values carry many fields; how
+  representative that is outside the repo is not measured.
 
 ### Constraints
 
@@ -150,8 +164,15 @@ This settles ADR 0042's three questions:
 ### 2. A new pipeline operator `|>` chains messages on the previous result
 
 ```
-pipeline := cascade ( '|>' message )*        // message = unary | binary | keyword
+statement-expr := keyword-expr                         // a plain send
+                | keyword-expr ( ';'  message )+       // cascade (unchanged)
+                | keyword-expr ( '|>' message )+       // pipeline (new)
+message        := unary | binary | keyword             // a send without its receiver
 ```
+
+A `;` after a pipeline stage, or a `|>` after a cascade message, is the
+mixing error below. `|>` is one token only when the two characters are
+adjacent; `| >` stays `Pipe` followed by a binary `>`.
 
 `recv m1 |> m2 |> m3` sends `m2` to the result of `recv m1`, and `m3` to the
 result of that — it is **exactly** `((recv m1) m2) m3`, and is defined by that
@@ -186,11 +207,11 @@ REPL:
 
 ```
 > p := Point x: 1 y: 2
-// => a Point(1, 2)
+// => Point(x: 1, y: 2)
 > p withX: 5 |> withY: 10
-// => a Point(5, 10)
+// => Point(x: 5, y: 10)
 > p withX: 5; withY: 10
-// => a Point(1, 10)        (fan-out: unchanged, and now warned — part 3)
+// => Point(x: 1, y: 10)        (fan-out: unchanged, and now warned — part 3)
 ```
 
 **Precedence and layout.**
@@ -209,9 +230,30 @@ REPL:
   parenthesise the part you mean"*. Both readings are plausible, and the
   rare code that wants both is clearer with explicit parentheses:
   `(a m1 |> m2) m3; m4` or `a m1 |> (…)`-free temp locals.
-- `|>` is not a binary selector and cannot be defined as a method. (Today
-  `|` always lexes as `TokenKind::Pipe`, so no existing user selector is
-  `|>`; the lexer gains one two-character token.)
+- **Where a pipeline may appear.** Exactly where a cascade may appear
+  today: the parse sites that call `parse_cascade` (a statement, an
+  assignment's right-hand side, a `^` value, the inside of parentheses —
+  and so a block body's statements). The sites that call
+  `parse_keyword_message` directly — keyword arguments, list-literal
+  elements, `match:` arm bodies and the other six — accept neither a
+  cascade nor a pipeline without parentheses, as today: `x at: k put:
+  (v withA: 1 |> withB: 2)`. In particular a `match:` arm body is parsed
+  below the cascade level and `;` there is the arm separator, so
+  `[1 -> a withX: 1 |> withY: 2; _ -> b]` is a parse error pointing at
+  `|>` with the help "parenthesise the arm body"; the mixing rule never
+  sees the arm separator. (Whether arm bodies should accept a bare
+  pipeline is open question 7.)
+- **Casts.** `!` is allowed only on the final stage: `a m1 |> m2!` casts
+  `m2` to the result of `a m1`. A cast on an earlier stage
+  (`a m1! |> m2`) is a parse error — a cast answers no value for the next
+  stage to receive.
+- `|>` is not a binary selector and cannot be defined as a method. `|`
+  is not a binary-selector character (it always lexes as
+  `TokenKind::Pipe`), so no existing user selector is `|>` and no current
+  grammar puts `>` right after `|`; the lexer gains one two-character
+  token. `|` is also the union-type operator (ADR 0102), including in
+  expression-position annotations (`x :: A | B := …`); taking `|>` reserves
+  that spelling against any future type-operator use.
 
 **Error examples.**
 
@@ -232,15 +274,36 @@ A stage the previous result does not understand raises
 `does_not_understand` exactly as the nested form would, and the type checker
 reports it at the stage's span (it sees an ordinary send).
 
-**AST representation.** The parser produces ordinary left-nested
-`Expression::MessageSend` nodes; each send that came from a `|>` stage
-carries a source-form marker (as `Parenthesized` preserves source
-parentheses today) so `unparse`, `beamtalk fmt`, reflected method source and
-the LSP reproduce `|>` as written. Every semantic pass — name resolution,
-type inference, the `ThreadedIr` lowering, codegen, the language-service
-send queries — sees a plain message send and needs no new arm. This is what
-makes `|>` free of state-threading risk: a pipeline *is* the nested send the
-compiler already lowers.
+**AST representation.** The parser produces a new
+`Expression::Pipeline { head, stages, span }` node, so `unparse`,
+`beamtalk fmt`, reflected method source and the LSP's syntax-level features
+reproduce `|>` as written. The existing send-operand normalisation pass
+(`crates/beamtalk-core/src/ast/normalize.rs`, BT-4059) — already the one
+place that turns source-only shape (redundant `Parenthesized` wrappers) into
+the canonical tree that analysis and codegen consume — rewrites each
+`Pipeline` into the left-nested `MessageSend`s it means, keeping every
+stage's span. Every pass after normalisation — name resolution, type
+inference, the `ThreadedIr` lowering, codegen, the language-service send
+queries — then sees a plain message send and needs no new arm; a
+debug-mode check that no `Pipeline` survives normalisation enforces it.
+This is what keeps `|>` free of state-threading risk: after normalisation a
+pipeline *is* the nested send the compiler already lowers.
+
+The cost is real but bounded: the new variant needs arms in the
+pre-normalisation consumers (parser, `unparse`/fmt, `ast_walker`, and any
+raw-tree LSP query such as folding or selection ranges), not the ~480
+`MessageSend` construction sites that a marker field on `MessageSend` would
+touch, and it avoids a `(a m1) m2` versus `a m1 |> m2` shape split in passes
+that peel parentheses. (Alternatives weighed: a defaulted `SendForm` field
+on `MessageSend`; a parser side-table of stage spans read only by
+unparse/fmt. The side-table is cheaper still but makes every raw-tree
+consumer re-derive pipeline structure from spans.)
+
+**Diagnostics.** Because analysis sees nested sends, a diagnostic that
+describes a construct by its position ("…as the receiver of a send", "…as
+an operand") would describe code the user did not write. Diagnostics whose
+wording depends on receiver/operand position consult the stage spans
+recorded by normalisation and say "…as the input to a `|>` stage" instead.
 
 ### 3. A `cascade-drops-update` warning for value cascades
 
@@ -249,9 +312,13 @@ A cascade gets a warning, at the dropped message, when **all** of:
 - the cascade target's inferred type is statically a value kind (a
   `Value subclass:` or a built-in immutable class — `Integer`, `String`,
   `Symbol`, `List`, `Dictionary`, `Set`, `Tuple`, …), and
-- a **non-final** message's declared return type is the target's own type
-  (`Self`, or the target's class) — i.e. it answers an updated copy, which
-  the cascade then throws away.
+- a **non-final** message's declared return type is `Self`, or the
+  target's class or one of its superclasses, **ignoring type arguments** —
+  i.e. it answers an updated copy, which the cascade then throws away.
+  The superclass clause matters: a synthesized `with*:` declares the
+  *defining* class as its return type, so an inherited `withX:` on a
+  `Point3D` target returns `Point`; the type-argument clause makes
+  `Dictionary(K, V) at:put:` (declared `-> Dictionary(K, V)`) count.
 
 ```
 warning[cascade-drops-update]: the result of `withX:` is discarded
@@ -265,13 +332,21 @@ warning[cascade-drops-update]: the result of `withX:` is discarded
 
 It does **not** fire on `Dynamic` targets, actors, `Object` instances,
 non-final messages answering some other type (`printString`, `size`), or
-`yourself`-terminated cascades whose earlier messages are all of that kind.
-It is a lint with the usual `@expect cascade_drops_update` /
+`yourself` in any position (it is declared `-> Self` but is the identity).
+It is a warning with the usual `@expect cascade_drops_update` /
 `[diagnostics] cascade-drops-update = "off"` controls, not a guarantee —
-a dynamic receiver still fans out silently, as it always has.
+a dynamic receiver still fans out silently, as it always has. Known false
+positives: a value method declared `-> Self` that also has a side effect
+(logs, validates, sends to an actor) and is cascaded for that effect;
+`@expect` covers them.
 
-The `with*:` recogniser reuses `crate::synthetic_selectors::with_star_selector`
-and the class hierarchy's declared return types; no new selector table.
+The check needs inferred types, so it lives in the type checker beside
+`infer_cascade` (`type_checker/inference/cascade.rs`), which already
+resolves the cascade target's type and each message's dispatch — not in
+the AST-only validators of `lint_validators.rs`. It reads declared return
+types from the class hierarchy; no new selector table. The `setUp` lint
+fix below is syntactic and uses the existing `with*:` recogniser
+(`crate::synthetic_selectors::with_star_selector`).
 The same change corrects `check_testcase_setup_drops_field_assignments`:
 a `setUp` ending in a `self with*:` cascade with **more than one** `with*:`
 message is no longer accepted as self-producing (it drops all but the last);
@@ -283,8 +358,12 @@ its help text suggests the `|>` form.
   canonical spelling; `|>` is sugar for it, never a replacement.
 - Temp locals remain the recommendation when intermediate values deserve
   names or when stages need debugging (`|>` stages have no names to inspect).
-- Every existing cascade keeps its exact meaning. No source changes are
-  required by this ADR.
+- Every existing cascade keeps its exact meaning. The only source changes
+  are warning suppressions: cascades that deliberately fan out on a value
+  and now warn — e.g. the codegen-regression fixtures'
+  `0 max: 1; max: (…)` (Integer target, `max:` answers Integer) — get an
+  `@expect cascade_drops_update`. Phase 1 runs the warning over stdlib and
+  the test corpus and lists every hit before it lands.
 
 ## Prior Art
 
@@ -328,11 +407,12 @@ the nested form, so debugging and stack traces are unchanged.
 **Production operator.** No runtime change: same BEAM code as hand-nested
 sends, no new dispatch, no hot-reload implications.
 
-**Tooling developer.** Because a pipeline is an ordinary nested send with a
-source marker, hover, go-to-definition, completion after `|>` (complete
-against the previous stage's type) and senders/references work without new
-AST arms. The formatter needs one layout rule (one stage per line when
-broken).
+**Tooling developer.** After normalisation a pipeline is an ordinary nested
+send, so hover, go-to-definition, type-based completion after `|>`
+(against the previous stage's type) and senders/references work on the
+normalised tree. Raw-tree features (formatter, folding, selection ranges,
+syntax highlighting) need a `Pipeline` arm; the formatter needs one layout
+rule (one stage per line when broken).
 
 ## Steelman Analysis
 
@@ -474,6 +554,32 @@ but only for field updates of a single value; it does nothing for
 collection pipelines or non-`with*:` messages. Complementary, out of scope;
 listed as an open question.
 
+### G. Warning plus multi-field update, no new operator
+Accept part 3 and Alternative F, reject part 2. This fixes the trap and the
+motivating example with no new syntax; collection chains of *unary*
+messages already read left-to-right without parentheses. This is the
+strongest rival to the full proposal and the right answer if the
+in-repo frequency of deep keyword chains (see Context § Current state:
+low) is taken as representative. Not chosen as the recommendation only
+because F does not cover keyword-heavy collection pipelines
+(`select:` → `collect:` → `inject:into:`) — the case BT-506 was opened
+for — but the maintainer may reasonably prefer it (open question 1).
+
+### H. Formatter-only: lay out nested chains one send per line
+Teach `beamtalk fmt` to break a left-nested keyword chain into one send per
+line with aligned parentheses. Improves readability with no language
+change, but the reader still counts parentheses to find where each stage
+ends, and the `;` trap is untouched. Compatible with any option; not a
+substitute for part 3.
+
+### I. Make the warning an error where it is certain
+For a cascade whose non-final message is a compiler-synthesized `with*:`
+setter on a statically-known `Value` target, the dropped update is certain
+(the setter has no side effects), so the compiler could reject it outright.
+Not proposed: errors on well-formed Smalltalk are a bigger step than ADR
+0039 allows without evidence the warning is ignored; the warning can be
+promoted later.
+
 ## Consequences
 
 ### Positive
@@ -497,9 +603,22 @@ listed as an open question.
   cascades still drop updates silently.
 - Pipelines hide intermediate values from the debugger in the same way
   nesting does; temps remain better for step-debugging.
+- A new AST variant: every pre-normalisation consumer (parser, unparse,
+  fmt, `ast_walker`, raw-tree LSP queries) needs a `Pipeline` arm, and
+  position-dependent diagnostics need pipeline-aware wording, or they will
+  describe nested code the user never wrote.
+- `|>` takes a spelling from the `|` family that ADR 0102 uses for union
+  types, closing it to future type-operator syntax.
+- The warning has false positives on side-effecting `-> Self` value
+  methods and fires on a few existing intentional value cascades, which
+  need `@expect`.
+- The motivating evidence is one application; in-repo deep chains are
+  rare. If that holds, the operator's cost may outweigh its use
+  (Alternative G).
 
 ### Neutral
-- Existing source is unaffected; no migration required.
+- Existing cascades keep their meaning; the only source edits are
+  `@expect` suppressions on intentional value cascades.
 - `yourself` keeps its Smalltalk meaning and stays useful only with `;`.
 - The `cascade_candidate` lint is unchanged (its rewrite is
   meaning-preserving on values).
@@ -508,33 +627,48 @@ listed as an open question.
 
 Sketch for `/plan-adr` once accepted; sizes are rough.
 
-1. **Warning only (S)** — `cascade-drops-update` in
-   `semantic_analysis` using `infer_cascade`'s resolved target type and the
-   hierarchy's declared return types; fix
+1. **Warning only (S/M)** — `cascade-drops-update` in the type checker
+   beside `infer_cascade`, using its resolved target type and the
+   hierarchy's declared return types (superclass match, type arguments
+   ignored, `yourself` exempt); run it over stdlib and the test corpus,
+   list the hits and add `@expect` where the fan-out is intended; fix
    `check_testcase_setup_drops_field_assignments`'s multi-`with*:` cascade
    acceptance. Independent of the operator; ships first.
-2. **Lexer + parser (M)** — `TokenKind::PipeGt` for `|>`
-   (`source_analysis/lexer.rs`); `parse_pipeline` above `parse_cascade` in
-   `parser/expressions.rs`, producing left-nested `MessageSend`s with a
-   pipeline source marker; the `;`/`|>` mixing error; line-continuation for
-   a leading `|>`.
-3. **Source fidelity (S/M)** — `unparse`, `beamtalk fmt` layout,
-   reflected method source, tree-sitter / editor grammars under `editors/`.
-4. **Language service (S)** — completion after `|>` against the previous
-   stage's type; hover/definition already work through `MessageSend`.
-5. **Docs & tests (S)** — `docs/beamtalk-language-features.md`
+2. **Wire check (S)** — before the full parser work: lex `|>`, parse a
+   single-stage pipeline at statement level into `Expression::Pipeline`,
+   desugar it in `ast/normalize.rs`, and run one BUnit test end-to-end
+   (value, actor and `Dynamic` receivers) plus `just verify-threaded-ir`.
+   This proves the "no codegen change" assumption before the rest lands.
+3. **Lexer + parser (M)** — `TokenKind::PipeGt` (adjacent `|>` only) in
+   `source_analysis/lexer.rs`; `|>` stages at every `parse_cascade` site in
+   `parser/expressions.rs`; the `;`/`|>` mixing error; the cast-on-final-
+   stage rule; the "parenthesise" error at `parse_keyword_message`-only
+   sites (including `match:` arm bodies); line-continuation for a leading
+   `|>`. Parser tests for each.
+4. **Source fidelity (S/M)** — `unparse`, `beamtalk fmt` layout (one stage
+   per line when broken), reflected method source, `ast_walker`, and the
+   editor grammars under `editors/` (including the liveview highlighter,
+   which treats `|` as a binary character today).
+5. **Diagnostics + language service (S)** — pipeline-aware wording for
+   position-dependent diagnostics via the stage spans; completion after
+   `|>` against the previous stage's type; hover/definition work through
+   the normalised `MessageSend`.
+6. **Docs & tests (S)** — `docs/beamtalk-language-features.md`
    (Cascades + new Pipelines section), `docs/beamtalk-syntax-rationale.md`
    (new departure row), BUnit tests in `stdlib/test/` for values, actors and
    `Dynamic` receivers, parser tests for precedence, layout and errors.
    `docs/development/surface-parity.md` needs no change (no new operation).
 
-No codegen, `ThreadedIr`, or runtime changes are expected; if one turns out
-to be needed, the source-marker design has failed and should be revisited.
+No codegen, `ThreadedIr`, or runtime changes are expected. If the wire
+check (phase 2) needs one, the normalise-to-nested-sends design has failed
+and the ADR should be revisited before phases 3–6.
 
 ## Open Questions (for the maintainer)
 
 1. **Accept all three parts, or a subset?** Part 3 (warning + `setUp` lint
-   fix) is valuable even if `|>` is rejected.
+   fix) is valuable even if `|>` is rejected. Given how rarely deep chains
+   occur in this repo, Alternative G (warning + multi-field update, no
+   operator) is a defensible smaller answer.
 2. **Token.** `|>` (proposed) versus another spelling. A pure-Smalltalk
    alternative would be Cuis's `::`, at the cost of the annotation clash.
 3. **Mixing `;` and `|>`.** Proposed: parse error without parentheses.
@@ -543,12 +677,18 @@ to be needed, the source-marker design has failed and should be revisited.
 4. **Binary stages.** Proposed: allowed for uniformity (`x |> + 1`), since
    the rewrite is trivial; could instead be restricted to unary and keyword
    stages for readability.
-5. **Warning breadth.** Proposed: only non-final messages that answer the
-   target's own type. Could widen to any discarded non-`nil` result on a
+5. **Warning breadth.** Proposed: only non-final messages that answer
+   `Self` or the target's class/superclass. Could widen to any discarded non-`nil` result on a
    value target (catches more, more false positives on value methods with
    side effects such as logging).
 6. **Multi-field update (Alternative F).** Left undecided; worth a separate
    issue if `with*:` chains remain the dominant use of `|>`.
+7. **`match:` arm bodies.** Proposed: a bare pipeline in an arm body is a
+   parse error asking for parentheses (arm bodies are parsed below the
+   cascade level and `;` separates arms). Alternative: let arm bodies
+   accept `|>` stages (no `;` ambiguity, since `|>` is distinct).
+8. **Error vs warning.** Should the certain case (synthesized `with*:` on a
+   known `Value`) be a compile error (Alternative I)?
 
 ## References
 - Related issues: BT-4352 (this ADR), BT-506 (canceled pipeline-chaining
