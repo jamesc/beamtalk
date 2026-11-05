@@ -471,6 +471,9 @@ impl CoreErlangGenerator {
         // All value types also export dispatch/4 for actor hierarchy walk.
         parts.push(Document::Str("'dispatch'/4"));
         parts.push(Document::Str("'has_method'/1"));
+        // BT-4260: the strictly-local probe `resolve_owner/2` walks with
+        // (always emitted by `generate_primitive_has_method`).
+        parts.push(Document::Str("'has_method_local'/1"));
 
         // All classes export superclass/0 for reflection
         parts.push(Document::Str("'superclass'/0"));
@@ -4564,30 +4567,32 @@ impl CoreErlangGenerator {
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
 
         // Default case: extension fallback, then superclass delegation (or DNU)
-        let not_found_branch: Document<'static> = if has_catch_all_dnu {
+        let default_arm: Document<'static> = if has_catch_all_dnu {
             // Class defines DNU — route unknown selectors through it
-            docvec![
-                "                    call ",
-                leaf::atom(mod_name.to_string()),
-                ":'doesNotUnderstand:args:'(Self, Selector, Args)\n",
-            ]
+            Self::value_extension_default_arm(
+                &class_name,
+                docvec![
+                    "                    call ",
+                    leaf::atom(mod_name.to_string()),
+                    ":'doesNotUnderstand:args:'(Self, Selector, Args)\n",
+                ],
+            )
         } else if let Some(ref super_mod) = superclass_mod {
-            docvec![
-                "                    call ",
-                leaf::atom(super_mod.clone()),
-                ":'dispatch'(Selector, Args, Self)\n",
-            ]
+            self.value_inherited_default_arm(class, &class_name, super_mod)
         } else {
             // Root of hierarchy — raise does_not_understand
-            docvec![
-                "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
-                "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
-                "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
-                "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, ",
-                leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists"),
-                ") in\n",
-                "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
-            ]
+            Self::value_extension_default_arm(
+                &class_name,
+                docvec![
+                    "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
+                    "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
+                    "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
+                    "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, ",
+                    leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists"),
+                    ") in\n",
+                    "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
+                ],
+            )
         };
 
         let doc = docvec![
@@ -4658,20 +4663,134 @@ impl CoreErlangGenerator {
                     .unwrap_or_default(),
             ),
             // Default case
-            "        <_Other> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-            "                    apply ExtFun(Args, Self)\n",
-            "                <'not_found'> when 'true' ->\n",
-            not_found_branch,
-            "            end\n",
+            default_arm,
             "    end\n",
             "\n",
         ];
 
         Ok(doc)
+    }
+
+    /// The `dispatch/3` default arm of a value type that has no inherited
+    /// route: the extension registry, then `not_found` (a catch-all
+    /// `doesNotUnderstand:args:` handler, or the root's DNU raise).
+    fn value_extension_default_arm(
+        class_name: &str,
+        not_found: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "        <_Other> when 'true' ->\n",
+            "            case call 'beamtalk_extensions':'lookup'(",
+            leaf::atom(class_name.to_string()),
+            ", Selector) of\n",
+            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
+            "                    apply ExtFun(Args, Self)\n",
+            "                <'not_found'> when 'true' ->\n",
+            not_found,
+            "            end\n",
+        ]
+    }
+
+    /// The `dispatch/3` default arm of a value type with a superclass.
+    ///
+    /// BT-4260: it first asks the memoised `beamtalk_dispatch:inherited_target/2`
+    /// verdict (BT-4280's, one derived-cache key for actors and values). On
+    /// `{'value', Owner, Module}` the inherited method is reached by calling
+    /// the owner's `dispatch/3` directly, skipping the superclass-by-superclass
+    /// delegation and its extension lookup per level. Anything else (`slow`,
+    /// or an actor-convention verdict a value chain cannot produce) takes the
+    /// unchanged route: this class's extensions, then the superclass's
+    /// `dispatch/3`.
+    ///
+    /// Both routes answer the same, so which one a selector takes is only a
+    /// cost choice. A selector the superclass defines itself is one hop away:
+    /// the unchanged route (one extension lookup and one call) is cheaper than
+    /// the verdict lookup, so such selectors skip the verdict. The list comes
+    /// from the class hierarchy at compile time; if the superclass later
+    /// changes, a selector only takes the slower of two equivalent routes.
+    fn value_inherited_default_arm(
+        &self,
+        class: &ClassDefinition,
+        class_name: &str,
+        super_mod: &str,
+    ) -> Document<'static> {
+        let ask = docvec![
+            "call 'beamtalk_dispatch':'inherited_target'(",
+            leaf::atom(class_name.to_string()),
+            ", Selector)",
+        ];
+        let one_hop = self.one_hop_selectors(class);
+        let verdict: Document<'static> = if one_hop.is_empty() {
+            ask
+        } else {
+            let arms: Vec<Document<'static>> = one_hop
+                .into_iter()
+                .map(|sel| {
+                    docvec![
+                        "                <",
+                        leaf::atom(sel),
+                        "> when 'true' -> 'slow'\n",
+                    ]
+                })
+                .collect();
+            docvec![
+                "case Selector of\n",
+                Document::Vec(arms),
+                "                <_> when 'true' -> ",
+                ask,
+                "\n",
+                "            end",
+            ]
+        };
+        docvec![
+            "        <_Other> when 'true' ->\n",
+            "            %% BT-4260: a memoised verdict picks the direct inherited call.\n",
+            "            case ",
+            verdict,
+            " of\n",
+            "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
+            "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
+            "                <_InhSlow> when 'true' ->\n",
+            "                    case call 'beamtalk_extensions':'lookup'(",
+            leaf::atom(class_name.to_string()),
+            ", Selector) of\n",
+            "                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
+            "                            apply ExtFun(Args, Self)\n",
+            "                        <'not_found'> when 'true' ->\n",
+            "                            call ",
+            leaf::atom(super_mod.to_string()),
+            ":'dispatch'(Selector, Args, Self)\n",
+            "                    end\n",
+            "            end\n",
+        ]
+    }
+
+    /// The instance selectors `class`'s superclass defines itself, per the
+    /// class hierarchy, less those `class` defines (its own `dispatch/3` arms
+    /// answer them before the default arm); sorted and deduplicated, and
+    /// empty when no hierarchy is available.
+    fn one_hop_selectors(&self, class: &ClassDefinition) -> Vec<String> {
+        let superclass = class.superclass_name();
+        let Some(info) = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.get_class(superclass))
+        else {
+            return Vec::new();
+        };
+        info.methods
+            .iter()
+            .filter(|m| m.defined_in == superclass)
+            .filter(|m| {
+                !class
+                    .methods
+                    .iter()
+                    .any(|own| own.selector.name() == m.selector)
+            })
+            .map(|m| m.selector.to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
     }
 
     /// Generates the `asString` dispatch arm if the class does not define it itself.
@@ -5126,11 +5245,11 @@ impl CoreErlangGenerator {
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
-                    // value types delegate via SuperclassDelegation::Static
-                    // (a compile-time module call, not a live registry walk),
-                    // so they don't have the class_chain_step re-entrant-walk
-                    // cost the local probe exists to avoid — out of scope here.
-                    emit_local_probe: false,
+                    // BT-4260: the strictly-local probe lets
+                    // `beamtalk_dispatch:resolve_owner/2` stop exactly where
+                    // the `dispatch/3` superclass chain would (a catch-all
+                    // DNU class handles every selector itself).
+                    emit_local_probe: true,
                 },
             ));
         }
@@ -5185,7 +5304,8 @@ impl CoreErlangGenerator {
                 superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
                 dnu: false,
                 auto_slots: auto_methods,
-                emit_local_probe: false,
+                // BT-4260: see the catch-all-DNU spec above.
+                emit_local_probe: true,
             },
         ))
     }
@@ -5234,18 +5354,9 @@ impl CoreErlangGenerator {
             "            call ",
             leaf::atom(mod_name),
             ":'dispatch'(PwaSel, PwaArgs, Self)\n",
-            // Default: extension check, then superclass delegation
-            "        <_Other> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name),
-            ", Selector) of\n",
-            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-            "                    apply ExtFun(Args, Self)\n",
-            "                <'not_found'> when 'true' ->\n",
-            "                    call ",
-            leaf::atom(super_mod),
-            ":'dispatch'(Selector, Args, Self)\n",
-            "            end\n",
+            // Default: the inherited verdict, then extension check and
+            // superclass delegation
+            self.value_inherited_default_arm(class, &class_name, &super_mod),
             "    end\n",
             "\n",
         ];
@@ -5275,7 +5386,8 @@ impl CoreErlangGenerator {
                 superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
                 auto_slots: None,
-                emit_local_probe: false,
+                // BT-4260: see `generate_primitive_has_method`.
+                emit_local_probe: true,
             },
         ))
     }

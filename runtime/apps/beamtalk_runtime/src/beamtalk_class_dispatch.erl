@@ -403,21 +403,39 @@ Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
 
 Eligible when the class's baked `direct_constructors` lists the selector, the
 class names a module and has no runtime-installed class-method funs (the
-`lookup_direct_constructor/2` gates), and the module exports `new` at the
-right arity (`new/0` for `new`, `new/1` for `new:` with a map argument). A
-non-map `new:` argument is never eligible: the gen_server path reproduces
-the legacy `IsConstructible = false` fallback and the `new: expects a
-Dictionary argument` error there.
+`beamtalk_class_metadata:lookup_direct_constructor/2` gates),
+`beamtalk_class_shadow_flags:direct_call_ok/2` holds for the class (ADR 0142
+§1 rules 1-2: no class-side extension on it, no ADR 0084 runtime fun, no class
+variables in its chain; BT-4409), and the module exports `new` at the right
+arity (`new/0` for `new`, `new/1` for `new:` with a map argument). For `new:`,
+no ancestor may define a user class-side `new:`
+(`beamtalk_class_metadata:chain_has_user_new1/1`, from the facts the
+ancestors publish). A non-map `new:` argument is never eligible: the
+gen_server path reproduces the legacy `IsConstructible = false` fallback and
+the `new: expects a Dictionary argument` error there.
 
-The verdict is generated metadata (Rust's `direct_constructors`), never
-re-derived here. `new` needs no chain check because `new/0` is itself the
-override slot (a custom `new` compiles to, or delegates from, it), so the
-direct call and the gen_server path reach the same function either way.
-`new:` shares the direct-call trust model: reloading a class re-syncs its own
-verdicts, while an ancestor reload does not re-bake descendants. The
-export check only sees loaded code, so a class
-whose module nobody has touched yet takes one gen_server fallback (which
-loads it) before going direct.
+The class's own verdict is generated metadata (Rust's `direct_constructors`),
+never re-derived here: the baked `new:` entry only says the class's own
+synthesized `new:` is eligible (Rust also folds in the chain as it was at
+compile time, which can only keep it off). The chain is decided at run time
+(BT-4409), so an ancestor reloaded with a user `new:` is honoured by an
+already-loaded descendant without recompiling it, and dropping it again
+brings the fast path back. `new` needs no chain check because `new/0` is
+itself the override slot (a custom `new` compiles to, or delegates from, it),
+so the direct call and the gen_server path reach the same function either
+way; an ancestor's class-side `new` extension does not shadow the class's own
+synthesized `new`, as on the class-process path.
+
+The class, its tag and module (or the decline) are memoised per class pid and
+selector in `beamtalk_class_derived_cache` (`{direct_constructor, ClassPid,
+Selector}`), flushed by every class-metadata write; `direct_call_ok/2` (one
+`persistent_term` read) and the export check run on every send. The export
+check only sees loaded code, so a class whose module nobody has touched yet
+takes one gen_server fallback (which loads it) before going direct.
+
+`beamtalk_class_shadow_flags:static_call_target/4` installs a static `new`
+call key only while this answers `{ok, Module}` for the call site's module
+(BT-4409): one rule for both paths.
 """.
 -spec lookup_direct_constructor(pid(), selector(), list()) -> {ok, module()} | error.
 lookup_direct_constructor(ClassPid, new, []) when is_pid(ClassPid) ->
@@ -429,18 +447,51 @@ lookup_direct_constructor(_ClassPid, _Selector, _Args) ->
 
 -spec lookup_direct_constructor_module(pid(), selector(), arity()) -> {ok, module()} | error.
 lookup_direct_constructor_module(ClassPid, Selector, Arity) ->
+    case direct_constructor_owner(ClassPid, Selector) of
+        {ok, ClassName, Tag, Module} ->
+            case
+                beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName) andalso
+                    erlang:function_exported(Module, new, Arity)
+            of
+                true -> {ok, Module};
+                false -> error
+            end;
+        error ->
+            error
+    end.
+
+%% The memoised part of `lookup_direct_constructor/3` (see its doc).
+-spec direct_constructor_owner(pid(), selector()) ->
+    {ok, class_name(), atom(), module()} | error.
+direct_constructor_owner(ClassPid, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {direct_constructor, ClassPid, Selector},
+        fun() -> compute_direct_constructor_owner(ClassPid, Selector) end
+    ).
+
+-spec compute_direct_constructor_owner(pid(), selector()) ->
+    {cache | nocache, {ok, class_name(), atom(), module()} | error}.
+compute_direct_constructor_owner(ClassPid, Selector) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
-                {ok, Module} = Found ->
-                    case erlang:function_exported(Module, new, Arity) of
-                        true -> Found;
-                        false -> error
-                    end;
-                error ->
-                    error
-            end;
+            {cache, direct_constructor_owner_of(ClassName, Selector)};
         not_found ->
+            {nocache, error}
+    end.
+
+-spec direct_constructor_owner_of(class_name(), selector()) ->
+    {ok, class_name(), atom(), module()} | error.
+direct_constructor_owner_of(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
+        {ok, Module} ->
+            case
+                Selector =:= 'new:' andalso
+                    beamtalk_class_metadata:chain_has_user_new1(ClassName)
+            of
+                true -> error;
+                false -> {ok, ClassName, receiver_tag(ClassName), Module}
+            end;
+        error ->
             error
     end.
 

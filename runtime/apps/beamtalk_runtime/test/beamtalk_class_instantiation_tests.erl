@@ -159,9 +159,168 @@ instantiation_test_() ->
                 fun test_new_compiled_map_without_new1/0},
             %% ADR 0123 Phase 0 (BT-3534)
             {"compiled Value class new/0 never carries '__shape_version__'",
-                fun test_compiled_value_new_excludes_shape_version/0}
+                fun test_compiled_value_new_excludes_shape_version/0},
+            %% BT-4404: shadowed class-reference spawn module lookup
+            {"resolve_spawn_module_or_raise answers the module when the kind matches",
+                fun test_resolve_spawn_module_kind_matches/0},
+            {"resolve_spawn_module_or_raise: actor spawn of a supervisor class",
+                fun test_resolve_spawn_module_actor_got_supervisor/0},
+            {"resolve_spawn_module_or_raise: supervisor start of an actor class",
+                fun test_resolve_spawn_module_supervisor_got_actor/0},
+            {"resolve_spawn_module_or_raise: Value/Object class is does_not_understand",
+                fun test_resolve_spawn_module_not_spawnable/0},
+            {"resolve_spawn_module_or_raise: metadata miss is class_not_found",
+                fun test_resolve_spawn_module_metadata_miss/0},
+            {"resolve_spawn_module_or_raise follows a multi-level chain",
+                fun test_resolve_spawn_module_deep_chain/0},
+            {"resolve_spawn_module_or_raise: incomplete ancestor chain passes through",
+                fun test_resolve_spawn_module_incomplete_chain/0}
         ]
     end}.
+
+%%====================================================================
+%% BT-4404: resolve_spawn_module_or_raise/3
+%%====================================================================
+
+%% Module-less-by-code metadata rows: only the module name and the superclass
+%% chain matter to the lookup.
+with_spawn_kind_classes(Fun) ->
+    Rows = [
+        {'Bt4404Actor', bt4404_actor_mod, 'Actor'},
+        {'Bt4404Sup', bt4404_sup_mod, 'Supervisor'},
+        {'Bt4404DynSup', bt4404_dynsup_mod, 'DynamicSupervisor'},
+        {'Bt4404Value', bt4404_value_mod, 'Value'},
+        {'Bt4404Object', bt4404_object_mod, 'Object'},
+        %% Actor -> Bt4404Actor -> Bt4404Mid -> Bt4404Leaf
+        {'Bt4404Mid', bt4404_mid_mod, 'Bt4404Actor'},
+        {'Bt4404Leaf', bt4404_leaf_mod, 'Bt4404Mid'},
+        %% Supervisor -> Bt4404Sup -> Bt4404SupLeaf
+        {'Bt4404SupLeaf', bt4404_sup_leaf_mod, 'Bt4404Sup'},
+        %% An ancestor with no metadata row (removed or renamed).
+        {'Bt4404Orphan', bt4404_orphan_mod, 'Bt4404NeverRegisteredBase'}
+    ],
+    lists:foreach(
+        fun({Name, Mod, Super}) ->
+            ok = beamtalk_class_metadata:insert(Name, Mod, undefined, Super, false)
+        end,
+        Rows
+    ),
+    try
+        Fun()
+    after
+        delete_classes([Name || {Name, _, _} <- Rows])
+    end.
+
+resolve_spawn(Class, Selector, Kind) ->
+    beamtalk_class_instantiation:resolve_spawn_module_or_raise(Class, Selector, Kind).
+
+test_resolve_spawn_module_kind_matches() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(bt4404_actor_mod, resolve_spawn('Bt4404Actor', spawn, actor)),
+        ?assertEqual(
+            bt4404_actor_mod, resolve_spawn('Bt4404Actor', 'spawnMonitoredWith:', actor)
+        ),
+        ?assertEqual(bt4404_sup_mod, resolve_spawn('Bt4404Sup', spawn, supervisor)),
+        ?assertEqual(bt4404_dynsup_mod, resolve_spawn('Bt4404DynSup', 'spawnWith:', supervisor))
+    end).
+
+test_resolve_spawn_module_actor_got_supervisor() ->
+    with_spawn_kind_classes(fun() ->
+        lists:foreach(
+            fun(Class) ->
+                ?assertError(
+                    #{
+                        error := #beamtalk_error{
+                            kind = instantiation_error,
+                            class = Class,
+                            selector = spawn,
+                            details = #{expected_kind := actor, actual_kind := supervisor}
+                        }
+                    },
+                    resolve_spawn(Class, spawn, actor)
+                )
+            end,
+            ['Bt4404Sup', 'Bt4404DynSup']
+        )
+    end).
+
+test_resolve_spawn_module_supervisor_got_actor() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    class = 'Bt4404Actor',
+                    selector = 'spawnWith:',
+                    details = #{expected_kind := supervisor, actual_kind := actor}
+                }
+            },
+            resolve_spawn('Bt4404Actor', 'spawnWith:', supervisor)
+        )
+    end).
+
+test_resolve_spawn_module_not_spawnable() ->
+    with_spawn_kind_classes(fun() ->
+        [
+            ?assertError(
+                #{
+                    error := #beamtalk_error{
+                        kind = does_not_understand, class = Class, selector = spawn
+                    }
+                },
+                resolve_spawn(Class, spawn, Kind)
+            )
+         || Class <- ['Bt4404Value', 'Bt4404Object'], Kind <- [actor, supervisor]
+        ]
+    end).
+
+test_resolve_spawn_module_deep_chain() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(bt4404_leaf_mod, resolve_spawn('Bt4404Leaf', spawn, actor)),
+        ?assertEqual(bt4404_sup_leaf_mod, resolve_spawn('Bt4404SupLeaf', spawn, supervisor)),
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    details = #{expected_kind := supervisor, actual_kind := actor}
+                }
+            },
+            resolve_spawn('Bt4404Leaf', spawn, supervisor)
+        ),
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    details = #{expected_kind := actor, actual_kind := supervisor}
+                }
+            },
+            resolve_spawn('Bt4404SupLeaf', spawn, actor)
+        )
+    end).
+
+%% A broken chain decides nothing, so it must not be reported as "not
+%% spawnable": the module is answered and the emitted call runs as before.
+test_resolve_spawn_module_incomplete_chain() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(unknown, beamtalk_supervisor:spawn_kind('Bt4404Orphan')),
+        ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, actor)),
+        ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, supervisor))
+    end).
+
+test_resolve_spawn_module_metadata_miss() ->
+    lists:foreach(
+        fun(Kind) ->
+            ?assertError(
+                #{
+                    error := #beamtalk_error{
+                        kind = class_not_found, class = 'Bt4404NeverRegistered', selector = spawn
+                    }
+                },
+                resolve_spawn('Bt4404NeverRegistered', spawn, Kind)
+            )
+        end,
+        [actor, supervisor]
+    ).
 
 %%====================================================================
 %% handle_spawn tests

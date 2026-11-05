@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'self_version_branch_context_regression' ['new'/0, 'new'/1, 'testSelfFieldReadInsideLoopAfterPriorMutation'/1, 'total'/1, 'withTotal:'/2, '__is_slot'/1, 'class_total:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'self_version_branch_context_regression' ['new'/0, 'new'/1, 'testSelfFieldReadInsideLoopAfterPriorMutation'/1, 'total'/1, 'withTotal:'/2, '__is_slot'/1, 'class_total:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'SelfVersionBranchContextRegressionTest', 'TestCase'}],
      'type' =
@@ -84,11 +84,33 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'self_version_branch_context_regression':'withTotal:'(Self, DispArg0)
         <_Other> when 'true' ->
-            case call 'beamtalk_extensions':'lookup'('SelfVersionBranchContextRegressionTest', Selector) of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    apply ExtFun(Args, Self)
-                <'not_found'> when 'true' ->
-                    call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'assert:'> when 'true' -> 'slow'
+                <'assert:equals:'> when 'true' -> 'slow'
+                <'assertError:equals:'> when 'true' -> 'slow'
+                <'assertOk:'> when 'true' -> 'slow'
+                <'deny:'> when 'true' -> 'slow'
+                <'fail:'> when 'true' -> 'slow'
+                <'setUp'> when 'true' -> 'slow'
+                <'setUpOnce'> when 'true' -> 'slow'
+                <'should:raise:'> when 'true' -> 'slow'
+                <'skip'> when 'true' -> 'slow'
+                <'skip:'> when 'true' -> 'slow'
+                <'suiteFixture'> when 'true' -> 'slow'
+                <'tearDown'> when 'true' -> 'slow'
+                <'tearDownOnce'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('SelfVersionBranchContextRegressionTest', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('SelfVersionBranchContextRegressionTest', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@test_case':'dispatch'(Selector, Args, Self)
+                    end
             end
     end
 
@@ -106,6 +128,16 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
             case call 'beamtalk_extensions':'has'('SelfVersionBranchContextRegressionTest', Selector) of
                 <'true'> when 'true' -> 'true'
                 <'false'> when 'true' -> call 'bt@stdlib@test_case':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'testSelfFieldReadInsideLoopAfterPriorMutation', 'total', 'withTotal:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('SelfVersionBranchContextRegressionTest', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
             end
     end
 
@@ -154,7 +186,8 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -191,7 +224,8 @@ let _InitMap@2 = call 'maps':'new'() in let _Packed@3 = call 'maps':'put'('__loc
       'method_info' => ~{'testSelfFieldReadInsideLoopAfterPriorMutation' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'UndefinedObject', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'total' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withTotal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'total:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
 
 'module_info'/0 = fun () ->

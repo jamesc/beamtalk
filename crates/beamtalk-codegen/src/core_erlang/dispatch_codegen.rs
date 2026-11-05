@@ -1501,8 +1501,12 @@ impl CoreErlangGenerator {
                 && self.is_supervisor_class(&name.name)
             {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
-                let module_doc =
-                    self.class_reference_spawn_module_doc(&name.name, pkg, &selector_atom);
+                let module_doc = self.class_reference_spawn_module_doc(
+                    &name.name,
+                    pkg,
+                    &selector_atom,
+                    SpawnTargetKind::Supervisor,
+                );
                 let doc = self.generate_supervisor_class_start(
                     leaf::atom(name.name.to_string()),
                     module_doc,
@@ -2332,13 +2336,45 @@ impl CoreErlangGenerator {
     /// implementing this amendment). `Selector` names the call for the
     /// structured error `resolve_module_or_raise/2` raises on a metadata miss.
     pub(super) fn class_self_module_doc(selector_atom: &str) -> Document<'static> {
-        docvec![
-            "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
-            Self::class_self_name_doc(),
-            ", ",
-            leaf::atom(selector_atom),
-            ")"
-        ]
+        Self::class_module_lookup_doc(Self::class_self_name_doc(), selector_atom, None)
+    }
+
+    /// The call-time module lookup shared by the `ClassSelf` instantiation
+    /// intrinsics ([`Self::class_self_module_doc`], `spawn_kind = None`) and
+    /// spawn-family sends to a shadowed class reference
+    /// ([`Self::class_reference_spawn_module_doc`], `spawn_kind = Some(_)`):
+    ///
+    /// ```erlang
+    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'(Name, 'new')
+    /// call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(Name, 'spawn', 'actor')
+    /// ```
+    ///
+    /// The spawn form also checks that the runtime class is the kind the
+    /// emitted call shape needs (BT-4404), raising a structured error instead
+    /// of a raw `undef` when a last-wins shadowing class is a different kind.
+    fn class_module_lookup_doc(
+        name_doc: Document<'static>,
+        selector_atom: &str,
+        spawn_kind: Option<SpawnTargetKind>,
+    ) -> Document<'static> {
+        match spawn_kind {
+            None => docvec![
+                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                name_doc,
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ")"
+            ],
+            Some(kind) => docvec![
+                "call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(",
+                name_doc,
+                ", ",
+                leaf::atom(selector_atom.to_string()),
+                ", ",
+                leaf::atom(kind.runtime_atom()),
+                ")"
+            ],
+        }
     }
 
     /// Lowers instantiation-like selectors (`new`, `spawn`, `spawnAs:`, ...) into
@@ -2457,12 +2493,16 @@ impl CoreErlangGenerator {
     /// ([`Self::is_shadowed_class`]) is one last-wins runtime class, so the
     /// compile-time package's module is not necessarily the one a dynamic
     /// send reaches: the module is resolved at call time from the class
-    /// registry instead, exactly as the class-side `self spawn` family does
-    /// ([`Self::class_self_module_doc`]) —
+    /// registry instead, through the same lookup helper as the class-side
+    /// `self spawn` family ([`Self::class_module_lookup_doc`]) —
     ///
     /// ```erlang
-    /// call 'beamtalk_class_instantiation':'resolve_module_or_raise'('Counter', 'spawn')
+    /// call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'('Counter', 'spawn', 'actor')
     /// ```
+    ///
+    /// The trailing kind lets the runtime reject a winning class of a
+    /// different kind (an actor where a supervisor start was compiled, a
+    /// Value class, …) with a structured error (BT-4404).
     ///
     /// The spawn itself stays in the caller (a dynamic `class_send` would
     /// start it inside the class `gen_server`, and has no monitored-spawn
@@ -2474,20 +2514,22 @@ impl CoreErlangGenerator {
 
     /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is
     /// looked up at call time rather than pinned.
+    ///
+    /// `kind` is the call shape the caller emits around the module; the
+    /// runtime lookup checks the winning class can take it (BT-4404).
     fn class_reference_spawn_module_doc(
         &self,
         class_name: &str,
         package: Option<&str>,
         selector_atom: &str,
+        kind: SpawnTargetKind,
     ) -> Document<'static> {
         if self.spawn_module_resolved_at_runtime(class_name, package) {
-            docvec![
-                "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+            Self::class_module_lookup_doc(
                 leaf::atom(class_name.to_string()),
-                ", ",
-                leaf::atom(selector_atom.to_string()),
-                ")"
-            ]
+                selector_atom,
+                Some(kind),
+            )
         } else {
             leaf::atom(self.compiled_module_name_qualified(class_name, package))
         }
@@ -3363,7 +3405,12 @@ impl CoreErlangGenerator {
         init_args: Option<&Expression>,
         variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let module_expr = self.class_reference_spawn_module_doc(class_name, package, selector_atom);
+        let module_expr = self.class_reference_spawn_module_doc(
+            class_name,
+            package,
+            selector_atom,
+            SpawnTargetKind::Actor,
+        );
         // An atom is used as-is; a runtime lookup is bound once, since the
         // REPL arm names the module twice.
         let (module_binding, module_doc): (Option<(String, Document<'static>)>, Document<'static>) =
@@ -3628,13 +3675,12 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // nullary `new` on an eligible Value builds via a direct
-        // `Module:'new'()` call. The synthesized builder takes no arguments
-        // (not even `ClassSelf`), so it cannot use the generic direct-call
-        // shape below. (`new:` stays on `class_send`: its chain verdict
-        // lives in the baked metadata, which only dynamic sends consult.)
+        // `Module:'new'()` call, behind the same static call key as every
+        // other guarded class send (BT-4409). (`new:` stays on `class_send`:
+        // its chain verdict is decided at run time, on the dynamic path.)
         if raw_selector == "new" && arguments.is_empty() {
             if let Some(module_name) = self.direct_new0_module(class_name) {
-                return Ok(Self::generate_direct_new_call(&module_name));
+                return Ok(self.guarded_direct_new_doc(class_name, module_name));
             }
         }
 
@@ -3774,7 +3820,68 @@ impl CoreErlangGenerator {
             &key_doc,
             &class_self_var,
             args_doc,
-            arg_count,
+            arg_count + 1,
+            direct_call,
+        )
+    }
+
+    /// BT-4409 (ADR 0142 rule 3): a static nullary `new` sent to the literal
+    /// class `class_name`, whose synthesized `new/0` in `module_name` may
+    /// build in the caller ([`Self::direct_new0_module`]), compiles to the
+    /// keyed shape of [`Self::guarded_class_direct_call_doc`]:
+    ///
+    /// ```erlang
+    /// let StaticSelf = case call 'persistent_term':'get'(
+    ///         {'bt@point', 'new', 'Point class'}, 'false') of
+    ///     <'false'> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
+    ///           {'bt@point', 'new', 'Point class'}, 'Point', 'new', 0)
+    ///     <StaticRef> when 'true' -> StaticRef
+    ///   end
+    /// in case StaticSelf of
+    ///   <'false'> when 'true' ->
+    ///     let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
+    ///     call 'beamtalk_object_class':'class_send'(ClassPid, 'new', [])
+    ///   <_> when 'true' -> call 'bt@point':'new'()
+    /// end
+    /// ```
+    ///
+    /// `new/0` takes no `ClassSelf`, so the key's class reference is only the
+    /// "installed" witness. The runtime installs the key only while the
+    /// dynamic path would build in the caller too
+    /// (`beamtalk_class_dispatch:lookup_direct_constructor/3`, which needs
+    /// `direct_call_ok/2`: no class-side extension, no ADR 0084 runtime fun,
+    /// no class variables in the chain), so a later extension or
+    /// `put_class_method` of `new` is honoured through the fallback.
+    fn guarded_direct_new_doc(
+        &mut self,
+        class_name: &str,
+        module_name: String,
+    ) -> Document<'static> {
+        let class_self_var = self.fresh_temp_var("StaticSelf");
+        let key_doc = docvec![
+            "{",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::atom("new".to_string()),
+            ", ",
+            leaf::atom(super::util::metaclass_tag(class_name)),
+            "}"
+        ];
+        let direct_call = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":",
+            leaf::atom("new".to_string()),
+            "()"
+        ]);
+        self.keyed_static_send_doc(
+            class_name,
+            "new",
+            &key_doc,
+            &class_self_var,
+            Document::Nil,
+            0,
             direct_call,
         )
     }
@@ -3849,7 +3956,7 @@ impl CoreErlangGenerator {
             &key_doc,
             &class_self_var,
             Self::join_docs_with_commas(arg_refs),
-            arg_count,
+            arg_count + 1,
             raise,
         ))
     }
@@ -3858,8 +3965,10 @@ impl CoreErlangGenerator {
     /// target's static call key, install it on a miss
     /// (`beamtalk_class_shadow_flags:static_call_target/4`), and run `hit_doc`
     /// (which may read `class_self_var`, the key's class reference) when it
-    /// is present, else the dynamic `class_send` fallback.
-    #[allow(clippy::too_many_arguments)] // One shape, two hit kinds: the parts are all distinct.
+    /// is present, else the dynamic `class_send` fallback. `fun_arity` is the
+    /// arity of the function the key names (`ClassSelf` included, except for
+    /// a constructor key's `new/0`, BT-4409).
+    #[allow(clippy::too_many_arguments)] // One shape, three hit kinds: the parts are all distinct.
     fn keyed_static_send_doc(
         &mut self,
         class_name: &str,
@@ -3867,7 +3976,7 @@ impl CoreErlangGenerator {
         key_doc: &Document<'static>,
         class_self_var: &str,
         args_doc: Document<'static>,
-        arg_count: usize,
+        fun_arity: usize,
         hit_doc: Document<'static>,
     ) -> Document<'static> {
         let static_ref_var = self.fresh_temp_var("StaticRef");
@@ -3886,7 +3995,7 @@ impl CoreErlangGenerator {
             ", ",
             leaf::atom(selector_atom),
             ", ",
-            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            leaf::int_lit(i64::try_from(fun_arity).unwrap_or(i64::MAX)),
             ") <",
             leaf::var(static_ref_var.clone()),
             "> when 'true' -> ",
@@ -4023,21 +4132,6 @@ impl CoreErlangGenerator {
             .and_then(|info| info.direct_new0.then(|| info.module_name.to_string()))
     }
 
-    /// Generates a direct nullary-`new` call.
-    ///
-    /// ```erlang
-    /// call 'module':'new'()
-    /// ```
-    fn generate_direct_new_call(module_name: &str) -> Document<'static> {
-        docvec![
-            "call ",
-            leaf::atom(module_name.to_string()),
-            ":",
-            leaf::atom("new".to_string()),
-            "()"
-        ]
-    }
-
     /// Builds the shared `safe_dispatch/4` self-send fragment used by every
     /// non-sealed self-dispatch call site (self-cast, discarding
     /// self-dispatch and open self-dispatch).
@@ -4154,6 +4248,27 @@ impl CoreErlangGenerator {
 /// → runtime `undef`).
 pub(super) fn is_class_auto_export_selector(selector_atom: &str, arity: usize) -> bool {
     arity == 0 && selector_atom == "class_name"
+}
+
+/// The call shape a spawn-family send to a class reference was lowered to,
+/// passed to `beamtalk_class_instantiation:resolve_spawn_module_or_raise/3`
+/// so a shadowed class resolved at call time is checked against it (BT-4404).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SpawnTargetKind {
+    /// `Module:spawn/0,1` or `Module:spawn_monitored/0,1`: needs an actor.
+    Actor,
+    /// `beamtalk_supervisor:class_start/4`: needs a supervisor.
+    Supervisor,
+}
+
+impl SpawnTargetKind {
+    /// The `Kind` atom the runtime helper takes.
+    fn runtime_atom(self) -> &'static str {
+        match self {
+            Self::Actor => "actor",
+            Self::Supervisor => "supervisor",
+        }
+    }
 }
 
 /// The class-side spawn-family selectors that start a supervisor instance

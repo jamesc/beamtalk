@@ -1960,6 +1960,11 @@ impl LanguageService for SimpleLanguageService {
         // ADR 0108 Phase 8: Pass the project-wide alias registry so
         // alias names are offered alongside class/protocol names in
         // type-annotation position.
+        // ADR 0144: the file's protocol registry, so a `P class` receiver
+        // completes `P`'s `class` requirements.
+        let protocol_registry = self
+            .project_index
+            .protocol_registry_for(file, &file_data.module);
         crate::queries::completion_provider::compute_completions_with_aliases(
             &file_data.module,
             &file_data.source,
@@ -1968,6 +1973,7 @@ impl LanguageService for SimpleLanguageService {
             current_package.as_deref(),
             self.native_types.as_deref(),
             Some(self.project_index.alias_registry()),
+            Some(&protocol_registry),
         )
     }
 
@@ -1978,7 +1984,11 @@ impl LanguageService for SimpleLanguageService {
         // project-wide `AliasRegistry` (see `update_file`), so an
         // alias-typed value's hover resolves and renders
         // `AliasName (expansion)` instead of falling back to its bare
-        // structural expansion.
+        // structural expansion. ADR 0144: likewise the file's protocol
+        // registry, so a `P class` value hovers as the protocol metatype.
+        let protocol_registry = self
+            .project_index
+            .protocol_registry_for(file, &file_data.module);
         crate::queries::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
@@ -1986,6 +1996,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
             Some(self.project_index.alias_registry()),
+            Some(&protocol_registry),
         )
     }
 

@@ -712,6 +712,7 @@ impl TypeChecker {
                     Some(env),
                     type_args,
                     receiver_known_remote.as_ref(),
+                    Self::is_self_or_super(receiver),
                 );
             }
 

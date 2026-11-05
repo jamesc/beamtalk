@@ -957,31 +957,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Seed the registry with pre-loaded protocols (e.g. BUnit fixture
     // protocols) *before* registering the current module's protocols so that
     // fixture protocol names are visible to `extending:` resolution and the
-    // unresolved-class validator. Skip pre-loaded entries whose names also
-    // appear in the current module — this mirrors `cross_file_class_infos`
+    // unresolved-class validator. Pre-loaded entries whose names also appear
+    // in the current module are skipped — this mirrors `cross_file_class_infos`
     // and prevents spurious "Duplicate protocol definition" errors when a
     // fixture file is itself being compiled (its own protocols are already
     // present in the pre_loaded slice).
-    if !pre_loaded_protocols.is_empty() {
-        let current_names: std::collections::HashSet<&EcoString> =
-            module.protocols.iter().map(|p| &p.name.name).collect();
-        let cross_file_protocols: Vec<_> = pre_loaded_protocols
-            .into_iter()
-            .filter(|p| !current_names.contains(&p.name))
-            .collect();
-        let collision_diags = result.protocol_registry.add_pre_loaded(
-            cross_file_protocols,
-            &result.class_hierarchy,
-            trait_package,
-        );
-        result.diagnostics.extend(collision_diags);
-    }
-    if !module.protocols.is_empty() {
-        let proto_diags = result
-            .protocol_registry
-            .register_module(module, &result.class_hierarchy);
-        result.diagnostics.extend(proto_diags);
-    }
+    let proto_diags = result.protocol_registry.seed_and_register_module(
+        module,
+        pre_loaded_protocols,
+        &result.class_hierarchy,
+        trait_package,
+    );
+    result.diagnostics.extend(proto_diags);
 
     // Phase 0.55: Trait semantic checks (ADR 0127 §3 step 5, §3a, §5, §7;
     // BT-3589) — the post-`ClassHierarchy` half of the two-part expansion

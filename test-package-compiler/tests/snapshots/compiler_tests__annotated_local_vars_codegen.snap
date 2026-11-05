@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, '__is_slot'/1, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'annotated_local_vars' ['new'/0, 'new'/1, 'eventId'/1, 'withEventId:'/2, '__is_slot'/1, 'class_eventId:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'Snapshot', 'Value'}, {'AnnotatedLocalVarDemo', 'Value'}],
      'type' =
@@ -75,11 +75,20 @@ call 'maps':'get'('eventId', Self)
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'annotated_local_vars':'withEventId:'(Self, DispArg0)
         <_Other> when 'true' ->
-            case call 'beamtalk_extensions':'lookup'('Snapshot', Selector) of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    apply ExtFun(Args, Self)
-                <'not_found'> when 'true' ->
-                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'printString'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Snapshot', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('Snapshot', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+                    end
             end
     end
 
@@ -97,6 +106,16 @@ call 'maps':'get'('eventId', Self)
             case call 'beamtalk_extensions':'has'('Snapshot', Selector) of
                 <'true'> when 'true' -> 'true'
                 <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'eventId', 'withEventId:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('Snapshot', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
             end
     end
 
@@ -146,7 +165,8 @@ call 'maps':'get'('eventId', Self)
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'direct_constructors' => ['new', 'new:']
+      'direct_constructors' => ['new', 'new:'],
+      'defines_user_class_new1' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -195,7 +215,8 @@ call 'maps':'get'('eventId', Self)
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'direct_constructors' => ['new', 'new:']
+      'direct_constructors' => ['new', 'new:'],
+      'defines_user_class_new1' => 'false'
     }~
                 }~
                 in let _Reg1 = case call 'beamtalk_class_builder':'register'(_BuilderState1) of
@@ -234,7 +255,8 @@ call 'maps':'get'('eventId', Self)
       'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'direct_constructors' => ['new', 'new:']
+      'direct_constructors' => ['new', 'new:'],
+      'defines_user_class_new1' => 'false'
     }~
 
 'module_info'/0 = fun () ->

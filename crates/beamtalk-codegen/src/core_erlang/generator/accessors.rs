@@ -36,6 +36,10 @@ impl CoreErlangGenerator {
                 .class_hierarchy
                 .as_ref()
                 .is_some_and(|h| h.threads_actor_state(&self.class_name())),
+            defines_user_class_new1: self
+                .class_hierarchy
+                .as_ref()
+                .map(|h| h.defines_user_class_new1(&self.class_name())),
         }
     }
 

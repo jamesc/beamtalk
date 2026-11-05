@@ -150,6 +150,21 @@ source). It shares the per-tag index and every eraser with the direct-call
 keys, so a `class signal:` override, a class-side extension, a runtime fun or
 a reload of the class or an ancestor takes it away.
 
+BT-4409: a class-literal `X new` on a Value whose synthesized `new/0` may build
+in the caller (ADR 0142 rule 3, the BT-4099 constructor fast path) is keyed
+`{Module, new, Tag}`, with arity 0: its hit path calls `Module:new()`, which
+takes no `ClassSelf`, so the stored class reference is only the "installed"
+witness. `new` is process-bound, so `in_caller_owner/2` never names it;
+instead the key needs the dynamic `new` path's own answer,
+`beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])`, to be
+`{ok, Module}` (the class's baked `direct_constructors` lists `new`, it has no
+runtime fun, `direct_call_ok/2` holds and `Module` exports `new/0`), so the
+static and dynamic paths ask one question. A change to the baked set erases the
+class's keys (`beamtalk_class_metadata:put_direct_constructors/2`), as do the
+erasers above; a later class-side extension or `put_class_method` of `new` is
+then answered by the fallback, whose class process runs it
+(`beamtalk_object_class`'s `{new, _}` handler).
+
 `static_call_target/4` (the call site's miss path) derives all four and, under
 the class's tag lock, records the key in the per-tag index
 (`beamtalk_class_registry:record_static_call_key/2`) and then puts it. Every
@@ -550,6 +565,20 @@ static_call_target(Key, ClassName, Selector, Arity) ->
 %% `direct_call_ok/2` answers from it.
 -spec static_call_ref(static_call_key(), atom(), atom(), arity()) ->
     #beamtalk_object{} | false.
+static_call_ref({Module, new, Tag}, ClassName, new, 0) ->
+    %% BT-4409: a constructor key. `new` is process-bound, so
+    %% `in_caller_owner/2` never names it; the owner predicate is the dynamic
+    %% `new` path's own (`lookup_direct_constructor/3`, which also requires
+    %% `direct_call_ok/2` and the `new/0` export). The reference is only the
+    %% "installed" witness: `new/0` takes no `ClassSelf`.
+    Pid = beamtalk_class_registry:whereis_class(ClassName),
+    case
+        is_pid(Pid) andalso is_process_alive(Pid) andalso
+            beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])
+    of
+        {ok, Module} -> #beamtalk_object{class = Tag, class_mod = Module, pid = Pid};
+        _ -> false
+    end;
 static_call_ref(Key, ClassName, Selector, Arity) ->
     {Module, FunName, Tag} = key_target(Key),
     Pid = beamtalk_class_registry:whereis_class(ClassName),

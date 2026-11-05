@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'match_exhaustiveness_missing_arm' ['new'/0, 'new'/1, 'run:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'match_exhaustiveness_missing_arm' ['new'/0, 'new'/1, 'run:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'ExhaustivenessTest', 'Object'}],
      'spec' =
@@ -64,11 +64,47 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'match_exhaustiveness_missing_arm':'run:'(Self, DispArg0)
         <_Other> when 'true' ->
-            case call 'beamtalk_extensions':'lookup'('ExhaustivenessTest', Selector) of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    apply ExtFun(Args, Self)
-                <'not_found'> when 'true' ->
-                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'class'> when 'true' -> 'slow'
+                <'clearField:'> when 'true' -> 'slow'
+                <'delegate'> when 'true' -> 'slow'
+                <'displayString'> when 'true' -> 'slow'
+                <'equals:'> when 'true' -> 'slow'
+                <'error:'> when 'true' -> 'slow'
+                <'fieldAt:'> when 'true' -> 'slow'
+                <'fieldAt:put:'> when 'true' -> 'slow'
+                <'fieldNames'> when 'true' -> 'slow'
+                <'hasField:'> when 'true' -> 'slow'
+                <'hash'> when 'true' -> 'slow'
+                <'ifNil:'> when 'true' -> 'slow'
+                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
+                <'inspect'> when 'true' -> 'slow'
+                <'isKindOf:'> when 'true' -> 'slow'
+                <'isNil'> when 'true' -> 'slow'
+                <'notImplemented'> when 'true' -> 'slow'
+                <'notNil'> when 'true' -> 'slow'
+                <'perform:'> when 'true' -> 'slow'
+                <'perform:withArguments:'> when 'true' -> 'slow'
+                <'printString'> when 'true' -> 'slow'
+                <'respondsTo:'> when 'true' -> 'slow'
+                <'show:'> when 'true' -> 'slow'
+                <'showCr:'> when 'true' -> 'slow'
+                <'subclassResponsibility'> when 'true' -> 'slow'
+                <'yourself'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('ExhaustivenessTest', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('ExhaustivenessTest', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                    end
             end
     end
 
@@ -86,6 +122,16 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
             case call 'beamtalk_extensions':'has'('ExhaustivenessTest', Selector) of
                 <'true'> when 'true' -> 'true'
                 <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'run:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('ExhaustivenessTest', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
             end
     end
 
@@ -130,7 +176,8 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -167,7 +214,8 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
       'method_info' => ~{'run:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Block', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
 
 'module_info'/0 = fun () ->

@@ -359,6 +359,7 @@ mod trait_flattening;
 mod tuple_acc_state_read_corpus;
 mod typed_sealed;
 mod value_immutable_slot_hint_conformance;
+mod value_inherited_target;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;

@@ -3666,6 +3666,48 @@ fn direct_constructors_plain_value() {
     );
 }
 
+/// BT-4409: the per-class fact baked as `defines_user_class_new1` (and asked
+/// of each ancestor by the compile-time chain walk) is false for `Value`,
+/// whose `new:` is the intrinsic router, and true for `Set`, whose `new:`
+/// (`stdlib/src/set.bt`) is user code. Unknown classes fail closed.
+#[test]
+fn defines_user_class_new1_value_router_and_set_override() {
+    let h = ClassHierarchy::with_builtins();
+    assert!(
+        !h.defines_user_class_new1("Value"),
+        "Value's `new:` is the basicNewWith router, not user code"
+    );
+    assert!(
+        h.defines_user_class_new1("Set"),
+        "Set defines a user class-side `new:`"
+    );
+    assert!(
+        !h.defines_user_class_new1("Object"),
+        "Object defines no class-side `new:`"
+    );
+    assert!(
+        h.defines_user_class_new1("NoSuchClass"),
+        "an unknown class fails closed"
+    );
+}
+
+/// BT-4409: the chain walk and the per-class fact are one rule: an ancestor
+/// whose fact is true keeps a descendant's baked `new:` verdict off, and the
+/// descendant's own fact stays false (only the class itself is asked).
+#[test]
+fn chain_walk_uses_per_class_user_new1_fact() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Base\n  state: x :: Integer = 0\n  class new: m => Base x: 1\n\
+         Base subclass: Leaf\n",
+    );
+    assert!(h.defines_user_class_new1("Base"));
+    assert!(!h.defines_user_class_new1("Leaf"));
+    assert!(
+        !h.direct_constructors("Leaf").new1,
+        "an ancestor's user `new:` keeps the descendant's baked `new:` off"
+    );
+}
+
 #[test]
 fn direct_constructors_stateless_value() {
     let h = bt4099_hierarchy_for_source("Value subclass: Empty\n");
