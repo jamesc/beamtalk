@@ -5,7 +5,8 @@
 //! object of some class conforming to protocol `P` (`ProtocolMeta`).
 //! Completion offers `P`'s `class` requirements with their signatures, then
 //! the class-object protocol; hover shows `P class`, typed as the compiler
-//! types it.
+//! types it; signature help shows the `class` requirement's signature
+//! (BT-4450).
 
 use super::common::*;
 
@@ -172,4 +173,33 @@ fn hover_on_protocol_metatype_variables() {
     // the protocol metatype, not the protocol object's class side.
     let result = hover_at(position_of(&source, "    s size", "s size"));
     assert!(result.contains("Type: String"), "{result}");
+}
+
+/// ADR 0144 / BT-4450: signature help on a `P class` receiver resolves `P`
+/// from another project file, like completion and hover do.
+#[test]
+fn signature_help_on_cross_file_protocol_metatype() {
+    let mut service = SimpleLanguageService::new();
+    service.update_file(
+        Utf8PathBuf::from("wire.bt"),
+        "Protocol define: Wire\n  class send: data :: Object to: port :: Integer -> Boolean\n"
+            .to_string(),
+    );
+    let file = Utf8PathBuf::from("caller.bt");
+    service.update_file(
+        file.clone(),
+        "Object subclass: Caller\n  run: w :: Wire class =>\n    w send: 1 to: 2\n".to_string(),
+    );
+
+    let help = service
+        .signature_help(&file, Position::new(2, 19))
+        .expect("the class requirement's signature is shown");
+    assert_eq!(
+        help.signatures[0].label.as_str(),
+        "send: Object to: Integer -> Boolean"
+    );
+    assert_eq!(
+        help.signatures[0].documentation.as_deref(),
+        Some("class requirement of protocol `Wire`")
+    );
 }

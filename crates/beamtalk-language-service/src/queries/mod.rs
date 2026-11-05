@@ -54,7 +54,7 @@ use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
-use std::borrow::Cow;
+use std::sync::Arc;
 
 /// Re-exported from [`beamtalk_core::method_source_walker`] so sibling query modules
 /// (`senders_query`, `all_sends_query`, `announce_sites_query`, `ffi_sites_query`)
@@ -82,21 +82,24 @@ pub(crate) fn type_of_parsed<'t>(
 ///
 /// `project` is the caller's registry for the file — cross-file protocols
 /// plus `module`'s own, built with
-/// [`ProtocolRegistry::seed_and_register_module`] — and is borrowed as is.
-/// Without one (a caller with no project index), only `module`'s own
+/// [`ProtocolRegistry::seed_and_register_module`] — and is passed through as
+/// is. Without one (a caller with no project index), only `module`'s own
 /// protocols are registered.
-pub(crate) fn protocols_for_module<'a>(
-    project: Option<&'a ProtocolRegistry>,
+///
+/// The registry is an `Arc` so the one built per request is shared with the
+/// type pass's `TypeChecker` rather than deep-cloned into it (BT-4450).
+pub(crate) fn protocols_for_module(
+    project: Option<Arc<ProtocolRegistry>>,
     module: &Module,
     hierarchy: &ClassHierarchy,
-) -> Cow<'a, ProtocolRegistry> {
+) -> Arc<ProtocolRegistry> {
     if let Some(registry) = project {
-        return Cow::Borrowed(registry);
+        return registry;
     }
     let mut registry = ProtocolRegistry::new();
     // Collision/duplicate diagnostics belong to the diagnostics provider.
     let _ = registry.seed_and_register_module(module, Vec::new(), hierarchy, None);
-    Cow::Owned(registry)
+    Arc::new(registry)
 }
 
 /// Enriches a class hierarchy with method return types inferred from a module's source,
@@ -132,7 +135,7 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
     native_type_registry: Option<
         &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     >,
-    protocol_registry: &ProtocolRegistry,
+    protocol_registry: &Arc<ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
     let (type_map, inferred) =
@@ -140,7 +143,7 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
             module,
             hierarchy,
             native_type_registry,
-            Some(protocol_registry),
+            Some(Arc::clone(protocol_registry)),
             alias_registry,
         );
     let enriched = if inferred.is_empty() {
@@ -155,3 +158,19 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
 
 #[cfg(test)]
 pub(crate) use beamtalk_core::test_helpers::test_support::parse_source;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BT-4450: the caller's registry is passed through, not copied — one
+    /// registry build per request, shared with the type pass.
+    #[test]
+    fn protocols_for_module_passes_the_project_registry_through() {
+        let module = parse_source("x := 1");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let project = Arc::new(ProtocolRegistry::new());
+        let registry = protocols_for_module(Some(Arc::clone(&project)), &module, &hierarchy);
+        assert!(Arc::ptr_eq(&registry, &project));
+    }
+}

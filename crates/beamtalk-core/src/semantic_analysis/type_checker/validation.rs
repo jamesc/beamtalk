@@ -343,7 +343,7 @@ impl TypeChecker {
                                 &method_subst,
                                 Some(&self_type),
                             ),
-                            self.protocol_registry.as_ref(),
+                            self.protocol_registry.as_deref(),
                             self.alias_registry.as_ref(),
                             super::TypeStringContext::Substitution,
                         );
@@ -1719,7 +1719,7 @@ impl TypeChecker {
                         class_object,
                         &expected_structural,
                         hierarchy,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                         Self::is_type_compatible,
                     );
                     if !compat {
@@ -1729,7 +1729,7 @@ impl TypeChecker {
                             class_object,
                             &expected_structural,
                             hierarchy,
-                            self.protocol_registry.as_ref(),
+                            self.protocol_registry.as_deref(),
                             format!(
                                 "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
                             ),
@@ -2871,7 +2871,7 @@ impl TypeChecker {
                     class_object,
                     &declared_type,
                     hierarchy,
-                    self.protocol_registry.as_ref(),
+                    self.protocol_registry.as_deref(),
                     Self::is_assignable_to,
                 ) {
                     let declared_display = declared_display.clone();
@@ -2879,7 +2879,7 @@ impl TypeChecker {
                         class_object,
                         &declared_type,
                         hierarchy,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                         format!(
                             "Type mismatch: field `{}` declared as {declared_display}, got {class_object}",
                             field.name
@@ -3618,7 +3618,7 @@ impl TypeChecker {
                         class_object,
                         &declared_type,
                         hierarchy,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                         Self::is_assignable_to,
                     ) {
                         continue;
@@ -3627,7 +3627,7 @@ impl TypeChecker {
                         class_object,
                         &declared_type,
                         hierarchy,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                         format!(
                             "Type mismatch: state `{}` declared as {declared_display}, default is {class_object}",
                             decl.name.name
