@@ -29,7 +29,7 @@ fn checker_messages(source: &str) -> Vec<String> {
 /// declares one parameter per element shape the issue names.
 fn source_with(body: &str) -> String {
     format!(
-        r#"
+        r"
 type Opt = #a | #b
 
 Object subclass: Taker
@@ -39,7 +39,7 @@ Object subclass: Taker
   class from: p :: String options: opts :: List(Opt) -> Integer => 1
 
 Object subclass: Caller
-{body}"#
+{body}"
     )
 }
 
@@ -183,5 +183,23 @@ fn class_type_param_element_is_not_checked() {
         r#"  run => #(1, 2) ++ #("a")
 "#,
     ));
+    assert!(!msgs.iter().any(|m| m.starts_with("Element ")), "{msgs:#?}");
+}
+
+/// A generic class's own type param — single-letter or multi-letter — is a
+/// placeholder in its signature, so an element passed against it is not
+/// judged (the receiver's binding is not substituted at this check).
+#[test]
+fn generic_class_param_element_is_not_checked() {
+    let source = r#"
+Object subclass: Box(Item)
+  addAll: xs :: List(Item) -> Integer => 1
+  put: xs :: List(T) -> Integer => 1
+
+Object subclass: Caller
+  run: b :: Box(Integer) => b addAll: #("a")
+  run2: b :: Box(Integer) => b put: #("a")
+"#;
+    let msgs = checker_messages(source);
     assert!(!msgs.iter().any(|m| m.starts_with("Element ")), "{msgs:#?}");
 }

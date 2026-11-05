@@ -1825,13 +1825,14 @@ impl TypeChecker {
     /// element is wrong, and the nominal argument check compares only the
     /// `List` base.
     ///
-    /// The declared type is resolved without the receiver's generic
-    /// substitution, so a parameter typed by a class type param (`List(E)`
-    /// on `List>>++`) resolves to a placeholder and is not checked here —
-    /// the element check is for concrete element types in a signature
-    /// (`List(RegexOption)`, `List(Tuple(Symbol, Integer))`). Elements whose
-    /// type was not inferred, or is `Dynamic`, are skipped. A cons tail
-    /// (`#(a | rest)`) is not an element and is not checked.
+    /// The element check is for concrete element types in a signature
+    /// (`List(RegexOption)`, `List(Tuple(Symbol, Integer))`). Every type
+    /// param of the receiver class and its superclasses (`E` on
+    /// `List>>++`, `Item` on a user `Box(Item)`) resolves to `Dynamic`, so
+    /// an element position typed by one is not judged here; a method-local
+    /// type variable (`T`) stays a placeholder, which the shared rule skips.
+    /// Elements whose type was not inferred, or is `Dynamic`, are skipped. A
+    /// cons tail (`#(a | rest)`) is not an element and is not checked.
     fn check_list_literal_elements(
         &mut self,
         class_name: &EcoString,
@@ -1844,9 +1845,15 @@ impl TypeChecker {
         if elements.is_empty() {
             return;
         }
+        let class_type_params: type_resolver::SubstitutionMap = std::iter::once(class_name.clone())
+            .chain(hierarchy.superclass_chain(class_name))
+            .filter_map(|name| hierarchy.get_class(&name))
+            .flat_map(|info| info.type_params.iter().cloned())
+            .map(|param| (param, InferredType::Dynamic(DynamicReason::Unknown)))
+            .collect();
         let (resolved, alias_deps) = type_resolver::resolve_declared_type_with_alias_deps(
             expected_declared,
-            &type_resolver::SubstitutionMap::new(),
+            &class_type_params,
             self.protocol_registry.as_deref(),
             self.alias_registry.as_ref(),
             super::TypeStringContext::Declared,
