@@ -1244,13 +1244,21 @@ loader_integration_test_() ->
             {"protocol reload refuses a stdlib protocol file", fun() ->
                 t_protocol_reload_refuses_stdlib(Proj)
             end},
-            {"protocol reload rollback merges ambient protocol sources", fun() ->
-                t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj)
-            end},
+            %% BT-4420: these two tests run under an explicit 30 s timeout.
+            %% Each calls `meck:new(beamtalk_repl_loader, [passthrough])`,
+            %% which recompiles the 7.2k-line loader (about 1 s), then does
+            %% four real compiles plus a fan-out reload and rollback through
+            %% the meck proxy: 3-4.5 s on an idle machine. Under CPU load
+            %% that passes EUnit's default 5 s, and the kill skips the
+            %% `meck:unload/1` cleanup, cancelling the fixture teardown too.
+            {"protocol reload rollback merges ambient protocol sources",
+                {timeout, 30, fun() ->
+                    t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj)
+                end}},
             {"protocol reload fan-out rolls back on a bare structured abi_mismatch (BT-3773)",
-                fun() ->
+                {timeout, 30, fun() ->
                     t_protocol_reload_fanout_bare_structured_error(Proj)
-                end},
+                end}},
             {"reload_method_definition existing method span", fun() ->
                 t_reload_method_definition_existing(Proj)
             end},
