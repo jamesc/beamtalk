@@ -930,6 +930,9 @@ struct MethodMeta {
     /// Quoted `@primitive "<name>"` when that is the whole body (BT-4115,
     /// `MethodInfo::primitive`).
     primitive: Option<String>,
+    /// The integer when that literal is the whole body (BT-4363,
+    /// `MethodInfo::constant_value`).
+    constant_value: Option<i64>,
 }
 
 /// Simplified method kind for code generation.
@@ -971,6 +974,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
             .collect(),
         doc: m.doc_comment.clone(),
         primitive: m.quoted_primitive_name().map(ToString::to_string),
+        constant_value: m.literal_integer_body(),
     }
 }
 
@@ -1021,6 +1025,7 @@ fn synthesize_value_auto_methods(
                 param_types: vec![],
                 doc: Some(getter_doc),
                 primitive: None,
+                constant_value: None,
             });
         }
 
@@ -1042,6 +1047,7 @@ fn synthesize_value_auto_methods(
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
                 primitive: None,
+                constant_value: None,
             });
         }
     }
@@ -1082,6 +1088,7 @@ fn synthesize_value_auto_methods(
         param_types,
         doc: Some(ctor_doc),
         primitive: None,
+        constant_value: None,
     });
     Some(kw_sel)
 }
@@ -2492,13 +2499,18 @@ fn generate_method_list(
             Some(name) => format!("Some({}.into())", rust_str_lit(name)),
             None => "None".to_string(),
         };
+        let constant_value_expr = match m.constant_value {
+            Some(value) => format!("Some({value})"),
+            None => "None".to_string(),
+        };
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
-             origin: None, primitive: {primitive_expr} }},",
+             origin: None, primitive: {primitive_expr}, \
+             constant_value: {constant_value_expr} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
@@ -3333,6 +3345,7 @@ mod tests {
                     param_types: vec![],
                     doc: None,
                     primitive: None,
+                    constant_value: None,
                 },
                 MethodMeta {
                     selector: "add:".to_string(),
@@ -3345,6 +3358,7 @@ mod tests {
                     param_types: vec![Some(DeclaredType::simple("Integer"))],
                     doc: None,
                     primitive: None,
+                    constant_value: None,
                 },
             ],
             class_methods: vec![MethodMeta {
@@ -3358,6 +3372,7 @@ mod tests {
                 param_types: vec![],
                 doc: None,
                 primitive: None,
+                constant_value: None,
             }],
             class_variables: vec![],
             type_params: vec![],
@@ -3741,6 +3756,7 @@ mod tests {
             param_types: vec![Some(DeclaredType::simple("Integer"))],
             doc: None,
             primitive: None,
+            constant_value: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -3767,6 +3783,7 @@ mod tests {
             param_types: vec![],
             doc: None,
             primitive: None,
+            constant_value: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -3793,6 +3810,7 @@ mod tests {
             param_types: vec![Some(DeclaredType::simple("Integer")), None],
             doc: None,
             primitive: None,
+            constant_value: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "class_methods", &methods, "Timer");
@@ -3818,6 +3836,7 @@ mod tests {
             param_types: vec![Some(DeclaredType::simple("Symbol"))],
             doc: None,
             primitive: None,
+            constant_value: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "SystemNavigation");
@@ -4407,6 +4426,7 @@ mod tests {
             param_types: vec![],
             doc: None,
             primitive: None,
+            constant_value: None,
         }
     }
 
@@ -4972,6 +4992,7 @@ mod tests {
             param_types: vec![],
             doc: Some("Line one\nLine \"two\"\tend\r".to_string()),
             primitive: None,
+            constant_value: None,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Help");

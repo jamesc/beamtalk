@@ -136,6 +136,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% direct-construction eligibility set for dynamic `new`/`new:`.
     put_direct_constructors/2,
     lookup_direct_constructors/1,
+    %% BT-4363: certified integer-literal class-side bodies.
+    put_constant_class_methods/2,
+    lookup_constant_class_methods/1,
     lookup_direct_constructor/2,
     %% BT-4409: the per-class `new:` fact and its run-time chain walk.
     put_defines_user_class_new1/2,
@@ -247,6 +250,15 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% (`ClassInfo::process_bound_class_selectors`); `undefined` for dynamic
     %% classes and modules compiled before the key existed (unknown, not empty).
     process_bound_selectors :: [selector()] | undefined,
+    %% BT-4363: `constant_class_methods` from the compiled module's
+    %% `__beamtalk_meta/0`, each class-side selector whose whole body is one
+    %% integer literal mapped to that integer. Written only by
+    %% `put_constant_class_methods/2`; `#{}` for dynamic classes and modules
+    %% compiled before the key existed. A constant-value static call key is
+    %% certified against this row, not against the module's own
+    %% `__beamtalk_meta/0`: a reload publishes it from the new module's meta
+    %% while the old code is still current (`-on_load`).
+    constant_class_methods = #{} :: #{selector() => integer()},
     %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
     %% the reflection state above, so `doc` answers without a `gen_server:call`
     %% into the class (which cannot answer from inside its own process, or
@@ -1342,6 +1354,48 @@ put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
             %% would re-derive from the old row and survive.
             beamtalk_class_derived_cache:invalidate(),
             beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc """
+Store a class's certified integer-literal class-side bodies (BT-4363).
+
+`Constants` is the `constant_class_methods` value from the class's
+`__beamtalk_meta/0` (`#{Selector => Integer}`); pass `#{}` to clear it.
+Updates the existing row in place; a no-op when no row exists.
+
+A change, once written, erases the class's static call keys
+(`beamtalk_class_shadow_flags:invalidate/1`): a constant-value key is
+installed only while this row maps its selector to the key's value
+(`beamtalk_class_shadow_flags`, `key_body_holds/4`). The install re-reads the
+row under the class's tag lock, which the erase also takes, so an install
+that read the old row is erased and one after the write reads the new row.
+A reload publishes this map after its own invalidations, from the new
+module's meta, while the old code may still be current.
+""".
+-spec put_constant_class_methods(class_name(), #{selector() => integer()}) -> ok.
+put_constant_class_methods(Name, Constants) when is_map(Constants) ->
+    new(),
+    case field(Name, #class_metadata.constant_class_methods) of
+        Constants ->
+            ok;
+        _ ->
+            try
+                ets:update_element(
+                    ?TABLE, Name, {#class_metadata.constant_class_methods, Constants}
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc "A class's certified integer-literal class-side bodies (`#{}` when none or unknown).".
+-spec lookup_constant_class_methods(class_name()) -> #{selector() => integer()}.
+lookup_constant_class_methods(Name) ->
+    case field(Name, #class_metadata.constant_class_methods) of
+        Constants when is_map(Constants) -> Constants;
+        _ -> #{}
     end.
 
 -doc """

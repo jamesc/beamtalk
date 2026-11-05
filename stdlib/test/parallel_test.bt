@@ -33,6 +33,9 @@ TestCase subclass: ParallelTest
     self assert: (results at: 3) value equals: 4
 
   testAllRejectsNonBlockElements =>
+    // The type checker flags the non-Block elements (BT-4385); this test
+    // checks the runtime rejection too.
+    @expect type
     self should: [Parallel all: #(1, 2)] raise: #type_error
 
   testAllTimeoutReturnsRealResultsWhenNotExceeded =>

@@ -64,6 +64,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
 
                 origin: None,
                 primitive: None,
+                constant_value: None,
             },
             MethodInfo {
                 selector: eco_string("getValue"),
@@ -80,6 +81,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
 
                 origin: None,
                 primitive: None,
+                constant_value: None,
             },
         ],
         class_methods: vec![],

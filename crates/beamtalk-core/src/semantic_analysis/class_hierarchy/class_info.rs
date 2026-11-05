@@ -108,6 +108,14 @@ pub struct MethodInfo {
     /// (BT-4115).
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive: Option<EcoString>,
+    /// The integer when the method body is exactly one integer literal
+    /// ([`MethodDefinition::literal_integer_body`](crate::ast::MethodDefinition::literal_integer_body)),
+    /// else `None`. Codegen answers a class-literal send of such a class-side
+    /// method with the literal, behind a static call key the runtime installs
+    /// only while the defining module's metadata still certifies that body
+    /// (BT-4363).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub constant_value: Option<i64>,
 }
 
 impl MethodInfo {
@@ -512,6 +520,7 @@ impl ClassInfo {
                 // `MethodInfo::origin`'s doc for why it can't be set here.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
+                constant_value: m.literal_integer_body(),
             })
             .collect();
 
@@ -537,6 +546,7 @@ impl ClassInfo {
                 // methods are never flattened in v1, so this is always `None`.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
+                constant_value: m.literal_integer_body(),
             })
             .collect();
 

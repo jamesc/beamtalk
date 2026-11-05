@@ -69,9 +69,14 @@ impl TypeChecker {
         // uses `find_class_method` instead of `find_method`. Shares the
         // helper with the downstream `is_class_side_receiver` check below.
         // ADR 0083: a metatype-typed receiver (`Meta{C}`) is also class-side
-        // — its block params should resolve against `C`'s class methods.
+        // — its block params should resolve against `C`'s class methods —
+        // and so is a protocol metatype (`ProtocolMeta{P}`, ADR 0144), whose
+        // block params resolve against `P`'s `class` requirements.
         let is_class_side = Self::is_class_side_receiver(receiver, env)
-            || matches!(receiver_ty, InferredType::Meta { .. });
+            || matches!(
+                receiver_ty,
+                InferredType::Meta { .. } | InferredType::ProtocolMeta { .. }
+            );
         self.infer_args_with_block_context(
             arguments,
             receiver_ty,

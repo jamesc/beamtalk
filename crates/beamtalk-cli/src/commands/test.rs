@@ -1361,12 +1361,13 @@ fn compute_native_type_registry(
         };
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
-        let (pkg_registry, _stub_diags) = super::build::resolve_package_type_registry(
+        let pkg_registry = super::build::resolve_package_type_registry(
             pkg_root,
             auto_extract,
             &resolved_deps,
             Some(super::OutputFormat::Text),
-        );
+        )
+        .registry;
 
         if let Some(reg) = pkg_registry {
             merged.apply_overrides(reg);
@@ -1605,6 +1606,36 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     Ok(())
 }
 
+/// Reject a `TestCase` class whose BEAM module name is already claimed by an
+/// earlier test class in this run.
+///
+/// Module names derive from the class name (plus a package prefix only when
+/// several packages are in scope), so two files in one package declaring the
+/// same `TestCase` subclass compile to the same `<module>.core`/`.beam`. The
+/// later file would silently clobber the earlier one and its tests would never
+/// run, with counts depending on discovery order (BT-4350).
+fn check_duplicate_test_module(
+    compiled_tests: &[CompiledTest],
+    test_class: &TestCaseClass,
+    test_file: &Utf8Path,
+) -> Result<()> {
+    if let Some(existing) = compiled_tests
+        .iter()
+        .find(|c| c.test_class.module_name == test_class.module_name)
+    {
+        miette::bail!(
+            "Duplicate test module '{}': test class '{}' in '{}' and test class '{}' in '{}' \
+             compile to the same module. Rename one of the test classes.",
+            test_class.module_name,
+            existing.test_class.class_name,
+            existing.source_file,
+            test_class.class_name,
+            test_file
+        );
+    }
+    Ok(())
+}
+
 /// Discover, compile, and generate wrappers for a single test file.
 ///
 /// Handles `@load` directive resolution, multi-package module name prefixing,
@@ -1674,6 +1705,10 @@ fn compile_single_test_file(
     // Compile TestCase subclasses
     let test_file_package = pipeline.current_package_for(test_file);
     for test_class in test_classes {
+        // Fail fast before writing `<module>.core`: a second file with the
+        // same module name would overwrite the first's output (BT-4350).
+        check_duplicate_test_module(&pipeline.compiled_tests, &test_class, test_file)?;
+
         // Generate Core Erlang for the test file (BEAM compilation is batched below)
         let core_file = generate_core_file(
             test_file,
@@ -3137,6 +3172,56 @@ mod tests {
 
             assert_eq!(test_classes[0].module_name, expected_module);
         }
+    }
+
+    /// BT-4350: two files in the *same* package declaring the same `TestCase`
+    /// subclass get no package prefix, so both map to `bt@protocol_test`. The
+    /// runner must reject the second instead of letting it overwrite the first's
+    /// `.core`/`.beam`, and the error must name both files.
+    #[test]
+    fn test_duplicate_test_module_name_in_scope_is_rejected() {
+        let (_temp, dir) = temp_utf8_dir();
+        let file_a = dir.join("test/http1/protocol_test.bt");
+        let file_b = dir.join("test/websocket/protocol_test.bt");
+        for f in [&file_a, &file_b] {
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(
+                f,
+                "TestCase subclass: ProtocolTest\n  testOk => self assert: true\n",
+            )
+            .unwrap();
+        }
+
+        let (classes_a, _) = discover_test_classes(&file_a).unwrap();
+        let (classes_b, _) = discover_test_classes(&file_b).unwrap();
+        assert_eq!(classes_a[0].module_name, "bt@protocol_test");
+        assert_eq!(classes_b[0].module_name, "bt@protocol_test");
+
+        // First file in scope: no collision.
+        let mut compiled = Vec::new();
+        check_duplicate_test_module(&compiled, &classes_a[0], &file_a).unwrap();
+        compiled.push(CompiledTest {
+            source_file: file_a.clone(),
+            test_class: classes_a.into_iter().next().unwrap(),
+        });
+
+        // Second file maps to the same module: error naming both files.
+        let err = check_duplicate_test_module(&compiled, &classes_b[0], &file_b)
+            .expect_err("duplicate test module name must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("bt@protocol_test"), "{msg}");
+        assert!(msg.contains(file_a.as_str()), "{msg}");
+        assert!(msg.contains(file_b.as_str()), "{msg}");
+
+        // A distinct class name in the same package is fine.
+        let file_c = dir.join("test/http1/http1_protocol_test.bt");
+        fs::write(
+            &file_c,
+            "TestCase subclass: HTTP1ProtocolTest\n  testOk => self assert: true\n",
+        )
+        .unwrap();
+        let (classes_c, _) = discover_test_classes(&file_c).unwrap();
+        check_duplicate_test_module(&compiled, &classes_c[0], &file_c).unwrap();
     }
 
     #[test]

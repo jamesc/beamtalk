@@ -290,6 +290,9 @@ TestCase subclass: TelemetryTest
       raise: #type_error
 
   testNonSymbolEventNameIsTypeError =>
+    // The type checker flags the String element (BT-4385); this test checks
+    // the runtime rejection too.
+    @expect type
     self
       should: [
         Telemetry

@@ -13,7 +13,7 @@
 //! variant) used by every other selector.
 
 use crate::ast::{Expression, WellKnownSelector};
-use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
 use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
@@ -923,12 +923,26 @@ impl TypeChecker {
         // to a bare `Known{C}` so the method lookup below resolves `C`'s
         // class-side methods (the class object is unparameterized, so no type
         // args). The `is_class_side_send` flag is already set by the caller.
+        //
+        // ADR 0144: a `P class` receiver (`ProtocolMeta{P}`) resolves its block
+        // params against `P`'s `class` requirement — the signature
+        // `infer_protocol_meta_send` checks the arguments against — viewed as
+        // a method on the bare `P` so the push-down below is shared.
         let normalized_receiver: InferredType;
-        let receiver_ty = if let InferredType::Meta { class_name, .. } = receiver_ty {
-            normalized_receiver = InferredType::known(class_name.clone());
-            &normalized_receiver
-        } else {
-            receiver_ty
+        // `Some(lookup)` for a `P class` receiver; `None` otherwise.
+        let mut protocol_meta_method: Option<Option<MethodInfo>> = None;
+        let receiver_ty = match receiver_ty {
+            InferredType::Meta { class_name, .. } => {
+                normalized_receiver = InferredType::known(class_name.clone());
+                &normalized_receiver
+            }
+            InferredType::ProtocolMeta { protocol_name, .. } => {
+                protocol_meta_method =
+                    Some(self.protocol_class_requirement_method(protocol_name, selector_name));
+                normalized_receiver = InferredType::known(protocol_name.clone());
+                &normalized_receiver
+            }
+            _ => receiver_ty,
         };
 
         // A `Union`-typed receiver sending a solo `ifTrue:` /
@@ -1013,7 +1027,9 @@ impl TypeChecker {
         // class-side method; otherwise the instance method. Without
         // this split, class-side block parameters never get their declared
         // types propagated to the call-site block params.
-        let method_lookup = if is_class_side_send {
+        let method_lookup = if let Some(requirement) = protocol_meta_method {
+            requirement
+        } else if is_class_side_send {
             hierarchy.find_class_method(class_name, selector_name)
         } else {
             hierarchy.find_method(class_name, selector_name)

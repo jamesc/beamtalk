@@ -57,7 +57,7 @@
 //! ...); and dataflow-sensitive cases such as `process_info(self())` (needs
 //! argument tracking).
 
-use crate::ast::{Expression, MethodDefinition, MethodKind, Module};
+use crate::ast::{Expression, MessageSelector, MethodDefinition, MethodKind, Module};
 use crate::ast_walker::walk_expression;
 use crate::ffi_receiver::erlang_module_of_receiver;
 use crate::semantic_analysis::ClassHierarchy;
@@ -178,6 +178,19 @@ fn table_row(module: &str, function: &str) -> Option<&'static ClassMethodFfi> {
     CLASS_METHOD_FFI
         .iter()
         .find(|r| r.module == module && r.function == function)
+}
+
+/// Whether `(Erlang <module>) <selector>` is any row of the curated
+/// [`CLASS_METHOD_FFI`] table: a call whose effect depends on which process
+/// runs it (a resource or socket it owns, its identity, its mailbox), in
+/// either direction. BT-4464: an explicit class-side `new` making such a call
+/// keeps the class process (`ClassHierarchy::explicit_class_new_builds_in_caller`
+/// fails closed on every row), since `new` used to be guaranteed to run there,
+/// neither lint inspects process-bound selectors, and moving it would hand
+/// what it creates to whichever caller ran first. Calls outside the table
+/// (`file open:`, a user `start_link`) are not recognised, as for the lints.
+pub(crate) fn ffi_call_is_process_sensitive(module: &str, selector: &MessageSelector) -> bool {
+    erlang_function_name(selector).is_some_and(|function| table_row(module, &function).is_some())
 }
 
 /// Runs both class-method FFI lints over every class-side method of `module`

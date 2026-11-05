@@ -2484,6 +2484,22 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// True when the compiler can prove `class_name` is neither an actor nor
+    /// a supervisor: it has a `ClassInfo` whose superclass chain is fully
+    /// known and reaches neither `Actor` nor a supervisor base (BT-4443). An
+    /// unknown class or an incomplete chain is not proof, matching the
+    /// runtime's `beamtalk_supervisor:spawn_kind/1` treating `unknown` as
+    /// "decides nothing". The hierarchy is keyed by bare name, so callers
+    /// only ask this of an unqualified reference.
+    fn is_known_non_spawnable_class(&self, class_name: &str) -> bool {
+        !self.is_supervisor_class(class_name)
+            && self.class_hierarchy.as_ref().is_some_and(|h| {
+                h.has_class(class_name)
+                    && !h.has_cross_file_parent(class_name)
+                    && !h.is_actor_subclass(class_name)
+            })
+    }
+
     /// Whether a spawn-family send to the class reference `class_name`
     /// (optionally `package`-qualified) resolves the module it starts its
     /// process from at call time rather than pinning it (BT-4278).
@@ -2508,8 +2524,19 @@ impl CoreErlangGenerator {
     /// start it inside the class `gen_server`, and has no monitored-spawn
     /// clause). A package-qualified reference (`json@Counter spawn`) names
     /// its module explicitly and keeps it.
+    ///
+    /// BT-4443: an unqualified reference to a class the compiler knows is
+    /// not spawnable ([`Self::is_known_non_spawnable_class`]) resolves at
+    /// call time too. A pinned `Module:spawn/0` on a Value or Object class
+    /// would fail with a raw `undef` (the type checker's class-side
+    /// does-not-understand is only a lint, not a build error), whereas the
+    /// lookup raises the same structured `does_not_understand` as the dynamic
+    /// route (`beamtalk_class_instantiation:do_handle_spawn/5`) — and still
+    /// spawns in the caller if the class has since been redefined as an
+    /// actor.
     fn spawn_module_resolved_at_runtime(&self, class_name: &str, package: Option<&str>) -> bool {
-        package.is_none() && self.is_shadowed_class(class_name)
+        package.is_none()
+            && (self.is_shadowed_class(class_name) || self.is_known_non_spawnable_class(class_name))
     }
 
     /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is
@@ -3792,6 +3819,16 @@ impl CoreErlangGenerator {
         args_doc: Document<'static>,
         arg_count: usize,
     ) -> Document<'static> {
+        if let Some(value) = self.constant_class_method_value(class_name, raw_selector) {
+            return self.guarded_constant_doc(
+                class_name,
+                module_name,
+                raw_selector,
+                value,
+                args_doc,
+                arg_count,
+            );
+        }
         let safe_fn = super::selector_mangler::safe_class_method_fn_name(raw_selector);
         let class_self_var = self.fresh_temp_var("StaticSelf");
         let comma = if arg_count == 0 { "" } else { ", " };
@@ -3825,6 +3862,89 @@ impl CoreErlangGenerator {
             args_doc,
             arg_count + 1,
             direct_call,
+        )
+    }
+
+    /// The integer that `class_name`'s own class-side method `raw_selector`
+    /// is, when its body is exactly that integer literal
+    /// (`MethodInfo::constant_value`, BT-4363). Only a compile-time
+    /// candidate: the runtime key of [`Self::guarded_constant_doc`] decides
+    /// each send.
+    fn constant_class_method_value(&self, class_name: &str, raw_selector: &str) -> Option<i64> {
+        self.class_hierarchy
+            .as_ref()?
+            .get_class(class_name)?
+            .class_methods
+            .iter()
+            .find(|m| m.selector == raw_selector)?
+            .constant_value
+    }
+
+    /// BT-4363: a static send of `raw_selector` to the literal class
+    /// `class_name`, whose own class-side method compiled to `module_name`
+    /// has the integer literal `value` as its whole body
+    /// ([`Self::constant_class_method_value`]), answers `value` in place,
+    /// behind the keyed shape of [`Self::guarded_class_direct_call_doc`]:
+    ///
+    /// ```erlang
+    /// let StaticSelf = case call 'persistent_term':'get'('Errs class static calls', ~{}~) of
+    ///     <~{{'constant_value', 1, 'bt@errs', 'class_protocolError', 'Errs class'}
+    ///         := StaticRef}~> when 'true' -> StaticRef
+    ///     <_> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
+    ///           <same key>, 'Errs', 'protocolError', 1)
+    ///   end
+    /// in case StaticSelf of
+    ///   <'false'> when 'true' -> <the dynamic class_send to 'Errs'>
+    ///   <_> when 'true' -> 1
+    /// end
+    /// ```
+    ///
+    /// The guard is the contract (ADR 0025 amendment): the runtime installs
+    /// the key only while every condition of a direct-call key holds (the
+    /// dynamic path would run exactly `module_name`'s compiled function in
+    /// the caller) and the class's published metadata row maps the selector
+    /// to this same value (`constant_class_methods`, published from the
+    /// module's `__beamtalk_meta/0` on registration and reload;
+    /// `beamtalk_class_shadow_flags`, `key_body_holds/4`). A class-side
+    /// extension, a runtime fun (`put_class_method`), `removeSelector:` or a
+    /// reload that changes the body erases or declines the key, and the send
+    /// then answers what the dynamic send answers. Sealing plays no part: the
+    /// guard already proves the target (ADR 0025 amendment §3).
+    ///
+    /// `args_doc` must be variables or literals (bound by the caller, so a
+    /// side-effecting argument still runs once); the hit arm ignores them.
+    fn guarded_constant_doc(
+        &mut self,
+        class_name: &str,
+        module_name: String,
+        raw_selector: &str,
+        value: i64,
+        args_doc: Document<'static>,
+        arg_count: usize,
+    ) -> Document<'static> {
+        let key_doc = docvec![
+            "{'constant_value', ",
+            leaf::int_lit(value),
+            ", ",
+            leaf::atom(module_name),
+            ", ",
+            leaf::atom(super::selector_mangler::safe_class_method_fn_name(
+                raw_selector
+            )),
+            ", ",
+            leaf::atom(super::util::metaclass_tag(class_name)),
+            "}"
+        ];
+        let class_self_var = self.fresh_temp_var("StaticSelf");
+        self.keyed_static_send_doc(
+            class_name,
+            raw_selector,
+            &key_doc,
+            &class_self_var,
+            args_doc,
+            arg_count + 1,
+            leaf::int_lit(value),
         )
     }
 

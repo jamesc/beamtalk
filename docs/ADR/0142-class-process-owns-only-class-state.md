@@ -12,6 +12,7 @@ Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 > - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
 > - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
 > - **Class-literal signal sends (BT-4270).** BT-4115's unguarded caller-side raise for `Error signal: m` was the last unguarded class-side verdict. It now sits behind a static call key of its own, `{caller_safe_raise, Primitive, DefiningModule, Fun, ReceiverTag}`, installed by `static_call_target/4` under the same conditions as a direct-call key (extended to an inherited owner without a runtime fun) plus the defining module's metadata mapping the selector to that primitive, and erased by the same writers. Row 8b stays at about 89 reductions (86 before), where the plain dynamic path cost 155 (`results/bench-bt4270.md`).
+> - **Integer-constant class methods (BT-4363).** A class-literal send of a class-side method whose whole body is one integer literal (`Errors protocolError` with `class protocolError => 1`) answers the literal in place behind a static call key of its own, `{constant_value, Value, Module, Fun, ReceiverTag}`. `static_call_target/4` installs it under the same conditions as a direct-call key, plus the class's published metadata row mapping the selector to that value (`constant_class_methods`, generated from the method source and published on registration and reload, not read from the module, whose old code is still current during a reload's `-on_load`); the same writers erase it, as does a change to that row, so an extension, a runtime fun, `removeSelector:` or a reload that changes the body is honoured. Sealing plays no part. The send costs 1 reduction instead of 3 for the guarded direct call.
 > - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307).
 > - **Explicit own-class sends (BT-4317, amended 2026-11-04)**: see the amendment at the end of §2.
 
@@ -343,6 +344,18 @@ end
     re-installs its own target. Erasing only the descendants or targets a
     write can affect was rejected: every eraser would have to classify its
     write, and one missed case would run a stale function.
+- **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
+  whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
+  with literal arguments) or `self delegate` on a `native:` class bakes `new`
+  into `direct_constructors` too (`ClassHierarchy::
+  explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
+  class variables in its chain. An FFI call listed in the curated
+  class-method FFI table (`ets new:`, `spawn_link`, `gen_udp open:`, ...)
+  keeps the class process: neither lint inspects `new`, and the class process
+  used to own what it creates. Its `new/0` is `class_new('undefined')`, which
+  is all the `{new, []}` handler would run, so the guarded direct call is the
+  same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
+  it; a body that sends to `self` (`self basicNew`) does not.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

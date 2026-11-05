@@ -52,17 +52,23 @@ pub(crate) struct BuildGraphEdges {
     pub protocol_hashes: HashMap<EcoString, String>,
     /// Hash of the flattened trait-user class surface (empty = none).
     pub trait_surface_hash: String,
+    /// Hash of every FFI stub file the package's type registry was merged
+    /// from, across all tiers (empty = no stubs; BT-4393) — see
+    /// `stubs::ResolvedTypeRegistry::stub_inputs_hash`.
+    pub stub_inputs_hash: String,
 }
 
 /// Log why a file whose own content is unchanged is being rebuilt. A file
-/// with no protocols only moved because a package-wide trait surface changed
-/// (routine, `info!`); one that uses protocols gets the ADR 0127 §10a warning.
+/// with no protocols only moved because a package-wide input (the trait
+/// surface or the FFI stubs) changed (routine, `info!`); one that uses
+/// protocols gets the ADR 0127 §10a warning.
 fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
     if used_protocols.is_empty() {
         info!(
             file = %source_file,
             "rebuilding '{source_file}': unchanged itself, but a trait-provided \
-             class surface in this package changed since it was last built"
+             class surface or an FFI stub in this package changed since it was \
+             last built"
         );
     } else {
         warn!(
@@ -131,6 +137,12 @@ fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
 /// nothing (empty hash is a no-op), and edits that leave the surfaces equal
 /// (method bodies) keep it stable.
 ///
+/// `edges.stub_inputs_hash` (BT-4393) does the same for the FFI stub tiers
+/// (project-local `stubs/`, package-bundled, distribution): every file
+/// type-checks its FFI calls against the registry merged from them, so a
+/// stub add/edit/remove rebuilds the whole package. A package without stubs
+/// has an empty hash and pays nothing.
+///
 /// Both are empty for a caller with no protocol data to offer (manifest-less
 /// builds, `--stdlib-mode`'s own separate pre-pass, tests), in which case
 /// every file's combined hash reduces to its own content hash — unchanged
@@ -147,6 +159,7 @@ pub(crate) fn detect_changes(
         file_protocol_uses,
         protocol_hashes,
         trait_surface_hash,
+        stub_inputs_hash,
     } = edges;
     // Content hash of each source file as of the last successful
     // `.beam` build, keyed by path string. Also carries each file's
@@ -177,6 +190,7 @@ pub(crate) fn detect_changes(
             used_protocols,
             protocol_hashes,
             trait_surface_hash,
+            stub_inputs_hash,
         );
 
         // A protocol-driven rebuild (own content unchanged, but the
@@ -289,13 +303,17 @@ fn combined_content_hash(
     used_protocols: &[EcoString],
     protocol_hashes: &HashMap<EcoString, String>,
     trait_surface_hash: &str,
+    stub_inputs_hash: &str,
 ) -> String {
     let mut protocol_hash_parts: Vec<&str> = used_protocols
         .iter()
         .filter_map(|name| protocol_hashes.get(name))
         .map(String::as_str)
         .collect();
-    if protocol_hash_parts.is_empty() && trait_surface_hash.is_empty() {
+    if protocol_hash_parts.is_empty()
+        && trait_surface_hash.is_empty()
+        && stub_inputs_hash.is_empty()
+    {
         return own_hash.to_string();
     }
     protocol_hash_parts.sort_unstable();
@@ -308,6 +326,10 @@ fn combined_content_hash(
     if !trait_surface_hash.is_empty() {
         buf.push_str("\nsurface:");
         buf.push_str(trait_surface_hash);
+    }
+    if !stub_inputs_hash.is_empty() {
+        buf.push_str("\nstubs:");
+        buf.push_str(stub_inputs_hash);
     }
     sha256_hex(buf.as_bytes())
 }

@@ -851,3 +851,124 @@ Object subclass: Factory
         "the protocol object is a `Protocol`: {diags:#?}"
     );
 }
+
+// ── BT-4441: return-type refinement and class-side block context ─────────
+
+#[test]
+fn protocol_metatype_subsumption_checks_class_side_return_types() {
+    // `Wire` answers `class label` with a `String`; `Numbered` promises an
+    // `Integer`, so `Wire class` must not flow into `Numbered class` even
+    // though it has the selector. `Described` promises an `Object`, which
+    // `String` refines.
+    let source = wire_source(
+        r"
+Protocol define: Numbered
+  class label -> Integer
+
+Protocol define: Described
+  class label -> Object
+
+Object subclass: Caller
+  numbered: n :: Numbered class => n label
+  described: d :: Described class => d label
+  run: w :: Wire class =>
+    self numbered: w
+    self described: w
+",
+    );
+    let msgs = messages(&checker_diagnostics(&source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Numbered class")),
+        "Wire's `class label -> String` does not refine Integer: {msgs:#?}"
+    );
+    assert!(
+        !msgs.iter().any(|m| m.contains("Described class")),
+        "String refines Object: {msgs:#?}"
+    );
+}
+
+#[test]
+fn protocol_metatype_subsumption_checks_instance_side_return_types() {
+    let source = r"
+Protocol define: Named
+  name -> String
+
+Protocol define: Sized
+  name -> Integer
+
+Protocol define: Vague
+  name
+
+Object subclass: Caller
+  sized: s :: Sized class => s
+  named: n :: Named class => n
+  run: n :: Named class with: v :: Vague class =>
+    self sized: n
+    self named: v
+";
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Sized class")),
+        "`name -> String` does not refine `name -> Integer`: {msgs:#?}"
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("Named class")),
+        "an unannotated `name` promises nothing, so does not refine String: {msgs:#?}"
+    );
+}
+
+#[test]
+fn class_side_requirement_return_type_mismatch_warns() {
+    // `Badge` responds to `class label` but answers an Integer where
+    // `Labelled` promises a String: passing a `Badge` to `:: Labelled`
+    // reports the class-side mismatch, as an instance-side one would be.
+    let source = r#"
+Protocol define: Labelled
+  class label -> String
+
+sealed Object subclass: Badge
+  class label -> Integer => 7
+
+sealed Object subclass: Tag
+  class label -> String => "tag"
+
+Object subclass: Caller
+  take: l :: Labelled => l
+  run =>
+    self take: Badge new
+    self take: Tag new
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.contains(
+            &"Badge class>>label returns Integer, incompatible with protocol Labelled's String"
+                .to_string()
+        ),
+        "class-side return mismatch is reported: {msgs:#?}"
+    );
+    assert!(
+        !msgs.iter().any(|m| m.starts_with("Tag")),
+        "a refining class-side return is silent: {msgs:#?}"
+    );
+}
+
+#[test]
+fn block_argument_to_protocol_metatype_gets_requirement_param_types() {
+    // `Each`'s `class each:` hands the block an Integer: the block param
+    // is typed from the requirement, so a misspelled selector on it is
+    // reported against Integer rather than passing as Dynamic.
+    let source = r"
+Protocol define: Each
+  class each: blk :: Block(Integer, Nil) -> Nil
+
+Object subclass: Caller
+  run: e :: Each class =>
+    e each: [:x | x bogusSelector. nil]
+";
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter()
+            .any(|m| m.starts_with("Integer") && m.contains("'bogusSelector'")),
+        "block param is typed Integer from the class requirement: {msgs:#?}"
+    );
+}

@@ -694,6 +694,88 @@ impl ClassHierarchy {
         result
     }
 
+    /// BT-4464: whether `class`'s own explicit class-side `new` may build in
+    /// the caller, the explicit-constructor counterpart of the synthesized
+    /// `new0` verdict of [`Self::direct_constructors`].
+    ///
+    /// A class that defines `class new => <body>` (and no instance-side
+    /// `new`) compiles a `new/0` that delegates to the body
+    /// (`generate_delegating_new` in codegen: `class_new('undefined')`), and
+    /// the class process's `{new, []}` handler only ever calls that `new/0`.
+    /// So the class process adds nothing but a serialisation point whenever
+    /// the body does not need it: the body is a single statement that is
+    ///
+    /// - `self delegate` on a `native:` class (lowered to
+    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module), or
+    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
+    ///   and which is not a row of the curated class-method FFI table read by
+    ///   the `class-process-ffi` / `class-method-process-resource` lints
+    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
+    ///   those keep the class process, which owns what they create. FFI
+    ///   outside that table is not recognised, exactly as for the lints,
+    ///   and runs in the caller like any other in-caller class method,
+    ///
+    /// so it reads no `self`, no class variable and nothing from the class
+    /// process's dictionary (`basicNew` does, which is why a body sending to
+    /// `self` is never eligible). The class must also be concrete, compile as
+    /// a non-actor, have a fully known surface and no class variables in its
+    /// chain. Like the synthesized verdict this only makes the class eligible
+    /// to *try* the direct path: codegen bakes it into `direct_constructors`
+    /// and every direct `new` is guarded at run time (BT-4409,
+    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`), so a class-side
+    /// extension or ADR 0084 runtime fun of `new` still reaches the class
+    /// process. As for any in-caller class method (ADR 0142), a resource the
+    /// FFI creates belongs to the caller.
+    #[must_use]
+    pub fn explicit_class_new_builds_in_caller(&self, class: &ClassDefinition) -> bool {
+        fn primary_new(
+            methods: &[crate::ast::MethodDefinition],
+        ) -> Option<&crate::ast::MethodDefinition> {
+            methods
+                .iter()
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "new")
+        }
+        let class_name = class.name.name.as_str();
+        if class.is_abstract
+            || self.compiles_as_actor(class)
+            || self.chain_has_class_variables(class_name)
+            || self
+                .get_class(class_name)
+                .is_none_or(|info| info.surface_incomplete)
+        {
+            return false;
+        }
+        if primary_new(&class.methods).is_some() {
+            return false;
+        }
+        let Some(new_method) = primary_new(&class.class_methods) else {
+            return false;
+        };
+        if class.backing_module.is_some() && new_method.is_self_delegate() {
+            return true;
+        }
+        let [stmt] = new_method.body.as_slice() else {
+            return false;
+        };
+        match &stmt.expression {
+            crate::ast::Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
+                    !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
+                        module, selector,
+                    )
+                }) && arguments
+                    .iter()
+                    .all(|arg| matches!(arg, crate::ast::Expression::Literal(..)))
+            }
+            _ => false,
+        }
+    }
+
     /// Whether any ancestor of the named class defines a class-side `new:`
     /// that is real user code ([`Self::defines_user_class_new1`], asked of
     /// each ancestor).
@@ -790,6 +872,7 @@ impl ClassHierarchy {
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
 
@@ -810,6 +893,7 @@ impl ClassHierarchy {
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
         }
@@ -840,6 +924,7 @@ impl ClassHierarchy {
             doc: Some(EcoString::from("*(compiler-generated)*")),
             origin: None,
             primitive: None,
+            constant_value: None,
         });
         KeywordDecision::Known(Some(kw_sel))
     }
@@ -1213,6 +1298,7 @@ impl ClassHierarchy {
                     doc: Some(getter_doc.into()),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
 
@@ -1236,6 +1322,7 @@ impl ClassHierarchy {
                     doc: Some(setter_doc.into()),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
         }
@@ -1274,6 +1361,7 @@ impl ClassHierarchy {
             doc: Some(ctor_doc.into()),
             origin: None,
             primitive: None,
+            constant_value: None,
         });
         Some(kw_sel)
     }

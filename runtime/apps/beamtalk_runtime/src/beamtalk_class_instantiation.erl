@@ -81,11 +81,47 @@ spawn_selector(plain, _) -> 'spawnWith:';
 spawn_selector(monitored, []) -> spawnMonitored;
 spawn_selector(monitored, _) -> 'spawnMonitoredWith:'.
 
+%% BT-4443: every spawn that reaches a class's own `Module:spawn/0,1` /
+%% `Module:spawn_monitored/0,1` from the runtime — the dynamic route
+%% (`beamtalk_class_dispatch:class_send/3` → `{spawn, Args}` → here), a
+%% class-method `self spawn…` and the `Actor>>spawnMonitored` shims — checks
+%% the class's spawnable kind first (`beamtalk_supervisor:spawn_kind/1`, the
+%% one hierarchy walk shared with the shadowed static route,
+%% `resolve_spawn_module_or_raise/3`). A Value or Object class has no spawn
+%% family, so it raises the same structured `does_not_understand` as that
+%% route instead of an `undef` caught from `erlang:apply/3`. Checked before
+%% the abstract flag: an abstract Value class does not understand `spawn`
+%% either. `unknown` (an ancestor chain that cannot be followed) decides
+%% nothing and keeps the pre-check behaviour, as on the shadowed route. On
+%% the dynamic route `class_send/3` has already asked `spawn_kind/1` (through
+%% `is_supervisor/1`) in the caller; this second ask runs in the class
+%% process and stops at the first deciding ancestor (one or two ETS reads
+%% for an `Actor` subclass), which is cheaper than threading the answer
+%% through the `{spawn, Args}` protocol.
+%%
+%% The unshadowed static route (`Point spawn` compiled to `Point:spawn/0`)
+%% never reaches this function, and the type checker's class-side
+%% does-not-understand is only a lint, not a build error, so it is not enough
+%% on its own: codegen pins that direct call only for a class it cannot prove
+%% is a non-actor, and resolves the module of a class it knows is a Value or
+%% Object class at call time through `resolve_spawn_module_or_raise/3`
+%% instead, which raises the same error
+%% (`DispatchCodegen::spawn_module_resolved_at_runtime`).
 -spec do_handle_spawn(spawn_variant(), list(), class_name(), atom(), boolean()) ->
     {ok, #beamtalk_object{} | {#beamtalk_object{}, reference()}} | {error, term()}.
-do_handle_spawn(Variant, Args, ClassName, _Module, true) ->
+do_handle_spawn(Variant, Args, ClassName, Module, IsAbstract) ->
+    case beamtalk_supervisor:spawn_kind(ClassName) of
+        none ->
+            {error, not_spawnable_error(ClassName, spawn_selector(Variant, Args))};
+        _ ->
+            do_handle_spawn_checked(Variant, Args, ClassName, Module, IsAbstract)
+    end.
+
+-spec do_handle_spawn_checked(spawn_variant(), list(), class_name(), atom(), boolean()) ->
+    {ok, #beamtalk_object{} | {#beamtalk_object{}, reference()}} | {error, term()}.
+do_handle_spawn_checked(Variant, Args, ClassName, _Module, true) ->
     {error, abstract_class_error(ClassName, spawn_selector(Variant, Args))};
-do_handle_spawn(Variant, Args, ClassName, Module, false) ->
+do_handle_spawn_checked(Variant, Args, ClassName, Module, false) ->
     Function = spawn_function(Variant),
     %% bt-catcher-audit: not-applicable-other-process - Module:spawn runs init/1 in the new actor
     %% process
@@ -955,12 +991,7 @@ resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
                     %% pre-check behaviour and let the emitted call run.
                     Module;
                 none ->
-                    raise_wrapped(
-                        beamtalk_error:with_hint(
-                            beamtalk_error:new(does_not_understand, ClassName, Selector),
-                            <<"Only Actor and Supervisor classes can be spawned">>
-                        )
-                    );
+                    raise_wrapped(not_spawnable_error(ClassName, Selector));
                 Other ->
                     raise_wrapped(spawn_kind_mismatch_error(ClassName, Selector, Kind, Other))
             end;
@@ -972,6 +1003,16 @@ resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
                 )
             )
     end.
+
+%% The structured error for a spawn-family send to a class that is neither an
+%% Actor nor a Supervisor (`beamtalk_supervisor:spawn_kind/1` answers `none`),
+%% shared by every spawn route (BT-4404, BT-4443).
+-spec not_spawnable_error(class_name(), atom()) -> #beamtalk_error{}.
+not_spawnable_error(ClassName, Selector) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:new(does_not_understand, ClassName, Selector),
+        <<"Only Actor and Supervisor classes can be spawned">>
+    ).
 
 -spec spawn_kind_mismatch_error(
     class_name(), atom(), actor | supervisor, actor | supervisor
