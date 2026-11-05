@@ -14,7 +14,7 @@ accepted two costs that no row measured:
 
 Measured on main @ 5f7e0d6 with the dev build of the compiler
 (`target/debug/beamtalk`) and the dev runtime tree. OTP 28 (erts 16.4),
-Elixir 1.20.1, 4 schedulers, an otherwise idle Linux VM (load average 1 to 2).
+Elixir 1.20.1, 4 schedulers, a Linux VM with no other work running (load average 1 to 2).
 Reductions and words are deterministic. ns depend on the machine.
 
 ## 1. A declining static call site (rows 3g-3j)
@@ -80,47 +80,69 @@ call keys.
 
 ## 2. `invalidate/1` over a hierarchy
 
-`run.sh invalidate 20`: a root class with N subclasses, each holding K
-installed static call keys (one per class method, installed through
-`static_call_target/4`, as the miss path of a static send would install it).
-Each round re-warms every key and then times one
-`beamtalk_class_shadow_flags:invalidate(Root)`. The bench checks that every
-key is gone afterwards. It reports the median and minimum of 20 rounds.
+`run.sh invalidate 20` sets up a root class with N subclasses. Each subclass
+holds K static call keys, one per class method, installed through
+`static_call_target/4` the way a static send's miss path installs them. Each
+round re-warms every key, times one
+`beamtalk_class_shadow_flags:invalidate(Root)`, and checks that every key is
+gone. Every shape uses fresh class names, so the class monitor's late `'DOWN'`
+handling of the previous shape can't erase keys mid-round.
 
-| idle processes | subclasses N | keys per subclass K | keys erased | invalidate/1 median µs | min µs |
-|--:|--:|--:|--:|--:|--:|
-| 0 | 0 | 0 | 0 | 10 | 8 |
-| 0 | 1 | 1 | 1 | 445 | 87 |
-| 0 | 1 | 10 | 10 | 2762 | 1406 |
-| 0 | 50 | 0 | 0 | 657 | 476 |
-| 0 | 50 | 1 | 50 | 28331 | 25249 |
-| 0 | 50 | 10 | 500 | 135817 | 89001 |
-| 10000 | 0 | 0 | 0 | 15 | 9 |
-| 10000 | 1 | 1 | 1 | 170 | 65 |
-| 10000 | 1 | 10 | 10 | 980 | 495 |
-| 10000 | 50 | 0 | 0 | 1183 | 491 |
-| 10000 | 50 | 1 | 50 | 22266 | 15890 |
-| 10000 | 50 | 10 | 500 | 103437 | 69912 |
+The node runs in one of three backgrounds:
+
+- idle;
+- 10,000 extra processes blocked in `receive`;
+- one spinning process per scheduler (5 rounds, since each round takes
+  longer).
+
+The table gives the median and minimum.
+
+| background | subclasses N | keys per subclass K | keys erased | rounds | invalidate/1 median µs | min µs |
+|---|--:|--:|--:|--:|--:|--:|
+| idle | 0 | 0 | 0 | 20 | 10 | 8 |
+| idle | 1 | 1 | 1 | 20 | 377 | 139 |
+| idle | 1 | 10 | 10 | 20 | 2431 | 1221 |
+| idle | 50 | 0 | 0 | 20 | 842 | 483 |
+| idle | 50 | 1 | 50 | 20 | 25529 | 18024 |
+| idle | 50 | 10 | 500 | 20 | 121666 | 93334 |
+| 10000 idle processes | 0 | 0 | 0 | 20 | 17 | 9 |
+| 10000 idle processes | 1 | 1 | 1 | 20 | 233 | 94 |
+| 10000 idle processes | 1 | 10 | 10 | 20 | 2027 | 721 |
+| 10000 idle processes | 50 | 0 | 0 | 20 | 1479 | 521 |
+| 10000 idle processes | 50 | 1 | 50 | 20 | 20086 | 12979 |
+| 10000 idle processes | 50 | 10 | 500 | 20 | 109140 | 74807 |
+| 4 busy processes | 0 | 0 | 0 | 5 | 94 | 60 |
+| 4 busy processes | 1 | 1 | 1 | 5 | 597 | 225 |
+| 4 busy processes | 1 | 10 | 10 | 5 | 1502 | 1358 |
+| 4 busy processes | 50 | 0 | 0 | 5 | 784 | 547 |
+| 4 busy processes | 50 | 1 | 50 | 5 | 14157 | 12992 |
+| 4 busy processes | 50 | 10 | 500 | 5 | 56519 | 49912 |
 
 A bare `persistent_term:erase/1` of a present key in the same node (no lock,
-no ETS index): median 245 µs, min 133 µs.
+no ETS index) costs a median of 203 µs and a minimum of 130 µs on the idle
+node.
 
-- **Erasing costs about 0.2-0.3 ms per key, and almost all of it is the BEAM's
-  own erase.** 500 keys take 136 ms against 500 × 245 µs from bare erases.
-  The bookkeeping around each erase is small: walking 50 subclasses with no
-  keys, each under its tag lock, costs 0.5-1.2 ms.
-- **Idle processes do not add to it.** The 10,000-process runs come out the
-  same or faster, within noise. The cost of a release here is waiting for the
-  schedulers to pass through, not scanning the heaps of idle processes.
-- **This is much more than `bench-bt4316.md` reported** (20 keys on one
-  class: 0.13 ms on an M-series Mac). The per-erase price depends on the
-  machine. On this 4-scheduler VM, a reload or `classState:` change on a base
-  class with 50 subclasses and 10 warm static targets each blocks the writer
-  for about 0.1 s.
+- **About 0.1 to 0.25 ms per erased key, almost all of it the BEAM's own
+  erase.** 500 keys take 122 ms. 500 bare erases would take about 100 ms.
+  The bookkeeping around the erase is small: walking 50 subclasses that hold
+  no keys, each under its tag lock, takes 0.5 to 1.5 ms.
+- **The cost is mostly waiting for every scheduler to make thread progress,
+  not scanning heaps.** 10,000 idle processes do not add to it. Busy
+  schedulers, which are awake already, halve it (57 ms for 500 keys). In one
+  earlier run, made while a parallel `cargo` build loaded the machine, a bare
+  erase took 3 µs. The price is a latency on the writer, and it depends on
+  the machine and on how busy it is.
+- **This is far above what `bench-bt4316.md` reported** for 20 keys on one
+  class (0.13 ms on an M-series Mac). On this 4-scheduler VM, a reload or
+  `classState:` change on a base class with 50 subclasses and 10 warm static
+  targets each blocks the writer for 50 to 120 ms.
 
-**Verdict: large. Follow-up BT-4442.** Erasure should grow with classes, not
-with warmed targets. One option is one key per class whose value maps targets
-to the class reference, which keeps one read on the hit path. Another is to
-erase only the descendants whose answer the write can change. Whichever design
-is chosen has to keep re-warming cheap: replacing a key with `put` also
-starts a release.
+**Verdict: large. Follow-up BT-4442.** Erasure should grow with the number
+of classes, not with the number of warmed targets. Two options:
+
+- one key per class whose value maps targets to the class reference, which
+  keeps one read on the hit path;
+- erasing only the descendants whose answer the write can change.
+
+Either way, re-warming must stay cheap, because replacing a key with `put`
+also starts a release.

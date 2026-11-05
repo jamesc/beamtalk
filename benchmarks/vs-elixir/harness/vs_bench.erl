@@ -748,15 +748,15 @@ print_counts(Counts, N) ->
 
 %% `beamtalk_class_shadow_flags:invalidate/1` erases the class's and every
 %% descendant's static call keys (BT-4316), and each `persistent_term:erase/1`
-%% of a present key scans every process for literal references. This times one
+%% of a present key starts a global literal-area release. This times one
 %% `invalidate/1` of a root class with N subclasses, each holding K warmed
-%% static call keys, with and without many idle processes. Between rounds every
+%% static call keys, on an idle node, beside 10k idle processes and beside one
+%% busy process per scheduler. Between rounds every
 %% key is re-installed through `static_call_target/4`, as the next static send
 %% of each call site would. Prints a markdown table of median and min µs.
 %%
 %% Args: [] or [Rounds].
 -define(INV_MOD, vs_bench_inv_methods).
--define(INV_ROOT, 'VsInvRoot').
 -define(INV_MAX_K, 10).
 
 invalidate(Args) ->
@@ -776,55 +776,75 @@ invalidate(Args) ->
     ]),
     io:format("# load average: ~s~n", [string:trim(os:cmd("uptime"))]),
     io:format("# rounds ~p~n~n", [Rounds]),
-    io:format("| idle processes | subclasses N | keys per subclass K | keys erased | "
-              "invalidate/1 median us | min us |~n", []),
-    io:format("|--:|--:|--:|--:|--:|--:|~n", []),
+    io:format("| background | subclasses N | keys per subclass K | keys erased | "
+              "rounds | invalidate/1 median us | min us |~n", []),
+    io:format("|---|--:|--:|--:|--:|--:|--:|~n", []),
     Shapes = [{0, 0}, {1, 1}, {1, 10}, {50, 0}, {50, 1}, {50, 10}],
+    Schedulers = erlang:system_info(schedulers_online),
+    %% An erase waits for every scheduler to pass a thread-progress point, so
+    %% what else the node is doing matters: nothing, 10k processes blocked in
+    %% `receive`, or one runnable (spinning) process per scheduler. Spinning
+    %% schedulers make each erase much slower, so they get fewer rounds.
+    Loads = [
+        {"idle", fun() -> spawn(fun() -> receive stop -> ok end end) end, 0, Rounds},
+        {"10000 idle processes", fun() -> spawn(fun() -> receive stop -> ok end end) end, 10000,
+            Rounds},
+        {io_lib:format("~p busy processes", [Schedulers]), fun() -> spawn(fun spin/0) end,
+            Schedulers, min(Rounds, 5)}
+    ],
     lists:foreach(
-        fun(Idle) ->
-            Idlers = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, Idle)],
+        fun({Label, Spawn, Count, LoadRounds}) ->
+            Procs = [Spawn() || _ <- lists:seq(1, Count)],
             try
-                [inv_shape(Idle, N, K, Rounds) || {N, K} <- Shapes]
+                [inv_shape(Label, N, K, LoadRounds) || {N, K} <- Shapes]
             after
-                [P ! stop || P <- Idlers]
+                [exit(P, kill) || P <- Procs]
             end
         end,
-        [0, 10000]
+        Loads
     ),
     %% The BEAM's own price per erase on this machine, for attribution: one
     %% `persistent_term:erase/1` of a present key, no lock, no ETS index.
     Bare = [inv_bare_erase(100) || _ <- lists:seq(1, Rounds)],
     io:format("~nbare `persistent_term:erase/1` of a present key: median ~.1f us, min ~.1f us "
-              "(100 keys per round, 0 idle processes)~n", [median(Bare), lists:min(Bare)]),
+              "(100 keys per round, idle node)~n", [median(Bare), lists:min(Bare)]),
     io:format("~n# load average after: ~s~n", [string:trim(os:cmd("uptime"))]),
     ok.
 
-inv_shape(Idle, N, K, Rounds) ->
-    Subs = [list_to_atom("VsInvSub" ++ integer_to_list(I)) || I <- lists:seq(1, N)],
-    Root = inv_start(?INV_ROOT, none),
-    SubPids = [inv_start(Sub, ?INV_ROOT) || Sub <- Subs],
+%% Class names are unique per shape: the class monitor's asynchronous 'DOWN'
+%% handling of the previous shape's classes runs `invalidate/1` on their names,
+%% and must not erase this shape's keys mid-round.
+inv_shape(Load, N, K, Rounds) ->
+    Shape = lists:flatten(io_lib:format("~p_~p_~p", [erlang:phash2(Load), N, K])),
+    RootName = list_to_atom("VsInvRoot" ++ Shape),
+    Subs = [list_to_atom("VsInvSub" ++ Shape ++ "_" ++ integer_to_list(I)) || I <- lists:seq(1, N)],
+    Root = inv_start(RootName, none),
+    SubPids = [inv_start(Sub, RootName) || Sub <- Subs],
     try
         Keys = [{Sub, I} || Sub <- Subs, I <- lists:seq(1, K)],
         Times = [
             begin
                 ok = inv_warm(Keys),
-                {Us, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(?INV_ROOT) end),
+                {Us, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(RootName) end),
                 false = lists:any(fun inv_key_present/1, Keys),
                 Us
             end
          || _ <- lists:seq(1, Rounds)
         ],
-        io:format("| ~p | ~p | ~p | ~p | ~p | ~p |~n", [
-            Idle, N, K, length(Keys), median(Times), lists:min(Times)
+        io:format("| ~s | ~p | ~p | ~p | ~p | ~p | ~p |~n", [
+            Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times)
         ])
     after
         [catch gen_server:stop(P, normal, 5000) || P <- [Root | SubPids]]
     end.
 
+%% A runnable process that never blocks (one per scheduler: a busy node).
+spin() -> spin().
+
 %% Per-key µs to erase `Count` present keys holding a class reference.
 inv_bare_erase(Count) ->
     Keys = [{?MODULE, inv_bare, I} || I <- lists:seq(1, Count)],
-    [persistent_term:put(Key, {beamtalk_object, 'VsInvRoot class', ?INV_MOD, self()}) || Key <- Keys],
+    [persistent_term:put(Key, {beamtalk_object, 'VsInvBare class', ?INV_MOD, self()}) || Key <- Keys],
     {Us, _} = timer:tc(fun() -> [persistent_term:erase(Key) || Key <- Keys] end),
     Us / Count.
 

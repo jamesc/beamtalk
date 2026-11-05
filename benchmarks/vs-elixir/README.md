@@ -164,8 +164,9 @@ share of each figure.
   `ClassSelf`: see `results/bench-bt4316.md` for the current figures.
   `results/bench-bt4431.md` measures a static site whose key is never
   installed (rows 3g-3j: +21 to +32 reductions on top of the `class_send`
-  fallback), and `invalidate/1` over a hierarchy (one `persistent_term` erase,
-  about 0.25 ms here, per warmed key; follow-up BT-4442).
+  fallback). It also measures `invalidate/1` over a hierarchy: one
+  `persistent_term` erase per warmed key, 0.1 to 0.25 ms each here (follow-up
+  BT-4442).
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.
 - **`collect:`, `inject:into:` and a `do:` that assigns nothing (6c-6e)**
