@@ -1316,7 +1316,7 @@ only happens on a class that is being torn down).
 
 A change, once written, drops the derived-fact cache (the dynamic constructor
 verdict `beamtalk_class_dispatch:lookup_direct_constructor/3` memoises reads
-it) and erases the class's static call keys
+it) and then erases the class's static call keys
 (`beamtalk_class_shadow_flags:invalidate/1`): a static `new` key is installed
 only while that verdict names the class's module (BT-4409), and a reload
 publishes this set after its own invalidations.
@@ -1334,8 +1334,12 @@ put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
             catch
                 error:badarg -> ok
             end,
-            beamtalk_class_shadow_flags:invalidate(Name),
-            beamtalk_class_derived_cache:invalidate()
+            %% Flush the memo before erasing the keys: the locked re-check in
+            %% `static_call_target/4` reads the memoised constructor verdict,
+            %% so a key install that lands between an erase and a later flush
+            %% would re-derive from the old row and survive.
+            beamtalk_class_derived_cache:invalidate(),
+            beamtalk_class_shadow_flags:invalidate(Name)
     end.
 
 -doc """

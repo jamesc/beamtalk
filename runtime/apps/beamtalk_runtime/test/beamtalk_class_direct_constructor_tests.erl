@@ -624,6 +624,30 @@ static_new_key_test_() ->
                 stop_class(Pid)
             end
         end},
+        {"a static new install racing a reload's key erase cannot survive it", fun() ->
+            %% A call site's miss path that runs right after any erase of this
+            %% class's keys re-derives from what is visible then. If the
+            %% memoised constructor verdict were flushed only after the erase,
+            %% that install would read the old `[new]` verdict and the key
+            %% would outlive the reload.
+            Name = 'BT4409RaceNew',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            meck:new(beamtalk_class_shadow_flags, [passthrough, no_link]),
+            meck:expect(beamtalk_class_shadow_flags, invalidate, fun(N) ->
+                Result = meck:passthrough([N]),
+                N =:= Name andalso ctor_target(Name),
+                Result
+            end),
+            try
+                ?assertNotEqual(false, ctor_target(Name)),
+                ok = reload_with(Name, ?HELPER, #{direct_constructors => []}),
+                ?assertEqual(false, ctor_key_value(Name)),
+                ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
+            after
+                meck:unload(beamtalk_class_shadow_flags),
+                stop_class(Pid)
+            end
+        end},
         {"a key naming another module or an unregistered class is declined", fun() ->
             Name = 'BT4409OtherMod',
             Pid = start_class(Name, #{direct_constructors => [new]}),
