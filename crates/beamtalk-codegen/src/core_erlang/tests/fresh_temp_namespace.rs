@@ -225,6 +225,7 @@ const HAND_WRITTEN: &[&str] = &[
     "_HfBadArgs",
     "_InfoDispatchResult",
     "_InfoState",
+    "_InhOwner",
     "_InhSlow",
     "_InitArgs",
     "_InitErrClass",

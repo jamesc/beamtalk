@@ -195,39 +195,70 @@ super(Selector, Args, Self, State, CurrentClass) ->
     end.
 
 -doc """
-BT-4280: the memoised verdict for an inherited send to an actor instance.
+BT-4280 / BT-4260: the memoised verdict for an inherited send.
 
-A compiled actor class's `dispatch/4` default arm asks this first. It answers
-`{compiled, Owner, Module}` when the send of `Selector` to an instance of
-`ClassName` reaches a compiled method of an actor class that threads its own
-`State` (ADR 0137 amended §1: it stores before every call that may run user
-code and on exit), so the arm may call `invoke_resolved/6` directly instead of
-`super/5` under `beamtalk_actor_state:call_foreign/3`. It answers `slow` for
-everything else, and the arm then takes today's path byte for byte: an
-extension on `ClassName` or its superclass, an owner that is not a compiled
-`State`-threading actor class (`Object`, `Actor`, a native or Value class, an
-extension on an ancestor between, a runtime-patched standalone method), and
-does-not-understand.
+A compiled class's default dispatch arm asks this first, with its own class
+name. The verdict names the owner method's calling convention, and each arm
+takes only its own:
+
+- `{compiled, Owner, Module}`: the send of `Selector` to an instance of
+  `ClassName` reaches a compiled method of an actor class that threads its own
+  `State` (ADR 0137 amended §1: it stores before every call that may run user
+  code and on exit). An actor class's `dispatch/4` default arm then calls
+  `invoke_resolved/6` directly instead of `super/5` under
+  `beamtalk_actor_state:call_foreign/3`.
+- `{value, Owner, Module}` (BT-4260): it reaches a compiled method of a class
+  whose methods take no actor `State` (`Object`, a Value or built-in class),
+  through that module's `dispatch/3`. A value-type `dispatch/3` default arm
+  (String, Binary, a `Value subclass:`, ...) then calls `Module:dispatch/3`
+  directly instead of delegating one superclass `dispatch/3` at a time, each
+  with its own extension lookup. An actor arm treats it as `slow`.
+- `slow` for everything else; the arm then takes today's path byte for byte:
+  an extension on `ClassName` or its superclass, an owner that does not define
+  `Selector` among its own compiled methods (an extension on an ancestor
+  between, a runtime-patched standalone method, a catch-all
+  `doesNotUnderstand:args:` class), and does-not-understand.
+
+The owner is `resolve_owner/2` from the superclass, which probes each class
+with `has_method_local/1` (own selectors, the reflection arms of its compiled
+dispatch function, and its extensions), so it stops exactly where the
+superclass-by-superclass walk would stop. A direct call to that owner's
+compiled dispatch function therefore answers what the walk would have.
 
 Memoised in the derived cache under `{inherited_target, Class, Selector}`, so
 it is invalidated by every source that invalidates `resolve_owner/2`: an
 extension install or removal, a method write or removal, a reload and a class
-removal. An out-of-band purge is caught by the export check on a hit. An
+removal. An out-of-band purge is caught by the export check on a `compiled`
+hit (`invoke_resolved/6` would otherwise answer a wrapped `undef`). A `value`
+hit needs none: the arm's remote `Module:dispatch/3` call loads a purged
+module exactly as the superclass chain's own static call to it would. An
 unregistered class is answered `slow` and not cached.
 """.
--spec inherited_target(class_name(), selector()) -> {compiled, class_name(), module()} | slow.
+-spec inherited_target(class_name(), selector()) ->
+    {compiled | value, class_name(), module()} | slow.
 inherited_target(ClassName, Selector) ->
-    beamtalk_class_derived_cache:fetch(
-        {inherited_target, ClassName, Selector},
-        fun() -> compute_inherited_target(ClassName, Selector) end,
-        fun
-            ({compiled, _, Module}) -> erlang:function_exported(Module, dispatch, 4);
-            (slow) -> true
-        end
-    ).
+    Key = {inherited_target, ClassName, Selector},
+    Compute = fun() -> compute_inherited_target(ClassName, Selector) end,
+    %% `fetch/2` keeps the hit to the cache lookup alone; only a `compiled`
+    %% verdict is re-checked, inline, and a stale one is repaired through
+    %% `fetch/3`, which recomputes and overwrites it.
+    case beamtalk_class_derived_cache:fetch(Key, Compute) of
+        {compiled, _, Module} = Verdict ->
+            case erlang:function_exported(Module, dispatch, 4) of
+                true ->
+                    Verdict;
+                false ->
+                    beamtalk_class_derived_cache:fetch(Key, Compute, fun
+                        ({compiled, _, M}) -> erlang:function_exported(M, dispatch, 4);
+                        (_) -> true
+                    end)
+            end;
+        Verdict ->
+            Verdict
+    end.
 
 -spec compute_inherited_target(class_name(), selector()) ->
-    {cache | nocache, {compiled, class_name(), module()} | slow}.
+    {cache | nocache, {compiled | value, class_name(), module()} | slow}.
 compute_inherited_target(ClassName, Selector) ->
     case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found ->
@@ -240,9 +271,9 @@ compute_inherited_target(ClassName, Selector) ->
                         resolve_owner(Super, Selector)
                 of
                     {owner, Owner, Module} ->
-                        case threads_actor_state(Module, Selector) of
-                            true -> {compiled, Owner, Module};
-                            false -> slow
+                        case owner_convention(Module, Selector) of
+                            none -> slow;
+                            Convention -> {Convention, Owner, Module}
                         end;
                     _ ->
                         slow
@@ -252,17 +283,32 @@ compute_inherited_target(ClassName, Selector) ->
             {cache, slow}
     end.
 
-%% The owner's compiled module says (codegen flag `threads_actor_state`, set
-%% from the same Rust predicate as the static `CompiledSelfSend` rule) that
-%% its methods thread actor `State`, and lists `Selector` among its own
-%% compiled methods.
--spec threads_actor_state(module(), selector()) -> boolean().
-threads_actor_state(Module, Selector) ->
+%% How a direct call reaches the owner's compiled method for `Selector`, read
+%% from the owner module alone: `compiled` when its meta carries
+%% `threads_actor_state` (codegen flag, set from the same Rust predicate as the
+%% static `CompiledSelfSend` rule), else `value` when it exports the
+%% state-less `dispatch/3`; `none` unless the meta lists `Selector` among the
+%% class's own compiled methods.
+-spec owner_convention(module(), selector()) -> compiled | value | none.
+owner_convention(Module, Selector) ->
     case beamtalk_class_metadata:read_meta(Module) of
-        {ok, #{threads_actor_state := true, method_info := MethodInfo}} when is_map(MethodInfo) ->
-            is_map_key(Selector, MethodInfo);
+        {ok, #{method_info := MethodInfo} = Meta} when is_map(MethodInfo) ->
+            case is_map_key(Selector, MethodInfo) of
+                false ->
+                    none;
+                true ->
+                    case Meta of
+                        #{threads_actor_state := true} ->
+                            compiled;
+                        _ ->
+                            case erlang:function_exported(Module, dispatch, 3) of
+                                true -> value;
+                                false -> none
+                            end
+                    end
+            end;
         _ ->
-            false
+            none
     end.
 
 -doc """
@@ -610,27 +656,18 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
     %% until it reaches Object itself (see class_chain_step/6's own doc
     %% for the O(depth²) this costs).
     %%
-    %% For supervisors it's different: `Supervisor`/
-    %% `DynamicSupervisor` are plain "Value" classes (`Object
-    %% subclass: Supervisor`), whose codegen never sets
-    %% `DispatchSpec.emit_local_probe` — they export no
-    %% `has_method_local/1`, so `has_method_local/2` falls back to their
-    %% `has_method/1`, which *delegates* to its superclass for any
-    %% selector it doesn't locally list (see `value_type_codegen.rs`
-    %% `generate_primitive_has_method`/`generate_minimal_has_method`).
-    %% That delegation makes the per-node probe report `true` as soon as
-    %% it reaches `Supervisor`/`DynamicSupervisor` — the walk never
-    %% actually visits a node named `'Object'` for an unoverridden
-    %% supervisor, it stops one level short. (A user supervisor
-    %% subclass's module does export `has_method_local/1` since
-    %% ADR 0135, but it answers only the class's own selectors and
-    %% extensions, so the walk passes it for `printString` and
-    %% still stops at the stdlib base.) So an unoverridden
-    %% supervisor's MethodOwner is `'Supervisor'` or
-    %% `'DynamicSupervisor'`, never `'Object'` — without this branch,
-    %% `aSupervisor printString` would fall through to the compiled
-    %% Object method's bare class name instead of matching the REPL's
-    %% kind-headed label.
+    %% Supervisors match on `'Supervisor'`/`'DynamicSupervisor'` as well as
+    %% `'Object'`: those stdlib bases are plain "Value" classes (`Object
+    %% subclass: Supervisor`). A module compiled before BT-4260 exports no
+    %% `has_method_local/1`, so `has_method_local/2` falls back to its
+    %% delegating `has_method/1` and the walk stops at the stdlib base;
+    %% since BT-4260 every value type exports the strictly-local probe and
+    %% the walk reaches `'Object'` (a user supervisor subclass's own
+    %% `has_method_local/1`, ADR 0135, answers only its own selectors and
+    %% extensions, so the walk passes it either way). Without this branch,
+    %% `aSupervisor printString` would fall through to the compiled Object
+    %% method's bare class name instead of matching the REPL's kind-headed
+    %% label.
     %%
     %% This also avoids the displayString deadlock: the compiled
     %% Object displayString sends a message back to Self

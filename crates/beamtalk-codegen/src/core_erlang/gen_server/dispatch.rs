@@ -611,7 +611,9 @@ impl CoreErlangGenerator {
     ///    verdict — an inherited compiled `State`-threading actor method is
     ///    invoked directly (`invoke_resolved/6`), the run-time twin of the
     ///    static `CompiledSelfSend` rule (ADR 0137 amended §1), so it skips
-    ///    the extension lookups, `super/5` and `call_foreign/3`;
+    ///    the extension lookups, `super/5` and `call_foreign/3`. Only
+    ///    `{'compiled', ...}` is taken here; a `{'value', ...}` verdict
+    ///    (BT-4260, for value-type `dispatch/3` arms) is slow for an actor;
     /// 1. otherwise extension registry (`beamtalk_extensions:lookup`)
     /// 2. class hierarchy walk (`beamtalk_dispatch:super`)
     /// 3. `doesNotUnderstand:args:` handler
