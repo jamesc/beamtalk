@@ -79,6 +79,7 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::semantic_analysis::facts::body_has_block_nlr;
 use beamtalk_core::source_analysis::Span;
+use beamtalk_core::state_threading_selectors::is_conditional_selector;
 
 /// The original bodies of the methods [`rewrite_guard_returns`] rewrote,
 /// keyed by method span.
@@ -254,18 +255,6 @@ fn with_body(mut block: Block, body: Vec<ExpressionStatement>) -> Block {
     block
 }
 
-/// The inlined conditionals whose literal-block branches are tail bodies
-/// when the conditional is.
-const INLINED_CONDITIONALS: [&str; 7] = [
-    "ifTrue:",
-    "ifFalse:",
-    "ifTrue:ifFalse:",
-    "ifNil:",
-    "ifNotNil:",
-    "ifNil:ifNotNil:",
-    "ifNotNil:ifNil:",
-];
-
 fn selector_of(parts: &[KeywordPart]) -> String {
     parts.iter().map(|p| p.keyword.as_str()).collect()
 }
@@ -280,10 +269,13 @@ fn receiver_qualifies(
     family_of(parts) == Family::Nil || is_boolean(receiver)
 }
 
-/// Whether `parts`/`arguments` name an inlined conditional with literal
-/// block arguments.
+/// Whether `parts`/`arguments` name an inlined `ifTrue:`/`ifNil:`-family
+/// conditional (the shared [`is_conditional_selector`] table, less
+/// `and:`/`or:`) with literal block arguments.
 fn is_inlined_conditional(parts: &[KeywordPart], arguments: &[Expression]) -> bool {
-    INLINED_CONDITIONALS.contains(&selector_of(parts).as_str())
+    let selector = selector_of(parts);
+    is_conditional_selector(&selector)
+        && !matches!(selector.as_str(), "and:" | "or:")
         && arguments.iter().all(|a| matches!(a, Expression::Block(_)))
 }
 

@@ -17,12 +17,14 @@ fn codegen(src: &str) -> String {
             .all(|d| d.severity != beamtalk_core::source_analysis::Severity::Error),
         "fixture failed to parse: {diagnostics:?}"
     );
-    generate_module(&module, CodegenOptions::new("guards").with_source(src))
-        .expect("codegen should succeed")
+    let code = generate_module(&module, CodegenOptions::new("guards").with_source(src))
+        .expect("codegen should succeed");
+    assert_compiles_through_erlc("guards", &code);
+    code
 }
 
 fn assert_no_nlr_frame(code: &str) {
-    for marker in ["make_ref", "call 'erlang':'throw'"] {
+    for marker in ["make_ref", "NlrToken"] {
         assert!(
             !code.contains(marker),
             "guard-style `^` must not set up an NLR frame (found {marker}):\n{code}"
@@ -76,6 +78,22 @@ fn actor_method_guard_has_no_try() {
          \x20   x > 10 ifTrue: [^#big]\n\
          \x20   self.count := self.count + x\n\
          \x20   #small\n",
+    );
+    assert_no_nlr_frame(&code);
+}
+
+#[test]
+fn expect_directive_in_absorbed_statements_compiles() {
+    // The statements after a guard move into its falling branch, a
+    // statement-level `@expect` directive with them.
+    let code = codegen(
+        "Actor subclass: E\n\
+         \x20 state: value = 0\n\
+         \x20 bump => self.value := self.value + 1\n\
+         \x20 bumpIfPositive: n :: Integer =>\n\
+         \x20   n <= 0 ifTrue: [^\"skipped\"]\n\
+         \x20   @expect lint \"trailing ^ under test\"\n\
+         \x20   ^self bump\n",
     );
     assert_no_nlr_frame(&code);
 }
