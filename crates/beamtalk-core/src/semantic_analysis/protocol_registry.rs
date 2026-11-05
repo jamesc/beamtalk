@@ -469,6 +469,40 @@ impl ProtocolRegistry {
         diagnostics
     }
 
+    /// Seeds the registry with `pre_loaded` cross-file protocols, then
+    /// registers `module`'s own — the one registration order every surface
+    /// uses (analysis Phase 0.5, and the language service's hover/completion
+    /// type pass).
+    ///
+    /// A pre-loaded entry named like a protocol `module` itself declares is
+    /// dropped, so the current module's definition wins and is not reported
+    /// as a duplicate (a fixture file compiled against its own pre-scanned
+    /// protocols, or an editor buffer whose saved copy is also indexed).
+    /// `current_package` is passed to [`Self::add_pre_loaded`]. Returns the
+    /// diagnostics of both steps.
+    pub fn seed_and_register_module(
+        &mut self,
+        module: &Module,
+        pre_loaded: Vec<ProtocolInfo>,
+        hierarchy: &ClassHierarchy,
+        current_package: Option<&str>,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        if !pre_loaded.is_empty() {
+            let current_names: std::collections::HashSet<&EcoString> =
+                module.protocols.iter().map(|p| &p.name.name).collect();
+            let cross_file: Vec<_> = pre_loaded
+                .into_iter()
+                .filter(|p| !current_names.contains(&p.name))
+                .collect();
+            diagnostics.extend(self.add_pre_loaded(cross_file, hierarchy, current_package));
+        }
+        if !module.protocols.is_empty() {
+            diagnostics.extend(self.register_module(module, hierarchy));
+        }
+        diagnostics
+    }
+
     /// Registers protocols from a parsed module.
     ///
     /// Returns diagnostics for:
@@ -1902,6 +1936,41 @@ Value subclass: Version
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
         assert!(diags.is_empty());
         assert!(registry.has_protocol("Tickable"));
+    }
+
+    #[test]
+    fn seed_and_register_module_lets_the_module_win_over_pre_loaded() {
+        // A pre-loaded copy of a protocol the module itself declares (an
+        // indexed saved copy of an edited buffer) is dropped, not reported as
+        // a duplicate; other pre-loaded protocols are seeded.
+        let (module, parse_diags) =
+            crate::source_analysis::parse(crate::source_analysis::lex_with_eof(
+                "Protocol define: Wire\n  class label -> String\n",
+            ));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let stale = |name: &str| ProtocolInfo {
+            name: name.into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            package: None,
+            span: span(),
+            provided_selectors: vec![],
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(
+            &module,
+            vec![stale("Wire"), stale("Other")],
+            &hierarchy,
+            None,
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(registry.has_protocol("Other"));
+        let wire = registry.get("Wire").expect("Wire registered");
+        assert_eq!(wire.class_methods.len(), 1, "the module's definition wins");
     }
 
     #[test]

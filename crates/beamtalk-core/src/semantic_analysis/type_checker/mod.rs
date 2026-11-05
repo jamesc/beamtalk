@@ -401,17 +401,29 @@ pub fn infer_types_and_returns(
 /// Used by `beamtalk-language-service`'s `queries::hover_provider` so hover on an alias-typed
 /// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
 /// rather than either the bare expansion or an "unresolved class" mis-read.
-/// `alias_registry = None` is identical to [`infer_types_and_returns`].
+///
+/// `protocol_registry` likewise lets a `P class` annotation resolve to the
+/// protocol metatype (`ProtocolMeta`, ADR 0144) and sends on it resolve
+/// against `P`'s `class` requirements, so completion and hover see the same
+/// type the compiler does. Only the base pass runs — not the protocol
+/// conformance passes of
+/// [`TypeChecker::check_module_with_protocols_and_aliases`], whose
+/// diagnostics these callers discard. `None` for both registries is
+/// identical to [`infer_types_and_returns`].
 #[must_use]
-pub fn infer_types_and_returns_with_aliases(
+pub fn infer_types_and_returns_with_registries(
     module: &Module,
     hierarchy: &ClassHierarchy,
     native_type_registry: Option<&NativeTypeRegistry>,
+    protocol_registry: Option<&ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
     if let Some(registry) = native_type_registry {
         checker.set_native_type_registry(registry.clone());
+    }
+    if let Some(protocols) = protocol_registry {
+        checker.set_protocol_registry(protocols.clone());
     }
     if let Some(aliases) = alias_registry {
         checker.set_alias_registry(aliases.clone());
@@ -608,6 +620,16 @@ impl TypeChecker {
     /// — no separate "aliases-only" entry point is needed.
     pub fn set_alias_registry(&mut self, registry: AliasRegistry) {
         self.alias_registry = Some(registry);
+    }
+
+    /// Sets the protocol registry for the *base* [`Self::check_module`]
+    /// pass — the protocol counterpart to [`Self::set_alias_registry`], for
+    /// callers (hover, completion) that need protocol-aware type resolution
+    /// (`P class` → `ProtocolMeta`, ADR 0144; `respondsTo:` narrowing) but
+    /// not the conformance passes
+    /// [`Self::check_module_with_protocols_and_aliases`] also runs.
+    pub fn set_protocol_registry(&mut self, registry: ProtocolRegistry) {
+        self.protocol_registry = Some(registry);
     }
 
     /// Returns all diagnostics collected during type checking.

@@ -26,7 +26,9 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 use crate::queries::erlang_modules;
-use crate::queries::{enrich_hierarchy_with_inferred_returns, type_of_parsed};
+use crate::queries::{
+    enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
+};
 use crate::{Completion, CompletionKind, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
@@ -34,9 +36,12 @@ use beamtalk_core::ast::{
     declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+use beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use beamtalk_core::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
+use beamtalk_core::semantic_analysis::{
+    AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
+};
 use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
@@ -143,6 +148,7 @@ pub fn compute_completions(
         current_package,
         native_types,
         None,
+        None,
     )
 }
 
@@ -156,7 +162,15 @@ pub fn compute_completions(
 /// [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
 /// identical "`_with_aliases`" wrapper shape, added for the same reason.
 /// `alias_registry = None` behaves identically to [`compute_completions`].
+///
+/// `protocol_registry` is the file's protocol registry (cross-file protocols
+/// plus the module's own), so a receiver typed `P class` completes `P`'s
+/// `class` requirements and then the class-object protocol (ADR 0144).
+/// `None` registers only the module's own protocols.
 #[must_use]
+// Each registry is independent project context, threaded straight through to
+// the shared type pass (`enrich_hierarchy_with_inferred_returns`).
+#[allow(clippy::too_many_arguments)]
 pub fn compute_completions_with_aliases(
     module: &Module,
     source: &str,
@@ -165,6 +179,7 @@ pub fn compute_completions_with_aliases(
     current_package: Option<&str>,
     native_types: Option<&NativeTypeRegistry>,
     alias_registry: Option<&AliasRegistry>,
+    protocol_registry: Option<&ProtocolRegistry>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
     let offset = match position.to_byte_offset(source) {
@@ -193,14 +208,20 @@ pub fn compute_completions_with_aliases(
             return compute_self_dot_completions(class_name, hierarchy, current_package);
         }
     }
+    let protocol_registry = protocols_for_module(protocol_registry, module, hierarchy);
     // Enrich hierarchy with inferred return types and get the type map in a single
     // TypeChecker pass. The TypeChecker consults its own
     // inferred method_return_types during chain resolution, so a second pass is
     // no longer needed for correct chain completion filtering.
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
-        let (enriched, type_map) =
-            enrich_hierarchy_with_inferred_returns(module, hierarchy, native_types);
+        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(
+            module,
+            hierarchy,
+            native_types,
+            &protocol_registry,
+            alias_registry,
+        );
         let h = match enriched {
             Some(h) => {
                 enriched_hierarchy = h;
@@ -228,6 +249,7 @@ pub fn compute_completions_with_aliases(
     add_hierarchy_completions(
         module,
         hierarchy,
+        &protocol_registry,
         &context,
         receiver_type.as_ref(),
         current_package,
@@ -886,6 +908,10 @@ enum ReceiverSide {
     Instance(EcoString),
     /// The class itself (show class-side methods like `spawn`, `new`)
     Class(EcoString),
+    /// The class object of some class conforming to the named protocol — a
+    /// `P class` value (ADR 0144). Shows `P`'s `class` requirements, then the
+    /// class-object protocol every class answers.
+    ProtocolClass(EcoString),
 }
 /// Finds the inferred type of the expression immediately before the cursor.
 ///
@@ -921,18 +947,19 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
 }
 /// Map an inferred type to the completion [`ReceiverSide`] for the value it
 /// describes: a `Known` instance offers instance-side methods, while a `Meta`
-/// metatype (a class object, ADR 0083) offers class-side methods. Unions,
-/// Dynamic, and Never have no single receiver side.
+/// metatype (a class object, ADR 0083) offers class-side methods, and a
+/// `ProtocolMeta` (`P class`, ADR 0144) offers `P`'s `class` requirements.
+/// Unions, Dynamic, and Never have no single receiver side.
 fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
     match ty {
         InferredType::Known { class_name: n, .. } => Some(ReceiverSide::Instance(n.clone())),
         InferredType::Meta { class_name: n, .. } => Some(ReceiverSide::Class(n.clone())),
+        InferredType::ProtocolMeta {
+            protocol_name: n, ..
+        } => Some(ReceiverSide::ProtocolClass(n.clone())),
         InferredType::Union { .. }
         | InferredType::Dynamic(_)
         | InferredType::Never
-        // A `P class` protocol metatype (ADR 0144) names no single class;
-        // completing its `class` requirements is a separate change (BT-4436).
-        | InferredType::ProtocolMeta { .. }
         // A `Negation` (`Symbol \ #foo`) has no single receiver side (ADR 0102).
         | InferredType::Negation { .. }
         // Nor does an `Intersection` (`P1 & P2`, ADR 0102) — it has no
@@ -1006,6 +1033,15 @@ fn find_receiver_in_expr(
                 None
             }
         }
+        // If cursor is right after a field access (`self.transport`), use the
+        // field's type — e.g. a `:: Transport class` field (ADR 0144).
+        Expression::FieldAccess { receiver, span, .. } => {
+            if offset >= span.end() && offset <= span.end() + 1 {
+                type_map.get(*span).and_then(receiver_side_of_type)
+            } else {
+                find_receiver_in_expr(receiver, offset, type_map)
+            }
+        }
         // Recurse into assignments
         Expression::Assignment { target, value, .. } => {
             find_receiver_in_expr(target, offset, type_map)
@@ -1034,6 +1070,7 @@ fn find_receiver_in_expr(
 /// Returns `true` if completions were added (caller should skip context-based fallback).
 fn add_receiver_type_completions(
     hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
     receiver_type: Option<&ReceiverSide>,
     context: &ClassContext<'_>,
     current_package: Option<&str>,
@@ -1093,6 +1130,46 @@ fn add_receiver_type_completions(
             }
             true
         }
+        Some(ReceiverSide::ProtocolClass(protocol_name)) => {
+            let Some(protocol) = protocol_registry.get(protocol_name) else {
+                return false;
+            };
+            // The protocol's `class` requirements first — the selectors the
+            // type checker resolves a `P class` send against (ADR 0144).
+            let receiver_display = format!("{protocol_name} class");
+            for requirement in protocol.all_class_requirements(protocol_registry) {
+                if seen.insert(requirement.selector.clone()) {
+                    completions.push(
+                        Completion::new(requirement.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(format!(
+                                "class requirement of protocol `{protocol_name}`"
+                            ))
+                            .with_detail(requirement_completion_detail(
+                                requirement,
+                                &receiver_display,
+                            )),
+                    );
+                }
+            }
+            // Then the class-object protocol every class answers: the
+            // metaclass tower's instance side (`Metaclass → Class →
+            // Behaviour → Object → ProtoObject`, ADR 0083), the fallback the
+            // type checker resolves a `P class` send against.
+            for method in hierarchy.all_methods("Metaclass") {
+                if is_cross_package_internal_method(&method, hierarchy, current_package) {
+                    continue;
+                }
+                if seen.insert(method.selector.clone()) {
+                    let doc = method_completion_doc(&method, false);
+                    completions.push(
+                        Completion::new(method.selector.as_str(), CompletionKind::Function)
+                            .with_documentation(doc)
+                            .with_detail(method_completion_detail(&method, &method.defined_in)),
+                    );
+                }
+            }
+            true
+        }
         _ => false,
     }
 }
@@ -1103,21 +1180,49 @@ fn method_completion_detail(
     method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
     class_name: &str,
 ) -> String {
-    let mut detail = format!("on {class_name}");
-    // Add parameter types for keyword/binary methods
-    let has_param_types = method.param_types.iter().any(Option::is_some);
-    if has_param_types {
-        let type_parts: Vec<String> = method
-            .param_types
+    let param_types: Vec<Option<String>> = method
+        .param_types
+        .iter()
+        .map(|t| t.as_ref().map(ToString::to_string))
+        .collect();
+    signature_detail(
+        class_name,
+        &param_types,
+        method.return_type.as_ref().map(ToString::to_string),
+    )
+}
+/// [`method_completion_detail`] for a protocol `class` requirement (ADR
+/// 0144), whose signature is declared on the protocol rather than on a
+/// class: e.g. `on Transport class (String) -> Transport`.
+fn requirement_completion_detail(requirement: &ProtocolMethodRequirement, owner: &str) -> String {
+    let param_types: Vec<Option<String>> = requirement
+        .param_types
+        .iter()
+        .map(|t| t.as_ref().map(ToString::to_string))
+        .collect();
+    signature_detail(
+        owner,
+        &param_types,
+        requirement.return_type.as_ref().map(ToString::to_string),
+    )
+}
+/// The shared `on Owner (P1, P2) -> R` completion-detail format: parameter
+/// types appear only when at least one is declared (an undeclared one shows
+/// as `Dynamic`), the return type only when declared.
+fn signature_detail(
+    owner: &str,
+    param_types: &[Option<String>],
+    return_type: Option<String>,
+) -> String {
+    let mut detail = format!("on {owner}");
+    if param_types.iter().any(Option::is_some) {
+        let type_parts: Vec<&str> = param_types
             .iter()
-            .map(|t| {
-                t.as_ref()
-                    .map_or_else(|| "Dynamic".to_string(), ToString::to_string)
-            })
+            .map(|t| t.as_deref().unwrap_or("Dynamic"))
             .collect();
         let _ = write!(detail, " ({})", type_parts.join(", "));
     }
-    if let Some(ref return_type) = method.return_type {
+    if let Some(return_type) = return_type {
         let _ = write!(detail, " -> {return_type}");
     }
     detail
@@ -1190,6 +1295,7 @@ fn should_exclude_delegate(
 fn add_hierarchy_completions(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
     context: &ClassContext<'_>,
     receiver_type: Option<&ReceiverSide>,
     current_package: Option<&str>,
@@ -1198,6 +1304,7 @@ fn add_hierarchy_completions(
     // If we have a known receiver type, show only methods for that type
     if add_receiver_type_completions(
         hierarchy,
+        protocol_registry,
         receiver_type,
         context,
         current_package,
@@ -2949,6 +3056,27 @@ mod tests {
     // -----------------------------------------------------------------------
     // Protocol class object completions
     // -----------------------------------------------------------------------
+    /// ADR 0144: with no project registry, a module's own protocols still
+    /// type a `P class` receiver, so it completes `P`'s `class` requirements
+    /// rather than the protocol object's class side.
+    #[test]
+    fn protocol_metatype_completions_without_project_registry() {
+        let source = "Protocol define: Wire\n  class label -> String\n\nObject subclass: Caller\n  run: w :: Wire class =>\n    w \n";
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        let (module, _) = parse(lex_with_eof(source));
+        hierarchy.register_protocol_classes(&module);
+        let completions =
+            compute_completions(&module, source, Position::new(5, 6), &hierarchy, None, None);
+        let label = completions
+            .iter()
+            .find(|c| c.label == "label")
+            .expect("the class requirement is offered");
+        assert_eq!(label.detail.as_deref(), Some("on Wire class -> String"));
+        assert!(
+            !completions.iter().any(|c| c.label == "requiredMethods"),
+            "the protocol object's class side is not offered"
+        );
+    }
     #[test]
     fn protocol_class_object_completions() {
         // Protocol class objects should offer requiredMethods and conformingClasses.
@@ -2963,6 +3091,7 @@ mod tests {
         let mut completions = Vec::new();
         let result = add_receiver_type_completions(
             &hierarchy,
+            &ProtocolRegistry::new(),
             Some(&receiver),
             &context,
             None,
@@ -3073,6 +3202,7 @@ mod tests {
             None,
             None,
             Some(&alias_registry),
+            None,
         );
 
         assert!(
@@ -3128,6 +3258,7 @@ mod tests {
             None,
             None,
             Some(&alias_registry),
+            None,
         );
 
         assert!(
@@ -3185,6 +3316,7 @@ mod tests {
             Some("my_pkg"),
             None,
             Some(&alias_registry),
+            None,
         );
 
         assert!(

@@ -898,6 +898,29 @@ impl ProjectIndex {
             .collect()
     }
 
+    /// The protocol registry `file`'s hover/completion type pass resolves
+    /// against: every cross-file protocol ([`Self::cross_file_protocol_infos_for`])
+    /// plus `module`'s own, registered in the order and with the package the
+    /// diagnostics pipeline uses, so a `P class` annotation (ADR 0144) types
+    /// the same in the editor as in `beamtalk build`. Collision diagnostics
+    /// are dropped — the diagnostics provider reports them.
+    #[must_use]
+    pub fn protocol_registry_for(
+        &self,
+        file: &Utf8PathBuf,
+        module: &beamtalk_core::ast::Module,
+    ) -> ProtocolRegistry {
+        let package = self.alias_package_for_file(file);
+        let mut registry = ProtocolRegistry::new();
+        let _ = registry.seed_and_register_module(
+            module,
+            self.cross_file_protocol_infos_for(file),
+            &self.merged_hierarchy,
+            beamtalk_core::semantic_analysis::trait_expansion::known_package(Some(&package)),
+        );
+        registry
+    }
+
     /// The per-file entries of `map` other than `file`'s own, in the one
     /// precedence order every "first definition wins" consumer relies on
     /// (BT-3915): project files, then dependency files, then — when
