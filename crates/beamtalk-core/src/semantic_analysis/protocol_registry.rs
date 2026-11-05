@@ -44,6 +44,22 @@ pub struct ProtocolMethodRequirement {
     pub param_types: Vec<Option<EcoString>>,
 }
 
+impl ProtocolMethodRequirement {
+    /// The requirement's declared return type, when it has one that can be
+    /// judged without a substitution context: `None` when it is
+    /// unannotated or names one of `type_params` (the type parameters of
+    /// the protocol and those it extends). The one gate every
+    /// return-type-refinement check against a requirement applies (BT-4175,
+    /// BT-4441).
+    #[must_use]
+    pub fn judged_return_type(&self, type_params: &[EcoString]) -> Option<DeclaredType> {
+        self.return_type
+            .as_deref()
+            .map(DeclaredType::parse)
+            .filter(|ty| !ty.mentions_any(type_params))
+    }
+}
+
 /// A protocol requirement a class answers with an incompatible declared
 /// return type — see [`ProtocolRegistry::conformance_return_type_mismatches`].
 ///
@@ -305,13 +321,9 @@ impl ProtocolInfo {
         let refines = |mine: Vec<&ProtocolMethodRequirement>,
                        theirs: Vec<&ProtocolMethodRequirement>| {
             theirs.iter().all(|req| {
-                let Some(ref expected) = req.return_type else {
+                let Some(expected) = req.judged_return_type(&type_params) else {
                     return true;
                 };
-                let expected = DeclaredType::parse(expected);
-                if expected.mentions_any(&type_params) {
-                    return true;
-                }
                 // Selector presence was checked above; a provided-only
                 // selector has no requirement (and no declared return type).
                 let Some(own) = mine.iter().find(|r| r.selector == req.selector) else {
@@ -828,13 +840,9 @@ impl ProtocolRegistry {
         let type_params = protocol.all_type_params(self);
         let mut mismatches = Vec::new();
         for req in protocol.all_requirements(self) {
-            let Some(ref req_rt) = req.return_type else {
+            let Some(expected) = req.judged_return_type(&type_params) else {
                 continue;
             };
-            let expected = DeclaredType::parse(req_rt);
-            if expected.mentions_any(&type_params) {
-                continue;
-            }
             let Some(method) = hierarchy.find_method(class_name, &req.selector) else {
                 continue;
             };
@@ -871,13 +879,9 @@ impl ProtocolRegistry {
             });
         }
         for req in protocol.all_class_requirements(self) {
-            let Some(ref req_rt) = req.return_type else {
+            let Some(expected) = req.judged_return_type(&type_params) else {
                 continue;
             };
-            let expected = DeclaredType::parse(req_rt);
-            if expected.mentions_any(&type_params) {
-                continue;
-            }
             let Some(method) = hierarchy.find_class_method(class_name, &req.selector) else {
                 continue;
             };

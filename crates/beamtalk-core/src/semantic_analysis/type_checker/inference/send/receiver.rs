@@ -1037,11 +1037,7 @@ impl TypeChecker {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: requirement
-                .return_type
-                .as_deref()
-                .map(DeclaredType::parse)
-                .filter(|ty| !ty.mentions_any(&type_params)),
+            return_type: requirement.judged_return_type(&type_params),
             param_types: Self::class_requirement_param_types(requirement, &type_params),
             doc: None,
             origin: None,
