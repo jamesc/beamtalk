@@ -2493,6 +2493,9 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     };
     match construct.family {
         LocalThreadingFamily::Exception => {
+            if !construct.inlined {
+                return None;
+            }
             let &[handler_index] =
                 crate::state_threading_selectors::state_threaded_block_arg_indices(
                     &construct.selector,
@@ -2500,6 +2503,7 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
             else {
                 return None;
             };
+            // `inlined` ([`exception_send_inlined`]) holds: both are literals.
             match (receiver.as_ref(), arguments.get(handler_index)) {
                 (Expression::Block(protected), Some(Expression::Block(handler))) => {
                     Some(vec![protected, handler])

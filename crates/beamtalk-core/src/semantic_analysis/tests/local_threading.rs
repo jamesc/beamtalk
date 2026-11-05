@@ -5091,6 +5091,12 @@ fn a_write_in_an_uninlined_exception_block_is_an_escape_in_every_context() {
         ("b := [1 / 0]\nb on: Error do: [:e | t := 7]\nt", "on:do:"),
         ("h := [:e | 0]\n[t := 1 / 0] on: Error do: h\nt", "on:do:"),
         ("(self foo: [5]) ensure: [t := 9]\nt", "ensure:"),
+        // A write in a construct nested in the closure is the closure's.
+        (
+            "b := [5]\nb ensure: [#(1, 2) do: [:y | t := t + y]]\nt",
+            "ensure:",
+        ),
+        ("b := [5]\nb ensure: [true ifTrue: [t := 9]]\nt", "ensure:"),
     ] {
         let message = format!(
             "`t` is assigned in a block of an `{selector}` whose blocks are not all written in \
