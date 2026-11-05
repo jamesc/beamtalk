@@ -66,6 +66,7 @@ only for `super_send/5` and `refresh/2`, which call them.
     get/2,
     get/3,
     view/2,
+    nlr_state/2,
     refresh/2,
     refresh_carried/2,
     call_foreign/3,
@@ -81,6 +82,11 @@ only for `super_send/5` and `refresh/2`, which call them.
 -export_type([cell/0, capture/0, adapted/0]).
 
 -define(CELL, '$bt_actor_state').
+%% BT-4448: the key `nlr_state/2` stamps on the state an away closure's `^`
+%% carries, holding the pid of the actor the closure belongs to. A `__local__`
+%% key, so the committed state never keeps it (`beamtalk_actor:strip_local_temps/1`);
+%% the `$` keeps it apart from every threaded local (`__local__<name>`).
+-define(AWAY_OWNER, '__local__$nlr_away_owner').
 
 -type cell() :: {pid() | tuple(), map()} | undefined.
 -type capture() :: none | map().
@@ -227,6 +233,21 @@ view(Self, Capture) ->
     end.
 
 -doc """
+The state an actor closure's `^` throw carries: the cell at home, as `view/2`.
+Away it is the creation-time `Capture` stamped with the pid of the closure's
+own actor (BT-4448). Actor state maps hold no pid, so without the stamp the
+capture of one actor equals another same-class actor's cell whenever their
+fields do; `refresh_carried/2` reads the stamp so that a `^` thrown from a
+closure of another actor is never resumed with this actor's cell.
+""".
+-spec nlr_state(#beamtalk_object{}, capture()) -> map().
+nlr_state(Self, Capture) ->
+    case at_home(Self) of
+        {true, State} -> State;
+        false -> (away_capture(Self, '_', Capture))#{?AWAY_OWNER => owner_of(Self)}
+    end.
+
+-doc """
 Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a
 native method, an ADR 0066 extension fun, the inherited `Object`/`ProtoObject`
 walk, `doesNotUnderstand:`. The code behind it is Erlang that does not bracket
@@ -266,17 +287,25 @@ reflect_cell(Entry, {error, Reason, Answered}) when is_map(Answered) ->
 reflect_cell(_Entry, Answer) ->
     Answer.
 
+%% States are compared without the `nlr_state/2` stamp (BT-4448): a compiled
+%% callee that caught its own away closure's `^` answers that closure's capture
+%% stamped, which is the same version as an unstamped `Entry`.
 -spec reflect_state(map(), map()) -> map().
 reflect_state(Entry, Answered) ->
     case erlang:get(?CELL) of
-        {_, Cell} when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
-            case Answered =:= Entry of
-                true -> Cell;
-                false -> raise_conflict(Entry)
+        {_, Cell} when is_map(Cell) ->
+            case {unstamped(Cell), unstamped(Answered), unstamped(Entry)} of
+                {C, A, E} when C =/= E, C =/= A, A =:= E -> Cell;
+                {C, A, E} when C =/= E, C =/= A -> raise_conflict(Entry);
+                _ -> Answered
             end;
         _ ->
             Answered
     end.
+
+-spec unstamped(map()) -> map().
+unstamped(State) ->
+    maps:remove(?AWAY_OWNER, State).
 
 -spec raise_conflict(map()) -> no_return().
 raise_conflict(Entry) ->
@@ -328,12 +357,19 @@ answer `Carried` with its fields replaced by the cell as the cleanup left it,
 as `refresh/2` does. Otherwise `Carried` holds no state a cleanup closure can
 write (no closure assigns a REPL binding or a value type's field), so answer it
 unchanged.
+
+Equal fields alone do not make `Carried` the cell's (BT-4448): a closure of
+another actor of the same class, run here away from home, carries its own
+actor's capture, which can equal this cell. `nlr_state/2` stamps that capture
+with its actor's pid, and a `Carried` stamped with any actor but the cell's
+owner is answered unchanged, so it goes back to its own boundary as it came.
 """.
 -spec refresh_carried(cell(), term()) -> term().
 refresh_carried({Owner, Before}, Carried) when Owner =:= self(), is_map(Carried) ->
     case
-        beamtalk_actor:strip_local_temps(Carried) =:=
-            beamtalk_actor:strip_local_temps(Before)
+        maps:get(?AWAY_OWNER, Carried, Owner) =:= Owner andalso
+            beamtalk_actor:strip_local_temps(Carried) =:=
+                beamtalk_actor:strip_local_temps(Before)
     of
         true ->
             case erlang:get(?CELL) of
