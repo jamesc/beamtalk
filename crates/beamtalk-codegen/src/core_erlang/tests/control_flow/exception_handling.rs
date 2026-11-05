@@ -624,3 +624,97 @@ fn test_class_method_fold_with_wrapper_local_loop_threads_no_outer_local() {
         assert_compiles_through_erlc(&module_name, &code);
     }
 }
+
+// ─── BT-4312: an `ensure:` cleanup run by a `^` keeps its writes ────────────
+//
+// The cleanup a `^` of the method runs threads from the state the throw
+// carries, and the throw resumes with the cleanup's result
+// (`ensure_nlr_relay`), so the method's NLR boundary answers the cleanup's
+// writes. Runtime ground truth: `stdlib/test/actor_closure_cell_test.bt`'s
+// `testEnsureCleanupWrite*` cells.
+
+fn compile_bt4312(src: &str, module: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (parsed, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&parsed, CodegenOptions::new(module))
+        .unwrap_or_else(|e| panic!("{module} must compile: {e:?}"));
+    assert_compiles_through_erlc(module, &code);
+    code
+}
+
+#[test]
+fn test_bt4312_actor_ensure_cleanup_field_write_rides_the_return() {
+    let code = compile_bt4312(
+        concat!(
+            "Actor subclass: Bt4312ActorEnsure\n",
+            "  state: n = 0\n\n",
+            "  early =>\n",
+            "    [^1] ensure: [self.n := 9]\n",
+            "    0\n",
+        ),
+        "bt@bt4312actorensure",
+    );
+    // The relay seeds the cleanup from the cell (which holds the carried
+    // state), stores the cleanup's result and resumes the throw with it.
+    assert!(
+        code.contains(
+            "'beamtalk_actor_state':'store'(StateAcc1) in call 'erlang':'throw'({'$bt_nlr', _EnsureNlrTok"
+        ),
+        "the relay must store and re-throw the cleanup's StateAcc1. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", StateAcc1})"),
+        "the resumed throw must carry the cleanup's state. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt4312_value_type_ensure_cleanup_field_write_rides_the_return() {
+    let code = compile_bt4312(
+        concat!(
+            "TestCase subclass: Bt4312VtEnsure\n",
+            "  field: k = 0\n\n",
+            "  early =>\n",
+            "    [^1] ensure: [self.k := 9]\n",
+            "    0\n",
+        ),
+        "bt@bt4312vtensure",
+    );
+    assert!(
+        code.contains("let Self = _EnsureCarried"),
+        "the relay must seed the cleanup's Self from the carried one. Got:\n{code}"
+    );
+    assert!(
+        code.contains(", Self1})"),
+        "the resumed throw must carry the cleanup's Self1. Got:\n{code}"
+    );
+}
+
+/// A class method's throw carries no state (its class variables are written
+/// in place), and a method with no `^` in a block has no throw of its own:
+/// neither relays.
+#[test]
+fn test_bt4312_nothing_to_relay_keeps_the_plain_catch() {
+    let code = compile_bt4312(
+        concat!(
+            "Object subclass: Bt4312ClassEnsure\n",
+            "  classState: n = 0\n\n",
+            "  class early =>\n",
+            "    [^1] ensure: [self.n := 9]\n",
+            "    0\n",
+        ),
+        "bt@bt4312classensure",
+    );
+    assert!(!code.contains("_EnsureNlrTok"), "{code}");
+    let code = compile_bt4312(
+        concat!(
+            "Actor subclass: Bt4312NoReturn\n",
+            "  state: n = 0\n\n",
+            "  plain =>\n",
+            "    [1] ensure: [self.n := 9]\n",
+            "    self.n\n",
+        ),
+        "bt@bt4312noreturn",
+    );
+    assert!(!code.contains("_EnsureNlrTok"), "{code}");
+}
