@@ -583,3 +583,28 @@ Value subclass: Holder
         "the accessor answers Wire class, not Dynamic: {msgs:#?}"
     );
 }
+
+#[test]
+fn protocol_literal_is_not_a_protocol_metatype_value() {
+    // The protocol object `Wire` does not answer `Wire`'s class
+    // requirements, so it is not the class object of a conformer.
+    let source = wire_source(
+        r"
+Value subclass: Holder
+  field: wire :: Wire class = Wire
+
+Object subclass: Caller
+  take: w :: Wire class => w label
+  run => self take: Wire
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let rejections = diags
+        .iter()
+        .filter(|d| d.message.contains("Wire class"))
+        .count();
+    assert_eq!(
+        rejections, 2,
+        "field default and argument both reject the protocol literal: {diags:#?}"
+    );
+}

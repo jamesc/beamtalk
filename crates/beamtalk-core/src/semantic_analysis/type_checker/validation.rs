@@ -3645,8 +3645,9 @@ impl TypeChecker {
     /// `C class` is accepted iff `C` is `X` or a subclass of it; for a
     /// protocol `X` (ADR 0144), `C class` is accepted iff
     /// [`ProtocolRegistry::check_conformance`]`(C, X)` is `Ok` (the one
-    /// structural conformance rule, open-world gate included) and `P class`
-    /// iff `P` is or extends `X`. Any other part models the class object as
+    /// structural conformance rule, open-world gate included) and `C` is not
+    /// itself a protocol, and `P class` iff
+    /// [`ProtocolInfo::subsumes_conformance_to`](crate::semantic_analysis::protocol_registry::ProtocolInfo::subsumes_conformance_to)`(P, X)`. Any other part models the class object as
     /// `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
     /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
@@ -3697,9 +3698,15 @@ impl TypeChecker {
                 protocol_registry.filter(|r| Self::is_protocol_type(declared_base, hierarchy, r))
             {
                 return match value {
-                    ClassObjectType::Class(class_name) => registry
-                        .check_conformance(class_name, declared_base, hierarchy)
-                        .is_ok(),
+                    // A protocol literal is the protocol object, not the
+                    // class object of a conformer; `check_conformance` would
+                    // wave it through the open-world gate (no hierarchy entry).
+                    ClassObjectType::Class(class_name) => {
+                        !registry.has_protocol(class_name)
+                            && registry
+                                .check_conformance(class_name, declared_base, hierarchy)
+                                .is_ok()
+                    }
                     ClassObjectType::Protocol(protocol_name) => {
                         match (registry.get(protocol_name), registry.get(declared_base)) {
                             (Some(value_protocol), Some(declared_protocol)) => {
