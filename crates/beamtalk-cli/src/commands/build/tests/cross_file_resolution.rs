@@ -1468,7 +1468,7 @@ fn own_sealed_class_shadowed_by_a_dependency_stays_dynamic_in_its_own_file() {
     // collide into one last-wins runtime class.
     let core = compile_own_widget_against("bt@app@widget", Some("json"));
     assert!(
-        !core.contains("'dispatch'('x'"),
+        !core.contains("'dispatch'('x'") && !core.contains("apply 'x'/1("),
         "a sealed class shadowed by a dependency must not direct-dispatch. Got:\n{core}"
     );
 }
@@ -1478,7 +1478,8 @@ fn own_sealed_class_without_a_rival_sends_direct_in_its_own_file() {
     // Positive control: its own Pass 1 entry is the class itself, not a rival.
     let core = compile_own_widget_against("bt@app@widget", None);
     assert!(
-        core.contains("call 'bt@app@widget':'dispatch'('x'"),
+        // BT-4473: the own class's arm, called locally.
+        core.contains("apply 'x'/1("),
         "an unshadowed sealed class should direct-dispatch. Got:\n{core}"
     );
 }
@@ -1490,7 +1491,7 @@ fn own_sealed_class_in_unqualified_test_module_is_not_its_own_rival() {
     // still the class itself, so the send stays direct.
     let core = compile_own_widget_against("bt@widget", None);
     assert!(
-        core.contains("call 'bt@widget':'dispatch'('x'"),
+        core.contains("apply 'x'/1("),
         "a test-module class must not be flagged as shadowing itself. Got:\n{core}"
     );
 }
