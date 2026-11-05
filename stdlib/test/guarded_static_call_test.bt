@@ -58,7 +58,7 @@ TestCase subclass: GuardedStaticCallTest
     self assert: viaSelf equals: #extension
 
   // BT-4126: a runtime fun replacing a class method is reached by static
-  // callers compiled before the patch.
+  // callers compiled before the patch, and removing it restores them.
   testRuntimeFunPatchReachesStaticCallers =>
     self assert: GscPatched patchMe equals: #compiled
     pid := Erlang beamtalk_class_registry whereis_class: #GscPatched
@@ -67,7 +67,10 @@ TestCase subclass: GuardedStaticCallTest
       put_class_method: pid
       selector: #patchMe
       fun: [:classSelf | #fromRuntimeFun]
-    self assert: GscPatched patchMe equals: #fromRuntimeFun
+    [
+      self assert: GscPatched patchMe equals: #fromRuntimeFun
+    ] ensure: [GscPatched class removeSelector: #patchMe]
+    self assert: GscPatched patchMe equals: #compiled
 
   // The guarded direct call stays a tail call: a million-deep recursion
   // through literal class references runs in the stack a shallow one uses.
@@ -121,7 +124,8 @@ TestCase subclass: GuardedStaticCallTest
     self assert: dynamic equals: #extension
     self assert: GscWarmExt answer equals: #compiled
 
-  // (b) A runtime class-method fun installed after warm-up wins.
+  // (b) A runtime class-method fun installed after warm-up wins, and its
+  // removal (BT-4438) gives the compiled method back.
   testRuntimeClassMethodAfterWarmUpWins =>
     self assert: GscWarmPatched answer equals: #compiled
     pid := Erlang beamtalk_class_registry whereis_class: #GscWarmPatched
@@ -130,8 +134,13 @@ TestCase subclass: GuardedStaticCallTest
       put_class_method: pid
       selector: #answer
       fun: [:classSelf | #fromRuntimeFun]
-    self assert: GscWarmPatched answer equals: #fromRuntimeFun
-    self assert: (self lookUp: #GscWarmPatched) answer equals: #fromRuntimeFun
+    [
+      self assert: GscWarmPatched answer equals: #fromRuntimeFun
+      self assert: (self lookUp: #GscWarmPatched) answer equals: #fromRuntimeFun
+    ] ensure: [GscWarmPatched class removeSelector: #answer]
+    // Removing it brings the compiled method back, through the static send too.
+    self assert: GscWarmPatched answer equals: #compiled
+    self assert: (self lookUp: #GscWarmPatched) answer equals: #compiled
 
   // (d) Once a superclass publishes class variables (the fact a reload that
   // adds `classState:` publishes), a warmed static send takes the class
