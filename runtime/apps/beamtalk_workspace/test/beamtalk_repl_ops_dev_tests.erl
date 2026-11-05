@@ -636,13 +636,25 @@ hover_markdown_empty_is_empty_test() ->
     ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(method, <<>>)),
     ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(class, <<>>)).
 
-hover_docs_real_method_header_is_preformatted_test() ->
-    %% End to end through the live doc engine: the header line is indented.
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
-    case Docs of
-        <<>> -> ok;
-        _ -> ?assertMatch(<<"    == Integer", _/binary>>, Docs)
-    end.
+hover_markdown_pins_the_help_method_layout_test() ->
+    %% hover_markdown/2 relies on beamtalk_repl_docs:format_method_output/4
+    %% laying out a header block with no blank line inside it (header, modifier
+    %% and inherited lines, signature), then `\n\n` and the doc-comment. Feed
+    %% it the real formatter's output with every optional header line present:
+    %% the whole header is preformatted, the doc-comment passes through as is.
+    DocText = <<"Fetch a URL.\n\n## Options\n- `timeout` - milliseconds">>,
+    Help = beamtalk_repl_docs:format_method_output(
+        'Fetcher',
+        <<"fetch:options:">>,
+        'Object',
+        {<<"fetch: url options: opts">>, DocText, true, true}
+    ),
+    Md = beamtalk_repl_ops_dev:hover_markdown(method, Help),
+    [Head, Doc] = binary:split(Md, <<"\n\n">>),
+    HeadLines = binary:split(Head, <<"\n">>, [global]),
+    ?assertEqual(4, length(HeadLines)),
+    ?assert(lists:all(fun(L) -> binary:part(L, 0, 4) =:= <<"    ">> end, HeadLines)),
+    ?assertEqual(DocText, Doc).
 
 %%====================================================================
 %% keyword_send_at/3 + hover_docs/4: keyword-selector hover (BT-4343)
