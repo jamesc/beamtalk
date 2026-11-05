@@ -582,7 +582,7 @@ impl CoreErlangGenerator {
                 .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
             chain = docvec![
                 "call 'maps':'put'(",
-                leaf::atom(Self::local_state_key(var)),
+                leaf::atom(self.local_scratch_key(var)),
                 ", ",
                 leaf::var(core_var),
                 ", ",
@@ -3554,7 +3554,7 @@ impl CoreErlangGenerator {
                                     "let ",
                                     leaf::var(core_var),
                                     " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
+                                    leaf::atom(self.local_scratch_key(var)),
                                     ", ",
                                     leaf::var(new_state_name.clone()),
                                     ") in ",

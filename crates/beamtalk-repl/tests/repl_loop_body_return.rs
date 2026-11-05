@@ -160,6 +160,15 @@ const POSITIONS: &[(&str, &str, Step)] = &[
         "w := w + x. [w := w * 2] ensure: [w := w + 100]. x == 5 ifTrue: [^w]",
         |x, w| ((w + x) * 2 + 100, None),
     ),
+    // BT-4424 review: the cleanup writes a binding the body bound without
+    // writing it to the bindings map (a destructured name, BT-4439): its
+    // scratch slot is seeded under the binding's own key, so the cleanup's
+    // read of it never misses (`badkey`).
+    (
+        "ensure: cleanup writes a destructured binding",
+        "#(v, b) := #(x, 0). [x == 5 ifTrue: [^w]] ensure: [v := v + 1. w := w + v]",
+        |x, w| (w + x + 1, None),
+    ),
     (
         "match: arm",
         "w := w + x. x match: [2 -> ^w; _ -> nil]",

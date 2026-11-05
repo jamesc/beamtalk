@@ -2142,9 +2142,9 @@ impl CoreErlangGenerator {
 
         // ADR 0131 §2 (Phase 3b): an arm entered after the try body (the
         // success-path cleanup of `ensure:`) reads the locals the try body
-        // wrote back from its returned tuple, as `LocalRebind`s lowered by this
-        // arm's frame (a legacy arm, which threads nothing of its own, binds
-        // them with a plain `let`).
+        // wrote back from its returned tuple, as `LocalRebind`s lowered by the
+        // frame the arm is rendered as ([`Self::arm_entry_rebind_frame`]: a
+        // REPL arm `Put`s each binding over the bindings map, BT-4424).
         if let Some(entry) = entry {
             let enclosing = self.arm_entry_rebind_frame(frame, arm, &entry.locals)?;
             let carrier = self.fresh_temp_var("ExEntry");
