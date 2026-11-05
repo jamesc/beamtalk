@@ -212,3 +212,28 @@ fn xref_pairs_receiver_types_with_the_sends_as_written() {
         );
     }
 }
+
+/// BT-4451: an Erlang FFI call as the receiver of an actor conditional whose
+/// arm writes a field is sequenced ahead of the `case` and runs once.
+#[test]
+fn ffi_receiver_of_state_threading_actor_conditional_compiles() {
+    let code = codegen(
+        "Actor subclass: P\n\
+         \x20 state: n = 0\n\
+         \x20 m: c =>\n\
+         \x20   (Erlang beamtalk_guard_return ifTrue: c) ifTrue: [1] ifFalse: [self.n := 2. 3]\n",
+    );
+    assert_eq!(
+        code.matches("'direct_call'('beamtalk_guard_return'")
+            .count(),
+        1,
+        "the FFI receiver must be called exactly once:\n{code}"
+    );
+    let call_at = code
+        .find("'direct_call'('beamtalk_guard_return'")
+        .expect("the FFI call is emitted");
+    let case_at = code[call_at..]
+        .find("case _Cond")
+        .unwrap_or_else(|| panic!("the conditional's `case` follows the FFI call:\n{code}"));
+    assert!(case_at > 0);
+}

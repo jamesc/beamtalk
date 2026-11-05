@@ -1051,13 +1051,35 @@ impl CoreErlangGenerator {
     /// operand the sequencing rule leaves to the conditional's own lowering.
     pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
-            receiver, selector, ..
+            receiver,
+            selector,
+            arguments,
+            ..
         } = expr
         else {
             return None;
         };
+        Self::is_conditional_send(selector, arguments).then_some(receiver.as_ref())
+    }
+
+    /// BT-4451: whether a send of `selector` with `arguments` is a conditional
+    /// the compiler lowers in place — the one predicate behind
+    /// [`Self::conditional_send_receiver`] (whose receiver the conditional's
+    /// lowering threads) and [`Self::sequenced_send_children`] (which leaves a
+    /// conditional opaque). Only literal block arguments are inlined
+    /// (`try_generate_boolean_protocol` and the conditional intrinsics match
+    /// `Expression::Block` arms); a conditional selector with any other
+    /// argument is an ordinary send whose receiver and arguments the sequencing
+    /// rule covers. In particular `Erlang beamtalk_guard_return ifTrue: c` is
+    /// an FFI call: `try_handle_erlang_interop` consumes its `Erlang <module>`
+    /// receiver structurally, so sequencing that receiver ahead registered a
+    /// value nothing read back ("never substituted"), while a non-block
+    /// argument that advances `State` was never sequenced at all.
+    fn is_conditional_send(selector: &MessageSelector, arguments: &[Expression]) -> bool {
         beamtalk_core::state_threading_selectors::is_conditional_selector(selector.name().as_str())
-            .then_some(receiver.as_ref())
+            && arguments
+                .iter()
+                .all(|arg| matches!(arg, Expression::Block(_)))
     }
 
     /// The children the sequencing rule applies to when `expr` (already
@@ -1089,9 +1111,7 @@ impl CoreErlangGenerator {
         else {
             return None;
         };
-        if beamtalk_core::state_threading_selectors::is_conditional_selector(
-            selector.name().as_str(),
-        ) {
+        if Self::is_conditional_send(selector, arguments) {
             return None;
         }
         let mut children = Vec::with_capacity(arguments.len() + 1);
