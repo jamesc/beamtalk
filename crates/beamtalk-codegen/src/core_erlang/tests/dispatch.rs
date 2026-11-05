@@ -4933,3 +4933,38 @@ fn test_long_keyword_ctor_bakes_hashed_meta_key() {
     );
     super::assert_compiles_through_erlc("test", &code);
 }
+
+// --- primitive dispatch/3 target module ---
+
+/// The `dispatch/3` an actor with `@primitive` methods emits delegates to the
+/// actor's own Erlang module. For a class whose name already starts with
+/// `Beamtalk` that module is `beamtalk_<rest>`, never `beamtalk_beamtalk_<rest>`.
+#[test]
+fn test_primitive_dispatch_3_targets_unprefixed_module_for_beamtalk_class() {
+    let src = concat!(
+        "Actor subclass: BeamtalkRuntime\n",
+        "  doIt => @primitive \"doIt\"\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'beamtalk_runtime':'dispatch'(Selector, Args, Self)"),
+        "dispatch/3 must delegate to 'beamtalk_runtime'. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("beamtalk_beamtalk_runtime"),
+        "module name must not be double-prefixed. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_primitive_dispatch_3_targets_prefixed_module_for_plain_class() {
+    let src = concat!(
+        "Actor subclass: HttpRouter\n",
+        "  doIt => @primitive \"doIt\"\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        code.contains("call 'beamtalk_http_router':'dispatch'(Selector, Args, Self)"),
+        "dispatch/3 must delegate to 'beamtalk_http_router'. Got:\n{code}"
+    );
+}
