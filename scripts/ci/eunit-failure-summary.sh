@@ -42,7 +42,9 @@ counts="$(printf '%s\n' "$output" | grep -E '^[0-9]+ tests, ' | tail -1)"
 annotate() {
     local kind="$1" name="$2"
     if [ -n "${GITHUB_ACTIONS:-}" ]; then
-        printf '::error title=%s %s::%s\n' "$label" "$kind" "$name" >&2
+        # Workflow-command data must escape `%` (and CR/LF, which a name
+        # extracted line-by-line cannot contain).
+        printf '::error title=%s %s::%s\n' "$label" "$kind" "${name//%/%25}" >&2
     fi
 }
 
@@ -55,7 +57,7 @@ annotate() {
         printf '%s\n' "$failed" | sed 's/^/  /'
     fi
     if [ -n "$cancelled" ]; then
-        echo "Cancelled (timed out, or torn down after a sibling timed out):"
+        echo "Cancelled (timed out, or skipped after a setup or sibling failure):"
         printf '%s\n' "$cancelled" | sed 's/^/  /'
     fi
 } >&2
