@@ -49689,6 +49689,7 @@
         "async",
         "branch",
         "bump:",
+        "bumpBig:",
         "concurrent",
         "conditional",
         "count",
@@ -49710,7 +49711,7 @@
         "set",
         "subclassing"
       ],
-      "source": "// BT-4415: GuardReturnActor — guard-style early returns (`cond ifTrue: [^v]` at a\n// method's top level) compiled as direct returns.\n\nActor subclass: GuardReturnActor\n  state: count :: Integer = 0\n\n  bump: x :: Integer =>\n    self.count := self.count + 1\n    x > 10 ifTrue: [^#big]\n    self.count := self.count + x\n    #small\n\n  early: x =>\n    x ifTrue: [^#early]\n    self.count := self.count + 1\n    #late\n\n  count => self.count",
+      "source": "// BT-4415: GuardReturnActor — guard-style early returns (`cond ifTrue: [^v]` at a\n// method's top level) compiled as direct returns.\n\nActor subclass: GuardReturnActor\n  state: count :: Integer = 0\n\n  bump: x :: Integer =>\n    self.count := self.count + 1\n    x > 10 ifTrue: [^#big]\n    self.count := self.count + x\n    #small\n\n  early: x =>\n    x ifTrue: [^#early]\n    self.count := self.count + 1\n    #late\n\n  count => self.count\n\n  // BT-4452: a typed comparison guard whose returning branch writes state.\n  bumpBig: x :: Integer =>\n    x > 10\n      ifTrue: [\n        self.count := self.count + 100\n        ^self.count\n      ]\n    self.count := self.count + x\n    self.count",
       "explanation": "BT-4415: GuardReturnActor — guard-style early returns (`cond ifTrue: [^v]` at a method's top level) compiled as direct returns."
     },
     {
@@ -49761,6 +49762,7 @@
         "Value",
         "assign",
         "assignment",
+        "bounded:",
         "branch",
         "clamp:",
         "conditional",
@@ -49768,18 +49770,22 @@
         "field",
         "guard_return_value",
         "if",
+        "if not",
         "inherit",
         "inheritance",
         "instance variable",
         "member",
         "mutate",
         "mutation",
+        "negation",
+        "positiveOnly:",
         "property",
         "set",
         "subclassing",
+        "unless",
         "value"
       ],
-      "source": "// BT-4415: GuardReturnValue — guard-style early returns (`cond ifTrue: [^v]` at a\n// method's top level) compiled as direct returns.\n\nValue subclass: GuardReturnValue\n  field: n :: Integer = 0\n\n  clamp: x :: Integer =>\n    x < 0 ifTrue: [^self]\n    x =:= 9 ifTrue: [^self withN: 99]\n    self withN: x",
+      "source": "// BT-4415: GuardReturnValue — guard-style early returns (`cond ifTrue: [^v]` at a\n// method's top level) compiled as direct returns.\n\nValue subclass: GuardReturnValue\n  field: n :: Integer = 0\n\n  clamp: x :: Integer =>\n    x < 0 ifTrue: [^self]\n    x =:= 9 ifTrue: [^self withN: 99]\n    self withN: x\n\n  // BT-4452: `x :: Integer` makes each comparison a bare BIF (a Boolean by\n  // construction), so effectful returns, two-branch guards and a tail guard\n  // compile as direct returns too.\n  bounded: x :: Integer =>\n    x < 0 ifTrue: [^self withN: 0]\n    x > 100\n      ifTrue: [\n        self withN: 1\n        ^self withN: 100\n      ]\n      ifFalse: [x]\n    x >= 90 ifFalse: [^self withN: x]\n    self withN: 90\n\n  positiveOnly: x :: Integer => 0 < x ifTrue: [^self withN: x]",
       "explanation": "BT-4415: GuardReturnValue — guard-style early returns (`cond ifTrue: [^v]` at a method's top level) compiled as direct returns."
     },
     {
@@ -59222,6 +59228,7 @@
         "subclassing",
         "testActorGuardKeepsStateWrittenBeforeReturn",
         "testActorNonBooleanReceiverKeepsState",
+        "testActorTypedComparisonGuardKeepsStateWrittenInBranch",
         "testClassSideGuard",
         "testIfFalseGuard",
         "testIfNilGuard",
@@ -59231,11 +59238,12 @@
         "testNonBooleanReceiverWithoutTheSelectorRaises",
         "testTailMatchArmReturn",
         "testTwoBranchGuardKeepsLocalRebind",
+        "testTypedComparisonGuardsWithEffects",
         "testUntypedBooleanReceiver",
         "testValueGuard",
         "unless"
       ],
-      "source": "// BT-4415: a `^` inside an inlined conditional at a method's top level is a\n// direct early return (no NLR frame). Behaviour must match the NLR form:\n// the returned value, the fall-through value, and actor state written before\n// the return.\n\nTestCase subclass: GuardReturnTest\n\n  testIfTrueGuards =>\n    self assert: (GuardReturnObject sign: 5) equals: 1\n    self assert: (GuardReturnObject sign: -5) equals: -1\n    self assert: (GuardReturnObject sign: 0) equals: 0\n\n  testIfNilGuard =>\n    self assert: (GuardReturnObject orDefault: nil) equals: #default\n    self assert: (GuardReturnObject orDefault: 3) equals: 3\n\n  testIfFalseGuard =>\n    self assert: (GuardReturnObject describe: 1) equals: \"some\"\n    self assert: (GuardReturnObject describe: nil) equals: \"none\"\n\n  testTwoBranchGuardKeepsLocalRebind =>\n    self assert: (GuardReturnObject local: 6) equals: 12\n    self assert: (GuardReturnObject local: 2) equals: 105\n\n  testClassSideGuard =>\n    self assert: (GuardReturnObject canon: nil) equals: \"nil\"\n    self assert: (GuardReturnObject canon: 42) equals: \"42\"\n\n  testTailMatchArmReturn =>\n    self assert: (GuardReturnObject classify: 0) equals: #zero\n    self assert: (GuardReturnObject classify: 1) equals: #other\n\n  testActorGuardKeepsStateWrittenBeforeReturn =>\n    a := GuardReturnActor spawn\n    self assert: (a bump: 20) equals: #big\n    self assert: a count equals: 1\n    self assert: (a bump: 2) equals: #small\n    self assert: a count equals: 4\n\n  testValueGuard =>\n    v := GuardReturnValue new\n    self assert: (v clamp: -3) n equals: 0\n    self assert: (v clamp: 9) n equals: 99\n    self assert: (v clamp: 4) n equals: 4\n\n  // An untyped guard receiver that is not a Boolean is sent the guard's own\n  // selector with a block that returns from the method (BT-4244).\n  testNonBooleanReceiverThatCallsTheBlockReturnsEarly =>\n    r := NonBooleanCondCalling new\n    self assert: (GuardReturnObject early: r) equals: #early\n    self assert: (GuardReturnObject earlyIfFalse: r) equals: #early\n\n  testNonBooleanReceiverThatIgnoresTheBlockFallsThrough =>\n    r := NonBooleanCondIgnoring new\n    self assert: (GuardReturnObject early: r) equals: #late\n    self assert: (GuardReturnObject earlyIfFalse: r) equals: #late\n\n  testUntypedBooleanReceiver =>\n    self assert: (GuardReturnObject early: true) equals: #early\n    self assert: (GuardReturnObject early: false) equals: #late\n    self assert: (GuardReturnObject earlyIfFalse: false) equals: #early\n    self assert: (GuardReturnObject earlyIfFalse: true) equals: #late\n\n  testNonBooleanReceiverWithoutTheSelectorRaises =>\n    self should: [GuardReturnObject early: nil] raise: #does_not_understand\n    self should: [GuardReturnObject earlyIfFalse: 3] raise: #does_not_understand\n\n  testActorNonBooleanReceiverKeepsState =>\n    a := GuardReturnActor spawn\n    self assert: (a early: NonBooleanCondCalling new) equals: #early\n    self assert: a count equals: 0\n    self assert: (a early: NonBooleanCondIgnoring new) equals: #late\n    self assert: a count equals: 1\n    self assert: (a early: true) equals: #early\n    self assert: a count equals: 1",
+      "source": "// BT-4415: a `^` inside an inlined conditional at a method's top level is a\n// direct early return (no NLR frame). Behaviour must match the NLR form:\n// the returned value, the fall-through value, and actor state written before\n// the return.\n\nTestCase subclass: GuardReturnTest\n\n  testIfTrueGuards =>\n    self assert: (GuardReturnObject sign: 5) equals: 1\n    self assert: (GuardReturnObject sign: -5) equals: -1\n    self assert: (GuardReturnObject sign: 0) equals: 0\n\n  testIfNilGuard =>\n    self assert: (GuardReturnObject orDefault: nil) equals: #default\n    self assert: (GuardReturnObject orDefault: 3) equals: 3\n\n  testIfFalseGuard =>\n    self assert: (GuardReturnObject describe: 1) equals: \"some\"\n    self assert: (GuardReturnObject describe: nil) equals: \"none\"\n\n  testTwoBranchGuardKeepsLocalRebind =>\n    self assert: (GuardReturnObject local: 6) equals: 12\n    self assert: (GuardReturnObject local: 2) equals: 105\n\n  testClassSideGuard =>\n    self assert: (GuardReturnObject canon: nil) equals: \"nil\"\n    self assert: (GuardReturnObject canon: 42) equals: \"42\"\n\n  testTailMatchArmReturn =>\n    self assert: (GuardReturnObject classify: 0) equals: #zero\n    self assert: (GuardReturnObject classify: 1) equals: #other\n\n  testActorGuardKeepsStateWrittenBeforeReturn =>\n    a := GuardReturnActor spawn\n    self assert: (a bump: 20) equals: #big\n    self assert: a count equals: 1\n    self assert: (a bump: 2) equals: #small\n    self assert: a count equals: 4\n\n  testValueGuard =>\n    v := GuardReturnValue new\n    self assert: (v clamp: -3) n equals: 0\n    self assert: (v clamp: 9) n equals: 99\n    self assert: (v clamp: 4) n equals: 4\n\n  testTypedComparisonGuardsWithEffects =>\n    v := GuardReturnValue new\n    self assert: (v bounded: -3) n equals: 0\n    self assert: (v bounded: 500) n equals: 100\n    self assert: (v bounded: 95) n equals: 90\n    self assert: (v bounded: 42) n equals: 42\n    self assert: (v positiveOnly: 7) n equals: 7\n    self assert: (v positiveOnly: -7) equals: false\n\n  testActorTypedComparisonGuardKeepsStateWrittenInBranch =>\n    a := GuardReturnActor spawn\n    self assert: (a bumpBig: 20) equals: 100\n    self assert: a count equals: 100\n    self assert: (a bumpBig: 2) equals: 102\n    self assert: a count equals: 102\n\n  // An untyped guard receiver that is not a Boolean is sent the guard's own\n  // selector with a block that returns from the method (BT-4244).\n  testNonBooleanReceiverThatCallsTheBlockReturnsEarly =>\n    r := NonBooleanCondCalling new\n    self assert: (GuardReturnObject early: r) equals: #early\n    self assert: (GuardReturnObject earlyIfFalse: r) equals: #early\n\n  testNonBooleanReceiverThatIgnoresTheBlockFallsThrough =>\n    r := NonBooleanCondIgnoring new\n    self assert: (GuardReturnObject early: r) equals: #late\n    self assert: (GuardReturnObject earlyIfFalse: r) equals: #late\n\n  testUntypedBooleanReceiver =>\n    self assert: (GuardReturnObject early: true) equals: #early\n    self assert: (GuardReturnObject early: false) equals: #late\n    self assert: (GuardReturnObject earlyIfFalse: false) equals: #early\n    self assert: (GuardReturnObject earlyIfFalse: true) equals: #late\n\n  testNonBooleanReceiverWithoutTheSelectorRaises =>\n    self should: [GuardReturnObject early: nil] raise: #does_not_understand\n    self should: [GuardReturnObject earlyIfFalse: 3] raise: #does_not_understand\n\n  testActorNonBooleanReceiverKeepsState =>\n    a := GuardReturnActor spawn\n    self assert: (a early: NonBooleanCondCalling new) equals: #early\n    self assert: a count equals: 0\n    self assert: (a early: NonBooleanCondIgnoring new) equals: #late\n    self assert: a count equals: 1\n    self assert: (a early: true) equals: #early\n    self assert: a count equals: 1",
       "explanation": "BT-4415: a `^` inside an inlined conditional at a method's top level is a direct early return (no NLR frame). Behaviour must match the NLR form: the returned value, the fall-through value, and actor state written before the return."
     },
     {

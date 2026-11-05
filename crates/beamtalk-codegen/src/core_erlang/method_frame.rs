@@ -115,9 +115,9 @@ impl<'a> MethodFrame<'a> {
             .current_method_selector
             .replace(selector_name.to_string());
         let prev_method_span = generator.current_method_span.replace(method.span);
-        let prev_guard_method = generator
-            .current_guard_method
-            .replace(super::guard_returns::MethodKey::of(method));
+        let guard_method = super::guard_returns::MethodKey::of(method);
+        generator.generated_methods.insert(guard_method.clone());
+        let prev_guard_method = generator.current_guard_method.replace(guard_method);
 
         if boundary == MethodBoundary::ClassMethod {
             generator.bind_var("self", CLASS_SELF_VAR);

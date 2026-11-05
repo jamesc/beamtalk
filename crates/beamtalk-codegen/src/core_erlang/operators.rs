@@ -81,6 +81,27 @@ pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
     structural_binary(op).is_some()
 }
 
+/// Whether `op` is an ordering comparison (`< > <= >=`): a dispatchable
+/// message whose builtin is the Erlang comparison BIF.
+pub(in crate::core_erlang) fn is_ordering_comparison(op: &str) -> bool {
+    matches!(op, "<" | ">" | "<=" | ">=")
+}
+
+/// Whether `expr` is a literal with a builtin total order (a number, string
+/// or character), on which the comparison BIFs (`< > <= >=`) are correct.
+/// The literal half of [`CoreErlangGenerator::receiver_is_statically_comparable`],
+/// shared with the guard-return rewrite (`guard_returns`, BT-4452).
+pub(in crate::core_erlang) fn is_comparable_literal(expr: &Expression) -> bool {
+    use beamtalk_core::ast::Literal;
+    matches!(
+        expr,
+        Expression::Literal(
+            Literal::Integer(_) | Literal::Float(_) | Literal::String(_) | Literal::Character(_),
+            _,
+        )
+    )
+}
+
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
@@ -170,6 +191,7 @@ impl CoreErlangGenerator {
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
         let guard = self.operator_guard(op, left);
+        self.record_comparison_lowering(left, guard.is_none());
 
         // ADR 0116: number-on-the-left coercion. Every arithmetic call
         // site that can reach a bare BIF with the *left* operand numeric (the
@@ -293,7 +315,7 @@ impl CoreErlangGenerator {
         left: &Expression,
     ) -> Option<OperatorGuard> {
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        let is_comparison = is_ordering_comparison(op);
         if is_arithmetic && !self.receiver_is_statically_numeric(left) {
             Some(OperatorGuard::Arithmetic)
         } else if is_comparison && !self.receiver_is_statically_comparable(left) {
@@ -360,15 +382,8 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        use beamtalk_core::ast::Literal;
         match expr {
-            Expression::Literal(
-                Literal::Integer(_)
-                | Literal::Float(_)
-                | Literal::String(_)
-                | Literal::Character(_),
-                _,
-            ) => true,
+            Expression::Literal(..) => is_comparable_literal(expr),
             Expression::Identifier(id) => {
                 if id.name == "self" {
                     matches!(

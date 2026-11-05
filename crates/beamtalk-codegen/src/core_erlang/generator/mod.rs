@@ -533,6 +533,17 @@ pub struct CoreErlangGenerator {
     /// [`Self::unconsumed_guard_conditions`]).
     pub(in crate::core_erlang) guard_conditions_used:
         std::collections::HashSet<super::guard_returns::GuardConditionKey>,
+    /// How codegen lowered each recorded typed comparison (BT-4452): `true`
+    /// while every lowering was a bare comparison BIF, `false` once any
+    /// dispatched (see [`Self::unconfirmed_boolean_comparisons`]).
+    pub(in crate::core_erlang) boolean_comparison_lowerings:
+        std::collections::HashMap<super::guard_returns::GuardConditionKey, bool>,
+    /// Every method whose body this generation entered (`MethodFrame::enter`).
+    /// The guard-return checks hold only for these: a same-file `X >> m`
+    /// extension is runtime-patched, not generated into the class module, so
+    /// its recorded guards are never lowered here.
+    pub(in crate::core_erlang) generated_methods:
+        std::collections::HashSet<super::guard_returns::MethodKey>,
     /// The identity of the method whose body is being generated (set by
     /// `MethodFrame::enter` with [`Self::current_method_span`]): the method
     /// half of a [`super::guard_returns::GuardConditionKey`].
@@ -683,6 +694,8 @@ impl CoreErlangGenerator {
             current_method_span: None,
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
+            boolean_comparison_lowerings: std::collections::HashMap::new(),
+            generated_methods: std::collections::HashSet::new(),
             current_guard_method: None,
         }
     }

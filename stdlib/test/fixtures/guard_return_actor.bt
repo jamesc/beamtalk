@@ -19,3 +19,13 @@ Actor subclass: GuardReturnActor
     #late
 
   count => self.count
+
+  // BT-4452: a typed comparison guard whose returning branch writes state.
+  bumpBig: x :: Integer =>
+    x > 10
+      ifTrue: [
+        self.count := self.count + 100
+        ^self.count
+      ]
+    self.count := self.count + x
+    self.count
