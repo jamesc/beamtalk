@@ -1436,11 +1436,24 @@ handle_call(
     %% auto-generated. We check `erlang:function_exported/3` on each module in the
     %% superclass chain, which is true only when the BEAM module contains an
     %% explicit `class_new:` function — correctly supporting inherited constructors.
-    case Args =/= [] andalso has_class_new_in_chain(ClassName, Module) of
+    %%
+    %% BT-4409: a class-side extension or ADR 0084 runtime fun on the class
+    %% itself for `new`/`new:` is honoured the same way: it is what turned the
+    %% caller's direct constructor path off (`direct_call_ok/2`), so this
+    %% fallback must answer it rather than the synthesized constructor.
+    Selector =
+        case Args of
+            [] -> 'new';
+            _ -> 'new:'
+        end,
+    case
+        constructor_shadowed(ClassName, Selector) orelse
+            (Args =/= [] andalso has_class_new_in_chain(ClassName, Module))
+    of
         true ->
             case
                 beamtalk_class_dispatch:handle_class_method_call(
-                    'new:', Args, ClassName, Module, ClassMethods, ClassVars
+                    Selector, Args, ClassName, Module, ClassMethods, ClassVars
                 )
             of
                 {reply, Result, NewClassVars} ->
@@ -1448,7 +1461,7 @@ handle_call(
                     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
                     {reply, Result, State#class_state{class_state = NewClassVars}};
                 {error, not_found} ->
-                    Err = beamtalk_error:new(does_not_understand, ClassName, 'new:'),
+                    Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
                     {reply, {error, Err}, State}
             end;
         false ->
@@ -1510,6 +1523,14 @@ handle_call(
             ok = publish_reflection(State#class_state{name = NewName}),
             beamtalk_class_metadata:put_direct_constructors(
                 NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
+            ),
+            %% BT-4409: the per-class `new:` fact moves too.
+            beamtalk_class_metadata:put_defines_user_class_new1(
+                NewName,
+                case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
+                    unknown -> undefined;
+                    Defines -> Defines
+                end
             ),
             %% BT-4299: the class-variable fact and process-bound list move too.
             beamtalk_class_metadata:put_class_variables(
@@ -1661,11 +1682,12 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
-    %% BT-4126: the gate flag above turns this class's own direct paths off,
-    %% but a gained `new:` strands subclasses' baked `direct_constructors`.
-    %% Static class-method call sites need no warning: each is guarded by
-    %% `direct_call_ok/2`, which the raised `runtime_fun` flag turns off
-    %% (ADR 0142 §2, BT-4301).
+    %% BT-4126: the gate flag above turns this class's own direct paths off;
+    %% a gained `new:` also reaches subclasses' dynamic `new:` through the
+    %% run-time chain check (BT-4409), so the warning about their baked
+    %% `direct_constructors` is informational. Static class-method call sites
+    %% are guarded by `direct_call_ok/2`, which the raised `runtime_fun` flag
+    %% turns off (ADR 0142 §2, BT-4301).
     warn_stale_subclass_constructors(
         ClassName, State#class_state.class_methods, NewClassMethods
     ),
@@ -2390,6 +2412,25 @@ find_inherited_class_method(Selector, SuperName) ->
     published_compiled_method(SuperName, class, Selector).
 
 -doc """
+Whether a class-side extension registered on `ClassName` itself, or an ADR
+0084 runtime class-method fun of `ClassName`, answers the constructor
+`Selector` (`new` or `new:`) (BT-4409). The `{new, _}` handler then runs it
+like any other class method (`handle_class_method_call/6`, which checks the
+extension first) instead of the synthesized constructor, so a constructor
+shadowed after a caller warmed up is honoured on the path the caller falls
+back to. The raw shadow flags (`beamtalk_class_shadow_flags:is_shadowed/2`,
+one `persistent_term` read each) pre-screen the common unshadowed class. Only
+the class's own shadows count: an ancestor's class-side `new` extension does
+not shadow the class's synthesized `new`, as on the class-process lookup.
+""".
+-spec constructor_shadowed(class_name(), selector()) -> boolean().
+constructor_shadowed(ClassName, Selector) ->
+    Tag = beamtalk_class_registry:class_object_tag(ClassName),
+    beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName) andalso
+        (beamtalk_dispatch:check_extension(Tag, Selector) =/= not_found orelse
+            beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error).
+
+-doc """
 Check whether `class_new:/2` is exported anywhere in the superclass chain.
 
 Walks the ETS hierarchy table from `ClassName` upward.  Returns `true` as soon as
@@ -2634,6 +2675,11 @@ Copies `direct_constructors` from `Meta` into the unified metadata row, where
 without the key (dynamic classes, older modules) clears the set, so a reload
 that makes a class ineligible takes effect immediately. Only `new`/`new:`
 atoms are kept; anything else in the list is dropped defensively.
+
+Also publishes the class's own `defines_user_class_new1` fact (BT-4409),
+which descendants' dynamic `new:` reads through
+`beamtalk_class_metadata:chain_has_user_new1/1`; Meta without it stores
+`undefined` (unknown), so the chain walk fails closed.
 """.
 -spec sync_direct_constructors(class_name(), map()) -> ok.
 sync_direct_constructors(ClassName, Meta) ->
@@ -2642,6 +2688,12 @@ sync_direct_constructors(ClassName, Meta) ->
             L when is_list(L) -> [S || S <- L, S =:= new orelse S =:= 'new:'];
             _ -> []
         end,
+    DefinesNew1 =
+        case maps:get(defines_user_class_new1, Meta, undefined) of
+            B when is_boolean(B) -> B;
+            _ -> undefined
+        end,
+    beamtalk_class_metadata:put_defines_user_class_new1(ClassName, DefinesNew1),
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
@@ -2677,13 +2729,16 @@ sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
 Warn when `ClassName` has just gained a class-side `new:` that its subclasses'
 baked `direct_constructors` verdicts do not know about (BT-4126).
 
-A subclass's `new:` verdict is baked only when no ancestor defines a
-class-side `new:` (Rust's `chain_has_user_new_init`). If `ClassName` *gains*
-one (by a compiled reload or a runtime-fun `put_class_method`), every
-transitive subclass whose row still lists `new:` keeps building in the caller
-and silently skips the new override. Those subclasses are named, so the
-warning says exactly what to recompile. Losing a `new:` needs no warning:
-stale descendants then just take the (correct, slower) gen_server path.
+A subclass's `new:` verdict is baked only when no ancestor defined a
+class-side `new:` at its compile time (Rust's `chain_has_user_new_init`).
+Since BT-4409 the chain is also decided at run time: a dynamic `new:` builds
+in the caller only while `beamtalk_class_metadata:chain_has_user_new1/1`
+finds no ancestor publishing a user `new:` (nor an ancestor's runtime-fun
+`new:`), so if `ClassName` *gains* one (by a compiled reload or a runtime-fun
+`put_class_method`), its subclasses route through it at once, without being
+recompiled. This warning is therefore informational: it names the subclasses
+whose baked verdict no longer matches their ancestors, which a recompile
+brings back in line. Losing a `new:` needs no warning.
 
 "Has a class-side `new:`" is read from the class-method map, which for a
 compiled class is the module's `class_method_info` (user primary methods only,
@@ -2957,9 +3012,11 @@ apply_class_info(State, ClassInfo) ->
     %% reload adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
-    %% the reload strands descendants' `direct_constructors`. Static
-    %% class-method call sites are guarded by `direct_call_ok/2` (ADR 0142 §2,
-    %% BT-4301), so they cannot go stale and need no warning.
+    %% the reload leaves descendants' baked `direct_constructors` behind their
+    %% ancestors (informational: their dynamic `new:` re-checks the chain at
+    %% run time, BT-4409). Static class-method call sites are guarded by
+    %% `direct_call_ok/2` (ADR 0142 §2, BT-4301), so they cannot go stale and
+    %% need no warning.
     warn_stale_subclass_constructors(
         State#class_state.name, State#class_state.class_methods, NewClassMethods
     ),

@@ -36,7 +36,14 @@ Keys are caller-chosen terms; namespace them with a leading tag
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
 `{class_method_owner, ClassPid, Selector}`,
-`{inherited_target, Class, Selector}`, `{declared_fields, Class}`).
+`{inherited_target, Class, Selector}`, `{declared_fields, Class}`,
+`{chain_has_user_new1, Class}`, `{direct_constructor, ClassPid, Selector}`).
+`chain_has_user_new1` is whether an ancestor of `Class` defines a user
+class-side `new:` (`beamtalk_class_metadata:chain_has_user_new1/1`, BT-4409);
+`direct_constructor` is the dynamic `new`/`new:` verdict built on it
+(`beamtalk_class_dispatch:lookup_direct_constructor/3`): the class, its tag
+and the module whose `new/0`/`new/1` may build in the caller, or `error`,
+before the per-send `direct_call_ok/2` and export checks.
 `declared_fields` is the full declared field set (own, inherited and `late`
 names) that `beamtalk_class_instantiation:check_init_args/5` validates a
 `new:`/`spawnWith:` map against (BT-4281); only a completed superclass walk
@@ -79,7 +86,9 @@ memo reads; it invalidates on its own rather than relying on
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
 write has landed. So do the class-side writes the `class_method_owner` memo
 reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),
-`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change. Extension install and removal do too: compiled
+`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change,
+and the constructor facts `put_direct_constructors/2` and
+`put_defines_user_class_new1/2` (BT-4409). Extension install and removal do too: compiled
 `has_method_local/1` consults the extension table, so an extension changes
 resolution for every chain through its class.
 Invalidation is global, not per class: a derived fact about

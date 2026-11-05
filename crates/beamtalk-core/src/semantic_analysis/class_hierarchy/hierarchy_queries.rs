@@ -618,7 +618,11 @@ impl ClassHierarchy {
     ///   (`has_class_new_in_chain`), so any user `new:` in the class or its
     ///   ancestors disables the fast path — except `Value`'s own, which is
     ///   the `@intrinsic basicNewWith` router that just forwards to the
-    ///   receiver's `new/1` (pinned by a test parsing `value.bt`).
+    ///   receiver's `new/1` (pinned by a test parsing `value.bt`). The
+    ///   ancestors' part is checked again at run time, from the facts the
+    ///   ancestors publish (`defines_user_class_new1`, BT-4409), so an
+    ///   ancestor that gains a user `new:` after this class was compiled is
+    ///   honoured; this compile-time walk can only keep the verdict off.
     /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
     ///   only the class's own synthesis record matters.
     ///
@@ -675,11 +679,15 @@ impl ClassHierarchy {
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
-    /// that is real user code.
+    /// that is real user code ([`Self::defines_user_class_new1`], asked of
+    /// each ancestor).
     ///
-    /// `Value` itself is skipped: its `new:` is the `@intrinsic basicNewWith`
-    /// router, not an override (skipping by name is sound: `Value` is a
-    /// runtime-protected class name, so no user class can shadow it).
+    /// The compile-time half of the `new:` chain rule: it only ever keeps the
+    /// baked `direct_constructors` verdict off. The run-time half,
+    /// `beamtalk_class_metadata:chain_has_user_new1/1`, walks the same
+    /// per-class fact as each ancestor publishes it (BT-4409), so an ancestor
+    /// reloaded with a user `new:` turns a descendant's fast path off without
+    /// recompiling the descendant.
     /// Mirrors the runtime's `has_class_new_in_chain` depth cap (50);
     /// anything unknown fails closed so the `new:` fast path stays off.
     fn chain_has_user_new_init(&self, class_name: &str) -> bool {
@@ -694,26 +702,42 @@ impl ClassHierarchy {
                 return true;
             }
             depth += 1;
+            if self.defines_user_class_new1(name.as_str()) {
+                return true;
+            }
             let Some(info) = self.classes.get(name.as_str()) else {
                 return true;
             };
-            // Error recovery can drop method definitions, so an ancestor
-            // whose surface is incomplete may hide a user `new:` — fail
-            // closed, like the leaf check in `direct_constructors`.
-            if info.surface_incomplete {
-                return true;
-            }
-            if name.as_str() != "Value"
-                && info
-                    .class_methods
-                    .iter()
-                    .any(|m| m.selector.as_str() == "new:")
-            {
-                return true;
-            }
             current.clone_from(&info.superclass);
         }
         false
+    }
+
+    /// Whether the named class itself defines a class-side `new:` that is
+    /// real user code: the one per-class rule behind both the compile-time
+    /// chain walk ([`Self::chain_has_user_new_init`]) and the fact baked into
+    /// each class's `__beamtalk_meta/0` as `defines_user_class_new1`, which
+    /// the runtime's `new:` chain check walks (BT-4409).
+    ///
+    /// `Value` answers `false`: its `new:` is the `@intrinsic basicNewWith`
+    /// router, not an override (skipping by name is sound: `Value` is a
+    /// runtime-protected class name, so no user class can shadow it). An
+    /// unknown class, or one whose surface is incomplete (error recovery can
+    /// drop method definitions, so it may hide a user `new:`), answers `true`:
+    /// fail closed, like the leaf check in `direct_constructors`.
+    #[must_use]
+    pub fn defines_user_class_new1(&self, class_name: &str) -> bool {
+        let Some(info) = self.classes.get(class_name) else {
+            return true;
+        };
+        if info.surface_incomplete {
+            return true;
+        }
+        class_name != "Value"
+            && info
+                .class_methods
+                .iter()
+                .any(|m| m.selector.as_str() == "new:")
     }
 
     /// Synthesize auto-generated slot methods from `ClassInfo` state fields.

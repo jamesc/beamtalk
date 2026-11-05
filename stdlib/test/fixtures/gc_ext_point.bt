@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4409: a stateless Value whose `new` (and `new:`) build in the caller
+// behind the ADR 0142 guard. See guarded_constructor_test.bt.
+
+Value subclass: GcExtPoint
+  field: x = 0

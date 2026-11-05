@@ -135,7 +135,8 @@ A class method runs **in the caller** when all of these hold:
      0130 §1's no-nesting rule is untouched.
 3. **The selector is not process-bound.** These keep their current routing:
    - `new`, `new:`, `startLink` and `startLink:` (ADR 0129). Value constructors
-     keep their BT-4099 direct path.
+     keep a direct path (BT-4099), behind the same guard (amended, BT-4409:
+     see §2).
    - `spawn` and `spawnWith:`, which have dedicated clauses in
      `beamtalk_class_dispatch`.
    - `Supervisor` `supervise`/`spawn*`, which are routed before
@@ -270,6 +271,36 @@ end
 
   See the `beamtalk_class_shadow_flags` moduledoc and
   `benchmarks/vs-elixir/results/bench-bt4316.md`.
+- **Amended (BT-4409, 2026-11-05): constructors are guarded too.** The
+  BT-4099 constructor fast path was the last unguarded compile-time verdict
+  on the class side. It now runs behind the same guard:
+  - **Static `X new`** on an eligible Value uses the static call key
+    `{Module, new, Tag}`, with arity 0. The hit path calls `Module:new()`,
+    which takes no `ClassSelf`, so the key's class reference only marks it as
+    installed. Since `new` is process-bound, `in_caller_owner/2` never names
+    it. `static_call_target/4` asks the dynamic path's question instead:
+    `beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])` must
+    answer `{ok, Module}`. The class's baked `direct_constructors` set is
+    published after a reload's erases, so a change to it erases the class's
+    keys too.
+  - **Dynamic `new`/`new:`** requires `direct_call_ok/2`. A class-side
+    extension or ADR 0084 runtime fun of `new`/`new:` on the class itself
+    then takes the fallback, and the class process's `{new, _}` handler runs
+    it. An ancestor's class-side `new` extension does not shadow the class's
+    own synthesized `new`, as on the class-process lookup.
+  - **The `new:` chain fact is decided at run time.** Rust bakes a per-class
+    fact into `__beamtalk_meta/0`, `defines_user_class_new1`: "this class
+    defines a class-side `new:` that is user code". `Value` is exempt, because
+    its `new:` is the `basicNewWith` router. One Rust helper,
+    `ClassHierarchy::defines_user_class_new1`, decides the fact for the bake
+    and for the compile-time chain walk. A dynamic `new:` builds in the caller
+    only while `beamtalk_class_metadata:chain_has_user_new1/1` finds no
+    ancestor that publishes a user `new:` or has a runtime-fun `new:`. The
+    walk fails closed on a missing row, link or fact, and on a cycle. It is
+    memoised in `beamtalk_class_derived_cache`. So an ancestor reloaded with
+    a user `new:` is honoured by already-loaded descendants without
+    recompiling them. BT-4126's reload warning becomes informational.
+  - Static `new:` stays on `class_send`; its fast path is the dynamic one.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

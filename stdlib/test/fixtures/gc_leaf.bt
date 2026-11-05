@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4409: a Value subclass whose own synthesized `new:` is eligible to build
+// in the caller while no ancestor defines a user class-side `new:`. See
+// guarded_constructor_test.bt.
+
+GcBase subclass: GcLeaf
+  field: y = 0

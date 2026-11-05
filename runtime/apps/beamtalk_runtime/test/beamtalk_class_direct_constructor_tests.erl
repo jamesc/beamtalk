@@ -413,3 +413,236 @@ stale_verdict_warning_test_() ->
             end
         end}
     ]}.
+
+%%====================================================================
+%% BT-4409: the constructor fast path behind the ADR 0142 guard
+%%====================================================================
+
+-define(NEW1_HELPER, beamtalk_class_direct_ctor_new1_helper).
+
+reload_with(Name, Module, Meta) ->
+    {module, Module} = code:ensure_loaded(Module),
+    {ok, _} = beamtalk_object_class:update_class(Name, #{module => Module, meta => Meta}),
+    ok.
+
+ctor_key(Name) -> {?HELPER, new, beamtalk_class_registry:class_object_tag(Name)}.
+
+ctor_target(Name) ->
+    beamtalk_class_shadow_flags:static_call_target(ctor_key(Name), Name, new, 0).
+
+ctor_key_value(Name) ->
+    beamtalk_class_shadow_flags:static_call_key_value(ctor_key(Name)).
+
+new1_chain_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"an ancestor reloaded with a user new: is honoured by a loaded descendant", fun() ->
+            %% The descendant's baked verdict still lists `new:`; only the
+            %% run-time chain check (`chain_has_user_new1/1`, from the facts
+            %% the ancestors publish) can see the parent's new `new:`.
+            Parent = start_class('BT4409Parent', #{defines_user_class_new1 => false}),
+            Child = start_subclass('BT4409Child', 'BT4409Parent', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            try
+                ?assertEqual(
+                    {self(), #{a => 1}},
+                    beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
+                ),
+                ok = reload_with('BT4409Parent', ?NEW1_HELPER, #{
+                    class_method_info => ?USER_NEW1, defines_user_class_new1 => true
+                }),
+                ?assert(beamtalk_class_metadata:chain_has_user_new1('BT4409Child')),
+                ?assertEqual(
+                    {ancestor_new1, Child, #{a => 1}},
+                    beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
+                ),
+                %% `new/0` is its own override slot: `new` stays direct.
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Child, new, [])),
+                %% Dropping the parent's `new:` brings the fast path back.
+                ok = reload_with('BT4409Parent', ?HELPER, #{
+                    class_method_info => #{}, defines_user_class_new1 => false
+                }),
+                ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4409Child')),
+                ?assertEqual(
+                    {self(), #{a => 1}},
+                    beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"an ancestor's runtime new: fun turns a descendant's direct new: off", fun() ->
+            Parent = start_class('BT4409FunParent', #{defines_user_class_new1 => false}),
+            Child = start_subclass('BT4409FunChild', 'BT4409FunParent', #{
+                direct_constructors => ['new:'], defines_user_class_new1 => false
+            }),
+            try
+                ?assertEqual(
+                    {self(), #{a => 1}},
+                    beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
+                ),
+                ok = beamtalk_object_class:put_class_method(
+                    Parent, 'new:', fun(_Self, Init) -> {from_fun, Init} end
+                ),
+                ?assert(beamtalk_class_metadata:chain_has_user_new1('BT4409FunChild')),
+                ?assertEqual(
+                    error,
+                    beamtalk_class_dispatch:lookup_direct_constructor(Child, 'new:', [#{a => 1}])
+                )
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"an ancestor that never published the fact keeps new: on the class process", fun() ->
+            %% An older module (or a dynamic ancestor) carries no
+            %% `defines_user_class_new1`: unknown, so the chain fails closed.
+            Parent = start_class('BT4409OldParent', #{}),
+            Child = start_subclass('BT4409OldChild', 'BT4409OldParent', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            try
+                ?assertEqual(
+                    {Child, #{a => 1}},
+                    beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
+                ),
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Child, new, []))
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
+        {"chain_has_user_new1 walks only the ancestors and fails closed", fun() ->
+            M = beamtalk_class_metadata,
+            Names = [
+                'BT4409Root',
+                'BT4409Leaf',
+                'BT4409Orphan',
+                'BT4409NoLink',
+                'BT4409NoLinkLeaf',
+                'BT4409CycA',
+                'BT4409CycB'
+            ],
+            try
+                ok = M:insert('BT4409Root', ?HELPER, [], none, false),
+                ok = M:put_defines_user_class_new1('BT4409Root', false),
+                ok = M:insert('BT4409Leaf', ?HELPER, [], 'BT4409Root', false),
+                ?assertNot(M:chain_has_user_new1('BT4409Leaf')),
+                ?assertNot(M:chain_has_user_new1('BT4409Root')),
+                %% The class's own fact is not part of the chain answer.
+                ok = M:put_defines_user_class_new1('BT4409Leaf', true),
+                ?assertNot(M:chain_has_user_new1('BT4409Leaf')),
+                %% An ancestor's user `new:`.
+                ok = M:put_defines_user_class_new1('BT4409Root', true),
+                ?assert(M:chain_has_user_new1('BT4409Leaf')),
+                %% A missing fact (a module compiled before the key existed).
+                ok = M:put_defines_user_class_new1('BT4409Root', undefined),
+                ?assert(M:chain_has_user_new1('BT4409Leaf')),
+                ok = M:put_defines_user_class_new1('BT4409Root', false),
+                ?assertNot(M:chain_has_user_new1('BT4409Leaf')),
+                %% A missing ancestor row.
+                ok = M:insert('BT4409Orphan', ?HELPER, [], 'BT4409NoSuchClass', false),
+                ?assert(M:chain_has_user_new1('BT4409Orphan')),
+                %% A missing superclass link above an ancestor.
+                ok = M:insert('BT4409NoLink', ?HELPER, [], undefined, false),
+                ok = M:put_defines_user_class_new1('BT4409NoLink', false),
+                ok = M:insert('BT4409NoLinkLeaf', ?HELPER, [], 'BT4409NoLink', false),
+                ?assert(M:chain_has_user_new1('BT4409NoLinkLeaf')),
+                %% A missing link on the class itself, and no row at all.
+                ?assert(M:chain_has_user_new1('BT4409NoLink')),
+                ?assert(M:chain_has_user_new1('BT4409NeverRegistered')),
+                %% A hierarchy cycle.
+                ok = M:insert('BT4409CycA', ?HELPER, [], 'BT4409CycB', false),
+                ok = M:insert('BT4409CycB', ?HELPER, [], 'BT4409CycA', false),
+                ok = M:put_defines_user_class_new1('BT4409CycA', false),
+                ok = M:put_defines_user_class_new1('BT4409CycB', false),
+                ?assert(M:chain_has_user_new1('BT4409CycA'))
+            after
+                [M:delete(N) || N <- Names]
+            end
+        end}
+    ]}.
+
+static_new_key_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a static new key is installed while the dynamic path builds in the caller", fun() ->
+            Name = 'BT4409StaticNew',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            Tag = beamtalk_class_registry:class_object_tag(Name),
+            try
+                Ref = {beamtalk_object, Tag, ?HELPER, Pid},
+                ?assertEqual(Ref, ctor_target(Name)),
+                ?assertEqual(Ref, ctor_key_value(Name))
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"a class-side new extension erases the key and is honoured", fun() ->
+            Name = 'BT4409ExtNew',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            Tag = beamtalk_class_registry:class_object_tag(Name),
+            try
+                ?assertNotEqual(false, ctor_target(Name)),
+                ok = beamtalk_extensions:register(
+                    Tag, new, fun(_Args, _ClassSelf) -> from_extension end, test
+                ),
+                ?assertEqual(false, ctor_key_value(Name)),
+                ?assertEqual(false, ctor_target(Name)),
+                ?assertEqual(
+                    error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])
+                ),
+                ?assertEqual(from_extension, beamtalk_class_dispatch:class_send(Pid, new, [])),
+                ok = beamtalk_extensions:unregister(Name, new, true),
+                ?assertNotEqual(false, ctor_target(Name)),
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
+            after
+                catch beamtalk_extensions:unregister(Name, new, true),
+                stop_class(Pid)
+            end
+        end},
+        {"a runtime new fun (put_class_method) erases the key and is honoured", fun() ->
+            Name = 'BT4409FunNew',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            try
+                ?assertNotEqual(false, ctor_target(Name)),
+                ok = beamtalk_object_class:put_class_method(Pid, new, fun(_Self) -> from_fun end),
+                ?assertEqual(false, ctor_key_value(Name)),
+                ?assertEqual(false, ctor_target(Name)),
+                ?assertEqual(from_fun, beamtalk_class_dispatch:class_send(Pid, new, []))
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"a reload dropping new from the baked set erases the key", fun() ->
+            Name = 'BT4409ReloadNew',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            try
+                ?assertNotEqual(false, ctor_target(Name)),
+                ok = reload_with(Name, ?HELPER, #{direct_constructors => []}),
+                ?assertEqual(false, ctor_key_value(Name)),
+                ?assertEqual(false, ctor_target(Name)),
+                ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
+            after
+                stop_class(Pid)
+            end
+        end},
+        {"a key naming another module or an unregistered class is declined", fun() ->
+            Name = 'BT4409OtherMod',
+            Pid = start_class(Name, #{direct_constructors => [new]}),
+            Tag = beamtalk_class_registry:class_object_tag(Name),
+            try
+                ?assertEqual(
+                    false,
+                    beamtalk_class_shadow_flags:static_call_target(
+                        {?NEW1_HELPER, new, Tag}, Name, new, 0
+                    )
+                ),
+                ?assertEqual(
+                    false,
+                    beamtalk_class_shadow_flags:static_call_target(
+                        ctor_key('BT4409Unregistered'), 'BT4409Unregistered', new, 0
+                    )
+                )
+            after
+                stop_class(Pid)
+            end
+        end}
+    ]}.

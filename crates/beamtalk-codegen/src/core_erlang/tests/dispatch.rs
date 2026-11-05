@@ -4650,9 +4650,11 @@ fn unqualified_class_reference(name: &str) -> Expression {
 }
 
 #[test]
-fn test_direct_new0_emits_module_new_call() {
-    // `Pt new` on an eligible Value builds via a direct
-    // `Module:'new'()` call — no registry lookup, no `class_send`.
+fn test_direct_new0_emits_guarded_module_new_call() {
+    // BT-4409: `Pt new` on an eligible Value builds via a direct
+    // `Module:'new'()` call behind the static call key `{Module, 'new', Tag}`
+    // (BT-4316's shape), whose miss path asks the runtime with arity 0
+    // (`new/0` takes no `ClassSelf`) and whose fallback is `class_send`.
     let mut generator = generator_with_direct_constructors("Pt", None, true, false);
     let receiver = unqualified_class_reference("Pt");
     let selector = MessageSelector::Unary("new".into());
@@ -4663,12 +4665,23 @@ fn test_direct_new0_emits_module_new_call() {
     let output = doc.to_pretty_string();
 
     assert!(
-        output.contains("call 'bt@test@pt':'new'()"),
-        "eligible `Pt new` must call the synthesized builder directly. Got:\n{output}"
+        output.contains(
+            "case call 'persistent_term':'get'({'bt@test@pt', 'new', 'Pt class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'new', 'Pt class'}, 'Pt', 'new', 0)"
+        ),
+        "eligible `Pt new` must be guarded by its static call key. Got:\n{output}"
     );
     assert!(
-        !output.contains("whereis") && !output.contains("class_send"),
-        "direct `new` must not touch the registry or gen_server dispatch. Got:\n{output}"
+        output.contains("<_> when 'true' -> call 'bt@test@pt':'new'()"),
+        "the hit arm calls the synthesized builder directly. Got:\n{output}"
+    );
+    assert!(
+        output.contains("'beamtalk_object_class':'class_send'(") && output.contains("'new', [])"),
+        "a declined key falls back to class_send of `new`. Got:\n{output}"
+    );
+    assert_eq!(
+        output.matches("call 'bt@test@pt':'new'()").count(),
+        1,
+        "the direct call appears once. Got:\n{output}"
     );
 }
 
@@ -4826,6 +4839,24 @@ fn test_value_meta_bakes_direct_constructors() {
         "no direct_class_methods table is baked (BT-4301). Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
+}
+
+/// BT-4409: every class bakes its own `defines_user_class_new1` fact (the
+/// one `ClassHierarchy::defines_user_class_new1` rule): false for a plain
+/// Value subclass, true for a class defining a class-side `new:`.
+#[test]
+fn test_meta_bakes_defines_user_class_new1() {
+    let plain = codegen_source("Value subclass: Pt\n  field: x = 0\n");
+    assert!(
+        plain.contains("'defines_user_class_new1' => 'false'"),
+        "a class without a user `new:` bakes false. Got:\n{plain}"
+    );
+    let custom = codegen_source("Object subclass: Custom\n\n  class new: m => m\n");
+    assert!(
+        custom.contains("'defines_user_class_new1' => 'true'"),
+        "a class with a user class-side `new:` bakes true. Got:\n{custom}"
+    );
+    super::assert_compiles_through_erlc("test", &plain);
 }
 
 #[test]
