@@ -1499,15 +1499,12 @@ impl TypeChecker {
             let Some(expected_declared) = expected else {
                 continue;
             };
-            if let Some(Expression::ListLiteral { elements, .. }) = arg_exprs
-                .and_then(|exprs| exprs.get(i))
-                .map(Expression::unwrap_parens)
-            {
+            if let Some(arg) = arg_exprs.and_then(|exprs| exprs.get(i)) {
                 self.check_list_literal_elements(
                     class_name,
                     selector,
                     i + 1,
-                    elements,
+                    arg,
                     expected_declared,
                     hierarchy,
                 );
@@ -1817,40 +1814,44 @@ impl TypeChecker {
         }
     }
 
-    /// BT-4385: a list literal `#(...)` passed to a parameter declared
-    /// `List(E)` (directly or through an alias) checks each element against
-    /// `E`, by the same rule as an annotated local
-    /// ([`Self::detect_assignment_type_mismatch`]). The argument's own joined
-    /// `List(E')` type cannot carry this: a joined element type loses which
-    /// element is wrong, and the nominal argument check compares only the
-    /// `List` base.
+    /// BT-4385: when `arg` (parens unwrapped) is a non-empty list literal
+    /// and the parameter declared `expected_declared` takes a list with a
+    /// concrete element type, the literal's elements and that element type.
+    /// The argument is then judged element by element
+    /// ([`Self::check_list_literal_elements`]), and the whole-argument
+    /// variance check (`check_variance_in_expr`) leaves it alone, so one
+    /// mistake gets one warning.
     ///
-    /// The element check is for concrete element types in a signature
-    /// (`List(RegexOption)`, `List(Tuple(Symbol, Integer))`). Every type
-    /// param of the receiver class and its superclasses (`E` on
-    /// `List>>++`, `Item` on a user `Box(Item)`) resolves to `Dynamic`, so
-    /// an element position typed by one is not judged here; a method-local
-    /// type variable (`T`) stays a placeholder, which the shared rule skips.
-    /// Elements whose type was not inferred, or is `Dynamic`, are skipped. A
-    /// cons tail (`#(a | rest)`) is not an element and is not checked.
-    fn check_list_literal_elements(
+    /// The declared type may be `List(E)`, an alias of it, or a union with
+    /// exactly one `List` arm (`List(RegexOption) | Nil`). It is `None`, and
+    /// the argument keeps the whole-argument checks, when `E` mentions:
+    /// - a type param of the receiver class or a superclass (`E` on
+    ///   `List>>++`, `Item` on a user `Box(Item)`), resolved to `Dynamic`
+    ///   here, or a method-local type variable (`T`);
+    /// - a protocol: conformance is structural, and the per-element
+    ///   assignability rule is nominal (BT-4482).
+    ///
+    /// A cons tail (`#(a | rest)`) is not an element and is not checked.
+    pub(super) fn list_literal_element_expectation<'a>(
         &mut self,
-        class_name: &EcoString,
-        selector: &str,
-        param_pos: usize,
-        elements: &[Expression],
+        arg: &'a Expression,
         expected_declared: &DeclaredType,
+        class_name: &str,
         hierarchy: &ClassHierarchy,
-    ) {
+    ) -> Option<(&'a [Expression], InferredType)> {
+        let Expression::ListLiteral { elements, .. } = arg.unwrap_parens() else {
+            return None;
+        };
         if elements.is_empty() {
-            return;
+            return None;
         }
-        let class_type_params: type_resolver::SubstitutionMap = std::iter::once(class_name.clone())
-            .chain(hierarchy.superclass_chain(class_name))
-            .filter_map(|name| hierarchy.get_class(&name))
-            .flat_map(|info| info.type_params.iter().cloned())
-            .map(|param| (param, InferredType::Dynamic(DynamicReason::Unknown)))
-            .collect();
+        let class_type_params: type_resolver::SubstitutionMap =
+            std::iter::once(EcoString::from(class_name))
+                .chain(hierarchy.superclass_chain(class_name))
+                .filter_map(|name| hierarchy.get_class(&name))
+                .flat_map(|info| info.type_params.iter().cloned())
+                .map(|param| (param, InferredType::Dynamic(DynamicReason::Unknown)))
+                .collect();
         let (resolved, alias_deps) = type_resolver::resolve_declared_type_with_alias_deps(
             expected_declared,
             &class_type_params,
@@ -1859,20 +1860,86 @@ impl TypeChecker {
             super::TypeStringContext::Declared,
         );
         self.referenced_aliases.extend(alias_deps);
-        let InferredType::Known {
-            class_name: list_class,
-            type_args,
-            ..
-        } = &resolved
+        let list_element = |ty: &InferredType| match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "List" && type_args.len() == 1 => Some(type_args[0].clone()),
+            _ => None,
+        };
+        let element = match &resolved {
+            InferredType::Union { members, .. } => {
+                let mut arms = members.iter().filter_map(list_element);
+                let first = arms.next()?;
+                if arms.next().is_some() {
+                    return None;
+                }
+                first
+            }
+            other => list_element(other)?,
+        };
+        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+            return None;
+        }
+        Some((elements.as_slice(), element))
+    }
+
+    /// Whether a declared list element type is left to the whole-argument
+    /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
+    /// or mentions a type variable placeholder or a protocol anywhere in it.
+    fn element_type_is_unjudged(
+        ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                super::is_type_var_placeholder(class_name, hierarchy)
+                    || hierarchy.is_protocol_class(class_name)
+                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
+                    || type_args.iter().any(|arg| {
+                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
+                    })
+            }
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+            InferredType::Meta { .. }
+            | InferredType::ProtocolMeta { .. }
+            | InferredType::Never
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => false,
+        }
+    }
+
+    /// BT-4385: a list literal `#(...)` passed to a parameter declared
+    /// `List(E)` checks each element against `E`, by the same rule as an
+    /// annotated local ([`Self::detect_assignment_type_mismatch`]). The
+    /// argument's own joined `List(E')` type cannot carry this: a joined
+    /// element type loses which element is wrong, and the nominal argument
+    /// check compares only the `List` base. Which arguments are judged, and
+    /// against what, is [`Self::list_literal_element_expectation`].
+    fn check_list_literal_elements(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        param_pos: usize,
+        arg: &Expression,
+        expected_declared: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some((elements, element_declared)) =
+            self.list_literal_element_expectation(arg, expected_declared, class_name, hierarchy)
         else {
             return;
         };
-        let [element_declared] = type_args.as_slice() else {
-            return;
-        };
-        if list_class != "List" {
-            return;
-        }
+        let element_declared = &element_declared;
         for (j, element) in elements.iter().enumerate() {
             let Some(element_ty) = self.type_map.get(element.span()).cloned() else {
                 continue;
