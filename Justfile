@@ -1199,7 +1199,10 @@ test-rust: (_test-rust "")
 # NOTE (BT-4331): `beamtalk-cli`'s `cli_run` e2e tests need the `just build`
 # artifacts (`runtime/apps/beamtalk_stdlib/ebin/*.beam`); without a preceding
 # `just build` they fail fast naming that prerequisite instead of passing.
-test-rust-crate CRATE: (_test-rust "-p " + CRATE)
+# A bin-only crate (no `lib` target, e.g. `beamtalk-compiler-port`) runs its
+# bin/test/example targets only: cargo rejects `--lib` and `--doc` for it
+# (BT-4419), so `_test-rust` drops both after asking `cargo metadata`.
+test-rust-crate CRATE: (_test-rust CRATE)
 
 # PARTITION is an optional nextest `--partition` spec (e.g. `count:1/2`) so CI can
 # shard the tier across jobs; empty runs the whole tier.
@@ -1243,35 +1246,50 @@ platform_skip_cargo_args := "--workspace " + replace_regex(platform_independent_
 
 test-rust-platform: (_test-rust "" platform_skip_filterset platform_skip_cargo_args)
 
-# ARGS is the cargo package selection, e.g. `-p <crate>`. SKIP_FILTERSET is a
+# The cargo target kinds `--lib` and `--doc` select (a `[lib]` with a
+# `crate-type` list reports those types instead of `lib`).
+lib_target_kinds := "^(lib|rlib|dylib|cdylib|staticlib|proc-macro)$"
+
+# CRATE is one package to test (`-p <crate>`), or empty for the workspace. A
+# crate without a `lib` target gets neither `--lib` nor the `--doc` pass, which
+# cargo rejects for it (BT-4419). SKIP_FILTERSET is a
 # nextest filterset of tests not to run, and SKIP_CARGO_ARGS the same packages
 # as cargo-test arguments for the no-nextest fallback (see `test-rust-platform`).
 # `cargo test --doc` runs the doctests nextest does not. The criterion bench
 # smoke is not here: see `test-benches-smoke` (nightly only, BT-3886).
 [unix]
-_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
+_test-rust CRATE SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
+    pkg=() lib=(--lib) doc=(--doc) lib_kinds='{{ lib_target_kinds }}'
+    if [ -n "{{ CRATE }}" ]; then
+        pkg=(-p "{{ CRATE }}")
+        command -v jq >/dev/null 2>&1 || { echo "❌ jq is required to inspect {{ CRATE }}'s targets"; exit 1; }
+        kinds=$(cargo metadata --no-deps --format-version 1 | jq -r --arg n "{{ CRATE }}" '.packages[] | select(.name == $n) | .targets[].kind[]') || exit $?
+        [ -n "$kinds" ] || { echo "❌ no workspace package named {{ CRATE }}"; exit 1; }
+        grep -qxE "$lib_kinds" <<<"$kinds" || { lib=(); doc=(); }
+    fi
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }} || exit $?
+        cargo nextest run "${lib[@]}" --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' "${pkg[@]}" || exit $?
         rest=()
     else
         echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier and the bench smoke too)"
         rest=("--all-targets {{ SKIP_CARGO_ARGS }}")
     fi
-    for targets in "${rest[@]}" "--doc"; do
-        output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
+    for targets in "${rest[@]}" "${doc[@]}"; do
+        output=$(cargo test $targets --quiet "${pkg[@]}" 2>&1) && rc=0 || rc=$?
         echo "$output" | grep -E '^test result:|FAILED|^error' || true
         if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     done
     echo "✅ Rust tests complete"
 
 [windows]
-_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
+_test-rust CRATE SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} {{ SKIP_CARGO_ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
-    @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
+    @$pkg = @(); $lib = @('--lib'); $doc = $true; if ('{{ CRATE }}' -ne '') { $pkg = @('-p', '{{ CRATE }}'); $meta = cargo metadata --no-deps --format-version 1 | Out-String; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $p = ($meta | ConvertFrom-Json).packages | Where-Object { $_.name -eq '{{ CRATE }}' }; if (-not $p) { Write-Output "no workspace package named {{ CRATE }}"; exit 1 }; if (-not ($p.targets | Where-Object { $_.kind -match '{{ lib_target_kinds }}' })) { $lib = @(); $doc = $false } }; \
+    if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run @lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' @pkg; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet @pkg {{ SKIP_CARGO_ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }; \
+    if ($doc) { $output = cargo test --doc --quiet @pkg 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @echo "✅ Rust tests complete"
 
 # Bench smoke (BT-3886): every criterion bench binary once, in test mode
