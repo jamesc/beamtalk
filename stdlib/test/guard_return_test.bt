@@ -43,5 +43,36 @@ TestCase subclass: GuardReturnTest
   testValueGuard =>
     v := GuardReturnValue new
     self assert: (v clamp: -3) n equals: 0
-    self assert: (v clamp: 30) n equals: 9
+    self assert: (v clamp: 9) n equals: 99
     self assert: (v clamp: 4) n equals: 4
+
+  // An untyped guard receiver that is not a Boolean is sent the guard's own
+  // selector with a block that returns from the method (BT-4244).
+  testNonBooleanReceiverThatCallsTheBlockReturnsEarly =>
+    r := NonBooleanCondCalling new
+    self assert: (GuardReturnObject early: r) equals: #early
+    self assert: (GuardReturnObject earlyIfFalse: r) equals: #early
+
+  testNonBooleanReceiverThatIgnoresTheBlockFallsThrough =>
+    r := NonBooleanCondIgnoring new
+    self assert: (GuardReturnObject early: r) equals: #late
+    self assert: (GuardReturnObject earlyIfFalse: r) equals: #late
+
+  testUntypedBooleanReceiver =>
+    self assert: (GuardReturnObject early: true) equals: #early
+    self assert: (GuardReturnObject early: false) equals: #late
+    self assert: (GuardReturnObject earlyIfFalse: false) equals: #early
+    self assert: (GuardReturnObject earlyIfFalse: true) equals: #late
+
+  testNonBooleanReceiverWithoutTheSelectorRaises =>
+    self should: [GuardReturnObject early: nil] raise: #does_not_understand
+    self should: [GuardReturnObject earlyIfFalse: 3] raise: #does_not_understand
+
+  testActorNonBooleanReceiverKeepsState =>
+    a := GuardReturnActor spawn
+    self assert: (a early: NonBooleanCondCalling new) equals: #early
+    self assert: a count equals: 0
+    self assert: (a early: NonBooleanCondIgnoring new) equals: #late
+    self assert: a count equals: 1
+    self assert: (a early: true) equals: #early
+    self assert: a count equals: 1

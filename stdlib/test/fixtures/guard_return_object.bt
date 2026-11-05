@@ -21,7 +21,7 @@ Object subclass: GuardReturnObject
 
   class local: x :: Integer =>
     y := x * 2
-    y > 10 ifTrue: [^y] ifFalse: [y := y + 1]
+    y =:= 12 ifTrue: [^y] ifFalse: [y := y + 1]
     y + 100
 
   class sealed canon: x =>
@@ -33,3 +33,12 @@ Object subclass: GuardReturnObject
       0 -> ^#zero;
       _ -> #other
     ]
+
+  // Untyped receivers: the condition goes through `beamtalk_guard_return`.
+  class early: x =>
+    x ifTrue: [^#early]
+    #late
+
+  class earlyIfFalse: x =>
+    x ifFalse: [^#early]
+    #late

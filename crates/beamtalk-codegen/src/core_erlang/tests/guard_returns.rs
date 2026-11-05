@@ -41,6 +41,10 @@ fn canonical_class_side_guard_has_no_try() {
          \x20   Binary fromIolist: bytes\n",
     );
     assert_no_nlr_frame(&code);
+    assert!(
+        !code.contains("beamtalk_guard_return"),
+        "`=:=` is a Boolean by construction, so the condition needs no helper:\n{code}"
+    );
 }
 
 #[test]
@@ -53,6 +57,13 @@ fn object_method_guard_has_no_try() {
          \x20   0\n",
     );
     assert_no_nlr_frame(&code);
+    assert_eq!(
+        code.matches("call 'beamtalk_guard_return':'if_true'")
+            .count(),
+        2,
+        "`x > 0` may answer a non-Boolean, so each guard's condition goes \
+         through the helper:\n{code}"
+    );
 }
 
 #[test]
@@ -99,18 +110,34 @@ fn expect_directive_in_absorbed_statements_compiles() {
 }
 
 #[test]
-fn untyped_boolean_receiver_keeps_its_frame() {
-    // BT-4244: a receiver not known to be a Boolean may implement `ifTrue:`
-    // itself, and must receive it with a block that returns from the method.
+fn guard_with_effectful_return_on_non_boolean_receiver_keeps_its_frame() {
+    // `self withN: 0` would run outside the receiver's own `ifTrue:` once
+    // rewritten, so only a Boolean by construction may take this shape.
+    let code = codegen(
+        "Value subclass: W\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   x < 0 ifTrue: [^self withN: 0]\n\
+         \x20   self withN: x\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}
+
+#[test]
+fn untyped_receiver_guard_is_decided_by_the_helper() {
+    // BT-4244: a receiver that is not a Boolean may implement `ifTrue:`
+    // itself and must still be sent it, with a block that returns from the
+    // method; `beamtalk_guard_return` does that without an NLR frame.
     let code = codegen(
         "Object subclass: U\n\
          \x20 sign: x =>\n\
-         \x20   x ifTrue: [^1]\n\
+         \x20   x ifFalse: [^1]\n\
          \x20   0\n",
     );
+    assert_no_nlr_frame(&code);
     assert!(
-        code.contains("call 'erlang':'throw'") && code.contains("make_ref"),
-        "an untyped `ifTrue:` receiver keeps the NLR form:\n{code}"
+        code.contains("call 'beamtalk_guard_return':'if_false'"),
+        "{code}"
     );
 }
 
@@ -158,4 +185,30 @@ fn reflected_source_keeps_the_guard_as_written() {
         texts.contains("x > 0 ifTrue: [^1]"),
         "the method's reflected source is its text as written:\n{texts}"
     );
+}
+
+#[test]
+fn xref_pairs_receiver_types_with_the_sends_as_written() {
+    // An `ifFalse:` guard's rewrite swaps the branch order; xref must still
+    // pair each send with its own receiver.
+    let code = codegen(
+        "Object subclass: X\n\
+         \x20 m: x =>\n\
+         \x20   x == 1 ifFalse: [^3 printString]\n\
+         \x20   \"abc\" size\n",
+    );
+    assert_no_nlr_frame(&code);
+    for (selector, recv_type) in [("printString", "Integer"), ("size", "String")] {
+        let row = format!("'selector' => '{selector}', 'line' => ");
+        let at = code
+            .find(&row)
+            .unwrap_or_else(|| panic!("no xref row for {selector}:\n{code}"));
+        let rest = &code[at..];
+        let row_end = rest.find("}~").expect("row end");
+        assert!(
+            rest[..row_end].contains(&format!("'recv_type' => '{recv_type}'")),
+            "{selector} must carry recv_type {recv_type}: {}",
+            &rest[..row_end]
+        );
+    }
 }

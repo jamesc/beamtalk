@@ -1795,8 +1795,11 @@ A `^` inside an inlined conditional at a method's top level
 frame: `make_ref/0`, a `try` around the body, and a `throw` for the `^`. The
 cost was paid on every call, taken or not. Codegen now compiles such a method
 as the expression form (`x > 0 ifTrue: [1] ifFalse: [...]`) when every block
-`^` in it is a guard and each Boolean-family receiver is statically a Boolean
-(`core_erlang/guard_returns.rs`).
+`^` in it is a guard (`core_erlang/guard_returns.rs`). When the receiver
+might not be a Boolean (`x > 0` dispatches `>` on a non-number), the `case`
+reads `case X of true -> true; false -> false; Other ->
+beamtalk_guard_return:if_true(Other) end`. That keeps the BT-4244 send for a
+non-Boolean and costs a Boolean nothing measurable.
 
 ### Harness
 

@@ -3035,6 +3035,7 @@ impl CoreErlangGenerator {
 
         let cond_var = self.fresh_temp_var("Cond");
         let cond_doc = self.expression_doc(receiver)?;
+        let cond_doc = self.guard_condition_doc(receiver, cond_doc);
         let result_var = self.fresh_temp_var("CondVal");
         let (true_branch, false_branch) = match arms {
             VtCondArms::Both(t, f) => (t, f),
@@ -3405,6 +3406,7 @@ impl CoreErlangGenerator {
 
         let cond_var = self.fresh_temp_var("Cond");
         let cond_doc = self.expression_doc(receiver)?;
+        let cond_doc = self.guard_condition_doc(receiver, cond_doc);
         let mut prelude: Vec<ThreadedStmt> = vec![ThreadedStmt::Statement(
             docvec!["let ", leaf::var(cond_var.clone()), " = ", cond_doc, " in "],
             span,

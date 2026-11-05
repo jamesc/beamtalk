@@ -13,4 +13,9 @@ Actor subclass: GuardReturnActor
     self.count := self.count + x
     #small
 
+  early: x =>
+    x ifTrue: [^#early]
+    self.count := self.count + 1
+    #late
+
   count => self.count

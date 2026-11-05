@@ -347,7 +347,8 @@ impl CoreErlangGenerator {
         // identical, verified by the corpus conformance test in
         // `source_analysis::method_span_corpus_tests`, not merely asserted
         // by this comment.
-        let receiver_spans = collect_receiver_spans(method);
+        // BT-4415: the body as written, the one `source` was unparsed from.
+        let receiver_spans = collect_receiver_spans(&self.as_written_method(method));
         // Defensive fallback for a divergence shape the corpus test doesn't
         // cover (see the comment above): a length mismatch means the
         // pre-order-ordinal pairing can't be trusted for *any* entry in this

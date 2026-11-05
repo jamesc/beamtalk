@@ -523,11 +523,18 @@ pub struct CoreErlangGenerator {
     /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) a
     /// `ClassBuilder` block method's operands were recorded under (BT-4059).
     pub(in crate::core_erlang) current_method_span: Option<beamtalk_core::source_analysis::Span>,
-    /// The bodies, as written, of the methods whose guard-style `^`s
-    /// codegen compiles as direct returns (BT-4415, `guard_returns`), keyed
-    /// by method span: [`Self::as_written_method_source`] reflects these,
-    /// not the rewritten bodies. Empty when nothing was rewritten.
-    pub(in crate::core_erlang) guard_rewritten_bodies: super::guard_returns::RewrittenBodies,
+    /// What codegen's guard-return rewrite changed (BT-4415,
+    /// `guard_returns`): the bodies as written, which
+    /// [`Self::as_written_method_source`] reflects in place of the rewritten
+    /// ones, and the guard receivers [`Self::guard_condition_doc`] decides.
+    /// Empty when nothing was rewritten.
+    pub(in crate::core_erlang) guard_rewrite: super::guard_returns::GuardRewrite,
+    /// The recorded guard conditions a conditional has consumed (see
+    /// [`Self::unconsumed_guard_conditions`]).
+    pub(in crate::core_erlang) guard_conditions_used: std::collections::HashSet<(
+        beamtalk_core::source_analysis::Span,
+        beamtalk_core::source_analysis::Span,
+    )>,
 }
 
 /// `method`'s reflected source: its text as written, with the operand
@@ -557,20 +564,33 @@ impl CoreErlangGenerator {
         &self,
         method: &beamtalk_core::ast::MethodDefinition,
     ) -> String {
-        if let Some(body) = self.guard_rewritten_bodies.get(&method.span) {
-            let mut written = method.clone();
-            written.body.clone_from(body);
-            return as_written_method_source(
-                &written,
-                &self.peeled_parens,
-                beamtalk_core::ast::normalize::PeelScope::of_method(method),
-            );
-        }
+        let written = self.as_written_method(method);
         as_written_method_source(
-            method,
+            &written,
             &self.peeled_parens,
             beamtalk_core::ast::normalize::PeelScope::of_method(method),
         )
+    }
+
+    /// `method` with its body as written: the body codegen's guard-return
+    /// rewrite (BT-4415) replaced, else `method` itself. Its operands are
+    /// still peeled (BT-4059), like every other method codegen reads.
+    pub(in crate::core_erlang) fn as_written_method<'m>(
+        &self,
+        method: &'m beamtalk_core::ast::MethodDefinition,
+    ) -> std::borrow::Cow<'m, beamtalk_core::ast::MethodDefinition> {
+        match self
+            .guard_rewrite
+            .bodies
+            .get(&super::guard_returns::MethodKey::of(method))
+        {
+            Some(body) => {
+                let mut written = method.clone();
+                written.body.clone_from(body);
+                std::borrow::Cow::Owned(written)
+            }
+            None => std::borrow::Cow::Borrowed(method),
+        }
     }
 
     /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) of the
@@ -659,7 +679,8 @@ impl CoreErlangGenerator {
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
-            guard_rewritten_bodies: super::guard_returns::RewrittenBodies::new(),
+            guard_rewrite: super::guard_returns::GuardRewrite::default(),
+            guard_conditions_used: std::collections::HashSet::new(),
         }
     }
 

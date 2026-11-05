@@ -671,7 +671,8 @@ Example: `Loop at line 15: StateAcc fallback — self-send in loop body`
 Emitted when `^` inside a block generates throw/catch, which can prevent BEAM JIT
 from optimizing the enclosing function. A method whose only block `^`s are
 guard-style early returns in inlined conditionals (`x ifTrue: [^y]` at the top
-level) has none: codegen compiles them as direct returns (BT-4415,
+level, within the limits in the language guide's § Blocks (Closures)) has none:
+codegen compiles them as direct returns (BT-4415,
 `core_erlang/guard_returns.rs`).
 
 Example: `Non-local return at line 15: compiled via throw/catch, may inhibit JIT optimization`

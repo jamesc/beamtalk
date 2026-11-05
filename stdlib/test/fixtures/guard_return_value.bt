@@ -8,6 +8,6 @@ Value subclass: GuardReturnValue
   field: n :: Integer = 0
 
   clamp: x :: Integer =>
-    x < 0 ifTrue: [^self withN: 0]
-    x > 9 ifTrue: [^self withN: 9]
+    x < 0 ifTrue: [^self]
+    x =:= 9 ifTrue: [^self withN: 99]
     self withN: x
