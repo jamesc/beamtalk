@@ -62,6 +62,7 @@ use super::super::threaded_ir::{
     StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
+use super::LocalWrite;
 use super::analysis::ThreadedFamilies;
 use super::conditionals::ArmFrame;
 use super::family_slots;
@@ -2340,13 +2341,13 @@ impl CoreErlangGenerator {
                     result_var = val_var;
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                // E4 — the bindings are plain; the right-hand side's own
-                // prelude is threaded ahead into this body (BT-4000).
-                let (binding_docs, rhs_var) = self
-                    .generate_destructure_bindings_sequenced(pattern, value, frame, &mut stmts)?;
-                for d in binding_docs {
-                    stmts.push(ThreadedStmt::Statement(d, span));
-                }
+                // E4 — the right-hand side's own prelude is threaded ahead
+                // into this body (BT-4000), and each name is written to the
+                // body's slot as E3 writes `name := ...` (BT-4439).
+                let (rhs_var, _) =
+                    self.lower_destructure_bind(pattern, value, frame, span, &mut stmts, &|_| {
+                        LocalWrite::Slot
+                    })?;
                 if is_last {
                     // BT-3889: the block answers the right-hand side.
                     result_var = rhs_var;

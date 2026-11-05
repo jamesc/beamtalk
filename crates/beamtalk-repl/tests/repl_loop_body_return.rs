@@ -169,6 +169,25 @@ const POSITIONS: &[(&str, &str, Step)] = &[
         "#(v, b) := #(x, 0). [x == 5 ifTrue: [^w]] ensure: [v := v + 1. w := w + v]",
         |x, w| (w + x + 1, None),
     ),
+    // BT-4439: a destructuring assignment writes each binding it binds, as
+    // `w := ...` does: the next iteration, the `^` and the eval read it.
+    (
+        "destructuring write",
+        "#(w, b) := #(w + x, 0). x == 2 ifTrue: [^w]",
+        |x, w| (w + x, (x == 2).then_some(w + x)),
+    ),
+    (
+        "destructuring write, never fires",
+        "#(w, b) := #(w + x, 0). x == 5 ifTrue: [^w]",
+        |x, w| (w + x, None),
+    ),
+    // BT-4439: an `ensure:` cleanup writes the destructured binding
+    // afterwards, reading the destructuring's write.
+    (
+        "ensure: cleanup writes a destructured binding afterwards",
+        "#(w, b) := #(w + x, 0). [x == 5 ifTrue: [^w]] ensure: [w := w + 100]",
+        |x, w| (w + x + 100, None),
+    ),
     (
         "match: arm",
         "w := w + x. x match: [2 -> ^w; _ -> nil]",

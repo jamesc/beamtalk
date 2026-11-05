@@ -63,8 +63,9 @@ impl CoreErlangGenerator {
     /// right-hand side's prelude (a self-send, a conditional whose receiver is
     /// sequenced, BT-4000) is threaded ahead into `stmts` in `frame`, so its
     /// `Bind`s are the body's own statements and the extraction reads the
-    /// already-sequenced value. The one lowering of a destructuring statement
-    /// in those bodies.
+    /// already-sequenced value. The method root binds the names with these
+    /// `let`s alone; every other threaded body also writes them back to its
+    /// frame through `lower_destructure_bind` (BT-4439).
     pub(in crate::core_erlang) fn generate_destructure_bindings_sequenced(
         &mut self,
         pattern: &Pattern,
@@ -72,8 +73,25 @@ impl CoreErlangGenerator {
         frame: super::super::threaded_ir::FrameId,
         stmts: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
     ) -> Result<(Vec<Document<'static>>, String)> {
+        let (docs, rhs_var, _bound) =
+            self.generate_destructure_extractions_sequenced(pattern, value, frame, stmts)?;
+        Ok((docs, rhs_var))
+    }
+
+    /// [`Self::generate_destructure_bindings_sequenced`], also returning each
+    /// `(name, core_var)` the pattern binds: what a threaded body's
+    /// destructuring lowering (`lower_destructure_bind`, BT-4439) writes back
+    /// to the frame's locals.
+    #[allow(clippy::type_complexity)]
+    pub(in crate::core_erlang) fn generate_destructure_extractions_sequenced(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        frame: super::super::threaded_ir::FrameId,
+        stmts: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
+    ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
         let scope = self.thread_ahead(value, stmts, frame)?;
-        let result = self.generate_destructure_bindings_with_value(pattern, value)?;
+        let result = self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
         self.finish_precompiled_scope(scope)?;
         Ok(result)
     }

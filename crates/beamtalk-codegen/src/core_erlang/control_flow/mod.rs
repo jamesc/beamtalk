@@ -45,6 +45,7 @@ mod exception_handling;
 pub(in crate::core_erlang) mod family_slots;
 mod list_ops;
 mod local_assign;
+pub(in crate::core_erlang) use local_assign::LocalWrite;
 mod lookups;
 mod loop_mode;
 mod plan;

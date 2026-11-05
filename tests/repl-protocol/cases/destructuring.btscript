@@ -198,3 +198,47 @@ x := 99
 
 x
 // => 99
+
+:clear
+// => ok
+
+// ===========================================================================
+// DESTRUCTURING INSIDE A THREADED BODY (BT-4439)
+//
+// A destructuring assignment in a loop or fold body, a conditional arm, a
+// protected block or an evaluated block writes each binding it binds, as
+// `w := ...` does there.
+// ===========================================================================
+
+w := 5
+// => 5
+
+#(1, 2, 3) do: [:x | #(w, b) := #(w + x, 0)]
+// => _
+
+w
+// => 11
+
+#(1, 2, 3) inject: 0 into: [:acc :x | #(w, b) := #(w + x, 0). acc + x]
+// => 6
+
+w
+// => 17
+
+w > 0 ifTrue: [#(w, b) := #(w + 1, 0)]
+// => _
+
+w
+// => 18
+
+[#(w, b) := #(w + 1, 0)] on: Error do: [:e | 0]
+// => _
+
+w
+// => 19
+
+[#(w, b) := #(w + 1, 0)] value
+// => _
+
+w
+// => 20

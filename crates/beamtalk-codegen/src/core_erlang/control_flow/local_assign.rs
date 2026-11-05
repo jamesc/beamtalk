@@ -13,7 +13,8 @@ use super::super::threaded_ir::{
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::Expression;
+use beamtalk_core::ast::{Expression, Pattern};
+use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
@@ -162,16 +163,7 @@ impl CoreErlangGenerator {
         } else {
             None
         };
-        let canonical = CoreErlangGenerator::to_core_erlang_var(&id.name);
-        let current = self
-            .lookup_var(&id.name)
-            .cloned()
-            .unwrap_or_else(|| canonical.clone());
-        let source = if current == canonical {
-            VersionedVar::new(VersionPrefix::Local(id.name.to_string()), 0, frame)
-        } else {
-            VersionedVar::new(VersionPrefix::Gensym(current), 1, frame)
-        };
+        let source = self.direct_local_identity(&id.name, frame);
 
         // BT-3493: the RHS is itself a field write (`r := (self.x :=
         // ...)`, at any parenthesization depth) — hybrid/direct-params mode
@@ -189,14 +181,14 @@ impl CoreErlangGenerator {
         if let Some(field_write) = self.local_assign_field_write(value) {
             let field_val_var =
                 self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
-            let new_var = self.fresh_temp_var(&canonical);
-            self.bind_var(&id.name, &new_var);
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
+            self.push_direct_local_rebind(
+                &id.name,
                 source,
-                op: BindOp::Direct(ValueRef::Var(field_val_var)),
+                ValueRef::Var(field_val_var),
+                frame,
                 span,
-            });
+                stmts,
+            );
             return Ok(());
         }
 
@@ -205,14 +197,187 @@ impl CoreErlangGenerator {
             self.finish_precompiled_scope(scope)?;
         }
 
-        let new_var = self.fresh_temp_var(&canonical);
-        self.bind_var(&id.name, &new_var);
+        self.push_direct_local_rebind(
+            &id.name,
+            source,
+            ValueRef::Doc(value_code),
+            frame,
+            span,
+            stmts,
+        );
+        Ok(())
+    }
+
+    /// The identity `local` has in a direct-params/tuple-acc/hybrid loop
+    /// body's rebind chain before its next rebind:
+    /// [`VersionPrefix::Local`] at the loop's own `produces` seed until the
+    /// first rebind, [`VersionPrefix::Gensym`] of the current `lookup_var`
+    /// name afterward.
+    fn direct_local_identity(&self, local: &str, frame: FrameId) -> VersionedVar {
+        let canonical = CoreErlangGenerator::to_core_erlang_var(local);
+        match self.lookup_var(local) {
+            Some(current) if *current != canonical => {
+                VersionedVar::new(VersionPrefix::Gensym(current.clone()), 1, frame)
+            }
+            _ => VersionedVar::new(VersionPrefix::Local(local.to_string()), 0, frame),
+        }
+    }
+
+    /// Rebinds `local` to `value` in a direct-params/tuple-acc/hybrid loop
+    /// body: a fresh name in generator scope and the `Bind` from `source`
+    /// (its identity before the rebind) that extends the loop's argument
+    /// chain, which `final_loop_arg_identities` traces.
+    fn push_direct_local_rebind(
+        &mut self,
+        local: &str,
+        source: VersionedVar,
+        value: ValueRef,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let new_var = self.fresh_temp_var(&CoreErlangGenerator::to_core_erlang_var(local));
+        self.bind_var(local, &new_var);
         stmts.push(ThreadedStmt::Bind {
             target: VersionedVar::new(VersionPrefix::Gensym(new_var), 1, frame),
             source,
-            op: BindOp::Direct(ValueRef::Doc(value_code)),
+            op: BindOp::Direct(value),
             span,
         });
-        Ok(())
     }
+
+    /// BT-4439: the one lowering of a destructuring assignment
+    /// `#(a, b) := expr` that is a statement of a threaded body — a loop or
+    /// fold body, a conditional arm, a protected block or handler, a Tier 2
+    /// stateful block. The right-hand side is sequenced and its elements
+    /// extracted ([`Self::generate_destructure_extractions_sequenced`]), then
+    /// every name the pattern binds is written to the frame exactly as
+    /// `name := <element>` writes it there, by `write_of(name)`:
+    ///
+    /// - [`LocalWrite::Slot`]: the frame's scratch-slot `Put` (the
+    ///   `__local__` key, or the binding itself in the REPL), as
+    ///   `lower_local_var_assignment_bind` writes it;
+    /// - [`LocalWrite::Direct`]: a rebind in a direct-params loop's
+    ///   argument chain, as [`Self::lower_direct_var_update_in_loop_bind`];
+    /// - [`LocalWrite::Plain`]: nothing more than the `let` — a block local
+    ///   no construct threads out.
+    ///
+    /// Before BT-4439 every name took the `Plain` path in every body, so a
+    /// threaded local or a REPL binding written by destructuring kept its old
+    /// value once the body's frame ended.
+    ///
+    /// Returns the variable holding the right-hand side (the statement's
+    /// value) and whether any name was written beyond its `let`.
+    pub(in crate::core_erlang) fn lower_destructure_bind(
+        &mut self,
+        pattern: &Pattern,
+        value: &Expression,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+        write_of: &dyn Fn(&str) -> LocalWrite,
+    ) -> Result<(String, bool)> {
+        let sources = self.destructure_sources(pattern, frame);
+        let (docs, rhs_var, bound) =
+            self.generate_destructure_extractions_sequenced(pattern, value, frame, stmts)?;
+        let wrote =
+            self.write_destructured_locals(docs, &sources, &bound, frame, span, stmts, write_of);
+        Ok((rhs_var, wrote))
+    }
+
+    /// [`Self::lower_destructure_bind`] for a right-hand side already
+    /// evaluated into `rhs_var` (an arm's `#(a, b) := (self.x := ...)`,
+    /// whose field write is lowered first).
+    pub(in crate::core_erlang) fn lower_destructure_bind_from_var(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+        write_of: &dyn Fn(&str) -> LocalWrite,
+    ) -> Result<bool> {
+        let sources = self.destructure_sources(pattern, frame);
+        let (docs, bound) =
+            self.generate_pattern_extractions_from_var(pattern, rhs_var, "let ", " in ")?;
+        Ok(self.write_destructured_locals(docs, &sources, &bound, frame, span, stmts, write_of))
+    }
+
+    /// Each name `pattern` binds, with the identity it has before the
+    /// extraction's own `let`s rebind it in generator scope: the source a
+    /// direct rebind steps from.
+    fn destructure_sources(
+        &self,
+        pattern: &Pattern,
+        frame: FrameId,
+    ) -> Vec<(String, VersionedVar)> {
+        extract_pattern_bindings(pattern)
+            .0
+            .into_iter()
+            .map(|id| {
+                let source = self.direct_local_identity(&id.name, frame);
+                (id.name.to_string(), source)
+            })
+            .collect()
+    }
+
+    /// Pushes a destructuring's extraction `docs`, then writes each bound
+    /// name (`bound`: `(name, core_var)`) by `write_of`. Whether any name was
+    /// written beyond its `let`.
+    #[allow(clippy::too_many_arguments)] // one argument per fact of the write
+    fn write_destructured_locals(
+        &mut self,
+        docs: Vec<beamtalk_cerl_doc::Document<'static>>,
+        sources: &[(String, VersionedVar)],
+        bound: &[(String, String)],
+        frame: FrameId,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+        write_of: &dyn Fn(&str) -> LocalWrite,
+    ) -> bool {
+        for d in docs {
+            stmts.push(ThreadedStmt::Statement(d, span));
+        }
+        let mut wrote = false;
+        for (name, source) in sources {
+            let Some((_, core_var)) = bound.iter().find(|(n, _)| n == name) else {
+                continue;
+            };
+            let core_var = core_var.clone();
+            match write_of(name) {
+                LocalWrite::Plain => {}
+                LocalWrite::Direct => {
+                    wrote = true;
+                    self.push_direct_local_rebind(
+                        name,
+                        source.clone(),
+                        ValueRef::Var(core_var),
+                        frame,
+                        span,
+                        stmts,
+                    );
+                }
+                LocalWrite::Slot => {
+                    wrote = true;
+                    let key = self.local_scratch_key(name);
+                    self.push_local_slot_put(stmts, frame, name, key, &core_var, span);
+                    self.bind_var(name, &core_var);
+                }
+            }
+        }
+        wrote
+    }
+}
+
+/// BT-4439: how a threaded body writes a local a destructuring assignment
+/// binds — the write `name := <value>` performs in the same body. See
+/// [`CoreErlangGenerator::lower_destructure_bind`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) enum LocalWrite {
+    /// The `let` alone: a block local no construct threads out.
+    Plain,
+    /// A rebind in a direct-params/tuple-acc/hybrid loop's argument chain.
+    Direct,
+    /// The frame's scratch-slot `Put`.
+    Slot,
 }
