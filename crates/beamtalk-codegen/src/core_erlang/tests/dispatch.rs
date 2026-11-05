@@ -4907,7 +4907,7 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
         "an FFI-forward class `new` bakes a direct `new` verdict. Got:\n{code}"
     );
     assert!(
-        code.contains("'new', 'Tag class'}, 'false')"),
+        code.contains("'Tag class static calls', ~{}~) of <~{{'bt@tag', 'new', 'Tag class'}"),
         "the module's own static `Tag new` uses the guarded constructor key. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
