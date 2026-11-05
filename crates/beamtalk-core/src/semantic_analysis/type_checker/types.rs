@@ -1419,6 +1419,13 @@ impl InferredType {
                     _ => Self::Never,
                 }
             }
+            // ADR 0144: `P class & Q class` (or `C class & P class`) is the
+            // class object of a class conforming to both — irreducible, like
+            // protocol ∩ protocol above, never disjoint.
+            (Self::ProtocolMeta { .. }, Self::ProtocolMeta { .. } | Self::Meta { .. })
+            | (Self::Meta { .. }, Self::ProtocolMeta { .. }) => {
+                Self::normalize_intersection(vec![a.clone(), b.clone()], provenance)
+            }
             // Distinct concrete types with no structural relationship (including
             // distinct singletons, `#foo ∩ #bar`) are disjoint.
             _ => Self::Never,

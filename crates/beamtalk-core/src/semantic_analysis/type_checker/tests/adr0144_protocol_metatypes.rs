@@ -484,3 +484,49 @@ Object subclass: Caller
         "the protocol object is not a `Wire class` value: {diags:#?}"
     );
 }
+
+#[test]
+fn protocol_typed_requirement_parameter_is_conformance_checked() {
+    let source = r#"
+Protocol define: Named
+  label -> String
+
+Protocol define: Registry
+  class register: item :: Named -> Integer
+
+sealed Object subclass: Store
+  class register: item :: Named -> Integer => 1
+
+Object subclass: Thing
+  label -> String => "t"
+
+Object subclass: Caller
+  run: r :: Registry class =>
+    r register: Thing new
+    r register: 42
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.contains(&"Integer does not conform to protocol Named".to_string()),
+        "a `:: Named` requirement parameter is checked: {msgs:#?}"
+    );
+    assert!(
+        !msgs.iter().any(|m| m.starts_with("Thing")),
+        "a conforming argument passes: {msgs:#?}"
+    );
+}
+
+#[test]
+fn intersection_of_protocol_metatypes_is_not_never() {
+    let resolved = InferredType::intersect(
+        &InferredType::protocol_meta("Labelled"),
+        &InferredType::protocol_meta("Counted"),
+        TypeProvenance::Inferred(span()),
+        None,
+        None,
+    );
+    assert!(
+        matches!(resolved, InferredType::Intersection { ref members, .. } if members.len() == 2),
+        "`Labelled class & Counted class` is irreducible: {resolved:?}"
+    );
+}

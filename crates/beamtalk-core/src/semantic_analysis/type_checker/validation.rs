@@ -3597,9 +3597,6 @@ impl TypeChecker {
                 }
                 // A class object as the default (`state: k :: Foo class =
                 // Bar`): the slot rule `check_field_assignment` applies
-                // (BT-4206).
-                // A class object as the default (`state: k :: Foo class =
-                // Bar`): the slot rule `check_field_assignment` applies
                 // (BT-4206), including ADR 0144 protocol metatypes.
                 InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                     let Some(class_object) = ClassObjectType::of(&inferred) else {

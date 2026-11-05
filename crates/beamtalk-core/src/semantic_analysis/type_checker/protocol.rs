@@ -95,18 +95,34 @@ impl TypeChecker {
                 // Instance-side receivers resolve against instance methods;
                 // Meta (class object) receivers against class-side methods.
                 let sel_name = selector.name();
-                let method = match self.type_map.get(receiver.span()) {
-                    Some(InferredType::Known { class_name, .. }) => {
-                        hierarchy.find_method(class_name, &sel_name)
-                    }
-                    Some(InferredType::Meta { class_name, .. }) => {
-                        hierarchy.find_class_method(class_name, &sel_name)
-                    }
-                    _ => None,
-                };
-                if let Some(method) = method {
+                let param_types: Option<Vec<Option<String>>> =
+                    match self.type_map.get(receiver.span()) {
+                        Some(InferredType::Known { class_name, .. }) => hierarchy
+                            .find_method(class_name, &sel_name)
+                            .map(|m| Self::param_type_strings(&m.param_types)),
+                        Some(InferredType::Meta { class_name, .. }) => hierarchy
+                            .find_class_method(class_name, &sel_name)
+                            .map(|m| Self::param_type_strings(&m.param_types)),
+                        // ADR 0144: a `P class` receiver's parameters come
+                        // from `P`'s matching `class` requirement.
+                        Some(InferredType::ProtocolMeta { protocol_name, .. }) => protocol_registry
+                            .get(protocol_name)
+                            .and_then(|info| {
+                                info.all_class_requirements(protocol_registry)
+                                    .into_iter()
+                                    .find(|req| req.selector == sel_name)
+                            })
+                            .map(|req| {
+                                req.param_types
+                                    .iter()
+                                    .map(|t| t.as_ref().map(ToString::to_string))
+                                    .collect()
+                            }),
+                        _ => None,
+                    };
+                if let Some(param_types) = param_types {
                     for (i, arg) in arguments.iter().enumerate() {
-                        if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                        if let Some(Some(expected_ty)) = param_types.get(i) {
                             let Some(arg_type) = self.type_map.get(arg.span()) else {
                                 continue;
                             };
@@ -127,7 +143,7 @@ impl TypeChecker {
                             // part independently instead of treating the
                             // whole compound string as one (unregistered)
                             // name.
-                            let expected_ty = expected_ty.to_string();
+                            let expected_ty = expected_ty.clone();
                             if let Some(parts) = Self::split_intersection_type_string(&expected_ty)
                             {
                                 for part in parts {
@@ -251,6 +267,17 @@ impl TypeChecker {
             // Leaf expressions — no sub-expressions to recurse into
             _ => {}
         }
+    }
+
+    /// A method's declared parameter types rendered as the name strings the
+    /// protocol checks key on (`None` = unannotated).
+    fn param_type_strings(
+        param_types: &[Option<crate::semantic_analysis::class_hierarchy::DeclaredType>],
+    ) -> Vec<Option<String>> {
+        param_types
+            .iter()
+            .map(|t| t.as_ref().map(ToString::to_string))
+            .collect()
     }
 
     /// Records every alias name a protocol's declared method signatures
