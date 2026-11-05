@@ -100,7 +100,8 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
 -type op_result() ::
     {ok, Value :: term(), Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
     | {trace, Steps :: [term()], Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
-    | {script_exit, Code :: non_neg_integer(), Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
+    | {script_exit, Code :: non_neg_integer(), Output :: binary(),
+        Warnings :: [beamtalk_repl_protocol:warning()]}
     | {actors, [map()]}
     | {inspect, map() | binary()}
     | {status, ok}
@@ -120,7 +121,8 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {test_results, map()}
     | {describe, Ops :: map(), Versions :: map()}
     | {error, #beamtalk_error{}}
-    | {error, #beamtalk_error{}, Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}.
+    | {error, #beamtalk_error{}, Output :: binary(),
+        Warnings :: [beamtalk_repl_protocol:warning()]}.
 
 %%% Dispatch — op name → term result
 
