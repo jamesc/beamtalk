@@ -290,7 +290,8 @@ end
     own synthesized `new`, as on the class-process lookup.
 - **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
   whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
-  with literal arguments) or `self delegate` on a `native:` class bakes `new`
+  with literal arguments, not a `class-method-process-resource` row such as
+  `ets new:`: the lint never inspects `new`, so those keep the class process) or `self delegate` on a `native:` class bakes `new`
   into `direct_constructors` too (`ClassHierarchy::
   explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
   class variables in its chain. Its `new/0` is `class_new('undefined')`, which

@@ -50,7 +50,7 @@ mod unguarded_late_read_validators;
 mod visibility_validators;
 
 // Re-export all validators so callers don't need to know the submodule structure.
-pub(crate) use class_process_ffi_validators::check_class_method_ffi;
+pub(crate) use class_process_ffi_validators::{check_class_method_ffi, ffi_call_has_caller_effect};
 pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{

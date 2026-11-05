@@ -57,7 +57,7 @@
 //! ...); and dataflow-sensitive cases such as `process_info(self())` (needs
 //! argument tracking).
 
-use crate::ast::{Expression, MethodDefinition, MethodKind, Module};
+use crate::ast::{Expression, MessageSelector, MethodDefinition, MethodKind, Module};
 use crate::ast_walker::walk_expression;
 use crate::ffi_receiver::erlang_module_of_receiver;
 use crate::semantic_analysis::ClassHierarchy;
@@ -178,6 +178,19 @@ fn table_row(module: &str, function: &str) -> Option<&'static ClassMethodFfi> {
     CLASS_METHOD_FFI
         .iter()
         .find(|r| r.module == module && r.function == function)
+}
+
+/// Whether `(Erlang <module>) <selector>` is a curated call with an effect on
+/// the *calling* process (the `class-method-process-resource` rows: a
+/// resource tied to the caller, or the caller's identity). BT-4464: an
+/// explicit class-side `new` making such a call keeps the class process
+/// (`ClassHierarchy::explicit_class_new_builds_in_caller`), since the lint
+/// never inspects process-bound selectors and moving it would silently hand
+/// the resource to whichever caller ran first.
+pub(crate) fn ffi_call_has_caller_effect(module: &str, selector: &MessageSelector) -> bool {
+    erlang_function_name(selector)
+        .and_then(|function| table_row(module, &function))
+        .is_some_and(|entry| entry.in_caller.is_some())
 }
 
 /// Runs both class-method FFI lints over every class-side method of `module`

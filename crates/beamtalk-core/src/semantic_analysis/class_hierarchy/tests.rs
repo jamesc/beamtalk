@@ -4322,6 +4322,15 @@ fn explicit_class_new_reading_class_or_args_stays_on_class_process() {
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  class new => (Erlang erlang) list_to_atom: self name\n"
     ));
+    // An FFI call with an effect on the calling process keeps the class
+    // process, which owns what it creates (the `class-method-process-resource`
+    // table; that lint never inspects process-bound selectors).
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => (Erlang ets) new: #tags options: #()\n"
+    ));
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => (Erlang erlang) self\n"
+    ));
     // More than one statement is not a plain forward.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  class new =>\n    (Erlang erlang) make_ref.\n    (Erlang erlang) make_ref\n"
@@ -4341,6 +4350,19 @@ fn explicit_class_new_needs_a_concrete_stateless_class() {
     assert!(!bt4464_explicit_new_verdict(
         "Actor subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
+    // Class variables anywhere in the chain keep the class process.
+    let tokens = crate::source_analysis::lex_with_eof(
+        "Object subclass: Base\n  classState: count = 0\n\
+         Base subclass: Tag\n  class new => (Erlang erlang) make_ref\n",
+    );
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module)
+        .0
+        .expect("fixture hierarchy should build");
+    assert!(
+        !h.explicit_class_new_builds_in_caller(&module.classes[1]),
+        "an ancestor's class variables keep the class process"
+    );
     // An instance-side `new` replaces `new/0`: nothing to call directly.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  new => self\n  class new => (Erlang erlang) make_ref\n"
