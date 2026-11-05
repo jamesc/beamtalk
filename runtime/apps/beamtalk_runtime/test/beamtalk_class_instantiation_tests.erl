@@ -174,7 +174,16 @@ instantiation_test_() ->
             {"resolve_spawn_module_or_raise follows a multi-level chain",
                 fun test_resolve_spawn_module_deep_chain/0},
             {"resolve_spawn_module_or_raise: incomplete ancestor chain passes through",
-                fun test_resolve_spawn_module_incomplete_chain/0}
+                fun test_resolve_spawn_module_incomplete_chain/0},
+            %% BT-4443: the dynamic spawn route checks the kind too
+            {"handle_spawn on a Value/Object class: same does_not_understand as the static route",
+                fun test_handle_spawn_not_spawnable/0},
+            {"handle_spawn on an abstract Value class is does_not_understand, not abstract",
+                fun test_handle_spawn_not_spawnable_abstract/0},
+            {"class-method self spawn family on a Value class raises does_not_understand",
+                fun test_class_self_spawn_not_spawnable/0},
+            {"handle_spawn: incomplete ancestor chain keeps the pre-check behaviour",
+                fun test_handle_spawn_incomplete_chain/0}
         ]
     end}.
 
@@ -305,6 +314,80 @@ test_resolve_spawn_module_incomplete_chain() ->
         ?assertEqual(unknown, beamtalk_supervisor:spawn_kind('Bt4404Orphan')),
         ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, actor)),
         ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, supervisor))
+    end).
+
+%%====================================================================
+%% BT-4443: do_handle_spawn kind check (dynamic route)
+%%====================================================================
+
+%% The error the shadowed static route raises (unwrapped from its exception).
+static_route_error(Class, Selector) ->
+    try resolve_spawn(Class, Selector, actor) of
+        Module -> error({expected_raise, Module})
+    catch
+        error:#{error := #beamtalk_error{} = Error} -> Error
+    end.
+
+test_handle_spawn_not_spawnable() ->
+    with_spawn_kind_classes(fun() ->
+        [
+            begin
+                {error, Error} = beamtalk_class_instantiation:handle_spawn(
+                    Args, Class, bt4404_value_mod, false
+                ),
+                ?assertMatch(
+                    #beamtalk_error{
+                        kind = does_not_understand, class = Class, selector = Selector
+                    },
+                    Error
+                ),
+                ?assertEqual(static_route_error(Class, Selector), Error)
+            end
+         || Class <- ['Bt4404Value', 'Bt4404Object'],
+            {Args, Selector} <- [{[], spawn}, {[#{}], 'spawnWith:'}]
+        ]
+    end).
+
+test_handle_spawn_not_spawnable_abstract() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand, selector = spawn}},
+            beamtalk_class_instantiation:handle_spawn([], 'Bt4404Value', bt4404_value_mod, true)
+        )
+    end).
+
+test_class_self_spawn_not_spawnable() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = does_not_understand, class = 'Bt4404Value', selector = spawn
+                }
+            },
+            beamtalk_class_instantiation:class_self_spawn('Bt4404Value', bt4404_value_mod, [])
+        ),
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = does_not_understand,
+                    class = 'Bt4404Object',
+                    selector = 'spawnMonitoredWith:'
+                }
+            },
+            beamtalk_class_instantiation:class_self_spawn_monitored(
+                'Bt4404Object', bt4404_object_mod, false, [#{}]
+            )
+        )
+    end).
+
+%% `unknown` is not "not spawnable": the compiled entry point is still tried,
+%% so a missing module surfaces as before (an `undef` caught from apply).
+test_handle_spawn_incomplete_chain() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertMatch(
+            {error, undef},
+            beamtalk_class_instantiation:handle_spawn([], 'Bt4404Orphan', bt4404_orphan_mod, false)
+        )
     end).
 
 test_resolve_spawn_module_metadata_miss() ->

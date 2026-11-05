@@ -435,3 +435,78 @@ fn class_self_module_lookup_keeps_the_unchecked_two_arity_helper() {
         "the ClassSelf lookup must stay resolve_module_or_raise/2. Got:\n{doc}"
     );
 }
+
+// --- spawn family on a known non-spawnable class (BT-4443) -----------------
+//
+// A Value or Object class has no `spawn/0,1`, so the direct call the spawn
+// intrinsic emits would fail with a raw `undef`. When the compiler can prove
+// the class is not spawnable (fully-known chain reaching neither `Actor` nor
+// a supervisor base), the send takes the ordinary class-send route, where the
+// runtime raises a structured `does_not_understand`. An unknown class or an
+// incomplete chain proves nothing and keeps the direct call.
+
+/// `Caller` with one spawn-family send per method to `Target`, compiled
+/// against `target` (named `Target`).
+fn spawn_sends_to(target: ClassInfo) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  a => Target spawn\n",
+        "  b => Target spawnWith: #{}\n",
+        "  c => Target spawnMonitored\n",
+        "  d => Target spawnMonitoredWith: #{}\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    generate_module(
+        &module,
+        CodegenOptions::new("caller").with_class_hierarchy(vec![target]),
+    )
+    .expect("codegen should succeed")
+}
+
+fn target_class(superclass: &str, is_value: bool) -> ClassInfo {
+    ClassInfo {
+        name: "Target".into(),
+        superclass: Some(superclass.into()),
+        is_sealed: false,
+        is_value,
+        class_methods: vec![],
+        ..sealed_parser(None)
+    }
+}
+
+const TARGET_DIRECT_SPAWN: [&str; 2] = [
+    "call 'bt@target':'spawn'(",
+    "call 'bt@target':'spawn_monitored'(",
+];
+
+#[test]
+fn spawn_family_on_known_non_spawnable_class_is_a_class_send() {
+    for (superclass, is_value) in [("Value", true), ("Object", false)] {
+        let code = spawn_sends_to(target_class(superclass, is_value));
+        for direct in TARGET_DIRECT_SPAWN {
+            assert!(
+                !code.contains(direct),
+                "a {superclass} class has no spawn entry point to call. Got:\n{code}"
+            );
+        }
+        assert!(
+            code.matches(CLASS_SEND).count() >= 4,
+            "every spawn-family send to a {superclass} class must be a class send. Got:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn spawn_family_on_actor_or_unprovable_class_keeps_the_direct_call() {
+    // Positive control (an actor) and an incomplete chain (an ancestor not in
+    // scope), which proves nothing about the class's kind.
+    for superclass in ["Actor", "NotInScopeBase"] {
+        let code = spawn_sends_to(target_class(superclass, false));
+        for direct in TARGET_DIRECT_SPAWN {
+            assert!(
+                code.contains(direct),
+                "`Target` under {superclass} must keep its direct spawn call. Got:\n{code}"
+            );
+        }
+    }
+}

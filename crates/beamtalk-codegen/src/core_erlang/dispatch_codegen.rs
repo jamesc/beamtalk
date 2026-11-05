@@ -1522,8 +1522,18 @@ impl CoreErlangGenerator {
         // `spawn/0,1` / `spawn_monitored/0,1` in the calling process — so a
         // monitored spawn's monitor belongs to the sender. Only match
         // ClassReference, not Identifier.
+        //
+        // BT-4443: a class the compiler knows is not spawnable (a Value or
+        // Object class on a fully-known chain) has no `spawn/0,1` to call —
+        // the direct call would fail with a raw `undef`, and the type
+        // checker's class-side does-not-understand is only a lint. Such a
+        // send takes the ordinary class-send route instead, where the
+        // runtime raises the same structured `does_not_understand` as the
+        // dynamic and shadowed routes.
         if let Expression::ClassReference { name, package, .. } = receiver {
-            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len()) {
+            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len())
+                .filter(|_| !self.is_known_non_spawnable_class(&name.name))
+            {
                 let pkg = package.as_ref().map(|p| p.name.as_str());
                 let doc = self.generate_actor_spawn_qualified(
                     &name.name,
@@ -2481,6 +2491,21 @@ impl CoreErlangGenerator {
         self.supervisor_classes.contains(class_name)
             || self.class_hierarchy.as_ref().is_some_and(|h| {
                 h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
+            })
+    }
+
+    /// True when the compiler can prove `class_name` is neither an actor nor
+    /// a supervisor: it has a `ClassInfo` whose superclass chain is fully
+    /// known and reaches neither `Actor` nor a supervisor base (BT-4443). An
+    /// unknown class or an incomplete chain is not proof, matching the
+    /// runtime's `beamtalk_supervisor:spawn_kind/1` treating `unknown` as
+    /// "decides nothing".
+    fn is_known_non_spawnable_class(&self, class_name: &str) -> bool {
+        !self.is_supervisor_class(class_name)
+            && self.class_hierarchy.as_ref().is_some_and(|h| {
+                h.has_class(class_name)
+                    && !h.has_cross_file_parent(class_name)
+                    && !h.is_actor_subclass(class_name)
             })
     }
 

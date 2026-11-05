@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4443: a spawn-family send to a class that is neither an Actor nor a
+// Supervisor raises one structured `does_not_understand`, whichever route
+// it takes: a static send to the class reference (codegen lowers it to a
+// class send instead of a direct `spawn/0` call that would fail with a raw
+// `undef`), or a dynamic send through a variable or `perform:`
+// (`beamtalk_class_instantiation:do_handle_spawn/5`).
+//
+// The type checker also flags the static sends (`@expect dnu`); the
+// assertions check the runtime error.
+//
+// Fixture: stdlib/test/fixtures/fraction.bt (a Value class)
+
+TestCase subclass: SpawnNonSpawnableClassTest
+
+  testStaticSpawnOnValueClassIsDoesNotUnderstand =>
+    @expect dnu
+    self should: [Fraction spawn] raise: #does_not_understand
+    @expect dnu
+    self should: [Fraction spawnWith: #{}] raise: #does_not_understand
+
+  testDynamicSpawnOnValueClassIsDoesNotUnderstand =>
+    cls := #(1) inject: Fraction into: [:acc :_ | acc]
+    self should: [cls spawn] raise: #does_not_understand
+    self should: [cls spawnWith: #{}] raise: #does_not_understand
+    self should: [Fraction perform: #spawn] raise: #does_not_understand
+
+  testStaticAndDynamicRoutesRaiseTheSameError =>
+    cls := #(1) inject: Fraction into: [:acc :_ | acc]
+    @expect dnu
+    static := [Fraction spawn] on: Error do: [:e | e hint]
+    dynamic := [cls spawn] on: Error do: [:e | e hint]
+    self assert: static equals: "Only Actor and Supervisor classes can be spawned"
+    self assert: dynamic equals: static
