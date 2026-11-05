@@ -213,7 +213,7 @@ impl fmt::Display for ErlangVar {
 /// # Invariants
 ///
 /// - Module names are valid Erlang atoms (lowercase, alphanumeric + underscore)
-/// - Instance and class modules always have `beamtalk_` prefix
+/// - Instance modules always have `beamtalk_` prefix
 /// - Class names are converted from `CamelCase` to `snake_case`
 ///
 /// # Example
