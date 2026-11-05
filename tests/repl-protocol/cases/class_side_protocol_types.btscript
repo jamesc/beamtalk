@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for class-side protocol types (ADR 0144, BT-4436): `P class` is
+// the class object of any class conforming to protocol `P`. A `:: P class`
+// field holds a conforming class, a send through it reaches that class's
+// class-side method, and assigning a class that misses one of `P`'s `class`
+// requirements warns.
+//
+// REPL-protocol cases share one workspace session, so every name here is
+// prefixed `Bt4436`.
+
+// ===========================================================================
+// A protocol with `class` requirements, and two conforming classes
+// ===========================================================================
+
+Protocol define: Bt4436Transport
+  class scheme -> String
+  class defaultPort -> Integer
+// => "Protocol Bt4436Transport defined"
+
+Object subclass: Bt4436Tcp
+  class scheme -> String => "tcp"
+// => "Bt4436Tcp"
+
+Bt4436Tcp class >> defaultPort -> Integer => 80
+// => _
+
+Object subclass: Bt4436Tls
+  class scheme -> String => "tls"
+// => "Bt4436Tls"
+
+Bt4436Tls class >> defaultPort -> Integer => 443
+// => _
+
+// ===========================================================================
+// A class with a `:: P class` field
+// ===========================================================================
+
+Value subclass: Bt4436Client
+  field: transport :: Bt4436Transport class = Bt4436Tcp
+// => "Bt4436Client"
+
+Bt4436Client >> url -> String => self.transport scheme ++ "://host:" ++ self.transport defaultPort printString
+// => _
+
+// ===========================================================================
+// A call through the field answers the held class's result
+// ===========================================================================
+
+Bt4436Client new url
+// => "tcp://host:80"
+
+(Bt4436Client new withTransport: Bt4436Tls) url
+// => "tls://host:443"
+
+(Bt4436Client new withTransport: Bt4436Tls) transport
+// => Bt4436Tls
+
+// ===========================================================================
+// A non-conforming class warns
+// ===========================================================================
+//
+// `Bt4436Udp` answers `scheme` but not `defaultPort`. The REPL protocol's
+// `warnings` carry each diagnostic's message; the missing selectors are in
+// its hint (`missing: class defaultPort`), which the type checker's own test
+// asserts (`non_conforming_class_warns_with_missing_class_selectors`). Here
+// the missing selector is shown through the class itself.
+
+Object subclass: Bt4436Udp
+  class scheme -> String => "udp"
+// => "Bt4436Udp"
+
+Value subclass: Bt4436BadClient
+  field: transport :: Bt4436Transport class = Bt4436Udp
+// => WARNING: Bt4436Udp class does not conform to Bt4436Transport class
+
+Bt4436Udp respondsTo: #defaultPort
+// => false
+
+Bt4436Tcp respondsTo: #defaultPort
+// => true

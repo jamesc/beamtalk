@@ -52,8 +52,9 @@ pub mod signature_help_provider;
 use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::{
-    AliasRegistry, ClassHierarchy, InferredType, infer_types_and_returns,
+    AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
+use std::borrow::Cow;
 
 /// Re-exported from [`beamtalk_core::method_source_walker`] so sibling query modules
 /// (`senders_query`, `all_sends_query`, `announce_sites_query`, `ffi_sites_query`)
@@ -77,6 +78,27 @@ pub(crate) fn type_of_parsed<'t>(
         .or_else(|| type_map.get(expr.unwrap_parens().span()))
 }
 
+/// The protocol registry a hover/completion query types `module` against.
+///
+/// `project` is the caller's registry for the file — cross-file protocols
+/// plus `module`'s own, built with
+/// [`ProtocolRegistry::seed_and_register_module`] — and is borrowed as is.
+/// Without one (a caller with no project index), only `module`'s own
+/// protocols are registered.
+pub(crate) fn protocols_for_module<'a>(
+    project: Option<&'a ProtocolRegistry>,
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+) -> Cow<'a, ProtocolRegistry> {
+    if let Some(registry) = project {
+        return Cow::Borrowed(registry);
+    }
+    let mut registry = ProtocolRegistry::new();
+    // Collision/duplicate diagnostics belong to the diagnostics provider.
+    let _ = registry.seed_and_register_module(module, Vec::new(), hierarchy, None);
+    Cow::Owned(registry)
+}
+
 /// Enriches a class hierarchy with method return types inferred from a module's source,
 /// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass.
 ///
@@ -96,54 +118,29 @@ pub(crate) fn type_of_parsed<'t>(
 /// callers already special-case separately via their own `native_types`
 /// parameter.
 ///
-/// `alias_registry` is `None` here (ADR 0108) — [`ProjectIndex`]
-/// does not yet track a project-wide alias table (that's LSP integration,
-/// deferred to a later ADR 0108 phase), so completions see aliases
-/// as ordinary unresolved names for now. [`hover_provider::compute_hover`]
-/// takes its own `alias_registry` parameter and calls
-/// [`enrich_hierarchy_with_inferred_returns_and_aliases`] directly instead of
-/// this function when a caller has one to offer.
+/// `protocol_registry` is the file's protocol registry (see
+/// [`protocols_for_module`]), so a `P class` annotation resolves to the
+/// protocol metatype (ADR 0144) as it does in the compiler.
+/// `alias_registry` resolves type alias references (ADR 0108, see
+/// [`TypeProvenance::Aliased`]); `None` leaves them unresolved.
 ///
-/// [`ProjectIndex`]: crate::project_index::ProjectIndex
+/// [`TypeChecker`]: beamtalk_core::semantic_analysis::type_checker::TypeChecker
+/// [`TypeProvenance::Aliased`]: beamtalk_core::semantic_analysis::type_checker::TypeProvenance
 pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
     native_type_registry: Option<
         &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
     >,
-) -> (Option<ClassHierarchy>, TypeMap) {
-    let (type_map, inferred) = infer_types_and_returns(module, hierarchy, native_type_registry);
-    let enriched = if inferred.is_empty() {
-        None
-    } else {
-        let mut h = hierarchy.clone();
-        h.apply_inferred_return_types(&inferred);
-        Some(h)
-    };
-    (enriched, type_map)
-}
-
-/// [`enrich_hierarchy_with_inferred_returns`], additionally threading a type
-/// alias registry (ADR 0108) through to
-/// [`infer_types_and_returns_with_aliases`] so the underlying [`TypeMap`]
-/// resolves and tags alias references (see [`TypeProvenance::Aliased`]).
-/// `alias_registry = None` is identical to
-/// [`enrich_hierarchy_with_inferred_returns`].
-///
-/// [`TypeProvenance::Aliased`]: beamtalk_core::semantic_analysis::type_checker::TypeProvenance
-pub(crate) fn enrich_hierarchy_with_inferred_returns_and_aliases(
-    module: &Module,
-    hierarchy: &ClassHierarchy,
-    native_type_registry: Option<
-        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
-    >,
+    protocol_registry: &ProtocolRegistry,
     alias_registry: Option<&AliasRegistry>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
     let (type_map, inferred) =
-        beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns_with_aliases(
+        beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns_with_registries(
             module,
             hierarchy,
             native_type_registry,
+            Some(protocol_registry),
             alias_registry,
         );
     let enriched = if inferred.is_empty() {
