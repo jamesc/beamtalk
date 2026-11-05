@@ -62303,6 +62303,34 @@
       "explanation": "BT-4260: a send to a built-in receiver that inherits its method (here `isKindOf:`, owned by Object, sent to a String) takes the memoised verdict from `beamtalk_dispatch:inherited_target/2` in the receiver class's `dispatch/3` default arm and calls the owner's `dispatch/3` directly, instead of walking String -> Binary -> Collection -> Value -> Object with an extension lookup at each level. An extension anywhere on that chain must still win, for call sites compiled before it was installed, both before and after the verdict is warm; removing it must restore the inherited method.  Each check runs through a typed call site (which direct-calls `bt@stdlib@string:dispatch/3`) and an untyped one (the dynamic send path)."
     },
     {
+      "id": "stdlib-test-primitive-is-kind-of-test",
+      "title": "PrimitiveIsKindOfTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "PrimitiveIsKindOfTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "kind:of:",
+        "mutate",
+        "mutation",
+        "object",
+        "primitive_is_kind_of_test",
+        "set",
+        "subclassing",
+        "testExtensionOverrideWins",
+        "testIntegerAnswersByItsChain",
+        "testMetaclassArgumentIsNotAnInstanceKind",
+        "testOtherPrimitives",
+        "testTextAndBytes"
+      ],
+      "source": "TestCase subclass: PrimitiveIsKindOfTest\n\n  kind: value :: Object of: aClass :: Behaviour -> Boolean =>\n    value isKindOf: aClass\n\n  testIntegerAnswersByItsChain =>\n    self assert: (self kind: 42 of: Integer)\n    self assert: (self kind: 42 of: Number)\n    self assert: (self kind: 42 of: Object)\n    self deny: (self kind: 42 of: String)\n    self deny: (self kind: 42 of: Float)\n\n  testTextAndBytes =>\n    self assert: (self kind: \"ab\" of: String)\n    self assert: (self kind: \"ab\" of: Binary)\n    self deny: (self kind: \"ab\" of: Symbol)\n    self deny: (self kind: #ab of: String)\n    self assert: (self kind: #ab of: Symbol)\n\n  testOtherPrimitives =>\n    self assert: (self kind: nil of: UndefinedObject)\n    self deny: (self kind: nil of: String)\n    self assert: (self kind: #(1, 2) of: List)\n    self assert: (self kind: 1.5 of: Float)\n    self assert: (self kind: true of: Boolean)\n    self assert: (self kind: [:x | x] of: Block)\n\n  testMetaclassArgumentIsNotAnInstanceKind =>\n    self deny: (self kind: 42 of: Integer class)\n\n  testExtensionOverrideWins =>\n    port := (Erlang erlang ports) first\n    self assert: (self kind: port of: Symbol)\n    self deny: (self kind: port of: Port)\n// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n// BT-4473: an `isKindOf:` send to a primitive receiver (Integer, Float,\n// String, Binary, Symbol, nil, List, ...) skips the dispatch-chain walk and\n// calls `Object>>isKindOf:`'s intrinsic directly, unless something on the\n// receiver's chain overrides `isKindOf:`. The receivers below are typed\n// `Object` (`kind:of:`) so the send is a dynamic one, the path the shortcut\n// sits on.\n//\n// The extension makes a Port answer `isKindOf: Symbol` true: it shows that an\n// override on a primitive class still wins over the shortcut.\nPort >> isKindOf: aClass :: Behaviour -> Boolean => aClass == Symbol",
+      "explanation": ""
+    },
+    {
       "id": "stdlib-test-printable-protocol-test",
       "title": "PrintableProtocolTest",
       "category": "stdlib-tests",

@@ -1,0 +1,47 @@
+TestCase subclass: PrimitiveIsKindOfTest
+
+  kind: value :: Object of: aClass :: Behaviour -> Boolean =>
+    value isKindOf: aClass
+
+  testIntegerAnswersByItsChain =>
+    self assert: (self kind: 42 of: Integer)
+    self assert: (self kind: 42 of: Number)
+    self assert: (self kind: 42 of: Object)
+    self deny: (self kind: 42 of: String)
+    self deny: (self kind: 42 of: Float)
+
+  testTextAndBytes =>
+    self assert: (self kind: "ab" of: String)
+    self assert: (self kind: "ab" of: Binary)
+    self deny: (self kind: "ab" of: Symbol)
+    self deny: (self kind: #ab of: String)
+    self assert: (self kind: #ab of: Symbol)
+
+  testOtherPrimitives =>
+    self assert: (self kind: nil of: UndefinedObject)
+    self deny: (self kind: nil of: String)
+    self assert: (self kind: #(1, 2) of: List)
+    self assert: (self kind: 1.5 of: Float)
+    self assert: (self kind: true of: Boolean)
+    self assert: (self kind: [:x | x] of: Block)
+
+  testMetaclassArgumentIsNotAnInstanceKind =>
+    self deny: (self kind: 42 of: Integer class)
+
+  testExtensionOverrideWins =>
+    port := (Erlang erlang ports) first
+    self assert: (self kind: port of: Symbol)
+    self deny: (self kind: port of: Port)
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4473: an `isKindOf:` send to a primitive receiver (Integer, Float,
+// String, Binary, Symbol, nil, List, ...) skips the dispatch-chain walk and
+// calls `Object>>isKindOf:`'s intrinsic directly, unless something on the
+// receiver's chain overrides `isKindOf:`. The receivers below are typed
+// `Object` (`kind:of:`) so the send is a dynamic one, the path the shortcut
+// sits on.
+//
+// The extension makes a Port answer `isKindOf: Symbol` true: it shows that an
+// override on a primitive class still wins over the shortcut.
+Port >> isKindOf: aClass :: Behaviour -> Boolean => aClass == Symbol

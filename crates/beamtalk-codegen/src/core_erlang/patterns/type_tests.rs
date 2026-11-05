@@ -222,7 +222,7 @@ impl CoreErlangGenerator {
 
     /// Dispatches a routing-table [`Guard`] to its renderer — the one
     /// renderer per guard kind the shared routing fixture names.
-    fn render_type_test(
+    pub(in crate::core_erlang) fn render_type_test(
         &mut self,
         test: Guard,
         match_var: &str,

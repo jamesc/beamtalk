@@ -185,6 +185,36 @@ fn native_constructor_selectors(class: &ClassDefinition, rejected: &str) -> Vec<
         .collect()
 }
 
+/// BT-4473: the selectors a value type's `dispatch/3` answers ahead of its
+/// method arms, in [`CoreErlangGenerator::generate_primitive_dispatch`]'s
+/// fixed prefix (`asString` is left out: its arm is emitted only when the
+/// class defines no `asString`, so it never shadows a method). A method of
+/// one of these names is never reached through `dispatch/3`, so it is never a
+/// direct-call target. Pinned to the emitted prefix by
+/// `dispatch_prefix_selectors_match_emitted_arms`.
+pub(in crate::core_erlang) const DISPATCH_PREFIX_SELECTORS: &[&str] = &[
+    "class",
+    "respondsTo:",
+    "fieldNames",
+    "fieldAt:",
+    "hasField:",
+    "fieldAt:put:",
+    "clearField:",
+    "perform:",
+    "perform:withArguments:",
+];
+
+/// BT-4473: how an own-class `dispatch/3` method arm calls its function:
+/// `Module:'selector'(Self, Arg1, …)`, unwrapping a `{Result, State}` pair
+/// when the method has a block non-local return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) struct OwnDispatchArm {
+    /// The selector's argument count (the function's arity less `Self`).
+    pub(in crate::core_erlang) arity: usize,
+    /// Whether the function answers a `{Result, State}` pair.
+    pub(in crate::core_erlang) nlr_pair: bool,
+}
+
 /// How many constructors the `instantiation_error` hint names before
 /// it stops. `DateTime` — the widest in the stdlib — declares seven.
 const MAX_HINTED_CONSTRUCTORS: usize = 6;
@@ -302,7 +332,7 @@ impl CoreErlangGenerator {
 
         // Compute auto-generated slot methods for `Value subclass:` classes.
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
-        let auto_methods = compute_auto_slot_methods(class);
+        let auto_methods = self.auto_slot_methods_and_own_arms(class);
 
         // The module's exports and attributes; `module_shell::core_module`
         // (below) builds the header around them.
@@ -4905,6 +4935,66 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// Whether `method`'s function answers a `{Result, State}` pair (it has a
+    /// block non-local return), which its `dispatch/3` arm unwraps.
+    fn method_returns_nlr_pair(&self, method: &MethodDefinition) -> bool {
+        self.semantic_facts
+            .has_block_nlr_or_walk(&method.span, &method.body)
+    }
+
+    /// The class's auto-generated slot accessors
+    /// ([`compute_auto_slot_methods`]), after recording (BT-4473)
+    /// [`Self::own_dispatch_arms`] in the class context — before any method
+    /// body is generated, so a typed send to an own-class instance inside one
+    /// can call the arm's function directly.
+    fn auto_slot_methods_and_own_arms(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Option<AutoSlotMethods> {
+        let auto = compute_auto_slot_methods(class);
+        let arms = self.own_dispatch_arms(class, auto.as_ref());
+        self.class_context_mut().own_dispatch_arms = arms;
+        auto
+    }
+
+    /// BT-4473: the selectors `class`'s `dispatch/3` answers from a method
+    /// arm — the arms [`Self::generate_dispatch_method_branches`] and
+    /// `generate_auto_slot_dispatch_arms` emit — mapped to how the arm calls
+    /// the method's function. A selector that one of the arms ahead of them
+    /// answers first ([`DISPATCH_PREFIX_SELECTORS`]) is left out, and a
+    /// selector defined twice keeps its first arm, as the `case` does.
+    fn own_dispatch_arms(
+        &self,
+        class: &ClassDefinition,
+        auto: Option<&AutoSlotMethods>,
+    ) -> std::collections::HashMap<String, OwnDispatchArm> {
+        let mut arms = std::collections::HashMap::new();
+        for method in &class.methods {
+            arms.entry(method.selector.name().to_string())
+                .or_insert(OwnDispatchArm {
+                    arity: method.parameters.len(),
+                    nlr_pair: self.method_returns_nlr_pair(method),
+                });
+        }
+        if let Some(auto) = auto {
+            for getter in &auto.getters {
+                arms.entry(getter.clone()).or_insert(OwnDispatchArm {
+                    arity: 0,
+                    nlr_pair: false,
+                });
+            }
+            for field in &auto.setters {
+                arms.entry(AutoSlotMethods::with_star_selector(field))
+                    .or_insert(OwnDispatchArm {
+                        arity: 1,
+                        nlr_pair: false,
+                    });
+            }
+        }
+        arms.retain(|selector, _| !DISPATCH_PREFIX_SELECTORS.contains(&selector.as_str()));
+        arms
+    }
+
     /// Generates dispatch case arms for all class-defined instance methods.
     ///
     /// Each arm routes to the module-level function for that method, unwrapping
@@ -4924,9 +5014,7 @@ impl CoreErlangGenerator {
             ]);
 
             // Methods with NLR return {Result, State} tuple — unwrap via case.
-            let has_nlr = self
-                .semantic_facts
-                .has_block_nlr_or_walk(&method.span, &method.body);
+            let has_nlr = self.method_returns_nlr_pair(method);
 
             // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
             if !method.parameters.is_empty() {

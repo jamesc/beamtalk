@@ -143,6 +143,15 @@ pub(in crate::core_erlang) struct ClassContext {
     /// Selectors of sealed methods in the current class.
     /// Used to generate standalone functions and direct call dispatch.
     pub sealed_method_selectors: std::collections::HashSet<String>,
+    /// BT-4473: the instance selectors the unit's own Value class answers
+    /// from a method arm of its own `dispatch/3` — its methods and its
+    /// auto-generated slot accessors — with how each arm calls the method.
+    /// A typed send to an instance of the own class calls that function
+    /// directly behind the class-tag guard instead of going through
+    /// `dispatch/3`. Set by `generate_value_type_module` before any method
+    /// body is generated; empty for every other kind of unit.
+    pub own_dispatch_arms:
+        std::collections::HashMap<String, crate::core_erlang::value_type_codegen::OwnDispatchArm>,
     /// Auto-generated keyword constructor selector for Value subclass: classes.
     /// E.g. `"symName:"` for a single-slot class, `"x:y:"` for two slots.
     /// Set during class method codegen to route `ClassName slot: value` to the correct
@@ -217,6 +226,7 @@ impl ClassContext {
             shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames::default(),
             own_class_name: None,
             sealed_method_selectors: std::collections::HashSet::new(),
+            own_dispatch_arms: std::collections::HashMap::new(),
             class_slot_constructor_selector: None,
             in_class_method: false,
             stdlib_mode: false,
