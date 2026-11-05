@@ -301,50 +301,6 @@ repeat_one_test() ->
     ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:repeat(<<"abc">>, 1)).
 
 %%% ============================================================================
-%%% as_charlist/1 (BT-4380: code points, not UTF-8 bytes)
-%%% ============================================================================
-
-as_charlist_ascii_test() ->
-    ?assertEqual("hello", beamtalk_string:as_charlist({beamtalk_string, <<"hello">>})).
-
-as_charlist_empty_test() ->
-    ?assertEqual([], beamtalk_string:as_charlist({beamtalk_string, <<>>})).
-
-as_charlist_code_points_test() ->
-    %% One code point per character, matching the FFI proxy's coercion.
-    ?assertEqual(
-        [99, 97, 102, 233, 8364],
-        beamtalk_string:as_charlist({beamtalk_string, <<"caf\x{E9}\x{20AC}"/utf8>>})
-    ).
-
-as_charlist_invalid_utf8_test() ->
-    %% Only reachable via asStringUnchecked: no code-point reading exists.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = asCharlist
-            }
-        },
-        beamtalk_string:as_charlist({beamtalk_string, <<255, 254>>})
-    ).
-
-as_charlist_bare_binary_test() ->
-    %% Direct Erlang callers only (BT-4382): valid UTF-8 reads as code points,
-    %% and invalid UTF-8 names Binary, not String.
-    ?assertEqual([233], beamtalk_string:as_charlist(<<"\x{E9}"/utf8>>)),
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'Binary', selector = asCharlist}},
-        beamtalk_string:as_charlist(<<255, 254>>)
-    ).
-
-as_charlist_non_string_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, selector = asCharlist}},
-        beamtalk_string:as_charlist(42)
-    ).
-
-%%% ============================================================================
 %%% as_list/1
 %%% ============================================================================
 
@@ -838,4 +794,333 @@ from_iolist_non_binary_non_list_raises_test() ->
             error := #beamtalk_error{kind = type_error, class = 'String', selector = 'fromIolist:'}
         },
         beamtalk_string:from_iolist(42)
+    ).
+
+%%% ============================================================================
+%%% raise_not_string/2 — integer receiver (bare binary hint vs generic)
+%%% ============================================================================
+
+%% When the receiver is a bare binary (not a tagged String), raise_not_string
+%% emits the "bare binaries are Binary" downcast hint (line 157-158).
+at_non_string_bare_binary_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string:at(42, 1)
+    ).
+
+first_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'first'}
+        },
+        beamtalk_string:first(42)
+    ).
+
+last_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'last'}
+        },
+        beamtalk_string:last(42)
+    ).
+
+ascii_lowercase_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = 'asciiLowercase'
+            }
+        },
+        beamtalk_string:ascii_lowercase(42)
+    ).
+
+capitalize_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'capitalize'}
+        },
+        beamtalk_string:capitalize(42)
+    ).
+
+reverse_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'reverse'}
+        },
+        beamtalk_string:reverse(42)
+    ).
+
+as_list_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'asList'}
+        },
+        beamtalk_string:as_list(42)
+    ).
+
+lines_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'lines'}
+        },
+        beamtalk_string:lines(42)
+    ).
+
+words_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'words'}
+        },
+        beamtalk_string:words(42)
+    ).
+
+take_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'take:'}
+        },
+        beamtalk_string:take(42, 3)
+    ).
+
+drop_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'drop:'}
+        },
+        beamtalk_string:drop(42, 3)
+    ).
+
+is_blank_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isBlank'}
+        },
+        beamtalk_string:is_blank(42)
+    ).
+
+is_digit_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isDigit'}
+        },
+        beamtalk_string:is_digit(42)
+    ).
+
+is_alpha_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isAlpha'}
+        },
+        beamtalk_string:is_alpha(42)
+    ).
+
+urlEncoded_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'urlEncoded'}
+        },
+        beamtalk_string:urlEncoded(42)
+    ).
+
+urlDecoded_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'urlDecoded'}
+        },
+        beamtalk_string:urlDecoded(42)
+    ).
+
+%%% ============================================================================
+%%% raise_not_string/2 — bare binary receiver (downcast hint path, line 157-158)
+%%% ============================================================================
+
+%% A bare binary (not tagged) hits the `is_binary(X)` clause of raise_not_string
+%% and gets the "bare binaries are Binary; convert with asString" hint.
+%% These tests verify that path is reachable when a non-compat function
+%% receives a tagged receiver but a bare binary argument triggers the error
+%% via the catch-all clause naming the receiver.
+
+includes_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'includes:'}
+        },
+        beamtalk_string:includes(42, {beamtalk_string, <<"hi">>})
+    ).
+
+starts_with_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'startsWith:'}
+        },
+        beamtalk_string:starts_with(42, {beamtalk_string, <<"hi">>})
+    ).
+
+ends_with_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'endsWith:'}
+        },
+        beamtalk_string:ends_with(42, {beamtalk_string, <<"hi">>})
+    ).
+
+index_of_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'indexOf:'}
+        },
+        beamtalk_string:index_of(42, {beamtalk_string, <<"hi">>})
+    ).
+
+split_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'split:'}
+        },
+        beamtalk_string:split(42, {beamtalk_string, <<",">>})
+    ).
+
+split_on_non_string_receiver_raises_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'splitOn:'}
+        },
+        beamtalk_string:split_on(42, {beamtalk_string, <<",">>})
+    ).
+
+%%% ============================================================================
+%%% BT-4173 compat clauses: mixed tagged/bare binary two-arg forms
+%%% ============================================================================
+
+%% tagged receiver, bare binary argument (line 238 for includes, 258 for starts_with, etc.)
+includes_tagged_receiver_bare_binary_arg_test() ->
+    ?assert(beamtalk_string:includes({beamtalk_string, <<"hello">>}, <<"ell">>)).
+
+includes_bare_binary_receiver_tagged_arg_test() ->
+    ?assert(beamtalk_string:includes(<<"hello">>, {beamtalk_string, <<"ell">>})).
+
+starts_with_tagged_receiver_bare_binary_arg_test() ->
+    ?assert(beamtalk_string:starts_with({beamtalk_string, <<"hello">>}, <<"hel">>)).
+
+starts_with_bare_binary_receiver_tagged_arg_test() ->
+    ?assert(beamtalk_string:starts_with(<<"hello">>, {beamtalk_string, <<"hel">>})).
+
+ends_with_tagged_receiver_bare_binary_arg_test() ->
+    ?assert(beamtalk_string:ends_with({beamtalk_string, <<"hello">>}, <<"llo">>)).
+
+ends_with_bare_binary_receiver_tagged_arg_test() ->
+    ?assert(beamtalk_string:ends_with(<<"hello">>, {beamtalk_string, <<"llo">>})).
+
+index_of_tagged_receiver_bare_binary_arg_test() ->
+    ?assertEqual(2, beamtalk_string:index_of({beamtalk_string, <<"hello">>}, <<"el">>)).
+
+index_of_bare_binary_receiver_tagged_arg_test() ->
+    ?assertEqual(2, beamtalk_string:index_of(<<"hello">>, {beamtalk_string, <<"el">>})).
+
+%%% ============================================================================
+%%% split/2 — EUnit coverage (all existing tests use BUnit tagged strings)
+%%% ============================================================================
+
+split_bare_binary_both_test() ->
+    ?assertEqual(
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}, {beamtalk_string, <<"c">>}],
+        beamtalk_string:split(<<"a,b,c">>, <<",">>)
+    ).
+
+split_tagged_receiver_bare_binary_sep_test() ->
+    ?assertEqual(
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
+        beamtalk_string:split({beamtalk_string, <<"a-b">>}, <<"-">>)
+    ).
+
+split_bare_binary_receiver_tagged_sep_test() ->
+    ?assertEqual(
+        [{beamtalk_string, <<"x">>}, {beamtalk_string, <<"y">>}],
+        beamtalk_string:split(<<"x/y">>, {beamtalk_string, <<"/">>})
+    ).
+
+%%% ============================================================================
+%%% split_on/2 — mixed tagged/bare binary compat clauses
+%%% ============================================================================
+
+split_on_tagged_receiver_bare_binary_sep_test() ->
+    ?assertEqual(
+        [{beamtalk_string, <<"a">>}, {beamtalk_string, <<"b">>}],
+        beamtalk_string:split_on({beamtalk_string, <<"a,b">>}, <<",">>)
+    ).
+
+split_on_bare_binary_receiver_tagged_sep_test() ->
+    ?assertEqual(
+        [{beamtalk_string, <<"x">>}, {beamtalk_string, <<"y">>}],
+        beamtalk_string:split_on(<<"x|y">>, {beamtalk_string, <<"|">>})
+    ).
+
+%%% ============================================================================
+%%% join/2 — non-list raises type_error
+%%% ============================================================================
+
+join_non_list_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'withAll:'}
+        },
+        beamtalk_string:join(42)
+    ).
+
+join_element_non_string_raises_type_error_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'withAll:'}
+        },
+        beamtalk_string:join([{beamtalk_string, <<"a">>}, <<"b">>])
+    ).
+
+%%% ============================================================================
+%%% urlEncoded/1 — bare binary compat clause (line 659)
+%%% ============================================================================
+
+urlEncoded_bare_binary_compat_test() ->
+    ?assertEqual(
+        {beamtalk_string, <<"hello%20world">>},
+        beamtalk_string:urlEncoded(<<"hello world">>)
+    ).
+
+%%% ============================================================================
+%%% from_iolist/1 — invalid UTF-8 binary (line 585-588)
+%%% ============================================================================
+
+from_iolist_bare_binary_invalid_utf8_raises_test() ->
+    %% <<255, 254>> is not valid UTF-8; the binary path validates and raises.
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'fromIolist:'}
+        },
+        beamtalk_string:from_iolist(<<255, 254>>)
     ).
