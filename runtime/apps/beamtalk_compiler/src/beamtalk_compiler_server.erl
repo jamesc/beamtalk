@@ -171,7 +171,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -187,7 +187,7 @@ Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -200,12 +200,12 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 
 -doc "Compile a REPL expression in trace mode.".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE, {compile_expression_trace, Source, ModuleName, KnownVars, Options}, 30000

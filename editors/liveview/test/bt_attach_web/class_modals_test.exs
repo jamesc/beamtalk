@@ -37,7 +37,8 @@ defmodule BtAttachWeb.Live.ClassModalsTest do
     @moduledoc false
     use BtAttachWeb.StubClientOverrides
 
-    def eval(_pid, _code), do: {:error, :compile_failed, "output", ["a warning"]}
+    def eval(_pid, _code),
+      do: {:error, :compile_failed, "output", [%{message: "a warning", hint: nil}]}
   end
 
   # `eval` fails with a plain 2-tuple (a down workspace, a malformed reply) —

@@ -242,6 +242,39 @@ pub fn format_warning(msg: &str, mode: OutputMode, style: WarningStyle) -> Strin
     }
 }
 
+/// Format a compilation warning together with its hint (BT-4449).
+///
+/// The hint goes on its own `Hint: <hint>` line, like
+/// [`format_diagnostic`]'s error hint, and is unpainted as there. With
+/// [`WarningStyle::Bullet`] the line is indented two spaces so it sits under
+/// the message text rather than the `⚠`:
+///
+/// ```text
+/// ⚠ Udp class does not conform to Transport class
+///   Hint: missing: class defaultPort
+/// ```
+///
+/// Without a hint this is exactly [`format_warning`].
+#[must_use]
+pub fn format_warning_entry(
+    warning: &crate::Warning,
+    mode: OutputMode,
+    style: WarningStyle,
+) -> String {
+    let mut out = format_warning(&warning.message, mode, style);
+    if let Some(hint) = &warning.hint {
+        let indent = match style {
+            WarningStyle::Prefixed => "",
+            WarningStyle::Bullet => "  ",
+        };
+        out.push('\n');
+        out.push_str(indent);
+        out.push_str("Hint: ");
+        out.push_str(hint);
+    }
+    out
+}
+
 /// Style of warning rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarningStyle {
@@ -553,6 +586,44 @@ mod tests {
             format_warning("deprecated", OutputMode::Plain, WarningStyle::Bullet),
             "⚠ deprecated"
         );
+    }
+
+    #[test]
+    fn warning_entry_bullet_puts_hint_under_message() {
+        let w = crate::Warning {
+            message: "Udp class does not conform to Transport class".to_string(),
+            hint: Some("missing: class defaultPort".to_string()),
+        };
+        assert_eq!(
+            format_warning_entry(&w, OutputMode::Plain, WarningStyle::Bullet),
+            "⚠ Udp class does not conform to Transport class\n  Hint: missing: class defaultPort"
+        );
+    }
+
+    #[test]
+    fn warning_entry_prefixed_hint_matches_error_hint_line() {
+        let w = crate::Warning {
+            message: "m".to_string(),
+            hint: Some("h".to_string()),
+        };
+        assert_eq!(
+            format_warning_entry(&w, OutputMode::Plain, WarningStyle::Prefixed),
+            "Warning: m\nHint: h"
+        );
+    }
+
+    #[test]
+    fn warning_entry_without_hint_is_format_warning() {
+        let w = crate::Warning {
+            message: "deprecated".to_string(),
+            hint: None,
+        };
+        for style in [WarningStyle::Bullet, WarningStyle::Prefixed] {
+            assert_eq!(
+                format_warning_entry(&w, OutputMode::Ansi, style),
+                format_warning("deprecated", OutputMode::Ansi, style)
+            );
+        }
     }
 
     // --- format_trace_step ---

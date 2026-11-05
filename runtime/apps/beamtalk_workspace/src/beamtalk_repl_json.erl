@@ -102,15 +102,14 @@ format_error(Reason) ->
     end.
 
 -doc "Format a successful response with warnings as JSON.".
--spec format_response_with_warnings(term(), [binary()]) -> binary().
+-spec format_response_with_warnings(term(), [beamtalk_repl_protocol:warning()]) -> binary().
 format_response_with_warnings(Value, Warnings) ->
     try
         JsonValue = term_to_json(Value),
         Response = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
-        case Warnings of
-            [] -> iolist_to_binary(json:encode(Response));
-            _ -> iolist_to_binary(json:encode(Response#{<<"warnings">> => Warnings}))
-        end
+        iolist_to_binary(
+            json:encode(beamtalk_repl_protocol:maybe_add_warnings(Response, Warnings))
+        )
     catch
         Class:Reason:_Stack ->
             ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
@@ -123,15 +122,14 @@ format_response_with_warnings(Value, Warnings) ->
     end.
 
 -doc "Format an error response with warnings as JSON.".
--spec format_error_with_warnings(term(), [binary()]) -> binary().
+-spec format_error_with_warnings(term(), [beamtalk_repl_protocol:warning()]) -> binary().
 format_error_with_warnings(Reason, Warnings) ->
     try
         Message = format_error_message(Reason),
         Response = #{<<"type">> => <<"error">>, <<"message">> => Message},
-        case Warnings of
-            [] -> iolist_to_binary(json:encode(Response));
-            _ -> iolist_to_binary(json:encode(Response#{<<"warnings">> => Warnings}))
-        end
+        iolist_to_binary(
+            json:encode(beamtalk_repl_protocol:maybe_add_warnings(Response, Warnings))
+        )
     catch
         Class:FormatError:Stack ->
             ?LOG_DEBUG("Failed to format error", #{
@@ -213,7 +211,7 @@ Warnings are surfaced when a reload causes a cross-package class collision.
     non_neg_integer(),
     [{pid(), term()}],
     beamtalk_repl_protocol:protocol_msg(),
-    [binary()]
+    [beamtalk_repl_protocol:warning()]
 ) -> binary().
 encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
     ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
@@ -225,11 +223,7 @@ encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
         <<"migration_failures">> => FailureCount,
         <<"status">> => [<<"done">>]
     },
-    iolist_to_binary(json:encode(maybe_add_warnings_reloaded(Full, Warnings))).
-
--spec maybe_add_warnings_reloaded(map(), [binary()]) -> map().
-maybe_add_warnings_reloaded(Map, []) -> Map;
-maybe_add_warnings_reloaded(Map, Warnings) -> Map#{<<"warnings">> => Warnings}.
+    iolist_to_binary(json:encode(beamtalk_repl_protocol:maybe_add_warnings(Full, Warnings))).
 
 -doc "Encode an error response using the REPL error formatter.".
 -spec encode_error(term(), beamtalk_repl_protocol:protocol_msg()) -> binary().

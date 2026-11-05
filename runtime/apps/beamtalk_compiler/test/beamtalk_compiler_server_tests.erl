@@ -510,11 +510,13 @@ any_message_contains(Diagnostics, Needle) ->
         Diagnostics
     ).
 
-%% Test-only helper: does any plain-binary warning (`compile`/`compile_method`'s
-%% `warnings` field — unlike `diagnostics`' diagnostic maps above) contain
-%% `Needle`?
+%% Test-only helper: does any warning's message (`compile`/`compile_method`'s
+%% `warnings` field, one `#{message, hint?}` map per warning — BT-4449)
+%% contain `Needle`?
 any_warning_contains(Warnings, Needle) ->
-    lists:any(fun(W) -> binary:match(W, Needle) =/= nomatch end, Warnings).
+    lists:any(
+        fun(#{message := Message}) -> binary:match(Message, Needle) =/= nomatch end, Warnings
+    ).
 
 %% The `compile/2` sibling of
 %% `api_diagnostics_protocol_registry_suppresses_false_protocol_mismatch` above

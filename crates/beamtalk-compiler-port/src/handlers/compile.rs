@@ -10,7 +10,9 @@ use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
     extract_protocol_registry, merge_method,
 };
-use crate::diagnostics::{DiagInfo, filter_error_diagnostics, partition_diagnostics};
+use crate::diagnostics::{
+    DiagInfo, filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
+};
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_ok_response, diagnostic_error_response, error_response, format_codegen_error,
@@ -174,6 +176,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
                     message: format!(
                         "Standalone method targets unknown class `{target_class}` in this module"
                     ),
+                    hint: None,
                     severity: "warning".to_string(),
                     category: None,
                     start: method_def.span.start(),
@@ -222,7 +225,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // one class exists and errors with "Value type module has no class" for
     // protocol-only files. Route through the protocol codegen instead.
     if !module.protocols.is_empty() && module.classes.is_empty() {
-        let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+        let warning_msgs = warnings_from_diag_infos(&warnings);
         // `referenced_aliases` was already computed above
         // for this file-compile path — thread it through so a protocol-only
         // file's alias-typed method signatures get the same
@@ -253,7 +256,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     let source_path = map_get(request, "source_path").and_then(term_to_string);
 
     // Generate Core Erlang
-    let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+    let warning_msgs = warnings_from_diag_infos(&warnings);
     let mut codegen_options = beamtalk_codegen::core_erlang::CodegenOptions::new(&module_name)
         .with_source(&source)
         .with_class_module_index(class_module_index)

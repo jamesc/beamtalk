@@ -169,20 +169,6 @@ fn load_like_compile_request(source: &str, source_path: &std::path::Path) -> Map
     ])
 }
 
-fn compile_warnings(response: &Term) -> Vec<String> {
-    let Term::Map(m) = response else {
-        panic!("Expected map response: {response:?}");
-    };
-    let Some(Term::List(warnings)) = map_get(m, "warnings") else {
-        panic!("Expected warnings list: {response:?}");
-    };
-    warnings
-        .elements
-        .iter()
-        .filter_map(term_to_string)
-        .collect()
-}
-
 /// BT-4322 AC 1-3: a project file using a cross-file alias (`Scheme`), a
 /// dependency alias (`DepAddr`), and a zero-arg FFI call with a declared
 /// return type compiles with no diagnostics — the same result `beamtalk
@@ -201,7 +187,7 @@ fn compile_file_sees_project_aliases_and_ffi_specs() {
         Some(&atom("ok")),
         "project file must compile: {response:?}"
     );
-    let warnings = compile_warnings(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         !warnings.iter().any(|w| w.contains("untyped FFI")),
         "zero-arg FFI with a registry spec must not warn: {warnings:?}"
@@ -277,7 +263,7 @@ fn compile_method_patch_sees_project_scope() {
         Some(&atom("ok")),
         "patched method must compile: {response:?}"
     );
-    let warnings = compile_warnings(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         !warnings.iter().any(|w| w.contains("untyped FFI")),
         "patched zero-arg FFI with a registry spec must not warn: {warnings:?}"
@@ -376,7 +362,7 @@ fn manifest_less_and_stdlib_files_keep_legacy_scope() {
         Some(&atom("ok")),
         "manifest-less file must compile: {response:?}"
     );
-    let warnings = compile_warnings(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         warnings.iter().any(|w| w.contains("declared as Scheme")),
         "unknown alias must still surface without project scope: {warnings:?}"
@@ -396,7 +382,7 @@ fn manifest_less_and_stdlib_files_keep_legacy_scope() {
         Some(&atom("ok")),
         "stdlib file must compile: {response:?}"
     );
-    let warnings = compile_warnings(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         warnings.iter().any(|w| w.contains("declared as Scheme")),
         "stdlib file must not see project aliases: {warnings:?}"
@@ -415,11 +401,11 @@ fn compile_baseline_state_file(state_path: &std::path::Path) -> String {
         "baseline must compile: {first:?}"
     );
     assert!(
-        !compile_warnings(&first)
+        !response_warning_messages(&first)
             .iter()
             .any(|w| w.contains("declared as Scheme")),
         "baseline must see Scheme: {:#?}",
-        compile_warnings(&first)
+        response_warning_messages(&first)
     );
     source
 }
@@ -560,7 +546,7 @@ fn compile_file_types_ffi_through_project_stubs_like_build() {
         "the stub types the FFI call, as in `beamtalk build`: {response:?}"
     );
     assert!(
-        !compile_warnings(&response)
+        !response_warning_messages(&response)
             .iter()
             .any(|w| w.contains("untyped FFI")),
         "{response:?}"
@@ -595,7 +581,7 @@ fn removed_dependency_aliases_do_not_resolve() {
     let source = fs::read_to_string(&state_path).expect("read fixture state file");
     let first = handle_compile(&load_like_compile_request(&source, &state_path));
     assert!(
-        !compile_warnings(&first)
+        !response_warning_messages(&first)
             .iter()
             .any(|w| w.contains("declared as DepAddr")),
         "baseline must see the dependency alias: {first:?}"

@@ -59,6 +59,7 @@ impl BeamtalkMcp {
             return Ok(error_result(fmt::format_diagnostic(&diag, MCP_OUTPUT_MODE)));
         }
 
+        let warnings: Vec<ContentBlock> = warning_blocks(&response).collect();
         let mut parts = Vec::new();
 
         if let Some(ref output) = response.output {
@@ -89,6 +90,10 @@ impl BeamtalkMcp {
         if parts.is_empty() {
             parts.push(ContentBlock::text("nil"));
         }
+
+        // Compile warnings, each with its hint (BT-4449), as the CLI REPL
+        // shows them after an eval.
+        parts.extend(warnings);
 
         timer.mark_ok();
         Ok(CallToolResult::success(parts))
@@ -278,11 +283,7 @@ impl BeamtalkMcp {
         let mut parts = vec![ContentBlock::text(text)];
 
         // Include any warnings
-        if let Some(warnings) = response.warnings {
-            for w in warnings {
-                parts.push(ContentBlock::text(format!("Warning: {w}")));
-            }
-        }
+        parts.extend(warning_blocks(&response));
 
         timer.mark_ok();
         Ok(CallToolResult::success(parts))
@@ -402,6 +403,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to generate Core Erlang");
 
+        let warnings: Vec<ContentBlock> = warning_blocks(&response).collect();
         let mut parts = Vec::new();
 
         if let Some(core_erlang) = response.core_erlang {
@@ -410,11 +412,7 @@ impl BeamtalkMcp {
             parts.push(ContentBlock::text("No Core Erlang output"));
         }
 
-        if let Some(warnings) = response.warnings {
-            for w in warnings {
-                parts.push(ContentBlock::text(format!("Warning: {w}")));
-            }
-        }
+        parts.extend(warnings);
 
         timer.mark_ok();
         Ok(CallToolResult::success(parts))
@@ -458,4 +456,18 @@ impl BeamtalkMcp {
         timer.mark_ok();
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
+}
+
+/// One `Warning: <msg>` content block per compile warning in `response`,
+/// with a `Hint: <hint>` line when the warning carries one (BT-4449).
+fn warning_blocks(
+    response: &beamtalk_repl_protocol::ReplResponse,
+) -> impl Iterator<Item = ContentBlock> {
+    response.warning_entries().into_iter().map(|w| {
+        ContentBlock::text(fmt::format_warning_entry(
+            &w,
+            MCP_OUTPUT_MODE,
+            fmt::WarningStyle::Prefixed,
+        ))
+    })
 }

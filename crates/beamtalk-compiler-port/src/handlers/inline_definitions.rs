@@ -8,6 +8,7 @@
 use eetf::Term;
 
 use crate::decode::merge_method;
+use crate::diagnostics::Warning;
 use crate::respond::{
     class_definition_ok_response, error_response, format_codegen_error,
     protocol_definition_ok_response, type_alias_definition_ok_response, with_verifier_warnings,
@@ -75,7 +76,7 @@ pub(crate) fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
     source: &str,
     expr_module_name: &str,
-    warnings: &[String],
+    warnings: &[Warning],
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
@@ -103,9 +104,9 @@ pub(crate) fn handle_inline_class_definition(
                 };
                 merge_method(methods, method_def.method);
             } else {
-                warnings.push(format!(
+                warnings.push(Warning::message_only(format!(
                     "Standalone method targets unknown class `{target_class}` in this module"
-                ));
+                )));
             }
         }
     }
@@ -220,7 +221,7 @@ pub(crate) fn handle_inline_class_definition(
 pub(crate) fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
     source: &str,
-    warnings: &[String],
+    warnings: &[Warning],
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
@@ -280,7 +281,7 @@ pub(crate) fn handle_inline_protocol_definition(
 /// a file-compile concern, not a single REPL turn's.
 pub(crate) fn handle_inline_type_alias_definition(
     module: &beamtalk_core::ast::Module,
-    warnings: &[String],
+    warnings: &[Warning],
 ) -> Term {
     if module.type_aliases.len() > 1 {
         return error_response(&[

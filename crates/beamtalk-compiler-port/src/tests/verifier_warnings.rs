@@ -11,20 +11,6 @@ use crate::handlers::expression::{
 };
 use beamtalk_codegen::core_erlang::CodegenOptions;
 
-fn response_warnings(response: &Term) -> Vec<String> {
-    let Term::Map(m) = response else {
-        panic!("Expected map response: {response:?}");
-    };
-    let Some(Term::List(warnings)) = map_get(m, "warnings") else {
-        panic!("Expected warnings list: {response:?}");
-    };
-    warnings
-        .elements
-        .iter()
-        .filter_map(term_to_string)
-        .collect()
-}
-
 fn injected() -> CodegenOptions {
     CodegenOptions::new("probe").with_injected_verifier_violation()
 }
@@ -35,7 +21,7 @@ fn assert_internal_warning(response: &Term) {
         response_field_str(response, "core_erlang").is_some_and(|c| c.contains("eval")),
         "eval still produces code: {response:?}"
     );
-    let warnings = response_warnings(response);
+    let warnings = response_warning_messages(response);
     assert!(
         warnings.iter().any(|w| w.starts_with("internal:")),
         "expected an `internal:` verifier warning, got: {warnings:?}"
@@ -59,7 +45,7 @@ fn expression_eval_has_no_internal_warning_by_default() {
     );
     assert_eq!(response_status(&response).as_deref(), Some("ok"));
     assert!(
-        response_warnings(&response)
+        response_warning_messages(&response)
             .iter()
             .all(|w| !w.starts_with("internal:")),
         "valid code adds no warning: {response:?}"
@@ -83,7 +69,7 @@ fn inline_class_trailing_expression_surfaces_injected_verifier_violation() {
     let response = handle_compile_expression_with_options(&request, &injected());
     assert_eq!(response_status(&response).as_deref(), Some("ok"));
     assert!(
-        response_warnings(&response)
+        response_warning_messages(&response)
             .iter()
             .any(|w| w.starts_with("internal:")),
         "trailing-expression finding reaches the class-definition response: {response:?}"

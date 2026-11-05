@@ -98,29 +98,29 @@ The cross-surface op result contract. A dispatched op returns one of these
 tagged terms; `encode/2` is the only thing that turns them into JSON.
 """.
 -type op_result() ::
-    {ok, Value :: term(), Output :: binary(), Warnings :: [binary()]}
-    | {trace, Steps :: [term()], Output :: binary(), Warnings :: [binary()]}
-    | {script_exit, Code :: non_neg_integer(), Output :: binary(), Warnings :: [binary()]}
+    {ok, Value :: term(), Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
+    | {trace, Steps :: [term()], Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
+    | {script_exit, Code :: non_neg_integer(), Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
     | {actors, [map()]}
     | {inspect, map() | binary()}
     | {status, ok}
     | {value, JsonValue :: term()}
-    | {loaded, Classes :: [map()], Warnings :: [binary()]}
+    | {loaded, Classes :: [map()], Warnings :: [beamtalk_repl_protocol:warning()]}
     | {load_project, Classes :: [binary()], Errors :: [map()], Summary :: binary(),
-        Warnings :: [binary()]}
+        Warnings :: [beamtalk_repl_protocol:warning()]}
     | {sessions, [map()]}
     | {health, WorkspaceId :: binary(), Nonce :: binary()}
     | {completions, [binary()]}
     | {diagnostics, [map()]}
     | {docs, binary()}
-    | {codegen, CoreErlang :: binary(), Warnings :: [binary()]}
+    | {codegen, CoreErlang :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}
     | {methods, Methods :: [map()], StateVars :: [binary()]}
     | {inherited_methods, Methods :: [map()]}
     | {class_list, [map()]}
     | {test_results, map()}
     | {describe, Ops :: map(), Versions :: map()}
     | {error, #beamtalk_error{}}
-    | {error, #beamtalk_error{}, Output :: binary(), Warnings :: [binary()]}.
+    | {error, #beamtalk_error{}, Output :: binary(), Warnings :: [beamtalk_repl_protocol:warning()]}.
 
 %%% Dispatch — op name → term result
 

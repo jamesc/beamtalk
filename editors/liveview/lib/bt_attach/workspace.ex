@@ -234,7 +234,11 @@ defmodule BtAttach.Workspace do
       the structured `#beamtalk_error{}` record (a tuple tagged `:beamtalk_error`,
       so no shared `.hrl` is needed)
 
-  `output` is captured stdout (`String.t/0`) and `warnings` is a list of strings.
+  `output` is captured stdout (`String.t/0`) and `warnings` is a list of
+  `%{message: String.t(), hint: String.t() | nil}` maps: the compiler's warning
+  message and, kept as its own field (BT-4449), the diagnostic's hint (e.g.
+  `"missing: class defaultPort"`). Warnings the runtime raises itself (class
+  collisions) arrive as plain binaries and get `hint: nil`.
 
   > #### Connected exit (BT-2688) {: .info}
   > A `Program exit:` in this connected session makes the op layer return a
@@ -247,11 +251,11 @@ defmodule BtAttach.Workspace do
   def eval(session_pid, expression) when is_pid(session_pid) and is_binary(expression) do
     case dispatch_eval(session_pid, expression) do
       {:ok, value, output, warnings} ->
-        {:ok, value, to_string(output), Enum.map(warnings, &to_string/1)}
+        {:ok, value, to_string(output), Enum.map(warnings, &normalize_warning/1)}
 
       # Term contract: eval may attach captured output + warnings to an error.
       {:error, reason, output, warnings} ->
-        {:error, reason, to_string(output), Enum.map(warnings, &to_string/1)}
+        {:error, reason, to_string(output), Enum.map(warnings, &normalize_warning/1)}
 
       {:error, reason} ->
         {:error, reason, "", []}
@@ -265,6 +269,17 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}, "", []}
     end
   end
+
+  # A workspace warning is a compiler-port `#{message, hint?}` map (BT-4449) or
+  # a runtime-raised plain binary; both become one `%{message, hint}` shape.
+  defp normalize_warning(%{message: message} = warning) do
+    %{message: to_string(message), hint: warning |> Map.get(:hint) |> optional_string()}
+  end
+
+  defp normalize_warning(message), do: %{message: to_string(message), hint: nil}
+
+  defp optional_string(nil), do: nil
+  defp optional_string(value), do: to_string(value)
 
   @doc """
   Snapshot the live supervision tree (ADR 0092) as a list of node maps.

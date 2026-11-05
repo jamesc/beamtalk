@@ -10,7 +10,7 @@ use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
     extract_protocol_registry,
 };
-use crate::diagnostics::{collect_warning_messages, filter_error_diagnostics};
+use crate::diagnostics::{Warning, collect_warnings, filter_error_diagnostics};
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     diagnostic_error_response, error_response, format_codegen_error, method_definition_ok_response,
@@ -64,7 +64,7 @@ pub(crate) fn parse_and_check_expression(
 ) -> Result<
     (
         beamtalk_core::ast::Module,
-        Vec<String>,
+        Vec<Warning>,
         beamtalk_core::semantic_analysis::AnalysisResult,
     ),
     Term,
@@ -100,7 +100,7 @@ pub(crate) fn parse_and_check_expression(
     all_diagnostics.extend(primitive_diags);
 
     let error_diags = filter_error_diagnostics(&all_diagnostics);
-    let warnings = collect_warning_messages(&all_diagnostics);
+    let warnings = collect_warnings(&all_diagnostics);
 
     if !error_diags.is_empty() {
         return Err(diagnostic_error_response(&error_diags, source));

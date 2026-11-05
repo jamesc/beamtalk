@@ -12,7 +12,9 @@ use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
     extract_protocol_registry, merge_method,
 };
-use crate::diagnostics::{filter_error_diagnostics, partition_diagnostics};
+use crate::diagnostics::{
+    filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
+};
 use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_method_diagnostic_response, compile_method_ok_response, diagnostic_error_response,
@@ -272,7 +274,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         .iter()
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
         .collect();
-    let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+    let warning_msgs = warnings_from_diag_infos(&warnings);
 
     // Prepare the AST at the driver boundary using the same
     // still-trustworthy analysis (computed on `merged_module` with no
