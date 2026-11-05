@@ -284,6 +284,54 @@ fn test_detect_changes_protocol_hash_change_forces_rebuild_of_user() {
     assert_eq!(third.unchanged_files, vec![source_file]);
 }
 
+/// BT-4393: every file type-checks its FFI calls against the registry merged
+/// from the stub tiers, so a change to the stub inputs (edit, add, or remove
+/// every stub) must rebuild a file whose own source is unchanged — and settle
+/// once the stubs stop changing.
+#[test]
+fn test_detect_changes_rebuilds_when_stub_inputs_change() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src_dir = project.join("src");
+    let build_dir = project.join("build");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let source_file = src_dir.join("answer.bt");
+    write_test_file(&source_file, "Object subclass: Answer\n");
+    write_test_file(&build_dir.join("bt@answer.beam"), "BEAM");
+    let source_files = vec![source_file.clone()];
+    let pairs = make_pairs(&source_files, &build_dir);
+
+    let detect = |stub_inputs_hash: &str| {
+        let changes = detect_changes(
+            &source_files,
+            &build_dir,
+            &pairs,
+            false,
+            &HashMap::new(),
+            &BuildGraphEdges {
+                stub_inputs_hash: stub_inputs_hash.to_string(),
+                ..BuildGraphEdges::default()
+            },
+        );
+        super::super::super::build_cache::save_beam_hash_cache(&build_dir, &changes.source_hashes);
+        changes
+    };
+
+    // Baseline with stubs present, then an unchanged rebuild settles.
+    assert_eq!(detect("stubs-v1").changed_files, vec![source_file.clone()]);
+    assert!(detect("stubs-v1").changed_files.is_empty());
+
+    // A stub edit rebuilds the unchanged source, then settles.
+    assert_eq!(detect("stubs-v2").changed_files, vec![source_file.clone()]);
+    assert!(detect("stubs-v2").changed_files.is_empty());
+
+    // Removing every stub (empty hash) rebuilds too.
+    assert_eq!(detect("").changed_files, vec![source_file.clone()]);
+    assert_eq!(detect("").unchanged_files, vec![source_file]);
+}
+
 /// ADR 0127 §10a / BT-3591 Blocker fix: a file's `uses:` protocol names
 /// must survive a Pass 1 cache hit, not just be known for files this build
 /// actually re-scanned. Before this fix, `file_protocol_uses` was derived
@@ -823,6 +871,7 @@ fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
             file_protocol_uses: index.file_protocol_uses.clone(),
             protocol_hashes,
             trait_surface_hash: index.trait_surface_hash.clone(),
+            ..BuildGraphEdges::default()
         },
     );
     for (_, module, _) in &pairs {
