@@ -2134,6 +2134,16 @@
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Counter answer                          // => #patched\nCounter class removeSelector: #answer\nCounter answer                          // the compiled method's answer again",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-222",
+      "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features",
         "for each",
         "for-each",
@@ -2149,7 +2159,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Removing methods — removeSelector: and removeSelector:ifAbsent: (ADR 0112) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2162,7 +2172,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Live Re-Checking on Reload (ADR 0105) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2175,7 +2185,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2201,7 +2211,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-228",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "shapeVersion: — declaring a version (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2211,7 +2221,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-229",
+      "id": "docs-beamtalk-language-features-block-230",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2238,7 +2248,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-230",
+      "id": "docs-beamtalk-language-features-block-231",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2265,7 +2275,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-231",
+      "id": "docs-beamtalk-language-features-block-232",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2287,7 +2297,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-232",
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2310,7 +2320,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-233",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2340,7 +2350,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-235",
+      "id": "docs-beamtalk-language-features-block-236",
       "title": "class migrateFromVN: — one method per step (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2350,7 +2360,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-238",
+      "id": "docs-beamtalk-language-features-block-239",
       "title": "Suspend on failure, not resume-on-old-state or kill (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2367,7 +2377,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-239",
+      "id": "docs-beamtalk-language-features-block-240",
       "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2381,7 +2391,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-240",
+      "id": "docs-beamtalk-language-features-block-241",
       "title": "Type annotations on extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2402,7 +2412,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-241",
+      "id": "docs-beamtalk-language-features-block-242",
       "title": "Cross-file extensions (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2419,7 +2429,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-242",
+      "id": "docs-beamtalk-language-features-block-243",
       "title": "Beamtalk — System reflection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2429,7 +2439,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-243",
+      "id": "docs-beamtalk-language-features-block-244",
       "title": "Workspace — Project operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2444,7 +2454,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-244",
+      "id": "docs-beamtalk-language-features-block-245",
       "title": "Transcript — The REPL's shared log (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2454,7 +2464,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-245",
+      "id": "docs-beamtalk-language-features-block-246",
       "title": "Node introspection (ADR 0129 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2475,7 +2485,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-246",
+      "id": "docs-beamtalk-language-features-block-247",
       "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2488,7 +2498,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-249",
+      "id": "docs-beamtalk-language-features-block-250",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2498,7 +2508,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-250",
+      "id": "docs-beamtalk-language-features-block-251",
       "title": "Renaming a class or method — renameTo:, renameSelector:to:, and moveClass:to: (ADR 0114) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2511,7 +2521,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-253",
+      "id": "docs-beamtalk-language-features-block-254",
       "title": "Destructive flush — flushIncludingDestructive and confirmDestructive (ADR 0113) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2521,7 +2531,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-255",
+      "id": "docs-beamtalk-language-features-block-256",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2544,7 +2554,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-256",
+      "id": "docs-beamtalk-language-features-block-257",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2562,7 +2572,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-258",
+      "id": "docs-beamtalk-language-features-block-259",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2585,7 +2595,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-260",
+      "id": "docs-beamtalk-language-features-block-261",
       "title": "Cross-session access (read-only) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2609,7 +2619,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-261",
+      "id": "docs-beamtalk-language-features-block-262",
       "title": "Tracing Lifecycle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2624,7 +2634,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-262",
+      "id": "docs-beamtalk-language-features-block-263",
       "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2639,7 +2649,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-263",
+      "id": "docs-beamtalk-language-features-block-264",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2657,7 +2667,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-264",
+      "id": "docs-beamtalk-language-features-block-265",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2672,7 +2682,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-265",
+      "id": "docs-beamtalk-language-features-block-266",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2687,7 +2697,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-266",
+      "id": "docs-beamtalk-language-features-block-267",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2697,7 +2707,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-267",
+      "id": "docs-beamtalk-language-features-block-268",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2717,7 +2727,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-268",
+      "id": "docs-beamtalk-language-features-block-269",
       "title": "Application Telemetry Events (ADR 0069 amendment) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2733,7 +2743,25 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-269",
+      "id": "docs-beamtalk-language-features-block-27",
+      "title": "Comparison (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "mutate",
+        "mutation",
+        "raise",
+        "set",
+        "throw"
+      ],
+      "source": "#apple < #banana   // => true\nx := nil\nx < 5              // => ERROR: UndefinedObject does not understand '<'",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-270",
       "title": "Attaching handlers (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2757,25 +2785,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-27",
-      "title": "Comparison (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "mutate",
-        "mutation",
-        "raise",
-        "set",
-        "throw"
-      ],
-      "source": "#apple < #banana   // => true\nx := nil\nx < 5              // => ERROR: UndefinedObject does not understand '<'",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-270",
+      "id": "docs-beamtalk-language-features-block-271",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2804,7 +2814,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-271",
+      "id": "docs-beamtalk-language-features-block-272",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2835,7 +2845,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-273",
+      "id": "docs-beamtalk-language-features-block-274",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2854,7 +2864,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-274",
+      "id": "docs-beamtalk-language-features-block-275",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2882,7 +2892,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-275",
+      "id": "docs-beamtalk-language-features-block-276",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2903,7 +2913,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-277",
+      "id": "docs-beamtalk-language-features-block-278",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2913,7 +2923,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-278",
+      "id": "docs-beamtalk-language-features-block-279",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2925,21 +2935,6 @@
         "process"
       ],
       "source": "AnnouncementNavigation default subscribersOf: ActorSpawned\nAnnouncementNavigation default announcedClasses    // => distinct event types in use\nAnnouncementNavigation of: anAnnouncer             // scope to one announcer",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-279",
-      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2977,6 +2972,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-280",
+      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-281",
       "title": "Node — a first-class value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2991,7 +3001,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-281",
+      "id": "docs-beamtalk-language-features-block-282",
       "title": "Remote spawn and lookup (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3011,7 +3021,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-282",
+      "id": "docs-beamtalk-language-features-block-283",
       "title": "Cluster-unique names — scope: #global (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3026,7 +3036,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-287",
+      "id": "docs-beamtalk-language-features-block-288",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3047,7 +3057,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-288",
+      "id": "docs-beamtalk-language-features-block-289",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3098,7 +3108,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-293",
+      "id": "docs-beamtalk-language-features-block-294",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3122,7 +3132,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-294",
+      "id": "docs-beamtalk-language-features-block-295",
       "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3140,7 +3150,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-296",
+      "id": "docs-beamtalk-language-features-block-297",
       "title": "Bitstring — Unaligned Bits (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3158,7 +3168,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-297",
+      "id": "docs-beamtalk-language-features-block-298",
       "title": "Bitstring — Unaligned Bits (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3168,7 +3178,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-298",
+      "id": "docs-beamtalk-language-features-block-299",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3207,7 +3217,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-301",
+      "id": "docs-beamtalk-language-features-block-302",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3226,7 +3236,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-302",
+      "id": "docs-beamtalk-language-features-block-303",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3236,7 +3246,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-304",
+      "id": "docs-beamtalk-language-features-block-305",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3246,7 +3256,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-306",
+      "id": "docs-beamtalk-language-features-block-307",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3259,7 +3269,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-307",
+      "id": "docs-beamtalk-language-features-block-308",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3269,7 +3279,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-308",
+      "id": "docs-beamtalk-language-features-block-309",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3285,7 +3295,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-309",
+      "id": "docs-beamtalk-language-features-block-31",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-310",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3309,22 +3334,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-31",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-310",
+      "id": "docs-beamtalk-language-features-block-311",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3343,7 +3353,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-311",
+      "id": "docs-beamtalk-language-features-block-312",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3364,7 +3374,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-312",
+      "id": "docs-beamtalk-language-features-block-313",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3377,7 +3387,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-313",
+      "id": "docs-beamtalk-language-features-block-314",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3393,7 +3403,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-314",
+      "id": "docs-beamtalk-language-features-block-315",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3406,7 +3416,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-315",
+      "id": "docs-beamtalk-language-features-block-316",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3425,7 +3435,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-316",
+      "id": "docs-beamtalk-language-features-block-317",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3435,7 +3445,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-317",
+      "id": "docs-beamtalk-language-features-block-318",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3456,7 +3466,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-318",
+      "id": "docs-beamtalk-language-features-block-319",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3495,7 +3505,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-320",
+      "id": "docs-beamtalk-language-features-block-321",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3513,7 +3523,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-321",
+      "id": "docs-beamtalk-language-features-block-322",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3528,7 +3538,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-322",
+      "id": "docs-beamtalk-language-features-block-323",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3538,7 +3548,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-323",
+      "id": "docs-beamtalk-language-features-block-324",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3556,7 +3566,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-326",
+      "id": "docs-beamtalk-language-features-block-327",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3579,7 +3589,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-327",
+      "id": "docs-beamtalk-language-features-block-328",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3604,7 +3614,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-330",
+      "id": "docs-beamtalk-language-features-block-331",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3614,7 +3624,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-331",
+      "id": "docs-beamtalk-language-features-block-332",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3637,7 +3647,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-333",
+      "id": "docs-beamtalk-language-features-block-334",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3652,7 +3662,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-334",
+      "id": "docs-beamtalk-language-features-block-335",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3662,7 +3672,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-336",
+      "id": "docs-beamtalk-language-features-block-337",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3675,7 +3685,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-337",
+      "id": "docs-beamtalk-language-features-block-338",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3698,7 +3708,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-338",
+      "id": "docs-beamtalk-language-features-block-339",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3726,7 +3736,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-339",
+      "id": "docs-beamtalk-language-features-block-340",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3754,7 +3764,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-342",
+      "id": "docs-beamtalk-language-features-block-343",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3785,7 +3795,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-343",
+      "id": "docs-beamtalk-language-features-block-344",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3813,7 +3823,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-344",
+      "id": "docs-beamtalk-language-features-block-345",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -22982,8 +22992,8 @@
         "testRuntimeFunOnTheClassAfterWarmUpIsHonoured",
         "testWarmedSendInstallsItsKey"
       ],
-      "source": "// BT-4270: a class-literal signal send (`MyErr signal: m`) raises in the\n// caller (BT-4115) only while it still resolves to `Exception`'s compiled\n// signal primitive. The call sites below are compiled once, warmed (their\n// caller-safe raise key installed), then the class's `class signal:` is\n// replaced at run time: the already-compiled call site runs the replacement.\n// Before and after, the raised exception's class is the receiving class and\n// `on: <that class> do:` catches it. (A reload that adds an override needs a\n// workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)\n//\n// Each class a test patches irreversibly (a runtime class-method fun) is used\n// by that test alone, so the tests do not depend on their order.\n//\n// Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt,\n// fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt,\n// fixtures/bt4270raise_plain.bt.\n\nTestCase subclass: ClassLiteralSignalTest\n\n  // The compiled call sites.\n  raiseExt: m => Bt4270RaiseExtErr signal: m\n\n  raiseFun: m => Bt4270RaiseFunErr signal: m\n\n  raiseLeaf: m => Bt4270RaiseLeaf signal: m\n\n  raisePlain: m => Bt4270RaisePlain signal: m\n\n  // What a call site does: the value it answers, or the class and message\n  // of what it raised, caught by the class it named.\n  outcomeOf: aBlock :: Block on: cls -> List =>\n    [\n      #(#returned, aBlock value)\n    ] on: cls do: [:e | #(#raised, e class, e message)]\n\n  // The hit path is taken, not only the fallback: a warmed `Error signal:`\n  // call site's raise key is installed, holding `Error`'s class reference.\n  testWarmedSendInstallsItsKey =>\n    [Error signal: \"warm\"] on: Error do: [:e | nil]\n    key := Erlang erlang list_to_tuple: #(#caller_safe_raise, #classSignal:, #'bt@stdlib@exception', #class_signal:, #'Error class')\n    self assert: (Erlang beamtalk_class_shadow_flags static_call_key_value: key) equals: Error\n\n  testRaiseIsTheReceivingClassAndCaughtByIt =>\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n    self assert: (self outcomeOf: [\n      self raisePlain: \"y\"\n    ] on: Bt4270RaisePlain) equals: #(#raised, Bt4270RaisePlain, \"y\")\n    // An ancestor's handler catches it too.\n    self assert: ([\n      self raiseExt: \"z\"\n    ] on: Error do: [:e | e class]) equals: Bt4270RaiseExtErr\n\n  // A class-side extension of `signal:` registered after warm-up is honoured\n  // by the call site compiled before it, and the raise is back once it goes.\n  testExtensionAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n    Erlang beamtalk_extensions\n      register: #'Bt4270RaiseExtErr class'\n      selector: #signal:\n      fun: [:args :receiver | #fromExtension]\n      owner: #test\n    shadowed := self outcomeOf: [self raiseExt: \"x\"] on: Bt4270RaiseExtErr\n    Erlang beamtalk_extensions\n      unregister: #Bt4270RaiseExtErr\n      selector: #signal:\n      classSide: true\n    self assert: shadowed equals: #(#returned, #fromExtension)\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n\n  // A runtime class-method fun replacing `signal:` on the receiving class\n  // after warm-up is honoured. (Nothing removes a runtime class-method fun,\n  // so the patched class is used by this test alone.)\n  testRuntimeFunOnTheClassAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseFun: \"x\"\n    ] on: Bt4270RaiseFunErr) equals: #(#raised, Bt4270RaiseFunErr, \"x\")\n    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseFunErr\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #signal:\n      fun: [:classSelf :msg | #fromRuntimeFun]\n    self assert: (self outcomeOf: [\n      self raiseFun: \"x\"\n    ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)\n\n  // The same on an ancestor between the receiving class and `Exception`: the\n  // ancestor's write takes away its descendant's key. (Used by this test\n  // alone, as above.)\n  testRuntimeFunOnAnAncestorAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseLeaf: \"x\"\n    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, \"x\")\n    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseMid\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #signal:\n      fun: [:classSelf :msg | classSelf name]\n    // The fun runs with the receiving class as `self`, as the dynamic path does.\n    self assert: (self outcomeOf: [\n      self raiseLeaf: \"x\"\n    ] on: Bt4270RaiseLeaf) equals: #(#returned, #Bt4270RaiseLeaf)",
-      "explanation": "BT-4270: a class-literal signal send (`MyErr signal: m`) raises in the caller (BT-4115) only while it still resolves to `Exception`'s compiled signal primitive. The call sites below are compiled once, warmed (their caller-safe raise key installed), then the class's `class signal:` is replaced at run time: the already-compiled call site runs the replacement. Before and after, the raised exception's class is the receiving class and `on: <that class> do:` catches it. (A reload that adds an override needs a workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)  Each class a test patches irreversibly (a runtime class-method fun) is used by that test alone, so the tests do not depend on their order.  Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt, fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt, fixtures/bt4270raise_plain.bt."
+      "source": "// BT-4270: a class-literal signal send (`MyErr signal: m`) raises in the\n// caller (BT-4115) only while it still resolves to `Exception`'s compiled\n// signal primitive. The call sites below are compiled once, warmed (their\n// caller-safe raise key installed), then the class's `class signal:` is\n// replaced at run time: the already-compiled call site runs the replacement.\n// Before and after, the raised exception's class is the receiving class and\n// `on: <that class> do:` catches it. (A reload that adds an override needs a\n// workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)\n//\n// A test that patches a class with a runtime class-method fun removes it\n// again (`X class removeSelector:`, BT-4438), so the tests can run twice in\n// one VM.\n//\n// Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt,\n// fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt,\n// fixtures/bt4270raise_plain.bt.\n\nTestCase subclass: ClassLiteralSignalTest\n\n  // The compiled call sites.\n  raiseExt: m => Bt4270RaiseExtErr signal: m\n\n  raiseFun: m => Bt4270RaiseFunErr signal: m\n\n  raiseLeaf: m => Bt4270RaiseLeaf signal: m\n\n  raisePlain: m => Bt4270RaisePlain signal: m\n\n  // What a call site does: the value it answers, or the class and message\n  // of what it raised, caught by the class it named.\n  outcomeOf: aBlock :: Block on: cls -> List =>\n    [\n      #(#returned, aBlock value)\n    ] on: cls do: [:e | #(#raised, e class, e message)]\n\n  // The hit path is taken, not only the fallback: a warmed `Error signal:`\n  // call site's raise key is installed, holding `Error`'s class reference.\n  testWarmedSendInstallsItsKey =>\n    [Error signal: \"warm\"] on: Error do: [:e | nil]\n    key := Erlang erlang list_to_tuple: #(#caller_safe_raise, #classSignal:, #'bt@stdlib@exception', #class_signal:, #'Error class')\n    self assert: (Erlang beamtalk_class_shadow_flags static_call_key_value: key) equals: Error\n\n  testRaiseIsTheReceivingClassAndCaughtByIt =>\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n    self assert: (self outcomeOf: [\n      self raisePlain: \"y\"\n    ] on: Bt4270RaisePlain) equals: #(#raised, Bt4270RaisePlain, \"y\")\n    // An ancestor's handler catches it too.\n    self assert: ([\n      self raiseExt: \"z\"\n    ] on: Error do: [:e | e class]) equals: Bt4270RaiseExtErr\n\n  // A class-side extension of `signal:` registered after warm-up is honoured\n  // by the call site compiled before it, and the raise is back once it goes.\n  testExtensionAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n    Erlang beamtalk_extensions\n      register: #'Bt4270RaiseExtErr class'\n      selector: #signal:\n      fun: [:args :receiver | #fromExtension]\n      owner: #test\n    shadowed := self outcomeOf: [self raiseExt: \"x\"] on: Bt4270RaiseExtErr\n    Erlang beamtalk_extensions\n      unregister: #Bt4270RaiseExtErr\n      selector: #signal:\n      classSide: true\n    self assert: shadowed equals: #(#returned, #fromExtension)\n    self assert: (self outcomeOf: [\n      self raiseExt: \"x\"\n    ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, \"x\")\n\n  // A runtime class-method fun replacing `signal:` on the receiving class\n  // after warm-up is honoured, and the raise is back once it goes.\n  testRuntimeFunOnTheClassAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseFun: \"x\"\n    ] on: Bt4270RaiseFunErr) equals: #(#raised, Bt4270RaiseFunErr, \"x\")\n    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseFunErr\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #signal:\n      fun: [:classSelf :msg | #fromRuntimeFun]\n    [\n      self assert: (self outcomeOf: [\n        self raiseFun: \"x\"\n      ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)\n    ] ensure: [Bt4270RaiseFunErr class removeSelector: #signal:]\n    self assert: (self outcomeOf: [\n      self raiseFun: \"x\"\n    ] on: Bt4270RaiseFunErr) equals: #(#raised, Bt4270RaiseFunErr, \"x\")\n\n  // The same on an ancestor between the receiving class and `Exception`: the\n  // ancestor's write takes away its descendant's key, and removing the fun\n  // brings the raise back.\n  testRuntimeFunOnAnAncestorAfterWarmUpIsHonoured =>\n    self assert: (self outcomeOf: [\n      self raiseLeaf: \"x\"\n    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, \"x\")\n    pid := Erlang beamtalk_class_registry whereis_class: #Bt4270RaiseMid\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #signal:\n      fun: [:classSelf :msg | classSelf name]\n    // The fun runs with the receiving class as `self`, as the dynamic path does.\n    [\n      self assert: (self outcomeOf: [\n        self raiseLeaf: \"x\"\n      ] on: Bt4270RaiseLeaf) equals: #(#returned, #Bt4270RaiseLeaf)\n    ] ensure: [Bt4270RaiseMid class removeSelector: #signal:]\n    self assert: (self outcomeOf: [\n      self raiseLeaf: \"x\"\n    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, \"x\")",
+      "explanation": "BT-4270: a class-literal signal send (`MyErr signal: m`) raises in the caller (BT-4115) only while it still resolves to `Exception`'s compiled signal primitive. The call sites below are compiled once, warmed (their caller-safe raise key installed), then the class's `class signal:` is replaced at run time: the already-compiled call site runs the replacement. Before and after, the raised exception's class is the receiving class and `on: <that class> do:` catches it. (A reload that adds an override needs a workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)  A test that patches a class with a runtime class-method fun removes it again (`X class removeSelector:`, BT-4438), so the tests can run twice in one VM.  Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt, fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt, fixtures/bt4270raise_plain.bt."
     },
     {
       "id": "stdlib-test-class-method-block-self-identity-test",
@@ -26336,6 +26346,31 @@
       ],
       "source": "// BT-631/BT-859: Tests that an actor method explicitly returning self\n// returns the actor reference and that reference is usable for further messages\n\nTestCase subclass: EmptyMethodSelfTest\n\n  testDoNothingReturnsSelf =>\n    a := EmptyMethodActor spawn\n    // Call method that explicitly returns self\n    ref := a doNothing\n    // Returned reference should be the same actor\n    self assert: (ref =:= a)\n    // Verify by reading state through the returned reference\n    self assert: ref getValue equals: 42",
       "explanation": "BT-631/BT-859: Tests that an actor method explicitly returning self returns the actor reference and that reference is usable for further messages"
+    },
+    {
+      "id": "stdlib-test-equals-fast-path-test",
+      "title": "EqualsFastPathTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "EqualsFastPathTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "equals_fast_path_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testDefaultEqualsIsRawEquality",
+        "testExtensionOnASuperclassWins",
+        "testExtensionOnTheReceiverClassWins"
+      ],
+      "source": "// BT-4416: an `equals:` send to a primitive receiver is answered by `=:=`\n// without walking the dispatch chain when nothing on the receiver's class\n// chain overrides `equals:` — but an override, including an extension\n// installed after the first send, still wins.\n//\n// The extensions registered here are deliberately narrow: they only widen\n// equality for the marker pair <<65, 22>> / <<68, 22>>, so a test\n// running concurrently that compares other binaries is unaffected (an\n// `equals:` override may only make *more* values equal).\n\nTestCase subclass: EqualsFastPathTest\n\n  testDefaultEqualsIsRawEquality =>\n    a := <<1, 2>>\n    self assert: (a equals: <<1, 2>>)\n    self deny: (a equals: <<1, 3>>)\n    self assert: (\"ab\" equals: \"ab\")\n    self deny: (\"ab\" equals: \"ba\")\n    self assert: (42 equals: 42)\n    self deny: (42 equals: 42.0)\n    self assert: (#sym equals: #sym)\n    self deny: (#sym equals: #other)\n    self assert: (nil equals: nil)\n    self deny: (true equals: false)\n    self assert: (#(1, 2) equals: #(1, 2))\n    self deny: (#(1, 2) equals: #(2, 1))\n\n  testExtensionOnTheReceiverClassWins =>\n    a := <<65, 22>>\n    b := <<68, 22>>\n    self deny: (a equals: b)\n    Erlang beamtalk_extensions\n      register: #Binary\n      selector: #equals:\n      fun: [:args :receiver |\n        (receiver =:= args first) or: [\n          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]\n        ]\n      ]\n      owner: #bt4416\n    [\n      self assert: (a equals: b)\n      // A raw hit still answers true (the reflexivity contract).\n      self assert: (a equals: <<65, 22>>)\n      self deny: (b equals: a)\n      Binary removeSelector: #equals:\n      self deny: (a equals: b)\n    ] ensure: [Binary removeSelector: #equals: ifAbsent: [nil]]\n\n  testExtensionOnASuperclassWins =>\n    a := <<65, 22>>\n    b := <<68, 22>>\n    self deny: (a equals: b)\n    Erlang beamtalk_extensions\n      register: #Collection\n      selector: #equals:\n      fun: [:args :receiver |\n        (receiver =:= args first) or: [\n          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]\n        ]\n      ]\n      owner: #bt4416\n    [\n      self assert: (a equals: b)\n      Collection removeSelector: #equals:\n      self deny: (a equals: b)\n    ] ensure: [Collection removeSelector: #equals: ifAbsent: [nil]]",
+      "explanation": "BT-4416: an `equals:` send to a primitive receiver is answered by `=:=` without walking the dispatch chain when nothing on the receiver's class chain overrides `equals:` — but an override, including an extension installed after the first send, still wins.  The extensions registered here are deliberately narrow: they only widen equality for the marker pair <<65, 22>> / <<68, 22>>, so a test running concurrently that compares other binaries is unaffected (an `equals:` override may only make *more* values equal)."
     },
     {
       "id": "stdlib-test-erlang-interop-test",
@@ -43019,6 +43054,59 @@
       "explanation": "BT-4424: a loop-body `ensure:` whose cleanup writes a local the loop body also writes, in a value-type method and a class method. See bt4424ensure_loop_rebind_test.bt."
     },
     {
+      "id": "stdlib-test-fixtures-bt4438child",
+      "title": "Bt4438Child",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4438Child",
+        "Bt4438Parent",
+        "bt4438child",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-4438: inherits `class answer` from Bt4438Parent. See\n// remove_runtime_class_method_test.bt.\n\nBt4438Parent subclass: Bt4438Child",
+      "explanation": "BT-4438: inherits `class answer` from Bt4438Parent. See remove_runtime_class_method_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4438own",
+      "title": "Bt4438Own",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4438Own",
+        "Object",
+        "answer",
+        "bt4438own",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-4438: a class whose class method a test replaces with a runtime fun, then\n// removes. See remove_runtime_class_method_test.bt.\n\nObject subclass: Bt4438Own\n\n  class answer -> Symbol => #compiled",
+      "explanation": "BT-4438: a class whose class method a test replaces with a runtime fun, then removes. See remove_runtime_class_method_test.bt."
+    },
+    {
+      "id": "stdlib-test-fixtures-bt4438parent",
+      "title": "Bt4438Parent",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Bt4438Parent",
+        "Object",
+        "answer",
+        "bt4438parent",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-4438: the ancestor of Bt4438Child that gains, then loses, a runtime\n// class-method fun. See remove_runtime_class_method_test.bt.\n\nObject subclass: Bt4438Parent\n\n  class answer -> Symbol => #parent",
+      "explanation": "BT-4438: the ancestor of Bt4438Child that gains, then loses, a runtime class-method fun. See remove_runtime_class_method_test.bt."
+    },
+    {
       "id": "stdlib-test-fixtures-calculator",
       "title": "Calculator",
       "category": "stdlib-fixtures",
@@ -58720,7 +58808,7 @@
         "testRuntimeFunPatchReachesStaticCallers",
         "testSuperclassClassVariablesAfterWarmUpTakeTheClassProcess"
       ],
-      "source": "// BT-4301 / ADR 0142 §2: a literal-receiver class send to a method the class\n// itself defines compiles to a direct call behind a run-time guard, whose\n// fallback is the dynamic `class_send`. Since BT-4316 the guard is one read of\n// the call target's static call key, installed by\n// `beamtalk_class_shadow_flags:static_call_target/4` only while\n// `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these\n// are the regression tests for the bugs that caused:\n// - BT-4133: a class-side extension shadowing a direct-called method was\n//   silently bypassed;\n// - BT-4126: hot-patching a direct-called method with a runtime fun left\n//   static callers on the compiled method;\n// - BT-4037: callers passed `nil` as `ClassSelf`.\n// (BT-4134, a re-parent under a class with class variables, is covered by the\n// runtime test `beamtalk_class_in_caller_tests`.)\n//\n// Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,\n// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,\n// fixtures/gsc_pong.bt, fixtures/gsc_warm_ext.bt, fixtures/gsc_warm_patched.bt,\n// fixtures/gsc_warm_parent.bt, fixtures/gsc_warm_child.bt,\n// fixtures/gsc_restart.bt.\n\nTestCase subclass: GuardedStaticCallTest\n\n  // BT-4133: an extension on a sealed class's `class sealed` method is honoured.\n  testExtensionShadowsSealedClassMethod =>\n    self assert: GscSealedExt shadowMe equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscSealedExt class'\n      selector: #shadowMe\n      fun: [:args :receiver | #extension]\n      owner: #test\n    shadowed := GscSealedExt shadowMe\n    Erlang beamtalk_extensions\n      unregister: #GscSealedExt\n      selector: #shadowMe\n      classSide: true\n    self assert: shadowed equals: #extension\n    self assert: GscSealedExt shadowMe equals: #compiled\n\n  // BT-4133: the same for an open class, and for a class-side self-send.\n  testExtensionShadowsOpenClassMethodAndSelfSend =>\n    self assert: GscOpenExt viaSelf equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscOpenExt class'\n      selector: #shadowMe\n      fun: [:args :receiver | #extension]\n      owner: #test\n    literal := GscOpenExt shadowMe\n    viaSelf := GscOpenExt viaSelf\n    Erlang beamtalk_extensions\n      unregister: #GscOpenExt\n      selector: #shadowMe\n      classSide: true\n    self assert: literal equals: #extension\n    self assert: viaSelf equals: #extension\n\n  // BT-4126: a runtime fun replacing a class method is reached by static\n  // callers compiled before the patch.\n  testRuntimeFunPatchReachesStaticCallers =>\n    self assert: GscPatched patchMe equals: #compiled\n    pid := Erlang beamtalk_class_registry whereis_class: #GscPatched\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #patchMe\n      fun: [:classSelf | #fromRuntimeFun]\n    self assert: GscPatched patchMe equals: #fromRuntimeFun\n\n  // The guarded direct call stays a tail call: a million-deep recursion\n  // through literal class references runs in the stack a shallow one uses.\n  testGuardedDirectCallIsATailCall =>\n    shallow := GscPing ping: 10\n    deep := GscPing ping: 1000000\n    self assert: deep - shallow < 50\n\n  // BT-4037: the callee gets the real class reference, on the direct path and\n  // on the fallback alike.\n  testCalleeGetsTheRealClass =>\n    self assert: GscClassSelf me equals: GscClassSelf\n    self assert: GscClassSelf viaSibling equals: GscClassSelf\n    // Raising the class-variable input turns the guard off: the same static\n    // send now takes the `class_send` fallback through the class process.\n    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true\n    guardOff := (Erlang beamtalk_class_shadow_flags) direct_call_ok: #'GscClassSelf class' with: #GscClassSelf\n    viaFallback := GscClassSelf me\n    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false\n    self deny: guardOff\n    self assert: viaFallback equals: GscClassSelf\n\n  // === BT-4316: the static call key ===\n  //\n  // A static send's hit path is one `persistent_term` read of a key per call\n  // target, whose value is the class reference passed as `ClassSelf`. Each\n  // test below warms that key with a static send first, then changes what the\n  // dynamic path answers and checks the static send answers the same. (The\n  // reload cases, a dropped method and a superclass that gains `classState:`\n  // on reload, need a workspace: see\n  // tests/repl-protocol/cases/guarded_static_call_key.btscript.)\n\n  // The class held as a Dynamic value: sends to it compile to `class_send`.\n  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name\n\n  // (a) A class-side extension registered after warm-up wins.\n  testExtensionRegisteredAfterWarmUpWins =>\n    self assert: GscWarmExt answer equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscWarmExt class'\n      selector: #answer\n      fun: [:args :receiver | #extension]\n      owner: #test\n    literal := GscWarmExt answer\n    dynamic := (self lookUp: #GscWarmExt) answer\n    Erlang beamtalk_extensions\n      unregister: #GscWarmExt\n      selector: #answer\n      classSide: true\n    self assert: literal equals: #extension\n    self assert: dynamic equals: #extension\n    self assert: GscWarmExt answer equals: #compiled\n\n  // (b) A runtime class-method fun installed after warm-up wins.\n  testRuntimeClassMethodAfterWarmUpWins =>\n    self assert: GscWarmPatched answer equals: #compiled\n    pid := Erlang beamtalk_class_registry whereis_class: #GscWarmPatched\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #answer\n      fun: [:classSelf | #fromRuntimeFun]\n    self assert: GscWarmPatched answer equals: #fromRuntimeFun\n    self assert: (self lookUp: #GscWarmPatched) answer equals: #fromRuntimeFun\n\n  // (d) Once a superclass publishes class variables (the fact a reload that\n  // adds `classState:` publishes), a warmed static send takes the class\n  // process, as the dynamic send does.\n  testSuperclassClassVariablesAfterWarmUpTakeTheClassProcess =>\n    me := Erlang erlang self\n    self assert: GscWarmChild whoRuns equals: me\n    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: true\n    literal := GscWarmChild whoRuns\n    dynamic := (self lookUp: #GscWarmChild) whoRuns\n    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: false\n    self deny: literal =:= me\n    self deny: dynamic =:= me\n    self assert: literal equals: dynamic\n    self assert: GscWarmChild whoRuns equals: me\n\n  // (e) After the class process is killed and the class monitor restarts it,\n  // the callee's `ClassSelf` holds the new pid.\n  testRestartedClassProcessIsTheNewClassSelf =>\n    oldPid := Erlang beamtalk_class_registry whereis_class: #GscRestart\n    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: oldPid\n    Erlang erlang exit: oldPid with: #kill\n    newPid := self\n      pidOf: #GscRestart\n      other: oldPid\n      tries: 500\n    self deny: newPid =:= oldPid\n    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: newPid\n    self assert: (Erlang erlang element: 4 of: (self lookUp: #GscRestart) me) equals: newPid\n\n  // The registered pid of class `name` once it is a live pid other than\n  // `oldPid`, polling every 10 ms up to `tries` times.\n  pidOf: name :: Symbol other: oldPid tries: tries :: Integer =>\n    pid := Erlang beamtalk_class_registry whereis_class: name\n    ((Erlang erlang is_pid: pid) and: [pid =/= oldPid]) ifTrue: [^pid]\n    tries =:= 0 ifTrue: [^pid]\n    Erlang timer sleep: 10\n    self\n      pidOf: name\n      other: oldPid\n      tries: tries - 1",
+      "source": "// BT-4301 / ADR 0142 §2: a literal-receiver class send to a method the class\n// itself defines compiles to a direct call behind a run-time guard, whose\n// fallback is the dynamic `class_send`. Since BT-4316 the guard is one read of\n// the call target's static call key, installed by\n// `beamtalk_class_shadow_flags:static_call_target/4` only while\n// `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these\n// are the regression tests for the bugs that caused:\n// - BT-4133: a class-side extension shadowing a direct-called method was\n//   silently bypassed;\n// - BT-4126: hot-patching a direct-called method with a runtime fun left\n//   static callers on the compiled method;\n// - BT-4037: callers passed `nil` as `ClassSelf`.\n// (BT-4134, a re-parent under a class with class variables, is covered by the\n// runtime test `beamtalk_class_in_caller_tests`.)\n//\n// Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,\n// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,\n// fixtures/gsc_pong.bt, fixtures/gsc_warm_ext.bt, fixtures/gsc_warm_patched.bt,\n// fixtures/gsc_warm_parent.bt, fixtures/gsc_warm_child.bt,\n// fixtures/gsc_restart.bt.\n\nTestCase subclass: GuardedStaticCallTest\n\n  // BT-4133: an extension on a sealed class's `class sealed` method is honoured.\n  testExtensionShadowsSealedClassMethod =>\n    self assert: GscSealedExt shadowMe equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscSealedExt class'\n      selector: #shadowMe\n      fun: [:args :receiver | #extension]\n      owner: #test\n    shadowed := GscSealedExt shadowMe\n    Erlang beamtalk_extensions\n      unregister: #GscSealedExt\n      selector: #shadowMe\n      classSide: true\n    self assert: shadowed equals: #extension\n    self assert: GscSealedExt shadowMe equals: #compiled\n\n  // BT-4133: the same for an open class, and for a class-side self-send.\n  testExtensionShadowsOpenClassMethodAndSelfSend =>\n    self assert: GscOpenExt viaSelf equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscOpenExt class'\n      selector: #shadowMe\n      fun: [:args :receiver | #extension]\n      owner: #test\n    literal := GscOpenExt shadowMe\n    viaSelf := GscOpenExt viaSelf\n    Erlang beamtalk_extensions\n      unregister: #GscOpenExt\n      selector: #shadowMe\n      classSide: true\n    self assert: literal equals: #extension\n    self assert: viaSelf equals: #extension\n\n  // BT-4126: a runtime fun replacing a class method is reached by static\n  // callers compiled before the patch, and removing it restores them.\n  testRuntimeFunPatchReachesStaticCallers =>\n    self assert: GscPatched patchMe equals: #compiled\n    pid := Erlang beamtalk_class_registry whereis_class: #GscPatched\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #patchMe\n      fun: [:classSelf | #fromRuntimeFun]\n    [\n      self assert: GscPatched patchMe equals: #fromRuntimeFun\n    ] ensure: [GscPatched class removeSelector: #patchMe]\n    self assert: GscPatched patchMe equals: #compiled\n\n  // The guarded direct call stays a tail call: a million-deep recursion\n  // through literal class references runs in the stack a shallow one uses.\n  testGuardedDirectCallIsATailCall =>\n    shallow := GscPing ping: 10\n    deep := GscPing ping: 1000000\n    self assert: deep - shallow < 50\n\n  // BT-4037: the callee gets the real class reference, on the direct path and\n  // on the fallback alike.\n  testCalleeGetsTheRealClass =>\n    self assert: GscClassSelf me equals: GscClassSelf\n    self assert: GscClassSelf viaSibling equals: GscClassSelf\n    // Raising the class-variable input turns the guard off: the same static\n    // send now takes the `class_send` fallback through the class process.\n    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true\n    guardOff := (Erlang beamtalk_class_shadow_flags) direct_call_ok: #'GscClassSelf class' with: #GscClassSelf\n    viaFallback := GscClassSelf me\n    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false\n    self deny: guardOff\n    self assert: viaFallback equals: GscClassSelf\n\n  // === BT-4316: the static call key ===\n  //\n  // A static send's hit path is one `persistent_term` read of a key per call\n  // target, whose value is the class reference passed as `ClassSelf`. Each\n  // test below warms that key with a static send first, then changes what the\n  // dynamic path answers and checks the static send answers the same. (The\n  // reload cases, a dropped method and a superclass that gains `classState:`\n  // on reload, need a workspace: see\n  // tests/repl-protocol/cases/guarded_static_call_key.btscript.)\n\n  // The class held as a Dynamic value: sends to it compile to `class_send`.\n  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name\n\n  // (a) A class-side extension registered after warm-up wins.\n  testExtensionRegisteredAfterWarmUpWins =>\n    self assert: GscWarmExt answer equals: #compiled\n    Erlang beamtalk_extensions\n      register: #'GscWarmExt class'\n      selector: #answer\n      fun: [:args :receiver | #extension]\n      owner: #test\n    literal := GscWarmExt answer\n    dynamic := (self lookUp: #GscWarmExt) answer\n    Erlang beamtalk_extensions\n      unregister: #GscWarmExt\n      selector: #answer\n      classSide: true\n    self assert: literal equals: #extension\n    self assert: dynamic equals: #extension\n    self assert: GscWarmExt answer equals: #compiled\n\n  // (b) A runtime class-method fun installed after warm-up wins, and its\n  // removal (BT-4438) gives the compiled method back.\n  testRuntimeClassMethodAfterWarmUpWins =>\n    self assert: GscWarmPatched answer equals: #compiled\n    pid := Erlang beamtalk_class_registry whereis_class: #GscWarmPatched\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: #answer\n      fun: [:classSelf | #fromRuntimeFun]\n    [\n      self assert: GscWarmPatched answer equals: #fromRuntimeFun\n      self assert: (self lookUp: #GscWarmPatched) answer equals: #fromRuntimeFun\n    ] ensure: [GscWarmPatched class removeSelector: #answer]\n    // Removing it brings the compiled method back, through the static send too.\n    self assert: GscWarmPatched answer equals: #compiled\n    self assert: (self lookUp: #GscWarmPatched) answer equals: #compiled\n\n  // (d) Once a superclass publishes class variables (the fact a reload that\n  // adds `classState:` publishes), a warmed static send takes the class\n  // process, as the dynamic send does.\n  testSuperclassClassVariablesAfterWarmUpTakeTheClassProcess =>\n    me := Erlang erlang self\n    self assert: GscWarmChild whoRuns equals: me\n    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: true\n    literal := GscWarmChild whoRuns\n    dynamic := (self lookUp: #GscWarmChild) whoRuns\n    Erlang beamtalk_class_metadata put_class_variables: #GscWarmParent with: false\n    self deny: literal =:= me\n    self deny: dynamic =:= me\n    self assert: literal equals: dynamic\n    self assert: GscWarmChild whoRuns equals: me\n\n  // (e) After the class process is killed and the class monitor restarts it,\n  // the callee's `ClassSelf` holds the new pid.\n  testRestartedClassProcessIsTheNewClassSelf =>\n    oldPid := Erlang beamtalk_class_registry whereis_class: #GscRestart\n    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: oldPid\n    Erlang erlang exit: oldPid with: #kill\n    newPid := self\n      pidOf: #GscRestart\n      other: oldPid\n      tries: 500\n    self deny: newPid =:= oldPid\n    self assert: (Erlang erlang element: 4 of: GscRestart me) equals: newPid\n    self assert: (Erlang erlang element: 4 of: (self lookUp: #GscRestart) me) equals: newPid\n\n  // The registered pid of class `name` once it is a live pid other than\n  // `oldPid`, polling every 10 ms up to `tries` times.\n  pidOf: name :: Symbol other: oldPid tries: tries :: Integer =>\n    pid := Erlang beamtalk_class_registry whereis_class: name\n    ((Erlang erlang is_pid: pid) and: [pid =/= oldPid]) ifTrue: [^pid]\n    tries =:= 0 ifTrue: [^pid]\n    Erlang timer sleep: 10\n    self\n      pidOf: name\n      other: oldPid\n      tries: tries - 1",
       "explanation": "BT-4301 / ADR 0142 §2: a literal-receiver class send to a method the class itself defines compiles to a direct call behind a run-time guard, whose fallback is the dynamic `class_send`. Since BT-4316 the guard is one read of the call target's static call key, installed by `beamtalk_class_shadow_flags:static_call_target/4` only while `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these are the regression tests for the bugs that caused: - BT-4133: a class-side extension shadowing a direct-called method was   silently bypassed; - BT-4126: hot-patching a direct-called method with a runtime fun left   static callers on the compiled method; - BT-4037: callers passed `nil` as `ClassSelf`. (BT-4134, a re-parent under a class with class variables, is covered by the runtime test `beamtalk_class_in_caller_tests`.)  Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt, fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt, fixtures/gsc_pong.bt, fixtures/gsc_warm_ext.bt, fixtures/gsc_warm_patched.bt, fixtures/gsc_warm_parent.bt, fixtures/gsc_warm_child.bt, fixtures/gsc_restart.bt."
     },
     {
@@ -61888,7 +61976,7 @@
         "testReferenceNewIsUnique",
         "testReferenceNewIsUsableAsDictionaryKey"
       ],
-      "source": "// BT-4049: process primitives — `Pid>>send:`, `Reference new`,\n// `Actor>>processLabel:` / `processLabel`.\n// BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.\n//\n// Fixtures: stdlib/test/fixtures/handle_info_counter.bt\n//           stdlib/test/fixtures/process_label_actor.bt\n\nTestCase subclass: ProcessPrimitivesTest\n\n  // === Pid>>send: ===\n  testPidSendReachesHandleInfo =>\n    server := HandleInfoCounter spawn\n    server pid send: #tick\n    server pid send: #tick\n    self assert: server getCount equals: 2\n    server pid send: {#ready, 42}\n    self assert: server getLastMsg equals: {#ready, 42}\n    server stop\n\n  testPidSendAnswersNil =>\n    server := HandleInfoCounter spawn\n    self assert: (server pid send: #tick) equals: nil\n    server stop\n\n  testPidSendToDeadPidIsANoOp =>\n    server := HandleInfoCounter spawn\n    pid := server pid\n    server stop\n    self deny: pid isAlive\n    self assert: (pid send: #tick) equals: nil\n\n  testPidSendDeliversResultShapedTermsUnchanged =>\n    server := HandleInfoCounter spawn\n    server pid send: {#ok, 1}\n    self assert: server getLastMsg equals: {#ok, 1}\n    server pid send: #ok\n    self assert: server getLastMsg equals: #ok\n    server stop\n\n  testPidSendDynamicDispatch =>\n    server := HandleInfoCounter spawn\n    p := server pid\n    self assert: (p respondsTo: #send:)\n    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil\n    self assert: server getCount equals: 1\n    server stop\n\n  // === Reference new ===\n  testReferenceNewDynamicDispatch =>\n    cls := Reference\n    self assert: (cls perform: #new) class equals: Reference\n\n  testReferenceNewAnswersAReference =>\n    self assert: Reference new class equals: Reference\n\n  testReferenceNewIsUnique =>\n    a := Reference new\n    b := Reference new\n    self deny: a =:= b\n    self assert: a =/= b\n    self assert: a =:= a\n\n  testReferenceNewIsUsableAsDictionaryKey =>\n    a := Reference new\n    b := Reference new\n    d := (Dictionary new at: a put: 1) at: b put: 2\n    self assert: d size equals: 2\n    self assert: (d at: a) equals: 1\n    self assert: (d at: b) equals: 2\n\n  // === Actor>>processLabel: / processLabel ===\n  testProcessLabelIsNilByDefault =>\n    actor := ProcessLabelActor spawn\n    self assert: actor processLabel equals: nil\n    self assert: actor ownLabel equals: nil\n    actor stop\n\n  testProcessLabelRoundTripsFromInside =>\n    actor := ProcessLabelActor spawn\n    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil\n    self assert: actor ownLabel equals: {#connection, 7}\n    self assert: actor processLabel equals: {#connection, 7}\n    actor stop\n\n  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #ok\n    self assert: actor processLabel equals: #ok\n    actor processLabel: {#ok, 1}\n    self assert: actor processLabel equals: {#ok, 1}\n    actor processLabel: {#error, #closed}\n    self assert: actor processLabel equals: {#error, #closed}\n    actor processLabel: #(72, 105)\n    self assert: actor processLabel equals: #(72, 105)\n    actor stop\n\n  testProcessLabelLabelsTheActorNotTheCaller =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #worker\n    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker\n    actor stop\n\n  // === Pid current (BT-4077) ===\n  testPidCurrentAnswersAPid =>\n    pid := Pid current\n    self assert: pid class equals: Pid\n    self assert: pid isAlive\n    self assert: pid =:= pid\n\n  testPidCurrentInsideActorEqualsSelfPid =>\n    actor := ProcessLabelActor spawn\n    who := actor whoAmI\n    self assert: who =:= actor pid\n    actor stop\n\n  // === Pid>>monitor (BT-4077) ===\n  testPidMonitorAnswersAReference =>\n    server := HandleInfoCounter spawn\n    ref := server pid monitor\n    self assert: ref class equals: Reference\n    ref demonitor\n    server stop\n\n  testPidMonitorDeliversDownToHandleInfo =>\n    watcher := HandleInfoCounter spawn\n    victim := HandleInfoCounter spawn\n    ref := watcher watch: victim pid\n    pid := victim pid\n    victim stop\n    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 3) equals: #process\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: #normal\n    watcher stop\n\n  // === Block>>fork (BT-4077) ===\n  testForkRunsBlockAndExitsNormally =>\n    table := Ets new: #forkRan type: #set\n    pid := [table at: #ran put: true] fork\n    self assert: pid class equals: Pid\n    self deny: pid =:= Pid current\n    50 timesRepeat: [(table at: #ran) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #ran) equals: true\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    table delete\n\n  testForkedRaiseCrashesOnlyTheWorker =>\n    pid := [1 / 0] fork\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    // The worker is unlinked: the caller carries on.\n    self assert: Pid current isAlive\n\n  testForkedNonLocalReturnExitsWithForkReason =>\n    // The block waits on an Ets gate so the monitor below is established\n    // before the `^` fires; otherwise the DOWN could carry `noproc`.\n    table := Ets new: #forkNlrGate type: #set\n    watcher := HandleInfoCounter spawn\n    pid := [\n      50 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]\n      ^42\n    ] fork\n    ref := watcher watch: pid\n    table at: #go put: true\n    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: {#fork_non_local_return, 42}\n    table delete\n    watcher stop\n\n  testForkNonZeroArgBlockRaisesTypeError =>\n    self should: [[:x | x] fork] raise: #type_error",
+      "source": "// BT-4049: process primitives — `Pid>>send:`, `Reference new`,\n// `Actor>>processLabel:` / `processLabel`.\n// BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.\n//\n// Fixtures: stdlib/test/fixtures/handle_info_counter.bt\n//           stdlib/test/fixtures/process_label_actor.bt\n\nTestCase subclass: ProcessPrimitivesTest\n\n  // === Pid>>send: ===\n  testPidSendReachesHandleInfo =>\n    server := HandleInfoCounter spawn\n    server pid send: #tick\n    server pid send: #tick\n    self assert: server getCount equals: 2\n    server pid send: {#ready, 42}\n    self assert: server getLastMsg equals: {#ready, 42}\n    server stop\n\n  testPidSendAnswersNil =>\n    server := HandleInfoCounter spawn\n    self assert: (server pid send: #tick) equals: nil\n    server stop\n\n  testPidSendToDeadPidIsANoOp =>\n    server := HandleInfoCounter spawn\n    pid := server pid\n    server stop\n    self deny: pid isAlive\n    self assert: (pid send: #tick) equals: nil\n\n  testPidSendDeliversResultShapedTermsUnchanged =>\n    server := HandleInfoCounter spawn\n    server pid send: {#ok, 1}\n    self assert: server getLastMsg equals: {#ok, 1}\n    server pid send: #ok\n    self assert: server getLastMsg equals: #ok\n    server stop\n\n  testPidSendDynamicDispatch =>\n    server := HandleInfoCounter spawn\n    p := server pid\n    self assert: (p respondsTo: #send:)\n    self assert: (p perform: #send: withArguments: #(#tick)) equals: nil\n    self assert: server getCount equals: 1\n    server stop\n\n  // === Reference new ===\n  testReferenceNewDynamicDispatch =>\n    cls := Reference\n    self assert: (cls perform: #new) class equals: Reference\n\n  testReferenceNewAnswersAReference =>\n    self assert: Reference new class equals: Reference\n\n  testReferenceNewIsUnique =>\n    a := Reference new\n    b := Reference new\n    self deny: a =:= b\n    self assert: a =/= b\n    self assert: a =:= a\n\n  testReferenceNewIsUsableAsDictionaryKey =>\n    a := Reference new\n    b := Reference new\n    d := (Dictionary new at: a put: 1) at: b put: 2\n    self assert: d size equals: 2\n    self assert: (d at: a) equals: 1\n    self assert: (d at: b) equals: 2\n\n  // === Actor>>processLabel: / processLabel ===\n  testProcessLabelIsNilByDefault =>\n    actor := ProcessLabelActor spawn\n    self assert: actor processLabel equals: nil\n    self assert: actor ownLabel equals: nil\n    actor stop\n\n  testProcessLabelRoundTripsFromInside =>\n    actor := ProcessLabelActor spawn\n    self assert: (actor labelSelfWith: {#connection, 7}) equals: nil\n    self assert: actor ownLabel equals: {#connection, 7}\n    self assert: actor processLabel equals: {#connection, 7}\n    actor stop\n\n  testProcessLabelRoundTripsResultAndCharlistShapedTerms =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #ok\n    self assert: actor processLabel equals: #ok\n    actor processLabel: {#ok, 1}\n    self assert: actor processLabel equals: {#ok, 1}\n    actor processLabel: {#error, #closed}\n    self assert: actor processLabel equals: {#error, #closed}\n    actor processLabel: #(72, 105)\n    self assert: actor processLabel equals: #(72, 105)\n    actor stop\n\n  testProcessLabelLabelsTheActorNotTheCaller =>\n    actor := ProcessLabelActor spawn\n    actor processLabel: #worker\n    self assert: ((Erlang proc_lib) get_label: actor pid) equals: #worker\n    actor stop\n\n  // === Pid current (BT-4077) ===\n  testPidCurrentAnswersAPid =>\n    pid := Pid current\n    self assert: pid class equals: Pid\n    self assert: pid isAlive\n    self assert: pid =:= pid\n\n  testPidCurrentInsideActorEqualsSelfPid =>\n    actor := ProcessLabelActor spawn\n    who := actor whoAmI\n    self assert: who =:= actor pid\n    actor stop\n\n  // === Pid>>monitor (BT-4077) ===\n  testPidMonitorAnswersAReference =>\n    server := HandleInfoCounter spawn\n    ref := server pid monitor\n    self assert: ref class equals: Reference\n    ref demonitor\n    server stop\n\n  testPidMonitorDeliversDownToHandleInfo =>\n    watcher := HandleInfoCounter spawn\n    victim := HandleInfoCounter spawn\n    ref := watcher watch: victim pid\n    pid := victim pid\n    victim stop\n    50 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 3) equals: #process\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: #normal\n    watcher stop\n\n  // === Block>>fork (BT-4077) ===\n  testForkRunsBlockAndExitsNormally =>\n    table := Ets new: #forkRan type: #set\n    pid := [table at: #ran put: true] fork\n    self assert: pid class equals: Pid\n    self deny: pid =:= Pid current\n    50 timesRepeat: [(table at: #ran) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #ran) equals: true\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    table delete\n\n  testForkedRaiseCrashesOnlyTheWorker =>\n    pid := [1 / 0] fork\n    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]\n    self deny: pid isAlive\n    // The worker is unlinked: the caller carries on.\n    self assert: Pid current isAlive\n\n  testForkedNonLocalReturnExitsWithForkReason =>\n    // The block waits on an Ets gate so the monitor below is established\n    // before the `^` fires; otherwise the DOWN could carry `noproc`.\n    // `watch:` is a synchronous call, so the monitor exists once it returns.\n    // The fork's gate bound (30 s) is far longer than any plausible delay\n    // before the gate opens, so under load it never gives up early and\n    // fires `^` before the monitor is in place (BT-4425). It stays bounded\n    // so a failed test does not leave the fork polling forever.\n    table := Ets new: #forkNlrGate type: #set\n    watcher := HandleInfoCounter spawn\n    pid := [\n      3000 timesRepeat: [(table at: #go) isNil ifTrue: [Timer sleep: 10]]\n      ^42\n    ] fork\n    ref := watcher watch: pid\n    table at: #go put: true\n    500 timesRepeat: [watcher getLastMsg isNil ifTrue: [Timer sleep: 10]]\n    msg := watcher getLastMsg\n    self assert: (msg at: 1) equals: #DOWN\n    self assert: (msg at: 2) =:= ref\n    self assert: (msg at: 4) =:= pid\n    self assert: (msg at: 5) equals: {#fork_non_local_return, 42}\n    table delete\n    watcher stop\n\n  testForkNonZeroArgBlockRaisesTypeError =>\n    self should: [[:x | x] fork] raise: #type_error",
       "explanation": "BT-4049: process primitives — `Pid>>send:`, `Reference new`, `Actor>>processLabel:` / `processLabel`. BT-4077: `Pid current`, `Pid>>monitor`, `Block>>fork`.  Fixtures: stdlib/test/fixtures/handle_info_counter.bt           stdlib/test/fixtures/process_label_actor.bt"
     },
     {
@@ -62415,6 +62503,37 @@
       ],
       "source": "// Tests for Behaviour >> removeFromSystem (BT-785)\n//\n// Tests the safety checks: stdlib class rejection and subclass rejection\n// Full integration tests (actual removal and cleanup) are in the e2e suite\n//\n// Fixtures:\n//   stdlib/test/fixtures/removal_test_parent.bt  — RemovalTestParent\n//   stdlib/test/fixtures/removal_test_child.bt   — RemovalTestChild (subclass of RemovalTestParent)\n\n// load test/fixtures/removal_test_parent.bt\n// load test/fixtures/removal_test_child.bt\n\nTestCase subclass: RemoveFromSystemTest\n\n  testStdlibClassRejected =>\n    // Attempting to remove a stdlib class raises a runtime_error\n    self should: [Integer removeFromSystem] raise: #runtime_error\n\n  testSubclassRejected =>\n    // A class with subclasses cannot be removed (subclasses must go first)\n    // RemovalTestParent has RemovalTestChild as a subclass (see fixtures)\n    self should: [RemovalTestParent removeFromSystem] raise: #runtime_error\n\n  testStringClassRejected =>\n    // String is stdlib — cannot be removed\n    self should: [String removeFromSystem] raise: #runtime_error\n\n  testObjectClassRejected =>\n    // Object is stdlib — cannot be removed\n    self should: [Object removeFromSystem] raise: #runtime_error",
       "explanation": "Tests for Behaviour >> removeFromSystem (BT-785)  Tests the safety checks: stdlib class rejection and subclass rejection Full integration tests (actual removal and cleanup) are in the e2e suite  Fixtures:   stdlib/test/fixtures/removal_test_parent.bt  — RemovalTestParent   stdlib/test/fixtures/removal_test_child.bt   — RemovalTestChild (subclass of RemovalTestParent)"
+    },
+    {
+      "id": "stdlib-test-remove-runtime-class-method-test",
+      "title": "RemoveRuntimeClassMethodTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "RemoveRuntimeClassMethodTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "install:selector:fun:",
+        "instantiate",
+        "lookUp:",
+        "mutate",
+        "mutation",
+        "object",
+        "remove_runtime_class_method_test",
+        "set",
+        "subclassing",
+        "testRemovingAFunOnAnAncestorRestoresTheSubclass",
+        "testRemovingAFunPutTwiceRestoresTheCompiledMethod",
+        "testRemovingAFunRestoresTheCompiledMethod",
+        "testRemovingANewSelectorLeavesItAbsent"
+      ],
+      "source": "// BT-4438: `X class removeSelector:` removes a class-side runtime fun\n// installed by `beamtalk_object_class:put_class_method` (ADR 0084), checked\n// after the extension registry and before the compiled method, the order\n// dispatch resolves them in. The selector then answers what it answered\n// before the fun went in: the compiled method, an inherited one, or DNU.\n// Every test removes what it installs, so they can run twice in one VM.\n//\n// Fixtures: fixtures/bt4438own.bt, fixtures/bt4438parent.bt,\n// fixtures/bt4438child.bt.\n\nTestCase subclass: RemoveRuntimeClassMethodTest\n\n  // The class held as a Dynamic value: sends to it compile to `class_send`.\n  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name\n\n  install: name :: Symbol selector: sel :: Symbol fun: aBlock :: Block =>\n    pid := Erlang beamtalk_class_registry whereis_class: name\n    @expect type\n    Erlang beamtalk_object_class\n      put_class_method: pid\n      selector: sel\n      fun: aBlock\n\n  // A fun over a compiled method: removing it brings the compiled one back,\n  // for static and dynamic sends alike, and it stays a local class method.\n  testRemovingAFunRestoresTheCompiledMethod =>\n    self assert: Bt4438Own answer equals: #compiled\n    self\n      install: #Bt4438Own\n      selector: #answer\n      fun: [:classSelf | #fromRuntimeFun]\n    [\n      self assert: Bt4438Own answer equals: #fromRuntimeFun\n      self assert: (Bt4438Own class includesSelector: #answer)\n    ] ensure: [Bt4438Own class removeSelector: #answer]\n    self assert: Bt4438Own answer equals: #compiled\n    self assert: (self lookUp: #Bt4438Own) answer equals: #compiled\n    self assert: (Bt4438Own class includesSelector: #answer)\n\n  // A second fun over the first: removal still restores the compiled method.\n  testRemovingAFunPutTwiceRestoresTheCompiledMethod =>\n    self\n      install: #Bt4438Own\n      selector: #answer\n      fun: [:classSelf | #first]\n    self\n      install: #Bt4438Own\n      selector: #answer\n      fun: [:classSelf | #second]\n    [\n      self assert: Bt4438Own answer equals: #second\n    ] ensure: [Bt4438Own class removeSelector: #answer]\n    self assert: Bt4438Own answer equals: #compiled\n\n  // A fun for a selector the class never had: `includesSelector:` sees it,\n  // `removeSelector:ifAbsent:` removes it, and afterwards the selector is\n  // absent and not understood.\n  testRemovingANewSelectorLeavesItAbsent =>\n    self deny: (Bt4438Own class includesSelector: #extra)\n    self\n      install: #Bt4438Own\n      selector: #extra\n      fun: [:classSelf | #extra]\n    self assert: (Bt4438Own class includesSelector: #extra)\n    self assert: (self lookUp: #Bt4438Own) extra equals: #extra\n    removed := Bt4438Own class removeSelector: #extra ifAbsent: [#absent]\n    self assert: removed equals: Bt4438Own class\n    self deny: (Bt4438Own class includesSelector: #extra)\n    self assert: (Bt4438Own class removeSelector: #extra ifAbsent: [\n      #absent\n    ]) equals: #absent\n    self should: [(self lookUp: #Bt4438Own) extra] raise: #does_not_understand\n\n  // A fun on an ancestor: removing it there restores what the subclass\n  // inherits.\n  testRemovingAFunOnAnAncestorRestoresTheSubclass =>\n    self assert: Bt4438Child answer equals: #parent\n    self\n      install: #Bt4438Parent\n      selector: #answer\n      fun: [:classSelf | classSelf name]\n    [\n      self assert: Bt4438Child answer equals: #Bt4438Child\n    ] ensure: [Bt4438Parent class removeSelector: #answer]\n    self assert: Bt4438Child answer equals: #parent\n    self assert: (self lookUp: #Bt4438Child) answer equals: #parent\n    self assert: Bt4438Parent answer equals: #parent",
+      "explanation": "BT-4438: `X class removeSelector:` removes a class-side runtime fun installed by `beamtalk_object_class:put_class_method` (ADR 0084), checked after the extension registry and before the compiled method, the order dispatch resolves them in. The selector then answers what it answered before the fun went in: the compiled method, an inherited one, or DNU. Every test removes what it installs, so they can run twice in one VM.  Fixtures: fixtures/bt4438own.bt, fixtures/bt4438parent.bt, fixtures/bt4438child.bt."
     },
     {
       "id": "stdlib-test-rename-selector-test",

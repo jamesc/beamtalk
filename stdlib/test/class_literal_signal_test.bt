@@ -10,8 +10,9 @@
 // `on: <that class> do:` catches it. (A reload that adds an override needs a
 // workspace: tests/repl-protocol/cases/class_literal_signal_reload.btscript.)
 //
-// Each class a test patches irreversibly (a runtime class-method fun) is used
-// by that test alone, so the tests do not depend on their order.
+// A test that patches a class with a runtime class-method fun removes it
+// again (`X class removeSelector:`, BT-4438), so the tests can run twice in
+// one VM.
 //
 // Fixtures: fixtures/bt4270raise_ext_err.bt, fixtures/bt4270raise_fun_err.bt,
 // fixtures/bt4270raise_mid.bt, fixtures/bt4270raise_leaf.bt,
@@ -76,8 +77,7 @@ TestCase subclass: ClassLiteralSignalTest
     ] on: Bt4270RaiseExtErr) equals: #(#raised, Bt4270RaiseExtErr, "x")
 
   // A runtime class-method fun replacing `signal:` on the receiving class
-  // after warm-up is honoured. (Nothing removes a runtime class-method fun,
-  // so the patched class is used by this test alone.)
+  // after warm-up is honoured, and the raise is back once it goes.
   testRuntimeFunOnTheClassAfterWarmUpIsHonoured =>
     self assert: (self outcomeOf: [
       self raiseFun: "x"
@@ -88,13 +88,18 @@ TestCase subclass: ClassLiteralSignalTest
       put_class_method: pid
       selector: #signal:
       fun: [:classSelf :msg | #fromRuntimeFun]
+    [
+      self assert: (self outcomeOf: [
+        self raiseFun: "x"
+      ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)
+    ] ensure: [Bt4270RaiseFunErr class removeSelector: #signal:]
     self assert: (self outcomeOf: [
       self raiseFun: "x"
-    ] on: Bt4270RaiseFunErr) equals: #(#returned, #fromRuntimeFun)
+    ] on: Bt4270RaiseFunErr) equals: #(#raised, Bt4270RaiseFunErr, "x")
 
   // The same on an ancestor between the receiving class and `Exception`: the
-  // ancestor's write takes away its descendant's key. (Used by this test
-  // alone, as above.)
+  // ancestor's write takes away its descendant's key, and removing the fun
+  // brings the raise back.
   testRuntimeFunOnAnAncestorAfterWarmUpIsHonoured =>
     self assert: (self outcomeOf: [
       self raiseLeaf: "x"
@@ -106,6 +111,11 @@ TestCase subclass: ClassLiteralSignalTest
       selector: #signal:
       fun: [:classSelf :msg | classSelf name]
     // The fun runs with the receiving class as `self`, as the dynamic path does.
+    [
+      self assert: (self outcomeOf: [
+        self raiseLeaf: "x"
+      ] on: Bt4270RaiseLeaf) equals: #(#returned, #Bt4270RaiseLeaf)
+    ] ensure: [Bt4270RaiseMid class removeSelector: #signal:]
     self assert: (self outcomeOf: [
       self raiseLeaf: "x"
-    ] on: Bt4270RaiseLeaf) equals: #(#returned, #Bt4270RaiseLeaf)
+    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "x")

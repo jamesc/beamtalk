@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4438: the ancestor of Bt4438Child that gains, then loses, a runtime
+// class-method fun. See remove_runtime_class_method_test.bt.
+
+Object subclass: Bt4438Parent
+
+  class answer -> Symbol => #parent

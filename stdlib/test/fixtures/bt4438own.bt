@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4438: a class whose class method a test replaces with a runtime fun, then
+// removes. See remove_runtime_class_method_test.bt.
+
+Object subclass: Bt4438Own
+
+  class answer -> Symbol => #compiled

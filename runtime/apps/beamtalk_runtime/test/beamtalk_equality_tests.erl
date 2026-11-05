@@ -117,3 +117,14 @@ untagged_map_is_not_dispatchable_test() ->
     %% Only maps carrying '$beamtalk_class' are asked.
     ?assertNot(beamtalk_equality:member(#{a => 2}, [#{a => 1}])),
     ?assert(beamtalk_equality:member(#{a => 1}, [#{a => 1}])).
+
+%%% ============================================================================
+%%% primitive_equals/2 — BT-4416 send fast path
+%%% ============================================================================
+
+primitive_equals_raw_hit_needs_no_dispatch_test() ->
+    %% A raw hit answers before any class lookup, so this holds with no
+    %% runtime or stdlib loaded at all.
+    ?assert(beamtalk_equality:primitive_equals(<<"ab">>, <<"ab">>)),
+    ?assert(beamtalk_equality:primitive_equals(42, 42)),
+    ?assert(beamtalk_equality:primitive_equals(foo, foo)).
