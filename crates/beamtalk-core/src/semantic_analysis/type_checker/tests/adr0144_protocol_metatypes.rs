@@ -587,7 +587,8 @@ Value subclass: Holder
 #[test]
 fn protocol_literal_is_not_a_protocol_metatype_value() {
     // The protocol object `Wire` does not answer `Wire`'s class
-    // requirements, so it is not the class object of a conformer.
+    // requirements, so it is not the class object of a conformer — at a
+    // field default, an argument and an annotated local.
     let source = wire_source(
         r"
 Value subclass: Holder
@@ -596,15 +597,30 @@ Value subclass: Holder
 Object subclass: Caller
   take: w :: Wire class => w label
   run => self take: Wire
+  local =>
+    w :: Wire class := Wire
+    w
 ",
     );
     let diags = checker_diagnostics(&source);
-    let rejections = diags
+    let lines: Vec<usize> = diags
         .iter()
-        .filter(|d| d.message.contains("Wire class"))
-        .count();
-    assert_eq!(
-        rejections, 2,
-        "field default and argument both reject the protocol literal: {diags:#?}"
-    );
+        .filter(|d| d.message.contains("Wire class") && !d.message.contains("understand"))
+        .map(|d| source[..d.span.start() as usize].lines().count())
+        .collect();
+    let line_of = |needle: &str| {
+        source[..source.find(needle).expect("fixture line")]
+            .lines()
+            .count()
+    };
+    for (site, needle) in [
+        ("field default", "field: wire"),
+        ("argument", "run => self take: Wire"),
+        ("annotated local", "w :: Wire class := Wire"),
+    ] {
+        assert!(
+            lines.contains(&line_of(needle)),
+            "{site} rejects the protocol literal: {diags:#?}"
+        );
+    }
 }

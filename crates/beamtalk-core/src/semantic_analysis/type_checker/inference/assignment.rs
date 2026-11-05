@@ -136,12 +136,23 @@ impl TypeChecker {
         }
         let inferred_name = inferred_ty.display_name();
         let declared_name = declared.display_name();
-        let rhs_assignable_to_declared =
-            Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
-        let declared_assignable_to_rhs =
-            Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
-        if rhs_assignable_to_declared || declared_assignable_to_rhs {
-            return None;
+        // A protocol literal (`Meta{P}`) into a declared `P class`
+        // (`ProtocolMeta{P}`) was already refused by `metatype_assignable_to`
+        // above; both display as `"P class"`, so the name comparison below
+        // would wrongly accept it.
+        let protocol_literal_into_protocol_metatype =
+            matches!(
+                (class_object, protocol_registry),
+                (Some(ClassObjectType::Class(name)), Some(registry)) if registry.has_protocol(name)
+            ) && Self::mentions_protocol_metatype(declared);
+        if !protocol_literal_into_protocol_metatype {
+            let rhs_assignable_to_declared =
+                Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
+            let declared_assignable_to_rhs =
+                Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
+            if rhs_assignable_to_declared || declared_assignable_to_rhs {
+                return None;
+            }
         }
         // Use source-sympathetic spelling (`Nil`) for user-facing messages.
         Some(AssignmentTypeMismatch {
@@ -161,6 +172,18 @@ impl TypeChecker {
                 _ => None,
             },
         })
+    }
+
+    /// `true` when `ty` is a protocol metatype `P class`, or a union or
+    /// intersection with one among its members (ADR 0144).
+    fn mentions_protocol_metatype(ty: &InferredType) -> bool {
+        match ty {
+            InferredType::ProtocolMeta { .. } => true,
+            InferredType::Union { members, .. } | InferredType::Intersection { members, .. } => {
+                members.iter().any(Self::mentions_protocol_metatype)
+            }
+            _ => false,
+        }
     }
 
     /// Infer an assignment `target := value` (optionally `target :: Type :=
