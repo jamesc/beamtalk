@@ -301,6 +301,50 @@ repeat_one_test() ->
     ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:repeat(<<"abc">>, 1)).
 
 %%% ============================================================================
+%%% as_charlist/1 (BT-4380: code points, not UTF-8 bytes)
+%%% ============================================================================
+
+as_charlist_ascii_test() ->
+    ?assertEqual("hello", beamtalk_string:as_charlist({beamtalk_string, <<"hello">>})).
+
+as_charlist_empty_test() ->
+    ?assertEqual([], beamtalk_string:as_charlist({beamtalk_string, <<>>})).
+
+as_charlist_code_points_test() ->
+    %% One code point per character, matching the FFI proxy's coercion.
+    ?assertEqual(
+        [99, 97, 102, 233, 8364],
+        beamtalk_string:as_charlist({beamtalk_string, <<"caf\x{E9}\x{20AC}"/utf8>>})
+    ).
+
+as_charlist_invalid_utf8_test() ->
+    %% Only reachable via asStringUnchecked: no code-point reading exists.
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = type_error, class = 'String', selector = asCharlist
+            }
+        },
+        beamtalk_string:as_charlist({beamtalk_string, <<255, 254>>})
+    ).
+
+as_charlist_bare_binary_test() ->
+    %% Direct Erlang callers only (BT-4382): valid UTF-8 reads as code points,
+    %% and invalid UTF-8 names Binary, not String.
+    ?assertEqual([233], beamtalk_string:as_charlist(<<"\x{E9}"/utf8>>)),
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, class = 'Binary', selector = asCharlist}},
+        beamtalk_string:as_charlist(<<255, 254>>)
+    ).
+
+as_charlist_non_string_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = asCharlist}},
+        beamtalk_string:as_charlist(42)
+    ).
+
+%%% ============================================================================
 %%% as_list/1
 %%% ============================================================================
 
@@ -797,11 +841,12 @@ from_iolist_non_binary_non_list_raises_test() ->
     ).
 
 %%% ============================================================================
-%%% raise_not_string/2 — integer receiver (bare binary hint vs generic)
+%%% raise_not_string/2 — non-string receiver (generic type_error clause)
 %%% ============================================================================
 
-%% When the receiver is a bare binary (not a tagged String), raise_not_string
-%% emits the "bare binaries are Binary" downcast hint (line 157-158).
+%% These tests pass an integer (not a binary and not a tagged String), so they
+%% exercise the generic raise_not_string clause that emits a plain type_error
+%% with no downcast hint.
 at_non_string_bare_binary_raises_test() ->
     ?assertError(
         #{
@@ -949,14 +994,12 @@ urlDecoded_non_string_raises_type_error_test() ->
     ).
 
 %%% ============================================================================
-%%% raise_not_string/2 — bare binary receiver (downcast hint path, line 157-158)
+%%% raise_not_string/2 — non-string receiver on two-arg functions
 %%% ============================================================================
 
-%% A bare binary (not tagged) hits the `is_binary(X)` clause of raise_not_string
-%% and gets the "bare binaries are Binary; convert with asString" hint.
-%% These tests verify that path is reachable when a non-compat function
-%% receives a tagged receiver but a bare binary argument triggers the error
-%% via the catch-all clause naming the receiver.
+%% These tests pass an integer receiver (42) to two-argument String functions.
+%% The catch-all clause delegates to raise_not_string, which emits a plain
+%% type_error (generic clause) since 42 is not a binary.
 
 includes_non_string_receiver_raises_test() ->
     ?assertError(
