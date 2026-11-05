@@ -50,6 +50,7 @@ mod bt4210_param_type_variables;
 mod bt4220_tuple_annotations;
 mod bt4233_type_var_placeholder;
 mod bt4235_value_type_trailing_field_assignment;
+mod bt4444_block_value_arg_check;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
