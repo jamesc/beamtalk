@@ -70,6 +70,14 @@ pub(crate) struct MetaProvenance<'a> {
     /// `beamtalk_dispatch:inherited_target/2` reads it to let a subclass's
     /// `dispatch/4` default arm call this class's compiled method directly.
     pub threads_actor_state: bool,
+    /// BT-4409: whether this class itself defines a class-side `new:` that is
+    /// user code (`ClassHierarchy::defines_user_class_new1`); emitted as
+    /// `'defines_user_class_new1' => 'true' | 'false'`, omitted when unknown
+    /// (no hierarchy). The runtime publishes it per class and walks the
+    /// ancestors' facts (`beamtalk_class_metadata:chain_has_user_new1/1`)
+    /// before a dynamic `new:` builds in the caller; an absent fact fails
+    /// closed there.
+    pub defines_user_class_new1: Option<bool>,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -417,6 +425,11 @@ impl CoreErlangGenerator {
             Self::meta_caller_safe_class_primitives_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
+            match provenance.defines_user_class_new1 {
+                Some(true) => Document::Str(",\n      'defines_user_class_new1' => 'true'"),
+                Some(false) => Document::Str(",\n      'defines_user_class_new1' => 'false'"),
+                None => Document::Nil,
+            },
             if provenance.overrides_collection_selector {
                 Document::Str(",\n      'overrides_collection_selector' => 'true'")
             } else {

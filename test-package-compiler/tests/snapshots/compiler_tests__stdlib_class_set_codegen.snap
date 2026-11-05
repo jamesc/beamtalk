@@ -233,7 +233,8 @@ case call 'erlang':'is_function'(_block@9, 2) of <'true'> when 'true' -> let _Er
       'class_method_info' => ~{'elements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'direct_constructors' => ['new', 'new:']
+      'direct_constructors' => ['new', 'new:'],
+      'defines_user_class_new1' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -271,7 +272,8 @@ case call 'erlang':'is_function'(_block@9, 2) of <'true'> when 'true' -> let _Er
       'class_method_info' => ~{'elements:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'direct_constructors' => ['new', 'new:']
+      'direct_constructors' => ['new', 'new:'],
+      'defines_user_class_new1' => 'false'
     }~
 
 'module_info'/0 = fun () ->

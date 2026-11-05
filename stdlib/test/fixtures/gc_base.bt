@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4409: the ancestor of GcLeaf. A test installs a runtime class-side
+// `new:` on it after GcLeaf has warmed its direct `new:`. See
+// guarded_constructor_test.bt.
+
+Value subclass: GcBase
+  field: x = 0

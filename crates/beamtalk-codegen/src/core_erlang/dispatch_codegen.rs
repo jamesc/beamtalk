@@ -3675,13 +3675,12 @@ impl CoreErlangGenerator {
         let raw_selector = selector.name().to_string();
 
         // nullary `new` on an eligible Value builds via a direct
-        // `Module:'new'()` call. The synthesized builder takes no arguments
-        // (not even `ClassSelf`), so it cannot use the generic direct-call
-        // shape below. (`new:` stays on `class_send`: its chain verdict
-        // lives in the baked metadata, which only dynamic sends consult.)
+        // `Module:'new'()` call, behind the same static call key as every
+        // other guarded class send (BT-4409). (`new:` stays on `class_send`:
+        // its chain verdict is decided at run time, on the dynamic path.)
         if raw_selector == "new" && arguments.is_empty() {
             if let Some(module_name) = self.direct_new0_module(class_name) {
-                return Ok(Self::generate_direct_new_call(&module_name));
+                return Ok(self.guarded_direct_new_doc(class_name, module_name));
             }
         }
 
@@ -3821,7 +3820,68 @@ impl CoreErlangGenerator {
             &key_doc,
             &class_self_var,
             args_doc,
-            arg_count,
+            arg_count + 1,
+            direct_call,
+        )
+    }
+
+    /// BT-4409 (ADR 0142 rule 3): a static nullary `new` sent to the literal
+    /// class `class_name`, whose synthesized `new/0` in `module_name` may
+    /// build in the caller ([`Self::direct_new0_module`]), compiles to the
+    /// keyed shape of [`Self::guarded_class_direct_call_doc`]:
+    ///
+    /// ```erlang
+    /// let StaticSelf = case call 'persistent_term':'get'(
+    ///         {'bt@point', 'new', 'Point class'}, 'false') of
+    ///     <'false'> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
+    ///           {'bt@point', 'new', 'Point class'}, 'Point', 'new', 0)
+    ///     <StaticRef> when 'true' -> StaticRef
+    ///   end
+    /// in case StaticSelf of
+    ///   <'false'> when 'true' ->
+    ///     let ClassPid = call 'erlang':'whereis'('beamtalk_class_Point') in
+    ///     call 'beamtalk_object_class':'class_send'(ClassPid, 'new', [])
+    ///   <_> when 'true' -> call 'bt@point':'new'()
+    /// end
+    /// ```
+    ///
+    /// `new/0` takes no `ClassSelf`, so the key's class reference is only the
+    /// "installed" witness. The runtime installs the key only while the
+    /// dynamic path would build in the caller too
+    /// (`beamtalk_class_dispatch:lookup_direct_constructor/3`, which needs
+    /// `direct_call_ok/2`: no class-side extension, no ADR 0084 runtime fun,
+    /// no class variables in the chain), so a later extension or
+    /// `put_class_method` of `new` is honoured through the fallback.
+    fn guarded_direct_new_doc(
+        &mut self,
+        class_name: &str,
+        module_name: String,
+    ) -> Document<'static> {
+        let class_self_var = self.fresh_temp_var("StaticSelf");
+        let key_doc = docvec![
+            "{",
+            leaf::atom(module_name.clone()),
+            ", ",
+            leaf::atom("new".to_string()),
+            ", ",
+            leaf::atom(super::util::metaclass_tag(class_name)),
+            "}"
+        ];
+        let direct_call = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":",
+            leaf::atom("new".to_string()),
+            "()"
+        ]);
+        self.keyed_static_send_doc(
+            class_name,
+            "new",
+            &key_doc,
+            &class_self_var,
+            Document::Nil,
+            0,
             direct_call,
         )
     }
@@ -3896,7 +3956,7 @@ impl CoreErlangGenerator {
             &key_doc,
             &class_self_var,
             Self::join_docs_with_commas(arg_refs),
-            arg_count,
+            arg_count + 1,
             raise,
         ))
     }
@@ -3905,8 +3965,10 @@ impl CoreErlangGenerator {
     /// target's static call key, install it on a miss
     /// (`beamtalk_class_shadow_flags:static_call_target/4`), and run `hit_doc`
     /// (which may read `class_self_var`, the key's class reference) when it
-    /// is present, else the dynamic `class_send` fallback.
-    #[allow(clippy::too_many_arguments)] // One shape, two hit kinds: the parts are all distinct.
+    /// is present, else the dynamic `class_send` fallback. `fun_arity` is the
+    /// arity of the function the key names (`ClassSelf` included, except for
+    /// a constructor key's `new/0`, BT-4409).
+    #[allow(clippy::too_many_arguments)] // One shape, three hit kinds: the parts are all distinct.
     fn keyed_static_send_doc(
         &mut self,
         class_name: &str,
@@ -3914,7 +3976,7 @@ impl CoreErlangGenerator {
         key_doc: &Document<'static>,
         class_self_var: &str,
         args_doc: Document<'static>,
-        arg_count: usize,
+        fun_arity: usize,
         hit_doc: Document<'static>,
     ) -> Document<'static> {
         let static_ref_var = self.fresh_temp_var("StaticRef");
@@ -3933,7 +3995,7 @@ impl CoreErlangGenerator {
             ", ",
             leaf::atom(selector_atom),
             ", ",
-            leaf::int_lit(i64::try_from(arg_count + 1).unwrap_or(i64::MAX)),
+            leaf::int_lit(i64::try_from(fun_arity).unwrap_or(i64::MAX)),
             ") <",
             leaf::var(static_ref_var.clone()),
             "> when 'true' -> ",
@@ -4068,21 +4130,6 @@ impl CoreErlangGenerator {
     fn direct_new0_module(&self, class_name: &str) -> Option<String> {
         self.class_reference_direct_call_info(class_name)
             .and_then(|info| info.direct_new0.then(|| info.module_name.to_string()))
-    }
-
-    /// Generates a direct nullary-`new` call.
-    ///
-    /// ```erlang
-    /// call 'module':'new'()
-    /// ```
-    fn generate_direct_new_call(module_name: &str) -> Document<'static> {
-        docvec![
-            "call ",
-            leaf::atom(module_name.to_string()),
-            ":",
-            leaf::atom("new".to_string()),
-            "()"
-        ]
     }
 
     /// Builds the shared `safe_dispatch/4` self-send fragment used by every
