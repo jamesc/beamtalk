@@ -51,6 +51,10 @@ TestCase subclass: GuardedConstructorTest
       fun: [:classSelf | #fromRuntimeFun]
     self assert: GcFunPoint new equals: #fromRuntimeFun
     self assert: (self lookUp: #GcFunPoint) new equals: #fromRuntimeFun
+    @expect type
+    removed := Erlang beamtalk_object_class remove_class_method: pid selector: #new
+    self assert: removed equals: #removed
+    self assert: GcFunPoint new x equals: 0
 
   // An ancestor that gains a user class-side `new:` after a descendant
   // warmed its direct `new:` is honoured by the descendant's dynamic `new:`
@@ -65,3 +69,7 @@ TestCase subclass: GuardedConstructorTest
       selector: #new:
       fun: [:classSelf :init | #fromAncestorNewInit]
     self assert: (leaf new: #{#x => 1}) equals: #fromAncestorNewInit
+    @expect type
+    removed := Erlang beamtalk_object_class remove_class_method: pid selector: #new:
+    self assert: removed equals: #removed
+    self assert: (leaf new: #{#x => 1}) x equals: 1

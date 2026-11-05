@@ -626,19 +626,18 @@ impl ClassHierarchy {
     /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
     ///   only the class's own synthesis record matters.
     ///
-    /// Abstractness is checked here, at the *caller's* compile time only
-    /// (BT-4200). The emitted `call '<mod>':'new'()` skips the `gen_server`
-    /// `{new, _}` abstract rejection, so a caller compiled while the class was
-    /// concrete still instantiates it after only the class's file is reloaded
-    /// as `abstract`. This is deliberate: the callee cannot reject it itself,
-    /// because a Value subclass's generated `new/0` chains through its
-    /// superclass module's `new/0` to collect inherited field defaults (and
-    /// `beamtalk_class_instantiation:ancestor_compiled_defaults/1` calls it
-    /// too), so an abstract class's `new/0` must stay a plain map builder.
-    /// Recompiling the callers (the normal build / REPL redefinition flow
-    /// recompiles dependents) restores the rejection; an abstract class's
-    /// instance is a plain tagged map either way, so no invariant beyond the
-    /// abstract-instantiation diagnostic is at stake.
+    /// Abstractness is decided here: an abstract class gets no direct
+    /// constructors (BT-4200). A caller's static `X new` is guarded by the
+    /// BT-4316 static call key `{Module, new, Tag}` (BT-4409), installed only
+    /// while the class's published `direct_constructors` still lists `new`.
+    /// Reloading the class as `abstract` publishes `[]`, which erases the key
+    /// (`beamtalk_class_metadata:put_direct_constructors/2`), so the next
+    /// send takes `class_send` and gets the `gen_server` `{new, _}` abstract
+    /// rejection without recompiling the caller. The callee cannot reject it
+    /// itself, because a Value subclass's generated `new/0` chains through
+    /// its superclass module's `new/0` to collect inherited field defaults
+    /// (and `beamtalk_class_instantiation:ancestor_compiled_defaults/1` calls
+    /// it too), so an abstract class's `new/0` must stay a plain map builder.
     ///
     /// Unknown classes, unknown ancestors, cycles, chains deeper than the
     /// runtime's cap, and parse-incomplete surfaces (where a missing user
