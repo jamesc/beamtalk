@@ -45,7 +45,10 @@
 //!   (`beamtalk_actor_state:refresh_carried/2`,
 //!   [`RethrowSlot::CellIfCarried`]); any other state (the REPL's bindings, a
 //!   value type's `Self`, another actor's state) a closure cannot write, and
-//!   resumes as it came.
+//!   resumes as it came. "Was the cell's" is decided by identity, not by
+//!   equal fields (BT-4448): a closure of another actor of the same class,
+//!   run here away from home, carries its own actor's capture stamped with
+//!   that actor (`beamtalk_actor_state:nlr_state/2`), never this cell.
 //!
 //! The same holds at every nesting: a statement, a conditional arm, a loop or
 //! fold body, an `on:do:` arm or another `ensure:` cleanup (whose relay hands

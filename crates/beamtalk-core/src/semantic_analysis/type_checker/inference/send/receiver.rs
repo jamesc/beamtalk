@@ -90,7 +90,7 @@ impl TypeChecker {
                         env,
                         hierarchy,
                         self.alias_registry.as_ref(),
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                     )
                 })
                 .map(|info| {
@@ -99,7 +99,7 @@ impl TypeChecker {
                         env,
                         hierarchy,
                         self.alias_registry.as_ref(),
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                     )
                 })
                 .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
@@ -835,7 +835,7 @@ impl TypeChecker {
                                 &method_subst,
                                 Some(&receiver_ty),
                             ),
-                            self.protocol_registry.as_ref(),
+                            self.protocol_registry.as_deref(),
                             self.alias_registry.as_ref(),
                             TypeStringContext::Substitution,
                         );
@@ -871,7 +871,7 @@ impl TypeChecker {
                     return type_resolver::resolve_declared_type(
                         ret_ty,
                         &type_resolver::SubstitutionMap::new(),
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                         self.alias_registry.as_ref(),
                         TypeStringContext::Declared,
                     );
@@ -1021,13 +1021,10 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
     ) -> InferredType {
-        let Some((requirement, type_params)) = self.protocol_registry.as_ref().and_then(|r| {
+        let Some((requirement, type_params)) = self.protocol_registry.as_deref().and_then(|r| {
             r.get(protocol_name).map(|info| {
                 (
-                    info.all_class_requirements(r)
-                        .into_iter()
-                        .find(|req| req.selector.as_str() == selector)
-                        .cloned(),
+                    info.find_class_requirement(r, selector).cloned(),
                     info.all_type_params(r),
                 )
             })
@@ -1076,7 +1073,7 @@ impl TypeChecker {
                         &type_resolver::SubstitutionMap::new(),
                         Some(&instance_ty),
                     ),
-                    self.protocol_registry.as_ref(),
+                    self.protocol_registry.as_deref(),
                     self.alias_registry.as_ref(),
                     TypeStringContext::Declared,
                 ),
@@ -1342,7 +1339,7 @@ impl TypeChecker {
                                         &type_resolver::SubstitutionMap::new(),
                                         Some(member),
                                     ),
-                                    self.protocol_registry.as_ref(),
+                                    self.protocol_registry.as_deref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Substitution,
                                 ));
@@ -1358,7 +1355,7 @@ impl TypeChecker {
                                 return_types.push(type_resolver::resolve_declared_type(
                                     ret_ty,
                                     &type_resolver::SubstitutionMap::new(),
-                                    self.protocol_registry.as_ref(),
+                                    self.protocol_registry.as_deref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
                                 ));
@@ -1422,7 +1419,7 @@ impl TypeChecker {
                         type_resolver::resolve_declared_type(
                             ret_ty,
                             &type_resolver::SubstitutionMap::new(),
-                            self.protocol_registry.as_ref(),
+                            self.protocol_registry.as_deref(),
                             self.alias_registry.as_ref(),
                             TypeStringContext::Declared,
                         )

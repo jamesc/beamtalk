@@ -41,6 +41,7 @@ use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
 use beamtalk_core::source_analysis::Span;
+use std::sync::Arc;
 
 /// Computes hover information at a given position.
 ///
@@ -88,7 +89,7 @@ pub fn compute_hover(
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
     alias_registry: Option<&AliasRegistry>,
-    protocol_registry: Option<&ProtocolRegistry>,
+    protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Option<HoverInfo> {
     let offset = position.to_byte_offset(source)?;
     let offset_val = offset.get();

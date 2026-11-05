@@ -244,16 +244,20 @@ impl ModuleName {
     /// Creates a module name for a Beamtalk class instance module.
     ///
     /// Converts the class name from `CamelCase` to `snake_case` and adds
-    /// the `beamtalk_` prefix.
+    /// the `beamtalk_` prefix when the `snake_case` form doesn't already have it.
     ///
     /// - `"Counter"` → `"beamtalk_counter"`
     /// - `"HttpRouter"` → `"beamtalk_http_router"`
+    /// - `"BeamtalkRuntime"` → `"beamtalk_runtime"` (not `"beamtalk_beamtalk_runtime"`)
     #[must_use]
     pub fn instance(class_name: &str) -> Self {
         let snake = to_module_name(class_name);
-        Self {
-            name: format!("beamtalk_{snake}"),
-        }
+        let name = if snake.starts_with("beamtalk_") {
+            snake
+        } else {
+            format!("beamtalk_{snake}")
+        };
+        Self { name }
     }
 
     /// Creates a module name for a Beamtalk class metadata module.
@@ -262,11 +266,11 @@ impl ModuleName {
     ///
     /// - `"Counter"` → `"beamtalk_counter_class"`
     /// - `"HttpRouter"` → `"beamtalk_http_router_class"`
+    /// - `"BeamtalkRuntime"` → `"beamtalk_runtime_class"` (not `"beamtalk_beamtalk_runtime_class"`)
     #[must_use]
     pub fn class(class_name: &str) -> Self {
-        let snake = to_module_name(class_name);
         Self {
-            name: format!("beamtalk_{snake}_class"),
+            name: format!("{}_class", Self::instance(class_name).name),
         }
     }
 
@@ -476,5 +480,18 @@ mod tests {
         let c = ModuleName::class("Counter");
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    // Regression: classes starting with "Beamtalk" must not double-prefix.
+    #[test]
+    fn module_name_instance_beamtalk_prefix_no_double() {
+        let m = ModuleName::instance("BeamtalkRuntime");
+        assert_eq!(m.name(), "beamtalk_runtime");
+    }
+
+    #[test]
+    fn module_name_class_beamtalk_prefix_no_double() {
+        let m = ModuleName::class("BeamtalkRuntime");
+        assert_eq!(m.name(), "beamtalk_runtime_class");
     }
 }

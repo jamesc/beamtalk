@@ -136,6 +136,17 @@ TestCase subclass: ActorClosureCellTest
     self assert: c performedCleanupOverTheBodysWriteAfterReturn equals: 1
     self assert: c n equals: 105
 
+  // BT-4448: a `^` block run away from home, by another actor of the same
+  // class in an equal state, keeps its own actor's state: the peer's
+  // cleanup write is not taken for it.
+  testPerformedEnsureInAPeerDoesNotTakeThePeersState =>
+    a := ClosureCellEnsure spawn
+    b := ClosureCellEnsure spawn
+    self assert: (a returnThroughPeer: b) equals: 1
+    self assert: a n equals: 0
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
+    self assert: b n equals: 0
+
   testNestedPerformedEnsureCleanupWritesSurviveAnEarlyReturn =>
     c := ClosureCellEnsure spawn
     self assert: c nestedPerformedCleanupsAfterReturn equals: 1
@@ -259,6 +270,7 @@ TestCase subclass: ActorClosureCellTest
     a bump
     b := ClosureCellSuperChild spawn
     self assert: (b runBlock: a peekBlock) equals: 2
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
     self assert: a n equals: 2
 
@@ -271,6 +283,7 @@ TestCase subclass: ActorClosureCellTest
     a bump
     b := ClosureCellSuperChild spawn
     self assert: (b runSuperApplyOnOwnRead: a superApplyBlock) equals: 0
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
     self assert: a n equals: 2
 
@@ -280,6 +293,7 @@ TestCase subclass: ActorClosureCellTest
     self should: [
       b runSuperApplyOnOwnWrite: a superApplyBlock
     ] raise: #actor_state_unreachable
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
     self assert: a n equals: 0
 
@@ -292,6 +306,7 @@ TestCase subclass: ActorClosureCellTest
     self should: [
       b runSuperApplyOnOwnSelfSend: a superApplyBlock
     ] raise: #deadlock_detected
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
     self assert: a n equals: 0
 

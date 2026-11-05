@@ -181,6 +181,20 @@ Actor subclass: ClosureCellEnsure
     ] perform: #ensure: withArguments: #(c2)
     0
 
+  // BT-4448: this actor's `^` block run by `peer`, an actor of the same
+  // class in an equal state, through a `perform:`ed `ensure:`. Away from
+  // home the `^` carries this actor's creation-time capture, which equals
+  // the peer's cell: the peer's relay must not resume it with the peer's
+  // state, or this actor's boundary answers the peer's state as its own.
+  returnThroughPeer: peer =>
+    peer performEnsureOn: [^1]
+    0
+
+  performEnsureOn: blk =>
+    c := [self.n := self.n + 1]
+    blk perform: #ensure: withArguments: #(c)
+    0
+
   performedCleanupInALoopAfterReturn =>
     c := [self.n := self.n + 1]
     #(1, 2, 3) do: [:i |
