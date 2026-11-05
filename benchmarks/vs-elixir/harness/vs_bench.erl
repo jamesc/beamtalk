@@ -28,11 +28,12 @@
 %% loop with a constant body). Words count only process heaps: off-heap
 %% (refc) binaries and ETS are not included.
 %%
-%% Entry points: main/1 (bench) and profile/1 (per-row call counts).
+%% Entry points: main/1 (bench), profile/1 (per-row call counts) and
+%% invalidate/1 (the metadata-write cost of static call keys over a hierarchy).
 
 -module(vs_bench).
 
--export([main/1, profile/1, rows/0, ffi_ok/0]).
+-export([main/1, profile/1, invalidate/1, rows/0, ffi_ok/0]).
 
 %% Fixture callee for row 13d: an FFI target returning the bare atom `ok`,
 %% which the proxy coerces to `Result ok: nil`. No pure OTP function returns
@@ -84,6 +85,14 @@ rows() ->
             'inheritedClassMethod:', none, [{remote_call, none}]},
         {"3f", dispatch, "class method, class with classState: / Mod.fun(arg)", 50000,
             'statefulClassMethod:', none, [{remote_call, none}]},
+        {"3g", dispatch, "class method, class variables published after compile / Mod.fun(arg)",
+            50000, 'lateStateClassMethod:', none, [{remote_call, none}]},
+        {"3h", dispatch, "as 3g, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
+            late_state_math_class, [{dyn_remote_call, late_state_math_class}, {remote_call, none}]},
+        {"3i", dispatch, "class method shadowed by a class-side extension / Mod.fun(arg)", 50000,
+            'shadowedClassMethod:', none, [{remote_call, none}]},
+        {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
+            shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
         {"4a", dispatch, "untyped receiver: o x / o.x", 200000, 'dynGetter:o:', point, [
             {getter_dot, point}
         ]},
@@ -204,6 +213,8 @@ fixtures() ->
         string => {Bt(string), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
         math_class => {Bt(openMathClass), ?EX:math_module()},
+        late_state_math_class => {Bt(lateStateMathClass), ?EX:math_module()},
+        shadowed_math_class => {Bt(shadowedMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
@@ -287,6 +298,11 @@ boot() ->
     %% Elixir protocol dispatch is only representative when consolidated.
     true = 'Elixir.Protocol':'consolidated?'('Elixir.VeBench.Area'),
     true = 'Elixir.Protocol':'consolidated?'('Elixir.Enumerable'),
+    %% Rows 3g/3h (BT-4431): `VbLateStateMath` was compiled with no class
+    %% state; publish "declares class variables" for it, the metadata write a
+    %% reload adding `classState:` makes, so its static call site declines.
+    ok = beamtalk_class_metadata:put_class_variables('VbLateStateMath', true),
+    true = beamtalk_class_metadata:chain_has_class_variables('VbLateStateMath'),
     timer:sleep(1000).
 
 load_all(Dir, Glob) ->
@@ -508,6 +524,14 @@ compiles_to("3e") ->
     "whereis_class + class_send: inherited method resolved by the owner memo, runs in the caller (BT-4300)";
 compiles_to("3f") ->
     "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
+compiles_to("3g") ->
+    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
+compiles_to("3h") ->
+    "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
+compiles_to("3i") ->
+    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
+compiles_to("3j") ->
+    "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";
@@ -717,3 +741,135 @@ print_counts(Counts, N) ->
         [] -> io:format("(no function called >= 0.5 times per op)~n", []);
         _ -> ok
     end.
+
+%%====================================================================
+%% invalidate/1 over a hierarchy (BT-4431)
+%%====================================================================
+
+%% `beamtalk_class_shadow_flags:invalidate/1` erases the class's and every
+%% descendant's static call keys (BT-4316), and each `persistent_term:erase/1`
+%% of a present key scans every process for literal references. This times one
+%% `invalidate/1` of a root class with N subclasses, each holding K warmed
+%% static call keys, with and without many idle processes. Between rounds every
+%% key is re-installed through `static_call_target/4`, as the next static send
+%% of each call site would. Prints a markdown table of median and min µs.
+%%
+%% Args: [] or [Rounds].
+-define(INV_MOD, vs_bench_inv_methods).
+-define(INV_ROOT, 'VsInvRoot').
+-define(INV_MAX_K, 10).
+
+invalidate(Args) ->
+    Rounds =
+        case Args of
+            [R | _] -> list_to_integer(R);
+            [] -> 20
+        end,
+    boot(),
+    ok = load_inv_module(?INV_MAX_K),
+    io:format("# vs-elixir invalidate/1 bench~n", []),
+    io:format("# otp ~s, erts ~s, schedulers ~p, processes ~p~n", [
+        erlang:system_info(otp_release),
+        erlang:system_info(version),
+        erlang:system_info(schedulers_online),
+        erlang:system_info(process_count)
+    ]),
+    io:format("# load average: ~s~n", [string:trim(os:cmd("uptime"))]),
+    io:format("# rounds ~p~n~n", [Rounds]),
+    io:format("| idle processes | subclasses N | keys per subclass K | keys erased | "
+              "invalidate/1 median us | min us |~n", []),
+    io:format("|--:|--:|--:|--:|--:|--:|~n", []),
+    Shapes = [{0, 0}, {1, 1}, {1, 10}, {50, 0}, {50, 1}, {50, 10}],
+    lists:foreach(
+        fun(Idle) ->
+            Idlers = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, Idle)],
+            try
+                [inv_shape(Idle, N, K, Rounds) || {N, K} <- Shapes]
+            after
+                [P ! stop || P <- Idlers]
+            end
+        end,
+        [0, 10000]
+    ),
+    %% The BEAM's own price per erase on this machine, for attribution: one
+    %% `persistent_term:erase/1` of a present key, no lock, no ETS index.
+    Bare = [inv_bare_erase(100) || _ <- lists:seq(1, Rounds)],
+    io:format("~nbare `persistent_term:erase/1` of a present key: median ~.1f us, min ~.1f us "
+              "(100 keys per round, 0 idle processes)~n", [median(Bare), lists:min(Bare)]),
+    io:format("~n# load average after: ~s~n", [string:trim(os:cmd("uptime"))]),
+    ok.
+
+inv_shape(Idle, N, K, Rounds) ->
+    Subs = [list_to_atom("VsInvSub" ++ integer_to_list(I)) || I <- lists:seq(1, N)],
+    Root = inv_start(?INV_ROOT, none),
+    SubPids = [inv_start(Sub, ?INV_ROOT) || Sub <- Subs],
+    try
+        Keys = [{Sub, I} || Sub <- Subs, I <- lists:seq(1, K)],
+        Times = [
+            begin
+                ok = inv_warm(Keys),
+                {Us, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(?INV_ROOT) end),
+                false = lists:any(fun inv_key_present/1, Keys),
+                Us
+            end
+         || _ <- lists:seq(1, Rounds)
+        ],
+        io:format("| ~p | ~p | ~p | ~p | ~p | ~p |~n", [
+            Idle, N, K, length(Keys), median(Times), lists:min(Times)
+        ])
+    after
+        [catch gen_server:stop(P, normal, 5000) || P <- [Root | SubPids]]
+    end.
+
+%% Per-key µs to erase `Count` present keys holding a class reference.
+inv_bare_erase(Count) ->
+    Keys = [{?MODULE, inv_bare, I} || I <- lists:seq(1, Count)],
+    [persistent_term:put(Key, {beamtalk_object, 'VsInvRoot class', ?INV_MOD, self()}) || Key <- Keys],
+    {Us, _} = timer:tc(fun() -> [persistent_term:erase(Key) || Key <- Keys] end),
+    Us / Count.
+
+%% A class whose K class methods are `?INV_MOD:class_m<I>/1`.
+inv_start(Name, Superclass) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => Superclass,
+        module => ?INV_MOD,
+        class_methods => maps:from_list([{inv_sel(I), #{arity => 0}} || I <- lists:seq(1, ?INV_MAX_K)]),
+        class_state => #{},
+        meta => #{process_bound_class_selectors => [new, spawn]}
+    }),
+    Pid.
+
+inv_sel(I) -> list_to_atom("m" ++ integer_to_list(I)).
+
+inv_key({Sub, I}) ->
+    {?INV_MOD, class_fn(inv_sel(I)), beamtalk_class_registry:class_object_tag(Sub)}.
+
+inv_key_present(SubI) -> persistent_term:get(inv_key(SubI), false) =/= false.
+
+%% Install every key the way a static send's miss path does.
+inv_warm(Keys) ->
+    lists:foreach(
+        fun({Sub, I} = SubI) ->
+            case beamtalk_class_shadow_flags:static_call_target(inv_key(SubI), Sub, inv_sel(I), 1) of
+                false -> error({static_call_key_declined, Sub, I});
+                _Ref -> ok
+            end
+        end,
+        Keys
+    ).
+
+%% `class_m<I>(_ClassSelf) -> ok.` for I in 1..K, loaded before any class
+%% process starts (a compiled class's module registers from `on_load`).
+load_inv_module(K) ->
+    Funs = [
+        {function, 1, class_fn(inv_sel(I)), 1, [{clause, 1, [{var, 1, '_'}], [], [{atom, 1, ok}]}]}
+     || I <- lists:seq(1, K)
+    ],
+    Forms = [
+        {attribute, 1, module, ?INV_MOD},
+        {attribute, 1, export, [{class_fn(inv_sel(I)), 1} || I <- lists:seq(1, K)]}
+        | Funs
+    ],
+    {ok, ?INV_MOD, Bin} = compile:forms(Forms, []),
+    {module, ?INV_MOD} = code:load_binary(?INV_MOD, "vs_bench_inv_methods.erl", Bin),
+    ok.

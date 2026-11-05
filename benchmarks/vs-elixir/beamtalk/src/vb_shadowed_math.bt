@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Rows 3i/3j (BT-4431): a compiled class method shadowed by a class-side
+// extension (ADR 0066) in vb_shadowed_math_ext.bt. A literal send to
+// `double:` is a guarded static call whose key is never installed
+// (`direct_call_ok/2` is false while the extension exists), so every send
+// declines to `class_send`, which runs the extension in the class process.
+Object subclass: VbShadowedMath
+
+  class double: x :: Integer -> Integer => x * 2
