@@ -48,11 +48,15 @@ A bare `persistent_term:erase/1` of a present key took a median of 189 µs
 - **The erase now grows with the number of classes, not with warm targets.**
   50 × 10 falls from 103 ms to 20 ms, the cost of 50 × 1 (one present map per
   class, plus the derived flag). 1 × 10 falls from 1.8 ms to 0.4 ms.
-- **Re-warming costs the same.** One `put` per target installed, as before.
-  The map is copied on each put, but a class has few targets. A put of a new
-  key already waited for thread progress before this change, so replacing the
-  map's value adds no new kind of update. The 50 × 10 re-warm is about 128 ms
-  either way; that is lazy, spread over the first send of each site.
+- **Re-warming costs about the same here, but it is a dearer kind of
+  update.** One `put` per target installed, as before, and a put of a new key
+  already waited for thread progress. But all but a class's first install now
+  replace a present value, which releases a literal area: every process's
+  heap is checked for the old term, as on an erase. On this node that shows
+  as a small rise with 10,000 processes (103 to 116 ms) and with busy
+  schedulers (107 to 122 ms); a node with many large heaps would pay more.
+  The cost moves from the writer's synchronous erase to the lazy re-warm,
+  spread over the first send of each site.
 - Rows with no keys (N × 0) and with one target per class are unchanged within
   noise: they made one or two updates per class before and still do.
 

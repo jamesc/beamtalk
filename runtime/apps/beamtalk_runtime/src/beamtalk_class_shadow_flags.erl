@@ -217,9 +217,15 @@ and the per-class map), however many targets were warm:
 `invalidate/1` of a class with N descendants costs at most 2(N+1) updates,
 not 1 + K per class (`benchmarks/vs-elixir/results/bench-bt4442.md`). Installing
 a target is one update (the map is copied, but a class has few targets), the
-same count as one key per target had; re-warming after an erase pays one
-update per target the next sends reach. Only metadata writes erase; never
-the send path.
+same count as one key per target had, so re-warming after an erase pays one
+update per target the next sends reach. All but a class's first install now
+replace a present value, though, and replacing (like erasing) a value releases
+its literal area, which has every process check its heap for the old term; a
+put of a new key did not. That moves cost from the synchronous erase (paid by
+the metadata writer, K per class) to the lazy re-warm (paid by the first
+send of each site, up to K - 1 per class), and grows with the number and heap
+size of the node's processes. Only metadata writes erase; never the send
+path.
 
 `persistent_term` writes that change a value trigger a global scan, so only
 actual transitions write (set when unset, erase when set); both are rare
@@ -600,8 +606,10 @@ static_call_target(Key, ClassName, Selector, Arity) ->
     end.
 
 %% Add `Key => Ref` to the class's per-class static call map (BT-4442), under
-%% the tag lock. A target already present is answered from the map and never
-%% rewritten (a rewrite would cost a `persistent_term` update for nothing).
+%% the tag lock. A target already present with this very reference is never
+%% rewritten (a rewrite would cost a `persistent_term` update for nothing); one
+%% holding another reference (a pid the class monitor has not yet erased after
+%% a restart) is replaced by the one just validated.
 %% The per-tag index records the tag first, so a map is never installed
 %% without the row that lets `erase_all_static_call_keys/0` find it.
 -spec install_static_call_locked(atom(), static_call_key(), #beamtalk_object{}) ->
@@ -610,8 +618,8 @@ install_static_call_locked(Tag, Key, Ref) ->
     MapKey = static_calls_key(Tag),
     Targets = persistent_term:get(MapKey, #{}),
     case Targets of
-        #{Key := #beamtalk_object{} = Installed} ->
-            Installed;
+        #{Key := Ref} ->
+            Ref;
         _ ->
             ok = beamtalk_class_registry:record_static_call_tag(Tag),
             persistent_term:put(MapKey, Targets#{Key => Ref}),

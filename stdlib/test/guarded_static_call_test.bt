@@ -103,10 +103,14 @@ TestCase subclass: GuardedStaticCallTest
     mapKey := Erlang beamtalk_class_shadow_flags static_calls_key: #'GscClassSelf class'
     warmed := Erlang persistent_term get: mapKey with: nil
     self deny: warmed isNil
+    planted := Erlang maps map: [:k :v | #planted] with: warmed
     Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: true
-    Erlang persistent_term put: mapKey with: (Erlang maps map: [:k :v | #planted] with: warmed)
-    viaKey := GscClassSelf me
-    Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
+    viaKey := [
+      Erlang persistent_term put: mapKey with: planted
+      GscClassSelf me
+    ] ensure: [
+      Erlang beamtalk_class_shadow_flags set_class_vars: #GscClassSelf with: false
+    ]
     self assert: viaKey equals: #planted
     self assert: GscClassSelf me equals: GscClassSelf
 

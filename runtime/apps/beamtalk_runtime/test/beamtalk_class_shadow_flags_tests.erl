@@ -661,6 +661,36 @@ static_call_target_test_() ->
                     ?assertNot(class_map_present(Tag))
                 end)
             end},
+        {"concurrent installs of different targets on one class keep both", fun() ->
+            %% BT-4442: an install is a read-modify-write of the class's map,
+            %% so only the tag lock keeps one install from dropping another's
+            %% target. Both installers block behind the held lock, then race.
+            Name = 'Bt4442RaceTargets',
+            Tag = 'Bt4442RaceTargets class',
+            with_static_class(Name, fun(Pid) ->
+                Self = static_key(Name, class_testSelf),
+                ClassSelf = static_key(Name, class_testClassSelf),
+                Ref = {beamtalk_object, Tag, ?HELPER, Pid},
+                Parent = self(),
+                beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+                    [
+                        spawn_link(fun() -> Parent ! {installed, target(Name, K, Sel)} end)
+                     || {K, Sel} <- [{Self, testSelf}, {ClassSelf, testClassSelf}]
+                    ],
+                    timer:sleep(50)
+                end),
+                [
+                    receive
+                        {installed, Got} -> ?assertEqual(Ref, Got)
+                    after 5000 -> ?assert(false)
+                    end
+                 || _ <- [1, 2]
+                ],
+                ?assertEqual(Ref, key_value(Self)),
+                ?assertEqual(Ref, key_value(ClassSelf)),
+                ok = beamtalk_class_shadow_flags:invalidate(Name)
+            end)
+        end},
         {"installs an inherited owner's function with the receiving class as ClassSelf", fun() ->
             %% BT-4270: a class-literal signal send keys `{DefiningModule,
             %% FunName, ReceiverTag}`; the value is the dynamic path's

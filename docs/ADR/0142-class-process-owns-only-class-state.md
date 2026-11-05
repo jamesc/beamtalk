@@ -324,7 +324,12 @@ end
     derived flag and the map), however many targets are warm, so
     `invalidate/1` over N descendants is at most 2(N+1) updates. Installing a
     target is one update (the class's map is copied with the target added),
-    as before; a target already present is never rewritten. The 50 × 10 case
+    as before; a target already present is never rewritten. But every install
+    after a class's first replaces a present value, which, like an erase,
+    releases a literal area that each process's heap is checked against; a
+    put of a new key did not. The cost moves from the writer's synchronous
+    erase to the lazy re-warm, and grows with the node's process count and
+    heap sizes. The 50 × 10 case
     falls to about 20 ms, the cost of the 50 × 1 case
     (`results/bench-bt4442.md`).
   - **The hit path stays one read.** The map match is a BEAM instruction, not
