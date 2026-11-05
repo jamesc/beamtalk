@@ -256,3 +256,39 @@ fn expect_sendability_suppresses_actor_message_warning() {
         "@expect sendability should not be reported stale, got: {diags_with:?}"
     );
 }
+
+// --- self-sends are not a process boundary (ADR 0103, BT-4447) ---
+
+#[test]
+fn actor_self_send_of_port_is_silent() {
+    // An actor's self-send runs in its own process: the port never leaves
+    // its owner, so neither a plain nor a local-block self-send warns.
+    let src = "Actor subclass: Porter\n  \
+        plain: p :: Port -> Nil =>\n    \
+        self take: p\n    \
+        nil\n\n  \
+        inBlock: p :: Port -> Nil =>\n    \
+        true ifTrue: [self take: p]\n    \
+        nil\n\n  \
+        take: p :: Port -> Nil => nil\n";
+    let diags = check_source(src);
+    assert!(
+        sendability_warnings(&diags).is_empty(),
+        "self-sends are not actor messages: {diags:?}"
+    );
+}
+
+#[test]
+fn actor_send_of_port_to_another_actor_still_warns() {
+    let src = "Actor subclass: Porter\n  \
+        hand: p :: Port to: other :: Porter -> Nil =>\n    \
+        other take: p\n    \
+        nil\n\n  \
+        take: p :: Port -> Nil => nil\n";
+    let diags = check_source(src);
+    assert_eq!(
+        sendability_warnings(&diags).len(),
+        1,
+        "a send to another actor crosses a process boundary: {diags:?}"
+    );
+}

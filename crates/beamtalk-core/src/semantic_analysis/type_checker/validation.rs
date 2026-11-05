@@ -1328,6 +1328,7 @@ impl TypeChecker {
             env,
             receiver_type_args,
             None,
+            false,
         );
     }
 
@@ -1337,6 +1338,10 @@ impl TypeChecker {
     /// ([`Self::check_arg_sendability`]), which upgrades a
     /// `HandleScoped(#node)` argument to a Warning when the receiver is
     /// known-remote (silent otherwise, unchanged from ADR 0103).
+    /// `receiver_is_self` marks a `self`/`super` receiver: an actor's
+    /// self-send runs in its own process, so its arguments cross no process
+    /// boundary and are exempt from the sendability check (ADR 0103,
+    /// BT-4447).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_argument_types_with_known_remote(
         &mut self,
@@ -1350,6 +1355,7 @@ impl TypeChecker {
         env: Option<&super::TypeEnv>,
         receiver_type_args: &[InferredType],
         receiver_known_remote: Option<&known_remote::KnownRemote>,
+        receiver_is_self: bool,
     ) {
         self.check_argument_types_impl(
             class_name,
@@ -1362,6 +1368,7 @@ impl TypeChecker {
             env,
             receiver_type_args,
             receiver_known_remote,
+            receiver_is_self,
         );
     }
 
@@ -1378,10 +1385,13 @@ impl TypeChecker {
         env: Option<&super::TypeEnv>,
         receiver_type_args: &[InferredType],
         receiver_known_remote: Option<&known_remote::KnownRemote>,
+        receiver_is_self: bool,
     ) {
         // ADR 0103: sendability of actor message arguments and `spawnWith:`
         // map values. Independent of the handler's declared parameter types, so
-        // they run before the method lookup / early returns below.
+        // they run before the method lookup / early returns below. An actor's
+        // self-send stays in its own process, so it is not a message boundary
+        // (BT-4447).
         let receiver_is_actor = hierarchy.is_actor_subclass(class_name);
         self.check_arg_sendability(
             selector,
@@ -1389,7 +1399,7 @@ impl TypeChecker {
             span,
             hierarchy,
             is_class_side,
-            receiver_is_actor,
+            receiver_is_actor && !receiver_is_self,
             arg_exprs,
             receiver_known_remote,
         );
