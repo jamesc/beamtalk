@@ -11,7 +11,9 @@ use ecow::EcoString;
 
 use super::CommentAttachment;
 use super::ExpressionStatement;
-use super::expression::{ExpectCategory, Expression, Identifier, MessageSelector, TypeAnnotation};
+use super::expression::{
+    ExpectCategory, Expression, Identifier, Literal, MessageSelector, TypeAnnotation,
+};
 
 /// Modifier flags for a method definition.
 ///
@@ -184,6 +186,24 @@ impl MethodDefinition {
         }
     }
 
+    /// The integer when the method body is exactly one integer literal (the
+    /// named-constant idiom, `class protocolError => 1`), else `None`.
+    ///
+    /// Codegen certifies it in the defining module's `__beamtalk_meta/0`
+    /// (`constant_class_methods`) and a class-literal send of the selector
+    /// answers it behind a static call key that the runtime installs only
+    /// while that metadata still maps the selector to this value (BT-4363).
+    #[must_use]
+    pub fn literal_integer_body(&self) -> Option<i64> {
+        match self.body.as_slice() {
+            [stmt] => match &stmt.expression {
+                Expression::Literal(Literal::Integer(value), _) => Some(*value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Creates a new method definition.
     #[must_use]
     pub fn new(
@@ -257,5 +277,39 @@ impl MethodDefinition {
             doc_comment: None,
             span,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::source_analysis::{lex_with_eof, parse};
+
+    /// `literal_integer_body` of the class-side `selector` of the one class in `src`.
+    fn class_method_constant(src: &str, selector: &str) -> Option<i64> {
+        let (module, diagnostics) = parse(lex_with_eof(src));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        module.classes[0]
+            .class_methods
+            .iter()
+            .find(|m| m.selector.name() == selector)
+            .expect("method")
+            .literal_integer_body()
+    }
+
+    #[test]
+    fn literal_integer_body_is_only_a_lone_integer_literal() {
+        let src = "Object subclass: Errs\n  \
+                   class one => 1\n  \
+                   class minus => -7\n  \
+                   class sum => 1 + 1\n  \
+                   class float => 1.5\n  \
+                   class sym => #one\n  \
+                   class two =>\n    1\n    2\n";
+        assert_eq!(class_method_constant(src, "one"), Some(1));
+        assert_eq!(class_method_constant(src, "minus"), Some(-7));
+        assert_eq!(class_method_constant(src, "sum"), None);
+        assert_eq!(class_method_constant(src, "float"), None);
+        assert_eq!(class_method_constant(src, "sym"), None);
+        assert_eq!(class_method_constant(src, "two"), None);
     }
 }

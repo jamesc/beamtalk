@@ -67,6 +67,7 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
 
             origin: None,
             primitive: None,
+            constant_value: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -118,6 +119,7 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
 
             origin: None,
             primitive: None,
+            constant_value: None,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -306,6 +308,7 @@ fn logger_class(
 
             origin: None,
             primitive: None,
+            constant_value: None,
         }],
         class_methods: vec![],
         class_variables: vec![],

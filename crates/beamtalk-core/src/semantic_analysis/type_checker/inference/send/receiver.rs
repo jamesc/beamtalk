@@ -1042,6 +1042,7 @@ impl TypeChecker {
             doc: None,
             origin: None,
             primitive: None,
+            constant_value: None,
         })
     }
 

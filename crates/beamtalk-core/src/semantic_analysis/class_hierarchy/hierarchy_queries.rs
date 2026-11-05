@@ -872,6 +872,7 @@ impl ClassHierarchy {
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
 
@@ -892,6 +893,7 @@ impl ClassHierarchy {
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
         }
@@ -922,6 +924,7 @@ impl ClassHierarchy {
             doc: Some(EcoString::from("*(compiler-generated)*")),
             origin: None,
             primitive: None,
+            constant_value: None,
         });
         KeywordDecision::Known(Some(kw_sel))
     }
@@ -1295,6 +1298,7 @@ impl ClassHierarchy {
                     doc: Some(getter_doc.into()),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
 
@@ -1318,6 +1322,7 @@ impl ClassHierarchy {
                     doc: Some(setter_doc.into()),
                     origin: None,
                     primitive: None,
+                    constant_value: None,
                 });
             }
         }
@@ -1356,6 +1361,7 @@ impl ClassHierarchy {
             doc: Some(ctor_doc.into()),
             origin: None,
             primitive: None,
+            constant_value: None,
         });
         Some(kw_sel)
     }

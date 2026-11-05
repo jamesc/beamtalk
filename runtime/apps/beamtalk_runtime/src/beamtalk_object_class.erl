@@ -1144,6 +1144,7 @@ init({ClassName, ClassInfo}) ->
     %% gen_server hop.
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_constructors(ClassName, Meta),
+    sync_constant_class_methods(ClassName, Meta),
     sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
     %% Clear any runtime class-method funs left behind by a *hard*
@@ -2736,6 +2737,23 @@ sync_direct_constructors(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
+Publish the class's certified integer-literal class-side bodies (BT-4363):
+`constant_class_methods` from its `__beamtalk_meta/0`, keeping only
+`Selector => Integer` entries; `#{}` when absent (a ClassBuilder class, an
+older module). A constant-value static call key is certified against it.
+""".
+-spec sync_constant_class_methods(class_name(), map()) -> ok.
+sync_constant_class_methods(ClassName, Meta) ->
+    Constants =
+        case maps:get(constant_class_methods, Meta, #{}) of
+            M when is_map(M) ->
+                maps:filter(fun(K, V) -> is_atom(K) andalso is_integer(V) end, M);
+            _ ->
+                #{}
+        end,
+    beamtalk_class_metadata:put_constant_class_methods(ClassName, Constants).
+
+-doc """
 Publish the class-variable fact and the process-bound selector list (ADR 0142
 §1, BT-4299) into the unified metadata row.
 
@@ -3166,6 +3184,10 @@ apply_class_info(State, ClassInfo) ->
     %% Refresh the direct-construction verdicts from the fresh meta (e.g. a
     %% reload adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
+    %% BT-4363: publish the new module's certified constants (erasing the
+    %% class's static call keys on a change), so a constant-value key never
+    %% certifies a literal from the old code still current during `-on_load`.
+    sync_constant_class_methods(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
     %% the reload leaves descendants' baked `direct_constructors` behind their
     %% ancestors (informational: their dynamic `new:` re-checks the chain at

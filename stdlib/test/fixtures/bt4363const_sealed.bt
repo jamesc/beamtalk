@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4363: a sealed class's constant class-side methods (the idiom the issue
+// names). See constant_class_method_test.bt.
+
+sealed Object subclass: Bt4363ConstSealed
+
+  class sealed protocolError -> Integer => 1
+
+  class sealed internalError -> Integer => 2

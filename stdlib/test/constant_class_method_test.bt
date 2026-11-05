@@ -1,0 +1,111 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4363: a class-literal send of a class-side method whose whole body is one
+// integer literal (`Errors protocolError` with `class protocolError => 1`)
+// answers the literal in place, behind a static call key
+// (`{constant_value, Value, Module, FunName, Tag}`) that the runtime installs
+// only while a direct call would run that method and the class's published
+// metadata still certifies the body is that literal. These check the inlined
+// answer and that what the dynamic path answers still wins after warm-up. (The
+// reload cases, a changed literal, a dropped method and `removeSelector:` of a
+// class-body method, need a workspace: see
+// tests/repl-protocol/cases/constant_class_method_key.btscript.)
+//
+// A test that patches a class with a runtime class-method fun removes it
+// again (`X class removeSelector:`, BT-4438), so the tests can run twice in
+// one VM.
+//
+// Fixtures: fixtures/bt4363const_key.bt, fixtures/bt4363const_ext.bt,
+// fixtures/bt4363const_fun.bt, fixtures/bt4363const_sealed.bt.
+
+TestCase subclass: ConstantClassMethodTest
+
+  // The class held as a Dynamic value: sends to it compile to `class_send`.
+  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
+
+  // The constant-value key of `cls`'s class-side `fun` answering `value`.
+  keyOf: cls value: value :: Integer fun: fun :: Symbol =>
+    Erlang erlang list_to_tuple: #(#constant_value, value, (Erlang erlang element: 3 of: cls), fun, (Erlang erlang element: 2 of: cls))
+
+  testConstantSendsAnswerTheirLiteral =>
+    self assert: Bt4363ConstKey answer equals: 42
+    self assert: Bt4363ConstKey negative equals: -7
+    self assert: Bt4363ConstKey notConstant equals: 42
+    self assert: Bt4363ConstSealed protocolError equals: 1
+    self assert: Bt4363ConstSealed internalError equals: 2
+    self assert: (self lookUp: #Bt4363ConstKey) answer equals: 42
+
+  // The hit path is taken, not only the fallback: a warmed call site's key is
+  // installed, holding the class's reference.
+  testWarmedSendInstallsItsKey =>
+    self assert: Bt4363ConstKey answer equals: 42
+    key := self
+      keyOf: Bt4363ConstKey
+      value: 42
+      fun: #class_answer
+    self assert: (Erlang beamtalk_class_shadow_flags static_call_key_value: key) equals: Bt4363ConstKey
+
+  // A keyword constant still evaluates its argument, exactly once.
+  testKeywordConstantEvaluatesItsArgument =>
+    count := 0
+    result := Bt4363ConstKey code: [count := count + 1] value
+    self assert: result equals: 9
+    self assert: count equals: 1
+
+  // A class-side extension registered after warm-up wins, and the literal is
+  // back once it goes.
+  testExtensionRegisteredAfterWarmUpWins =>
+    self assert: Bt4363ConstExt answer equals: 1
+    Erlang beamtalk_extensions
+      register: #'Bt4363ConstExt class'
+      selector: #answer
+      fun: [:args :receiver | #extension]
+      owner: #test
+    literal := Bt4363ConstExt answer
+    dynamic := (self lookUp: #Bt4363ConstExt) answer
+    Erlang beamtalk_extensions
+      unregister: #Bt4363ConstExt
+      selector: #answer
+      classSide: true
+    self assert: literal equals: #extension
+    self assert: dynamic equals: #extension
+    self assert: Bt4363ConstExt answer equals: 1
+
+  // A runtime class-method fun (`put_class_method`) installed after warm-up
+  // wins, and its removal gives the literal back.
+  testRuntimeClassMethodAfterWarmUpWins =>
+    self assert: Bt4363ConstFun answer equals: 1
+    pid := Erlang beamtalk_class_registry whereis_class: #Bt4363ConstFun
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
+      selector: #answer
+      fun: [:classSelf | #fromRuntimeFun]
+    [
+      self assert: Bt4363ConstFun answer equals: #fromRuntimeFun
+      self assert: (self lookUp: #Bt4363ConstFun) answer equals: #fromRuntimeFun
+    ] ensure: [Bt4363ConstFun class removeSelector: #answer]
+    self assert: Bt4363ConstFun answer equals: 1
+    self assert: (self lookUp: #Bt4363ConstFun) answer equals: 1
+
+  // Conformance: for every loaded class, each unary class-side selector its
+  // published row certifies (`constant_class_methods`, what the hit arm
+  // answers) answers that very integer through the dynamic send, which runs
+  // the compiled method. Guards the Rust certification
+  // (`MethodDefinition::literal_integer_body`) against drifting from what the
+  // method's codegen actually returns.
+  testEveryCertifiedConstantIsWhatItsMethodAnswers =>
+    checked := Beamtalk allClasses
+      inject: 0
+      into: [:count :cls |
+        constants := Erlang beamtalk_class_metadata lookup_constant_class_methods: cls name
+        (constants keys reject: [:sel | sel asString includesSubstring: ":"])
+          inject: count
+          into: [:n :sel |
+            self assert: (cls perform: sel) equals: (constants at: sel)
+            n + 1
+          ]
+      ]
+    // At least this file's fixtures and stdlib's own constants were checked.
+    self assert: checked >= 6
