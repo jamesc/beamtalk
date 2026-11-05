@@ -414,15 +414,12 @@ fn receiver_evaluated_once() {
 fn nonlocal_return_in_pure_branch_throws() {
     // `^` in a pure branch keeps non-local-return semantics: the method
     // installs its NLR catch (the `^` sits in a block literal, as far as
-    // detection is concerned) and the inlined arm throws to it. BT-4415:
-    // the `do:` closure's `^` keeps the frame; a method whose only `^`s are
-    // guards compiles them as direct returns (`tests/guard_returns.rs`).
+    // detection is concerned) and the inlined arm throws to it.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
         "  check: flag =>\n",
         "    flag ifTrue: [^42].\n",
-        "    #[] do: [:e | ^e].\n",
         "    0\n",
     );
     let code = compile(src, "ctr_pure_nlr");

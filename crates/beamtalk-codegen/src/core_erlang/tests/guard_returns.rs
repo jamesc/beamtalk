@@ -45,7 +45,7 @@ fn canonical_class_side_guard_has_no_try() {
 fn object_method_guard_has_no_try() {
     let code = codegen(
         "Object subclass: G\n\
-         \x20 sign: x =>\n\
+         \x20 sign: x :: Integer =>\n\
          \x20   x > 0 ifTrue: [^1]\n\
          \x20   x < 0 ifTrue: [^-1]\n\
          \x20   0\n",
@@ -58,8 +58,8 @@ fn value_method_guard_has_no_try() {
     let code = codegen(
         "Value subclass: V\n\
          \x20 state: n :: Integer = 0\n\
-         \x20 clamp: x =>\n\
-         \x20   x isNil ifTrue: [^self]\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   x < 0 ifTrue: [^self]\n\
          \x20   x ifNil: [^self]\n\
          \x20   self withN: x\n",
     );
@@ -71,13 +71,29 @@ fn actor_method_guard_has_no_try() {
     let code = codegen(
         "Actor subclass: A\n\
          \x20 state: count :: Integer = 0\n\
-         \x20 bump: x =>\n\
+         \x20 bump: x :: Integer =>\n\
          \x20   self.count := self.count + 1\n\
          \x20   x > 10 ifTrue: [^#big]\n\
          \x20   self.count := self.count + x\n\
          \x20   #small\n",
     );
     assert_no_nlr_frame(&code);
+}
+
+#[test]
+fn untyped_boolean_receiver_keeps_its_frame() {
+    // BT-4244: a receiver not known to be a Boolean may implement `ifTrue:`
+    // itself, and must receive it with a block that returns from the method.
+    let code = codegen(
+        "Object subclass: U\n\
+         \x20 sign: x =>\n\
+         \x20   x ifTrue: [^1]\n\
+         \x20   0\n",
+    );
+    assert!(
+        code.contains("call 'erlang':'throw'") && code.contains("make_ref"),
+        "an untyped `ifTrue:` receiver keeps the NLR form:\n{code}"
+    );
 }
 
 #[test]
@@ -114,7 +130,7 @@ fn binary_literal_texts(code: &str) -> String {
 #[test]
 fn reflected_source_keeps_the_guard_as_written() {
     let src = "Object subclass: G\n\
-               \x20 sign: x =>\n\
+               \x20 sign: x :: Integer =>\n\
                \x20   x > 0 ifTrue: [^1]\n\
                \x20   0\n";
     let code = codegen(src);

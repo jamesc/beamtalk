@@ -378,11 +378,14 @@ pub fn generate_module_with_warnings(
     // changed, so the facts derived from it are recomputed over the clone;
     // reflected method source keeps the bodies as written.
     let guard_rewritten_storage;
-    let module: &Module = if guard_returns::has_guard_returns(module) {
+    let type_map = &generator.type_map;
+    let is_boolean =
+        |e: &beamtalk_core::ast::Expression| guard_returns::is_boolean_type(type_map.get(e.span()));
+    let module: &Module = if guard_returns::has_guard_returns(module, &is_boolean) {
         let mut owned = module.clone();
-        generator.guard_rewritten_bodies = guard_returns::rewrite_guard_returns(&mut owned);
-        generator.semantic_facts =
-            beamtalk_core::semantic_analysis::compute_semantic_facts(&owned);
+        let rewritten = guard_returns::rewrite_guard_returns(&mut owned, &is_boolean);
+        generator.guard_rewritten_bodies = rewritten;
+        generator.semantic_facts = beamtalk_core::semantic_analysis::compute_semantic_facts(&owned);
         guard_rewritten_storage = owned;
         &guard_rewritten_storage
     } else {

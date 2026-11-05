@@ -7,7 +7,7 @@
 Actor subclass: GuardReturnActor
   state: count :: Integer = 0
 
-  bump: x =>
+  bump: x :: Integer =>
     self.count := self.count + 1
     x > 10 ifTrue: [^#big]
     self.count := self.count + x

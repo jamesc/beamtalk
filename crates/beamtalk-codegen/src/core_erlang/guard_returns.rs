@@ -53,10 +53,14 @@
 //! absorbs the statements after it, since its parameter would shadow a name
 //! they use.
 //!
-//! A non-Boolean receiver is the one place the two forms differ: the inlined
-//! conditional falls back to a dynamic send of its own selector, so such a
-//! receiver now receives `ifTrue:ifFalse:` in place of `ifTrue:`, and both
-//! raise `does_not_understand` on anything that is not a Boolean.
+//! The Boolean family (`ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`) is
+//! rewritten only when its receiver is statically a Boolean (the caller's
+//! [`IsBoolean`]). On any other receiver the inlined conditional sends its
+//! own selector, with the branches as closures (BT-4244): a receiver that
+//! implements `ifTrue:` itself must still receive `ifTrue:` and a block that
+//! returns from the method, which only the form as written gives it. The nil
+//! family needs no such check: it lowers to a total `case` on `nil`, with no
+//! send.
 //!
 //! # When it applies
 //!
@@ -80,18 +84,49 @@ use beamtalk_core::source_analysis::Span;
 /// keyed by method span.
 pub(in crate::core_erlang) type RewrittenBodies = HashMap<Span, Vec<ExpressionStatement>>;
 
+/// Whether an expression is statically a Boolean: the receivers of the
+/// Boolean-family conditionals the rewrite may change.
+pub(in crate::core_erlang) type IsBoolean<'a> = &'a dyn Fn(&Expression) -> bool;
+
+/// Whether `ty` (an expression's inferred type) is a Boolean: `Boolean`,
+/// `True`, `False`, or a union of them. Any provenance: a value of a
+/// declared-but-wrong type reaching the rewritten conditional only changes
+/// which selector the resulting `does_not_understand` names.
+pub(in crate::core_erlang) fn is_boolean_type(
+    ty: Option<&beamtalk_core::semantic_analysis::InferredType>,
+) -> bool {
+    use beamtalk_core::semantic_analysis::InferredType;
+    match ty {
+        Some(InferredType::Known { class_name, .. }) => {
+            matches!(class_name.as_str(), "Boolean" | "True" | "False")
+        }
+        Some(InferredType::Union { members, .. }) => {
+            members.iter().all(|m| is_boolean_type(Some(m)))
+        }
+        _ => false,
+    }
+}
+
 /// Rewrites, in place, every method of `module` whose guard-style `^`s are
 /// its only block NLRs (see the module doc), returning the original bodies
 /// of the methods it changed. Empty when nothing changed.
-pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> RewrittenBodies {
+pub(in crate::core_erlang) fn rewrite_guard_returns(
+    module: &mut Module,
+    is_boolean: IsBoolean<'_>,
+) -> RewrittenBodies {
     let mut originals = RewrittenBodies::new();
     let methods = module
         .classes
         .iter_mut()
-        .flat_map(|class| class.methods.iter_mut().chain(class.class_methods.iter_mut()))
+        .flat_map(|class| {
+            class
+                .methods
+                .iter_mut()
+                .chain(class.class_methods.iter_mut())
+        })
         .chain(module.method_definitions.iter_mut().map(|m| &mut m.method));
     for method in methods {
-        if let Some(original) = rewrite_method(method) {
+        if let Some(original) = rewrite_method(method, is_boolean) {
             originals.insert(method.span, original);
         }
     }
@@ -100,49 +135,60 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Rewr
 
 /// Whether `module` has a method [`rewrite_guard_returns`] would change, so
 /// a caller can skip cloning the module when it has none.
-pub(in crate::core_erlang) fn has_guard_returns(module: &Module) -> bool {
+pub(in crate::core_erlang) fn has_guard_returns(
+    module: &Module,
+    is_boolean: IsBoolean<'_>,
+) -> bool {
     module
         .classes
         .iter()
         .flat_map(|class| class.methods.iter().chain(class.class_methods.iter()))
         .chain(module.method_definitions.iter().map(|m| &m.method))
-        .any(|method| rewritten_body(&method.body).is_some())
+        .any(|method| rewritten_body(&method.body, is_boolean).is_some())
 }
 
 /// Rewrites `method`'s body when that removes every block NLR from it,
 /// returning the body as it was.
-fn rewrite_method(method: &mut MethodDefinition) -> Option<Vec<ExpressionStatement>> {
-    let body = rewritten_body(&method.body)?;
+fn rewrite_method(
+    method: &mut MethodDefinition,
+    is_boolean: IsBoolean<'_>,
+) -> Option<Vec<ExpressionStatement>> {
+    let body = rewritten_body(&method.body, is_boolean)?;
     Some(std::mem::replace(&mut method.body, body))
 }
 
 /// `body` rewritten, when it holds a block NLR and the rewrite leaves none.
-fn rewritten_body(body: &[ExpressionStatement]) -> Option<Vec<ExpressionStatement>> {
+fn rewritten_body(
+    body: &[ExpressionStatement],
+    is_boolean: IsBoolean<'_>,
+) -> Option<Vec<ExpressionStatement>> {
     if !body_has_block_nlr(body) {
         return None;
     }
-    let rewritten = rewrite_tail_body(body.to_vec());
+    let rewritten = rewrite_tail_body(body.to_vec(), is_boolean);
     (!body_has_block_nlr(&rewritten)).then_some(rewritten)
 }
 
 /// Rewrites a tail body: absorbs the statements after the first guard into
 /// it, then rewrites the (new) last statement in tail position.
-fn rewrite_tail_body(mut body: Vec<ExpressionStatement>) -> Vec<ExpressionStatement> {
-    let guard_at = body
-        .iter()
-        .enumerate()
-        .position(|(i, stmt)| i + 1 < body.len() && guard_shape(&stmt.expression).is_some());
+fn rewrite_tail_body(
+    mut body: Vec<ExpressionStatement>,
+    is_boolean: IsBoolean<'_>,
+) -> Vec<ExpressionStatement> {
+    let guard_at = body.iter().enumerate().position(|(i, stmt)| {
+        i + 1 < body.len() && guard_shape(&stmt.expression, is_boolean).is_some()
+    });
     if let Some(i) = guard_at {
         let rest = body.split_off(i + 1);
         let guard = body.pop().expect("guard statement at index i");
-        let absorbed = absorb_rest(guard.expression, rest);
+        let absorbed = absorb_rest(guard.expression, rest, is_boolean);
         body.push(ExpressionStatement {
             expression: absorbed,
             ..guard
         });
     }
     if let Some(last) = body.pop() {
-        let expression = rewrite_tail_expression(last.expression);
+        let expression = rewrite_tail_expression(last.expression, is_boolean);
         body.push(ExpressionStatement { expression, ..last });
     }
     body
@@ -150,7 +196,7 @@ fn rewrite_tail_body(mut body: Vec<ExpressionStatement>) -> Vec<ExpressionStatem
 
 /// Rewrites `expr` in tail position: `^ v` is `v`, and an inlined
 /// conditional's branches (a `match:`'s arm bodies) are in tail position too.
-fn rewrite_tail_expression(expr: Expression) -> Expression {
+fn rewrite_tail_expression(expr: Expression, is_boolean: IsBoolean<'_>) -> Expression {
     match expr {
         Expression::Return { value, .. } => *value,
         Expression::MessageSend {
@@ -159,22 +205,26 @@ fn rewrite_tail_expression(expr: Expression) -> Expression {
             arguments,
             is_cast: false,
             span,
-        } if is_inlined_conditional(&parts, &arguments) => Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments: arguments
-                .into_iter()
-                .map(|arg| match arg {
-                    Expression::Block(mut block) => {
-                        let body = std::mem::take(&mut block.body);
-                        Expression::Block(with_body(block, rewrite_tail_body(body)))
-                    }
-                    other => other,
-                })
-                .collect(),
-            is_cast: false,
-            span,
-        },
+        } if is_inlined_conditional(&parts, &arguments)
+            && receiver_qualifies(&parts, &receiver, is_boolean) =>
+        {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments: arguments
+                    .into_iter()
+                    .map(|arg| match arg {
+                        Expression::Block(mut block) => {
+                            let body = std::mem::take(&mut block.body);
+                            Expression::Block(with_body(block, rewrite_tail_body(body, is_boolean)))
+                        }
+                        other => other,
+                    })
+                    .collect(),
+                is_cast: false,
+                span,
+            }
+        }
         Expression::Match {
             value,
             arms,
@@ -220,6 +270,16 @@ fn selector_of(parts: &[KeywordPart]) -> String {
     parts.iter().map(|p| p.keyword.as_str()).collect()
 }
 
+/// Whether the conditional `parts` names may be rewritten on `receiver`:
+/// always for the nil family, only on a static Boolean for the Boolean one.
+fn receiver_qualifies(
+    parts: &[KeywordPart],
+    receiver: &Expression,
+    is_boolean: IsBoolean<'_>,
+) -> bool {
+    family_of(parts) == Family::Nil || is_boolean(receiver)
+}
+
 /// Whether `parts`/`arguments` name an inlined conditional with literal
 /// block arguments.
 fn is_inlined_conditional(parts: &[KeywordPart], arguments: &[Expression]) -> bool {
@@ -244,6 +304,15 @@ impl Family {
     }
 }
 
+/// The family of the conditional `parts` names.
+fn family_of(parts: &[KeywordPart]) -> Family {
+    if parts[0].keyword.starts_with("ifTrue") || parts[0].keyword.starts_with("ifFalse") {
+        Family::Boolean
+    } else {
+        Family::Nil
+    }
+}
+
 /// A guard's shape: its family, and which slot (0 or 1, in
 /// [`Family::keywords`] order) falls through.
 struct GuardShape {
@@ -253,8 +322,9 @@ struct GuardShape {
 
 /// `expr`'s [`GuardShape`] when it is a guard statement (see the module
 /// doc), else `None`.
-fn guard_shape(expr: &Expression) -> Option<GuardShape> {
+fn guard_shape(expr: &Expression, is_boolean: IsBoolean<'_>) -> Option<GuardShape> {
     let Expression::MessageSend {
+        receiver,
         selector: MessageSelector::Keyword(parts),
         arguments,
         is_cast: false,
@@ -263,7 +333,8 @@ fn guard_shape(expr: &Expression) -> Option<GuardShape> {
     else {
         return None;
     };
-    if !is_inlined_conditional(parts, arguments) {
+    if !is_inlined_conditional(parts, arguments) || !receiver_qualifies(parts, receiver, is_boolean)
+    {
         return None;
     }
     let slots = branch_slots(parts, arguments)?;
@@ -295,12 +366,7 @@ fn branch_slots<'a>(
     parts: &[KeywordPart],
     arguments: &'a [Expression],
 ) -> Option<(Family, [Option<&'a Block>; 2])> {
-    let family = if parts[0].keyword.starts_with("ifTrue") || parts[0].keyword.starts_with("ifFalse")
-    {
-        Family::Boolean
-    } else {
-        Family::Nil
-    };
+    let family = family_of(parts);
     let keywords = family.keywords();
     let mut slots = [None, None];
     for (part, arg) in parts.iter().zip(arguments) {
@@ -316,8 +382,12 @@ fn branch_slots<'a>(
 /// The guard `expr` (a [`guard_shape`]) with `rest` appended to its falling
 /// branch, as the two-branch conditional (`ifTrue:ifFalse:` /
 /// `ifNil:ifNotNil:`).
-fn absorb_rest(expr: Expression, rest: Vec<ExpressionStatement>) -> Expression {
-    let shape = guard_shape(&expr).expect("absorb_rest is only called on a guard");
+fn absorb_rest(
+    expr: Expression,
+    rest: Vec<ExpressionStatement>,
+    is_boolean: IsBoolean<'_>,
+) -> Expression {
+    let shape = guard_shape(&expr, is_boolean).expect("absorb_rest is only called on a guard");
     let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Keyword(parts),
@@ -378,19 +448,24 @@ mod tests {
         module
     }
 
+    /// Treats every receiver as a Boolean (the type map is codegen's).
+    fn any_boolean(_: &Expression) -> bool {
+        true
+    }
+
     /// The body of the first method of `class_source`'s class, rewritten,
     /// unparsed (`None` when the rewrite does not apply).
     fn rewritten(class_source: &str) -> Option<String> {
         let mut module = parse(class_source);
         assert_eq!(
-            has_guard_returns(&module),
+            has_guard_returns(&module, &any_boolean),
             {
                 let mut probe = module.clone();
-                !rewrite_guard_returns(&mut probe).is_empty()
+                !rewrite_guard_returns(&mut probe, &any_boolean).is_empty()
             },
             "has_guard_returns agrees with rewrite_guard_returns"
         );
-        let originals = rewrite_guard_returns(&mut module);
+        let originals = rewrite_guard_returns(&mut module, &any_boolean);
         let method = &module.classes[0].methods[0];
         originals
             .contains_key(&method.span)
@@ -458,7 +533,23 @@ mod tests {
 
     #[test]
     fn method_without_block_nlr_is_untouched() {
-        assert_eq!(rewritten(&class("    x > 0 ifTrue: [1] ifFalse: [2]")), None);
+        assert_eq!(
+            rewritten(&class("    x > 0 ifTrue: [1] ifFalse: [2]")),
+            None
+        );
+    }
+
+    #[test]
+    fn boolean_family_needs_a_boolean_receiver() {
+        let mut module = parse(&class("    x > 0 ifTrue: [^1]\n    2"));
+        assert!(!has_guard_returns(&module, &|_| false));
+        assert!(rewrite_guard_returns(&mut module, &|_| false).is_empty());
+    }
+
+    #[test]
+    fn nil_family_needs_no_boolean_receiver() {
+        let mut module = parse(&class("    x ifNil: [^0]\n    x"));
+        assert!(!rewrite_guard_returns(&mut module, &|_| false).is_empty());
     }
 
     #[test]
