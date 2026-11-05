@@ -255,6 +255,29 @@ REPL:
   expression-position annotations (`x :: A | B := …`); taking `|>` reserves
   that spelling against any future type-operator use.
 
+**For Elixir and Gleam users.** The `|>` spelling is chosen so BEAM
+developers recognise it on sight: the value on the left flows into the step
+on the right, read top to bottom. The one difference to learn is *where*
+the value lands. In Elixir and Gleam it becomes the first argument of a
+function; in Beamtalk it becomes the receiver of a message. Because a
+Smalltalk receiver sits where an Elixir first argument sits, the shapes
+line up one-for-one (each row is a separate stage, not one chain):
+
+| Elixir | Gleam | Beamtalk |
+|---|---|---|
+| `orders \|> Enum.filter(&paid?/1)` | `orders \|> list.filter(is_paid)` | `orders \|> select: [:o \| o isPaid]` |
+| `\|> Enum.map(& &1.amount)` | `\|> list.map(fn(o) { o.amount })` | `\|> collect: [:o \| o amount]` |
+| `\|> Enum.sum()` | `\|> int.sum` | `\|> inject: 0 into: [:s :a \| s + a]` |
+| `\|> Map.put(:a, 1)` | `\|> dict.insert("a", 1)` | `\|> at: #a put: 1` |
+
+The function name (`Enum.map`) becomes a selector on the value
+(`collect:`); the module disappears because the value's class decides
+which method runs. There is no capture syntax (Elixir's `&`, Gleam's `_`)
+for putting the value anywhere but the receiver; when it must be an
+argument (`Logger info: x`), use a temp local or the nested form. The language-features
+guide gets this table, and the parse error for a non-message stage
+(`x |> 10`) points at it.
+
 **Error examples.**
 
 ```beamtalk
@@ -399,10 +422,12 @@ its meaning. `|>` is a departure, but Cuis has shipped the same idea (as
 `::`), and it removes a Smalltalk pain point that ADR 0042's immutable values
 make far more frequent than in an image of mutable objects.
 
-**Erlang/Elixir developer.** `|>` reads like Elixir's pipe, with one
-difference worth a sentence in the docs: the value flows into the
-*receiver*, not the first argument. Generated Core Erlang is identical to
-the nested form, so debugging and stack traces are unchanged.
+**Erlang/Elixir/Gleam developer.** `|>` is the same token and the same
+top-to-bottom reading as in Elixir and Gleam — a design goal, not an
+accident — with one difference the docs state up front: the value flows
+into the *receiver*, not the first argument (see "For Elixir and Gleam
+users" above). Generated Core Erlang is identical to the nested form, so
+debugging and stack traces are unchanged.
 
 **Production operator.** No runtime change: same BEAM code as hand-nested
 sends, no new dispatch, no hot-reload implications.
@@ -669,8 +694,9 @@ and the ADR should be revisited before phases 3–6.
    fix) is valuable even if `|>` is rejected. Given how rarely deep chains
    occur in this repo, Alternative G (warning + multi-field update, no
    operator) is a defensible smaller answer.
-2. **Token.** `|>` (proposed) versus another spelling. A pure-Smalltalk
-   alternative would be Cuis's `::`, at the cost of the annotation clash.
+2. **Token.** Settled (2026-11-05): `|>`, so Elixir and Gleam users
+   recognise it. Cuis's `::` was the pure-Smalltalk alternative and is
+   ruled out by the annotation clash.
 3. **Mixing `;` and `|>`.** Proposed: parse error without parentheses.
    Alternative: allow `a m1 |> m2; m3` with `;` binding tighter (cascade on
    the pipeline's last stage's receiver), as Cuis does with `::` and `;`.
