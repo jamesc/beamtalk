@@ -55,10 +55,13 @@ const BLOCK_CALLS: &[&str] = &[
     "(Erlang m or: [{W}. false])",
 ];
 
-/// The FFI argument: plain, and (actor contexts only) an operand whose
-/// evaluation advances `State` — a self-send, a field write.
+/// The argument: plain, an outer-local rebind (every context: analysis
+/// accepts it, and before BT-4451 codegen failed it in every context), and
+/// (actor contexts only) an operand whose evaluation advances `State` — a
+/// self-send, a field write.
 const ARGS: &[(&str, bool)] = &[
     ("c", false),
+    ("(x := c)", false),
     ("(self probe: c)", true),
     ("(self.n := c)", true),
 ];
