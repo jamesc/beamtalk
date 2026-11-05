@@ -537,39 +537,39 @@ handle_hover_empty_code_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %%====================================================================
-%% hover_docs/3 (no suffix): every parse_receiver_and_prefix/1 shape
+%% hover_docs/4 (no context): every parse_receiver_and_prefix/1 shape
 %% it dispatches on.
 %%====================================================================
 
 hover_docs_empty_trailing_token_is_empty_test() ->
     %% `{Receiver, <<>>}` — a line ending in whitespace. Defensive: the JS
     %% client never sends this shape, but the code path exists.
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<"Integer ">>, <<>>, #{})).
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer ">>, <<>>, #{})).
 
 hover_docs_multitoken_expression_hovers_the_trailing_word_test() ->
     %% `{expression, _, Word}` — a multi-token receiver expression; only the
     %% trailing word is offered for hover (full receiver inference is future
     %% work), and a lowercase word with no binding degrades to `<<>>`.
     ?assertEqual(
-        <<>>, beamtalk_repl_ops_dev:hover_docs(<<"\"hello\" size c">>, <<>>, #{})
+        <<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"\"hello\" size c">>, <<>>, #{})
     ).
 
 hover_docs_bare_class_name_test() ->
     %% `{undefined, Word}` where Word classifies as a class — hover_class/2's
     %% `{class, ClassName}` branch. Whatever format_class_docs/1 returns for
     %% the real bootstrap `Integer` class, the result is always a binary.
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<"Integer">>, <<>>, #{}),
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer">>, <<>>, #{}),
     ?assert(is_binary(Docs)).
 
 hover_docs_bare_lowercase_token_is_empty_test() ->
     %% A bare lowercase token (an instance/binding) is intentionally NOT
     %% hovered in v1 — hover_class/2's non-class fallback clause.
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<"count">>, <<>>, #{})).
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"count">>, <<>>, #{})).
 
 hover_docs_class_side_method_test() ->
     %% `{Receiver, Word}` with an uppercase class receiver — hover_method/3's
     %% `{class, ClassName}` branch (format_method_doc_class_side/2).
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<"Integer new">>, <<>>, #{}),
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
     ?assert(is_binary(Docs)).
 
 hover_docs_instance_side_method_test() ->
@@ -577,21 +577,22 @@ hover_docs_instance_side_method_test() ->
     %% instance — hover_method/3's `{instance, ClassName}` branch
     %% (format_method_doc/2), via classify_by_binding/2's primitive_class_of
     %% path.
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<"n printString">>, <<>>, #{n => 5}),
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"n printString">>, <<>>, #{n => 5}),
     ?assert(is_binary(Docs)).
 
 hover_docs_unclassifiable_receiver_method_is_empty_test() ->
     %% hover_method/3's `undefined` branch: a lowercase receiver with no
     %% matching binding.
     ?assertEqual(
-        <<>>, beamtalk_repl_ops_dev:hover_docs(<<"nosuchbinding printString">>, <<>>, #{})
+        <<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"nosuchbinding printString">>, <<>>, #{})
     ).
 
 %%====================================================================
-%% keyword_send_at/2 + hover_docs/3: keyword-selector hover (BT-4343)
+%% keyword_send_at/3 + hover_docs/4: keyword-selector hover (BT-4343)
 %%====================================================================
 
-kw(Code, Suffix) -> beamtalk_repl_ops_dev:keyword_send_at(Code, Suffix).
+kw(Code, Suffix) -> kw(<<>>, Code, Suffix).
+kw(Before, Code, Suffix) -> beamtalk_repl_ops_dev:keyword_send_at(Before, Code, Suffix).
 
 keyword_send_first_keyword_resolves_full_selector_test() ->
     ?assertEqual(
@@ -654,23 +655,66 @@ keyword_send_non_keyword_tokens_test() ->
     ?assertEqual(not_keyword, kw(<<"x">>, <<" := 1">>)),
     ?assertEqual(not_keyword, kw(<<"x">>, <<":= 1">>)),
     ?assertEqual(not_keyword, kw(<<"x">>, <<":: Integer">>)),
-    %% A symbol's colons are not a send's keywords.
-    ?assertEqual(not_keyword, kw(<<"#at:put:">>, <<>>)),
+    %% A symbol's colons are not a send's keywords: a `…:` inside one shows
+    %% nothing, and the symbol itself is not a keyword token.
+    ?assertEqual(none, kw(<<"#at:put:">>, <<>>)),
+    ?assertEqual(not_keyword, kw(<<"#at:put">>, <<>>)),
     ?assertEqual(not_keyword, kw(<<>>, <<>>)).
 
 keyword_send_overlong_line_is_not_scanned_test() ->
-    Long = binary:copy(<<"a b: 1. ">>, 1000),
+    Long = binary:copy(<<"a b: 1. ">>, 3000),
     ?assertEqual(none, kw(<<"Foo bar:">>, Long)),
     ?assertEqual(not_keyword, kw(<<"Foo bar">>, Long)).
+
+keyword_send_split_across_lines_test() ->
+    %% A line starting with a keyword part continues the send above it.
+    ?assertEqual(
+        {ok, <<"Fetcher">>, <<"fetch:options:">>},
+        kw(<<"Fetcher fetch:">>, <<" url\n    options: o\nx := 1">>)
+    ),
+    ?assertEqual(
+        {ok, <<"Fetcher">>, <<"fetch:options:">>},
+        kw(<<"y := 0.\nFetcher fetch: url\n">>, <<"    options:">>, <<" o\nx := 1">>)
+    ),
+    %% Blank and comment lines between the parts do not break the send.
+    ?assertEqual(
+        {ok, <<"d">>, <<"at:put:">>},
+        kw(<<"d at: 1\n\n  // value\n">>, <<"  put:">>, <<" 2">>)
+    ),
+    %% A newline NOT followed by a keyword ends the statement.
+    ?assertEqual(
+        {ok, <<"d">>, <<"at:">>},
+        kw(<<"d at:">>, <<" 1\ne put: 2">>)
+    ),
+    ?assertEqual({ok, <<"e">>, <<"put:">>}, kw(<<"d at: 1\n">>, <<"e put:">>, <<" 2">>)).
+
+keyword_send_field_access_is_not_a_boundary_test() ->
+    %% `self.count max: 3` — the receiver is `self.count`, an expression.
+    ?assertEqual(none, kw(<<"self.count max:">>, <<" 3">>)),
+    %% A statement-ending `.` still separates.
+    ?assertEqual({ok, <<"b">>, <<"max:">>}, kw(<<"a. b max:">>, <<" 3">>)).
+
+keyword_send_binary_or_is_not_a_boundary_test() ->
+    %% `flag | other foo: 1` parses as `(flag | other) foo: 1`.
+    ?assertEqual(none, kw(<<"flag | other foo:">>, <<" 1">>)),
+    %% ...but a block's parameter bar is a boundary.
+    ?assertEqual({ok, <<"y">>, <<"bar:">>}, kw(<<"[:a :b | y bar:">>, <<" a]">>)).
+
+keyword_in_string_or_comment_is_none_test() ->
+    %% The client sends `…:` only for a keyword part; inside a string or a
+    %% comment that must not fall back to a one-keyword lookup.
+    ?assertEqual(none, kw(<<"x := \"Fetcher fetch:">>, <<" u\"">>)),
+    ?assertEqual(none, kw(<<"// Foo bar:">>, <<" x">>)),
+    ?assertEqual(none, kw(<<"/* Foo bar:">>, <<" x */">>)).
 
 hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
     ?assertEqual(
         <<>>,
-        beamtalk_repl_ops_dev:hover_docs(<<"nosuchbinding at:">>, <<" 1 put: 2">>, #{})
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"nosuchbinding at:">>, <<" 1 put: 2">>, #{})
     ).
 
 hover_docs_keyword_send_class_receiver_test() ->
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<"Integer max:">>, <<" 3">>, #{}),
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer max:">>, <<" 3">>, #{}),
     ?assert(is_binary(Docs)).
 
 %%====================================================================

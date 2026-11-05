@@ -58,14 +58,15 @@ Extracted from beamtalk_repl_server.
     %% White-box tests of the receiver classifier, the hover
     %% resolver, and the diagnostics side-effect-free compile path.
     classify_receiver/2,
-    hover_docs/3,
-    keyword_send_at/2,
+    hover_docs/4,
+    keyword_send_at/3,
     diagnostics_for/2
 ]).
 -endif.
 
-%% Longest editor line (prefix + suffix) the hover keyword-send scanner reads.
--define(HOVER_MAX_LINE_BYTES, 4096).
+%% Most bytes of editor context (before + code + suffix) the hover keyword-send
+%% scanner reads; the client sends a few lines either side of the hovered one.
+-define(HOVER_MAX_SCAN_BYTES, 16384).
 
 %% Methods inherited from Object that are internal implementation protocol and
 %% should not appear in user-facing completions. Long-term, reflection methods
@@ -141,9 +142,9 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
 handle_term(<<"hover">>, Params, Msg, SessionPid) ->
     %% Live-image hover for the cockpit CodeMirror editors. `code` is
     %% the editor line up to (and including) the hovered token; the optional
-    %% `suffix` is the rest of that line, needed so a hovered keyword part
-    %% (`fetch:` in `X fetch: a options: b`) resolves the FULL keyword selector
-    %% (BT-4343). We resolve the token against the LIVE class registry — a bare
+    %% `before` (lines above it) and `suffix` (text after it) let a hovered
+    %% keyword part (`fetch:` in `X fetch: a options: b`, possibly split across
+    %% lines) resolve the FULL keyword selector (BT-4343). We resolve the token against the LIVE class registry — a bare
     %% class name → its docs, a `Receiver selector` pair (unary, or every
     %% keyword of the send) → that method's docs — and format signature +
     %% doc-comment markdown via beamtalk_repl_docs, the SAME live doc engine the
@@ -152,11 +153,8 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
     %% live-patched classes — this can). Pure reflection, runs no user code, so
     %% it is a `:read` op (the Observer may hover).
     Code = maps:get(<<"code">>, Params, <<>>),
-    Suffix =
-        case maps:get(<<"suffix">>, Params, <<>>) of
-            S when is_binary(S) -> S;
-            _ -> <<>>
-        end,
+    Before = binary_param(<<"before">>, Params),
+    Suffix = binary_param(<<"suffix">>, Params),
     case Code of
         <<>> ->
             {docs, <<>>};
@@ -171,7 +169,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
             SessionBindings = get_session_bindings(BindingPid),
             WorkspaceBindings = get_workspace_bindings(),
             Bindings = maps:merge(WorkspaceBindings, SessionBindings),
-            {docs, hover_docs(Code, Suffix, Bindings)}
+            {docs, hover_docs(Before, Code, Suffix, Bindings)}
     end;
 handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% Parse-only diagnostics for the cockpit CodeMirror editors. `code`
@@ -1119,16 +1117,24 @@ normalize_diagnostics_mode(Mode) when is_binary(Mode) ->
 normalize_diagnostics_mode(Mode) ->
     Mode.
 
+%% An optional binary op param; absent or non-binary reads as `<<>>`.
+-spec binary_param(binary(), map()) -> binary().
+binary_param(Key, Params) ->
+    case maps:get(Key, Params, <<>>) of
+        V when is_binary(V) -> V;
+        _ -> <<>>
+    end.
+
 -doc """
 Resolve hover documentation for the hovered token.
 
-When the hovered token is a keyword part (`fetch:` / `options:`), `Suffix` (the
-rest of the line after the token) lets `keyword_send_at/2` recover the whole
-keyword send, so any keyword resolves the full selector (`fetch:options:`) on
+`Code` is the editor line up to and including the hovered token. When that
+token is a keyword part (`fetch:` / `options:`), `Before` (the editor lines
+above, ending in a newline) and `Suffix` (the rest of the buffer after the
+token) let `keyword_send_at/3` recover the whole keyword send — even one split
+across lines — so any keyword resolves the full selector (`fetch:options:`) on
 its single-token receiver (BT-4343). Every other token takes the unary /
-class-name path below, which ignores `Suffix`.
-
-`Code` is the editor line up to and including the hovered token; we reuse
+class-name path below, which reads only `Code`: we reuse
 `parse_receiver_and_prefix/1` (the completion parser) so the trailing token is
 the hovered word and the token before it (if any) is its receiver:
 
@@ -1144,9 +1150,9 @@ an unexpected throw in `beamtalk_repl_docs` propagates and surfaces to the
 `rpc`-attached client as `{badrpc, _}`, which the Elixir layer maps to an empty
 hover, so the system still degrades cleanly.
 """.
--spec hover_docs(binary(), binary(), map()) -> binary().
-hover_docs(Code, Suffix, Bindings) ->
-    case keyword_send_at(Code, Suffix) of
+-spec hover_docs(binary(), binary(), binary(), map()) -> binary().
+hover_docs(Before, Code, Suffix, Bindings) ->
+    case keyword_send_at(Before, Code, Suffix) of
         {ok, Receiver, Selector} -> hover_method(Receiver, Selector, Bindings);
         none -> <<>>;
         not_keyword -> hover_token(Code, Bindings)
@@ -1174,26 +1180,31 @@ hover_token(Code, Bindings) ->
 -doc """
 Recover the keyword send whose keyword part ends exactly at the end of `Code`.
 
-`Code` is the line up to and including the hovered token and `Suffix` the rest
-of the line. Returns:
+`Before` is the buffer text before `Code`'s line (empty, or ending in a
+newline), `Code` the line up to and including the hovered token, and `Suffix`
+the rest of the buffer after it. Returns:
 
   * `not_keyword`               — the hovered token is not a keyword part
                                   (the caller takes the unary/class path)
   * `{ok, Receiver, Selector}`  — the send's single-token receiver and its full
                                   keyword selector
-  * `none`                      — a keyword was hovered but its send cannot be
-                                  resolved (multi-token/expression receiver,
-                                  cascade continuation, unscannable line)
+  * `none`                      — a keyword-looking token was hovered but no
+                                  send resolves: an expression receiver, a
+                                  cascade continuation, a keyword inside a string
+                                  or comment, or text we do not scan
+                                  (interpolated string, oversized context)
 
-The line is scanned into tokens (strings, character literals and comments are
-skipped atomically by the `beamtalk_repl_eval` lexeme skippers). From the
-hovered keyword we walk outward over the enclosing bracket level until a
-statement boundary (`.` `;` `^` `|` `:=`) or the enclosing open/close bracket;
-the keywords at that level, in order, form the selector, and the tokens before
-the first one are the receiver. Arguments may be any expression — keywords
-nested inside brackets belong to inner sends and are skipped.
+The text is scanned into tokens (strings, character literals and comments are
+skipped atomically by the `beamtalk_repl_eval` lexeme skippers). A newline is a
+statement boundary unless the next line starts with a keyword part — the
+language's own rule for splitting a send across lines. From the hovered keyword
+we walk outward over its bracket level until a statement boundary (newline,
+`.`, `;`, `^`, `:=`, a block's `|`) or the enclosing bracket; the keywords at
+that level, in order, form the selector, and the tokens before the first one
+are the receiver. Arguments may be any expression — keywords nested inside
+brackets belong to inner sends and are skipped.
 
-Examples:
+Examples (`Before` = `<<>>`):
   <<"Fetcher fetch:">>, <<" \"u\" options: #()">>
       → {ok, <<"Fetcher">>, <<"fetch:options:">>}
   <<"Fetcher fetch: \"u\" options:">>, <<" #()">>
@@ -1202,41 +1213,46 @@ Examples:
       → {ok, <<"d">>, <<"at:put:">>}
   <<"Integer max">>, <<>>    → not_keyword
 """.
--spec keyword_send_at(binary(), binary()) ->
+-spec keyword_send_at(binary(), binary(), binary()) ->
     {ok, binary(), binary()} | none | not_keyword.
-keyword_send_at(Code, Suffix) when
-    byte_size(Code) + byte_size(Suffix) > ?HOVER_MAX_LINE_BYTES
+keyword_send_at(Before, Code, Suffix) when
+    byte_size(Before) + byte_size(Code) + byte_size(Suffix) > ?HOVER_MAX_SCAN_BYTES
 ->
-    %% Hover fires whenever the pointer rests, so bound the scan (it is
-    %% quadratic in the line length) rather than stall on a huge pasted line.
-    keyword_unscannable(Code);
-keyword_send_at(Code, Suffix) ->
-    Line = binary_to_list(<<Code/binary, Suffix/binary>>),
-    HoverEnd = byte_size(Code),
-    case hover_tokens(Line, length(Line), []) of
+    %% Hover fires whenever the pointer rests, so bound the scan rather than
+    %% stall on a huge pasted buffer.
+    keyword_fallback(Code);
+keyword_send_at(Before, Code, Suffix) ->
+    Text = binary_to_list(<<Before/binary, Code/binary, Suffix/binary>>),
+    HoverEnd = byte_size(Before) + byte_size(Code),
+    Total = length(Text),
+    case hover_tokens(Text, Total, Total, []) of
         unsupported ->
-            %% An interpolated string makes the line unscannable here.
-            keyword_unscannable(Code);
+            %% An interpolated string makes the text unscannable here.
+            keyword_fallback(Code);
         {ok, Tokens} ->
-            {Before, After} = lists:splitwith(
-                fun({_Kind, _Text, End}) -> End =< HoverEnd end, Tokens
+            {Left, Right} = lists:splitwith(
+                fun({_Kind, _Text, End}) -> End =< HoverEnd end,
+                hover_resolve_newlines(Tokens)
             ),
-            case lists:reverse(Before) of
+            case lists:reverse(Left) of
                 [{keyword, _, HoverEnd} = Hovered | LeftRev] ->
                     Segment =
                         hover_walk_left(LeftRev, 0, []) ++
                             [{0, Hovered}] ++
-                            hover_walk_right(After, 0),
+                            hover_walk_right(Right, 0),
                     keyword_send_of(Segment);
                 _ ->
-                    not_keyword
+                    %% Not a keyword token. A `…:` hovered inside a string or
+                    %% comment must not fall back to a one-keyword lookup.
+                    keyword_fallback(Code)
             end
     end.
 
-%% A line we will not scan: a hovered keyword gets no tooltip (`none`), any
-%% other token keeps the unary/class path (which does not need the scan).
--spec keyword_unscannable(binary()) -> none | not_keyword.
-keyword_unscannable(Code) ->
+%% No keyword send to resolve: a hovered `…:` (the client only sends one for a
+%% keyword part) shows nothing (`none`); any other token keeps the unary/class
+%% path, which does not need the scan.
+-spec keyword_fallback(binary()) -> none | not_keyword.
+keyword_fallback(Code) ->
     case binary:longest_common_suffix([Code, <<":">>]) of
         1 -> none;
         0 -> not_keyword
@@ -1257,8 +1273,25 @@ keyword_send_of(Segment) ->
             none
     end.
 
-%% A scanned token: kind, source text, and end offset (bytes) in the line.
--type hover_token() :: {keyword | word | open | close | sep | other, binary(), non_neg_integer()}.
+%% A scanned token: kind, source text, and end offset (bytes) in the text.
+-type hover_token() :: {
+    keyword | word | param | open | close | sep | newline | other, binary(), non_neg_integer()
+}.
+
+%% A newline ends the statement unless the next line starts with a keyword
+%% part, which continues the send above (docs/beamtalk-language-features.md
+%% § Splitting a Message Send Across Lines).
+-spec hover_resolve_newlines([hover_token()]) -> [hover_token()].
+hover_resolve_newlines([{newline, _, _} | [{newline, _, _} | _] = Rest]) ->
+    hover_resolve_newlines(Rest);
+hover_resolve_newlines([{newline, _, _} | [{keyword, _, _} | _] = Rest]) ->
+    hover_resolve_newlines(Rest);
+hover_resolve_newlines([{newline, Text, End} | Rest]) ->
+    [{sep, Text, End} | hover_resolve_newlines(Rest)];
+hover_resolve_newlines([T | Rest]) ->
+    [T | hover_resolve_newlines(Rest)];
+hover_resolve_newlines([]) ->
+    [].
 
 %% Walk left from the hovered keyword (tokens nearest-first), tagging each with
 %% its bracket depth relative to the hovered keyword; stop at the enclosing open
@@ -1295,78 +1328,104 @@ hover_walk_right([{sep, _, _} | _], 0) ->
 hover_walk_right([T | Rest], Depth) ->
     [{Depth, T} | hover_walk_right(Rest, Depth)].
 
-%% Scan a line (byte list) into hover tokens. `Total` is the line length, so a
-%% token's end offset is `Total - length(RestAfterToken)`. Returns
-%% `unsupported` when an interpolated string makes the line unscannable.
--spec hover_tokens(string(), non_neg_integer(), [hover_token()]) ->
+%% Scan text (a byte list) into hover tokens. `Len` is the length of the
+%% remaining text and `Total` that of the whole, so a token ending with `Len'`
+%% bytes left ends at offset `Total - Len'`. Returns `unsupported` when an
+%% interpolated string makes the text unscannable.
+-spec hover_tokens(string(), non_neg_integer(), non_neg_integer(), [hover_token()]) ->
     {ok, [hover_token()]} | unsupported.
-hover_tokens([], _Total, Acc) ->
+hover_tokens([], _Len, _Total, Acc) ->
     {ok, lists:reverse(Acc)};
-hover_tokens([C | Rest], Total, Acc) when C =:= $\s; C =:= $\t; C =:= $\r; C =:= $\n ->
-    hover_tokens(Rest, Total, Acc);
-hover_tokens([$/, $/ | _] = Cs, Total, Acc) ->
-    hover_tokens(beamtalk_repl_eval:skip_line_comment(Cs), Total, Acc);
-hover_tokens([$/, $* | _] = Cs, Total, Acc) ->
-    hover_tokens(beamtalk_repl_eval:skip_block_comment(Cs), Total, Acc);
-hover_tokens([$" | _] = Cs, Total, Acc) ->
+hover_tokens([$\n | _] = Cs, Len, Total, Acc) ->
+    hover_push(newline, Cs, 1, Len, Total, Acc);
+hover_tokens([C | Rest], Len, Total, Acc) when C =:= $\s; C =:= $\t; C =:= $\r ->
+    hover_tokens(Rest, Len - 1, Total, Acc);
+hover_tokens([$/, $/ | _] = Cs, _Len, Total, Acc) ->
+    hover_skip(beamtalk_repl_eval:skip_line_comment(Cs), Total, Acc);
+hover_tokens([$/, $* | _] = Cs, _Len, Total, Acc) ->
+    hover_skip(beamtalk_repl_eval:skip_block_comment(Cs), Total, Acc);
+hover_tokens([$" | _] = Cs, Len, Total, Acc) ->
     case beamtalk_repl_eval:skip_string_literal(Cs) of
-        {ok, Rest} -> hover_push(word, Cs, Rest, Total, Acc);
+        {ok, Rest} -> hover_push(word, Cs, Len - length(Rest), Len, Total, Acc);
         unsupported -> unsupported
     end;
-hover_tokens([$$ | _] = Cs, Total, Acc) ->
-    hover_push(word, Cs, beamtalk_repl_eval:skip_character_literal(Cs), Total, Acc);
-hover_tokens([$#, C | Rest] = Cs, Total, Acc) when C =:= $(; C =:= $[; C =:= ${ ->
-    hover_push(open, Cs, Rest, Total, Acc);
-hover_tokens([$#, $' | Rest0] = Cs, Total, Acc) ->
+hover_tokens([$$ | _] = Cs, Len, Total, Acc) ->
+    Rest = beamtalk_repl_eval:skip_character_literal(Cs),
+    hover_push(word, Cs, Len - length(Rest), Len, Total, Acc);
+hover_tokens([$#, C | _] = Cs, Len, Total, Acc) when C =:= $(; C =:= $[; C =:= ${ ->
+    hover_push(open, Cs, 2, Len, Total, Acc);
+hover_tokens([$#, $' | Rest] = Cs, Len, Total, Acc) ->
     %% Quoted symbol `#'…'` (no escapes inside symbol literals).
-    Rest =
-        case lists:dropwhile(fun(C) -> C =/= $' end, Rest0) of
-            [$' | R] -> R;
-            [] -> []
-        end,
-    hover_push(word, Cs, Rest, Total, Acc);
-hover_tokens([$# | Rest0] = Cs, Total, Acc) ->
+    {Body, Close} = lists:splitwith(fun(C) -> C =/= $' end, Rest),
+    hover_push(word, Cs, 2 + length(Body) + min(length(Close), 1), Len, Total, Acc);
+hover_tokens([$# | Rest] = Cs, Len, Total, Acc) ->
     %% Symbol literal `#foo` / `#at:put:` — colons included, so a symbol's
     %% keywords are never mistaken for a send's.
-    {_, Rest} = lists:splitwith(fun is_identifier_char/1, Rest0),
-    hover_push(word, Cs, Rest, Total, Acc);
-hover_tokens([C | Rest] = Cs, Total, Acc) when C =:= $(; C =:= $[; C =:= ${ ->
-    hover_push(open, Cs, Rest, Total, Acc);
-hover_tokens([C | Rest] = Cs, Total, Acc) when C =:= $); C =:= $]; C =:= $} ->
-    hover_push(close, Cs, Rest, Total, Acc);
-hover_tokens([$:, $= | Rest] = Cs, Total, Acc) ->
-    hover_push(sep, Cs, Rest, Total, Acc);
-hover_tokens([$:, $: | Rest] = Cs, Total, Acc) ->
-    hover_push(other, Cs, Rest, Total, Acc);
-hover_tokens([C | Rest] = Cs, Total, Acc) when
-    C =:= $.; C =:= $;; C =:= $^; C =:= $|
-->
-    hover_push(sep, Cs, Rest, Total, Acc);
-hover_tokens([C | Rest0] = Cs, Total, Acc) when C >= $0, C =< $9 ->
-    hover_push(word, Cs, hover_skip_number(Rest0), Total, Acc);
-hover_tokens([C | Rest0] = Cs, Total, Acc) when
+    {Sym, _} = lists:splitwith(fun is_identifier_char/1, Rest),
+    hover_push(word, Cs, 1 + length(Sym), Len, Total, Acc);
+hover_tokens([C | _] = Cs, Len, Total, Acc) when C =:= $(; C =:= $[; C =:= ${ ->
+    hover_push(open, Cs, 1, Len, Total, Acc);
+hover_tokens([C | _] = Cs, Len, Total, Acc) when C =:= $); C =:= $]; C =:= $} ->
+    hover_push(close, Cs, 1, Len, Total, Acc);
+hover_tokens([$:, $= | _] = Cs, Len, Total, Acc) ->
+    hover_push(sep, Cs, 2, Len, Total, Acc);
+hover_tokens([$:, $: | _] = Cs, Len, Total, Acc) ->
+    hover_push(other, Cs, 2, Len, Total, Acc);
+hover_tokens([$:, C | Rest] = Cs, Len, Total, Acc) when
     (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse C =:= $_
 ->
-    {_, Rest} = lists:splitwith(fun is_name_char/1, Rest0),
-    case Rest of
+    %% Block parameter `:x`.
+    {Name, _} = lists:splitwith(fun is_name_char/1, Rest),
+    hover_push(param, Cs, 2 + length(Name), Len, Total, Acc);
+hover_tokens([$., C | _] = Cs, Len, Total, Acc) when
+    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse C =:= $_
+->
+    %% `self.count` field access, not a statement-ending `.`.
+    hover_push(other, Cs, 1, Len, Total, Acc);
+hover_tokens([$| | _] = Cs, Len, Total, [{param, _, _} | _] = Acc) ->
+    %% The `|` closing a block's parameters (`[:x | …]`). Elsewhere `|` is
+    %% the binary `or` and stays inside the expression.
+    hover_push(sep, Cs, 1, Len, Total, Acc);
+hover_tokens([C | _] = Cs, Len, Total, Acc) when C =:= $.; C =:= $;; C =:= $^ ->
+    hover_push(sep, Cs, 1, Len, Total, Acc);
+hover_tokens([C | Rest] = Cs, Len, Total, Acc) when C >= $0, C =< $9 ->
+    hover_push(word, Cs, Len - length(hover_skip_number(Rest)), Len, Total, Acc);
+hover_tokens([C | Rest] = Cs, Len, Total, Acc) when
+    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse C =:= $_
+->
+    {Name, After} = lists:splitwith(fun is_name_char/1, Rest),
+    NameLen = 1 + length(Name),
+    case After of
         [$:, N | _] when N =:= $:; N =:= $= ->
-            hover_push(word, Cs, Rest, Total, Acc);
-        [$: | AfterColon] ->
-            hover_push(keyword, Cs, AfterColon, Total, Acc);
+            hover_push(word, Cs, NameLen, Len, Total, Acc);
+        [$: | _] ->
+            hover_push(keyword, Cs, NameLen + 1, Len, Total, Acc);
         _ ->
-            hover_push(word, Cs, Rest, Total, Acc)
+            hover_push(word, Cs, NameLen, Len, Total, Acc)
     end;
-hover_tokens([_ | Rest] = Cs, Total, Acc) ->
-    %% Binary-operator characters, a block parameter's leading `:`, or any
-    %% other byte: one `other` token each. Only keyword/word/bracket/boundary
-    %% tokens drive send recovery, so finer splitting is unnecessary.
-    hover_push(other, Cs, Rest, Total, Acc).
+hover_tokens([_ | _] = Cs, Len, Total, Acc) ->
+    %% Binary-operator characters or any other byte: one `other` token each.
+    %% Only keyword/word/bracket/boundary tokens drive send recovery, so finer
+    %% splitting is unnecessary.
+    hover_push(other, Cs, 1, Len, Total, Acc).
 
--spec hover_push(atom(), string(), string(), non_neg_integer(), [hover_token()]) ->
+%% Emit the `TokLen`-byte token at the head of `Cs` and continue after it.
+-spec hover_push(
+    atom(), string(), pos_integer(), non_neg_integer(), non_neg_integer(), [hover_token()]
+) ->
     {ok, [hover_token()]} | unsupported.
-hover_push(Kind, Cs, Rest, Total, Acc) ->
-    Text = list_to_binary(lists:sublist(Cs, length(Cs) - length(Rest))),
-    hover_tokens(Rest, Total, [{Kind, Text, Total - length(Rest)} | Acc]).
+hover_push(Kind, Cs, TokLen, Len, Total, Acc) ->
+    {TokChars, Rest} = lists:split(TokLen, Cs),
+    RestLen = Len - TokLen,
+    hover_tokens(Rest, RestLen, Total, [
+        {Kind, list_to_binary(TokChars), Total - RestLen} | Acc
+    ]).
+
+%% Continue after a skipped comment (no token emitted).
+-spec hover_skip(string(), non_neg_integer(), [hover_token()]) ->
+    {ok, [hover_token()]} | unsupported.
+hover_skip(Rest, Total, Acc) ->
+    hover_tokens(Rest, length(Rest), Total, Acc).
 
 %% Number literal tail: digits/letters/`_` (radix `16rFF`, exponents) and a `.`
 %% only when a digit follows (`3.14`, not the statement-ending `3.`).
@@ -2403,8 +2462,10 @@ base_ops() ->
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         %% Live-image hover docs for the cockpit editors.
-        %% optional `suffix` (rest of the line) resolves keyword selectors.
-        <<"hover">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"suffix">>]},
+        %% optional `before`/`suffix` context resolves keyword selectors.
+        <<"hover">> => #{
+            <<"params">> => [<<"code">>], <<"optional">> => [<<"before">>, <<"suffix">>]
+        },
         %% Parse-only diagnostics for the cockpit editors.
         %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
         <<"diagnostics">> => #{

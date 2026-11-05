@@ -408,14 +408,14 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       assert hover =~ "Counter"
     end
 
-    test "hover accepts the optional line suffix (BT-4343), ignoring a non-string one" do
+    test "hover accepts the optional editor context (BT-4343), ignoring non-strings" do
       socket = base_socket()
 
-      for suffix <- [" options: #()", 42] do
+      for context <- [%{"before" => "x := 1\n", "suffix" => " options: #()"}, %{"suffix" => 42}] do
         assert {:reply, %{"hover" => hover}, ^socket} =
                  SystemBrowser.handle_event(
                    "hover",
-                   %{"code" => "Counter fetch:", "suffix" => suffix},
+                   Map.put(context, "code", "Counter fetch:"),
                    socket
                  )
 

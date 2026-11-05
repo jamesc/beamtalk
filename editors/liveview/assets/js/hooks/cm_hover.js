@@ -14,7 +14,7 @@
 //
 // Shared by `cm_editor.js` (Workspace + method editors) and `repl_input.js`
 // (REPL composer), mirroring the cm_autocomplete.js structure: each passes a
-// `requestHover(linePrefix, lineSuffix) => Promise<string>` callback resolving
+// `requestHover({code, before, suffix}) => Promise<string>` callback resolving
 // to the docs markdown (an empty string means "nothing to show", so no tooltip
 // opens).
 
@@ -25,11 +25,17 @@ import { hoverTooltip } from "@codemirror/view"
 // trailing `:` (see `wordAt`), so `fetch:` is hovered as a keyword (BT-4343).
 const TOKEN = /[A-Za-z0-9_]/
 
-// Build the hover extension. `requestHover(linePrefix, lineSuffix)` must return
-// a Promise<string> — the hover markdown for the line up to the hovered token
-// (an empty string when there is nothing to show). `lineSuffix` is the rest of
-// the line after the token: the backend needs it to recover a keyword send's
-// FULL selector (`fetch:` in `X fetch: a options: b` → `fetch:options:`).
+// Lines of context sent either side of the hovered line, so a keyword send split
+// across lines (`Fetcher fetch: u` / `  options: o`) resolves as one send. The
+// backend bounds the total it scans, so this only needs to cover a typical send.
+const CONTEXT_LINES = 10
+
+// Build the hover extension. `requestHover({code, before, suffix})` must return
+// a Promise<string> — the hover markdown (an empty string when there is nothing
+// to show). `code` is the line up to and including the hovered token; `before`
+// (the lines above) and `suffix` (the text after the token) let the backend
+// recover a keyword send's FULL selector (`fetch:` in `X fetch: a options: b`
+// → `fetch:options:`).
 export function backendHover(requestHover) {
   // CM's source signature is (view, pos, side); we ignore `side` because
   // `wordAt` expands symmetrically from `pos` and so already covers both edges
@@ -43,13 +49,17 @@ export function backendHover(requestHover) {
     // The backend infers receiver + token from the line up to the token's end,
     // reusing the completion parser (`Counter` → class docs; `42 factorial` →
     // method docs). Send the line from its start through the hovered token's
-    // end, plus the rest of the line so a hovered keyword part resolves every
-    // keyword of its send (`Fetcher fetch: u options: o` → `fetch:options:`).
-    const line = view.state.doc.lineAt(pos)
-    const linePrefix = view.state.sliceDoc(line.from, to)
-    const lineSuffix = view.state.sliceDoc(to, line.to)
-
-    const docs = await requestHover(linePrefix, lineSuffix)
+    // end, plus a few lines of context either side so a hovered keyword part
+    // resolves every keyword of its send (`fetch:options:`), even across lines.
+    const doc = view.state.doc
+    const line = doc.lineAt(pos)
+    const firstLine = doc.line(Math.max(1, line.number - CONTEXT_LINES))
+    const lastLine = doc.line(Math.min(doc.lines, line.number + CONTEXT_LINES))
+    const docs = await requestHover({
+      code: view.state.sliceDoc(line.from, to),
+      before: view.state.sliceDoc(firstLine.from, line.from),
+      suffix: view.state.sliceDoc(to, lastLine.to),
+    })
     if (!docs) return null
 
     return {
@@ -105,7 +115,7 @@ function isKeywordColon(s, i) {
   )
 }
 
-// Wrap a hook's `pushEvent` into the `(linePrefix, lineSuffix) => Promise<string>` contract
+// Wrap a hook's `pushEvent` into the `({code, before, suffix}) => Promise<string>` contract
 // the source expects. The LiveView `hover` handler replies `{hover: "…"}` on the
 // same event (a `{:reply, …}` from `handle_event`), resolving the callback. A
 // reply that carries no session / an unreachable workspace / nothing to show
@@ -117,9 +127,9 @@ function isKeywordColon(s, i) {
 // correct fix when it matters is a shared per-hook cancel signal, not a local
 // try/catch — left uncancelled deliberately.
 export function hoverQuery(pushEvent) {
-  return (linePrefix, lineSuffix = "") =>
+  return (payload) =>
     new Promise((resolve) => {
-      pushEvent("hover", { code: linePrefix, suffix: lineSuffix }, (reply) => {
+      pushEvent("hover", payload, (reply) => {
         resolve((reply && reply.hover) || "")
       })
     })
