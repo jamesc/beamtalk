@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4430: an `on:do:`/`ensure:` whose protected body or handler is not a
+// block literal runs its literal block as a closure, which cannot write a
+// binding. The write used to be dropped silently (`b ensure: [w := 9]` left
+// `w` at 0); it is now rejected before the input runs (ADR 0133), so no
+// binding changes. Wrapping the block value in a literal threads the write.
+// A `^` in such a block still ends the input with its value.
+
+w := 0
+// => 0
+
+x := 0
+// => 0
+
+b := [5]
+// => _
+
+c := [nil]
+// => _
+
+h := [:e | 0]
+// => _
+
+b ensure: [w := 9]. x := 2
+// => ERROR: `w` is assigned in a block of an `ensure:` whose blocks are not all written
+
+[w := 11] ensure: c
+// => ERROR: `w` is assigned in a block of an `ensure:` whose blocks are not all written
+
+b on: Error do: [:e | w := 7]
+// => ERROR: `w` is assigned in a block of an `on:do:` whose blocks are not all written
+
+[w := 1 / 0] on: Error do: h
+// => ERROR: `w` is assigned in a block of an `on:do:` whose blocks are not all written
+
+w
+// => 0
+
+x
+// => 0
+
+[b value] ensure: [w := 9]. x := 2
+// => 2
+
+w
+// => 9
+
+[w := 11] ensure: [c value]
+// => 11
+
+w
+// => 11
+
+b ensure: [^6]. x := 4
+// => 6
+
+x
+// => 2
+
+[^5] ensure: c. x := 3
+// => 5
+
+x
+// => 2

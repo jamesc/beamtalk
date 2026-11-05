@@ -1758,6 +1758,13 @@ pub struct LocalThreadingConstruct<'a> {
     pub family: LocalThreadingFamily,
     /// The construct's block literals, receiver first.
     pub blocks: Vec<&'a Block>,
+    /// Whether codegen inlines the construct's blocks. False only for an
+    /// `on:do:`/`ensure:` whose protected body or handler is not a block
+    /// literal (`b ensure: [w := 9]`, `[w := 9] ensure: c`): codegen compiles
+    /// such a send's literal block as a closure (BT-4430), so the block still
+    /// runs during the send ([`Self::runs_in_place`]) but its outer-local
+    /// writes are not threaded back ([`Self::is_threaded_today`]).
+    pub inlined: bool,
 }
 
 impl LocalThreadingConstruct<'_> {
@@ -1766,8 +1773,26 @@ impl LocalThreadingConstruct<'_> {
     /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)).
     /// The one predicate the nested-construct walks ([`threaded_today_block_writes`])
     /// and the Phase 0 check filter on.
+    ///
+    /// BT-4430: and not an `on:do:`/`ensure:` that codegen does not inline
+    /// ([`Self::inlined`]): its literal block is a closure, which can write no
+    /// outer local, so the Phase 0 check reports such a write (ADR 0133).
     #[must_use]
     pub fn is_threaded_today(&self) -> bool {
+        self.inlined && self.runs_in_place()
+    }
+
+    /// Whether the construct's blocks run during the send, in the activation
+    /// that holds it: every family but a lookup whose selector is not
+    /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)
+    /// (whose block is handed to the runtime). Unlike
+    /// [`Self::is_threaded_today`], an `on:do:`/`ensure:` that codegen does not
+    /// inline still runs its literal block here, as a closure applied inside
+    /// the `try` (BT-4430): a `^` in it ends the method or REPL input, and it
+    /// reads the locals as they stand. The predicate the `^` classification
+    /// ([`classify_in_place_returns`]) and the evaluation-order walks read.
+    #[must_use]
+    pub fn runs_in_place(&self) -> bool {
         match self.family {
             LocalThreadingFamily::Lookup => {
                 crate::state_threading_selectors::is_dictionary_inline_lookup(&self.selector)
@@ -1838,11 +1863,13 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         })
     };
     let mut blocks: Vec<&Block> = Vec::new();
+    let mut inlined = true;
     let family = match selector {
         MessageSelector::Keyword(_) => {
             if is_exception_selector(&sel) {
                 blocks.extend(receiver_block);
                 blocks.extend(literal_args());
+                inlined = exception_send_inlined(&sel, receiver, arguments);
                 LocalThreadingFamily::Exception
             } else if is_conditional_selector(&sel) {
                 blocks.extend(literal_args());
@@ -1896,8 +1923,28 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             selector: sel,
             family,
             blocks,
+            inlined,
         })
     }
+}
+
+/// BT-4430: whether codegen inlines the `on:do:`/`ensure:` send of `selector`
+/// to `receiver` with `arguments`: its protected body (the receiver) and its
+/// handler or cleanup are both block literals, the shape
+/// [`exception_arm_blocks`] and codegen's `generate_on_do`/`generate_ensure`
+/// lower in place. Any other such send compiles its literal block as a
+/// closure. The one rule behind [`LocalThreadingConstruct::inlined`] and the
+/// ADR 0133 escape check (`validators/local_threading.rs`).
+#[must_use]
+pub fn exception_send_inlined(
+    selector: &str,
+    receiver: &Expression,
+    arguments: &[Expression],
+) -> bool {
+    matches!(receiver, Expression::Block(_))
+        && crate::state_threading_selectors::state_threaded_block_arg_indices(selector)
+            .iter()
+            .all(|&i| matches!(arguments.get(i), Some(Expression::Block(_))))
 }
 
 /// BT-4288 / BT-4312: the `^`s of a top-level scope (a REPL input), by where
@@ -1944,7 +1991,7 @@ pub fn classify_in_place_returns<'a>(
             Expression::Return { span, .. } => returns.push(*span),
             Expression::MessageSend { .. } => {
                 let Some(construct) =
-                    local_threading_construct(e).filter(LocalThreadingConstruct::is_threaded_today)
+                    local_threading_construct(e).filter(LocalThreadingConstruct::runs_in_place)
                 else {
                     return;
                 };
@@ -5401,6 +5448,31 @@ mod tests {
                 !src.contains("ifAbsentPut:"),
                 "{src}"
             );
+            assert_eq!(
+                construct.runs_in_place(),
+                construct.is_threaded_today(),
+                "{src}"
+            );
+        }
+        // BT-4430: an `on:do:`/`ensure:` with a non-literal protected body or
+        // handler is a construct whose literal block runs in place, but codegen
+        // compiles it as a closure, so its writes are not threaded.
+        for (src, blocks) in [
+            ("b ensure: [i := 2]", 1),
+            ("[i := 1] ensure: c", 1),
+            ("b on: Error do: [:e | i := 2]", 1),
+            ("[i := 1] on: Error do: h", 1),
+            ("(self make) ensure: [i := 2]", 1),
+        ] {
+            let expr = parse_first_expr(src);
+            let construct =
+                local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
+            assert_eq!(construct.family, Exception, "{src}");
+            assert_eq!(construct.blocks.len(), blocks, "{src}");
+            assert!(!construct.inlined, "{src}");
+            assert!(!construct.is_threaded_today(), "{src}");
+            assert!(construct.runs_in_place(), "{src}");
+            assert!(exception_arm_blocks(&expr).is_none(), "{src}");
         }
         for src in [
             "items foo: [:x | i := x]",
