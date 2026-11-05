@@ -2484,6 +2484,22 @@ impl CoreErlangGenerator {
             })
     }
 
+    /// True when the compiler can prove `class_name` is neither an actor nor
+    /// a supervisor: it has a `ClassInfo` whose superclass chain is fully
+    /// known and reaches neither `Actor` nor a supervisor base (BT-4443). An
+    /// unknown class or an incomplete chain is not proof, matching the
+    /// runtime's `beamtalk_supervisor:spawn_kind/1` treating `unknown` as
+    /// "decides nothing". The hierarchy is keyed by bare name, so callers
+    /// only ask this of an unqualified reference.
+    fn is_known_non_spawnable_class(&self, class_name: &str) -> bool {
+        !self.is_supervisor_class(class_name)
+            && self.class_hierarchy.as_ref().is_some_and(|h| {
+                h.has_class(class_name)
+                    && !h.has_cross_file_parent(class_name)
+                    && !h.is_actor_subclass(class_name)
+            })
+    }
+
     /// Whether a spawn-family send to the class reference `class_name`
     /// (optionally `package`-qualified) resolves the module it starts its
     /// process from at call time rather than pinning it (BT-4278).
@@ -2508,8 +2524,19 @@ impl CoreErlangGenerator {
     /// start it inside the class `gen_server`, and has no monitored-spawn
     /// clause). A package-qualified reference (`json@Counter spawn`) names
     /// its module explicitly and keeps it.
+    ///
+    /// BT-4443: an unqualified reference to a class the compiler knows is
+    /// not spawnable ([`Self::is_known_non_spawnable_class`]) resolves at
+    /// call time too. A pinned `Module:spawn/0` on a Value or Object class
+    /// would fail with a raw `undef` (the type checker's class-side
+    /// does-not-understand is only a lint, not a build error), whereas the
+    /// lookup raises the same structured `does_not_understand` as the dynamic
+    /// route (`beamtalk_class_instantiation:do_handle_spawn/5`) — and still
+    /// spawns in the caller if the class has since been redefined as an
+    /// actor.
     fn spawn_module_resolved_at_runtime(&self, class_name: &str, package: Option<&str>) -> bool {
-        package.is_none() && self.is_shadowed_class(class_name)
+        package.is_none()
+            && (self.is_shadowed_class(class_name) || self.is_known_non_spawnable_class(class_name))
     }
 
     /// See [`Self::spawn_module_resolved_at_runtime`] for when the module is

@@ -2604,7 +2604,7 @@ classremovefromsystembyname_with_class_spawned_actor_test_() ->
                 ClassInfo = #{
                     name => ClassName,
                     module => ModAtom,
-                    superclass => none,
+                    superclass => 'Actor',
                     instance_methods => #{},
                     class_methods => #{}
                 },
