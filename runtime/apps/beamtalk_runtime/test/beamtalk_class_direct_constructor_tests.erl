@@ -760,3 +760,46 @@ indirect_value_subclass_test_() ->
                 ?assertEqual([], beamtalk_class_metadata:lookup_direct_constructors('Collection'))
             end}
     ]}.
+
+%% BT-4464: a stdlib class whose own explicit `class new` is a plain FFI
+%% forward (or `self delegate` on a `native:` class) bakes `new` into its
+%% `direct_constructors`, so `X new` builds in the caller and the class
+%% process sees no message at all. Over the real compiled stdlib, with the
+%% `sys:statistics` counter Buccaneer's `bench_profile` uses.
+explicit_class_new_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {atom_to_list(Class) ++ " new makes no call into its class process", fun() ->
+            assert_new_in_caller(Class, Module, Check)
+        end}
+     || {Class, Module, Check} <- [
+            %% A fresh reference each time, not one cached value.
+            {'Reference', 'bt@stdlib@reference', fun(R) ->
+                is_reference(R) andalso R =/= erlang:get(bt4464_last_ref) andalso
+                    erlang:put(bt4464_last_ref, R) =/= R
+            end},
+            {'Random', 'bt@stdlib@random', fun(#{'$beamtalk_class' := C}) -> C =:= 'Random' end},
+            {'Queue', 'bt@stdlib@queue', fun(#{'$beamtalk_class' := C}) -> C =:= 'Queue' end},
+            {'Announcer', 'bt@stdlib@announcer', fun(#{'$beamtalk_class' := C}) ->
+                C =:= 'Announcer'
+            end}
+        ]
+    ]}.
+
+assert_new_in_caller(Class, Module, Check) ->
+    {module, Module} = code:ensure_loaded(Module),
+    ?assertEqual([new], beamtalk_class_metadata:lookup_direct_constructors(Class)),
+    Pid = beamtalk_class_registry:whereis_class(Class),
+    ?assertEqual({ok, Module}, beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])),
+    ok = sys:statistics(Pid, true),
+    try
+        Before = messages_in(Pid),
+        Results = [beamtalk_class_dispatch:class_send(Pid, new, []) || _ <- lists:seq(1, 100)],
+        ?assertEqual(Before, messages_in(Pid)),
+        ?assert(lists:all(Check, Results))
+    after
+        sys:statistics(Pid, false)
+    end.
+
+messages_in(Pid) ->
+    {ok, Stats} = sys:statistics(Pid, get),
+    proplists:get_value(messages_in, Stats).

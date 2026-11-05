@@ -343,6 +343,18 @@ end
     re-installs its own target. Erasing only the descendants or targets a
     write can affect was rejected: every eraser would have to classify its
     write, and one missed case would run a stale function.
+- **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
+  whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
+  with literal arguments) or `self delegate` on a `native:` class bakes `new`
+  into `direct_constructors` too (`ClassHierarchy::
+  explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
+  class variables in its chain. An FFI call listed in the curated
+  class-method FFI table (`ets new:`, `spawn_link`, `gen_udp open:`, ...)
+  keeps the class process: neither lint inspects `new`, and the class process
+  used to own what it creates. Its `new/0` is `class_new('undefined')`, which
+  is all the `{new, []}` handler would run, so the guarded direct call is the
+  same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
+  it; a body that sends to `self` (`self basicNew`) does not.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base
