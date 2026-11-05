@@ -342,6 +342,12 @@ strategy, and an LSP completion test.
 
 Size: M.
 
+## Implementation Tracking
+
+**Epic:** BT-4434
+**Issues:** BT-4435 (type checker, M), BT-4436 (LSP and REPL e2e, S, blocked by BT-4435), BT-4437 (Catalina migration, S, blocked by BT-4435)
+**Status:** Planned
+
 ## Migration Path
 
 None required. No existing code writes `:: P class` for a protocol `P`, and
