@@ -158,15 +158,14 @@ pub fn compute_completions(
 ///
 /// A separate function — rather than adding the parameter to
 /// [`compute_completions`] directly — keeps that function's signature
-/// source-compatible with every existing caller and test; mirrors
-/// [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
-/// identical "`_with_aliases`" wrapper shape, added for the same reason.
-/// `alias_registry = None` behaves identically to [`compute_completions`].
+/// source-compatible with every existing caller and test.
+/// `alias_registry = None` and `protocol_registry = None` behave identically
+/// to [`compute_completions`].
 ///
 /// `protocol_registry` is the file's protocol registry (cross-file protocols
 /// plus the module's own), so a receiver typed `P class` completes `P`'s
 /// `class` requirements and then the class-object protocol (ADR 0144).
-/// `None` registers only the module's own protocols.
+/// With `None`, only the module's own protocols are registered.
 #[must_use]
 // Each registry is independent project context, threaded straight through to
 // the shared type pass (`enrich_hierarchy_with_inferred_returns`).
