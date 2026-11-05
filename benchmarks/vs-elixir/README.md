@@ -165,7 +165,7 @@ share of each figure.
   `results/bench-bt4431.md` measures a static site whose key is never
   installed (rows 3g-3j: +21 to +32 reductions on top of the `class_send`
   fallback). It also measures `invalidate/1` over a hierarchy: one
-  `persistent_term` erase per warmed key, 0.1 to 0.25 ms each here (follow-up
+  `persistent_term` erase per warmed key, 0.1 to 0.5 ms each here (follow-up
   BT-4442).
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.

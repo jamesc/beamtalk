@@ -122,7 +122,7 @@ A bare `persistent_term:erase/1` of a present key in the same node (no lock,
 no ETS index) costs a median of 203 µs and a minimum of 130 µs on the idle
 node.
 
-- **About 0.1 to 0.25 ms per erased key, almost all of it the BEAM's own
+- **About 0.1 to 0.5 ms per erased key (less per key in larger batches), almost all of it the BEAM's own
   erase.** 500 keys take 122 ms. 500 bare erases would take about 100 ms.
   The bookkeeping around the erase is small: walking 50 subclasses that hold
   no keys, each under its tag lock, takes 0.5 to 1.5 ms.
