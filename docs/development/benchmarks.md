@@ -1747,3 +1747,43 @@ reductions, heap words and ns per operation, plus what each Beamtalk row
 compiles to and the functions it calls. Run it with `just bench-vs-elixir`.
 Method, results (main at `dc216bf52`), the analysis and the effect of BT-4065
 and BT-4071 are in [`benchmarks/vs-elixir/README.md`](../../benchmarks/vs-elixir/README.md).
+
+## BT-4416: `equals:` on a primitive receiver
+
+`a equals: b` compiles to `beamtalk_message_dispatch:send/3`. For a primitive
+receiver it used to walk the whole dispatch chain (for a `Binary`:
+`bt@stdlib@binary` → `collection` → `value` → `object`, an extension-registry
+probe at each level) to reach `Object>>equals:`, which is `=:=`.
+`send/3` now routes a primitive receiver to
+`beamtalk_equality:primitive_equals/2`: a raw hit answers `true` (the
+reflexivity contract), and a raw miss answers `false` when no class on the
+receiver's chain overrides `equals:` (compiled or extension). That check is
+memoised in `beamtalk_class_derived_cache` and, for the hot path, in the
+calling process's dictionary tagged with the cache generation, so an
+extension registered later is seen by the next send.
+
+### Harness
+
+`runtime/perf/bench_equals_fast_path.escript`. Run from `runtime/` after
+`just build`:
+
+```bash
+escript perf/bench_equals_fast_path.escript
+```
+
+"before" calls the stdlib module's `dispatch/3` directly (the chain the old
+`send/3` ran, minus its own receiver classification, so it slightly
+understates the old cost); "after" is the real `send/3`.
+
+### Results (200k calls, µs per call)
+
+| Receiver | before | after | raw `=:=` |
+|---|---|---|---|
+| `Binary`, miss | 0.360 | 0.081 | 0.009 |
+| `Binary`, hit | 0.364 | 0.020 | 0.009 |
+| `Integer`, miss | 0.344 | 0.075 | 0.008 |
+| `Symbol`, miss | 0.155 | 0.106 | 0.011 |
+
+The remaining miss cost is mostly the generation read
+(`persistent_term:get` + `atomics:get`) that keeps the memo honest when an
+override is installed later.

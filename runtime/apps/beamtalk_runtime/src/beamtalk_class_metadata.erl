@@ -119,6 +119,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_class_method_fun/3,
     lookup_class_method_fun/2,
     delete_class_method_funs/1,
+    delete_class_method_fun/2,
+    set_class_method_selectors/2,
     has_runtime_class_methods/1,
     set_runtime_class_methods/2,
     reset_runtime_class_methods/1,
@@ -1386,6 +1388,45 @@ delete_class_method_funs(Name) ->
                 error:badarg -> ok
             end
     end.
+
+-doc """
+Remove the one runtime class-method fun installed for `{Name, Selector}`
+(BT-4438, `X class removeSelector:`), leaving the class's other funs alone.
+
+The caller publishes the class's new selector set first
+(`set_class_method_selectors/2`) and closes the gate afterwards
+(`reset_runtime_class_methods/1`) if no funs remain. Drops derived facts
+(the class-method owner memo) after the delete, as `set_runtime_class_methods/2`
+does after an install. A no-op if the table or row is absent.
+""".
+-spec delete_class_method_fun(class_name(), selector()) -> ok.
+delete_class_method_fun(Name, Selector) ->
+    case ets:info(?FUN_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            try
+                ets:delete(?FUN_TABLE, {Name, Selector})
+            catch
+                error:badarg -> ok
+            end
+    end,
+    beamtalk_class_derived_cache:invalidate().
+
+-doc """
+Publish the class's local class-side selector set without touching the
+runtime-fun gate (BT-4438). Used by a runtime-fun removal, which publishes the
+restored selector set before deleting the fun. A no-op if the row is absent.
+""".
+-spec set_class_method_selectors(class_name(), [selector()]) -> ok.
+set_class_method_selectors(Name, Selectors) ->
+    new(),
+    try
+        ets:update_element(?TABLE, Name, [{#class_metadata.selectors, Selectors}])
+    catch
+        error:badarg -> ok
+    end,
+    beamtalk_class_derived_cache:invalidate().
 
 -doc """
 Read the per-class "has runtime class methods" gate flag.

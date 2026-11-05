@@ -736,7 +736,21 @@ round-trip per call, which matters for the bulk iteration done by
 classes built via ClassBuilder.
 """.
 -spec classIncludesSelector(#beamtalk_object{}, atom()) -> boolean().
-classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
+classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid} = Self, Selector) ->
+    %% BT-4438: a class-side ADR 0084 runtime fun is a local class method too
+    %% (and `removeSelector:` removes it), even when the compiled module has
+    %% no method of that name.
+    compiled_includes_selector(Self, Selector) orelse
+        has_runtime_class_fun(beamtalk_object_class:class_name_safe(ClassPid), Selector);
+classIncludesSelector(Self, Selector) ->
+    compiled_includes_selector(Self, Selector).
+
+%% The class's local method table as compiled (or as a builder class
+%% published it): `__beamtalk_meta/0` when available, else the published
+%% selectors. Excludes a class-side runtime fun installed over a compiled
+%% class -- `classIncludesSelector/2` adds that.
+-spec compiled_includes_selector(#beamtalk_object{}, atom()) -> boolean().
+compiled_includes_selector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Selector) ->
     %% Metaclass receiver — check class methods.
     %% Use __beamtalk_meta/0 fast path when available, matching the
     %% instance-side clause below. Avoids per-call gen_server hops during the
@@ -749,7 +763,7 @@ classIncludesSelector(#beamtalk_object{class = 'Metaclass', pid = ClassPid}, Sel
             ClassMethods = beamtalk_object_class:local_class_method_selectors_safe(ClassPid),
             lists:member(Selector, ClassMethods)
     end;
-classIncludesSelector(Self, Selector) ->
+compiled_includes_selector(Self, Selector) ->
     ClassPid = erlang:element(4, Self),
     Module = beamtalk_object_class:module_name_safe(ClassPid),
     case meta_for_module(Module) of
@@ -1526,15 +1540,48 @@ remove_class_selector(Self, ClassName, Side, Selector) ->
             remove_extension_selector(ClassName, EtsClass, Selector, Side),
             removed;
         false ->
-            case classIncludesSelector(Self, Selector) of
-                true ->
-                    ok = refuse_if_protocol_provided(ClassName, Side, Selector, remove),
-                    remove_local_method(ClassName, Selector, Side),
-                    removed;
-                false ->
-                    absent
-            end
+            remove_runtime_or_local_selector(Self, ClassName, Side, Selector)
     end.
+
+%% BT-4438: after the extension registry, a class-side removal checks the
+%% class's ADR 0084 runtime fun (`put_class_method`) before its compiled
+%% method -- the order `beamtalk_class_dispatch:apply_class_method_body/7`
+%% resolves them in. The class process undoes the put and answers `absent`
+%% if the fun went in the meantime, in which case the compiled method (if
+%% any) is the next thing to remove.
+-spec remove_runtime_or_local_selector(
+    #beamtalk_object{}, atom(), instance | class, atom()
+) -> removed | absent.
+remove_runtime_or_local_selector(Self, ClassName, class, Selector) ->
+    case has_runtime_class_fun(ClassName, Selector) of
+        true ->
+            case beamtalk_object_class:remove_class_method(erlang:element(4, Self), Selector) of
+                removed -> removed;
+                absent -> remove_local_selector(Self, ClassName, class, Selector)
+            end;
+        false ->
+            remove_local_selector(Self, ClassName, class, Selector)
+    end;
+remove_runtime_or_local_selector(Self, ClassName, instance, Selector) ->
+    remove_local_selector(Self, ClassName, instance, Selector).
+
+-spec remove_local_selector(#beamtalk_object{}, atom(), instance | class, atom()) ->
+    removed | absent.
+remove_local_selector(Self, ClassName, Side, Selector) ->
+    case compiled_includes_selector(Self, Selector) of
+        true ->
+            ok = refuse_if_protocol_provided(ClassName, Side, Selector, remove),
+            remove_local_method(ClassName, Selector, Side),
+            removed;
+        false ->
+            absent
+    end.
+
+%% BT-4438: whether `ClassName` itself (not an ancestor) has an ADR 0084
+%% runtime class-method fun for `Selector` -- the store dispatch reads.
+-spec has_runtime_class_fun(atom(), atom()) -> boolean().
+has_runtime_class_fun(ClassName, Selector) ->
+    beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error.
 
 %% ADR 0127 §11: `DateTime removeSelector: #max:` where `max:` is
 %% trait-provided is an error naming the trait and the `excluding:` escape
@@ -3064,7 +3111,9 @@ rename_selector(Self, OldSelector, NewSelector, Sent) ->
         beamtalk_object_class:class_name_safe(erlang:element(4, Self)),
         OldSelector
     ),
-    case classIncludesSelector(Self, OldSelector) of
+    %% A runtime class-method fun has no source to rewrite, so rename sees
+    %% only the compiled table (BT-4438).
+    case compiled_includes_selector(Self, OldSelector) of
         false ->
             absent;
         true ->
