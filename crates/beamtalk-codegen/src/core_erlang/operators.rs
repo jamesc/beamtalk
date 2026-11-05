@@ -81,6 +81,12 @@ pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
     structural_binary(op).is_some()
 }
 
+/// Whether `op` is an ordering comparison (`< > <= >=`): a dispatchable
+/// message whose builtin is the Erlang comparison BIF.
+pub(in crate::core_erlang) fn is_ordering_comparison(op: &str) -> bool {
+    matches!(op, "<" | ">" | "<=" | ">=")
+}
+
 /// Whether `expr` is a literal with a builtin total order (a number, string
 /// or character), on which the comparison BIFs (`< > <= >=`) are correct.
 /// The literal half of [`CoreErlangGenerator::receiver_is_statically_comparable`],
@@ -185,9 +191,7 @@ impl CoreErlangGenerator {
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
         let guard = self.operator_guard(op, left);
-        if guard.is_none() {
-            self.confirm_bare_comparison(left);
-        }
+        self.record_comparison_lowering(left, guard.is_none());
 
         // ADR 0116: number-on-the-left coercion. Every arithmetic call
         // site that can reach a bare BIF with the *left* operand numeric (the
@@ -311,7 +315,7 @@ impl CoreErlangGenerator {
         left: &Expression,
     ) -> Option<OperatorGuard> {
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        let is_comparison = is_ordering_comparison(op);
         if is_arithmetic && !self.receiver_is_statically_numeric(left) {
             Some(OperatorGuard::Arithmetic)
         } else if is_comparison && !self.receiver_is_statically_comparable(left) {

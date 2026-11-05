@@ -284,3 +284,92 @@ fn ffi_receiver_of_state_threading_actor_conditional_compiles() {
         "the conditional's `case` must scrutinise the FFI call's binding `{binding}`:\n{code}"
     );
 }
+
+#[test]
+fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
+    // BT-4452: class-side, a String-literal left operand, and a foreign
+    // extension method all lower the comparison bare, so every guard shape
+    // compiles as a direct return.
+    let class_side = codegen(
+        "Object subclass: K\n\
+         \x20 class sealed one => 1\n\
+         \x20 class sealed pick: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^self one]\n\
+         \x20   2\n",
+    );
+    assert_no_nlr_frame(&class_side);
+    assert!(
+        !class_side.contains("beamtalk_guard_return"),
+        "{class_side}"
+    );
+
+    let literal_left = codegen(
+        "Object subclass: L\n\
+         \x20 pick: s =>\n\
+         \x20   \"m\" < s ifTrue: [^s size]\n\
+         \x20   0\n",
+    );
+    assert_no_nlr_frame(&literal_left);
+    assert!(
+        !literal_left.contains("beamtalk_guard_return"),
+        "{literal_left}"
+    );
+
+    let extension = codegen(
+        "Integer >> bt4452Pick: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^self abs]\n\
+         \x20   2\n",
+    );
+    assert!(extension.contains("bt4452Pick"), "{extension}");
+    assert_no_nlr_frame(&extension);
+}
+
+#[test]
+fn shadowed_typed_parameter_keeps_its_frame() {
+    // A block parameter named like the typed parameter makes it untrusted
+    // (`trusted_param_types`), so `x > 0` may dispatch and the effectful
+    // guard keeps its NLR frame.
+    let code = codegen(
+        "Object subclass: S\n\
+         \x20 pick: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^x abs]\n\
+         \x20   x ifNotNil: [:x | x]\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}
+
+#[test]
+fn dispatched_typed_comparison_is_reported() {
+    // BT-4452: a recorded typed comparison that any lowering dispatched (or
+    // none lowered) is reported, so the driver refuses the compile.
+    use crate::core_erlang::guard_returns::MethodKey;
+    let module = parse_normalised("Object subclass: R\n  m: x :: Integer => x > 0\n").0;
+    let method = &module.classes[0].methods[0];
+    let key = (MethodKey::of(method), Span::new(0, 1));
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.generated_methods.insert(key.0.clone());
+    generator
+        .guard_rewrite
+        .boolean_comparisons
+        .insert(key.clone());
+    assert_eq!(
+        generator.unconfirmed_boolean_comparisons(),
+        vec![key.clone()]
+    );
+    generator
+        .boolean_comparison_lowerings
+        .insert(key.clone(), true);
+    assert!(generator.unconfirmed_boolean_comparisons().is_empty());
+    generator
+        .boolean_comparison_lowerings
+        .insert(key.clone(), false);
+    assert_eq!(generator.unconfirmed_boolean_comparisons(), vec![key]);
+}
+
+#[test]
+fn same_file_extension_guard_compiles() {
+    // A same-file `X >> m` is runtime-patched, not generated into X's
+    // module, so its recorded guards (helper-decided or typed) are not
+    // checked there; before BT-4452 they made the compile fail.
+    codegen("Object subclass: X\n  n => 1\nX >> pick: x =>\n    x > 0 ifTrue: [^1]\n    2\n");
+}

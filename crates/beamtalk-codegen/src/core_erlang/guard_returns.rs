@@ -107,7 +107,7 @@ use ecow::EcoString;
 
 use crate::core_erlang::field_types::{COMPARABLE_TYPES, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
-use crate::core_erlang::operators::is_comparable_literal;
+use crate::core_erlang::operators::{is_comparable_literal, is_ordering_comparison};
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 
 /// A method's identity within one generation: its span, side and selector. A
@@ -163,7 +163,7 @@ pub(in crate::core_erlang) struct GuardRewrite {
     /// The left operands of the typed comparisons the rewrite took for
     /// Booleans by construction ([`Rewriter::typed_comparison`]), which
     /// codegen must lower to a bare comparison BIF
-    /// ([`CoreErlangGenerator::confirm_bare_comparison`]).
+    /// ([`CoreErlangGenerator::record_comparison_lowering`]).
     pub(in crate::core_erlang) boolean_comparisons: HashSet<GuardConditionKey>,
 }
 
@@ -301,7 +301,7 @@ impl Rewriter {
         else {
             return None;
         };
-        if !matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+        if !is_ordering_comparison(op) {
             return None;
         }
         let bare = is_comparable_literal(receiver)
@@ -399,7 +399,9 @@ fn rewrite_tail_expression(expr: Expression, rw: &mut Rewriter) -> Expression {
         } if is_inlined_conditional(&parts, &arguments)
             && (family_of(&parts) == Family::Nil || rw.is_boolean(&receiver)) =>
         {
-            rw.note_boolean(&receiver);
+            if family_of(&parts) == Family::Boolean {
+                rw.note_boolean(&receiver);
+            }
             rewrite_conditional_branches(
                 Expression::MessageSend {
                     receiver,
@@ -743,28 +745,36 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// Records that `left`, a comparison's left operand, lowered to a bare
-    /// comparison BIF, when it is a recorded typed comparison of the method
-    /// being generated ([`GuardRewrite::boolean_comparisons`]).
-    pub(in crate::core_erlang) fn confirm_bare_comparison(&mut self, left: &Expression) {
+    /// Records how a comparison whose left operand is `left` was lowered
+    /// (`bare`: to the comparison BIF, else through a dispatching guard),
+    /// when it is a recorded typed comparison of the method being generated
+    /// ([`GuardRewrite::boolean_comparisons`]). One dispatched lowering
+    /// sticks, whatever other lowerings of the method did.
+    pub(in crate::core_erlang) fn record_comparison_lowering(
+        &mut self,
+        left: &Expression,
+        bare: bool,
+    ) {
         let Some(method) = self.current_guard_method.clone() else {
             return;
         };
         let key = (method, left.span());
         if self.guard_rewrite.boolean_comparisons.contains(&key) {
-            self.boolean_comparisons_bare.insert(key);
+            *self.boolean_comparison_lowerings.entry(key).or_insert(true) &= bare;
         }
     }
 
-    /// The recorded typed comparisons codegen never lowered to a bare BIF:
-    /// each is a guard the rewrite made exact only for a Boolean receiver,
-    /// whose receiver could then be a non-Boolean answer of a dispatched
-    /// comparison (BT-4452).
+    /// The recorded typed comparisons codegen did not always lower to a bare
+    /// BIF (never lowered, or dispatched at least once): each is a guard the
+    /// rewrite made exact only for a Boolean receiver, whose receiver could
+    /// then be a non-Boolean answer of a dispatched comparison (BT-4452).
     pub(in crate::core_erlang) fn unconfirmed_boolean_comparisons(&self) -> Vec<GuardConditionKey> {
         let mut missed: Vec<_> = self
             .guard_rewrite
             .boolean_comparisons
-            .difference(&self.boolean_comparisons_bare)
+            .iter()
+            .filter(|key| self.generated_methods.contains(&key.0))
+            .filter(|key| self.boolean_comparison_lowerings.get(*key) != Some(&true))
             .cloned()
             .collect();
         missed.sort_by_key(|(m, r)| (m.span.start(), r.start()));
@@ -781,6 +791,7 @@ impl CoreErlangGenerator {
             .guard_rewrite
             .conditions
             .keys()
+            .filter(|key| self.generated_methods.contains(&key.0))
             .filter(|key| !used.contains(key))
             .cloned()
             .collect();
