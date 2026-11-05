@@ -85,13 +85,14 @@ impl CoreErlangGenerator {
     /// Builds, verifies and renders the catch of a compiled `ensure:`
     /// ([`ThreadedStmt::EnsureCatch`]): `other` is the error path (the cleanup
     /// and the re-raise), `relay` the `$bt_nlr` clause for the scope's own
-    /// throw, `carry` what that throw carries and `cleanup` how the cleanup
-    /// runs (inlined, ending at a version of the carried family, or as a
-    /// closure). The single owner of every compiled `ensure:` catch.
+    /// throw, `carry` what that throw carries (with whether the construct's
+    /// scratch map is private, which the verifier reads to exempt it) and
+    /// `cleanup` how the cleanup runs (inlined, ending at a version of the
+    /// carried family, or as a closure). The single owner of every compiled `ensure:` catch.
     pub(in crate::core_erlang) fn ensure_catch(
         &mut self,
         triple: EnsureCatchTriple,
-        carry: Option<NlrCarry>,
+        (carry, private_scratch): (Option<NlrCarry>, bool),
         cleanup: EnsureCleanup,
         relay: Option<EnsureNlrRelay>,
         other: Document<'static>,
@@ -102,6 +103,7 @@ impl CoreErlangGenerator {
             Some(fault::RelayFault::NoRelay) => None,
             // The relay before review: a cell-carried throw resumed with what
             // a `^` at this site would carry, rebuilt from the site's bindings.
+            #[cfg(any(test, feature = "test"))]
             Some(fault::RelayFault::RebuildAtSite) => relay.map(|relay| {
                 if relay.rethrow == RethrowSlot::CellOverCarried && carry == Some(NlrCarry::Live) {
                     EnsureNlrRelay {
@@ -145,6 +147,7 @@ impl CoreErlangGenerator {
             vars: Box::new(vars),
             token,
             carry,
+            private_scratch,
             cleanup,
             relay,
             other,
@@ -187,7 +190,10 @@ pub mod fault {
         NoRelay,
         /// A cell-carried throw resumes with the state a `^` at the
         /// `ensure:` site would carry, rebuilt from the site's bindings, as
-        /// the first BT-4312 relay did.
+        /// the first BT-4312 relay did. Test builds only, with the
+        /// [`RethrowSlot::SiteState`](crate::core_erlang::threaded_ir::RethrowSlot::SiteState)
+        /// it builds.
+        #[cfg(any(test, feature = "test"))]
         RebuildAtSite,
     }
 

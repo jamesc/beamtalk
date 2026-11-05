@@ -53,6 +53,7 @@ fn node(
         vars: Box::new(vars()),
         token: Some(TokenId::new("NlrToken1")),
         carry,
+        private_scratch: false,
         cleanup,
         relay,
         other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
@@ -100,6 +101,47 @@ fn a_writing_cleanup_without_a_relay_fails() {
     assert_eq!(defect(&ir), Some(EnsureRelayDefect::NoRelay));
     let ir = [node(Some(NlrCarry::SelfVt), inlined(Some(2)), None)];
     assert_eq!(defect(&ir), Some(EnsureRelayDefect::NoRelay));
+}
+
+/// BT-4433: a construct whose scratch map is private (a direct-params loop
+/// body, a class or value-type method) threads the REPL's bindings or an
+/// actor's `State` through a map that dies with the scope, so the verifier,
+/// reading the node's typed `private_scratch`, owes it no relay. A `Self` or
+/// a cell-held state is written whatever the scratch map is.
+#[test]
+fn a_private_scratch_map_is_exempt_only_for_a_state_acc_carry() {
+    let private = |carry, relay| match node(Some(carry), inlined(Some(1)), relay) {
+        ThreadedStmt::EnsureCatch {
+            vars,
+            token,
+            carry,
+            cleanup,
+            relay,
+            other,
+            span,
+            ..
+        } => ThreadedStmt::EnsureCatch {
+            vars,
+            token,
+            carry,
+            private_scratch: true,
+            cleanup,
+            relay,
+            other,
+            span,
+        },
+        _ => unreachable!(),
+    };
+    for carry in [NlrCarry::Bindings, NlrCarry::ActorState] {
+        assert_eq!(defect(&[private(carry, None)]), None, "{carry:?}");
+    }
+    for carry in [NlrCarry::SelfVt, NlrCarry::Live] {
+        assert_eq!(
+            defect(&[private(carry, None)]),
+            Some(EnsureRelayDefect::NoRelay),
+            "{carry:?}"
+        );
+    }
 }
 
 #[test]
@@ -213,6 +255,7 @@ fn nothing_to_relay_verifies_clean() {
         vars: Box::new(vars()),
         token: None,
         carry: Some(NlrCarry::ActorState),
+        private_scratch: false,
         cleanup: CLOSURE,
         relay: None,
         other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
@@ -234,6 +277,7 @@ fn a_foreign_throw_needs_the_cell_over_the_carried_state_when_it_is_the_cells() 
             vars: Box::new(vars()),
             token: None,
             carry: Some(carry),
+            private_scratch: false,
             cleanup,
             relay,
             other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
