@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Rows 3i/3j (BT-4431): a cross-file class-side extension (ADR 0066) that
+// shadows VbShadowedMath's compiled `double:`. It registers at module load.
+VbShadowedMath class >> double: x :: Integer -> Integer => x * 2
