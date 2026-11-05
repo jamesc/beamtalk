@@ -1410,10 +1410,24 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # BT-2555: live-image hover docs for the CodeMirror editors. The stub returns
   # docs for a known class name so the UI flow can be exercised, and "" otherwise
   # (the no-tooltip path).
+  #
+  # BT-4344: the op answers Markdown — the `:help` layout as an indented code
+  # block, a method's `///` doc-comment as authored. `Fetcher` hovers a method
+  # whose doc-comment has an `## Options` section (and author text that must be
+  # escaped, not interpreted).
   def hover(_pid, code, _context \\ %{}) do
-    if String.contains?(code, "Counter"),
-      do: {:ok, "== Counter < Actor ==\nThe Counter class."},
-      else: {:ok, ""}
+    cond do
+      String.contains?(code, "Fetcher") ->
+        {:ok,
+         "    == Fetcher class >> fetch:options: ==\n      fetch: url options: opts\n\n" <>
+           "Fetch <b>url</b>.\n\n## Options\n- `timeout` — milliseconds\n- `retries` — count"}
+
+      String.contains?(code, "Counter") ->
+        {:ok, "    == Counter < Actor ==\n    The Counter class."}
+
+      true ->
+        {:ok, ""}
+    end
   end
 
   # BT-2556/BT-3297: live parse-only diagnostics for the CodeMirror editors'

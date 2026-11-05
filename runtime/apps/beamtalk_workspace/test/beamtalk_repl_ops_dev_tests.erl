@@ -588,6 +588,63 @@ hover_docs_unclassifiable_receiver_method_is_empty_test() ->
     ).
 
 %%====================================================================
+%% hover_markdown/2: `:help` text → tooltip Markdown (BT-4344)
+%%====================================================================
+
+hover_markdown_method_keeps_doc_comment_markdown_test() ->
+    %% The `:help` header block becomes an indented code block; the `///`
+    %% doc-comment after the first blank line passes through untouched, so its
+    %% `## Options` heading and bullets render in the tooltip.
+    Help = <<
+        "== Fetcher >> fetch:options: ==\n"
+        "  fetch: url options: opts\n\n"
+        "Fetch a URL.\n\n"
+        "## Options\n"
+        "- `timeout` - milliseconds"
+    >>,
+    ?assertEqual(
+        <<
+            "    == Fetcher >> fetch:options: ==\n"
+            "      fetch: url options: opts\n\n"
+            "Fetch a URL.\n\n"
+            "## Options\n"
+            "- `timeout` - milliseconds"
+        >>,
+        beamtalk_repl_ops_dev:hover_markdown(method, Help)
+    ).
+
+hover_markdown_method_without_doc_is_all_preformatted_test() ->
+    ?assertEqual(
+        <<"    == Integer >> foo ==\n    (inherited from Number)\n      foo">>,
+        beamtalk_repl_ops_dev:hover_markdown(
+            method, <<"== Integer >> foo ==\n(inherited from Number)\n  foo">>
+        )
+    ).
+
+hover_markdown_class_is_all_preformatted_test() ->
+    %% Class docs interleave the header, class comment and method listing line
+    %% by line, so the whole text stays preformatted — blank lines stay blank.
+    ?assertEqual(
+        <<"    == Counter < Object ==\n    A counter.\n\n    More.\n    Instance methods:\n      increment">>,
+        beamtalk_repl_ops_dev:hover_markdown(
+            class,
+            <<"== Counter < Object ==\nA counter.\n\nMore.\nInstance methods:\n  increment">>
+        )
+    ).
+
+hover_markdown_empty_is_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(method, <<>>)),
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(class, <<>>)).
+
+hover_docs_real_method_header_is_preformatted_test() ->
+    %% End to end through the live doc engine: the header line is indented.
+    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
+    case Docs of
+        <<>> -> ok;
+        _ -> ?assertMatch(<<"    == Integer", _/binary>>, Docs)
+    end.
+
+%%====================================================================
 %% keyword_send_at/3 + hover_docs/4: keyword-selector hover (BT-4343)
 %%====================================================================
 

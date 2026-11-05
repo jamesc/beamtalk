@@ -59,6 +59,7 @@ Extracted from beamtalk_repl_server.
     %% resolver, and the diagnostics side-effect-free compile path.
     classify_receiver/2,
     hover_docs/4,
+    hover_markdown/2,
     keyword_send_at/3,
     diagnostics_for/2
 ]).
@@ -1452,7 +1453,7 @@ hover_class(<<>>, _Bindings) ->
 hover_class(Word, Bindings) ->
     case classify_receiver(Word, Bindings) of
         {class, ClassName} ->
-            hover_format(fun() -> beamtalk_repl_docs:format_class_docs(ClassName) end);
+            hover_format(class, fun() -> beamtalk_repl_docs:format_class_docs(ClassName) end);
         %% A bare lowercase token (a binding/instance) is intentionally NOT
         %% hovered in v1: hover targets class names + explicit receiver→selector.
         _ ->
@@ -1468,24 +1469,67 @@ class-side doc lookup from how the receiver classifies (mirroring how
 hover_method(Receiver, Selector, Bindings) ->
     case classify_receiver(Receiver, Bindings) of
         {class, ClassName} ->
-            hover_format(fun() ->
+            hover_format(method, fun() ->
                 beamtalk_repl_docs:format_method_doc_class_side(ClassName, Selector)
             end);
         {instance, ClassName} ->
-            hover_format(fun() ->
+            hover_format(method, fun() ->
                 beamtalk_repl_docs:format_method_doc(ClassName, Selector)
             end);
         undefined ->
             <<>>
     end.
 
--doc "Run a `{ok, Bin} | {error, _}` doc lookup, mapping anything but ok to `<<>>`.".
--spec hover_format(fun(() -> {ok, binary()} | {error, term()})) -> binary().
-hover_format(Lookup) ->
+-doc """
+Run a `{ok, Bin} | {error, _}` doc lookup, mapping anything but ok to `<<>>`,
+and shape the `:help` text into the hover's Markdown (`hover_markdown/2`).
+""".
+-spec hover_format(class | method, fun(() -> {ok, binary()} | {error, term()})) -> binary().
+hover_format(Kind, Lookup) ->
     case Lookup() of
-        {ok, Docs} when is_binary(Docs) -> Docs;
+        {ok, Docs} when is_binary(Docs) -> hover_markdown(Kind, Docs);
         _ -> <<>>
     end.
+
+-doc """
+Turn `:help` text into the Markdown the cockpit hover tooltip renders (BT-4344).
+
+The hover reuses `beamtalk_repl_docs` — the text `:help` prints — but the
+tooltip renders it as Markdown (`BtAttach.DocFormat`), so a method's `///`
+doc-comment shows its `## Options` heading and bullets rendered rather than as
+raw source. Only the doc-comment is author Markdown; the `:help` layout around
+it is plain, line-oriented text that Markdown would reflow into one paragraph.
+So that layout is emitted as an indented code block (every non-blank line
+indented four spaces), which renders preformatted exactly as before:
+
+  * `method` — `format_method_output/4` lays out a header block (`== C >> sel ==`,
+    modifier/inherited lines, the signature) with no blank line inside it, then
+    `\n\n` and the doc-comment. The header becomes a code block; the doc-comment
+    after the first blank line passes through as Markdown.
+  * `class` — the class header, class comment and method listing are
+    interleaved line-by-line, so the whole text stays a code block (unchanged
+    from the pre-BT-4344 plain-text tooltip).
+""".
+-spec hover_markdown(class | method, binary()) -> binary().
+hover_markdown(_Kind, <<>>) ->
+    <<>>;
+hover_markdown(class, Docs) ->
+    hover_preformatted(Docs);
+hover_markdown(method, Docs) ->
+    case binary:split(Docs, <<"\n\n">>) of
+        [Head, Doc] -> <<(hover_preformatted(Head))/binary, "\n\n", Doc/binary>>;
+        [Head] -> hover_preformatted(Head)
+    end.
+
+%% Indent every non-blank line four spaces: a Markdown indented code block.
+-spec hover_preformatted(binary()) -> binary().
+hover_preformatted(Text) ->
+    Lines = binary:split(Text, <<"\n">>, [global]),
+    iolist_to_binary(lists:join(<<"\n">>, [hover_indent(L) || L <- Lines])).
+
+-spec hover_indent(binary()) -> binary().
+hover_indent(<<>>) -> <<>>;
+hover_indent(Line) -> <<"    ", Line/binary>>.
 
 -doc """
 Parse the line up to the cursor into a receiver and prefix.

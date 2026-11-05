@@ -157,6 +157,13 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # `before` (lines above) and `suffix` (text after the hovered token) are the
   # optional editor context that lets a hovered keyword part resolve its send's
   # full keyword selector (BT-4343); a non-string is treated as absent.
+  #
+  # BT-4344: the op answers Markdown (the `:help` layout as an indented code
+  # block, a method's `///` doc-comment as authored), and the reply carries it
+  # rendered to HTML by `BtAttach.DocFormat` — the same escaped renderer the
+  # System Browser doc block uses — so a `## Options` section shows as a heading
+  # and bullets. DocFormat escapes all author text and emits only its own tags,
+  # which is what lets the tooltip insert the reply as HTML.
   def handle_event("hover", %{"code" => code} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) and is_binary(code) do
     hover =
@@ -170,7 +177,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
              },
              RequestContext.build(socket)
            ) do
-        {:ok, docs} when is_binary(docs) -> docs
+        {:ok, docs} when is_binary(docs) -> hover_html(docs)
         _ -> ""
       end
 
@@ -1709,6 +1716,15 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     case MethodEditor.active_tab(assigns) do
       %{kind: :def, class: class} -> class
       _ -> nil
+    end
+  end
+
+  # Render the hover op's Markdown to an HTML string ("" when there is nothing
+  # to show, so no tooltip opens).
+  defp hover_html(docs) do
+    case BtAttach.DocFormat.to_html(docs) do
+      nil -> ""
+      safe -> Phoenix.HTML.safe_to_string(safe)
     end
   end
 
