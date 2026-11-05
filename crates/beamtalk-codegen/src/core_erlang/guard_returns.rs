@@ -91,6 +91,7 @@ use std::collections::{HashMap, HashSet};
 use beamtalk_core::ast::{
     Block, Expression, ExpressionStatement, KeywordPart, MessageSelector, MethodDefinition, Module,
 };
+use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::semantic_analysis::facts::body_has_block_nlr;
 use beamtalk_core::source_analysis::Span;
 use beamtalk_core::state_threading_selectors::{
@@ -165,12 +166,12 @@ impl GuardRewrite {
 pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> GuardRewrite {
     let mut rewrite = GuardRewrite::default();
     for method in methods_mut(module) {
-        let mut conditions = HashMap::new();
-        if let Some(body) = rewritten_body(&method.body, &mut conditions) {
+        let mut rw = Rewriter::of(method);
+        if let Some(body) = rewritten_body(&method.body, &mut rw) {
             let original = std::mem::replace(&mut method.body, body);
             let key = MethodKey::of(method);
             rewrite.conditions.extend(
-                conditions
+                rw.conditions
                     .into_iter()
                     .map(|(receiver, sense)| ((key.clone(), receiver), sense)),
             );
@@ -188,7 +189,7 @@ pub(in crate::core_erlang) fn has_guard_returns(module: &Module) -> bool {
         .iter()
         .flat_map(|class| class.methods.iter().chain(class.class_methods.iter()))
         .chain(module.method_definitions.iter().map(|m| &m.method))
-        .any(|method| rewritten_body(&method.body, &mut HashMap::new()).is_some())
+        .any(|method| rewritten_body(&method.body, &mut Rewriter::of(method)).is_some())
 }
 
 fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinition> {
@@ -204,18 +205,85 @@ fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinitio
         .chain(module.method_definitions.iter_mut().map(|m| &mut m.method))
 }
 
-/// The receiver spans of a method's helper-decided guards.
-type Conditions = HashMap<Span, GuardSense>;
+/// One method's rewrite: what it records, and what it needs to know about
+/// the method's locals.
+struct Rewriter {
+    /// The receiver spans of the method's helper-decided guards.
+    conditions: HashMap<Span, GuardSense>,
+    /// How many times the method assigns each local, nested blocks included.
+    assignments: HashMap<EcoString, usize>,
+    /// The method's and its blocks' parameter names.
+    parameters: HashSet<EcoString>,
+    /// Whether the method has a destructuring assignment, whose bound names
+    /// [`Self::assignments`] does not count.
+    destructures: bool,
+}
+
+impl Rewriter {
+    fn of(method: &MethodDefinition) -> Self {
+        let mut rw = Self {
+            conditions: HashMap::new(),
+            assignments: HashMap::new(),
+            parameters: method
+                .parameters
+                .iter()
+                .map(|p| p.name.name.clone())
+                .collect(),
+            destructures: false,
+        };
+        for stmt in &method.body {
+            walk_expression(&stmt.expression, &mut |e| match e {
+                Expression::Assignment { target, .. } => {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        *rw.assignments.entry(id.name.clone()).or_default() += 1;
+                    }
+                }
+                Expression::DestructureAssignment { .. } => rw.destructures = true,
+                Expression::Block(block) => rw
+                    .parameters
+                    .extend(block.parameters.iter().map(|p| p.name.clone())),
+                _ => {}
+            });
+        }
+        rw
+    }
+
+    /// Whether `rest`, the statements after a guard, may move into the
+    /// guard's falling branch without changing any construct's threaded
+    /// locals (ADR 0131): every local `rest` assigns is one only `rest`
+    /// assigns. A local bound outside it (a parameter, or one assigned
+    /// earlier) would become an outer local of the branch, which a
+    /// construct in `rest` then threads where the method as written does
+    /// not, and the core recognizer (`block_facts`) would disagree.
+    fn can_absorb(&self, rest: &[ExpressionStatement]) -> bool {
+        if self.destructures {
+            return false;
+        }
+        let mut in_rest: HashMap<EcoString, usize> = HashMap::new();
+        for stmt in rest {
+            walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Assignment { target, .. } = e {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        *in_rest.entry(id.name.clone()).or_default() += 1;
+                    }
+                }
+            });
+        }
+        in_rest.iter().all(|(name, n)| {
+            !self.parameters.contains(name) && self.assignments.get(name) == Some(n)
+        })
+    }
+}
 
 /// `body` rewritten, when it holds a block NLR and the rewrite leaves none.
 fn rewritten_body(
     body: &[ExpressionStatement],
-    conditions: &mut Conditions,
+    rw: &mut Rewriter,
 ) -> Option<Vec<ExpressionStatement>> {
     if !body_has_block_nlr(body) {
         return None;
     }
-    let rewritten = rewrite_tail_body(body.to_vec(), conditions);
+    let rewritten = rewrite_tail_body(body.to_vec(), rw);
     (!body_has_block_nlr(&rewritten)).then_some(rewritten)
 }
 
@@ -223,24 +291,25 @@ fn rewritten_body(
 /// it, then rewrites the (new) last statement in tail position.
 fn rewrite_tail_body(
     mut body: Vec<ExpressionStatement>,
-    conditions: &mut Conditions,
+    rw: &mut Rewriter,
 ) -> Vec<ExpressionStatement> {
-    let guard_at = body
-        .iter()
-        .enumerate()
-        .position(|(i, stmt)| i + 1 < body.len() && guard_shape(&stmt.expression).is_some());
+    let guard_at = body.iter().enumerate().position(|(i, stmt)| {
+        i + 1 < body.len()
+            && guard_shape(&stmt.expression).is_some()
+            && rw.can_absorb(&body[i + 1..])
+    });
     if let Some(i) = guard_at {
         let rest = body.split_off(i + 1);
         let guard = body.pop().expect("guard statement at index i");
         // The guard's own check made it exact on any receiver, so its
         // branches are tail bodies whatever the receiver.
-        let absorbed = absorb_rest(guard.expression, rest, conditions);
+        let absorbed = absorb_rest(guard.expression, rest, rw);
         body.push(ExpressionStatement {
-            expression: rewrite_conditional_branches(absorbed, conditions),
+            expression: rewrite_conditional_branches(absorbed, rw),
             ..guard
         });
     } else if let Some(last) = body.pop() {
-        let expression = rewrite_tail_expression(last.expression, conditions);
+        let expression = rewrite_tail_expression(last.expression, rw);
         body.push(ExpressionStatement { expression, ..last });
     }
     body
@@ -248,7 +317,7 @@ fn rewrite_tail_body(
 
 /// Rewrites `expr` in tail position: `^ v` is `v`, and an inlined
 /// conditional's branches (a `match:`'s arm bodies) are in tail position too.
-fn rewrite_tail_expression(expr: Expression, conditions: &mut Conditions) -> Expression {
+fn rewrite_tail_expression(expr: Expression, rw: &mut Rewriter) -> Expression {
     match expr {
         Expression::Return { value, .. } => *value,
         Expression::MessageSend {
@@ -268,7 +337,7 @@ fn rewrite_tail_expression(expr: Expression, conditions: &mut Conditions) -> Exp
                     is_cast: false,
                     span,
                 },
-                conditions,
+                rw,
             )
         }
         Expression::Match {
@@ -296,7 +365,7 @@ fn rewrite_tail_expression(expr: Expression, conditions: &mut Conditions) -> Exp
 
 /// The inlined conditional `expr` with each literal block's body rewritten
 /// as a tail body.
-fn rewrite_conditional_branches(expr: Expression, conditions: &mut Conditions) -> Expression {
+fn rewrite_conditional_branches(expr: Expression, rw: &mut Rewriter) -> Expression {
     let Expression::MessageSend {
         receiver,
         selector,
@@ -315,7 +384,7 @@ fn rewrite_conditional_branches(expr: Expression, conditions: &mut Conditions) -
             .map(|arg| match arg {
                 Expression::Block(mut block) => {
                     let body = std::mem::take(&mut block.body);
-                    Expression::Block(with_body(block, rewrite_tail_body(body, conditions)))
+                    Expression::Block(with_body(block, rewrite_tail_body(body, rw)))
                 }
                 other => other,
             })
@@ -503,11 +572,7 @@ fn branch_slots<'a>(
 /// branch, as the two-branch conditional (`ifTrue:ifFalse:` /
 /// `ifNil:ifNotNil:`), recording its receiver in `conditions` when codegen
 /// decides it through `beamtalk_guard_return`.
-fn absorb_rest(
-    expr: Expression,
-    rest: Vec<ExpressionStatement>,
-    conditions: &mut Conditions,
-) -> Expression {
+fn absorb_rest(expr: Expression, rest: Vec<ExpressionStatement>, rw: &mut Rewriter) -> Expression {
     let shape = guard_shape(&expr).expect("absorb_rest is only called on a guard");
     let Expression::MessageSend {
         receiver,
@@ -520,7 +585,7 @@ fn absorb_rest(
         unreachable!("guard_shape matched a keyword send");
     };
     if let Some(sense) = shape.helper {
-        conditions.insert(receiver.span(), sense);
+        rw.conditions.insert(receiver.span(), sense);
     }
     let keywords = shape.family.keywords();
     let mut slots: [Option<Block>; 2] = [None, None];
@@ -732,6 +797,24 @@ mod tests {
             rewritten(&class("    x > 0 ifTrue: [1] ifFalse: [2]")),
             None
         );
+    }
+
+    #[test]
+    fn rest_assigning_an_outer_local_is_not_absorbed() {
+        // `t` would become an outer local of the falling branch, threaded
+        // where the method as written threads nothing (ADR 0131 agreement).
+        assert_eq!(
+            rewritten(&class(
+                "    t := 0\n    x =:= 0 ifTrue: [^1]\n    t := t + 1\n    t"
+            )),
+            None
+        );
+        assert_eq!(
+            rewritten(&class("    x =:= 0 ifTrue: [^1]\n    x := 2\n    x")),
+            None
+        );
+        // A local only the absorbed statements assign moves with them.
+        assert!(rewritten(&class("    x =:= 0 ifTrue: [^1]\n    u := 2\n    u + x")).is_some());
     }
 
     #[test]
