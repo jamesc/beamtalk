@@ -235,7 +235,7 @@ impl TypeChecker {
             .resolve_type_annotation(
                 ann,
                 &type_resolver::SubstitutionMap::new(),
-                self.protocol_registry.as_ref(),
+                self.protocol_registry.as_deref(),
             )
         });
         if let Some(declared) = &declared_ann {
@@ -254,7 +254,7 @@ impl TypeChecker {
                 &inferred_ty,
                 &declared,
                 hierarchy,
-                self.protocol_registry.as_ref(),
+                self.protocol_registry.as_deref(),
             ) {
                 self.emit_assignment_type_mismatch(&mismatch, span);
             }

@@ -337,7 +337,7 @@ impl TypeChecker {
             info,
             &current_ty,
             hierarchy,
-            self.protocol_registry.as_ref(),
+            self.protocol_registry.as_deref(),
         );
         self.check_impossible_class_comparison(
             &current_ty,

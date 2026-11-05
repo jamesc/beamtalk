@@ -389,7 +389,7 @@ impl TypeChecker {
         Self::set_param_types(
             &mut method_env,
             &method.parameters,
-            self.protocol_registry.as_ref(),
+            self.protocol_registry.as_deref(),
             &mut ctx,
         );
         self.stash_return_position_block_pushdown(method);
@@ -653,7 +653,7 @@ impl TypeChecker {
                                     type_resolver::resolve_declared_type(
                                         &field_type,
                                         &type_resolver::SubstitutionMap::new(),
-                                        self.protocol_registry.as_ref(),
+                                        self.protocol_registry.as_deref(),
                                         self.alias_registry.as_ref(),
                                         TypeStringContext::Declared,
                                     )
@@ -719,7 +719,7 @@ impl TypeChecker {
                                 result = type_resolver::resolve_declared_type(
                                     &field_type,
                                     &type_resolver::SubstitutionMap::new(),
-                                    self.protocol_registry.as_ref(),
+                                    self.protocol_registry.as_deref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
                                 );

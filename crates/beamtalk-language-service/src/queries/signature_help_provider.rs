@@ -20,14 +20,21 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: `textDocument/signatureHelp`
 
-use crate::queries::type_of_parsed;
+use std::sync::Arc;
+
+use crate::queries::{protocols_for_module, type_of_parsed};
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{BinarySegment, ClassDefinition, Expression, MessageSelector, Module};
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
-use beamtalk_core::semantic_analysis::type_checker::TypeMap;
+use beamtalk_core::semantic_analysis::protocol_registry::{
+    ProtocolMethodRequirement, ProtocolRegistry,
+};
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
+use beamtalk_core::semantic_analysis::type_checker::{
+    TypeMap, infer_types_and_returns_with_registries,
+};
+use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType};
 use ecow::EcoString;
 
 /// The class context for resolving receiver types.
@@ -40,10 +47,23 @@ enum SigHelpClassContext<'a> {
     TopLevel,
 }
 
+/// What a signature-help lookup resolves a receiver and selector against.
+struct Lookup<'a> {
+    hierarchy: &'a ClassHierarchy,
+    type_map: &'a TypeMap,
+    native_types: Option<&'a NativeTypeRegistry>,
+    protocol_registry: &'a ProtocolRegistry,
+}
+
 /// Computes signature help at a given position.
 ///
 /// Returns signature information if the cursor is inside a keyword message send,
 /// including parameter names, types, and the active parameter index.
+///
+/// `protocol_registry` is the file's protocol registry (cross-file protocols
+/// plus the module's own), as for completion and hover: a receiver typed
+/// `P class` (ADR 0144) shows the signature of `P`'s `class` requirement.
+/// With `None`, only the module's own protocols are registered.
 #[must_use]
 pub fn compute_signature_help(
     module: &Module,
@@ -51,21 +71,28 @@ pub fn compute_signature_help(
     position: Position,
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
+    protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Option<SignatureHelp> {
     let offset = position.to_byte_offset(source)?.get();
-    let type_map = infer_types(module, hierarchy, native_types);
+    let protocol_registry = protocols_for_module(protocol_registry, module, hierarchy);
+    let (type_map, _) = infer_types_and_returns_with_registries(
+        module,
+        hierarchy,
+        native_types,
+        Some(Arc::clone(&protocol_registry)),
+        None,
+    );
+    let lookup = Lookup {
+        hierarchy,
+        type_map: &type_map,
+        native_types,
+        protocol_registry: &protocol_registry,
+    };
 
     // Search top-level expressions
     for stmt in &module.expressions {
         let context = SigHelpClassContext::TopLevel;
-        if let Some(help) = find_signature_in_expr(
-            &stmt.expression,
-            offset,
-            &context,
-            hierarchy,
-            &type_map,
-            native_types,
-        ) {
+        if let Some(help) = find_signature_in_expr(&stmt.expression, offset, &context, &lookup) {
             return Some(help);
         }
     }
@@ -75,14 +102,9 @@ pub fn compute_signature_help(
         for method in &class.methods {
             let context = SigHelpClassContext::InstanceMethod(class);
             for stmt in &method.body {
-                if let Some(help) = find_signature_in_expr(
-                    &stmt.expression,
-                    offset,
-                    &context,
-                    hierarchy,
-                    &type_map,
-                    native_types,
-                ) {
+                if let Some(help) =
+                    find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
+                {
                     return Some(help);
                 }
             }
@@ -90,14 +112,9 @@ pub fn compute_signature_help(
         for method in &class.class_methods {
             let context = SigHelpClassContext::ClassMethod(class);
             for stmt in &method.body {
-                if let Some(help) = find_signature_in_expr(
-                    &stmt.expression,
-                    offset,
-                    &context,
-                    hierarchy,
-                    &type_map,
-                    native_types,
-                ) {
+                if let Some(help) =
+                    find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
+                {
                     return Some(help);
                 }
             }
@@ -112,14 +129,8 @@ pub fn compute_signature_help(
             SigHelpClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str())
         };
         for stmt in &smd.method.body {
-            if let Some(help) = find_signature_in_expr(
-                &stmt.expression,
-                offset,
-                &context,
-                hierarchy,
-                &type_map,
-                native_types,
-            ) {
+            if let Some(help) = find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
+            {
                 return Some(help);
             }
         }
@@ -134,9 +145,7 @@ fn find_signature_in_expr(
     expr: &Expression,
     offset: u32,
     context: &SigHelpClassContext<'_>,
-    hierarchy: &ClassHierarchy,
-    type_map: &TypeMap,
-    native_types: Option<&NativeTypeRegistry>,
+    lookup: &Lookup<'_>,
 ) -> Option<SignatureHelp> {
     let span = expr.span();
     if offset < span.start() || offset > span.end() {
@@ -152,15 +161,11 @@ fn find_signature_in_expr(
             ..
         } => {
             // Check nested expressions first (inner-most message wins)
-            if let Some(help) =
-                find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
-            {
+            if let Some(help) = find_signature_in_expr(receiver, offset, context, lookup) {
                 return Some(help);
             }
             for arg in arguments {
-                if let Some(help) =
-                    find_signature_in_expr(arg, offset, context, hierarchy, type_map, native_types)
-                {
+                if let Some(help) = find_signature_in_expr(arg, offset, context, lookup) {
                     return Some(help);
                 }
             }
@@ -178,74 +183,43 @@ fn find_signature_in_expr(
                         &selector_name,
                         selector,
                         active_param,
-                        type_map,
-                        native_types,
+                        lookup.type_map,
+                        lookup.native_types,
                     ) {
                         return Some(help);
                     }
 
                     // Resolve receiver type and look up method
-                    if let Some(method) =
-                        resolve_method(receiver, &selector_name, context, hierarchy, type_map)
+                    if let Some(help) =
+                        resolve_signature(receiver, &selector_name, context, lookup, active_param)
                     {
-                        return Some(build_signature_help(&method, active_param));
+                        return Some(help);
                     }
                 }
             }
             None
         }
-        Expression::Block(block) => block.body.iter().find_map(|s| {
-            find_signature_in_expr(
-                &s.expression,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-            )
-        }),
+        Expression::Block(block) => block
+            .body
+            .iter()
+            .find_map(|s| find_signature_in_expr(&s.expression, offset, context, lookup)),
         Expression::Assignment { target, value, .. } => {
-            find_signature_in_expr(target, offset, context, hierarchy, type_map, native_types)
-                .or_else(|| {
-                    find_signature_in_expr(
-                        value,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                    )
-                })
+            find_signature_in_expr(target, offset, context, lookup)
+                .or_else(|| find_signature_in_expr(value, offset, context, lookup))
         }
-        Expression::Return { value, .. } => {
-            find_signature_in_expr(value, offset, context, hierarchy, type_map, native_types)
+        Expression::Return { value, .. } => find_signature_in_expr(value, offset, context, lookup),
+        Expression::Parenthesized { expression, .. } => {
+            find_signature_in_expr(expression, offset, context, lookup)
         }
-        Expression::Parenthesized { expression, .. } => find_signature_in_expr(
-            expression,
-            offset,
-            context,
-            hierarchy,
-            type_map,
-            native_types,
-        ),
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            if let Some(help) =
-                find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
-            {
+            if let Some(help) = find_signature_in_expr(receiver, offset, context, lookup) {
                 return Some(help);
             }
             for msg in messages {
                 for arg in &msg.arguments {
-                    if let Some(help) = find_signature_in_expr(
-                        arg,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                    ) {
+                    if let Some(help) = find_signature_in_expr(arg, offset, context, lookup) {
                         return Some(help);
                     }
                 }
@@ -254,10 +228,14 @@ fn find_signature_in_expr(
                         let active_param =
                             determine_active_parameter(parts, &msg.arguments, offset);
                         let selector_name = msg.selector.name();
-                        if let Some(method) =
-                            resolve_method(receiver, &selector_name, context, hierarchy, type_map)
-                        {
-                            return Some(build_signature_help(&method, active_param));
+                        if let Some(help) = resolve_signature(
+                            receiver,
+                            &selector_name,
+                            context,
+                            lookup,
+                            active_param,
+                        ) {
+                            return Some(help);
                         }
                     }
                 }
@@ -265,61 +243,33 @@ fn find_signature_in_expr(
             None
         }
         Expression::Match { value, arms, .. } => {
-            find_signature_in_expr(value, offset, context, hierarchy, type_map, native_types)
-                .or_else(|| {
-                    arms.iter().find_map(|arm| {
-                        find_signature_in_expr(
-                            &arm.body,
-                            offset,
-                            context,
-                            hierarchy,
-                            type_map,
-                            native_types,
-                        )
-                    })
-                })
+            find_signature_in_expr(value, offset, context, lookup).or_else(|| {
+                arms.iter()
+                    .find_map(|arm| find_signature_in_expr(&arm.body, offset, context, lookup))
+            })
         }
         Expression::FieldAccess { receiver, .. } => {
-            find_signature_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
+            find_signature_in_expr(receiver, offset, context, lookup)
         }
         Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_signature_in_expr(
-                &pair.key,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-            )
-            .or_else(|| {
-                find_signature_in_expr(
-                    &pair.value,
-                    offset,
-                    context,
-                    hierarchy,
-                    type_map,
-                    native_types,
-                )
-            })
+            find_signature_in_expr(&pair.key, offset, context, lookup)
+                .or_else(|| find_signature_in_expr(&pair.value, offset, context, lookup))
         }),
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements.iter().find_map(|e| {
-                find_signature_in_expr(e, offset, context, hierarchy, type_map, native_types)
-            })
+            elements
+                .iter()
+                .find_map(|e| find_signature_in_expr(e, offset, context, lookup))
         }
         Expression::ListLiteral { elements, tail, .. } => elements
             .iter()
-            .find_map(|e| {
-                find_signature_in_expr(e, offset, context, hierarchy, type_map, native_types)
-            })
+            .find_map(|e| find_signature_in_expr(e, offset, context, lookup))
             .or_else(|| {
-                tail.as_ref().and_then(|t| {
-                    find_signature_in_expr(t, offset, context, hierarchy, type_map, native_types)
-                })
+                tail.as_ref()
+                    .and_then(|t| find_signature_in_expr(t, offset, context, lookup))
             }),
         Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
             if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
-                find_signature_in_expr(expr, offset, context, hierarchy, type_map, native_types)
+                find_signature_in_expr(expr, offset, context, lookup)
             } else {
                 None
             }
@@ -327,9 +277,7 @@ fn find_signature_in_expr(
         Expression::BinaryConstruction { segments, .. } => segments
             .iter()
             .flat_map(BinarySegment::sub_expressions)
-            .find_map(|expr| {
-                find_signature_in_expr(expr, offset, context, hierarchy, type_map, native_types)
-            }),
+            .find_map(|expr| find_signature_in_expr(expr, offset, context, lookup)),
         _ => None,
     }
 }
@@ -492,22 +440,46 @@ fn determine_active_parameter(
     active
 }
 
-/// Resolves the receiver type and looks up the method in the hierarchy.
-fn resolve_method(
+/// Resolves the receiver type and builds the signature of `selector_name`
+/// on it: a method in the hierarchy, or — for a `P class` receiver (ADR 0144)
+/// — `P`'s `class` requirement, falling back to the class-object protocol
+/// (`Metaclass`'s instance side), the same order completion offers them in.
+fn resolve_signature(
     receiver: &Expression,
     selector_name: &str,
     context: &SigHelpClassContext<'_>,
-    hierarchy: &ClassHierarchy,
-    type_map: &TypeMap,
-) -> Option<MethodInfo> {
-    let (receiver_class, class_side) =
-        resolve_receiver_class(receiver, context, hierarchy, type_map)?;
+    lookup: &Lookup<'_>,
+    active_parameter: u32,
+) -> Option<SignatureHelp> {
+    let hierarchy = lookup.hierarchy;
+    if let Some(InferredType::ProtocolMeta { protocol_name, .. }) =
+        type_of_parsed(lookup.type_map, receiver)
+    {
+        let registry = lookup.protocol_registry;
+        if let Some(requirement) = registry
+            .get(protocol_name)
+            .and_then(|protocol| protocol.find_class_requirement(registry, selector_name))
+        {
+            return Some(build_requirement_signature_help(
+                requirement,
+                protocol_name,
+                active_parameter,
+            ));
+        }
+        return hierarchy
+            .find_method("Metaclass", selector_name)
+            .map(|method| build_signature_help(&method, active_parameter));
+    }
 
-    if class_side {
+    let (receiver_class, class_side) =
+        resolve_receiver_class(receiver, context, hierarchy, lookup.type_map)?;
+
+    let method = if class_side {
         hierarchy.find_class_method(receiver_class.as_str(), selector_name)
     } else {
         hierarchy.find_method(receiver_class.as_str(), selector_name)
-    }
+    }?;
+    Some(build_signature_help(&method, active_parameter))
 }
 
 /// Resolves the class of a receiver expression.
@@ -556,7 +528,6 @@ fn resolve_receiver_class(
     }
 }
 
-/// Builds a `SignatureHelp` from a resolved `MethodInfo`.
 /// Builds signature help from a resolved `ClassHierarchy::MethodInfo`.
 /// Like [`crate::queries::hover_provider`]'s resolved-call
 /// display, `MethodInfo` has no parameter names — only types — so each
@@ -564,21 +535,62 @@ fn resolve_receiver_class(
 /// [`beamtalk_core::unparse::render_signature_text`] core (`SignatureParam { name:
 /// None, .. }`), not the declaration's `keyword name :: Type`.
 fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> SignatureHelp {
-    use beamtalk_core::unparse::{
-        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
-    };
-
-    let selector = &method.selector;
-
     // `MethodInfo` types are structured `DeclaredType`s — render
     // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
     // and hand the composer the text it contracts for.
-    let return_type_text = method.return_type.as_ref().map(ToString::to_string);
     let param_type_texts: Vec<Option<String>> = method
         .param_types
         .iter()
         .map(|ty| ty.as_ref().map(ToString::to_string))
         .collect();
+    signature_help_from_parts(
+        &method.selector,
+        &param_type_texts,
+        method
+            .return_type
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        &format!("Defined in `{}`", method.defined_in),
+        active_parameter,
+    )
+}
+
+/// Builds signature help from a protocol's `class` requirement, for a send to
+/// a `P class` receiver (ADR 0144). Rendered like a hierarchy method, and
+/// documented the way completion documents the same requirement.
+fn build_requirement_signature_help(
+    requirement: &ProtocolMethodRequirement,
+    protocol_name: &str,
+    active_parameter: u32,
+) -> SignatureHelp {
+    let param_type_texts: Vec<Option<String>> = requirement
+        .param_types
+        .iter()
+        .map(|ty| ty.as_ref().map(ToString::to_string))
+        .collect();
+    signature_help_from_parts(
+        &requirement.selector,
+        &param_type_texts,
+        requirement.return_type.as_deref(),
+        &format!("class requirement of protocol `{protocol_name}`"),
+        active_parameter,
+    )
+}
+
+/// The shared signature-help composer: one `keyword: Type` parameter per
+/// keyword part of `selector`, labelled via
+/// [`beamtalk_core::unparse::render_signature_text`].
+fn signature_help_from_parts(
+    selector: &str,
+    param_type_texts: &[Option<String>],
+    return_type_text: Option<&str>,
+    documentation: &str,
+    active_parameter: u32,
+) -> SignatureHelp {
+    use beamtalk_core::unparse::{
+        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+    };
 
     // Build parameter list from keyword parts (re-adding the trailing `:`
     // the split strips) and param_types.
@@ -609,19 +621,14 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
 
     let label = render_signature_text(
         SignatureSelector::Params(&sig_params),
-        return_type_text.as_deref(),
+        return_type_text,
         &SignatureRenderOptions::DISPLAY,
     );
-
-    let documentation = Some(EcoString::from(format!(
-        "Defined in `{}`",
-        method.defined_in
-    )));
 
     SignatureHelp {
         signatures: vec![SignatureInfo {
             label: EcoString::from(label),
-            documentation,
+            documentation: Some(EcoString::from(documentation)),
             parameters,
         }],
         active_signature: 0,
@@ -639,7 +646,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_signature_help(&module, source, position, &hierarchy, None)
+        compute_signature_help(&module, source, position, &hierarchy, None, None)
     }
 
     #[test]
@@ -666,8 +673,14 @@ mod tests {
         // Position in `self add: 1 to: 2` — cursor on `to:` (line 2, col 23)
         // Line 2: "  run => self add: 1 to: 2"
         //          0123456789012345678901234567
-        let result =
-            compute_signature_help(&module, source, Position::new(2, 23), &hierarchy, None);
+        let result = compute_signature_help(
+            &module,
+            source,
+            Position::new(2, 23),
+            &hierarchy,
+            None,
+            None,
+        );
         let help = result.expect("should find signature help for self add:to:");
         assert_eq!(help.signatures.len(), 1);
         assert_eq!(help.signatures[0].parameters.len(), 2);
@@ -694,8 +707,14 @@ mod tests {
         // Cursor right after `add:` — should be param 0
         // Line 2: "  run => self add: 1 to: 2"
         //                       ^-- col 19
-        let result =
-            compute_signature_help(&module, source, Position::new(2, 19), &hierarchy, None);
+        let result = compute_signature_help(
+            &module,
+            source,
+            Position::new(2, 19),
+            &hierarchy,
+            None,
+            None,
+        );
         let help = result.expect("should get signature help at 'add:' position");
         assert_eq!(
             help.active_parameter, 0,
@@ -705,8 +724,14 @@ mod tests {
         // Cursor right after `to:` — should be param 1
         // Line 2: "  run => self add: 1 to: 2"
         //                               ^-- col 24
-        let result =
-            compute_signature_help(&module, source, Position::new(2, 24), &hierarchy, None);
+        let result = compute_signature_help(
+            &module,
+            source,
+            Position::new(2, 24),
+            &hierarchy,
+            None,
+            None,
+        );
         let help = result.expect("should get signature help at 'to:' position");
         assert_eq!(
             help.active_parameter, 1,
@@ -760,6 +785,7 @@ mod tests {
             Position::new(0, 20),
             &hierarchy,
             Some(&registry),
+            None,
         );
         let help = result.expect("should find FFI signature help");
         assert_eq!(help.signatures.len(), 1);
@@ -784,12 +810,125 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         // Without registry, signature help should still work (falls through to normal resolution)
-        let result =
-            compute_signature_help(&module, source, Position::new(0, 20), &hierarchy, None);
+        let result = compute_signature_help(
+            &module,
+            source,
+            Position::new(0, 20),
+            &hierarchy,
+            None,
+            None,
+        );
         // ErlangModule doesn't have a "seq:to:" method in the hierarchy, so no result
         assert!(
             result.is_none(),
             "Without registry, FFI sig help should not resolve"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0144: `P class` receivers (BT-4450)
+    // -----------------------------------------------------------------------
+
+    const WIRE_SOURCE: &str = "Protocol define: Wire\n  class send: data :: Object to: port :: Integer -> Boolean\n\nObject subclass: Caller\n  run: w :: Wire class =>\n    w send: 1 to: 2\n";
+
+    fn wire_hierarchy(module: &Module) -> ClassHierarchy {
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.register_protocol_classes(module);
+        hierarchy
+    }
+
+    /// A keyword send to a `P class` receiver shows the signature of `P`'s
+    /// `class` requirement, as completion and hover resolve it.
+    #[test]
+    fn protocol_metatype_signature_help_shows_class_requirement() {
+        let (module, _) = parse(lex_with_eof(WIRE_SOURCE));
+        let hierarchy = wire_hierarchy(&module);
+        // Cursor on the `to:` argument.
+        let help = compute_signature_help(
+            &module,
+            WIRE_SOURCE,
+            Position::new(5, 19),
+            &hierarchy,
+            None,
+            None,
+        )
+        .expect("the class requirement's signature is shown");
+        let signature = &help.signatures[0];
+        assert_eq!(
+            signature.label.as_str(),
+            "send: Object to: Integer -> Boolean"
+        );
+        assert_eq!(
+            signature.documentation.as_deref(),
+            Some("class requirement of protocol `Wire`")
+        );
+        assert_eq!(signature.parameters.len(), 2);
+        assert_eq!(help.active_parameter, 1);
+    }
+
+    /// A protocol known only from the caller's project registry (declared in
+    /// another file) still resolves.
+    #[test]
+    fn protocol_metatype_signature_help_uses_project_registry() {
+        let protocol_source =
+            "Protocol define: Wire\n  class send: data :: Object to: port :: Integer -> Boolean\n";
+        let source = "Object subclass: Caller\n  run: w :: Wire class =>\n    w send: 1 to: 2\n";
+        let (protocol_module, _) = parse(lex_with_eof(protocol_source));
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = wire_hierarchy(&protocol_module);
+        let mut registry = ProtocolRegistry::new();
+        let _ = registry.seed_and_register_module(&protocol_module, Vec::new(), &hierarchy, None);
+
+        let without = compute_signature_help(
+            &module,
+            source,
+            Position::new(2, 19),
+            &hierarchy,
+            None,
+            None,
+        );
+        assert!(
+            without
+                .is_none_or(|help| help.signatures[0].label.as_str()
+                    != "send: Object to: Integer -> Boolean"),
+            "without the project registry `Wire` is not a known protocol"
+        );
+
+        let help = compute_signature_help(
+            &module,
+            source,
+            Position::new(2, 19),
+            &hierarchy,
+            None,
+            Some(Arc::new(registry)),
+        )
+        .expect("the class requirement's signature is shown");
+        assert_eq!(
+            help.signatures[0].label.as_str(),
+            "send: Object to: Integer -> Boolean"
+        );
+    }
+
+    /// A selector that is no `class` requirement falls back to the
+    /// class-object protocol (`Metaclass`'s instance side), as completion does.
+    #[test]
+    fn protocol_metatype_signature_help_falls_back_to_class_object_protocol() {
+        let source = "Protocol define: Wire\n  class label -> String\n\nObject subclass: Caller\n  run: w :: Wire class =>\n    w respondsTo: #label\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = wire_hierarchy(&module);
+        let help = compute_signature_help(
+            &module,
+            source,
+            Position::new(5, 18),
+            &hierarchy,
+            None,
+            None,
+        )
+        .expect("the class-object protocol's signature is shown");
+        assert!(
+            help.signatures[0].label.starts_with("respondsTo:"),
+            "got {}",
+            help.signatures[0].label
         );
     }
 }

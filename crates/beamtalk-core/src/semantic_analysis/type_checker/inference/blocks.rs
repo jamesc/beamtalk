@@ -1509,13 +1509,13 @@ impl TypeChecker {
                     .resolve_type_annotation(
                         ann,
                         &subst,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                     );
                     if let Some(mismatch) = Self::detect_assignment_type_mismatch(
                         &pushed_ty,
                         &declared,
                         hierarchy,
-                        self.protocol_registry.as_ref(),
+                        self.protocol_registry.as_deref(),
                     ) {
                         self.emit_assignment_type_mismatch(&mismatch, param.span);
                     }
@@ -1604,7 +1604,7 @@ impl TypeChecker {
         .resolve_type_annotation(
             ann,
             &type_resolver::SubstitutionMap::new(),
-            self.protocol_registry.as_ref(),
+            self.protocol_registry.as_deref(),
         );
         let last = method.body.len().saturating_sub(1);
         for (i, stmt) in method.body.iter().enumerate() {

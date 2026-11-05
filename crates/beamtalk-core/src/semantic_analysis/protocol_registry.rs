@@ -362,6 +362,20 @@ impl ProtocolInfo {
 
         reqs
     }
+
+    /// The `class` requirement named `selector`, own or inherited (see
+    /// [`Self::all_class_requirements`]) — the requirement a send of
+    /// `selector` to a `P class` value resolves against (ADR 0144).
+    #[must_use]
+    pub fn find_class_requirement<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+        selector: &str,
+    ) -> Option<&'a ProtocolMethodRequirement> {
+        self.all_class_requirements(registry)
+            .into_iter()
+            .find(|req| req.selector.as_str() == selector)
+    }
 }
 
 /// Registry of protocol definitions for compile-time conformance checking.

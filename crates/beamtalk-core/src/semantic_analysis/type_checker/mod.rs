@@ -415,7 +415,7 @@ pub fn infer_types_and_returns_with_registries(
     module: &Module,
     hierarchy: &ClassHierarchy,
     native_type_registry: Option<&NativeTypeRegistry>,
-    protocol_registry: Option<&ProtocolRegistry>,
+    protocol_registry: Option<Arc<ProtocolRegistry>>,
     alias_registry: Option<&AliasRegistry>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
@@ -423,7 +423,7 @@ pub fn infer_types_and_returns_with_registries(
         checker.set_native_type_registry(registry.clone());
     }
     if let Some(protocols) = protocol_registry {
-        checker.set_protocol_registry(protocols.clone());
+        checker.set_protocol_registry(protocols);
     }
     if let Some(aliases) = alias_registry {
         checker.set_alias_registry(aliases.clone());
@@ -490,7 +490,7 @@ pub struct TypeChecker {
     /// `Dynamic` to a specific protocol type by looking up which protocol
     /// requires the tested selector. Set by `check_module_with_protocols`
     /// before running the main type checking pass.
-    pub(super) protocol_registry: Option<ProtocolRegistry>,
+    pub(super) protocol_registry: Option<Arc<ProtocolRegistry>>,
     /// Type alias registry (ADR 0108 Phase 2).
     ///
     /// When set, [`super::type_resolver::resolve_type_annotation`] expands a
@@ -628,8 +628,19 @@ impl TypeChecker {
     /// (`P class` → `ProtocolMeta`, ADR 0144; `respondsTo:` narrowing) but
     /// not the conformance passes
     /// [`Self::check_module_with_protocols_and_aliases`] also runs.
-    pub fn set_protocol_registry(&mut self, registry: ProtocolRegistry) {
-        self.protocol_registry = Some(registry);
+    ///
+    /// Takes `impl Into<Arc<_>>` like [`Self::set_native_type_registry`], so
+    /// a caller that already holds an `Arc` (the language service builds one
+    /// registry per request) shares it rather than deep-cloning every
+    /// `ProtocolInfo` again (BT-4450).
+    pub fn set_protocol_registry(&mut self, registry: impl Into<Arc<ProtocolRegistry>>) {
+        self.protocol_registry = Some(registry.into());
+    }
+
+    /// The protocol registry the base pass resolves against, if one is set.
+    #[must_use]
+    pub fn protocol_registry(&self) -> Option<&Arc<ProtocolRegistry>> {
+        self.protocol_registry.as_ref()
     }
 
     /// Returns all diagnostics collected during type checking.
@@ -729,7 +740,7 @@ impl TypeChecker {
         let module = &*crate::ast::normalize::normalised(module);
         // Store protocol registry for respondsTo: narrowing.
         // This allows detect_narrowing to refine Dynamic → protocol type.
-        self.protocol_registry = Some(protocol_registry.clone());
+        self.protocol_registry = Some(Arc::new(protocol_registry.clone()));
         // ADR 0108: store the alias table for the duration of this
         // whole method (unlike `protocol_registry`, which the Phase 2b/2d/2f
         // passes below take as a direct parameter and so don't need it on

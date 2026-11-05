@@ -27,6 +27,7 @@ use beamtalk_core::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Builds `module`'s [`ClassHierarchy`] with ADR 0127 trait provenance.
 ///
@@ -904,12 +905,16 @@ impl ProjectIndex {
     /// diagnostics pipeline uses, so a `P class` annotation (ADR 0144) types
     /// the same in the editor as in `beamtalk build`. Collision diagnostics
     /// are dropped — the diagnostics provider reports them.
+    ///
+    /// Built once per request and returned as an `Arc`, which the providers
+    /// hand on to the type pass's `TypeChecker` without a second deep clone
+    /// (BT-4450).
     #[must_use]
     pub fn protocol_registry_for(
         &self,
         file: &Utf8PathBuf,
         module: &beamtalk_core::ast::Module,
-    ) -> ProtocolRegistry {
+    ) -> Arc<ProtocolRegistry> {
         let package = self.alias_package_for_file(file);
         let mut registry = ProtocolRegistry::new();
         let _ = registry.seed_and_register_module(
@@ -918,7 +923,7 @@ impl ProjectIndex {
             &self.merged_hierarchy,
             beamtalk_core::semantic_analysis::trait_expansion::known_package(Some(&package)),
         );
-        registry
+        Arc::new(registry)
     }
 
     /// The per-file entries of `map` other than `file`'s own, in the one

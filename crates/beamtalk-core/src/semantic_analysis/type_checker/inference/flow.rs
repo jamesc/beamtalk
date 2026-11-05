@@ -206,7 +206,7 @@ impl TypeChecker {
             env,
             hierarchy,
             self.alias_registry.as_ref(),
-            self.protocol_registry.as_ref(),
+            self.protocol_registry.as_deref(),
         )
     }
 
@@ -322,7 +322,7 @@ impl TypeChecker {
                 info,
                 &current_ty,
                 hierarchy,
-                self.protocol_registry.as_ref(),
+                self.protocol_registry.as_deref(),
             );
         }
         if info.singleton_eq.is_some() {
@@ -336,7 +336,7 @@ impl TypeChecker {
                 env,
                 hierarchy,
                 self.alias_registry.as_ref(),
-                self.protocol_registry.as_ref(),
+                self.protocol_registry.as_deref(),
             );
         }
         if info.responded_selector.is_some() {
@@ -378,7 +378,7 @@ impl TypeChecker {
                 env,
                 hierarchy,
                 self.alias_registry.as_ref(),
-                self.protocol_registry.as_ref(),
+                self.protocol_registry.as_deref(),
             ) else {
                 return;
             };
@@ -640,7 +640,7 @@ impl TypeChecker {
                             &residual_scrutinee_ty,
                             &class.name,
                             hierarchy,
-                            self.protocol_registry.as_ref(),
+                            self.protocol_registry.as_deref(),
                         );
                         arm_env.set_local(binding.name.clone(), narrowed.clone());
                         Some(narrowed)

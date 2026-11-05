@@ -188,7 +188,7 @@ impl TypeChecker {
         Self::set_param_types(
             &mut env,
             &method.parameters,
-            self.protocol_registry.as_ref(),
+            self.protocol_registry.as_deref(),
             &mut ctx,
         );
         let function_name = method.selector.leading_word().to_string();
