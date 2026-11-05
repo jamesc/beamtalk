@@ -2348,7 +2348,7 @@ Value subclass: Socket
 
 - Assigning or passing a class that does not conform warns, naming the missing selectors: `Integer class does not conform to Transport class` / `missing: class send:data:, class close:`. Classes the checker cannot see completely (a `doesNotUnderstand:` override, a cross-file superclass) conform, as for `:: P`.
 - A send to a `P class` value resolves against `P`'s `class` requirements (including those of protocols it extends), using their declared parameter and return types, then against the class-object protocol (`Class` → `Behaviour` → `Object`). Anything else is reported as not understood.
-- `P class` flows into `:: Class`, `:: Behaviour` and `:: Object`; the reverse is a narrowing and warns. `P class | Nil` narrows after `isNil` checks, `P class & Q class` requires both, and `Derived class` flows into `Base class` when `Derived` extends `Base`.
+- `P class` flows into `:: Class`, `:: Behaviour` and `:: Object`; the reverse is a narrowing and warns. `P class | Nil` narrows after `isNil` checks, `P class & Q class` requires both, and `P class` flows into `Q class` when every selector `Q` requires (instance and class side) is one `P` requires too — e.g. when `P` extends `Q`.
 - Like every metatype, `P class` is name-only: `Collection class` is valid, `Collection(E) class` is not. The type is erased at run time; class-side sends through it stay dynamic sends.
 
 ### Type Parameter Bounds

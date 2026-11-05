@@ -3700,9 +3700,14 @@ impl TypeChecker {
                     ClassObjectType::Class(class_name) => registry
                         .check_conformance(class_name, declared_base, hierarchy)
                         .is_ok(),
-                    ClassObjectType::Protocol(protocol_name) => registry
-                        .get(protocol_name)
-                        .is_some_and(|p| p.is_or_extends(declared_base, registry)),
+                    ClassObjectType::Protocol(protocol_name) => {
+                        match (registry.get(protocol_name), registry.get(declared_base)) {
+                            (Some(value_protocol), Some(declared_protocol)) => {
+                                value_protocol.subsumes_conformance_to(declared_protocol, registry)
+                            }
+                            _ => false,
+                        }
+                    }
                 };
             }
             return match value {

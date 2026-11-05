@@ -426,7 +426,10 @@ impl TypeChecker {
                 .any(|s| matches!(s.expression, Expression::Primitive { .. }))
         {
             match &body_type {
-                InferredType::Known { .. } | InferredType::Meta { .. } | InferredType::Never => {
+                InferredType::Known { .. }
+                | InferredType::Meta { .. }
+                | InferredType::ProtocolMeta { .. }
+                | InferredType::Never => {
                     self.method_return_types.insert(
                         (class_name.clone(), method.selector.name(), is_class_method),
                         body_type.clone(),

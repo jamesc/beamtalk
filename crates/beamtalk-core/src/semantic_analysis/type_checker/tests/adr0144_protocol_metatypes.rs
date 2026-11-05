@@ -530,3 +530,56 @@ fn intersection_of_protocol_metatypes_is_not_never() {
         "`Labelled class & Counted class` is irreducible: {resolved:?}"
     );
 }
+
+#[test]
+fn protocol_metatype_assignability_between_protocols_is_structural() {
+    // `Wire` restates `Labelled`'s requirement without `extending:` it:
+    // every `Wire` conformer conforms to `Labelled`, so `Wire class` flows
+    // into `Labelled class` — the same structural rule as `check_conformance`.
+    // `Counted` needs a class selector `Wire` lacks, so it stays a mismatch.
+    let source = wire_source(
+        r"
+Protocol define: Labelled
+  class label -> String
+
+Protocol define: Counted
+  class count -> Integer
+
+Object subclass: Caller
+  take: l :: Labelled class => l label
+  count: c :: Counted class => c count
+  run: w :: Wire class =>
+    self take: w
+    self count: w
+",
+    );
+    let msgs = messages(&checker_diagnostics(&source));
+    assert!(
+        !msgs.iter().any(|m| m.contains("Labelled class")),
+        "Wire class <: Labelled class structurally: {msgs:#?}"
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("Counted class")),
+        "Wire class is not assignable to Counted class: {msgs:#?}"
+    );
+}
+
+#[test]
+fn unannotated_accessor_keeps_protocol_metatype() {
+    // An unannotated method's inferred `P class` return type is cached like
+    // `C class`, so sends through the accessor are checked against `Wire`.
+    let source = wire_source(
+        r"
+Value subclass: Holder
+  field: wire :: Wire class = Tcp
+
+  transport => self.wire
+  run => self transport sned: 1
+",
+    );
+    let msgs = messages(&checker_diagnostics(&source));
+    assert!(
+        msgs.contains(&"Wire class does not understand 'sned:'".to_string()),
+        "the accessor answers Wire class, not Dynamic: {msgs:#?}"
+    );
+}

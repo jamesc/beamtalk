@@ -259,14 +259,30 @@ impl ProtocolInfo {
         chain
     }
 
-    /// `true` when this protocol is `name` or transitively extends it — so
-    /// every class conforming to this protocol conforms to `name` too
-    /// (ADR 0144: `P class <: Q class` when `P` extends `Q`).
+    /// `true` when every class conforming to this protocol provably conforms
+    /// to `other` too (ADR 0144: `P class <: Q class`): this protocol's
+    /// instance-side conformance selectors and class-side required selectors
+    /// each include `other`'s. Structural, like
+    /// [`ProtocolRegistry::check_conformance`] — the same two selector sets
+    /// `missing_conformance_selectors` checks a class against — so a protocol
+    /// that `extending:`s `other` qualifies, and so does one that merely
+    /// restates `other`'s requirements.
     #[must_use]
-    pub fn is_or_extends(&self, name: &str, registry: &ProtocolRegistry) -> bool {
-        self.extending_chain(registry)
+    pub fn subsumes_conformance_to(
+        &self,
+        other: &ProtocolInfo,
+        registry: &ProtocolRegistry,
+    ) -> bool {
+        let instance = self.all_conformance_selectors(registry);
+        let class_side = self.all_required_class_selectors(registry);
+        other
+            .all_conformance_selectors(registry)
             .iter()
-            .any(|p| p.name.as_str() == name)
+            .all(|sel| instance.contains(sel))
+            && other
+                .all_required_class_selectors(registry)
+                .iter()
+                .all(|sel| class_side.contains(sel))
     }
 
     /// The type parameters of this protocol and of every protocol it
