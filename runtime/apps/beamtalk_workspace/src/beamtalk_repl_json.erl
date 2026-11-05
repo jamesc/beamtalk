@@ -231,7 +231,9 @@ encode_error(Err, Msg) ->
     beamtalk_repl_protocol:encode_error(Err, Msg, fun format_error_message/1).
 
 -doc "Encode an error response with captured stdout and warnings using the REPL error formatter.".
--spec encode_error(term(), beamtalk_repl_protocol:protocol_msg(), binary(), [binary()]) -> binary().
+-spec encode_error(
+    term(), beamtalk_repl_protocol:protocol_msg(), binary(), [beamtalk_repl_protocol:warning()]
+) -> binary().
 encode_error(Err, Msg, Output, Warnings) ->
     beamtalk_repl_protocol:encode_error(Err, Msg, fun format_error_message/1, Output, Warnings).
 
@@ -240,7 +242,11 @@ Encode an error response with captured stdout, warnings, and extra metadata fiel
 using the REPL error formatter.
 """.
 -spec encode_error(
-    term(), beamtalk_repl_protocol:protocol_msg(), binary(), [binary()], map()
+    term(),
+    beamtalk_repl_protocol:protocol_msg(),
+    binary(),
+    [beamtalk_repl_protocol:warning()],
+    map()
 ) -> binary().
 encode_error(Err, Msg, Output, Warnings, Metadata) ->
     beamtalk_repl_protocol:encode_error(

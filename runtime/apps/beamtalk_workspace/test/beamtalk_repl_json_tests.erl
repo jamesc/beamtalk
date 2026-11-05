@@ -1555,7 +1555,7 @@ format_error_with_warnings_catch_test() ->
 %%% encode_reloaded/5 with warnings (line 231)
 %%% ============================================================================
 
-%% maybe_add_warnings_reloaded/2 second clause fires when Warnings is non-empty.
+%% beamtalk_repl_protocol:maybe_add_warnings/2 adds `warnings' when non-empty.
 encode_reloaded_with_warnings_test() ->
     Classes = [#{name => "Counter"}],
     {ok, Msg} = beamtalk_repl_protocol:decode(
@@ -1566,6 +1566,32 @@ encode_reloaded_with_warnings_test() ->
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)),
     ?assertEqual(Warnings, maps:get(<<"warnings">>, Decoded)).
+
+%% BT-4449: structured warnings keep `warnings' as messages and add
+%% `warning_details' when one carries a hint.
+encode_reloaded_with_hinted_warning_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(
+        <<"{\"op\":\"reload\",\"id\":\"wtest2\",\"session\":\"sess1\"}">>
+    ),
+    Warnings = [#{message => <<"m">>, hint => <<"h">>}, <<"collision">>],
+    Result = beamtalk_repl_json:encode_reloaded([#{name => "Counter"}], 0, [], Msg, Warnings),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual([<<"m">>, <<"collision">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}, #{<<"message">> => <<"collision">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
+format_response_with_hinted_warning_test() ->
+    Result = beamtalk_repl_json:format_response_with_warnings(
+        42, [#{message => <<"m">>, hint => <<"h">>}]
+    ),
+    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
+    ?assertEqual([<<"m">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
 
 %%% ============================================================================
 %%% encode_error/2, /4, /5 (lines 236, 241, 251)

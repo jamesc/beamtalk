@@ -1019,8 +1019,8 @@ the useful part: ADR 0144's `X class does not conform to P class` puts
   ```
 
   MCP `evaluate` now lists an eval's compile warnings (one `Warning:` block
-  each, after the value), as the CLI REPL does; before BT-4449 it dropped
-  them.
+  each, after the value — or after the `Error:` block when the eval failed),
+  as the CLI REPL does; before BT-4449 it dropped them.
 - **LiveView attach:** `BtAttach.Workspace.eval/2` returns each warning as
   `%{message: String.t(), hint: String.t() | nil}`. The attach UI does not
   display eval warnings yet (surface-specific gap, pre-existing).

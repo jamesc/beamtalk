@@ -964,6 +964,8 @@ server_api_test_() ->
     {setup, fun start_compiler/0, fun stop_compiler/1, [
         {"compile_expression/3", fun api_compile_expression/0},
         {"compile_expression/4 with options", fun api_compile_expression_opts/0},
+        {"compile_expression/3 warning carries its hint as a field (BT-4449)",
+            fun api_compile_expression_warning_hint/0},
         {"compile_expression_trace/3", fun api_compile_trace/0},
         {"compile_expression_trace/4 with options", fun api_compile_trace_opts/0},
         {"compile/2 class definition", fun api_compile/0},
@@ -984,6 +986,19 @@ server_api_test_() ->
 api_compile_expression() ->
     {ok, Core, []} = beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, []),
     ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
+
+%% BT-4449: the real port's warning shape, end to end through the Erlang
+%% client — a hinted warning is `#{message, hint}`, a plain one has no `hint`
+%% key. Pins the Rust `respond::build_warning_terms` shape against
+%% `beamtalk_compiler_port:warning()`.
+api_compile_expression_warning_hint() ->
+    {ok, _Core, Warnings} =
+        beamtalk_compiler_server:compile_expression(<<"\"abc\" sizee">>, <<"m">>, []),
+    ?assertMatch(
+        [#{message := _, hint := <<"Did you mean 'size'?">>}],
+        [W || #{message := M} = W <- Warnings, binary:match(M, <<"sizee">>) =/= nomatch]
+    ),
+    ?assert(lists:all(fun(W) -> is_map(W) andalso is_binary(maps:get(message, W)) end, Warnings)).
 
 api_compile_expression_opts() ->
     Options = #{class_module_index => #{<<"Counter">> => <<"bt@app@counter">>}},

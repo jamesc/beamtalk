@@ -56,6 +56,28 @@ async fn evaluate_renders_warning_with_its_hint() {
 }
 
 #[tokio::test]
+async fn evaluate_error_still_renders_warnings_with_hints() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "error": "boom",
+        "status": ["done", "error"],
+        "warnings": ["w"],
+        "warning_details": [{"message": "w", "hint": "h"}]
+    })))
+    .await;
+    let result = mcp
+        .evaluate(Parameters(EvaluateParams {
+            code: "x".to_string(),
+            trace: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = call_text(&result);
+    assert!(text.contains("Error: boom"), "{text:?}");
+    assert!(text.contains("Warning: w\nHint: h"), "{text:?}");
+}
+
+#[tokio::test]
 async fn evaluate_trace_renders_steps() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
         "steps": [{"src": "1 + 2", "value": "3"}]

@@ -355,6 +355,29 @@ structured_warning_hint_on_error_response_test() ->
         maps:get(<<"warning_details">>, Decoded)
     ).
 
+structured_warning_hint_on_codegen_response_test() ->
+    Msg = make_msg(<<"show-codegen">>, <<"msg-h3">>, undefined),
+    Result = beamtalk_repl_protocol:encode_codegen(
+        <<"core">>, [#{message => <<"m">>, hint => <<"h">>}], Msg
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"m">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
+structured_warning_hint_on_trace_response_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-h4">>, undefined),
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        [], Msg, fun identity/1, <<>>, [#{message => <<"m">>, hint => <<"h">>}]
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
 %%% encode_error/6 — with metadata
 
 encode_error_with_metadata_new_format_test() ->

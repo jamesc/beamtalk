@@ -135,10 +135,10 @@ handle_response_expression_with_warnings_test() ->
     Response = #{
         status => ok,
         core_erlang => <<"core">>,
-        warnings => [<<"unused var">>]
+        warnings => [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]
     },
     ?assertEqual(
-        {ok, <<"core">>, [<<"unused var">>]},
+        {ok, <<"core">>, [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]},
         beamtalk_compiler_port:handle_response(Response)
     ).
 

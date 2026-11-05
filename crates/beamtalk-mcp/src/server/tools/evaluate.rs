@@ -56,7 +56,15 @@ impl BeamtalkMcp {
             if let Some(ref hint) = response.hint {
                 diag = diag.with_hint(hint);
             }
-            return Ok(error_result(fmt::format_diagnostic(&diag, MCP_OUTPUT_MODE)));
+            // Warnings raised before the failure (e.g. a class definition
+            // that warned, then a trailing expression that failed) still
+            // reach the caller, with their hints, as the CLI REPL shows them.
+            let mut parts = vec![ContentBlock::text(fmt::format_diagnostic(
+                &diag,
+                MCP_OUTPUT_MODE,
+            ))];
+            parts.extend(warning_blocks(&response));
+            return Ok(CallToolResult::error(parts));
         }
 
         let warnings: Vec<ContentBlock> = warning_blocks(&response).collect();

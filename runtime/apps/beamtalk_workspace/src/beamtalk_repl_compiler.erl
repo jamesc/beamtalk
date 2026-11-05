@@ -53,11 +53,11 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 
 -doc "Compile a Beamtalk expression to bytecode.".
 -spec compile_expression(string(), atom(), map()) ->
-    {ok, binary(), term(), [binary()]}
-    | {ok, class_definition, map(), [binary()]}
-    | {ok, method_definition, map(), [binary()]}
-    | {ok, protocol_definition, map(), [binary()]}
-    | {ok, type_alias_definition, map(), [binary()]}
+    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, type_alias_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
@@ -71,11 +71,11 @@ Compile a Beamtalk expression to bytecode, with earlier-turn type aliases.
 `::' annotations in `Expression' resolve names this session already knows.
 """.
 -spec compile_expression(string(), atom(), map(), [binary()]) ->
-    {ok, binary(), term(), [binary()]}
-    | {ok, class_definition, map(), [binary()]}
-    | {ok, method_definition, map(), [binary()]}
-    | {ok, protocol_definition, map(), [binary()]}
-    | {ok, type_alias_definition, map(), [binary()]}
+    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, type_alias_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
     compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources).
@@ -108,11 +108,11 @@ caller omits `known_type_aliases`. Skipping registration only skips the
 results; it does not skip alias *resolution* for the expression itself.
 """.
 -spec compile_expression_no_registration(string(), atom(), map()) ->
-    {ok, binary(), term(), [binary()]}
-    | {ok, class_definition, map(), [binary()]}
-    | {ok, method_definition, map(), [binary()]}
-    | {ok, protocol_definition, map(), [binary()]}
-    | {ok, type_alias_definition, map(), [binary()]}
+    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {ok, type_alias_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {error, term()}.
 compile_expression_no_registration(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
@@ -148,7 +148,7 @@ Like `compile_expression/3' but the generated module's `eval/1' returns
 `{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
 """.
 -spec compile_expression_trace(string(), atom(), map()) ->
-    {ok, binary(), term(), [binary()]} | {error, term()}.
+    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
 compile_expression_trace(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
@@ -173,7 +173,7 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
 -doc "Compile a Beamtalk file to bytecode.".
 -spec compile_file(string(), string(), boolean(), binary() | undefined) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()}
-    | {ok, protocol_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride).
@@ -186,7 +186,7 @@ redundant class registry scans during batch loads.
 """.
 -spec compile_file(string(), string(), boolean(), binary() | undefined, map()) ->
     {ok, binary(), [#{name := string(), superclass := string()}], atom()}
-    | {ok, protocol_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {error, term()}.
 compile_file(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes) ->
     compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes).
@@ -196,7 +196,7 @@ Compile a Beamtalk expression and return Core Erlang source (for show-codegen).
 Does NOT compile to bytecode.
 """.
 -spec compile_for_codegen(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, term()}.
+    {ok, binary(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
 compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
     wrap_compiler_errors(
         fun() ->
@@ -226,7 +226,7 @@ Compile a Beamtalk source file and return Core Erlang source (for show-codegen).
 Does NOT compile to bytecode. Used when inspecting codegen for a loaded class.
 """.
 -spec compile_file_for_codegen(binary(), string() | undefined) ->
-    {ok, binary(), [binary()]} | {error, term()}.
+    {ok, binary(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
 compile_file_for_codegen(SourceBin, Path) ->
     Options0 = #{},
     Options1 = apply_source_path(Options0, Path),
@@ -382,7 +382,7 @@ wrap_compiler_errors so that a compiler crash (exit, throw, error) returns
 kill the REPL process.
 """.
 -spec compile_for_method_reload(binary(), map()) ->
-    {ok, binary(), atom(), list(), [binary()]} | {error, term()}.
+    {ok, binary(), atom(), list(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
 compile_for_method_reload(SourceBin, Options) ->
     wrap_compiler_errors(
         fun() ->
@@ -584,7 +584,7 @@ for why never removing an edge is the safe default for a REPL-inline compile
 that might be missing file-local context).
 """.
 -spec compile_protocol_definition_result(map(), replace | additive) ->
-    {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
+    {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
 compile_protocol_definition_result(ProtocolInfo, Mode) ->
     #{
         core_erlang := CoreErlang,
@@ -635,7 +635,7 @@ whole-set-replace registration would silently clobber a real edge a prior
 `:load` registered. See `beamtalk_alias_xref:register_class_additive/2`'s doc.
 """.
 -spec compile_class_definition_result(map(), atom()) ->
-    {ok, class_definition, map(), [binary()]} | {error, binary()}.
+    {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
 compile_class_definition_result(ClassInfo, ModuleName) ->
     #{
         core_erlang := CoreErlang,
@@ -673,8 +673,8 @@ compile_trailing_expressions(ClassInfo, ModuleName) ->
     end.
 
 %% Assemble the final class definition result map.
--spec assemble_class_result(binary(), atom(), list(), [binary()], term()) ->
-    {ok, class_definition, map(), [binary()]} | {error, binary()}.
+-spec assemble_class_result(binary(), atom(), list(), [beamtalk_repl_protocol:warning()], term()) ->
+    {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
 assemble_class_result(_Binary, _ClassModName, _Classes, _Warnings, {error, Msg}) ->
     {error, Msg};
 assemble_class_result(Binary, ClassModName, Classes, Warnings, TrailingResult) ->
@@ -692,8 +692,8 @@ assemble_class_result(Binary, ClassModName, Classes, Warnings, TrailingResult) -
     {ok, class_definition, ClassInfo2, Warnings}.
 
 %% Compile a standard (non-class, non-method) expression.
--spec compile_standard_expression(binary(), [binary()]) ->
-    {ok, binary(), term(), [binary()]} | {error, binary()}.
+-spec compile_standard_expression(binary(), [beamtalk_repl_protocol:warning()]) ->
+    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
 compile_standard_expression(CoreErlang, Warnings) ->
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
