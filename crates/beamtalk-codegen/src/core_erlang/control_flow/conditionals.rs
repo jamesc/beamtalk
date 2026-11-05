@@ -2330,11 +2330,7 @@ impl CoreErlangGenerator {
         let val_var = self.fresh_temp_var("Val");
         // In REPL mode, use the plain variable name as the key (no
         // __local__ prefix), so reads and writes agree on the key.
-        let state_key: String = if self.is_repl_mode() {
-            id.name.to_string()
-        } else {
-            Self::local_state_key(&id.name)
-        };
+        let state_key = self.local_scratch_key(&id.name);
 
         // C2z — BT-3493: the RHS is itself a field write (`r := (self.x
         // := ...)`, at any parenthesization depth) — the shared ADR 0111

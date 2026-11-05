@@ -2040,6 +2040,36 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// The frame an arm entered after the try body ([`ArmEntry`]) lowers its
+    /// entry `LocalRebind`s by: the frame the arm itself is rendered as
+    /// (`render_branch_arm`), so the verifier's `LocalRebindModeMismatch`
+    /// reads the same cell of ADR 0131 §2's table. Outside the REPL that is
+    /// the `BranchArm` frame carrying the arm's `threads`. A REPL arm is not a
+    /// `BranchArm`: it runs over the bindings map (the `StateAcc` frame
+    /// [`Self::with_repl_arm_rebind_frame`] registers), where every binding is
+    /// a member (`RebindFrame::with_repl_binding`), so an entry rebind is a
+    /// `Put` of the binding's key (BT-4424: inside a REPL loop body, a binding
+    /// the body wrote before the `ensure:` is bound in the generated code and
+    /// threaded here, and was lowered as a plain `let`).
+    fn arm_entry_rebind_frame(
+        &self,
+        frame: FrameId,
+        arm: Option<&ArmFrame>,
+        locals: &[String],
+    ) -> Result<RebindFrame> {
+        if !self.is_repl_mode() {
+            return Ok(RebindFrame {
+                frame,
+                kind: RebindFrameKind::BranchArm,
+                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
+            });
+        }
+        let repl_arm = self.rebind_frame_of(frame)?;
+        Ok(locals
+            .iter()
+            .fold(repl_arm, |frame, local| frame.with_repl_binding(local)))
+    }
+
     /// The `BranchArm` frame shared by the arms of an `on:do:`/`ensure:` that
     /// is a local-threading producer: the construct's seeded set
     /// ([`Self::branch_threaded_locals`] over `blocks`). `None` for the legacy
@@ -2116,11 +2146,7 @@ impl CoreErlangGenerator {
         // arm's frame (a legacy arm, which threads nothing of its own, binds
         // them with a plain `let`).
         if let Some(entry) = entry {
-            let enclosing = RebindFrame {
-                frame,
-                kind: RebindFrameKind::BranchArm,
-                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
-            };
+            let enclosing = self.arm_entry_rebind_frame(frame, arm, &entry.locals)?;
             let carrier = self.fresh_temp_var("ExEntry");
             let prelude = self.construct_rebind_prelude(
                 &enclosing,

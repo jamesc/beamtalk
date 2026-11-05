@@ -26,6 +26,20 @@ impl CoreErlangGenerator {
         key
     }
 
+    /// The key a local's value is held under in the frame's scratch map: the
+    /// bare name in a REPL input, whose scratch map is the bindings map itself
+    /// (BT-4424), and [`Self::local_state_key`] everywhere else. A write
+    /// (`lower_local_var_assignment_bind`) and a read back of it (an `ensure:`
+    /// cleanup's entry rebinds, `construct_rebind_prelude`) both key by it, so
+    /// the two agree on the slot.
+    pub(in crate::core_erlang) fn local_scratch_key(&self, var_name: &str) -> String {
+        if self.is_repl_mode() {
+            var_name.to_string()
+        } else {
+            Self::local_state_key(var_name)
+        }
+    }
+
     /// ADR 0111 Addendum 5 (rebind idiom): rebinds
     /// each of `vars` — a nested control-flow construct's threaded
     /// `__local__` captured vars — from `state_var`, returning one `let V =
