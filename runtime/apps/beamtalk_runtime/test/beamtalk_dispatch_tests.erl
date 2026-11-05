@@ -57,8 +57,12 @@ dispatch_test_() ->
             {"lookup finds local method", fun test_lookup_local_method/0},
             {"BT-4280: inherited_target answers compiled for an inherited actor method",
                 fun test_inherited_target_compiled/0},
-            {"BT-4280: inherited_target answers slow for an Object-owned selector",
+            {"BT-4280: inherited_target answers no actor verdict for an Object-owned selector",
                 fun test_inherited_target_object_owned_slow/0},
+            {"BT-4260: inherited_target answers value for an Object method sent to a String",
+                fun test_inherited_target_value_owner/0},
+            {"BT-4260: an extension anywhere on a value chain flips the verdict",
+                fun test_inherited_target_value_extension_flips/0},
             {"BT-4280: an extension on the class or its superclass flips the verdict",
                 fun test_inherited_target_extension_flips/0},
             {"BT-4280: an unregistered class answers slow and is not cached",
@@ -2124,13 +2128,65 @@ test_inherited_target_compiled() ->
         beamtalk_dispatch:inherited_target('LoggingCounter', decrement)
     ).
 
-%% BT-4280: `printString` resolves to Object, an owner without the actor-State flag.
+%% BT-4280: `printString` resolves to Object, an owner without the actor-State
+%% flag, so the verdict is not `compiled`. (BT-4260: it is Object's `value`
+%% verdict, which an actor's `dispatch/4` arm treats as `slow`.)
 test_inherited_target_object_owned_slow() ->
     ok = ensure_counter_loaded(),
     ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
-    ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', printString)),
+    ?assertEqual(
+        {value, 'Object', 'bt@stdlib@object'},
+        beamtalk_dispatch:inherited_target('LoggingCounter', printString)
+    ),
     ?assertEqual(slow, beamtalk_dispatch:inherited_target('LoggingCounter', bt4280NoSuchSelector)).
+
+%% BT-4260: `isKindOf:` sent to a String is Object's own method; every class
+%% between (Binary, Collection, Value) has a local probe that answers false, so
+%% the owner is Object and the verdict is its state-less `dispatch/3`. The
+%% second ask is a cache hit. A selector nobody defines answers `slow`.
+test_inherited_target_value_owner() ->
+    beamtalk_class_derived_cache:invalidate(),
+    Object = {value, 'Object', 'bt@stdlib@object'},
+    ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
+    ?assertMatch(
+        [{_, _, Object}],
+        ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'String', 'isKindOf:'})
+    ),
+    ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
+    ?assertEqual(Object, beamtalk_dispatch:inherited_target('Integer', 'isKindOf:')),
+    ?assertEqual(slow, beamtalk_dispatch:inherited_target('String', bt4260NoSuchSelector)).
+
+%% An extension on the class itself, its superclass, or an ancestor further up
+%% (seen by that ancestor's `has_method_local/1`) makes the verdict `slow`;
+%% removing it flips it back. Both install and removal flush the derived cache.
+test_inherited_target_value_extension_flips() ->
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    Fun = fun(_Args, _Self) -> ext4260 end,
+    Object = {value, 'Object', 'bt@stdlib@object'},
+    Classes = ['String', 'Binary', 'Collection', 'Value'],
+    try
+        lists:foreach(
+            fun(C) ->
+                ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
+                ok = beamtalk_extensions:register(C, 'isKindOf:', Fun, bt4260_test),
+                ?assertEqual(slow, beamtalk_dispatch:inherited_target('String', 'isKindOf:')),
+                ok = beamtalk_extensions:unregister(C, 'isKindOf:'),
+                ?assertEqual(Object, beamtalk_dispatch:inherited_target('String', 'isKindOf:'))
+            end,
+            Classes
+        )
+    after
+        [
+            (try
+                beamtalk_extensions:unregister(C, 'isKindOf:')
+            catch
+                _:_ -> ok
+            end)
+         || C <- Classes
+        ]
+    end.
 
 %% An extension on the class itself, or on its superclass, makes the verdict
 %% `slow` (today's extension / super path); removing it flips it back. Both

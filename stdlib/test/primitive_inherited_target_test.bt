@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4260: a send to a built-in receiver that inherits its method (here
+// `isKindOf:`, owned by Object, sent to a String) takes the memoised verdict
+// from `beamtalk_dispatch:inherited_target/2` in the receiver class's
+// `dispatch/3` default arm and calls the owner's `dispatch/3` directly,
+// instead of walking String -> Binary -> Collection -> Value -> Object with an
+// extension lookup at each level. An extension anywhere on that chain must
+// still win, for call sites compiled before it was installed, both before and
+// after the verdict is warm; removing it must restore the inherited method.
+//
+// Each check runs through a typed call site (which direct-calls
+// `bt@stdlib@string:dispatch/3`) and an untyped one (the dynamic send path).
+
+TestCase subclass: PrimitiveInheritedTargetTest
+
+  typedKind: s :: String => s isKindOf: String
+
+  dynamicKind: s => s isKindOf: String
+
+  dynamicProbe: s => s bt4260Probe
+
+  checkKind: expected on: s =>
+    self assert: (self typedKind: s) equals: expected
+    self assert: (self dynamicKind: s) equals: expected
+
+  testInheritedSendReachesObject =>
+    self checkKind: true on: "abc"
+    self checkKind: true on: "abc"
+    self assert: (self dynamicKind: 42) equals: false
+
+  testExtensionOnStringWinsThenLosesAfterRemoval =>
+    self checkExtensionOn: #String
+
+  testExtensionOnBinaryWinsThenLosesAfterRemoval =>
+    self checkExtensionOn: #Binary
+
+  testExtensionOnCollectionWinsThenLosesAfterRemoval =>
+    self checkExtensionOn: #Collection
+
+  testExtensionOnValueWinsThenLosesAfterRemoval => self checkExtensionOn: #Value
+
+  // An extension installed before the first send (no warm verdict yet).
+  testExtensionOnBinaryWinsBeforeWarmUp =>
+    Erlang beamtalk_extensions
+      register: #Binary
+      selector: #isKindOf:
+      fun: [:args :receiver | #fromBinaryExtension]
+      owner: #bt4260
+    [
+      self checkKind: #fromBinaryExtension on: "cold"
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Binary selector: #isKindOf:
+    ]
+    self checkKind: true on: "cold"
+
+  // A selector no class on the chain defines: an extension on Object (the
+  // root the walk ends at) is reached, before and after the DNU verdict is
+  // warm, and removing it gives does-not-understand again.
+  testExtensionOnObjectWinsThenLosesAfterRemoval =>
+    before := [self dynamicProbe: "abc"] on: Error do: [:e | e kind]
+    self assert: before equals: #does_not_understand
+    Erlang beamtalk_extensions
+      register: #Object
+      selector: #bt4260Probe
+      fun: [:args :receiver | #fromObjectExtension]
+      owner: #bt4260
+    [
+      self assert: (self dynamicProbe: "abc") equals: #fromObjectExtension
+      self assert: (self dynamicProbe: "abc") equals: #fromObjectExtension
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Object selector: #bt4260Probe
+    ]
+    after := [self dynamicProbe: "abc"] on: Error do: [:e | e kind]
+    self assert: after equals: #does_not_understand
+
+  checkExtensionOn: className =>
+    self checkKind: true on: "abc"
+    Erlang beamtalk_extensions
+      register: className
+      selector: #isKindOf:
+      fun: [:args :receiver | #fromExtension]
+      owner: #bt4260
+    [
+      self checkKind: #fromExtension on: "abc"
+      self checkKind: #fromExtension on: "abc"
+      Erlang beamtalk_extensions unregister: className selector: #isKindOf:
+      self checkKind: true on: "abc"
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: className selector: #isKindOf:
+    ]
+    self checkKind: true on: "abc"

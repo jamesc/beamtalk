@@ -109,11 +109,13 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// turning an O(depth) walk into O(depth²). `has_method_local/1` gives
     /// `class_chain_step` a probe that matches its contract again.
     ///
-    /// Only actor classes set this (`gen_server::dispatch::generate_has_method`,
-    /// the only [`SuperclassDelegation::Dynamic`] call site) — value-type
-    /// `has_method/1` uses [`SuperclassDelegation::Static`], a
-    /// compile-time-resolved direct module call with no live registry walk,
-    /// so it doesn't compound the same way.
+    /// Value types set it too (BT-4260), although their
+    /// [`SuperclassDelegation::Static`] `has_method/1` does not compound the
+    /// same way: `beamtalk_dispatch:resolve_owner/2` walks with the same
+    /// per-node probe, and without a local answer it would credit an
+    /// inherited method to the first value class it visits. The
+    /// `inherited_target/2` verdict a value type's `dispatch/3` default arm
+    /// asks needs the owner the superclass `dispatch/3` chain would reach.
     pub(in crate::core_erlang) emit_local_probe: bool,
 }
 
