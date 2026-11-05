@@ -658,6 +658,11 @@ keyword_send_non_keyword_tokens_test() ->
     ?assertEqual(not_keyword, kw(<<"#at:put:">>, <<>>)),
     ?assertEqual(not_keyword, kw(<<>>, <<>>)).
 
+keyword_send_overlong_line_is_not_scanned_test() ->
+    Long = binary:copy(<<"a b: 1. ">>, 1000),
+    ?assertEqual(none, kw(<<"Foo bar:">>, Long)),
+    ?assertEqual(not_keyword, kw(<<"Foo bar">>, Long)).
+
 hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
     ?assertEqual(
         <<>>,

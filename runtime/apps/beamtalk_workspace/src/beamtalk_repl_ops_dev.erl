@@ -64,6 +64,9 @@ Extracted from beamtalk_repl_server.
 ]).
 -endif.
 
+%% Longest editor line (prefix + suffix) the hover keyword-send scanner reads.
+-define(HOVER_MAX_LINE_BYTES, 4096).
+
 %% Methods inherited from Object that are internal implementation protocol and
 %% should not appear in user-facing completions. Long-term, reflection methods
 %% (fieldNames, fieldAt:, fieldAt:put:) should move to Mirror classes.
@@ -1201,17 +1204,19 @@ Examples:
 """.
 -spec keyword_send_at(binary(), binary()) ->
     {ok, binary(), binary()} | none | not_keyword.
+keyword_send_at(Code, Suffix) when
+    byte_size(Code) + byte_size(Suffix) > ?HOVER_MAX_LINE_BYTES
+->
+    %% Hover fires whenever the pointer rests, so bound the scan (it is
+    %% quadratic in the line length) rather than stall on a huge pasted line.
+    keyword_unscannable(Code);
 keyword_send_at(Code, Suffix) ->
     Line = binary_to_list(<<Code/binary, Suffix/binary>>),
     HoverEnd = byte_size(Code),
     case hover_tokens(Line, length(Line), []) of
         unsupported ->
-            %% An interpolated string makes the line unscannable here. Only a
-            %% keyword hover needs the scan, so keep the unary path working.
-            case binary:last(Code) of
-                $: -> none;
-                _ -> not_keyword
-            end;
+            %% An interpolated string makes the line unscannable here.
+            keyword_unscannable(Code);
         {ok, Tokens} ->
             {Before, After} = lists:splitwith(
                 fun({_Kind, _Text, End}) -> End =< HoverEnd end, Tokens
@@ -1226,6 +1231,15 @@ keyword_send_at(Code, Suffix) ->
                 _ ->
                     not_keyword
             end
+    end.
+
+%% A line we will not scan: a hovered keyword gets no tooltip (`none`), any
+%% other token keeps the unary/class path (which does not need the scan).
+-spec keyword_unscannable(binary()) -> none | not_keyword.
+keyword_unscannable(Code) ->
+    case binary:longest_common_suffix([Code, <<":">>]) of
+        1 -> none;
+        0 -> not_keyword
     end.
 
 -spec keyword_send_of([{non_neg_integer(), hover_token()}]) ->
