@@ -26306,6 +26306,31 @@
       "explanation": "BT-631/BT-859: Tests that an actor method explicitly returning self returns the actor reference and that reference is usable for further messages"
     },
     {
+      "id": "stdlib-test-equals-fast-path-test",
+      "title": "EqualsFastPathTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "EqualsFastPathTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "equals_fast_path_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testDefaultEqualsIsRawEquality",
+        "testExtensionOnASuperclassWins",
+        "testExtensionOnTheReceiverClassWins"
+      ],
+      "source": "// BT-4416: an `equals:` send to a primitive receiver is answered by `=:=`\n// without walking the dispatch chain when nothing on the receiver's class\n// chain overrides `equals:` — but an override, including an extension\n// installed after the first send, still wins.\n//\n// The extensions registered here are deliberately narrow: they only widen\n// equality for the marker pair <<65, 22>> / <<68, 22>>, so a test\n// running concurrently that compares other binaries is unaffected (an\n// `equals:` override may only make *more* values equal).\n\nTestCase subclass: EqualsFastPathTest\n\n  testDefaultEqualsIsRawEquality =>\n    a := <<1, 2>>\n    self assert: (a equals: <<1, 2>>)\n    self deny: (a equals: <<1, 3>>)\n    self assert: (\"ab\" equals: \"ab\")\n    self deny: (\"ab\" equals: \"ba\")\n    self assert: (42 equals: 42)\n    self deny: (42 equals: 42.0)\n    self assert: (#sym equals: #sym)\n    self deny: (#sym equals: #other)\n    self assert: (nil equals: nil)\n    self deny: (true equals: false)\n    self assert: (#(1, 2) equals: #(1, 2))\n    self deny: (#(1, 2) equals: #(2, 1))\n\n  testExtensionOnTheReceiverClassWins =>\n    a := <<65, 22>>\n    b := <<68, 22>>\n    self deny: (a equals: b)\n    Erlang beamtalk_extensions\n      register: #Binary\n      selector: #equals:\n      fun: [:args :receiver |\n        (receiver =:= args first) or: [\n          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]\n        ]\n      ]\n      owner: #bt4416\n    [\n      self assert: (a equals: b)\n      // A raw hit still answers true (the reflexivity contract).\n      self assert: (a equals: <<65, 22>>)\n      self deny: (b equals: a)\n      Binary removeSelector: #equals:\n      self deny: (a equals: b)\n    ] ensure: [Binary removeSelector: #equals: ifAbsent: [nil]]\n\n  testExtensionOnASuperclassWins =>\n    a := <<65, 22>>\n    b := <<68, 22>>\n    self deny: (a equals: b)\n    Erlang beamtalk_extensions\n      register: #Collection\n      selector: #equals:\n      fun: [:args :receiver |\n        (receiver =:= args first) or: [\n          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]\n        ]\n      ]\n      owner: #bt4416\n    [\n      self assert: (a equals: b)\n      Collection removeSelector: #equals:\n      self deny: (a equals: b)\n    ] ensure: [Collection removeSelector: #equals: ifAbsent: [nil]]",
+      "explanation": "BT-4416: an `equals:` send to a primitive receiver is answered by `=:=` without walking the dispatch chain when nothing on the receiver's class chain overrides `equals:` — but an override, including an extension installed after the first send, still wins.  The extensions registered here are deliberately narrow: they only widen equality for the marker pair <<65, 22>> / <<68, 22>>, so a test running concurrently that compares other binaries is unaffected (an `equals:` override may only make *more* values equal)."
+    },
+    {
       "id": "stdlib-test-erlang-interop-test",
       "title": "ErlangInteropTest",
       "category": "stdlib-tests",

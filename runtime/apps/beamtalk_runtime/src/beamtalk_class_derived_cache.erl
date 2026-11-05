@@ -118,6 +118,7 @@ so they share an owner and heir and are lost together.
     invalidate/0,
     fetch/2,
     fetch/3,
+    generation/0,
     inherits_from/2
 ]).
 
@@ -224,6 +225,22 @@ fetch_valid(Key, Compute, Valid) ->
             catch
                 error:badarg -> element(2, Compute())
             end
+    end.
+
+-doc """
+The current cache generation, or `undefined` before `new/0`.
+
+Every `invalidate/0` bumps it, so a caller that memoises a derived fact
+somewhere cheaper than this module's ETS table (BT-4416: a per-process memo
+on the `equals:` send path, where one ETS read is most of the cost) can tag
+the memo with the generation read *before* computing it and treat a
+mismatch as a miss.
+""".
+-spec generation() -> integer() | undefined.
+generation() ->
+    case persistent_term:get(?GEN_KEY, undefined) of
+        undefined -> undefined;
+        Ref -> atomics:get(Ref, 1)
     end.
 
 -doc """

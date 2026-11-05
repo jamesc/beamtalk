@@ -820,7 +820,7 @@ Both containers use `=:=` for identity, so they agree with each other and with `
 
 The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
 
-An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss, and so does an `equals:` send to a primitive receiver (`Integer`, `Binary`, `String`, `Symbol`, …): a raw hit answers `true` without dispatch, and a raw miss answers `false` without dispatch unless the receiver's class chain overrides `equals:` (for a primitive, through an extension).
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 

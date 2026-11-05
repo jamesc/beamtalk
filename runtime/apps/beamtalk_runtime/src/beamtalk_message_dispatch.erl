@@ -119,6 +119,19 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
         {error, Error} ->
             beamtalk_exception_handler:reraise(Error)
     end;
+send(Receiver, 'equals:', [Arg]) when
+    is_number(Receiver);
+    is_atom(Receiver);
+    is_bitstring(Receiver);
+    is_list(Receiver);
+    is_function(Receiver);
+    is_tuple(Receiver), tuple_size(Receiver) =:= 2, element(1, Receiver) =:= beamtalk_string
+->
+    %% BT-4416: `=:=` fast path for `equals:` on a primitive receiver, which
+    %% otherwise walks the whole dispatch chain to reach `Object>>equals:`.
+    %% An override on the receiver's class — compiled or an extension — still
+    %% wins; see `beamtalk_equality:primitive_equals/2`.
+    beamtalk_equality:primitive_equals(Receiver, Arg);
 send(Receiver, Selector, Args) ->
     case classify_receiver(Receiver) of
         primitive ->
