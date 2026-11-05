@@ -250,7 +250,7 @@ impl CoreErlangGenerator {
     /// `#(a, b) := expr` that is a statement of a threaded body — a loop or
     /// fold body, a conditional arm, a protected block or handler, a Tier 2
     /// stateful block. The right-hand side is sequenced and its elements
-    /// extracted ([`Self::generate_destructure_extractions_sequenced`]), then
+    /// extracted ([`Self::generate_destructure_extractions`]), then
     /// every name the pattern binds is written to the frame exactly as
     /// `name := <element>` writes it there, by `write_of(name)`:
     ///
@@ -277,9 +277,17 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
         write_of: &dyn Fn(&str) -> LocalWrite,
     ) -> Result<(String, bool)> {
+        // The right-hand side is sequenced first, as
+        // `generate_destructure_bindings_sequenced` sequences it: its prelude
+        // may rebind a name the pattern binds (a producer writing `w` in
+        // `#(w, _) := #(<loop writing w>, 0)`), so each name's direct-rebind
+        // source is read after it, as `lower_direct_var_update_in_loop_bind`
+        // reads the target's.
+        let scope = self.thread_ahead(value, stmts, frame)?;
         let sources = self.destructure_sources(pattern, frame);
         let (docs, rhs_var, bound) =
-            self.generate_destructure_extractions_sequenced(pattern, value, frame, stmts)?;
+            self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        self.finish_precompiled_scope(scope)?;
         let wrote =
             self.write_destructured_locals(docs, &sources, &bound, frame, span, stmts, write_of);
         Ok((rhs_var, wrote))

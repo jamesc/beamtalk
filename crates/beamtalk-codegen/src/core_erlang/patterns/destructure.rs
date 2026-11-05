@@ -73,25 +73,8 @@ impl CoreErlangGenerator {
         frame: super::super::threaded_ir::FrameId,
         stmts: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
     ) -> Result<(Vec<Document<'static>>, String)> {
-        let (docs, rhs_var, _bound) =
-            self.generate_destructure_extractions_sequenced(pattern, value, frame, stmts)?;
-        Ok((docs, rhs_var))
-    }
-
-    /// [`Self::generate_destructure_bindings_sequenced`], also returning each
-    /// `(name, core_var)` the pattern binds: what a threaded body's
-    /// destructuring lowering (`lower_destructure_bind`, BT-4439) writes back
-    /// to the frame's locals.
-    #[allow(clippy::type_complexity)]
-    pub(in crate::core_erlang) fn generate_destructure_extractions_sequenced(
-        &mut self,
-        pattern: &Pattern,
-        value: &Expression,
-        frame: super::super::threaded_ir::FrameId,
-        stmts: &mut Vec<super::super::threaded_ir::ThreadedStmt>,
-    ) -> Result<(Vec<Document<'static>>, String, Vec<(String, String)>)> {
         let scope = self.thread_ahead(value, stmts, frame)?;
-        let result = self.generate_destructure_extractions(pattern, value, "let ", " in ")?;
+        let result = self.generate_destructure_bindings_with_value(pattern, value)?;
         self.finish_precompiled_scope(scope)?;
         Ok(result)
     }
@@ -145,7 +128,7 @@ impl CoreErlangGenerator {
     /// - `rhs_var_name` is the Core Erlang var holding the evaluated RHS
     /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
     #[allow(clippy::type_complexity)]
-    pub(super) fn generate_destructure_extractions(
+    pub(in crate::core_erlang) fn generate_destructure_extractions(
         &mut self,
         pattern: &Pattern,
         value: &Expression,
