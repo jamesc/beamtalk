@@ -82,6 +82,8 @@ routing_conformance_test_() ->
         {"reserved tuple tags are never Tuples", fun reserved_tuples_are_not_tuples/0},
         {"isKindOfBuiltin treats only String among reserved tuples as a plain value",
             fun reserved_tuples_are_not_plain_values/0},
+        {"with no override, isKindOfBuiltin answers the test for plain values only",
+            fun is_kind_of_builtin_answers_test_without_override/0},
         {"an isKindOf: override below Object makes isKindOfBuiltin send",
             fun is_kind_of_override_makes_builtin_send/0},
         {"rewritten selectors are rewritten before classification",
@@ -255,6 +257,35 @@ reserved_tuples_are_not_plain_values() ->
     ?assertNot(beamtalk_behaviour_intrinsics:plain_value({beamtalk_object, 1, 2})),
     ?assert(beamtalk_behaviour_intrinsics:plain_value({a, 1})),
     ?assert(beamtalk_behaviour_intrinsics:plain_value(#{a => 1})).
+
+%% BT-4473: the branch the BUnit run may never reach (another test registers
+%% an `isKindOf:` extension node-wide): with the flag down, a plain value gets
+%% the compiler's test answer, which agrees with the send for every routed
+%% sample; a non-plain value (a class object) still sends.
+is_kind_of_builtin_answers_test_without_override() ->
+    lists:foreach(
+        fun({#{<<"class">> := ClassBin}, Sample, _Target}) ->
+            Class = binary_to_atom(ClassBin, utf8),
+            K = beamtalk_class_registry:resolve_class_object(Class),
+            Sent = beamtalk_message_dispatch:send(Sample, 'isKindOf:', [K]),
+            ?assertEqual(
+                Sent,
+                beamtalk_behaviour_intrinsics:kind_of_builtin(Sample, K, Sent, false),
+                ClassBin
+            ),
+            ?assertEqual(
+                not Sent,
+                beamtalk_behaviour_intrinsics:kind_of_builtin(Sample, K, not Sent, false),
+                ClassBin
+            )
+        end,
+        routed_samples()
+    ),
+    IntegerClass = beamtalk_class_registry:resolve_class_object('Integer'),
+    ?assertEqual(
+        false,
+        beamtalk_behaviour_intrinsics:kind_of_builtin(IntegerClass, IntegerClass, true, false)
+    ).
 
 %% BT-4473: once any class below `Object` defines `isKindOf:` (here an
 %% extension on `Port`), `isKindOfBuiltin/3` stops answering the compiler's

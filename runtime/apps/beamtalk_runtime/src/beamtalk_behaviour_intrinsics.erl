@@ -151,7 +151,7 @@ that the Behaviour/Class libraries can rely on.
 ]).
 
 -ifdef(TEST).
--export([rewrite_after_identity_move/4, plain_value/1]).
+-export([rewrite_after_identity_move/4, plain_value/1, kind_of_builtin/4]).
 -endif.
 
 %%% ============================================================================
@@ -1008,9 +1008,18 @@ for a `binding :: Class` match arm.
 """.
 -spec isKindOfBuiltin(term(), term(), boolean()) -> term().
 isKindOfBuiltin(Receiver, Behaviour, TestAnswer) ->
-    case
-        plain_value(Receiver) andalso not beamtalk_default_method:overridden_anywhere('isKindOf:')
-    of
+    kind_of_builtin(
+        Receiver,
+        Behaviour,
+        TestAnswer,
+        beamtalk_default_method:overridden_anywhere('isKindOf:')
+    ).
+
+%% `isKindOfBuiltin/3` with the node-wide override flag passed in, so tests
+%% can check both branches whatever the flag holds in their node.
+-spec kind_of_builtin(term(), term(), boolean(), boolean()) -> term().
+kind_of_builtin(Receiver, Behaviour, TestAnswer, Overridden) ->
+    case not Overridden andalso plain_value(Receiver) of
         true -> TestAnswer;
         false -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
     end.

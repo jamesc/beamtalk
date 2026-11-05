@@ -1968,8 +1968,11 @@ impl CoreErlangGenerator {
     /// built-in below `Object` defines `isKindOf:` — checked here against the
     /// class hierarchy, so a stdlib override would turn this lowering off.
     ///
-    /// `self`/`super` receivers keep their own lowering: an actor's `self`
-    /// would make the fallback send a call to itself.
+    /// `self`/`super` and class-literal receivers keep their own lowering
+    /// (the same exclusion as [`Self::try_generate_pure_boolean_conditional`]):
+    /// an actor's `self`, or a class literal inside a class method of a class
+    /// with class variables, would make the fallback send a call back into
+    /// the process the method is running in.
     fn try_generate_builtin_is_kind_of(
         &mut self,
         receiver: &Expression,
@@ -1982,8 +1985,10 @@ impl CoreErlangGenerator {
         let [class_arg] = arguments else {
             return Ok(None);
         };
-        if matches!(receiver, Expression::Super(_))
-            || super::expr_shape::is_self_identifier(receiver)
+        if matches!(
+            receiver,
+            Expression::Super(_) | Expression::ClassReference { .. }
+        ) || super::expr_shape::is_self_identifier(receiver)
         {
             return Ok(None);
         }

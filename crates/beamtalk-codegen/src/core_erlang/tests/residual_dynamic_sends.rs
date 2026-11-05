@@ -201,6 +201,19 @@ fn is_kind_of_abstract_sealed_boolean_uses_is_boolean() {
 }
 
 #[test]
+fn is_kind_of_on_a_class_literal_receiver_keeps_the_class_reference_lowering() {
+    // In a class method of a class with class variables, a send to its own
+    // class literal runs in the class process; the fallback send would call
+    // back into it.
+    let code = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  classState: count :: Integer = 0\n",
+        "  class check -> Boolean => Probe isKindOf: Integer\n",
+    ));
+    assert!(!code.contains("'isKindOfBuiltin'("), "Got:\n{code}");
+}
+
+#[test]
 fn is_kind_of_on_self_stays_dynamic() {
     // An actor's `self` would make the fallback send a call to itself.
     let code = codegen(concat!(

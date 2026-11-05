@@ -11,8 +11,11 @@
 // Each test checks the lowered literal form against the dynamic form
 // (`kind:of:` takes the class as a value, so it is never lowered) over values
 // of every representation. No `isKindOf:` override is defined here: one
-// would turn the lowered fast path off for the whole run. The override case
-// is covered in EUnit (`beamtalk_tagged_map_routing_conformance_tests`).
+// would turn the lowered fast path off for the whole run. Another test in the
+// suite does register one (`primitive_inherited_target_test.bt`), so in a full
+// run these assertions may only exercise the send fallback; they hold either
+// way. Both branches, and the override case, are covered in EUnit
+// (`beamtalk_tagged_map_routing_conformance_tests`).
 
 TestCase subclass: PrimitiveIsKindOfTest
 
