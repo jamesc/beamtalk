@@ -29,14 +29,16 @@ TestCase subclass: GuardedConstructorTest
       selector: #new
       fun: [:args :receiver | #extension]
       owner: #test
-    literal := GcExtPoint new
-    dynamic := (self lookUp: #GcExtPoint) new
-    Erlang beamtalk_extensions
-      unregister: #GcExtPoint
-      selector: #new
-      classSide: true
-    self assert: literal equals: #extension
-    self assert: dynamic equals: #extension
+    [
+      self assert: GcExtPoint new equals: #extension
+      self assert: (self lookUp: #GcExtPoint) new equals: #extension
+    ]
+      ensure: [
+        Erlang beamtalk_extensions
+          unregister: #GcExtPoint
+          selector: #new
+          classSide: true
+      ]
     self assert: GcExtPoint new x equals: 0
 
   // An ADR 0084 runtime fun of `new` installed after warm-up wins.
@@ -49,12 +51,12 @@ TestCase subclass: GuardedConstructorTest
       put_class_method: pid
       selector: #new
       fun: [:classSelf | #fromRuntimeFun]
-    self assert: GcFunPoint new equals: #fromRuntimeFun
-    self assert: (self lookUp: #GcFunPoint) new equals: #fromRuntimeFun
-    @expect type
-    removed := Erlang beamtalk_object_class remove_class_method: pid selector: #new
-    self assert: removed equals: #removed
+    [
+      self assert: GcFunPoint new equals: #fromRuntimeFun
+      self assert: (self lookUp: #GcFunPoint) new equals: #fromRuntimeFun
+    ] ensure: [GcFunPoint class removeSelector: #new]
     self assert: GcFunPoint new x equals: 0
+    self assert: (self lookUp: #GcFunPoint) new x equals: 0
 
   // An ancestor that gains a user class-side `new:` after a descendant
   // warmed its direct `new:` is honoured by the descendant's dynamic `new:`
@@ -68,8 +70,7 @@ TestCase subclass: GuardedConstructorTest
       put_class_method: pid
       selector: #new:
       fun: [:classSelf :init | #fromAncestorNewInit]
-    self assert: (leaf new: #{#x => 1}) equals: #fromAncestorNewInit
-    @expect type
-    removed := Erlang beamtalk_object_class remove_class_method: pid selector: #new:
-    self assert: removed equals: #removed
+    [
+      self assert: (leaf new: #{#x => 1}) equals: #fromAncestorNewInit
+    ] ensure: [GcBase class removeSelector: #new:]
     self assert: (leaf new: #{#x => 1}) x equals: 1
