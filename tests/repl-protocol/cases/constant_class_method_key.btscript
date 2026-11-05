@@ -1,0 +1,126 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4363: a class-literal send of a class-side method whose whole body is
+// one integer literal answers the literal in place, behind a constant-value
+// static call key that the runtime installs only while the defining module's
+// metadata still certifies that literal. These are the workspace halves of
+// stdlib/test/constant_class_method_test.bt: each warms the key through a call
+// site compiled before the change (`CckCaller run`), redefines the target
+// class, then checks the old call site answers what a dynamic send (the class
+// held in a variable) answers.
+
+Object subclass: CckTarget
+  class answer => 1
+// => "CckTarget"
+
+Object subclass: CckCaller
+  class run => CckTarget answer
+// => "CckCaller"
+
+CckCaller run
+// => 1
+
+// The hit path is taken, not only the fallback: the warmed key is installed.
+key := Erlang erlang list_to_tuple: #(#constant_value, 1, (Erlang erlang element: 3 of: CckTarget), #class_answer, #'CckTarget class')
+// => _
+
+(Erlang beamtalk_class_shadow_flags static_call_key_value: key) == CckTarget
+// => true
+
+// ===========================================================================
+// A REDEFINITION WITH ANOTHER LITERAL IS SEEN BY THE WARMED CALL SITE
+// ===========================================================================
+
+Object subclass: CckTarget
+  class answer => 2
+// => "CckTarget"
+
+CckCaller run
+// => 2
+
+target := CckTarget
+// => CckTarget
+
+target answer
+// => 2
+
+// ===========================================================================
+// A REDEFINITION WHOSE BODY IS NO LONGER A LITERAL
+// ===========================================================================
+
+Object subclass: CckTarget
+  class answer => 40 + 2
+// => "CckTarget"
+
+CckCaller run
+// => 42
+
+// ===========================================================================
+// A REDEFINITION WITHOUT THE METHOD: does_not_understand
+// ===========================================================================
+
+Object subclass: CckTarget
+  class answer => 3
+// => "CckTarget"
+
+CckCaller run
+// => 3
+
+Object subclass: CckTarget
+  class other => #other
+// => "CckTarget"
+
+[CckCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+[target answer] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// removeSelector: OF A CLASS-BODY CONSTANT, AFTER A FRESH WARM-UP
+// ===========================================================================
+
+Object subclass: CckTarget
+  class answer => 4
+// => "CckTarget"
+
+CckCaller run
+// => 4
+
+CckTarget class removeSelector: #answer
+// => CckTarget class
+
+[CckCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+[target answer] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// A SUPERCLASS THAT GAINS classState: ON RELOAD: THE WARMED CALL SITE STILL
+// ANSWERS THE LITERAL, THROUGH THE CLASS PROCESS
+// ===========================================================================
+
+Object subclass: CckParent
+  class tag => #parent
+// => "CckParent"
+
+CckParent subclass: CckChild
+  class answer => 5
+// => "CckChild"
+
+Object subclass: CckChildCaller
+  class run => CckChild answer
+// => "CckChildCaller"
+
+CckChildCaller run
+// => 5
+
+Object subclass: CckParent
+  classState: count :: Integer = 0
+  class tag => #parent
+// => "CckParent"
+
+CckChildCaller run
+// => 5

@@ -305,6 +305,7 @@ mod class_literal_signal;
 mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
+mod constant_class_methods;
 mod control_flow;
 mod cross_file_abstract;
 mod dispatch;

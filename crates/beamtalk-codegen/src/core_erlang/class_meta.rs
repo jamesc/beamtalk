@@ -423,6 +423,7 @@ impl CoreErlangGenerator {
             Self::meta_provenance_entries(provenance),
             Self::meta_process_bound_class_selectors_entry(),
             Self::meta_caller_safe_class_primitives_entry(class),
+            Self::meta_constant_class_methods_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
             match provenance.defines_user_class_new1 {
@@ -529,6 +530,39 @@ impl CoreErlangGenerator {
         }
         docvec![
             ",\n      'caller_safe_class_primitives' => ~{",
+            Document::Vec(parts),
+            "}~"
+        ]
+    }
+
+    /// BT-4363: `'constant_class_methods' => ~{'protocolError' => 1, ...}~`,
+    /// each class-side selector whose body is exactly one integer literal
+    /// ([`MethodDefinition::literal_integer_body`](beamtalk_core::ast::MethodDefinition::literal_integer_body)),
+    /// mapped to that integer. A class-literal send of such a selector
+    /// answers the integer in place behind a constant-value key, which the
+    /// runtime installs only while the defining module's current metadata
+    /// maps the selector to that same value, so a reload that changes or
+    /// drops the body ends the inlining. Omitted when the class has none.
+    fn meta_constant_class_methods_entry(class: &ClassDefinition) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for method in &class.class_methods {
+            let Some(value) = method.literal_integer_body() else {
+                continue;
+            };
+            if !parts.is_empty() {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(docvec![
+                leaf::atom(method.selector.name().to_string()),
+                " => ",
+                leaf::int_lit(value),
+            ]);
+        }
+        if parts.is_empty() {
+            return Document::Nil;
+        }
+        docvec![
+            ",\n      'constant_class_methods' => ~{",
             Document::Vec(parts),
             "}~"
         ]

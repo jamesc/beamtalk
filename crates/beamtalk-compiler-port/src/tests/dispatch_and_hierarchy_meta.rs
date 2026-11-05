@@ -543,3 +543,59 @@ fn module_less_decodes_from_meta_module_key() {
         "absent module key must decode as module-ful"
     );
 }
+
+/// BT-4363: a class-side method that the module's own
+/// `'constant_class_methods'` certifies as an integer-literal body arrives as
+/// `MethodInfo::constant_value`, so a workspace compile against a loaded class
+/// folds a class-literal send of it as a batch compile does. Instance methods
+/// and uncertified class methods carry none.
+#[test]
+fn constant_class_methods_survive_etf_meta() {
+    use eetf::{FixInteger, List};
+
+    let method = || {
+        Term::from(Map::from([
+            (atom("arity"), Term::from(FixInteger::from(0))),
+            (atom("param_types"), Term::from(List::from(vec![]))),
+        ]))
+    };
+    let meta_map = Map::from([
+        (atom("class"), atom("Errs")),
+        (atom("superclass"), atom("Object")),
+        (atom("meta_version"), Term::from(FixInteger::from(2))),
+        (atom("fields"), Term::from(List::from(vec![]))),
+        (
+            atom("method_info"),
+            Term::from(Map::from([(atom("protocolError"), method())])),
+        ),
+        (
+            atom("class_method_info"),
+            Term::from(Map::from([
+                (atom("protocolError"), method()),
+                (atom("computed"), method()),
+            ])),
+        ),
+        (
+            atom("constant_class_methods"),
+            Term::from(Map::from([(
+                atom("protocolError"),
+                Term::from(FixInteger::from(-3)),
+            )])),
+        ),
+    ]);
+    let classes = parse_class_hierarchy_from_term(&Term::from(Map::from([(
+        atom("Errs"),
+        Term::from(meta_map),
+    )])));
+    let info = &classes[0];
+    let class_method = |sel: &str| {
+        info.class_methods
+            .iter()
+            .find(|m| m.selector == sel)
+            .unwrap_or_else(|| panic!("class method {sel}"))
+            .constant_value
+    };
+    assert_eq!(class_method("protocolError"), Some(-3));
+    assert_eq!(class_method("computed"), None);
+    assert_eq!(info.methods[0].constant_value, None);
+}

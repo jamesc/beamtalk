@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4363: class-side methods whose whole body is one integer literal. See
+// constant_class_method_test.bt.
+
+Object subclass: Bt4363ConstKey
+
+  class answer -> Integer => 42
+
+  class negative -> Integer => -7
+
+  class code: _ignored => 9
+
+  class notConstant -> Integer => 40 + 2

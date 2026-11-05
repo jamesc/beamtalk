@@ -267,6 +267,14 @@ pub(crate) fn parse_method_infos_from_map(
     let Some(Term::Map(method_map)) = map_get(m, key) else {
         return vec![];
     };
+    // BT-4363: a class-side method certified as an integer-literal body by
+    // the module's own `constant_class_methods` (generated from its source),
+    // so a workspace compile against a loaded class folds it as a batch
+    // compile does. The fold stays behind the runtime's constant-value key.
+    let constants = match (key, map_get(m, "constant_class_methods")) {
+        ("class_method_info", Some(Term::Map(constants))) => Some(constants),
+        _ => None,
+    };
     method_map
         .map
         .iter()
@@ -276,6 +284,12 @@ pub(crate) fn parse_method_infos_from_map(
                 return None;
             };
             let arity = map_get(info_map, "arity").and_then(term_to_usize)?;
+            let constant_value = constants.and_then(|c| {
+                c.map.get(sel_term).and_then(|v| match v {
+                    Term::FixInteger(n) => Some(i64::from(n.value)),
+                    _ => None,
+                })
+            });
             let return_type = map_get(info_map, "return_type").and_then(term_to_declared_type);
             let param_types = match map_get(info_map, "param_types") {
                 Some(Term::List(list)) => list.elements.iter().map(term_to_declared_type).collect(),
@@ -302,6 +316,7 @@ pub(crate) fn parse_method_infos_from_map(
                 // until then.
                 origin: None,
                 primitive: None,
+                constant_value,
             })
         })
         .collect()
