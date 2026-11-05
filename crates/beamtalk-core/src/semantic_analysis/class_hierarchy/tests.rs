@@ -3844,17 +3844,19 @@ fn direct_constructors_missing_ancestor_fails_closed_for_new1() {
     );
 }
 
+/// BT-4132: an indirect Value subclass is anchored by `propagate_class_kind`
+/// (the real pass, not a hand-built post-writeback shape). Its ancestor's
+/// user `new:` wins at run time via chain dispatch, so its `new:` verdict
+/// is off; nullary `new` is unaffected.
 #[test]
 fn direct_constructors_ancestor_user_new_init_blocks_new1() {
-    // Simulates the post-writeback indirect case (not yet produced by
-    // extraction): Sub's anchor is set but its superclass is user code.
-    let mut h = bt4099_hierarchy_for_source(
-        "Value subclass: Mid\n  class new: m => Mid new\nValue subclass: Sub\n",
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Mid\n  class new: m => Mid new\nMid subclass: Sub\n",
     );
-    {
-        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
-        sub.superclass = Some(ecow::EcoString::from("Mid"));
-    }
+    assert!(
+        h.get_class("Sub").expect("Sub").auto_ctors.is_some(),
+        "propagation anchors the indirect Value subclass"
+    );
     let ctors = h.direct_constructors("Sub");
     assert!(
         !ctors.new1,
@@ -3863,21 +3865,269 @@ fn direct_constructors_ancestor_user_new_init_blocks_new1() {
     assert!(ctors.new0, "ancestor `new:` does not affect nullary `new`");
 }
 
+/// BT-4132: same real propagation; an ancestor's nullary user `new` never
+/// runs for `Sub new` (the `{new, []}` handler calls Sub's own new/0), so it
+/// blocks nothing.
 #[test]
 fn direct_constructors_ancestor_user_new_is_shadowed() {
-    // Same simulation: an ancestor's nullary user `new` never runs for
-    // `Sub new` (the `{new, []}` handler calls Sub's own new/0), so it
-    // blocks nothing.
-    let mut h = bt4099_hierarchy_for_source(
-        "Value subclass: Mid\n  class new => Mid new\nValue subclass: Sub\n",
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Mid\n  class new => Mid new\nMid subclass: Sub\n",
     );
-    {
-        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
-        sub.superclass = Some(ecow::EcoString::from("Mid"));
-    }
     let ctors = h.direct_constructors("Sub");
     assert!(ctors.new0);
     assert!(ctors.new1);
+}
+
+/// BT-4132: `propagate_class_kind` stores the keyword decision as the
+/// anchor of an indirect Value subclass, so it gets the same verdicts as a
+/// direct `Value subclass:`.
+#[test]
+fn indirect_value_subclass_gets_constructor_anchor_and_verdicts() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Base\n  state: x :: Integer = 0\n\
+         Base subclass: Leaf\n  state: y :: Integer = 0\n",
+    );
+    assert_eq!(
+        h.get_class("Leaf").expect("Leaf").auto_ctors,
+        Some(AutoConstructors {
+            keyword_constructor: Some("y:".into())
+        }),
+        "the keyword decision (own slots only) is the anchor"
+    );
+    assert_eq!(
+        h.direct_constructors("Leaf"),
+        DirectConstructors {
+            new0: true,
+            new1: true,
+            keyword: Some("y:".into()),
+        }
+    );
+}
+
+/// BT-4132: the analysis pipeline runs `propagate_class_kind` twice (again
+/// after cross-file classes are injected). The second run must not re-read
+/// the class's own synthesized keyword constructor as a user collision.
+#[test]
+fn repropagation_keeps_indirect_keyword_anchor() {
+    let tokens = crate::source_analysis::lex_with_eof(
+        "Value subclass: Base\nBase subclass: Leaf\n  state: y :: Integer = 0\n",
+    );
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let mut h = ClassHierarchy::build(&module)
+        .0
+        .expect("fixture hierarchy should build");
+    h.propagate_class_kind(&module);
+    h.propagate_cross_file_class_kind();
+    assert_eq!(
+        h.direct_constructors("Leaf").keyword.as_deref(),
+        Some("y:"),
+        "re-propagation keeps the recorded keyword decision"
+    );
+}
+
+/// BT-4132: a user class-side method with the keyword selector suppresses
+/// synthesis, and the indirect anchor records that (`None` keyword), while
+/// `new`/`new:` stay eligible.
+#[test]
+fn indirect_value_subclass_user_keyword_suppresses_keyword_verdict() {
+    let h = bt4099_hierarchy_for_source(
+        "Value subclass: Base\nBase subclass: Leaf\n  state: y :: Integer = 0\n\
+         \n  class y: v => Leaf new\n",
+    );
+    assert_eq!(
+        h.get_class("Leaf").expect("Leaf").auto_ctors,
+        Some(AutoConstructors {
+            keyword_constructor: None
+        })
+    );
+    let ctors = h.direct_constructors("Leaf");
+    assert_eq!(ctors.keyword, None);
+    assert!(ctors.new0 && ctors.new1);
+}
+
+/// BT-4132: `Value` itself is not a Value subclass. Compiling `value.bt`
+/// reaches it in `propagate_class_kind`, but it keeps a `None` anchor.
+#[test]
+fn value_itself_is_never_anchored() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/value.bt");
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let tokens = crate::source_analysis::lex_with_eof(&source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module)
+        .0
+        .expect("value.bt hierarchy should build");
+    assert!(h.get_class("Value").expect("Value").auto_ctors.is_none());
+    assert_eq!(
+        h.direct_constructors("Value"),
+        DirectConstructors::default()
+    );
+}
+
+/// BT-4132: the chain walk's depth guard, reached through real
+/// propagation: a Value subclass 55 classes below `Value` is anchored, but
+/// its `new:` walk passes the runtime's cap (50) and fails closed. A class
+/// within the cap keeps its `new:` verdict.
+#[test]
+fn indirect_value_subclass_deep_chain_fails_closed_for_new1() {
+    let source: String = std::iter::once("Value subclass: Deep0\n".to_string())
+        .chain((1..55).map(|i| format!("Deep{} subclass: Deep{i}\n", i - 1)))
+        .collect();
+    let h = bt4099_hierarchy_for_source(&source);
+    let deep = h.direct_constructors("Deep54");
+    assert!(
+        h.get_class("Deep54").expect("Deep54").auto_ctors.is_some(),
+        "propagation anchors every Value descendant"
+    );
+    assert!(!deep.new1, "a chain past the depth cap fails closed");
+    assert!(deep.new0, "nullary `new` needs no ancestor walk");
+    assert!(h.direct_constructors("Deep10").new1);
+}
+
+/// BT-4132: the chain walk's `surface_incomplete` guard, reached through the
+/// real analysis pipeline: the ancestor comes from a sibling file that had
+/// parse errors (the build's class index marks its infos incomplete), and
+/// the indirect subclass is anchored by `propagate_class_kind` after the
+/// injection. A complete ancestor keeps the `new:` verdict.
+#[test]
+fn indirect_value_subclass_incomplete_ancestor_fails_closed_for_new1() {
+    let leaf_ctors = |mid_incomplete: bool| {
+        let mid_module = crate::test_helpers::test_support::parse_bt("Value subclass: Mid\n");
+        let mut mid_infos = ClassHierarchy::extract_class_infos(&mid_module);
+        for info in &mut mid_infos {
+            info.surface_incomplete = mid_incomplete;
+        }
+        let module = crate::test_helpers::test_support::parse_bt("Mid subclass: Sub\n");
+        let result = crate::semantic_analysis::analyse_full(
+            &module,
+            crate::semantic_analysis::AnalysisContext::default().with_pre_loaded_classes(mid_infos),
+        );
+        assert!(
+            result
+                .class_hierarchy
+                .get_class("Sub")
+                .expect("Sub")
+                .auto_ctors
+                .is_some(),
+            "propagation after injection anchors Sub"
+        );
+        result.class_hierarchy.direct_constructors("Sub")
+    };
+    let incomplete = leaf_ctors(true);
+    assert!(
+        !incomplete.new1,
+        "an ancestor with an incomplete surface may hide a user `new:`"
+    );
+    assert!(incomplete.new0);
+    assert!(leaf_ctors(false).new1, "a complete ancestor keeps `new:`");
+}
+
+/// BT-4132: an unknown ancestor or a cycle never reaches the walk through
+/// real propagation: such a chain never reaches `Value`, so the class is not
+/// anchored and gets no verdicts at all. (The walk's own unknown/cycle
+/// guards below are defence in depth for a link changed after anchoring.)
+#[test]
+fn indirect_unknown_or_cyclic_chain_is_never_anchored() {
+    let h = bt4099_hierarchy_for_source("Missing subclass: Orphan\n");
+    assert!(h.get_class("Orphan").expect("Orphan").auto_ctors.is_none());
+    assert_eq!(
+        h.direct_constructors("Orphan"),
+        DirectConstructors::default()
+    );
+
+    let tokens = crate::source_analysis::lex_with_eof("Aaa subclass: Bbb\nBbb subclass: Aaa\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let (h, _) = ClassHierarchy::build(&module);
+    if let Ok(h) = h {
+        for name in ["Aaa", "Bbb"] {
+            assert!(h.get_class(name).is_none_or(|i| i.auto_ctors.is_none()));
+            assert_eq!(h.direct_constructors(name), DirectConstructors::default());
+        }
+    }
+}
+
+/// BT-4132: `propagate_cross_file_class_kind` anchors an AST-less sibling
+/// class only where the stored state determines the keyword decision, and
+/// never overwrites an anchor the info already carries.
+#[test]
+fn cross_file_pass_anchors_only_derivable_keyword_decisions() {
+    let infos = |src: &str| {
+        ClassHierarchy::extract_class_infos(&crate::test_helpers::test_support::parse_bt(src))
+    };
+    let mut pre_loaded = infos("Value subclass: Base\n");
+    pre_loaded.extend(infos("Base subclass: Plain\n  state: y :: Integer = 0\n"));
+    pre_loaded.extend(infos("Base subclass: Empty\n"));
+    pre_loaded.extend(infos(
+        "Base subclass: Collide\n  state: y :: Integer = 0\n\n  class y: v => nil\n",
+    ));
+    let module = crate::test_helpers::test_support::parse_bt("Object subclass: User\n");
+    let h = crate::semantic_analysis::analyse_full(
+        &module,
+        crate::semantic_analysis::AnalysisContext::default().with_pre_loaded_classes(pre_loaded),
+    )
+    .class_hierarchy;
+    let anchor = |name: &str| h.get_class(name).expect(name).auto_ctors.clone();
+    assert_eq!(
+        anchor("Plain"),
+        Some(AutoConstructors {
+            keyword_constructor: Some("y:".into())
+        }),
+        "a selector absent from the stored class side is synthesized here"
+    );
+    assert_eq!(
+        anchor("Empty"),
+        Some(AutoConstructors {
+            keyword_constructor: None
+        }),
+        "a slot-less class provably has no keyword constructor"
+    );
+    assert_eq!(
+        anchor("Collide"),
+        None,
+        "a selector already on the class side (user or earlier synthesis) is ambiguous: fail closed"
+    );
+    assert_eq!(
+        anchor("Bag"),
+        ClassHierarchy::with_builtins()
+            .get_class("Bag")
+            .expect("Bag")
+            .auto_ctors
+            .clone(),
+        "a builtin's generated anchor is kept"
+    );
+}
+
+/// BT-4132: the regenerated stdlib builtins anchor indirect Value
+/// subclasses too. `Bag` (`Collection(E) subclass:`) gets verdicts; `Set`
+/// keeps `new1 = false` (its own user `class new:`); abstract `Collection`
+/// keeps `new0 = false`; a user `TestCase` subclass is anchored as well.
+#[test]
+fn builtin_indirect_value_subclasses_get_verdicts() {
+    let h = ClassHierarchy::with_builtins();
+    for name in ["Bag", "Interval", "Set", "Collection", "TestCase"] {
+        assert!(
+            h.get_class(name).expect(name).auto_ctors.is_some(),
+            "{name} should carry a generated anchor"
+        );
+    }
+    let bag = h.direct_constructors("Bag");
+    assert!(bag.new0 && bag.new1, "Bag: {bag:?}");
+    let set = h.direct_constructors("Set");
+    assert!(set.new0, "Set: {set:?}");
+    assert!(!set.new1, "Set defines a user `class new:`: {set:?}");
+    let collection = h.direct_constructors("Collection");
+    assert!(
+        !collection.new0 && !collection.new1,
+        "abstract: {collection:?}"
+    );
+    assert!(h.get_class("Value").expect("Value").auto_ctors.is_none());
+
+    let t = bt4099_hierarchy_for_source("TestCase subclass: MyTest\n  testOne => nil\n");
+    let my_test = t.direct_constructors("MyTest");
+    assert!(
+        my_test.new0 && my_test.new1,
+        "TestCase subclass: {my_test:?}"
+    );
 }
 
 #[test]

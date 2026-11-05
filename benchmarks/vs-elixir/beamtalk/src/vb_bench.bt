@@ -97,6 +97,21 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := VbPoint new: #{#x => a, #y => 4}]
     last
 
+  // `Bag` is an indirect Value (`Collection(E) subclass:`): BT-4132 anchors
+  // it, so `Bag new` takes the guarded static `new` key instead of the class
+  // process.
+  class constructBag: n :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := Bag new]
+    last
+
+  // The keyword constructor of an indirect user Value (`VbLeaf` is a
+  // `VbBase subclass:`), BT-4132.
+  class constructLeaf: n :: Integer a: a :: Integer -> Object =>
+    last := nil
+    n timesRepeat: [last := VbLeaf w: a]
+    last
+
   // === 3. Class-side method: sealed (static) vs open ===
   class classSealedMethod: n :: Integer -> Integer =>
     last := 0

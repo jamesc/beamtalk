@@ -72,6 +72,10 @@ rows() ->
         {"2c", alloc,
             "construct via new: VbPoint new: #{#x => a, #y => 4} / struct!(Point, %{x: a, y: 4})",
             50000, 'constructMap:a:', int, [{construct_map, int}, {construct, int}]},
+        {"2d", alloc, "construct an indirect stdlib Value: Bag new / MapSet.new()", 50000,
+            'constructBag:', none, [{mapset_new, none}]},
+        {"2e", alloc, "keyword construct, indirect user Value: VbLeaf w: a / %Point{x: a, y: 4}",
+            50000, 'constructLeaf:a:', int, [{construct, int}]},
         {"3a", dispatch, "`class sealed` method, sealed class / Mod.fun(arg)", 200000,
             'classSealedMethod:', none, [{remote_call, none}]},
         {"3b", dispatch, "class method, sealed class / Mod.fun(arg)", 50000, 'sealedClassMethod:',
@@ -513,6 +517,10 @@ compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
 compiles_to("2c") ->
     "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
+compiles_to("2d") ->
+    "guarded static `new` (BT-4409): one persistent_term:get of the {bt@stdlib@bag, new, Tag} key, then bt@stdlib@bag:new() in the caller (BT-4132 anchors indirect Values)";
+compiles_to("2e") ->
+    "guarded direct keyword constructor: one persistent_term:get of the static call key, then VbLeaf:'w:'(ClassRef, A) (BT-4132)";
 compiles_to("3a") ->
     "guarded direct call: one persistent_term:get of the {Mod, Fun, Tag} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
 compiles_to("3b") ->

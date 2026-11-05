@@ -4841,6 +4841,24 @@ fn test_value_meta_bakes_direct_constructors() {
     super::assert_compiles_through_erlc("test", &code);
 }
 
+/// BT-4132: an indirect Value subclass (here under the abstract stdlib
+/// `Collection`, whose chain has no user `new:`) bakes the same verdicts as a
+/// direct `Value subclass:`, and a `TestCase` subclass does too.
+#[test]
+fn test_indirect_value_meta_bakes_direct_constructors() {
+    let code = codegen_source("Collection subclass: MyBag\n  field: n = 0\n");
+    assert!(
+        code.contains("'direct_constructors' => ['new', 'new:']"),
+        "an indirect Value subclass must bake new/new: verdicts. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+    let test_case = codegen_source("TestCase subclass: MyTest\n  testOne => nil\n");
+    assert!(
+        test_case.contains("'direct_constructors' => ['new', 'new:']"),
+        "a TestCase subclass is an indirect Value subclass. Got:\n{test_case}"
+    );
+}
+
 /// BT-4409: every class bakes its own `defines_user_class_new1` fact (the
 /// one `ClassHierarchy::defines_user_class_new1` rule): false for a plain
 /// Value subclass, true for a class defining a class-side `new:`.

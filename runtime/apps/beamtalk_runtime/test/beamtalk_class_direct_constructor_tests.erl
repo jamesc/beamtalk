@@ -670,3 +670,93 @@ static_new_key_test_() ->
             end
         end}
     ]}.
+
+%%====================================================================
+%% BT-4132: indirect Value subclasses carry direct-construction verdicts
+%%====================================================================
+
+indirect_value_subclass_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"an indirect subclass is named when its ancestor gains new:, and routes new: to it",
+            fun() ->
+                %% Mid is the `Value subclass:`; Leaf is an indirect Value
+                %% subclass whose verdicts BT-4132 bakes (`new` and `new:`).
+                Mid = start_subclass('BT4132Mid', 'Value', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                Leaf = start_subclass('BT4132Leaf', 'BT4132Mid', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                try
+                    ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4132Leaf')),
+                    ?assertEqual(
+                        {self(), #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    Warnings = stale_warnings(stale_direct_constructors, fun() ->
+                        ok = reload_with('BT4132Mid', ?NEW1_HELPER, #{
+                            class_method_info => ?USER_NEW1,
+                            direct_constructors => [new],
+                            defines_user_class_new1 => true
+                        })
+                    end),
+                    ?assertMatch(
+                        [#{class := 'BT4132Mid', stale_direct_constructors := ['BT4132Leaf']}],
+                        Warnings
+                    ),
+                    %% The guard (BT-4409) makes the warning informational:
+                    %% the loaded Leaf's dynamic `new:` already routes through
+                    %% Mid's user `new:` on the class process.
+                    ?assert(beamtalk_class_metadata:chain_has_user_new1('BT4132Leaf')),
+                    ?assertEqual(
+                        error,
+                        beamtalk_class_dispatch:lookup_direct_constructor(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    ?assertEqual(
+                        {ancestor_new1, Leaf, #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    %% `new/0` is its own override slot: Leaf's `new` stays direct.
+                    ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, []))
+                after
+                    [stop_class(P) || P <- [Leaf, Mid]]
+                end
+            end},
+        {"the compiled stdlib publishes the facts that let Bag's dynamic new: build in the caller",
+            fun() ->
+                %% Over the real compiled stdlib chain, not a fixture: if
+                %% ProtoObject/Object/Value stop publishing
+                %% `defines_user_class_new1 => false`, or Bag (an indirect
+                %% Value, `Collection(E) subclass:`) loses its anchor, the
+                %% dynamic `new:` fast path is silently gone.
+                [
+                    ?assertEqual(
+                        false, beamtalk_class_metadata:lookup_defines_user_class_new1(C), C
+                    )
+                 || C <- ['ProtoObject', 'Object', 'Value', 'Collection', 'Bag']
+                ],
+                ?assertEqual(
+                    [new, 'new:'], beamtalk_class_metadata:lookup_direct_constructors('Bag')
+                ),
+                ?assertNot(beamtalk_class_metadata:chain_has_user_new1('Bag')),
+                {module, BagMod} = code:ensure_loaded('bt@stdlib@bag'),
+                Bag = beamtalk_class_registry:whereis_class('Bag'),
+                ?assertEqual(
+                    {ok, BagMod},
+                    beamtalk_class_dispatch:lookup_direct_constructor(Bag, 'new:', [#{}])
+                ),
+                ?assertEqual(
+                    {ok, BagMod}, beamtalk_class_dispatch:lookup_direct_constructor(Bag, new, [])
+                ),
+                %% Set defines a user `class new:` (stdlib/src/set.bt): its
+                %% own fact is true and its baked set keeps `new` only.
+                ?assert(beamtalk_class_metadata:lookup_defines_user_class_new1('Set')),
+                ?assertEqual([new], beamtalk_class_metadata:lookup_direct_constructors('Set')),
+                Set = beamtalk_class_registry:whereis_class('Set'),
+                ?assertEqual(
+                    error, beamtalk_class_dispatch:lookup_direct_constructor(Set, 'new:', [#{}])
+                ),
+                %% Abstract Collection bakes nothing.
+                ?assertEqual([], beamtalk_class_metadata:lookup_direct_constructors('Collection'))
+            end}
+    ]}.
