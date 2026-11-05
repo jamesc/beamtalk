@@ -1115,8 +1115,13 @@ impl CoreErlangGenerator {
                 // `push_control_flow_threaded_var_rereads`, which does the same
                 // rebind for the `ThreadedIr`-rendered conditional-arm path.
                 if let Some(inner_vars) = inner_threaded_vars {
-                    for d in self.rebind_threaded_vars_from_state(&inner_vars, &new_state) {
-                        stmts.push(ThreadedStmt::Statement(d, span));
+                    let re_reads = self.rebind_threaded_vars_from_state(&inner_vars, &new_state);
+                    if !re_reads.is_empty() {
+                        stmts.push(ThreadedStmt::StateCarrierReread {
+                            locals: inner_vars,
+                            doc: Document::Vec(re_reads),
+                            span,
+                        });
                     }
                 }
                 if is_last {

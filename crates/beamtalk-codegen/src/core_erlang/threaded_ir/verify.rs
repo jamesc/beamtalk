@@ -462,6 +462,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// producer sites.
     ConstructCarrierInPlace { at: Span },
 
+    /// BT-4460 (ADR 0131 §2): a construct that threads the locals `locals`
+    /// (`threaded_locals_of` names them) reached its frame through the legacy
+    /// reread, a [`ThreadedStmt::StateCarrierReread`] after an opaque
+    /// `element(2, ...)` extraction of its state carrier, instead of a
+    /// [`ThreadedStmt::ConstructTuple`] and one [`ThreadedStmt::LocalRebind`]
+    /// per local. The construct was compiled in place: its writes ride in
+    /// the carrier's scratch keys, which the arm then folds into the frame's
+    /// `State` (an actor's arm-local `__local__` key leaks into the actor's
+    /// state), and no frame rule decides how each local is rebound. The repro
+    /// is an actor method's `c ifTrue: [m := 0. c ifTrue: [m := 5. 7]
+    /// ifFalse: [0]. m] ifFalse: [0]`, whose plain arm registered only loop
+    /// and fold sites, so the nested conditional was not a producer there.
+    /// Every frame registers every producer at its sites, so no reread is
+    /// legitimate; reported by [`VerifyWalk::walk_stmt`] wherever one is.
+    ConstructLocalsRereadOpaquely { locals: Vec<String>, at: Span },
+
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
@@ -1169,6 +1185,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
+            | ThreadedStmt::StateCarrierReread { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
@@ -1747,6 +1764,17 @@ impl VerifyWalk<'_> {
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
+            // BT-4460: a construct's locals reread out of its state carrier
+            // rather than rebound by its producer.
+            ThreadedStmt::StateCarrierReread { locals, span, .. } => {
+                if !locals.is_empty() {
+                    self.errors
+                        .push(VerifyError::ConstructLocalsRereadOpaquely {
+                            locals: locals.clone(),
+                            at: *span,
+                        });
+                }
+            }
             // ADR 0137: the bracket reads `store` and binds `load` in the
             // frame it sits in, exactly as the `Bind` it steps like.
             ThreadedStmt::SyncedCall {

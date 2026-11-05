@@ -408,15 +408,15 @@ impl CoreErlangGenerator {
     }
 
     /// BT-3949: whether the `match:` arm body `body` holds a producer at one of
-    /// its plain-arm producer sites (the rule `generate_plain_arm` registers,
-    /// [`Self::plain_arm_producer_sites`]): a fold that threads `State` in a
-    /// map-literal value, an array element or a keyword argument. Such an arm
+    /// its arm-frame producer sites (the rule `generate_plain_arm` registers,
+    /// [`Self::frame_producer_sites`] with `arm`): a fold that threads `State`
+    /// in a map-literal value, an array element or a keyword argument. Such an arm
     /// is threaded and lowered as a plain arm frame (the synthetic-block route
     /// of [`Self::generate_match_arm_body`]); compiled in place, its
     /// construct's `{Value, State}` carrier became the operand. The one
     /// predicate both the threading gate and the arm lowering read.
     fn match_arm_has_producer_site(&self, body: &Expression) -> bool {
-        !self.plain_arm_producer_sites(body).is_empty()
+        !self.frame_producer_sites(body, false, true).is_empty()
     }
 
     /// BT-3947: whether the arm body `body` of a REPL `match:` writes a REPL
@@ -484,7 +484,7 @@ impl CoreErlangGenerator {
 
     /// BT-3949: a field write inside a loop or fold that threads the value-type
     /// `Self` family (`vt_loop_threaded_families`) at one of the arm body's
-    /// plain-arm producer sites ([`Self::plain_arm_producer_site_exprs`]: the
+    /// arm-frame producer sites ([`Self::body_producer_site_exprs`] with `arm`: the
     /// body itself, a map-literal value, an array element, a keyword argument).
     /// Such a construct compiles to a `{Value, Self}` carrier whose `Self` a
     /// `match:` arm has no merge for (`MATCH_ARM_FAMILIES` excludes `SelfVt`),
@@ -493,7 +493,7 @@ impl CoreErlangGenerator {
     /// further down (or, at worst, compiled in place with its carrier as the
     /// operand: `ConstructCarrierInPlace`).
     fn vt_match_arm_producer_field_write(&self, body: &Expression) -> Option<(String, Span)> {
-        self.plain_arm_producer_site_exprs(body)
+        self.body_producer_site_exprs(body, false, true)
             .into_iter()
             .filter(|site| {
                 self.vt_loop_threaded_families(site)

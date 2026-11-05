@@ -145,6 +145,13 @@ pub(super) mod fault {
         /// arm statement (a map-literal value) is compiled in place and its
         /// carrier tuple becomes the operand (`ConstructCarrierInPlace`).
         PlainArmOpaqueProducers,
+        /// BT-4460: a plain arm's producer sites (registered and checked) are
+        /// only its loops and folds, the plain-arm rule before BT-4460,
+        /// so a nested conditional, `ifNil:`, `and:`/`or:`, `match:` or
+        /// `on:do:`/`ensure:` that writes a local of a plain arm is compiled in
+        /// place and the arm rereads its locals out of the construct's state
+        /// carrier (`ConstructLocalsRereadOpaquely`).
+        ArmLoopOrFoldSitesOnly,
         /// BT-4002: a `Letrec` loop takes its families from its body only, as
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition
         /// writes is not carried (`ConditionFamilyNotCarried`).
@@ -221,6 +228,29 @@ pub(super) mod fault {
     thread_local! {
         static ACTIVE: Cell<Option<LocalRebindFault>> = const { Cell::new(None) };
         static PRODUCERS: RefCell<Option<Vec<ProducerRecord>>> = const { RefCell::new(None) };
+        static IN_PLAIN_ARM: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Whether the arm frame being lowered is a plain arm
+    /// (`generate_plain_arm`), for [`LocalRebindFault::ArmLoopOrFoldSitesOnly`].
+    pub(in crate::core_erlang) fn in_plain_arm() -> bool {
+        IN_PLAIN_ARM.with(Cell::get)
+    }
+
+    /// Marks the arm frame being lowered as plain (or not) until the guard is
+    /// dropped, restoring the enclosing arm's mark.
+    pub(in crate::core_erlang) struct PlainArmScope(bool);
+
+    impl PlainArmScope {
+        pub(in crate::core_erlang) fn enter(plain: bool) -> Self {
+            Self(IN_PLAIN_ARM.with(|c| c.replace(plain)))
+        }
+    }
+
+    impl Drop for PlainArmScope {
+        fn drop(&mut self) {
+            IN_PLAIN_ARM.with(|c| c.set(self.0));
+        }
     }
 
     /// Records a producer lowering of the construct at `span` threading
@@ -1709,8 +1739,7 @@ impl CoreErlangGenerator {
         self.body_producer_site_exprs_with(stmt, fold, arm, FamilyOnlySites::ALL)
     }
 
-    /// The sites [`Self::with_body_producer_sites`] and
-    /// [`Self::with_plain_arm_producer_sites`] register for `stmt`:
+    /// The sites [`Self::with_body_producer_sites`] registers for `stmt`:
     /// [`Self::body_producer_site_exprs`], except that the test-only fault
     /// `FoldOperandFamilyOnlyInPlace` withholds the BT-4287 sites
     /// ([`Self::is_family_only_fold_value_site`]) while the check still reads
@@ -1782,6 +1811,15 @@ impl CoreErlangGenerator {
             .collect();
         if family.unsequenced_operands {
             Self::extend_new_sites(&mut sites, self.family_only_operand_site_exprs(stmt));
+        }
+        #[cfg(test)]
+        if arm
+            && fault::in_plain_arm()
+            && fault::active() == Some(fault::LocalRebindFault::ArmLoopOrFoldSitesOnly)
+        {
+            sites.retain(|site| {
+                beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
+            });
         }
         sites
     }
@@ -1956,15 +1994,6 @@ impl CoreErlangGenerator {
         self.producer_sites_of(self.body_producer_site_exprs(stmt, fold, arm))
     }
 
-    /// BT-3949: [`Self::frame_producer_sites`] for a statement of a plain arm,
-    /// over its [`Self::plain_arm_producer_site_exprs`].
-    pub(super) fn plain_arm_producer_sites(&self, stmt: &Expression) -> Vec<(Span, Vec<String>)> {
-        if self.is_repl_mode() {
-            return Vec::new();
-        }
-        self.producer_sites_of(self.plain_arm_producer_site_exprs(stmt))
-    }
-
     /// The `(site span, locals)` of each of `sites` that
     /// [`Self::producer_site_locals`] names a producer.
     fn producer_sites_of(&self, sites: Vec<&Expression>) -> Vec<(Span, Vec<String>)> {
@@ -2024,57 +2053,6 @@ impl CoreErlangGenerator {
             );
         }
         self.with_producer_site_set(sites, fold, f)
-    }
-
-    /// BT-3949: the producer sites of `stmt`, a statement of a *plain* arm (the
-    /// arm of a construct that is not a local-threading producer,
-    /// `generate_plain_arm`): its arm-frame sites
-    /// ([`Self::body_producer_site_exprs`] with `arm`) that are a loop or fold
-    /// (`producer_body_block`). A loop or fold is a producer of whatever frame
-    /// lowers it, so one at an operand site of a plain arm's statement (a
-    /// map-literal value, an array element, a keyword argument) is lowered
-    /// through its `ConstructTuple` and never leaves its `{Value, State}`
-    /// carrier as the operand. A nested conditional, `match:` or exception
-    /// construct is not: whether it is a producer is the core rule's
-    /// arm-frame question (`conditional_producer_writes`), which a plain arm
-    /// does not ask, so it keeps its own lowering there. The one rule behind
-    /// the plain arm's registration ([`Self::with_plain_arm_producer_sites`])
-    /// and its `ConstructCarrierInPlace` / `ProducerSiteNotThreaded` check.
-    pub(super) fn plain_arm_producer_site_exprs<'a>(
-        &self,
-        stmt: &'a Expression,
-    ) -> Vec<&'a Expression> {
-        Self::loop_or_fold_sites(self.body_producer_site_exprs(stmt, false, true))
-    }
-
-    /// The loop or fold sites (`producer_body_block`) among `sites`.
-    fn loop_or_fold_sites(sites: Vec<&Expression>) -> Vec<&Expression> {
-        sites
-            .into_iter()
-            .filter(|site| {
-                beamtalk_core::semantic_analysis::block_facts::producer_body_block(site).is_some()
-            })
-            .collect()
-    }
-
-    /// [`Self::with_body_producer_sites`] for a plain arm's statements `body`:
-    /// registers their [`Self::plain_arm_producer_site_exprs`].
-    pub(super) fn with_plain_arm_producer_sites<T>(
-        &mut self,
-        body: &[&Expression],
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let mut sites: std::collections::HashSet<Span> = self.local_producer_sites.clone();
-        for stmt in body {
-            sites.extend(
-                Self::loop_or_fold_sites(
-                    self.registered_body_producer_site_exprs(stmt, false, true),
-                )
-                .into_iter()
-                .map(Expression::span),
-            );
-        }
-        self.with_producer_site_set(sites, false, f)
     }
 
     /// Runs `f` with [`Self::local_producer_sites`] set to `sites` (and the

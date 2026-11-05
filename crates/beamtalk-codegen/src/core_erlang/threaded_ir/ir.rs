@@ -842,6 +842,23 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
 
+    /// ADR 0111 Addendum 5 / ADR 0131 (BT-4460): the legacy reread of a
+    /// nested construct's threaded `locals` out of the state carrier the arm
+    /// just extracted with an opaque `element(2, ...)` `Bind`: one
+    /// `let Local = maps:get('__local__…', StateN) in` per local, rendered
+    /// verbatim from `doc` like a [`Statement`](Self::Statement). Built only by
+    /// `push_control_flow_threaded_var_rereads`, for a construct the arm
+    /// compiled in place instead of lowering as a producer (its
+    /// `ConstructTuple` and one [`LocalRebind`](Self::LocalRebind) per
+    /// local). Typed rather than an opaque `Statement` so the verifier sees
+    /// that the construct's locals reach the frame without a `LocalRebind`
+    /// ([`VerifyError::ConstructLocalsRereadOpaquely`](super::verify::VerifyError::ConstructLocalsRereadOpaquely)).
+    StateCarrierReread {
+        locals: Vec<String>,
+        doc: Document<'static>,
+        span: Span,
+    },
+
     /// ADR 0131 §4 (BT-3863): a fold lambda body's last statement, the
     /// accumulator `lists:foldl` hands to the next iteration and, after the
     /// last one, to the code after the fold. `value` is that accumulator's
