@@ -4907,6 +4907,24 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
     );
     super::assert_compiles_through_erlc("test", &code);
 
+    // The verdict is sound only because `new/0` is the `class_new` delegate
+    // the class process's `{new, []}` handler would call (with no
+    // `ClassSelf`): pin that shape for both accepted bodies, so a change to
+    // `generate_delegating_new` cannot leave the verdict stale silently.
+    let native = codegen_source(
+        "Value subclass: Q native: my_queue\n\n  class sealed new -> Q => self delegate\n",
+    );
+    for (what, module) in [("FFI forward", &code), ("native `self delegate`", &native)] {
+        assert!(
+            module.contains("'direct_constructors' => ['new']"),
+            "{what}: bakes a direct `new` verdict. Got:\n{module}"
+        );
+        assert!(
+            module.contains("'new'/0 = fun () ->\n    call 'test':'class_new'('undefined')"),
+            "{what}: `new/0` must delegate to `class_new('undefined')`. Got:\n{module}"
+        );
+    }
+
     // A body that sends to `self` keeps the class process.
     let basic = codegen_source("Object subclass: Tag\n\n  class new => self basicNew\n");
     assert!(
