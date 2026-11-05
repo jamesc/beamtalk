@@ -35,7 +35,11 @@ TestCase subclass: EqualsFastPathTest
     Erlang beamtalk_extensions
       register: #Binary
       selector: #equals:
-      fun: [:args :receiver | (receiver =:= args first) or: [(receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]]]
+      fun: [:args :receiver |
+        (receiver =:= args first) or: [
+          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]
+        ]
+      ]
       owner: #bt4416
     [
       self assert: (a equals: b)
@@ -53,7 +57,11 @@ TestCase subclass: EqualsFastPathTest
     Erlang beamtalk_extensions
       register: #Collection
       selector: #equals:
-      fun: [:args :receiver | (receiver =:= args first) or: [(receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]]]
+      fun: [:args :receiver |
+        (receiver =:= args first) or: [
+          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]
+        ]
+      ]
       owner: #bt4416
     [
       self assert: (a equals: b)
