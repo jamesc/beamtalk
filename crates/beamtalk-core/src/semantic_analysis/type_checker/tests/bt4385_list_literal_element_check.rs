@@ -365,3 +365,31 @@ fn class_reference_and_nil_elements_against_behaviour() {
         ]
     );
 }
+
+/// A cons literal checks its heads and its tail's element type.
+#[test]
+fn cons_literal_checks_heads_and_tail() {
+    let run = |body: &str| checker_messages(&source_with(body));
+    assert_eq!(
+        run("  run: t :: Taker rest: r :: List(String) => t takeInts: #(1 | r)\n"),
+        vec![
+            "Each tail element of argument 1 of 'takeInts:' on Taker expects Integer, got String"
+                .to_string()
+        ]
+    );
+    assert_eq!(
+        run("  run: t :: Taker rest: r :: List(Integer) => t takeInts: #(\"a\" | r)\n"),
+        vec![
+            "Element 1 of argument 1 of 'takeInts:' on Taker expects Integer, got String"
+                .to_string()
+        ]
+    );
+    assert_eq!(
+        run("  run: t :: Taker rest: r :: List(Integer) => t takeInts: #(1 | r)\n"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        run("  run: t :: Taker rest: r => t takeInts: #(1 | r)\n"),
+        Vec::<String>::new()
+    );
+}

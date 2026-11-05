@@ -1831,16 +1831,18 @@ impl TypeChecker {
     /// - a protocol: conformance is structural, and the per-element
     ///   assignability rule is nominal (BT-4482).
     ///
-    /// A cons tail (`#(a | rest)`) is not an element and is not checked.
+    /// A cons literal (`#(a | rest)`) is judged too: each head is an
+    /// element, and the tail's own element type (`E'` of its `List(E')`) is
+    /// checked against `E` as one more entry.
     pub(super) fn list_literal_element_expectation<'a>(
         &mut self,
         arg: &'a Expression,
         expected_declared: &DeclaredType,
         class_name: &str,
         hierarchy: &ClassHierarchy,
-    ) -> Option<(&'a [Expression], InferredType)> {
+    ) -> Option<ListLiteralElements<'a>> {
         // `ast::normalize` (BT-4059) already peeled parens off a send argument.
-        let Expression::ListLiteral { elements, .. } = arg else {
+        let Expression::ListLiteral { elements, tail, .. } = arg else {
             return None;
         };
         if elements.is_empty() {
@@ -1883,7 +1885,11 @@ impl TypeChecker {
         if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
             return None;
         }
-        Some((elements.as_slice(), element))
+        Some(ListLiteralElements {
+            elements,
+            tail: tail.as_deref(),
+            element,
+        })
     }
 
     /// Whether a declared list element type is left to the whole-argument
@@ -1935,14 +1941,36 @@ impl TypeChecker {
         expected_declared: &DeclaredType,
         hierarchy: &ClassHierarchy,
     ) {
-        let Some((elements, element_declared)) =
-            self.list_literal_element_expectation(arg, expected_declared, class_name, hierarchy)
+        let Some(ListLiteralElements {
+            elements,
+            tail,
+            element: element_declared,
+        }) = self.list_literal_element_expectation(arg, expected_declared, class_name, hierarchy)
         else {
             return;
         };
         let element_declared = &element_declared;
-        for (j, element) in elements.iter().enumerate() {
-            let Some(element_ty) = self.type_map.get(element.span()).cloned() else {
+        // Each head, then the tail's element type (`E'` of its `List(E')`).
+        let entries = elements
+            .iter()
+            .enumerate()
+            .map(|(j, element)| {
+                (
+                    format!("Element {}", j + 1),
+                    element.span(),
+                    self.type_map.get(element.span()).cloned(),
+                )
+            })
+            .chain(tail.map(|tail| {
+                (
+                    "Each tail element".to_string(),
+                    tail.span(),
+                    self.type_map.get(tail.span()).map(Self::tail_element_type),
+                )
+            }))
+            .collect::<Vec<_>>();
+        for (label, span, element_ty) in entries {
+            let Some(element_ty) = element_ty else {
                 continue;
             };
             let Some(mismatch) = Self::detect_assignment_type_mismatch(
@@ -1953,21 +1981,20 @@ impl TypeChecker {
             ) else {
                 continue;
             };
-            let element_pos = j + 1;
             let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
                 Self::protocol_metatype_nonconformance_diagnostic(
                     &mismatch.inferred_display,
                     protocol,
                     missing,
-                    element.span(),
+                    span,
                 )
             } else {
                 Diagnostic::warning(
                     format!(
-                        "Element {element_pos} of argument {param_pos} of '{selector}' on {class_name} expects {}, got {}",
+                        "{label} of argument {param_pos} of '{selector}' on {class_name} expects {}, got {}",
                         mismatch.declared_display, mismatch.inferred_display
                     ),
-                    element.span(),
+                    span,
                 )
                 .with_category(DiagnosticCategory::Type)
                 .with_hint(format!(
@@ -5110,4 +5137,15 @@ impl ComparisonArgKind {
             Self::Symbol => arg_ty == "Symbol" || arg_ty.starts_with('#'),
         }
     }
+}
+
+/// BT-4385: a list-literal argument judged element by element — see
+/// [`TypeChecker::list_literal_element_expectation`].
+pub(super) struct ListLiteralElements<'a> {
+    /// The literal's heads.
+    elements: &'a [Expression],
+    /// A cons literal's tail (`rest` in `#(a | rest)`).
+    tail: Option<&'a Expression>,
+    /// The declared element type `E` of the parameter's `List(E)`.
+    element: InferredType,
 }
