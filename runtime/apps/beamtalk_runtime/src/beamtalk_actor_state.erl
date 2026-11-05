@@ -67,6 +67,7 @@ only for `super_send/5` and `refresh/2`, which call them.
     get/3,
     view/2,
     refresh/2,
+    refresh_carried/2,
     call_foreign/3,
     super_send/5,
     put/3,
@@ -311,12 +312,39 @@ from home (no cell) `Acc` unchanged.
 -spec refresh(#beamtalk_object{}, map()) -> map().
 refresh(Self, Acc) ->
     case at_home(Self) of
-        {true, Cell} ->
-            Fields = beamtalk_actor:strip_local_temps(Acc),
-            maps:merge(Cell, maps:without(maps:keys(Fields), Acc));
-        false ->
-            Acc
+        {true, Cell} -> cell_over(Cell, Acc);
+        false -> Acc
     end.
+
+-doc """
+BT-4429: the state a `^` throw resumes with after `Block>>ensure:` reached
+dynamically (`perform:`) ran its cleanup. That catch runs in the Block method,
+so it cannot know what the throw carries: an actor method's or closure's state
+(the cell, which the `^` stored or read just before it threw), the REPL's
+bindings, or a value type's `Self`. `Snapshot` is the cell as `snapshot/0`
+answered it before the cleanup ran. When the cell was this process's actor's
+own and `Carried` is that cell's state (its `__local__` scratch keys aside),
+answer `Carried` with its fields replaced by the cell as the cleanup left it,
+as `refresh/2` does. Otherwise `Carried` holds no state a cleanup closure can
+write (no closure assigns a REPL binding or a value type's field), so answer it
+unchanged.
+""".
+-spec refresh_carried(cell(), term()) -> term().
+refresh_carried({Owner, Before}, Carried) when Owner =:= self(), is_map(Carried) ->
+    case
+        beamtalk_actor:strip_local_temps(Carried) =:=
+            beamtalk_actor:strip_local_temps(Before)
+    of
+        true ->
+            case erlang:get(?CELL) of
+                {Owner, Cell} when is_map(Cell) -> cell_over(Cell, Carried);
+                _ -> Carried
+            end;
+        false ->
+            Carried
+    end;
+refresh_carried(_Snapshot, Carried) ->
+    Carried.
 
 -doc """
 A `super` send from a block: run the superclass method of `Class` for `Selector`
@@ -424,6 +452,11 @@ at_home(#beamtalk_object{pid = Pid}) when Pid =:= self() ->
     end;
 at_home(#beamtalk_object{}) ->
     false.
+
+-spec cell_over(map(), map()) -> map().
+cell_over(Cell, Acc) ->
+    Fields = beamtalk_actor:strip_local_temps(Acc),
+    maps:merge(Cell, maps:without(maps:keys(Fields), Acc)).
 
 -spec owner_of(#beamtalk_object{}) -> pid() | tuple().
 owner_of(#beamtalk_object{pid = Pid}) -> Pid.

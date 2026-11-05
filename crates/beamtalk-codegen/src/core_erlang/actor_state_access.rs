@@ -82,6 +82,7 @@ pub(in crate::core_erlang) mod actor_state_helper {
     pub const RESTORE: (&str, u32) = ("restore", 2);
     pub const CALL_FOREIGN: (&str, u32) = ("call_foreign", 3);
     pub const REFRESH: (&str, u32) = ("refresh", 2);
+    pub const REFRESH_CARRIED: (&str, u32) = ("refresh_carried", 2);
     pub const CAPTURE: (&str, u32) = ("capture", 2);
     pub const VIEW: (&str, u32) = ("view", 2);
     pub const GET: (&str, u32) = ("get", 3);
@@ -99,6 +100,7 @@ pub(in crate::core_erlang) mod actor_state_helper {
         RESTORE,
         CALL_FOREIGN,
         REFRESH,
+        REFRESH_CARRIED,
         CAPTURE,
         VIEW,
         GET,

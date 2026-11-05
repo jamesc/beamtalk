@@ -738,14 +738,29 @@ fn render_ensure_catch(
         leaf::var(vars.stack_var.clone()),
         "> -> ",
     ];
-    let (Some(relay), Some(token), Some(carry)) = (relay, token, carry) else {
+    let (Some(relay), Some(carry)) = (relay, carry) else {
         return docvec![head, other.clone()];
+    };
+    // The scope's own throw matches its token; a foreign one (BT-4429) is
+    // every `$bt_nlr` throw that reaches the catch.
+    let guard = match (carry, token) {
+        (NlrCarry::Foreign, _) => leaf::atom("true"),
+        (_, Some(token)) => docvec![
+            "call 'erlang':'=:='(",
+            leaf::var(vars.nlr_tok_var.clone()),
+            ", ",
+            leaf::var(token.name().to_string()),
+            ")",
+        ],
+        (_, None) => return docvec![head, other.clone()],
     };
     let rethrow = match &relay.rethrow {
         RethrowSlot::Version(version) => {
             let family = match carry {
                 NlrCarry::SelfVt => "Self",
-                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live => "StateAcc",
+                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live | NlrCarry::Foreign => {
+                    "StateAcc"
+                }
             };
             leaf::var(super::super::util::versioned_var(family, *version))
         }
@@ -753,7 +768,27 @@ fn render_ensure_catch(
             actor_state_helper::REFRESH,
             vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
         ),
+        RethrowSlot::CellIfCarried => actor_state_call(
+            actor_state_helper::REFRESH_CARRIED,
+            vec![
+                leaf::var(vars.cell_snapshot_var.clone()),
+                leaf::var(vars.nlr_carried_var.clone()),
+            ],
+        ),
         RethrowSlot::SiteState(doc) => doc.clone(),
+    };
+    // `refresh_carried/2` compares the carried state with the cell as it was
+    // before the cleanup wrote it.
+    let snapshot = if relay.rethrow == RethrowSlot::CellIfCarried {
+        docvec![
+            "let ",
+            leaf::var(vars.cell_snapshot_var.clone()),
+            " = ",
+            actor_state_call(actor_state_helper::SNAPSHOT, vec![]),
+            " in ",
+        ]
+    } else {
+        Document::Nil
     };
     let store = if relay.cell_store {
         docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
@@ -772,11 +807,10 @@ fn render_ensure_catch(
         leaf::var(vars.nlr_val_var.clone()),
         ", ",
         leaf::var(vars.nlr_carried_var.clone()),
-        "}}> when call 'erlang':'=:='(",
-        leaf::var(vars.nlr_tok_var.clone()),
-        ", ",
-        leaf::var(token.name().to_string()),
-        ") -> ",
+        "}}> when ",
+        guard,
+        " -> ",
+        snapshot,
         relay.seed.clone(),
         relay.cleanup.clone(),
         " ",

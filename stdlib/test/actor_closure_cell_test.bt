@@ -124,12 +124,37 @@ TestCase subclass: ActorClosureCellTest
     self assert: c storedCleanupInAClosureAfterReturn equals: 1
     self assert: c n equals: 9
 
-  // PIN-BUG BT-4429: an `ensure:` sent with `perform:` loses the cleanup's
-  // write when a `^` unwinds through it. The fix flips `n` to 9.
-  testPerformedEnsureCleanupWriteIsLostOnAnEarlyReturn =>
+  // BT-4429: the same when `ensure:` is sent with `perform:`, so the
+  // `Block>>ensure:` fallback runs it.
+  testPerformedEnsureCleanupWriteSurvivesAnEarlyReturn =>
     c := ClosureCellEnsure spawn
     self assert: c performedCleanupAfterReturn equals: 1
-    self assert: c n equals: 0
+    self assert: c n equals: 9
+
+  testPerformedEnsureCleanupWriteOverTheBodysWriteSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c performedCleanupOverTheBodysWriteAfterReturn equals: 1
+    self assert: c n equals: 105
+
+  testNestedPerformedEnsureCleanupWritesSurviveAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c nestedPerformedCleanupsAfterReturn equals: 1
+    self assert: c n equals: 200
+
+  testPerformedEnsureInsideACompiledEnsureKeepsBothCleanupWrites =>
+    c := ClosureCellEnsure spawn
+    self assert: c performedInsideCompiledCleanupsAfterReturn equals: 1
+    self assert: c n equals: 200
+
+  testCompiledEnsureInsideAPerformedEnsureKeepsBothCleanupWrites =>
+    c := ClosureCellEnsure spawn
+    self assert: c compiledInsidePerformedCleanupsAfterReturn equals: 1
+    self assert: c n equals: 200
+
+  testPerformedEnsureCleanupWriteInALoopSurvivesAnEarlyReturn =>
+    c := ClosureCellEnsure spawn
+    self assert: c performedCleanupInALoopAfterReturn equals: 2
+    self assert: c n equals: 2
 
   testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
     c := ClosureCellEnsure spawn

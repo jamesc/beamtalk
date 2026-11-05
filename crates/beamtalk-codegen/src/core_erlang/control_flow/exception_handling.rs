@@ -1533,7 +1533,9 @@ impl CoreErlangGenerator {
                 (error_arm.state_version > 0).then_some(error_arm.state_version)
             }
             Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
-            Some(NlrCarry::Live) | None => None,
+            // A scope's own throw is never foreign: only the
+            // `Block>>ensure:` fallback relays a foreign one.
+            Some(NlrCarry::Live | NlrCarry::Foreign) | None => None,
         };
         let writes_cell = self.block_touches_actor_state(cleanup_block);
         let relays = self.scope_nlr_token().is_some()
@@ -1679,6 +1681,12 @@ impl CoreErlangGenerator {
                     cell_store: false,
                     rethrow: RethrowSlot::CellOverCarried,
                 }
+            }
+            NlrCarry::Foreign => {
+                return Err(CodeGenError::Internal(
+                    "an inlined `ensure:` cleanup relays its own scope's `^`, never a foreign one"
+                        .to_string(),
+                ));
             }
         };
         Ok(relay)
@@ -1834,6 +1842,51 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4429: the catch of `Block>>ensure:`'s structural fallback, an
+    /// [`ThreadedStmt::EnsureCatch`](threaded_ir::ThreadedStmt::EnsureCatch)
+    /// whose relay takes every foreign `^` ([`NlrCarry::Foreign`]).
+    fn ensure_structural_fallback_catch(&mut self, cleanup_param: &str) -> Document<'static> {
+        let type_var = self.fresh_temp_var("Type");
+        let error_var = self.fresh_temp_var("Error");
+        let stack_var = self.fresh_temp_var("Stack");
+        // BT-4429: every `^` that crosses this catch is foreign (this is the
+        // Block method's frame), so its state kind is known only at run time.
+        // The cleanup is a closure, which writes only the actor-state cell:
+        // the relay resumes the throw with the cell over the carried state
+        // when the throw carried the cell's state (an actor method's or
+        // closure's `^`), and as it came otherwise (`ensure_nlr_relay`).
+        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
+        let relay = EnsureNlrRelay {
+            seed: Document::Nil,
+            cleanup: docvec![
+                "let _ = ",
+                self.annotate_current_send_call(cleanup_apply()),
+                " in"
+            ],
+            cell_store: false,
+            rethrow: RethrowSlot::CellIfCarried,
+        };
+        let other = docvec![
+            "do ",
+            self.annotate_current_send_call(cleanup_apply()),
+            " ",
+            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+        ];
+        self.ensure_catch(
+            EnsureCatchTriple {
+                type_var,
+                error_var,
+                stack_var,
+                carried_var: None,
+            },
+            Some(NlrCarry::Foreign),
+            EnsureCleanup::Closure { writes_cell: true },
+            Some(relay),
+            other,
+            beamtalk_core::source_analysis::Span::default(),
+        )
+    }
+
     /// Generates the fallback method body for `ensure` — Block's
     /// `ensure:`. Reached only via generic dispatch bypassing the call-site
     /// interception `generate_ensure` normally provides (e.g. `perform:`).
@@ -1877,10 +1930,8 @@ impl CoreErlangGenerator {
 
         let try_result_var = self.fresh_temp_var("TryResult");
         let result_var = self.fresh_temp_var("Result");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-
+        let catch = self.ensure_structural_fallback_catch(&cleanup_param);
+        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.clone()), " ()"];
         let tier1_try = docvec![
             "try let ",
             leaf::var(try_result_var.clone()),
@@ -1891,27 +1942,11 @@ impl CoreErlangGenerator {
             " of ",
             leaf::var(result_var.clone()),
             " -> let _ = ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_param.clone()),
-                " ()"
-            ]),
+            self.annotate_current_send_call(cleanup_apply()),
             " in ",
             leaf::var(result_var),
-            " catch <",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> do ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_param.clone()),
-                " ()"
-            ]),
             " ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
+            catch,
         ];
 
         let cleanup_stateful_error = self.generate_stateful_block_dispatch_error(

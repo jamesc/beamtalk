@@ -511,8 +511,9 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
     /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
     /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
-    /// nor did `c := [self.n := 9]. [^1] ensure: c`. Excluded: `Block>>ensure:`
-    /// reached by `perform:` builds no `EnsureCatch` (PIN-BUG BT-4429).
+    /// nor did `c := [self.n := 9]. [^1] ensure: c`, nor (BT-4429) the same
+    /// sent with `perform:`, whose `Block>>ensure:` fallback relays every
+    /// foreign throw ([`NlrCarry::Foreign`]).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
@@ -1922,14 +1923,25 @@ impl VerifyWalk<'_> {
 /// where the state lives in the cell, any cleanup that may write the cell
 /// writes it. A result in the cell is the carried state with the cell's
 /// fields over it, never one rebuilt from the `ensure:` site's bindings.
+/// A foreign throw (BT-4429, `Block>>ensure:` reached dynamically) has no
+/// token of the scope to match and a state kind known only at run time: a
+/// cleanup that may write the cell resumes it with the cell over the carried
+/// state when that state is the cell's.
 fn check_ensure_relay(
     has_token: bool,
     carry: Option<NlrCarry>,
     cleanup: EnsureCleanup,
     relay: Option<&EnsureNlrRelay>,
 ) -> Option<EnsureRelayDefect> {
-    let carry = carry.filter(|_| has_token)?;
+    let carry = carry.filter(|carry| has_token || *carry == NlrCarry::Foreign)?;
     let expected = match (carry, cleanup) {
+        (
+            NlrCarry::Foreign,
+            EnsureCleanup::Inlined {
+                writes_cell: true, ..
+            }
+            | EnsureCleanup::Closure { writes_cell: true },
+        ) => RethrowSlot::CellIfCarried,
         (
             NlrCarry::Live,
             EnsureCleanup::Inlined {
