@@ -1,7 +1,7 @@
 # ADR 0144: Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`"
 
 ## Status
-Accepted (2026-11-05); proposed 2026-11-04. Driven by BT-4413.
+Implemented (2026-11-05); accepted 2026-11-05, proposed 2026-11-04. Driven by BT-4413.
 
 ## Context
 
@@ -345,8 +345,27 @@ Size: M.
 ## Implementation Tracking
 
 **Epic:** BT-4434
-**Issues:** BT-4435 (type checker, M), BT-4436 (LSP and REPL e2e, S, blocked by BT-4435), BT-4437 (Catalina migration, S, blocked by BT-4435)
-**Status:** Planned
+**Status:** Done (2026-11-05)
+
+| Phase | Issue | Title | Size | PR |
+|-------|-------|-------|------|----|
+| 1 | BT-4435 | Type `P class` as the class object of a conforming class | M | #4832 |
+| 2 | BT-4446 | `beamtalk test` loads `src/` and dependency protocols (found by BT-4437) | S | #4839 |
+| 2 | BT-4447 | Actor self-sends exempt from the sendability check (found by BT-4437) | S | #4840 |
+| 2 | BT-4436 | LSP completion/hover and REPL e2e for `P class` values | S | #4842 |
+| 2 | BT-4437 | Catalina: type transport fields as `Transport class` | S | jamesc/beamtalk-catalina#36 |
+
+**Result (Catalina `echo_c10_64B`):** `beamtalk_message_dispatch:send/3` per
+message went from 3 to 2 (`result isOk` after a transport send is now a direct
+call), and untyped dynamic sites went from 61 to 41. The class-side sends to the
+transport itself stay dynamic; making them direct calls is a future ADR 0025
+amendment (BT-4413).
+
+**Follow-ups:** BT-4440 (check `C class` / `P class` return annotations),
+BT-4441 (return-type refinement in `P class <: Q class`), BT-4444 (block
+`value:` arguments against annotated parameters), BT-4445 (distinct internal
+name for `ProtocolMeta`), BT-4449 (REPL warning hints), BT-4450 (LSP registry
+cloning and signature help).
 
 ## Migration Path
 
