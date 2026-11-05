@@ -1,7 +1,7 @@
 # ADR 0144: Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`"
 
 ## Status
-Proposed (2026-11-04). Driven by BT-4413.
+Accepted (2026-11-05); proposed 2026-11-04. Driven by BT-4413.
 
 ## Context
 
