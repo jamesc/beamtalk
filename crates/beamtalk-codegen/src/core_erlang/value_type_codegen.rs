@@ -4864,7 +4864,9 @@ impl CoreErlangGenerator {
         let field_names_branch: Document<'static> = if is_value_class {
             docvec![
                 "        <'fieldNames'> when 'true' ->\n",
-                "            call 'beamtalk_reflection':'field_names'(Self)\n",
+                "            ",
+                super::primitives::field_names_doc("Self"),
+                "\n",
             ]
         } else {
             docvec![

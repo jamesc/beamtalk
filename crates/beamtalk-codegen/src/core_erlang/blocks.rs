@@ -812,11 +812,12 @@ impl CoreErlangGenerator {
                 // so a producer there (an evaluated block that threads
                 // `State`) lands its carrier and `Bind` in this body instead
                 // of destructuring its raw `{Value, State}` tuple.
-                let (binding_docs, rhs_var) =
-                    self.generate_destructure_bindings_sequenced(pattern, value, frame, stmts)?;
-                for d in binding_docs {
-                    stmts.push(ThreadedStmt::Statement(d, span));
-                }
+                // BT-4439: each name is written to the block's slot, as the
+                // local-var assignment branch above writes `name := ...`.
+                let (rhs_var, _) =
+                    self.lower_destructure_bind(pattern, value, frame, span, stmts, &|_| {
+                        super::control_flow::LocalWrite::Slot
+                    })?;
                 if is_last {
                     // BT-3889: the block answers the right-hand side.
                     let final_version = self.state_version();

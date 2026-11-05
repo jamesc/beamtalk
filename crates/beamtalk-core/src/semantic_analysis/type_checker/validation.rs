@@ -1343,7 +1343,8 @@ impl TypeChecker {
     /// argument away from the owning actor. At home it runs in the actor's
     /// own process; from a block running away from home (ADR 0137) it
     /// messages the owner back. A block that carries the handle away is the
-    /// escape, and ADR 0137's away-from-home rules report it, not this check.
+    /// escape, and ADR 0103's block-capture check (boundary #2) reports it,
+    /// not this check.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn check_argument_types_with_known_remote(
         &mut self,
@@ -1499,6 +1500,16 @@ impl TypeChecker {
             let Some(expected_declared) = expected else {
                 continue;
             };
+            if let Some(arg) = arg_exprs.and_then(|exprs| exprs.get(i)) {
+                self.check_list_literal_elements(
+                    class_name,
+                    selector,
+                    i + 1,
+                    arg,
+                    expected_declared,
+                    hierarchy,
+                );
+            }
             // Resolve a declared parameter type that names one of
             // the receiver's own generic type params — bare (`V`) or nested
             // (`List(E)`, `Dictionary(K, V)`) — to its concrete substituted
@@ -1804,6 +1815,198 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4385: when `arg` is a non-empty list literal
+    /// and the parameter declared `expected_declared` takes a list with a
+    /// concrete element type, the literal's elements and that element type.
+    /// The argument is then judged element by element
+    /// ([`Self::check_list_literal_elements`]), and the whole-argument
+    /// variance check (`check_variance_in_expr`) leaves it alone, so one
+    /// mistake gets one warning.
+    ///
+    /// The declared type may be `List(E)`, an alias of it, or a union with
+    /// exactly one `List` arm (`List(RegexOption) | Nil`). It is `None`, and
+    /// the argument keeps the whole-argument checks, when `E` mentions:
+    /// - a type param of the receiver class or a superclass (`E` on
+    ///   `List>>++`, `Item` on a user `Box(Item)`), resolved to `Dynamic`
+    ///   here, or a method-local type variable (`T`);
+    /// - a protocol: conformance is structural, and the per-element
+    ///   assignability rule is nominal (BT-4482).
+    ///
+    /// A cons literal (`#(a | rest)`) is judged too: each head is an
+    /// element, and the tail's own element type (`E'` of its `List(E')`) is
+    /// checked against `E` as one more entry.
+    pub(super) fn list_literal_element_expectation<'a>(
+        &mut self,
+        arg: &'a Expression,
+        expected_declared: &DeclaredType,
+        class_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<ListLiteralElements<'a>> {
+        // `ast::normalize` (BT-4059) already peeled parens off a send argument.
+        let Expression::ListLiteral { elements, tail, .. } = arg else {
+            return None;
+        };
+        if elements.is_empty() {
+            return None;
+        }
+        let class_type_params: type_resolver::SubstitutionMap =
+            std::iter::once(EcoString::from(class_name))
+                .chain(hierarchy.superclass_chain(class_name))
+                .filter_map(|name| hierarchy.get_class(&name))
+                .flat_map(|info| info.type_params.iter().cloned())
+                .map(|param| (param, InferredType::Dynamic(DynamicReason::Unknown)))
+                .collect();
+        let (resolved, alias_deps) = type_resolver::resolve_declared_type_with_alias_deps(
+            expected_declared,
+            &class_type_params,
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_ref(),
+            super::TypeStringContext::Declared,
+        );
+        self.referenced_aliases.extend(alias_deps);
+        let list_element = |ty: &InferredType| match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "List" && type_args.len() == 1 => Some(type_args[0].clone()),
+            _ => None,
+        };
+        let element = match &resolved {
+            InferredType::Union { members, .. } => {
+                let mut arms = members.iter().filter_map(list_element);
+                let first = arms.next()?;
+                if arms.next().is_some() {
+                    return None;
+                }
+                first
+            }
+            other => list_element(other)?,
+        };
+        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+            return None;
+        }
+        Some(ListLiteralElements {
+            elements,
+            tail: tail.as_deref(),
+            element,
+        })
+    }
+
+    /// Whether a declared list element type is left to the whole-argument
+    /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
+    /// or mentions a type variable placeholder or a protocol anywhere in it.
+    fn element_type_is_unjudged(
+        ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                super::is_type_var_placeholder(class_name, hierarchy)
+                    || hierarchy.is_protocol_class(class_name)
+                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
+                    || type_args.iter().any(|arg| {
+                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
+                    })
+            }
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+            InferredType::Meta { .. }
+            | InferredType::ProtocolMeta { .. }
+            | InferredType::Never
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => false,
+        }
+    }
+
+    /// BT-4385: a list literal `#(...)` passed to a parameter declared
+    /// `List(E)` checks each element against `E`, by the same rule as an
+    /// annotated local ([`Self::detect_assignment_type_mismatch`]). The
+    /// argument's own joined `List(E')` type cannot carry this: a joined
+    /// element type loses which element is wrong, and the nominal argument
+    /// check compares only the `List` base. Which arguments are judged, and
+    /// against what, is [`Self::list_literal_element_expectation`].
+    fn check_list_literal_elements(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        param_pos: usize,
+        arg: &Expression,
+        expected_declared: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some(ListLiteralElements {
+            elements,
+            tail,
+            element: element_declared,
+        }) = self.list_literal_element_expectation(arg, expected_declared, class_name, hierarchy)
+        else {
+            return;
+        };
+        let element_declared = &element_declared;
+        // Each head, then the tail's element type (`E'` of its `List(E')`).
+        let entries = elements
+            .iter()
+            .enumerate()
+            .map(|(j, element)| {
+                (
+                    format!("Element {}", j + 1),
+                    element.span(),
+                    self.type_map.get(element.span()).cloned(),
+                )
+            })
+            .chain(tail.map(|tail| {
+                (
+                    "Each tail element".to_string(),
+                    tail.span(),
+                    self.type_map.get(tail.span()).map(Self::tail_element_type),
+                )
+            }))
+            .collect::<Vec<_>>();
+        for (label, span, element_ty) in entries {
+            let Some(element_ty) = element_ty else {
+                continue;
+            };
+            let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                &element_ty,
+                element_declared,
+                hierarchy,
+                self.protocol_registry.as_deref(),
+            ) else {
+                continue;
+            };
+            let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
+                Self::protocol_metatype_nonconformance_diagnostic(
+                    &mismatch.inferred_display,
+                    protocol,
+                    missing,
+                    span,
+                )
+            } else {
+                Diagnostic::warning(
+                    format!(
+                        "{label} of argument {param_pos} of '{selector}' on {class_name} expects {}, got {}",
+                        mismatch.declared_display, mismatch.inferred_display
+                    ),
+                    span,
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Every element of the list must be assignable to {}",
+                    mismatch.declared_display
+                ))
+            };
+            self.diagnostics.push(diag);
+        }
+    }
+
     /// BT-4090: whether `expr` contains a `self deferReply` send (descending
     /// into blocks and arguments).
     fn contains_defer_reply_send(expr: &Expression) -> bool {
@@ -1865,8 +2068,10 @@ impl TypeChecker {
         // B]) needs it. The `-> Self` case needs the static receiver class
         // (which the plain annotation resolver does not thread), so handle it
         // specially via `receiver_type_for_class`. `-> Self class` returns a
-        // class object — existing body-type comparison cannot meaningfully
-        // validate this, so skip.
+        // class object whose class depends on the receiver — skip. A
+        // `-> C class` / `-> P class` return resolves like any annotation;
+        // a class-object body is then judged by `metatype_assignable_to`
+        // below (BT-4440), and any other body against it is skipped.
         //
         // All other arms — including `Generic` — go through the
         // central `resolve_type_annotation` resolver. ADR 0108:
@@ -1878,7 +2083,7 @@ impl TypeChecker {
             TypeAnnotation::SelfType { .. } => {
                 type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
-            TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
+            TypeAnnotation::SelfClass { .. } => return,
             _ => {
                 // ADR 0108 hot-reload re-check trigger: a declared
                 // `-> RestartStrategy` return type is an annotation site too
@@ -1894,6 +2099,28 @@ impl TypeChecker {
                 expected
             }
         };
+
+        // BT-4440: a class-object body (`C class` / `P class`) meets the
+        // declared return type under the same `metatype_assignable_to` rule
+        // arguments, slots and locals use (ADR 0083 tower, ADR 0144
+        // conformance). `-> Self` depends on the receiver side, so skip it.
+        if let Some(class_object) = ClassObjectType::of(body_type) {
+            if !matches!(declared, TypeAnnotation::SelfType { .. }) {
+                self.check_class_object_return(
+                    method,
+                    class_object,
+                    &expected,
+                    class_name,
+                    hierarchy,
+                );
+            }
+            return;
+        }
+        // Any other body against a declared class-object return has no
+        // reliable comparison here — skip, as before BT-4440.
+        if matches!(declared, TypeAnnotation::ClassOf { .. }) {
+            return;
+        }
 
         let InferredType::Known {
             class_name: actual_ty,
@@ -2039,9 +2266,10 @@ impl TypeChecker {
                 );
             }
             // ADR 0083: a declared metatype return (`-> Self class` / `-> X class`)
-            // already short-circuits via the `SelfClass`/`ClassOf` arm above, so
-            // `Meta` is unreachable in practice; skip checking (like `Dynamic`)
-            // to stay safe should a future annotation resolve to a metatype.
+            // already returned above (a class-object body is judged by
+            // `check_class_object_return`), so `Meta` is unreachable in
+            // practice; skip checking (like `Dynamic`) to stay safe should a
+            // future annotation resolve to a metatype.
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
             // `Meta`/`Dynamic` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
             // 0102) declared return type has no single `Known` body
@@ -2052,6 +2280,52 @@ impl TypeChecker {
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
         }
+    }
+
+    /// BT-4440: warn when a method whose body is a class object (`C class` /
+    /// `P class`) declares a return type that class object does not fit,
+    /// judged by [`Self::metatype_assignable_to`] with the
+    /// [`Self::is_type_compatible`] tower (the same rule as an argument,
+    /// which keeps return checking's unknown-class escape). A declared
+    /// `P class` the class misses gets the ADR 0144 conformance wording with
+    /// the missing selectors. A `Dynamic` declared return accepts anything.
+    fn check_class_object_return(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_object: ClassObjectType<'_>,
+        expected: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if matches!(expected, InferredType::Dynamic(_)) {
+            return;
+        }
+        let declared_type = expected.display_annotation();
+        if Self::metatype_assignable_to(
+            class_object,
+            &declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            Self::is_type_compatible,
+        ) {
+            return;
+        }
+        let expected_display = expected
+            .display_for_diagnostic()
+            .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+        let selector = method.selector.name();
+        let diag = Self::metatype_mismatch_diagnostic(
+            class_object,
+            &declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            format!(
+                "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+            ),
+            format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+            method.span,
+        );
+        self.diagnostics.push(diag);
     }
 
     /// Returns whether a `Known` type — either a method body's whole inferred
@@ -3661,7 +3935,9 @@ impl TypeChecker {
     /// itself a protocol, and `P class` iff
     /// [`ProtocolInfo::subsumes_conformance_to`](crate::semantic_analysis::protocol_registry::ProtocolInfo::subsumes_conformance_to)`(P, X)`. Any other part models the class object as
     /// `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
-    /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
+    /// `Behaviour` / `Object` accept it, `Integer` does not; a protocol
+    /// literal (`Meta{P}` for a registered protocol) is modelled as
+    /// `Protocol` instead — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
     /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
     /// for an argument, as for every other argument type. A type-parameter
@@ -3721,9 +3997,8 @@ impl TypeChecker {
                     }
                     ClassObjectType::Protocol(protocol_name) => {
                         match (registry.get(protocol_name), registry.get(declared_base)) {
-                            (Some(value_protocol), Some(declared_protocol)) => {
-                                value_protocol.subsumes_conformance_to(declared_protocol, registry)
-                            }
+                            (Some(value_protocol), Some(declared_protocol)) => value_protocol
+                                .subsumes_conformance_to(declared_protocol, registry, hierarchy),
                             _ => false,
                         }
                     }
@@ -3748,8 +4023,17 @@ impl TypeChecker {
         } else {
             part.into()
         };
-        let class_name_ty: EcoString = "Class".into();
-        tower(&class_name_ty, &part, hierarchy)
+        // A protocol literal (`Meta{P}` for a registered protocol `P`) is a
+        // `Protocol` object, not a class (BT-4440): `:: Protocol` accepts it.
+        let runtime_class: EcoString = match value {
+            ClassObjectType::Class(name)
+                if protocol_registry.is_some_and(|r| r.has_protocol(name)) =>
+            {
+                "Protocol".into()
+            }
+            _ => "Class".into(),
+        };
+        tower(&runtime_class, &part, hierarchy)
     }
 
     /// ADR 0144: when a class object `C class` fails
@@ -4438,20 +4722,22 @@ impl TypeChecker {
                         ) {
                             let ReturnTypeMismatch {
                                 selector,
+                                class_side,
                                 defined_in,
                                 actual,
                                 expected,
                             } = mismatch;
+                            let side = if class_side { " class" } else { "" };
                             self.diagnostics.push(
                                 Diagnostic::warning(
                                     format!(
-                                        "{class_name}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
+                                        "{class_name}{side}>>{selector} returns {actual}, incompatible with protocol {base_protocol}'s {expected}"
                                     ),
                                     span,
                                 )
                                 .with_category(DiagnosticCategory::Type)
                                 .with_hint(format!(
-                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
+                                    "{class_name} responds to every {base_protocol} selector, but `{selector}` (defined in {defined_in}{side}) is declared -> {actual}; code typed `:: {base_protocol}` expects {expected}"
                                 )),
                             );
                         }
@@ -4853,4 +5139,15 @@ impl ComparisonArgKind {
             Self::Symbol => arg_ty == "Symbol" || arg_ty.starts_with('#'),
         }
     }
+}
+
+/// BT-4385: a list-literal argument judged element by element — see
+/// [`TypeChecker::list_literal_element_expectation`].
+pub(super) struct ListLiteralElements<'a> {
+    /// The literal's heads.
+    elements: &'a [Expression],
+    /// A cons literal's tail (`rest` in `#(a | rest)`).
+    tail: Option<&'a Expression>,
+    /// The declared element type `E` of the parameter's `List(E)`.
+    element: InferredType,
 }

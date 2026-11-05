@@ -705,6 +705,19 @@ impl TypeChecker {
                                 .collect();
                             for (i, arg) in arguments.iter().enumerate() {
                                 if let Some(Some(expected_declared)) = method.param_types.get(i) {
+                                    // BT-4385: a list literal judged element
+                                    // by element is not judged again whole.
+                                    if self
+                                        .list_literal_element_expectation(
+                                            arg,
+                                            expected_declared,
+                                            &class_name,
+                                            hierarchy,
+                                        )
+                                        .is_some()
+                                    {
+                                        continue;
+                                    }
                                     // `type_string_references_class_param` /
                                     // `is_assignable_to_with_variance` below are
                                     // string-level helpers (`DeclaredType`

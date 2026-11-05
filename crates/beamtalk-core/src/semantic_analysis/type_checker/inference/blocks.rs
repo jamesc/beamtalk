@@ -13,7 +13,7 @@
 //! variant) used by every other selector.
 
 use crate::ast::{Expression, WellKnownSelector};
-use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
 use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
@@ -923,12 +923,26 @@ impl TypeChecker {
         // to a bare `Known{C}` so the method lookup below resolves `C`'s
         // class-side methods (the class object is unparameterized, so no type
         // args). The `is_class_side_send` flag is already set by the caller.
+        //
+        // ADR 0144: a `P class` receiver (`ProtocolMeta{P}`) resolves its block
+        // params against `P`'s `class` requirement — the signature
+        // `infer_protocol_meta_send` checks the arguments against — viewed as
+        // a method on the bare `P` so the push-down below is shared.
         let normalized_receiver: InferredType;
-        let receiver_ty = if let InferredType::Meta { class_name, .. } = receiver_ty {
-            normalized_receiver = InferredType::known(class_name.clone());
-            &normalized_receiver
-        } else {
-            receiver_ty
+        // `Some(lookup)` for a `P class` receiver; `None` otherwise.
+        let mut protocol_meta_method: Option<Option<MethodInfo>> = None;
+        let receiver_ty = match receiver_ty {
+            InferredType::Meta { class_name, .. } => {
+                normalized_receiver = InferredType::known(class_name.clone());
+                &normalized_receiver
+            }
+            InferredType::ProtocolMeta { protocol_name, .. } => {
+                protocol_meta_method =
+                    Some(self.protocol_class_requirement_method(protocol_name, selector_name));
+                normalized_receiver = InferredType::known(protocol_name.clone());
+                &normalized_receiver
+            }
+            _ => receiver_ty,
         };
 
         // A `Union`-typed receiver sending a solo `ifTrue:` /
@@ -1013,7 +1027,9 @@ impl TypeChecker {
         // class-side method; otherwise the instance method. Without
         // this split, class-side block parameters never get their declared
         // types propagated to the call-site block params.
-        let method_lookup = if is_class_side_send {
+        let method_lookup = if let Some(requirement) = protocol_meta_method {
+            requirement
+        } else if is_class_side_send {
             hierarchy.find_class_method(class_name, selector_name)
         } else {
             hierarchy.find_method(class_name, selector_name)
@@ -1526,6 +1542,69 @@ impl TypeChecker {
             out.push(ty);
         }
         out
+    }
+
+    /// BT-4444: a `value`-family send (`value:`, `value:value:`, …) directly
+    /// to a block literal checks each argument against the matching
+    /// parameter's `:: T` annotation, by the same rule as an annotated local
+    /// ([`Self::detect_assignment_type_mismatch`]) — so `C class` / `P class`
+    /// metatype parameters judge a class-object argument by conformance.
+    ///
+    /// Unannotated parameters are not checked (their type is the pushed or
+    /// `Dynamic` type, never a declaration), and an arity mismatch is left
+    /// to the runtime, as elsewhere for block arity.
+    pub(in crate::semantic_analysis::type_checker) fn check_block_literal_value_args(
+        &mut self,
+        receiver: &Expression,
+        receiver_ty: &InferredType,
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) {
+        // `ast::normalize` (BT-4059) already peeled parens off a send receiver.
+        let Expression::Block(block) = receiver else {
+            return;
+        };
+        if arguments.is_empty()
+            || arguments.len() != block.parameters.len()
+            || !selector
+                .well_known()
+                .is_some_and(WellKnownSelector::is_block_value)
+        {
+            return;
+        }
+        // The literal's own inferred `Block(P…, R)` carries each annotation
+        // already resolved (aliases, protocols, metatypes).
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = receiver_ty
+        else {
+            return;
+        };
+        if class_name != "Block" {
+            return;
+        }
+        for (i, param) in block.parameters.iter().enumerate() {
+            if param.type_annotation.is_none() {
+                continue;
+            }
+            let (Some(declared), Some(arg_ty), Some(arg)) =
+                (type_args.get(i), arg_types.get(i), arguments.get(i))
+            else {
+                continue;
+            };
+            if let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                arg_ty,
+                declared,
+                hierarchy,
+                self.protocol_registry.as_deref(),
+            ) {
+                self.emit_assignment_type_mismatch(&mismatch, arg.span());
+            }
+        }
     }
 
     /// The parameter types of the (single) `Block(P…, R)` arm of an expected

@@ -3828,11 +3828,12 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let StaticSelf = case call 'persistent_term':'get'(
-    ///         {'bt@point', 'class_origin', 'Point class'}, 'false') of
-    ///     <'false'> when 'true' ->
+    ///         'Point class static calls', ~{}~) of
+    ///     <~{{'bt@point', 'class_origin', 'Point class'} := StaticRef}~> when 'true' ->
+    ///       StaticRef
+    ///     <_> when 'true' ->
     ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
     ///           {'bt@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
-    ///     <StaticRef> when 'true' -> StaticRef
     ///   end
     /// in case StaticSelf of
     ///   <'false'> when 'true' ->
@@ -3843,9 +3844,11 @@ impl CoreErlangGenerator {
     /// ```
     ///
     /// The guard is the contract (ADR 0025 amendment). The hit path is one
-    /// `persistent_term` read of the call target's static call key
-    /// (BT-4316), whose value is the class reference the callee gets as
-    /// `ClassSelf`. The runtime installs the key
+    /// `persistent_term` read of the class's static call map (BT-4442: one
+    /// key per class, `'<Name> class static calls'`, so a metadata write
+    /// erases one key per class, not one per warm target) and a map match of
+    /// the call target's key (BT-4316), whose value is the class reference
+    /// the callee gets as `ClassSelf`. The runtime installs the key
     /// (`beamtalk_class_shadow_flags:static_call_target/4`) only while
     /// `direct_call_ok/2` holds (nothing shadows the compiled method: no
     /// class-side extension, no ADR 0084 runtime fun; neither the class nor
@@ -3858,8 +3861,8 @@ impl CoreErlangGenerator {
     /// position: tail recursion through a literal class reference runs in
     /// constant stack.
     ///
-    /// The key is the call-site literal `{Module, FunName, Tag}`, passed whole
-    /// to the runtime, which never spells it. The metaclass tag keeps a call
+    /// The target's map key is the call-site literal `{Module, FunName, Tag}`,
+    /// passed whole to the runtime, which never spells it. The metaclass tag keeps a call
     /// site naming one class from hitting a key another class installed for
     /// the same module (after `renameTo:`, or a removed class's module name
     /// reused): such a site misses, and its own miss path answers for the
@@ -3919,11 +3922,11 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let StaticSelf = case call 'persistent_term':'get'(
-    ///         {'bt@point', 'new', 'Point class'}, 'false') of
-    ///     <'false'> when 'true' ->
+    ///         'Point class static calls', ~{}~) of
+    ///     <~{{'bt@point', 'new', 'Point class'} := StaticRef}~> when 'true' -> StaticRef
+    ///     <_> when 'true' ->
     ///       call 'beamtalk_class_shadow_flags':'static_call_target'(
     ///           {'bt@point', 'new', 'Point class'}, 'Point', 'new', 0)
-    ///     <StaticRef> when 'true' -> StaticRef
     ///   end
     /// in case StaticSelf of
     ///   <'false'> when 'true' ->
@@ -3981,11 +3984,11 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let StaticSelf = case call 'persistent_term':'get'(
-    ///         {'caller_safe_raise', 'classSignal:', 'bt@stdlib@exception', 'class_signal:',
-    ///          'Error class'}, 'false') of
-    ///     <'false'> when 'true' ->
+    ///         'Error class static calls', ~{}~) of
+    ///     <~{{'caller_safe_raise', 'classSignal:', 'bt@stdlib@exception', 'class_signal:',
+    ///         'Error class'} := StaticRef}~> when 'true' -> StaticRef
+    ///     <_> when 'true' ->
     ///       call 'beamtalk_class_shadow_flags':'static_call_target'(<same key>, 'Error', 'signal:', 2)
-    ///     <StaticRef> when 'true' -> StaticRef
     ///   end
     /// in case StaticSelf of
     ///   <'false'> when 'true' -> <the dynamic class_send to 'Error'>
@@ -4048,8 +4051,9 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// The shared shape of a keyed static class send (BT-4316): read the call
-    /// target's static call key, install it on a miss
+    /// The shared shape of a keyed static class send (BT-4316): read the
+    /// class's static call map (`'<Name> class static calls'`, BT-4442),
+    /// match the call target's key in it, install it on a miss
     /// (`beamtalk_class_shadow_flags:static_call_target/4`), and run `hit_doc`
     /// (which may read `class_self_var`, the key's class reference) when it
     /// is present, else the dynamic `class_send` fallback. `fun_arity` is the
@@ -4069,12 +4073,20 @@ impl CoreErlangGenerator {
         let static_ref_var = self.fresh_temp_var("StaticRef");
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let fallback = self.generate_class_send_fallback(class_name, raw_selector, args_doc);
+        // BT-4442: the class's one static call key (`util::static_calls_key`).
+        let class_key_doc = leaf::atom(super::util::static_calls_key(class_name));
         docvec![
             "let ",
             leaf::var(class_self_var.to_string()),
             " = case call 'persistent_term':'get'(",
+            class_key_doc,
+            ", ~{}~) of <~{",
             key_doc.clone(),
-            ", 'false') of <'false'> when 'true' -> ",
+            " := ",
+            leaf::var(static_ref_var.clone()),
+            "}~> when 'true' -> ",
+            leaf::var(static_ref_var),
+            " <_> when 'true' -> ",
             "call 'beamtalk_class_shadow_flags':'static_call_target'(",
             key_doc.clone(),
             ", ",
@@ -4083,11 +4095,7 @@ impl CoreErlangGenerator {
             leaf::atom(selector_atom),
             ", ",
             leaf::int_lit(i64::try_from(fun_arity).unwrap_or(i64::MAX)),
-            ") <",
-            leaf::var(static_ref_var.clone()),
-            "> when 'true' -> ",
-            leaf::var(static_ref_var),
-            " end in case ",
+            ") end in case ",
             leaf::var(class_self_var.to_string()),
             " of <'false'> when 'true' -> ",
             fallback,

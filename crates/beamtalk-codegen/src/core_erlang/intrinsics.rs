@@ -24,7 +24,7 @@
 
 use super::control_flow::SoloBoolean;
 use super::control_flow::{PureArm, SoloAnswer};
-use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, primitives};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression, MessageSelector, WellKnownSelector};
@@ -2567,9 +2567,8 @@ impl CoreErlangGenerator {
                 leaf::var(recv_var.clone()),
                 " = ",
                 recv_doc,
-                " in call 'erlang':'phash2'(",
-                leaf::var(recv_var),
-                ")",
+                " in ",
+                primitives::phash2_doc(recv_var),
             ];
             return Ok(Some(seq.close(self, call_doc, "HashRes")));
         }

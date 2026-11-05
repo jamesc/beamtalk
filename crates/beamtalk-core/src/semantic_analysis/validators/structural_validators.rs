@@ -498,122 +498,10 @@ fn is_known_erlang_module(
 
 // ── FFI arity mismatches ─────────────────────────────────────────────────────
 
-/// Known Erlang function arities: `(module, function, arity)`.
-///
-/// This is a curated list of commonly-used OTP functions where arity
-/// mismatches are a frequent source of bugs when using the Beamtalk FFI.
-const KNOWN_ARITIES: &[(&str, &str, usize)] = &[
-    // lists
-    ("lists", "append", 1),
-    ("lists", "append", 2),
-    ("lists", "filter", 2),
-    ("lists", "flatten", 1),
-    ("lists", "foldl", 3),
-    ("lists", "foldr", 3),
-    ("lists", "foreach", 2),
-    ("lists", "keyfind", 3),
-    ("lists", "keystore", 4),
-    ("lists", "last", 1),
-    ("lists", "map", 2),
-    ("lists", "member", 2),
-    ("lists", "nth", 2),
-    ("lists", "reverse", 1),
-    ("lists", "reverse", 2),
-    ("lists", "seq", 2),
-    ("lists", "seq", 3),
-    ("lists", "sort", 1),
-    ("lists", "sort", 2),
-    ("lists", "zip", 2),
-    // maps
-    ("maps", "find", 2),
-    ("maps", "fold", 3),
-    ("maps", "from_list", 1),
-    ("maps", "get", 2),
-    ("maps", "get", 3),
-    ("maps", "is_key", 2),
-    ("maps", "keys", 1),
-    ("maps", "map", 2),
-    ("maps", "merge", 2),
-    ("maps", "new", 0),
-    ("maps", "put", 3),
-    ("maps", "remove", 2),
-    ("maps", "size", 1),
-    ("maps", "to_list", 1),
-    ("maps", "update", 3),
-    ("maps", "values", 1),
-    // erlang
-    ("erlang", "atom_to_binary", 1),
-    ("erlang", "atom_to_binary", 2),
-    ("erlang", "atom_to_list", 1),
-    ("erlang", "binary_to_atom", 1),
-    ("erlang", "binary_to_atom", 2),
-    ("erlang", "binary_to_list", 1),
-    ("erlang", "binary_to_list", 3),
-    ("erlang", "element", 2),
-    ("erlang", "hd", 1),
-    ("erlang", "integer_to_binary", 1),
-    ("erlang", "integer_to_binary", 2),
-    ("erlang", "is_atom", 1),
-    ("erlang", "is_binary", 1),
-    ("erlang", "is_integer", 1),
-    ("erlang", "is_list", 1),
-    ("erlang", "is_map", 1),
-    ("erlang", "length", 1),
-    ("erlang", "list_to_binary", 1),
-    ("erlang", "list_to_tuple", 1),
-    ("erlang", "make_ref", 0),
-    ("erlang", "self", 0),
-    ("erlang", "size", 1),
-    ("erlang", "spawn", 1),
-    ("erlang", "spawn", 2),
-    ("erlang", "spawn", 3),
-    ("erlang", "spawn", 4),
-    ("erlang", "throw", 1),
-    ("erlang", "tl", 1),
-    ("erlang", "tuple_to_list", 1),
-    // io
-    ("io", "format", 1),
-    ("io", "format", 2),
-    // timer
-    ("timer", "sleep", 1),
-    // string
-    ("string", "join", 2),
-    ("string", "split", 2),
-    ("string", "trim", 1),
-    // file
-    ("file", "read_file", 1),
-    ("file", "write_file", 2),
-    ("file", "write_file", 3),
-    // os
-    ("os", "cmd", 1),
-    ("os", "getenv", 1),
-    ("os", "type", 0),
-    // math
-    ("math", "sqrt", 1),
-    ("math", "pow", 2),
-    ("math", "pi", 0),
-    // re
-    ("re", "compile", 1),
-    ("re", "compile", 2),
-    ("re", "run", 2),
-    ("re", "run", 3),
-    // ets
-    ("ets", "insert", 2),
-    ("ets", "lookup", 2),
-    ("ets", "new", 2),
-    ("ets", "delete", 1),
-    ("ets", "delete", 2),
-    // rand
-    ("rand", "uniform", 0),
-    ("rand", "uniform", 1),
-    // json
-    ("json", "encode", 1),
-    ("json", "decode", 1),
-];
-
 /// Warn when a known Erlang function is called with the wrong arity.
 ///
-/// Only checks functions in the `KNOWN_ARITIES` table — unknown functions
+/// Only checks functions in the curated [`crate::ffi_exports`] table, which
+/// lists every real arity of each listed function — unknown functions
 /// are silently accepted (the unresolved-FFI check handles unknown modules).
 pub(crate) fn check_ffi_arity(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     walk_module(module, &mut |expr| {
@@ -670,11 +558,11 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 let arity = erlang_arity(selector, arguments.len());
 
                 // Check if this function has known arities.
-                let known: Vec<usize> = KNOWN_ARITIES
-                    .iter()
-                    .filter(|(m, f, _)| *m == module_name && *f == function_name)
-                    .map(|(_, _, a)| *a)
-                    .collect();
+                let known: Vec<usize> =
+                    crate::ffi_exports::known_arities(module_name, &function_name)
+                        .into_iter()
+                        .map(usize::from)
+                        .collect();
 
                 if !known.is_empty() && !known.contains(&arity) {
                     let expected = if known.len() == 1 {
@@ -1135,7 +1023,8 @@ mod tests {
 
     #[test]
     fn test_arity_mismatch_warns_on_wrong_count() {
-        // Erlang lists flatten: a extra: b — arity 2, but lists:flatten is arity 1 only
+        // Erlang lists flatten: a extra: b extra2: c — arity 3, but lists:flatten
+        // has arities 1 and 2 only
         let inner_send = Expression::MessageSend {
             receiver: Box::new(class_ref("Erlang")),
             selector: MessageSelector::Unary("lists".into()),
@@ -1145,10 +1034,15 @@ mod tests {
         };
         let outer_send = Expression::MessageSend {
             receiver: Box::new(inner_send),
-            selector: MessageSelector::Keyword(vec![kwpart("flatten:"), kwpart("extra:")]),
+            selector: MessageSelector::Keyword(vec![
+                kwpart("flatten:"),
+                kwpart("extra:"),
+                kwpart("extra2:"),
+            ]),
             arguments: vec![
                 Expression::Identifier(ident("a")),
                 Expression::Identifier(ident("b")),
+                Expression::Identifier(ident("c")),
             ],
             is_cast: false,
             span: test_span(),
@@ -1159,8 +1053,8 @@ mod tests {
         check_ffi_arity(&module, &mut diags);
 
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].message.contains("lists:flatten/2"));
-        assert!(diags[0].message.contains("expected arity 1"));
+        assert!(diags[0].message.contains("lists:flatten/3"));
+        assert!(diags[0].message.contains("expected arity 1 or 2"));
         assert_eq!(diags[0].category, Some(DiagnosticCategory::ArityMismatch));
     }
 
@@ -1191,21 +1085,32 @@ mod tests {
 
     /// Builds `Erlang erlang <function>: ... with: ...` with `arity` arguments.
     fn erlang_call(function: &str, arity: usize) -> Expression {
+        ffi_call("erlang", function, arity)
+    }
+
+    /// Builds `Erlang <module> <function>: ... with: ...` with `arity`
+    /// arguments (a unary send for arity 0).
+    fn ffi_call(module: &str, function: &str, arity: usize) -> Expression {
         let inner_send = Expression::MessageSend {
             receiver: Box::new(class_ref("Erlang")),
-            selector: MessageSelector::Unary("erlang".into()),
+            selector: MessageSelector::Unary(module.into()),
             arguments: vec![],
             is_cast: false,
             span: test_span(),
         };
-        let mut parts = vec![kwpart(&format!("{function}:"))];
-        parts.extend(std::iter::repeat_with(|| kwpart("with:")).take(arity.saturating_sub(1)));
+        let selector = if arity == 0 {
+            MessageSelector::Unary(function.into())
+        } else {
+            let mut parts = vec![kwpart(&format!("{function}:"))];
+            parts.extend(std::iter::repeat_with(|| kwpart("with:")).take(arity - 1));
+            MessageSelector::Keyword(parts)
+        };
         let args = (0..arity)
             .map(|_| Expression::Identifier(ident("x")))
             .collect();
         Expression::MessageSend {
             receiver: Box::new(inner_send),
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments: args,
             is_cast: false,
             span: test_span(),
@@ -1237,6 +1142,73 @@ mod tests {
                 diags.is_empty(),
                 "erlang:{function}/{arity} should not warn, got: {diags:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_arity_real_otp_arities_no_warning() {
+        // BT-4371: the arity table listed only some arities of these
+        // functions, so valid calls (which LSP completions even offered)
+        // were flagged as `arity_mismatch`.
+        let cases: &[(&str, &str, usize)] = &[
+            ("os", "getenv", 0),
+            ("os", "getenv", 2),
+            ("string", "trim", 2),
+            ("string", "trim", 3),
+            ("lists", "flatten", 2),
+            ("string", "split", 3),
+            ("io", "format", 3),
+            ("file", "read_file", 2),
+            ("json", "encode", 2),
+        ];
+        for (module_name, function, arity) in cases {
+            let module = empty_module_with_exprs(vec![ffi_call(module_name, function, *arity)]);
+            let mut diags = Vec::new();
+
+            check_ffi_arity(&module, &mut diags);
+
+            assert!(
+                diags.is_empty(),
+                "{module_name}:{function}/{arity} should not warn, got: {diags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_every_curated_ffi_module_is_a_known_otp_module() {
+        // BT-4371: a module the curated export table (and so LSP completion)
+        // offers must not trip the unresolved-FFI lint.
+        let none = std::collections::HashSet::new();
+        for module_info in crate::ffi_exports::CURATED_MODULES {
+            assert!(
+                is_known_erlang_module(module_info.name, &none),
+                "curated FFI module `{}` is missing from KNOWN_OTP_MODULES",
+                module_info.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_arity_every_lsp_completion_is_accepted() {
+        // BT-4371: completions and the arity lint share one table, so no
+        // offered `Erlang <module> <selector>` may trip `arity_mismatch`.
+        for module_info in crate::ffi_exports::CURATED_MODULES {
+            for &(function, arity) in module_info.exports {
+                let module = empty_module_with_exprs(vec![ffi_call(
+                    module_info.name,
+                    function,
+                    usize::from(arity),
+                )]);
+                let mut diags = Vec::new();
+
+                check_ffi_arity(&module, &mut diags);
+
+                assert!(
+                    diags.is_empty(),
+                    "{}:{function}/{arity} should not warn, got: {diags:?}",
+                    module_info.name
+                );
+            }
         }
     }
 
@@ -1332,7 +1304,8 @@ mod tests {
 
     #[test]
     fn test_arity_check_with_parenthesized_receiver() {
-        // (Erlang lists) flatten: a extra: b — arity 2, but lists:flatten is arity 1
+        // (Erlang lists) flatten: a extra: b extra2: c — arity 3, but lists:flatten
+        // has arities 1 and 2 only
         let inner_send = Expression::MessageSend {
             receiver: Box::new(class_ref("Erlang")),
             selector: MessageSelector::Unary("lists".into()),
@@ -1346,10 +1319,15 @@ mod tests {
         };
         let outer_send = Expression::MessageSend {
             receiver: Box::new(parens),
-            selector: MessageSelector::Keyword(vec![kwpart("flatten:"), kwpart("extra:")]),
+            selector: MessageSelector::Keyword(vec![
+                kwpart("flatten:"),
+                kwpart("extra:"),
+                kwpart("extra2:"),
+            ]),
             arguments: vec![
                 Expression::Identifier(ident("a")),
                 Expression::Identifier(ident("b")),
+                Expression::Identifier(ident("c")),
             ],
             is_cast: false,
             span: test_span(),
@@ -1364,7 +1342,7 @@ mod tests {
             1,
             "Parenthesized receiver should not bypass arity check"
         );
-        assert!(diags[0].message.contains("lists:flatten/2"));
+        assert!(diags[0].message.contains("lists:flatten/3"));
     }
 
     fn make_method(body_expr: Expression) -> MethodDefinition {

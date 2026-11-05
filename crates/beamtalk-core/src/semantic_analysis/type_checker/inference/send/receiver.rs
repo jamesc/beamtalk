@@ -12,8 +12,10 @@
 //! receiver's instance-side method lookup, and a `Union`-typed receiver's
 //! per-member resolution.
 
+use crate::ast::MethodKind;
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
-use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
+use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
@@ -222,6 +224,17 @@ impl TypeChecker {
                 in_abstract_method,
             )
         };
+
+        // BT-4444: `[:x :: T | ...] value: arg` — check each argument
+        // against the literal's annotated parameter types.
+        self.check_block_literal_value_args(
+            receiver,
+            &receiver_ty,
+            selector,
+            arguments,
+            &arg_types,
+            hierarchy,
+        );
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
@@ -980,6 +993,58 @@ impl TypeChecker {
         })
     }
 
+    /// A protocol `class` requirement's declared parameter types, with any
+    /// type naming one of the protocol's `type_params` erased to `None`
+    /// (unchecked: there is no substitution context for a `P class`
+    /// receiver).
+    fn class_requirement_param_types(
+        requirement: &ProtocolMethodRequirement,
+        type_params: &[EcoString],
+    ) -> Vec<Option<DeclaredType>> {
+        requirement
+            .param_types
+            .iter()
+            .map(|ty| {
+                ty.as_deref()
+                    .map(DeclaredType::parse)
+                    .filter(|ty| !ty.mentions_any(type_params))
+            })
+            .collect()
+    }
+
+    /// The signature a send of `selector` to a `P class` receiver
+    /// (`ProtocolMeta{P}`, ADR 0144) resolves against — `P`'s own or
+    /// inherited `class` requirement — as a [`MethodInfo`] defined in `P`,
+    /// so block-argument parameter push-down
+    /// ([`Self::infer_args_with_block_context`]) treats it like a class-side
+    /// method. Parameter types are those [`Self::infer_protocol_meta_send`]
+    /// checks the arguments against. `None` when `P` has no such requirement
+    /// (or no registry is threaded).
+    pub(in crate::semantic_analysis::type_checker) fn protocol_class_requirement_method(
+        &self,
+        protocol_name: &EcoString,
+        selector: &str,
+    ) -> Option<MethodInfo> {
+        let registry = self.protocol_registry.as_deref()?;
+        let info = registry.get(protocol_name)?;
+        let requirement = info.find_class_requirement(registry, selector)?;
+        let type_params = info.all_type_params(registry);
+        Some(MethodInfo {
+            selector: requirement.selector.clone(),
+            arity: requirement.arity,
+            kind: MethodKind::Primary,
+            defined_in: protocol_name.clone(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: requirement.judged_return_type(&type_params),
+            param_types: Self::class_requirement_param_types(requirement, &type_params),
+            doc: None,
+            origin: None,
+            primitive: None,
+        })
+    }
+
     /// ADR 0144: type a send to a `P class` receiver — the class object of
     /// some class conforming to protocol `P`. Resolution order:
     ///
@@ -1025,15 +1090,7 @@ impl TypeChecker {
         let instance_ty = InferredType::known(protocol_name.clone());
 
         if let Some(requirement) = requirement {
-            let param_types: Vec<Option<DeclaredType>> = requirement
-                .param_types
-                .iter()
-                .map(|ty| {
-                    ty.as_deref()
-                        .map(DeclaredType::parse)
-                        .filter(|ty| !ty.mentions_any(&type_params))
-                })
-                .collect();
+            let param_types = Self::class_requirement_param_types(&requirement, &type_params);
             self.check_args_against_param_types(
                 &receiver_display,
                 selector,

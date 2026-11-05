@@ -34,6 +34,9 @@ pub mod ast_walker;
 #[cfg(any(test, feature = "test"))]
 pub mod class_var_census;
 pub mod compilation;
+// Shared leaf: curated Erlang export/arity table read by the `arity_mismatch`
+// lint and by `beamtalk-language-service` `Erlang <module>` completions (BT-4371).
+pub mod ffi_exports;
 // This module is `pub`, not `pub(crate)` (ADR 0117 Decision step 5) — same
 // rationale as `announce_selectors` above; `erlang_module_of_receiver` is
 // reached from `beamtalk-language-service`'s `queries::ffi_sites_query`.

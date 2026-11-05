@@ -165,8 +165,11 @@ share of each figure.
   `results/bench-bt4431.md` measures a static site whose key is never
   installed (rows 3g-3j: +21 to +32 reductions on top of the `class_send`
   fallback). It also measures `invalidate/1` over a hierarchy: one
-  `persistent_term` erase per warmed key, 0.1 to 0.5 ms each here (follow-up
-  BT-4442).
+  `persistent_term` erase per warmed key, 0.1 to 0.5 ms each here. Since
+  BT-4442 a class's targets share one key (an atom whose value maps each
+  call-site key to the class reference), so an erase costs at most two
+  updates per class: `results/bench-bt4442.md` (50 subclasses × 10 targets,
+  103 ms down to 20 ms; rows 3a-3c still 3 reductions).
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.
 - **`collect:`, `inject:into:` and a `do:` that assigns nothing (6c-6e)**
@@ -455,3 +458,12 @@ side, main → PR. Rows not listed did not move.
   26.0 / 36). Calls per op: 95 → 27; `own_declared_fields/1`,
   `declared_fields_walk/3`, `read_meta_detailed/1` and `lookup_superclass/1`
   (4 each before) no longer appear. Row 2b is unchanged (7.05 red / 11 w).
+- **BT-4397** checked row 14a (typed `Tuple at:`) against its target of
+  within 10% of 1a. It is at 3.00 reductions, the same as 1a, because
+  BT-4400 inlined the in-range read inside `Tuple>>at:`
+  (`results/bench-bt4397.md`). A prototype went further. For a built-in's
+  own `@primitive` method, it called the method function directly instead of
+  `dispatch/3`, saving one reduction on 10a, 10b, 10d and 14a, and 4 words
+  on 10a. It was not merged: `removeSelector:` and live patches recompile a
+  stdlib module in place, which breaks ADR 0025 amendment §2 (follow-up
+  BT-4481).

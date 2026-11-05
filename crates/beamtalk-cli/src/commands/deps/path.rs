@@ -738,7 +738,7 @@ fn dependency_type_registry(
         &layout.type_cache_dir(),
     );
     crate::commands::build::resolve_package_type_registry(dep_root, auto_extract, prior_deps, None)
-        .0
+        .registry
         .map(std::sync::Arc::new)
 }
 
