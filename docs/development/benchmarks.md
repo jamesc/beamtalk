@@ -1787,3 +1787,35 @@ understates the old cost); "after" is the real `send/3`.
 The remaining miss cost is mostly the generation read
 (`persistent_term:get` + `atomics:get`) that keeps the memo honest when an
 override is installed later.
+
+## BT-4415: guard-style `^` as a direct return
+
+A `^` inside an inlined conditional at a method's top level
+(`x > 0 ifTrue: [^1]`) used to make the whole method a non-local-return
+frame: `make_ref/0`, a `try` around the body, and a `throw` for the `^`. The
+cost was paid on every call, taken or not. Codegen now compiles such a method
+as the expression form (`x > 0 ifTrue: [1] ifFalse: [...]`) when every block
+`^` in it is a guard and each Boolean-family receiver is statically a Boolean
+(`core_erlang/guard_returns.rs`).
+
+### Harness
+
+A sealed, stateless class with `class sealed guard: x :: Integer => x > 0
+ifTrue: [^1]. 2`, the hand-written `expr: x :: Integer => x > 0 ifTrue: [1]
+ifFalse: [2]`, and loops of the shape `n timesRepeat: [last := self guard:
+1]`, called from Erlang as `'class_run:'(ClassRef, 5000000)`, median of 5.
+"before" is the same source compiled with the rewrite switched off. Both
+sides include the class-side self-send (~0.04 µs), which dominates.
+
+### Results (µs per iteration, two interleaved runs)
+
+| Row | before | after |
+|---|---|---|
+| empty loop | 0.002 | 0.002 |
+| `guard: 1` (`^` taken) | 0.115 – 0.123 | 0.042 – 0.051 |
+| `guard: 0` (falls through) | 0.051 – 0.057 | 0.040 – 0.044 |
+| `expr: 1` (expression form) | 0.042 | 0.040 – 0.042 |
+
+A guard now costs what the expression form costs. A taken `^` saved about
+0.07 µs (the throw and its catch); a guard that falls through saved
+about 0.01 µs (the `make_ref` and the `try` set-up).
