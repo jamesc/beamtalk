@@ -5072,3 +5072,74 @@ fn bt4312_in_place_returns_classify_every_return_position() {
         assert_eq!(classify(src), expected, "{src}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// BT-4430: an `on:do:`/`ensure:` that codegen does not inline
+// ---------------------------------------------------------------------------
+
+/// An `on:do:`/`ensure:` whose protected body or handler is not a block
+/// literal compiles its literal block as a closure, which cannot write an
+/// outer local: the write used to be dropped silently (or, in a value-type
+/// method, crash the unpack). It is an ADR 0133 escape in every context, the
+/// REPL included. Wrapping the block value in a literal threads the write, and
+/// a `^` or a read in the closure is still accepted.
+#[test]
+fn a_write_in_an_uninlined_exception_block_is_an_escape_in_every_context() {
+    for (body, selector) in [
+        ("b := [5]\nb ensure: [t := 9]\nt", "ensure:"),
+        ("c := [nil]\n[t := 9] ensure: c\nt", "ensure:"),
+        ("b := [1 / 0]\nb on: Error do: [:e | t := 7]\nt", "on:do:"),
+        ("h := [:e | 0]\n[t := 1 / 0] on: Error do: h\nt", "on:do:"),
+        ("(self foo: [5]) ensure: [t := 9]\nt", "ensure:"),
+        // A write in a construct nested in the closure is the closure's.
+        (
+            "b := [5]\nb ensure: [#(1, 2) do: [:y | t := t + y]]\nt",
+            "ensure:",
+        ),
+        ("b := [5]\nb ensure: [true ifTrue: [t := 9]]\nt", "ensure:"),
+    ] {
+        let message = format!(
+            "`t` is assigned in a block of an `{selector}` whose blocks are not all written in \
+             place, which the compiler runs as a closure and does not thread it through"
+        );
+        let mut srcs = vec![
+            (in_class(body), &[][..]),
+            (in_value(body), &[][..]),
+            (in_actor(body), &[][..]),
+            (in_testcase(body), &[][..]),
+        ];
+        // No `self` receiver at the REPL root.
+        if !body.contains("self") {
+            srcs.push((format!("{body}\n"), &["t"][..]));
+        }
+        for (src, known) in srcs {
+            let diags = adr0131_diagnostics_with(&src, known);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+            assert_eq!(s6[0].message.as_str(), message, "{src}");
+            let at = &src[s6[0].span.start() as usize..s6[0].span.end() as usize];
+            assert!(at.starts_with("t := "), "{src}: {at}");
+            let hint = s6[0].hint.as_deref().unwrap_or_default();
+            assert!(hint.contains("[b value]"), "{hint}");
+        }
+    }
+    for body in [
+        "b := [5]\n[b value] ensure: [t := 9]\nt",
+        "c := [nil]\n[t := 9] ensure: [c value]\nt",
+        "b := [5]\nb ensure: [^t]\nt",
+        "c := [nil]\n[^t] ensure: c\nt",
+        "b := [5]\nb ensure: [Transcript show: t printString]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+        let diags = adr0131_diagnostics_with(&format!("{body}\n"), &["t"]);
+        assert!(diags.is_empty(), "REPL {body}: {diags:?}");
+    }
+    // An actor field write in such a closure goes through the actor-state cell
+    // (BT-4312), so it is no escape.
+    let src = in_actor("b := [5]\nb ensure: [self.n := 9]\nself.n");
+    let errors = analysis_errors(&src, &[]);
+    assert!(errors.is_empty(), "{src}: {errors:?}");
+}

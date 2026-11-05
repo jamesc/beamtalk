@@ -719,8 +719,8 @@ impl StaleReturnScan<'_> {
                 arguments,
                 ..
             } => {
-                let construct = local_threading_construct(expr)
-                    .filter(LocalThreadingConstruct::is_threaded_today);
+                let construct =
+                    local_threading_construct(expr).filter(LocalThreadingConstruct::runs_in_place);
                 for operand in std::iter::once(receiver.as_ref()).chain(arguments) {
                     let Expression::Block(b) = operand else {
                         self.expr(operand);
@@ -1244,8 +1244,8 @@ impl RaiseScan<'_> {
                 arguments,
                 ..
             } => {
-                let construct = local_threading_construct(expr)
-                    .filter(LocalThreadingConstruct::is_threaded_today);
+                let construct =
+                    local_threading_construct(expr).filter(LocalThreadingConstruct::runs_in_place);
                 let in_place = |e: &Expression| match (e, &construct) {
                     (Expression::Block(b), Some(c)) => {
                         c.blocks.iter().any(|blk| std::ptr::eq(*blk, b))
@@ -1412,6 +1412,10 @@ enum Escape {
     /// The receiver of this selector, which does not run its receiver block in
     /// place.
     Receiver(EcoString),
+    /// A block of this `on:do:`/`ensure:` send whose protected body or handler
+    /// is not a block literal: the compiler runs its literal block as a closure
+    /// (BT-4430, `block_facts::exception_send_inlined`).
+    ExceptionNotInlined(EcoString),
     /// The condition of a `whileTrue:`/`whileFalse:` whose loop does not
     /// thread a condition write here (BT-3782).
     Condition(EcoString),
@@ -1456,6 +1460,10 @@ impl Escape {
             Self::Condition(selector) => format!(
                 "used as the condition of `{selector}`, which does not thread an assignment in \
                  its condition here"
+            ),
+            Self::ExceptionNotInlined(selector) => format!(
+                "of an `{selector}` whose blocks are not all written in place, which the compiler \
+                 runs as a closure and does not thread it through"
             ),
         }
     }
@@ -1504,6 +1512,11 @@ impl Escape {
             Self::Condition(selector) => format!(
                 "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
                  {name} + 1]`"
+            ),
+            Self::ExceptionNotInlined(selector) => format!(
+                "write both blocks of the `{selector}` directly, wrapping a block value in a \
+                 literal (`[b value] {selector} [...]`, `[...] {selector} [c value]`), or return \
+                 the new value from the block and assign `{name}` where it is called"
             ),
         }
     }
@@ -2704,6 +2717,14 @@ impl<'d> Walker<'d> {
             && !dispatched
             && (is_section1_selector(&sel)
                 || crate::semantic_analysis::block_facts::is_result_try_do(receiver, &sel));
+        // BT-4430: an `on:do:`/`ensure:` whose protected body or handler is not
+        // a block literal is not inlined: its literal block is a closure.
+        let exception_not_inlined = construct_send
+            && crate::state_threading_selectors::is_exception_selector(&sel)
+            && !crate::semantic_analysis::block_facts::exception_send_inlined(
+                &sel, receiver, arguments,
+            );
+        let construct_send = construct_send && !exception_not_inlined;
         // EXEMPTION (lookup producer, BT-3798): the handler blocks of a lookup
         // accepted as a producer at this position (`check_construct`); a
         // block in any other argument position is a key that is a block value.
@@ -2740,6 +2761,9 @@ impl<'d> Walker<'d> {
                 Expression::Block(block) if !receiver_has_channel(&sel) => {
                     self.report_literal(block, &Escape::Receiver(sel.clone()));
                 }
+                Expression::Block(block) if exception_not_inlined => {
+                    self.report_literal(block, &Escape::ExceptionNotInlined(sel.clone()));
+                }
                 Expression::Block(_) => {}
                 // Any other receiver that evaluates to a block literal, a
                 // parenthesized one or one answered by a conditional arm, an
@@ -2757,7 +2781,9 @@ impl<'d> Walker<'d> {
         // evaluates to a block literal ([`value_blocks`]: the literal itself,
         // parenthesized, or answered by a conditional arm, an evaluated block or
         // a protected body) is a block value passed to `sel`, in every send.
-        let escape = if dispatched {
+        let escape = if exception_not_inlined {
+            Escape::ExceptionNotInlined(sel.clone())
+        } else if dispatched {
             let word = if matches!(receiver.unwrap_parens(), Expression::Super(_)) {
                 "super"
             } else {
