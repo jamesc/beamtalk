@@ -1499,6 +1499,19 @@ impl TypeChecker {
             let Some(expected_declared) = expected else {
                 continue;
             };
+            if let Some(Expression::ListLiteral { elements, .. }) = arg_exprs
+                .and_then(|exprs| exprs.get(i))
+                .map(Expression::unwrap_parens)
+            {
+                self.check_list_literal_elements(
+                    class_name,
+                    selector,
+                    i + 1,
+                    elements,
+                    expected_declared,
+                    hierarchy,
+                );
+            }
             // Resolve a declared parameter type that names one of
             // the receiver's own generic type params — bare (`V`) or nested
             // (`List(E)`, `Dictionary(K, V)`) — to its concrete substituted
@@ -1801,6 +1814,93 @@ impl TypeChecker {
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. } => {}
             }
+        }
+    }
+
+    /// BT-4385: a list literal `#(...)` passed to a parameter declared
+    /// `List(E)` (directly or through an alias) checks each element against
+    /// `E`, by the same rule as an annotated local
+    /// ([`Self::detect_assignment_type_mismatch`]). The argument's own joined
+    /// `List(E')` type cannot carry this: a joined element type loses which
+    /// element is wrong, and the nominal argument check compares only the
+    /// `List` base.
+    ///
+    /// The declared type is resolved without the receiver's generic
+    /// substitution, so a parameter typed by a class type param (`List(E)`
+    /// on `List>>++`) resolves to a placeholder and is not checked here —
+    /// the element check is for concrete element types in a signature
+    /// (`List(RegexOption)`, `List(Tuple(Symbol, Integer))`). Elements whose
+    /// type was not inferred, or is `Dynamic`, are skipped. A cons tail
+    /// (`#(a | rest)`) is not an element and is not checked.
+    fn check_list_literal_elements(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        param_pos: usize,
+        elements: &[Expression],
+        expected_declared: &DeclaredType,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if elements.is_empty() {
+            return;
+        }
+        let (resolved, alias_deps) = type_resolver::resolve_declared_type_with_alias_deps(
+            expected_declared,
+            &type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_ref(),
+            super::TypeStringContext::Declared,
+        );
+        self.referenced_aliases.extend(alias_deps);
+        let InferredType::Known {
+            class_name: list_class,
+            type_args,
+            ..
+        } = &resolved
+        else {
+            return;
+        };
+        let [element_declared] = type_args.as_slice() else {
+            return;
+        };
+        if list_class != "List" {
+            return;
+        }
+        for (j, element) in elements.iter().enumerate() {
+            let Some(element_ty) = self.type_map.get(element.span()).cloned() else {
+                continue;
+            };
+            let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                &element_ty,
+                element_declared,
+                hierarchy,
+                self.protocol_registry.as_deref(),
+            ) else {
+                continue;
+            };
+            let element_pos = j + 1;
+            let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
+                Self::protocol_metatype_nonconformance_diagnostic(
+                    &mismatch.inferred_display,
+                    protocol,
+                    missing,
+                    element.span(),
+                )
+            } else {
+                Diagnostic::warning(
+                    format!(
+                        "Element {element_pos} of argument {param_pos} of '{selector}' on {class_name} expects {}, got {}",
+                        mismatch.declared_display, mismatch.inferred_display
+                    ),
+                    element.span(),
+                )
+                .with_category(DiagnosticCategory::Type)
+                .with_hint(format!(
+                    "Every element of the list must be assignable to {}",
+                    mismatch.declared_display
+                ))
+            };
+            self.diagnostics.push(diag);
         }
     }
 
