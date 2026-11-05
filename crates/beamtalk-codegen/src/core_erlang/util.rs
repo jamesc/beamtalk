@@ -1067,13 +1067,32 @@ impl CoreErlangGenerator {
     /// operand the sequencing rule leaves to the conditional's own lowering.
     pub(super) fn conditional_send_receiver(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
-            receiver, selector, ..
+            receiver,
+            selector,
+            arguments,
+            ..
         } = expr
         else {
             return None;
         };
-        beamtalk_core::state_threading_selectors::is_conditional_selector(selector.name().as_str())
-            .then_some(receiver.as_ref())
+        Self::is_conditional_send(selector, arguments).then_some(receiver.as_ref())
+    }
+
+    /// BT-4451: whether a send of `selector` with `arguments` is a conditional
+    /// the compiler lowers in place — the shared
+    /// [`beamtalk_core::state_threading_selectors::is_inlined_conditional_send`],
+    /// behind [`Self::conditional_send_receiver`] (whose receiver the
+    /// conditional's lowering threads) and [`Self::sequenced_send_children`]
+    /// (which leaves a conditional opaque). Any other conditional-selector send
+    /// is a covered send: `Erlang beamtalk_guard_return ifTrue: c` is an FFI
+    /// call whose `Erlang <module>` receiver `try_handle_erlang_interop`
+    /// consumes structurally, so sequencing it ahead registered a value
+    /// nothing read back ("never substituted").
+    fn is_conditional_send(selector: &MessageSelector, arguments: &[Expression]) -> bool {
+        beamtalk_core::state_threading_selectors::is_inlined_conditional_send(
+            selector.name().as_str(),
+            arguments,
+        )
     }
 
     /// The children the sequencing rule applies to when `expr` (already
@@ -1105,9 +1124,7 @@ impl CoreErlangGenerator {
         else {
             return None;
         };
-        if beamtalk_core::state_threading_selectors::is_conditional_selector(
-            selector.name().as_str(),
-        ) {
+        if Self::is_conditional_send(selector, arguments) {
             return None;
         }
         let mut children = Vec::with_capacity(arguments.len() + 1);

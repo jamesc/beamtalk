@@ -212,3 +212,45 @@ fn xref_pairs_receiver_types_with_the_sends_as_written() {
         );
     }
 }
+
+/// BT-4451: an Erlang FFI call as the receiver of an actor conditional whose
+/// arm writes a field is sequenced ahead of the `case` and runs once.
+#[test]
+fn ffi_receiver_of_state_threading_actor_conditional_compiles() {
+    let code = codegen(
+        "Actor subclass: P\n\
+         \x20 state: n = 0\n\
+         \x20 m: c =>\n\
+         \x20   (Erlang beamtalk_guard_return ifTrue: c) ifTrue: [1] ifFalse: [self.n := 2. 3]\n",
+    );
+    assert_eq!(
+        code.matches("'direct_call'('beamtalk_guard_return'")
+            .count(),
+        1,
+        "the FFI receiver must be called exactly once:\n{code}"
+    );
+    // The FFI result is let-bound ahead of the conditional, whose `case`
+    // scrutinee reads that binding: `let _V = ( call …direct_call(…) -| [_] )
+    // in … let _Cond@N = _V in case _Cond@N of`.
+    let call_at = code
+        .find("call 'beamtalk_erlang_proxy':'direct_call'('beamtalk_guard_return'")
+        .expect("the FFI call is emitted");
+    let binding = code[..call_at]
+        .rsplit_once("let ")
+        .and_then(|(_, rest)| rest.split_once(" = "))
+        .map_or_else(
+            || panic!("the FFI call is let-bound:\n{code}"),
+            |(var, _)| var,
+        );
+    let after = &code[call_at..];
+    let cond_at = after
+        .find("let _Cond@")
+        .unwrap_or_else(|| panic!("the conditional follows the FFI call:\n{code}"));
+    let (cond_var, rest) = after[cond_at + 4..]
+        .split_once(" = ")
+        .expect("the conditional binds its scrutinee");
+    assert!(
+        rest.starts_with(&format!("{binding} in case {cond_var} of")),
+        "the conditional's `case` must scrutinise the FFI call's binding `{binding}`:\n{code}"
+    );
+}
