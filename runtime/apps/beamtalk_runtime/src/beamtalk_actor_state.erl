@@ -287,17 +287,25 @@ reflect_cell(Entry, {error, Reason, Answered}) when is_map(Answered) ->
 reflect_cell(_Entry, Answer) ->
     Answer.
 
+%% States are compared without the `nlr_state/2` stamp (BT-4448): a compiled
+%% callee that caught its own away closure's `^` answers that closure's capture
+%% stamped, which is the same version as an unstamped `Entry`.
 -spec reflect_state(map(), map()) -> map().
 reflect_state(Entry, Answered) ->
     case erlang:get(?CELL) of
-        {_, Cell} when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
-            case Answered =:= Entry of
-                true -> Cell;
-                false -> raise_conflict(Entry)
+        {_, Cell} when is_map(Cell) ->
+            case {unstamped(Cell), unstamped(Answered), unstamped(Entry)} of
+                {C, A, E} when C =/= E, C =/= A, A =:= E -> Cell;
+                {C, A, E} when C =/= E, C =/= A -> raise_conflict(Entry);
+                _ -> Answered
             end;
         _ ->
             Answered
     end.
+
+-spec unstamped(map()) -> map().
+unstamped(State) ->
+    maps:remove(?AWAY_OWNER, State).
 
 -spec raise_conflict(map()) -> no_return().
 raise_conflict(Entry) ->

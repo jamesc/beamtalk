@@ -377,6 +377,32 @@ refresh_carried_resumes_this_actors_own_away_capture_with_the_cell_test() ->
         ?assertMatch(#{n := 9}, beamtalk_actor_state:refresh_carried(Snap, Own))
     end).
 
+refresh_carried_leaves_its_own_stamp_alone_under_another_actors_cell_test() ->
+    %% A nested away `super_send/5` installs another actor's cell here: this
+    %% actor's own stamped capture is still not that cell's state.
+    Own = beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}),
+    Snap = {spawn(fun() -> ok end), #{n => 0}},
+    ?assertEqual(Own, beamtalk_actor_state:refresh_carried(Snap, Own)).
+
+call_foreign_takes_the_cell_over_a_stamped_entry_answer_test() ->
+    %% A compiled callee that caught its own away closure's `^` answers the
+    %% entry state stamped: still "answer equals entry", so the cell wins.
+    Entry = #{n => 0},
+    Stamped = beamtalk_actor_state:nlr_state(self_obj(), Entry),
+    with_cell(#{n => 0}, fun() ->
+        ?assertEqual(
+            {reply, ok, #{n => 9}},
+            beamtalk_actor_state:call_foreign(
+                Entry,
+                fun() ->
+                    ok = beamtalk_actor_state:put(self_obj(), n, 9),
+                    {reply, ok, Stamped}
+                end,
+                []
+            )
+        )
+    end).
+
 call_foreign_stores_the_state_and_answers_the_funs_answer_test() ->
     State = #{n => 1},
     Fun = fun(Arg) -> {reply, {saw, beamtalk_actor_state:take(), Arg}, State} end,
