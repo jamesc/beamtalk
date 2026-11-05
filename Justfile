@@ -1822,7 +1822,8 @@ measure-adr0131-statements: build-stdlib
 # `_tests` companions, plus every standalone test-dir suite (BT-3896). Never
 # pass --app here: it silently skips test-dir suites with no src/ counterpart.
 # Run Erlang runtime unit tests
-# Output: summary only on success, full output on failure
+# Output: summary only on success, full output on failure followed by a
+# stderr summary naming every failed/cancelled test (scripts/ci/eunit-failure-summary.sh)
 [unix]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
@@ -1833,12 +1834,14 @@ test-runtime: build-stdlib
         echo "$OUTPUT" | tail -2
     else
         echo "$OUTPUT"
+        echo "$OUTPUT" | ../scripts/ci/eunit-failure-summary.sh "EUnit runtime+workspace+compiler"
         exit 1
     fi
     if OUTPUT=$(BEAMTALK_NO_FILE_LOG=1 BEAMTALK_NO_FOREGROUND_PRUNE=1 rebar3 eunit --cover=false --dir=apps/beamtalk_stdlib/test 2>&1); then
         echo "$OUTPUT" | tail -2
     else
         echo "$OUTPUT"
+        echo "$OUTPUT" | ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"
         exit 1
     fi
     echo "✅ Runtime tests complete"
@@ -2064,6 +2067,7 @@ coverage-runtime: coverage-build
     if ! OUTPUT=$(rebar3 eunit --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ EUnit tests (runtime+workspace+compiler) failed"
+        echo "$OUTPUT" | ../scripts/ci/eunit-failure-summary.sh "EUnit runtime+workspace+compiler"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
@@ -2074,6 +2078,7 @@ coverage-runtime: coverage-build
     if ! OUTPUT=$(rebar3 eunit --dir=apps/beamtalk_stdlib/test --cover 2>&1); then
         echo "$OUTPUT"
         echo "❌ EUnit tests (stdlib) failed"
+        echo "$OUTPUT" | ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"
         exit 1
     fi
     echo "$OUTPUT" | grep -E "Finished in|[0-9]+ tests," || true
