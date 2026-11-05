@@ -2821,6 +2821,10 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
             return_type, State#class_state.class_method_return_types
         )
     },
+    %% A concurrent dispatch in another process that already resolved
+    %% `Selector` to this class may read the funs table after the delete below
+    %% and run the compiled branch instead; `put_class_method` has the mirror
+    %% window. Neither is new to removal (ADR 0084's lock-free reads).
     Funs = maps:filter(fun(_, Info) -> is_runtime_fun_info(Info) end, NewClassMethods),
     case maps:find(Selector, Funs) of
         {ok, RestoredFun} ->
@@ -2851,6 +2855,28 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
     notify_hot_patch(NewState),
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     NewState.
+
+-doc """
+BT-4438: the stash entries that survive a reload. A reload whose class info
+names no class methods keeps the old `class_methods` map, so a put fun stays
+installed; its stash must stay too, or removing it would drop the selector
+instead of restoring what the put hid. Any selector the reload re-defined
+loses its stash (disk wins).
+""".
+-spec carried_over_shadowed(#class_state{}, map()) ->
+    #{selector() => shadowed_class_method()}.
+carried_over_shadowed(
+    #class_state{shadowed_class_methods = Shadowed, class_methods = Old}, NewClassMethods
+) ->
+    maps:filter(
+        fun(Selector, _) ->
+            case {maps:find(Selector, Old), maps:find(Selector, NewClassMethods)} of
+                {{ok, Info}, {ok, Info}} -> is_runtime_fun_info(Info);
+                _ -> false
+            end
+        end,
+        Shadowed
+    ).
 
 -spec is_runtime_fun_info(term()) -> boolean().
 is_runtime_fun_info(Info) ->
@@ -3098,9 +3124,9 @@ apply_class_info(State, ClassInfo) ->
         superclass = NewSuperclass,
         instance_methods = NewInstanceMethods,
         class_methods = NewClassMethods,
-        %% BT-4438: disk wins -- the reload re-seeded the runtime funs from
-        %% `NewClassMethods`, so nothing a removal could restore remains.
-        shadowed_class_methods = #{},
+        %% BT-4438: disk wins -- a fun the reload replaced takes its stash
+        %% with it; a put fun the reload carried over keeps it.
+        shadowed_class_methods = carried_over_shadowed(State, NewClassMethods),
         fields = maps:get(
             fields,
             Meta,
