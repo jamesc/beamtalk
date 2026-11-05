@@ -140,14 +140,17 @@ impl GuardSense {
     }
 }
 
+/// A recorded guard condition: its method and its receiver's span.
+pub(in crate::core_erlang) type GuardConditionKey = (MethodKey, Span);
+
 /// What [`rewrite_guard_returns`] changed.
 #[derive(Debug, Default)]
 pub(in crate::core_erlang) struct GuardRewrite {
     /// The bodies, as written, of the methods it rewrote.
     pub(in crate::core_erlang) bodies: HashMap<MethodKey, Vec<ExpressionStatement>>,
     /// The receivers of the guards whose condition codegen must decide
-    /// through `beamtalk_guard_return`, keyed by (method span, receiver span).
-    pub(in crate::core_erlang) conditions: HashMap<(Span, Span), GuardSense>,
+    /// through `beamtalk_guard_return`.
+    pub(in crate::core_erlang) conditions: HashMap<GuardConditionKey, GuardSense>,
 }
 
 impl GuardRewrite {
@@ -165,12 +168,13 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
         let mut conditions = HashMap::new();
         if let Some(body) = rewritten_body(&method.body, &mut conditions) {
             let original = std::mem::replace(&mut method.body, body);
-            rewrite.bodies.insert(MethodKey::of(method), original);
+            let key = MethodKey::of(method);
             rewrite.conditions.extend(
                 conditions
                     .into_iter()
-                    .map(|(receiver, sense)| ((method.span, receiver), sense)),
+                    .map(|(receiver, sense)| ((key.clone(), receiver), sense)),
             );
+            rewrite.bodies.insert(key, original);
         }
     }
     rewrite
@@ -566,10 +570,10 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         cond_doc: Document<'static>,
     ) -> Document<'static> {
-        let Some(method_span) = self.current_method_span else {
+        let Some(method) = self.current_guard_method.clone() else {
             return cond_doc;
         };
-        let key = (method_span, receiver.span());
+        let key = (method, receiver.span());
         let Some(sense) = self.guard_rewrite.conditions.get(&key).copied() else {
             return cond_doc;
         };
@@ -593,10 +597,10 @@ impl CoreErlangGenerator {
     /// Whether `receiver` is a recorded guard's, in the method being
     /// generated.
     pub(in crate::core_erlang) fn is_guard_condition(&self, receiver: &Expression) -> bool {
-        self.current_method_span.is_some_and(|method_span| {
+        self.current_guard_method.as_ref().is_some_and(|method| {
             self.guard_rewrite
                 .conditions
-                .contains_key(&(method_span, receiver.span()))
+                .contains_key(&(method.clone(), receiver.span()))
         })
     }
 
@@ -604,16 +608,16 @@ impl CoreErlangGenerator {
     /// lowering path that compiled a rewritten guard's receiver without
     /// [`Self::guard_condition_doc`], so a non-Boolean receiver would be
     /// sent `ifTrue:ifFalse:` in place of the guard's own selector.
-    pub(in crate::core_erlang) fn unconsumed_guard_conditions(&self) -> Vec<(Span, Span)> {
-        let used: &HashSet<(Span, Span)> = &self.guard_conditions_used;
+    pub(in crate::core_erlang) fn unconsumed_guard_conditions(&self) -> Vec<GuardConditionKey> {
+        let used: &HashSet<GuardConditionKey> = &self.guard_conditions_used;
         let mut missed: Vec<_> = self
             .guard_rewrite
             .conditions
             .keys()
             .filter(|key| !used.contains(key))
-            .copied()
+            .cloned()
             .collect();
-        missed.sort_by_key(|(m, r)| (m.start(), r.start()));
+        missed.sort_by_key(|(m, r)| (m.span.start(), r.start()));
         missed
     }
 }

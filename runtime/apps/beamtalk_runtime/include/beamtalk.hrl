@@ -210,6 +210,11 @@
         element(1, T) =:= '$bt_nlr')
 ).
 
+%% @doc The state-carrying `^` signal codegen throws (ADR 0041), for runtime
+%% code that must throw one itself (`beamtalk_guard_return`, BT-4415). Read
+%% it back with `?IS_NLR/1` and `element(2, T)` for the token.
+-define(NLR(Token, Value, State), {'$bt_nlr', Token, Value, State}).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

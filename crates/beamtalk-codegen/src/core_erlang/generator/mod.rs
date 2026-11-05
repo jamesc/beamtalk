@@ -531,10 +531,12 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) guard_rewrite: super::guard_returns::GuardRewrite,
     /// The recorded guard conditions a conditional has consumed (see
     /// [`Self::unconsumed_guard_conditions`]).
-    pub(in crate::core_erlang) guard_conditions_used: std::collections::HashSet<(
-        beamtalk_core::source_analysis::Span,
-        beamtalk_core::source_analysis::Span,
-    )>,
+    pub(in crate::core_erlang) guard_conditions_used:
+        std::collections::HashSet<super::guard_returns::GuardConditionKey>,
+    /// The identity of the method whose body is being generated (set by
+    /// `MethodFrame::enter` with [`Self::current_method_span`]): the method
+    /// half of a [`super::guard_returns::GuardConditionKey`].
+    pub(in crate::core_erlang) current_guard_method: Option<super::guard_returns::MethodKey>,
 }
 
 /// `method`'s reflected source: its text as written, with the operand
@@ -681,6 +683,7 @@ impl CoreErlangGenerator {
             current_method_span: None,
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
+            current_guard_method: None,
         }
     }
 

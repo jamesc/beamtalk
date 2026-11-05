@@ -16,7 +16,7 @@ block that returns `v` from the method when called (BT-4244), and the rest of
 the method runs if the receiver never calls it. The compiled code asks this
 module for the branch to take: a Boolean answers itself, and anything else is
 sent the guard's own selector with a block whose call is caught here. That
-block throws the same `{'$bt_nlr', Token, Value, State}` shape a `^` throws,
+block throws the same signal a `^` throws (`?NLR/3` in `beamtalk.hrl`),
 so it unwinds the receiver's method, including across an actor call, exactly
 as the guard's own block did.
 
@@ -24,6 +24,8 @@ The compiler uses this only for a guard whose block is `[^v]` with a `v` that
 has no effects, so it makes no difference that `v` is evaluated after the
 receiver's method has unwound rather than inside it.
 """.
+
+-include("beamtalk.hrl").
 
 -export([if_true/1, if_false/1]).
 
@@ -55,9 +57,9 @@ if_false(Receiver) -> not block_called(Receiver, 'ifFalse:').
 -spec block_called(term(), 'ifTrue:' | 'ifFalse:') -> boolean().
 block_called(Receiver, Selector) ->
     Token = make_ref(),
-    Block = fun() -> throw({'$bt_nlr', Token, true, nil}) end,
+    Block = fun() -> throw(?NLR(Token, true, nil)) end,
     try beamtalk_message_dispatch:send(Receiver, Selector, [Block]) of
         _ -> false
     catch
-        throw:{'$bt_nlr', Token, _, _} -> true
+        throw:Signal when ?IS_NLR(Signal), element(2, Signal) =:= Token -> true
     end.

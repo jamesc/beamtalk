@@ -397,17 +397,14 @@ pub fn generate_module_with_warnings(
 
     // BT-4415: a rewritten guard whose receiver no conditional decided
     // through `guard_condition_doc` would send a non-Boolean receiver
-    // `ifTrue:ifFalse:` in place of the guard's own selector. Checked in
-    // debug builds, where the stdlib and test corpora compile.
-    #[cfg(debug_assertions)]
-    {
-        let missed = generator.unconsumed_guard_conditions();
-        if !missed.is_empty() {
-            return Err(CodeGenError::Internal(format!(
-                "BT-4415: guard conditions never decided through \
-                 `guard_condition_doc` (method span, receiver span): {missed:?}"
-            )));
-        }
+    // `ifTrue:ifFalse:` in place of the guard's own selector. A wrong
+    // compile is worse than a refused one, so this holds in every build.
+    let missed = generator.unconsumed_guard_conditions();
+    if !missed.is_empty() {
+        return Err(CodeGenError::Internal(format!(
+            "BT-4415: guard conditions never decided through \
+             `guard_condition_doc` (method, receiver span): {missed:?}"
+        )));
     }
 
     generator.finish_synced_calls(module.span);

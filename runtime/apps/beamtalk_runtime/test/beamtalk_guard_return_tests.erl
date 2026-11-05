@@ -8,7 +8,7 @@
 -moduledoc """
 BT-4415: `beamtalk_guard_return`. A Boolean answers itself; the non-Boolean
 path (a receiver that calls or ignores the block) is covered end to end by
-`stdlib/test/non_boolean_conditional_receiver_test.bt`.
+`stdlib/test/guard_return_test.bt`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
