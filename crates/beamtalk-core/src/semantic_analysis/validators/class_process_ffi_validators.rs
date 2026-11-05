@@ -127,9 +127,9 @@ const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 /// The single curated v1 table of process-sensitive Erlang functions, read by
 /// both lints: a function both lints care about (`self`, the process
 /// dictionary, `process_flag`, links, monitors) has one row with both
-/// effects. Modelled on
-/// `KNOWN_ARITIES`: a spec-derived attribute is a possible follow-up. See the
-/// module docs for what is deliberately left out.
+/// effects. Modelled on the curated `ffi_exports` table: a spec-derived
+/// attribute is a possible follow-up. See the module docs for what is
+/// deliberately left out.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "self", OWNERSHIP, IDENTITY),
     row("erlang", "send", OWNERSHIP, None),

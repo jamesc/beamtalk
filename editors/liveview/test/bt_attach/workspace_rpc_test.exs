@@ -493,6 +493,13 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.hover(self(), "Counter") == {:ok, "Counter class docs"}
     end
 
+    test "hover/3 forwards the editor context and returns the docs (BT-4343)" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:docs, "fetch:options: docs"}))
+
+      assert Workspace.hover(self(), "  options:", %{before: "Fetcher fetch: u\n", suffix: " o"}) ==
+               {:ok, "fetch:options: docs"}
+    end
+
     test "hover/2 propagates a dispatch error" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:error, :unresolved}))
       assert Workspace.hover(self(), "x") == {:error, :unresolved}

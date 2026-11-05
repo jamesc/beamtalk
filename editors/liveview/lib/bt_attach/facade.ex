@@ -468,11 +468,16 @@ defmodule BtAttach.Facade do
   # against the live image via the `hover` op and returns `{:ok, String.t()}`
   # (the markdown, "" when nothing resolves). Capability `:read` (no user code),
   # so the Observer role hovers too. A bad shape is `:invalid_params` with no
-  # dist call, matching `:complete`.
-  defp invoke(:hover, %{session_pid: pid, code: code}, _ctx) do
-    if is_pid(pid) and is_binary(code),
-      do: client().hover(pid, code),
-      else: {:error, :invalid_params}
+  # dist call, matching `:complete`. The optional `before`/`suffix` editor
+  # context (BT-4343) lets a hovered keyword part resolve its full keyword
+  # selector, even for a send split across lines.
+  defp invoke(:hover, %{session_pid: pid, code: code} = params, _ctx) do
+    context = %{before: Map.get(params, :before, ""), suffix: Map.get(params, :suffix, "")}
+
+    if is_pid(pid) and is_binary(code) and is_binary(context.before) and
+         is_binary(context.suffix),
+       do: client().hover(pid, code, context),
+       else: {:error, :invalid_params}
   end
 
   # BT-2556: parse-only diagnostics for the CodeMirror editors. `code` is the

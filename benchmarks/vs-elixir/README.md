@@ -455,3 +455,12 @@ side, main → PR. Rows not listed did not move.
   26.0 / 36). Calls per op: 95 → 27; `own_declared_fields/1`,
   `declared_fields_walk/3`, `read_meta_detailed/1` and `lookup_superclass/1`
   (4 each before) no longer appear. Row 2b is unchanged (7.05 red / 11 w).
+- **BT-4397** checked row 14a (typed `Tuple at:`) against its target of
+  within 10% of 1a. It is at 3.00 reductions, the same as 1a, because
+  BT-4400 inlined the in-range read inside `Tuple>>at:`
+  (`results/bench-bt4397.md`). A prototype went further. For a built-in's
+  own `@primitive` method, it called the method function directly instead of
+  `dispatch/3`, saving one reduction on 10a, 10b, 10d and 14a, and 4 words
+  on 10a. It was not merged: `removeSelector:` and live patches recompile a
+  stdlib module in place, which breaks ADR 0025 amendment §2 (follow-up
+  BT-4481).

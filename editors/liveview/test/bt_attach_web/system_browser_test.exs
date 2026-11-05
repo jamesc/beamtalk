@@ -408,6 +408,41 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       assert hover =~ "Counter"
     end
 
+    test "hover accepts the optional editor context (BT-4343), ignoring non-strings" do
+      socket = base_socket()
+
+      for context <- [%{"before" => "x := 1\n", "suffix" => " options: #()"}, %{"suffix" => 42}] do
+        assert {:reply, %{"hover" => hover}, ^socket} =
+                 SystemBrowser.handle_event(
+                   "hover",
+                   Map.put(context, "code", "Counter fetch:"),
+                   socket
+                 )
+
+        assert hover =~ "Counter"
+      end
+    end
+
+    test "hover renders the docs Markdown to escaped HTML (BT-4344)" do
+      socket = base_socket()
+
+      assert {:reply, %{"hover" => hover}, ^socket} =
+               SystemBrowser.handle_event("hover", %{"code" => "Fetcher fetch:"}, socket)
+
+      # The `:help` header stays preformatted…
+      assert hover =~
+               ~s(<pre class="doc-code"><code>== Fetcher class &gt;&gt; fetch:options: ==\n  fetch: url options: opts</code></pre>)
+
+      # …the doc-comment's `## Options` section renders as a heading + bullets…
+      assert hover =~ ~s(<h4 class="doc-h">Options</h4>)
+      assert hover =~ ~s(<ul class="doc-list"><li><code>timeout</code> — milliseconds</li>)
+      assert hover =~ ~s(<li><code>retries</code> — count</li></ul>)
+
+      # …and author text is escaped, never interpreted as markup.
+      assert hover =~ "Fetch &lt;b&gt;url&lt;/b&gt;."
+      refute hover =~ "<b>"
+    end
+
     test "hover with no session_pid replies with an empty string" do
       socket = base_socket(%{session_pid: nil})
 

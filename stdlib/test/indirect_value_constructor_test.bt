@@ -28,14 +28,16 @@ TestCase subclass: IndirectValueConstructorTest
       selector: #new
       fun: [:args :receiver | #extension]
       owner: #test
-    literal := Bag new
-    dynamic := (self lookUp: #Bag) new
-    Erlang beamtalk_extensions
-      unregister: #Bag
-      selector: #new
-      classSide: true
-    self assert: literal equals: #extension
-    self assert: dynamic equals: #extension
+    [
+      self assert: Bag new equals: #extension
+      self assert: (self lookUp: #Bag) new equals: #extension
+    ]
+      ensure: [
+        Erlang beamtalk_extensions
+          unregister: #Bag
+          selector: #new
+          classSide: true
+      ]
     self assert: Bag new size equals: 0
 
   // The indirect user Value's synthesized constructors all build a
