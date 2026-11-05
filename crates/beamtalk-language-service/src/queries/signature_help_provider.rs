@@ -13,7 +13,8 @@
 //!
 //! Signature help triggers when the cursor is inside a keyword message send.
 //! It resolves the receiver type, looks up the method in the `ClassHierarchy`,
-//! and returns parameter names, types, and the return type.
+//! and returns parameter names, types, and the return type, documented with
+//! the method's doc comment (including any `## Options` section, BT-4345).
 //!
 //! # References
 //!
@@ -542,6 +543,10 @@ fn resolve_receiver_class(
 /// parameter renders as `keyword: Type` via the shared
 /// [`beamtalk_core::unparse::render_signature_text`] core (`SignatureParam { name:
 /// None, .. }`), not the declaration's `keyword name :: Type`.
+///
+/// The signature documentation carries the method's full doc comment (BT-4345)
+/// ahead of the `Defined in` line — the same layout as the send-site hover —
+/// so a BT-4337 `## Options` section is visible while typing the arguments.
 fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> SignatureHelp {
     // `MethodInfo` types are structured `DeclaredType`s — render
     // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
@@ -551,6 +556,11 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
         .iter()
         .map(|ty| ty.as_ref().map(ToString::to_string))
         .collect();
+    let defined_in = format!("Defined in `{}`", method.defined_in);
+    let documentation = match method.doc.as_deref() {
+        Some(doc) if !doc.trim().is_empty() => format!("{doc}\n\n{defined_in}"),
+        _ => defined_in,
+    };
     signature_help_from_parts(
         &method.selector,
         &param_type_texts,
@@ -559,7 +569,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
             .as_ref()
             .map(ToString::to_string)
             .as_deref(),
-        &format!("Defined in `{}`", method.defined_in),
+        &documentation,
         active_parameter,
     )
 }
@@ -1034,6 +1044,63 @@ mod tests {
         assert_eq!(
             with.signatures[0].label.as_str(),
             "add: Integer to: Integer -> Integer"
+        );
+    }
+
+    /// BT-4345: signature help for a method documented with the BT-4337
+    /// `## Options` convention carries the full doc comment — option keys,
+    /// types and defaults — ahead of the `Defined in` line, so the options
+    /// are visible while typing the `options:` argument.
+    #[test]
+    fn signature_help_on_options_doc_surfaces_option_bullets() {
+        let source = concat!(
+            "type FetchOption = #timeout | #retries\n",
+            "Object subclass: Fetcher\n",
+            "  /// Fetch a URL with options.\n",
+            "  ///\n",
+            "  /// ## Options\n",
+            "  /// - `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n",
+            "  /// - `#retries` (Integer, default `3`) — times to retry on failure.\n",
+            "  class fetch: url :: String options: opts :: List(FetchOption) -> String => url\n",
+            "  run => Fetcher fetch: 1 options: 2\n",
+        );
+        // Cursor on the `options:` argument (line 8, before `2`).
+        let help = sig_help_at(source, Position::new(8, 35))
+            .expect("signature help on the options: argument");
+        assert_eq!(help.active_parameter, 1);
+        let signature = &help.signatures[0];
+        assert_eq!(
+            signature.label.as_str(),
+            "fetch: String options: List(FetchOption) -> String"
+        );
+        assert_eq!(
+            signature.documentation.as_deref(),
+            Some(concat!(
+                "Fetch a URL with options.\n",
+                "\n",
+                "## Options\n",
+                "- `#timeout` (Integer, default `5000`) — request timeout in milliseconds.\n",
+                "- `#retries` (Integer, default `3`) — times to retry on failure.\n",
+                "\n",
+                "Defined in `Fetcher`",
+            ))
+        );
+        // Parameter documentation is unchanged: just the type.
+        assert_eq!(
+            signature.parameters[1].documentation.as_deref(),
+            Some("Type: List(FetchOption)")
+        );
+    }
+
+    /// An undocumented method's signature documentation stays just the
+    /// `Defined in` line.
+    #[test]
+    fn signature_help_without_doc_comment_is_defined_in_only() {
+        let source = "Object subclass: Calc\n  add: x to: y => x + y\n  run => self add: 1 to: 2";
+        let help = sig_help_at(source, Position::new(2, 20)).expect("signature help");
+        assert_eq!(
+            help.signatures[0].documentation.as_deref(),
+            Some("Defined in `Calc`")
         );
     }
 }

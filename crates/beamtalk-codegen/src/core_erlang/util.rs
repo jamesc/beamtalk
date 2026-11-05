@@ -96,6 +96,22 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
     s
 }
 
+/// Builds the name of a class's static call key (BT-4442),
+/// `"{class_name} class static calls"`: the one `persistent_term` key a
+/// static class send to `class_name` reads, whose value maps each installed
+/// call-site key to its class reference. An atom, because hashing an atom
+/// `persistent_term` key is much cheaper than hashing a tuple one; the spaces
+/// keep it from colliding with a module's key or a class tag (no class name
+/// contains a space). The runtime spells it in
+/// `beamtalk_class_shadow_flags:static_calls_key/1`;
+/// `GuardedStaticCallTest>>testCallSiteReadsTheRuntimesPerClassKey`
+/// (`stdlib/test/guarded_static_call_test.bt`) fails if the two differ.
+pub(super) fn static_calls_key(class_name: &str) -> String {
+    let mut s = metaclass_tag(class_name);
+    s.push_str(" static calls");
+    s
+}
+
 /// The name a class's process is registered under,
 /// `"beamtalk_class_{class_name}"` (`beamtalk_class_registry:registry_name/1`).
 /// Built at compile time so a static call site looks the class's pid up with

@@ -116,7 +116,9 @@ fn signal_sends_raise_through_the_handler_only_in_the_hit_arm() {
         let key =
             format!("{{'caller_safe_raise', '{primitive}', {module}, '{fun}', '{class} class'}}");
         assert!(
-            body.contains(&format!("call 'persistent_term':'get'({key}, 'false')"))
+            body.contains(&format!(
+                "call 'persistent_term':'get'('{class} class static calls', ~{{}}~) of <~{{{key} := "
+            ))
                 && body.contains(&format!(
                     "'beamtalk_class_shadow_flags':'static_call_target'({key}, '{class}', '{selector}', {arity})"
                 )),

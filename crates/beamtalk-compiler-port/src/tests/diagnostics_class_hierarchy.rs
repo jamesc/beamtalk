@@ -326,24 +326,6 @@ fn timeout_token_terms() -> (Term, Term) {
     (class_entry, protocol_entry)
 }
 
-/// Extract every string in a `compile`/`compile_method` `ok`
-/// response's `warnings` field (plain binaries, unlike `diagnostics`'s
-/// `diagnostic_messages` maps above) for the protocol-registry tests
-/// below.
-fn compile_warning_messages(response: &Term) -> Vec<String> {
-    let Term::Map(m) = response else {
-        panic!("Expected map response: {response:?}");
-    };
-    let Some(Term::List(warnings)) = map_get(m, "warnings") else {
-        panic!("Expected warnings list: {response:?}");
-    };
-    warnings
-        .elements
-        .iter()
-        .filter_map(term_to_string)
-        .collect()
-}
-
 /// Without `protocol_registry`, `compile` (not just
 /// `diagnostics/3`, which is already covered above) hits the identical
 /// false type-mismatch/Dnu for a cross-file protocol-typed receiver —
@@ -382,7 +364,7 @@ fn compile_class_hierarchy_alone_reproduces_false_protocol_mismatch() {
         Some(&atom("ok")),
         "the false positives are warning/hint severity, not errors: {response:?}"
     );
-    let warnings = compile_warning_messages(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         warnings
             .iter()
@@ -435,7 +417,7 @@ fn compile_protocol_registry_suppresses_false_protocol_mismatch() {
         Some(&atom("ok")),
         "resp: {response:?}"
     );
-    let warnings = compile_warning_messages(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         !warnings
             .iter()
@@ -495,7 +477,7 @@ fn compile_method_protocol_registry_suppresses_false_protocol_mismatch() {
         Some(&atom("ok")),
         "resp: {response:?}"
     );
-    let warnings = compile_warning_messages(&response);
+    let warnings = response_warning_messages(&response);
     assert!(
         !warnings
             .iter()

@@ -625,6 +625,84 @@ Object subclass: Caller
     }
 }
 
+#[test]
+fn protocol_literal_in_a_union_is_not_a_protocol_metatype_value() {
+    // BT-4445: `Meta{Wire}` (the protocol literal) and `ProtocolMeta{Wire}`
+    // both spell `Wire class`; a union carrying the literal, or a
+    // non-conformer's class object, must not slip past a declared
+    // `Wire class | Nil` on the name comparison.
+    let source = wire_source(
+        r"
+Object subclass: Caller
+  literal: flag :: Boolean =>
+    w :: Wire class | Nil := flag ifTrue: [Wire] ifFalse: [nil]
+    w
+  narrowLiteral: flag :: Boolean =>
+    w :: Wire class := flag ifTrue: [Wire] ifFalse: [nil]
+    w
+  widenWithNil: flag :: Boolean =>
+    w :: Wire class := flag ifTrue: [Tcp] ifFalse: [nil]
+    w
+  nonconformer: flag :: Boolean =>
+    w :: Wire class | Nil := flag ifTrue: [Integer] ifFalse: [nil]
+    w
+  fine: flag :: Boolean =>
+    a :: Wire class | Nil := flag ifTrue: [Tcp] ifFalse: [nil]
+    b :: Wire class := flag ifTrue: [Tcp] ifFalse: [Ssl]
+    c :: Object := flag ifTrue: [Wire] ifFalse: [nil]
+    d :: Class | Nil := flag ifTrue: [Integer] ifFalse: [nil]
+    e :: Integer | Nil := flag ifTrue: [3] ifFalse: [nil]
+    f :: Dynamic := Integer
+    g :: Dynamic := 3
+    h :: Object := Wire
+    i :: Tcp class := flag ifTrue: [Tcp] ifFalse: [nil]
+    k :: Tcp class | Nil := flag ifTrue: [Tcp] ifFalse: [3]
+    a
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let line_of = |needle: &str| {
+        source[..source.find(needle).expect("fixture line")]
+            .lines()
+            .count()
+    };
+    let at = |needle: &str| -> Vec<&Diagnostic> {
+        diags
+            .iter()
+            .filter(|d| source[..d.span.start() as usize].lines().count() == line_of(needle))
+            .collect()
+    };
+    let literal = at("ifTrue: [Wire] ifFalse: [nil]\n    w");
+    assert!(
+        literal
+            .iter()
+            .any(|d| d.message.contains("Wire class | Nil")),
+        "the protocol literal in a union is refused: {diags:#?}"
+    );
+    assert!(
+        !at("w :: Wire class := flag ifTrue: [Wire]").is_empty(),
+        "narrowing a union carrying the protocol literal to `Wire class` is refused: {diags:#?}"
+    );
+    assert!(
+        !at("w :: Wire class := flag ifTrue: [Tcp]").is_empty(),
+        "`Tcp class | Nil` into `Wire class` neither widens nor narrows: {diags:#?}"
+    );
+    let nonconformer = at("ifTrue: [Integer] ifFalse: [nil]\n    w");
+    assert!(
+        nonconformer.iter().any(|d| d
+            .message
+            .contains("Integer class does not conform to Wire class")),
+        "a non-conformer in a union reports its non-conformance: {diags:#?}"
+    );
+    let fine = line_of("fine: flag");
+    assert!(
+        diags
+            .iter()
+            .all(|d| source[..d.span.start() as usize].lines().count() < fine),
+        "conformers, `Object`, `Class`, `Dynamic` and narrowing accept class objects in a union: {diags:#?}"
+    );
+}
+
 /// BT-4450: a caller that already holds the registry in an `Arc` (the
 /// language service builds one per completion/hover request) shares it with
 /// the checker — no second deep clone of every `ProtocolInfo`.
@@ -639,5 +717,137 @@ fn set_protocol_registry_shares_the_callers_arc() {
             &registry
         ),
         "the checker holds the caller's registry, not a copy"
+    );
+}
+
+/// BT-4440: the return-type diagnostics naming `selector` (one per method).
+fn return_diagnostics<'a>(
+    diags: &'a [Diagnostic],
+    source: &str,
+    selector: &str,
+) -> Vec<&'a Diagnostic> {
+    let line = source[..=source
+        .find(&format!("\n  {selector} "))
+        .expect("fixture method")]
+        .lines()
+        .count()
+        + 1;
+    diags
+        .iter()
+        .filter(|d| source[..d.span.start() as usize].lines().count() == line)
+        .collect()
+}
+
+#[test]
+fn protocol_metatype_return_accepts_conformers_and_protocol_metatypes() {
+    let source = wire_source(
+        r"
+Object subclass: Factory
+  tcp -> Wire class => Tcp
+  pass: w :: Wire class -> Wire class => w
+  either: flag :: Boolean -> Wire class => flag ifTrue: [Tcp] ifFalse: [Ssl]
+  open -> Object class => Tcp
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("return type") || d.message.contains("does not conform")),
+        "conforming class objects are valid `-> Wire class` returns: {diags:#?}"
+    );
+}
+
+#[test]
+fn non_conforming_protocol_metatype_return_warns_with_missing_selectors() {
+    let source = wire_source(
+        r"
+Object subclass: Factory
+  bad -> Wire class => Integer
+  literal -> Wire class => Wire
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let bad = return_diagnostics(&diags, &source, "bad");
+    let warning = bad
+        .iter()
+        .find(|d| d.message == "Integer class does not conform to Wire class")
+        .unwrap_or_else(|| panic!("conformance warning on `bad`: {diags:#?}"));
+    assert_eq!(warning.severity, crate::source_analysis::Severity::Warning);
+    let hint = warning.hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("class send:") && hint.contains("class label"),
+        "the hint names the missing class-side selectors: {hint}"
+    );
+    // The protocol object is not the class object of a conformer.
+    assert!(
+        !return_diagnostics(&diags, &source, "literal").is_empty(),
+        "a protocol literal is not a `-> Wire class` return: {diags:#?}"
+    );
+}
+
+#[test]
+fn protocol_metatype_return_into_unrelated_protocol_metatype_warns() {
+    let source = wire_source(
+        r"
+Protocol define: Counted
+  class count -> Integer
+
+Object subclass: Factory
+  convert: w :: Wire class -> Counted class => w
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        diags.iter().any(|d| d.message
+            == "Method 'convert:' in Factory declares return type Counted class, but body returns Wire class"),
+        "`Wire class` is not `Counted class`: {diags:#?}"
+    );
+}
+
+#[test]
+fn class_metatype_return_is_checked_against_the_metaclass_tower() {
+    let source = r"
+Object subclass: Factory
+  number -> Number class => Integer
+  behaviour -> Behaviour => Integer
+  wrong -> Number class => String
+  instance -> Integer => Integer
+";
+    let diags = checker_diagnostics(source);
+    assert!(
+        return_diagnostics(&diags, source, "number").is_empty()
+            && return_diagnostics(&diags, source, "behaviour").is_empty(),
+        "a subclass's class object fits `-> Number class` and `-> Behaviour`: {diags:#?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message
+            == "Method 'wrong' in Factory declares return type Number class, but body returns String class"),
+        "`String class` is not `Number class`: {diags:#?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.message
+            == "Method 'instance' in Factory declares return type Integer, but body returns Integer class"),
+        "a class object is not an instance: {diags:#?}"
+    );
+}
+
+#[test]
+fn protocol_literal_return_fits_protocol_and_object() {
+    let source = wire_source(
+        r"
+Object subclass: Factory
+  proto -> Protocol => Wire
+  anything -> Object => Wire
+  take: p :: Protocol => p
+  pass => self take: Wire
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        return_diagnostics(&diags, &source, "proto").is_empty()
+            && return_diagnostics(&diags, &source, "anything").is_empty()
+            && return_diagnostics(&diags, &source, "pass").is_empty(),
+        "the protocol object is a `Protocol`: {diags:#?}"
     );
 }

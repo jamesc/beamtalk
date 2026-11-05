@@ -33,7 +33,7 @@ pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<D
         // Display — delegate to runtime primitive for consistent formatting
         "printString" => Some(super::PRINT_STRING),
         // Identity
-        "hash" => Some(Document::Str("call 'erlang':'phash2'(Self)")),
+        "hash" => Some(super::phash2_doc("Self")),
         _ => None,
     }
 }

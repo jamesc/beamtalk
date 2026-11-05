@@ -69,6 +69,74 @@ fn test_generate_primitive_error_body_raises_user_error() {
 }
 
 #[test]
+fn test_generate_primitive_hash_body_is_phash2() {
+    // BT-4432: `Object>>hash`'s compiled body is reached by generic dispatch
+    // (`perform: #hash`). As a placeholder it self-dispatched `hash` back to
+    // `Object>>hash` and looped forever; it is now the same `phash2` call the
+    // call-site intrinsic emits.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Object")));
+    generator.current_method_selector = Some("hash".to_string());
+    generator.current_method_params = vec![];
+
+    let doc = generator
+        .generate_primitive("hash", false, Span::new(0, 0))
+        .unwrap();
+    assert_eq!(doc.to_pretty_string(), "call 'erlang':'phash2'(Self)");
+}
+
+#[test]
+fn test_generate_primitive_rejects_self_redispatching_placeholder() {
+    // BT-4432 guard: a placeholder intrinsic declared by a method whose
+    // selector equals the intrinsic name would re-dispatch to itself forever.
+    // `printString` is still a `Placeholder` entry, so declaring it from a
+    // `printString` method must fail the build.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Object")));
+    generator.current_method_selector = Some("printString".to_string());
+    generator.current_method_params = vec![];
+
+    let err = generator
+        .generate_primitive("printString", false, Span::new(0, 0))
+        .expect_err("a self-redispatching placeholder must be rejected");
+    assert!(
+        matches!(&err, CodeGenError::Internal(msg) if msg.contains("loop forever")),
+        "expected an Internal self-redispatch error, got: {err:?}"
+    );
+
+    // The same placeholder under a different selector (as `respondsTo:`
+    // declares `@intrinsic respondsTo`) is not a self-loop and still compiles.
+    generator.current_method_selector = Some("printOn:".to_string());
+    assert!(
+        generator
+            .generate_primitive("printString", false, Span::new(0, 0))
+            .is_ok()
+    );
+}
+
+#[test]
+fn test_stdlib_object_hash_body_is_phash2() {
+    // BT-4432: the real `Object>>hash` (stdlib/src/object.bt) compiles to a
+    // `phash2` body, not a self-dispatch of `hash`.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../stdlib/src/object.bt"
+    ))
+    .expect("stdlib/src/object.bt should be readable");
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("bt@stdlib@object").with_stdlib_mode(true),
+    )
+    .expect("object.bt codegen should succeed");
+    assert!(
+        !code.contains("'dispatch'('hash'"),
+        "Object>>hash must not self-dispatch `hash` (BT-4432). Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_generate_primitive_block_value_structural_fallback() {
     // `blockValue`'s fallback body (reached via `perform:`, not the
     // call-site interception) discriminates Tier 1 (plain fun) from Tier 2

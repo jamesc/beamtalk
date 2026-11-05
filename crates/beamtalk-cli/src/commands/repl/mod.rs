@@ -1259,7 +1259,9 @@ fn handle_sync(client: &mut ReplClient) {
 /// hint (when available), followed by a summary line listing all failed file
 /// paths so the user can identify problems without manual bisection.
 fn display_sync_diagnostics(response: &ReplResponse) {
-    use beamtalk_repl_protocol::format::{WarningStyle, format_file_diagnostic, format_warning};
+    use beamtalk_repl_protocol::format::{
+        WarningStyle, format_file_diagnostic, format_warning_entry,
+    };
 
     let mode = output_mode();
 
@@ -1290,10 +1292,8 @@ fn display_sync_diagnostics(response: &ReplResponse) {
         eprintln!("{}", color::paint(color::RED, &summary));
     }
 
-    if let Some(ref warns) = response.warnings {
-        for w in warns {
-            eprintln!("{}", format_warning(w, mode, WarningStyle::Prefixed));
-        }
+    for w in response.warning_entries() {
+        eprintln!("{}", format_warning_entry(&w, mode, WarningStyle::Prefixed));
     }
 }
 
@@ -1342,17 +1342,15 @@ fn handle_show_codegen(code: &str, client: &mut ReplClient) {
             {
                 println!("No code generated.");
             }
-            if let Some(ref warns) = response.warnings {
-                for w in warns {
-                    eprintln!(
-                        "{}",
-                        beamtalk_repl_protocol::format::format_warning(
-                            w,
-                            output_mode(),
-                            beamtalk_repl_protocol::format::WarningStyle::Prefixed,
-                        )
-                    );
-                }
+            for w in response.warning_entries() {
+                eprintln!(
+                    "{}",
+                    beamtalk_repl_protocol::format::format_warning_entry(
+                        &w,
+                        output_mode(),
+                        beamtalk_repl_protocol::format::WarningStyle::Prefixed,
+                    )
+                );
             }
         }
         Err(e) => eprintln!("Error: {e}"),
@@ -1465,17 +1463,15 @@ fn display_eval_response(response: &ReplResponse) {
         }
     }
     // Display compilation warnings
-    if let Some(ref warnings) = response.warnings {
-        for warning in warnings {
-            eprintln!(
-                "{}",
-                beamtalk_repl_protocol::format::format_warning(
-                    warning,
-                    output_mode(),
-                    beamtalk_repl_protocol::format::WarningStyle::Bullet,
-                )
-            );
-        }
+    for warning in response.warning_entries() {
+        eprintln!(
+            "{}",
+            beamtalk_repl_protocol::format::format_warning_entry(
+                &warning,
+                output_mode(),
+                beamtalk_repl_protocol::format::WarningStyle::Bullet,
+            )
+        );
     }
     if response.is_error() {
         if let Some(msg) = response.error_message() {

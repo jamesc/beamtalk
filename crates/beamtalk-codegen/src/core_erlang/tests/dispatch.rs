@@ -3890,7 +3890,7 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
     );
     let literal = &run[literal_arm..];
     assert!(
-        literal.contains("'class_who:', 'Base class'}, 'false')")
+        literal.contains("'class_who:', 'Base class'} := ")
             && literal.contains("'static_call_target'(")
             && literal.contains(":'class_who:'(_StaticSelf")
             && literal.contains("'class_send'(_ClassPid"),
@@ -4666,7 +4666,9 @@ fn test_direct_new0_emits_guarded_module_new_call() {
 
     assert!(
         output.contains(
-            "case call 'persistent_term':'get'({'bt@test@pt', 'new', 'Pt class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'new', 'Pt class'}, 'Pt', 'new', 0)"
+            "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'new', 'Pt class'} := "
+        ) && output.contains(
+            "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'new', 'Pt class'}, 'Pt', 'new', 0)"
         ),
         "eligible `Pt new` must be guarded by its static call key. Got:\n{output}"
     );
@@ -4752,12 +4754,15 @@ fn test_direct_keyword_constructor_emits_class_fn_call() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    // BT-4316: the hit path is one read of the call target's static call key,
-    // whose value is the class reference; a miss asks the runtime, which
+    // BT-4316/BT-4442: the hit path is one read of the class's static call
+    // map, matched on the call target's key, whose value is the class
+    // reference; a miss asks the runtime, which
     // installs it only while the guard holds.
     assert!(
         output.contains(
-            "case call 'persistent_term':'get'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)"
+            "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'class_x:y:', 'Pt class'} := "
+        ) && output.contains(
+            "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)"
         ),
         "eligible keyword ctor must be guarded by its static call key. Got:\n{output}"
     );

@@ -89,6 +89,8 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 | `output` | string | Captured stdout from evaluation (omitted if empty). Present in the final message for backward compatibility. Streaming clients should prefer `out` messages. |
 | `out` | string | Streaming stdout chunk (BT-696). Sent as intermediate messages during eval, before the final `done` message. No `status` field. |
 | `error` | string | Error message (when status includes `"error"`) |
+| `warnings` | string[] | Compile warning messages (omitted if none). Message text only, so clients that predate `warning_details` keep working. |
+| `warning_details` | object[] | The same warnings, in the same order, as `{"message": ..., "hint": ...}` objects; `hint` is present only when the diagnostic carried one (BT-4449). Sent only when at least one warning has a hint. Clients should prefer it over `warnings` when present. |
 | *result fields* | varies | Operation-specific fields (see below) |
 
 ### Status Flags
@@ -138,6 +140,15 @@ If the expression produces no stdout, the response is a single message (unchange
 **Response (error):**
 ```json
 {"id": "msg-001", "error": "Undefined variable: foo", "status": ["done", "error"]}
+```
+
+**Response (with a hinted warning, BT-4449):**
+```json
+{"id": "msg-001", "value": "Client",
+ "warnings": ["Udp class does not conform to Transport class"],
+ "warning_details": [{"message": "Udp class does not conform to Transport class",
+                      "hint": "missing: class defaultPort"}],
+ "status": ["done"]}
 ```
 
 **Interactive input (stdin, BT-698):**

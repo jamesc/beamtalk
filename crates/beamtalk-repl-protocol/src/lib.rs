@@ -28,4 +28,4 @@ pub mod test_ports;
 pub mod test_support;
 
 pub use request::{RequestBuilder, next_msg_id};
-pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo};
+pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, Warning};

@@ -67,7 +67,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -83,7 +83,7 @@ Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -99,12 +99,12 @@ Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
 returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
 """.
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [binary()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, Options).
 

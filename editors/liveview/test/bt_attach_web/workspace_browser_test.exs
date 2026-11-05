@@ -123,6 +123,21 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".cm-hover-doc", text: "Integer")
   end
 
+  test "the CmEditor hover resolves a multi-line keyword send's full selector (BT-4343)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # A keyword send split across lines. Hovering the LATER keyword part (`and:`)
+    # sends the editor context around it, and the `hover` op recovers the whole
+    # send — receiver `5`, selector `between:and:` — then formats that method's
+    # live docs (`Integer >> between:and:`, inherited from Number). Before
+    # BT-4343 a keyword part never resolved, so no tooltip opened at all.
+    |> set_source("5 between: 1\n  and: 10")
+    |> hover_doc_text("#workspace-editor-overlay", "and:")
+    |> assert_has(".cm-hover-doc", text: "between:and:")
+  end
+
   test "the CmEditor shows live parse-only diagnostics + clears them on a fix (BT-2556)",
        %{conn: conn} do
     conn
@@ -1243,6 +1258,25 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       if (!el) throw new Error("hover target not found: " + sel);
       const r = el.getBoundingClientRect();
       const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      el.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x, clientY: y}));
+    })()
+    """)
+  end
+
+  # Hover the first occurrence of `needle` in the CmEditor wrapped by
+  # `selector`: map its doc offset to screen coordinates (`coordsAtPos`) and
+  # dispatch a real `mousemove` on the element under that point, for tokens with
+  # no distinctive highlight class to select (e.g. a keyword part). See
+  # `hover_token/2` for why the event must target an element in `.cm-content`.
+  defp hover_doc_text(conn, selector, needle) do
+    evaluate(conn, """
+    (() => {
+      const view = document.querySelector(#{Jason.encode!(selector)}).cmView;
+      const at = view.state.doc.toString().indexOf(#{Jason.encode!(needle)});
+      if (at < 0) throw new Error("hover text not found");
+      const c = view.coordsAtPos(at + 1);
+      const x = c.left + 1, y = (c.top + c.bottom) / 2;
+      const el = document.elementFromPoint(x, y);
       el.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x, clientY: y}));
     })()
     """)

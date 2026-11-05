@@ -83,8 +83,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
-    record_static_call_key/2,
-    take_static_call_keys/1,
+    record_static_call_tag/1,
+    forget_static_call_tag/1,
     static_call_key_tags/0
 ]).
 
@@ -1456,12 +1456,14 @@ walk_return_type(ClassName, Selector, Lookup) ->
 -define(STATIC_CALL_KEYS, beamtalk_class_static_call_keys).
 
 -doc """
-Ensure the static call key index exists (idempotent): a `bag` of
-`{Tag, Key}`, one row per `persistent_term` static call key
-`beamtalk_class_shadow_flags:static_call_target/4` installed for the class
-whose metaclass tag is `Tag`. `beamtalk_class_shadow_flags` writes and takes
-rows only under that tag's lock, so its erase finds every installed key.
-Public, heir-protected like `ensure_backing_module_index_table/0`.
+Ensure the static call key index exists (idempotent): a `set` of `{Tag}`, one
+row per class tag whose per-class static call key
+(`beamtalk_class_shadow_flags:static_calls_key/1`, BT-4442) may be installed.
+`beamtalk_class_shadow_flags` records and forgets rows only under that tag's
+lock. The index exists only so
+`beamtalk_class_shadow_flags:erase_all_static_call_keys/0` can enumerate the
+tags without scanning every `persistent_term`. Public, heir-protected like
+`ensure_backing_module_index_table/0`.
 """.
 -spec ensure_static_call_keys_table() -> ok.
 ensure_static_call_keys_table() ->
@@ -1471,7 +1473,7 @@ ensure_static_call_keys_table() ->
                 ets:new(
                     ?STATIC_CALL_KEYS,
                     [
-                        bag,
+                        set,
                         public,
                         named_table,
                         {write_concurrency, true}
@@ -1488,42 +1490,39 @@ ensure_static_call_keys_table() ->
     end.
 
 -doc """
-Record that the static call key `Key` is installed for the class tagged `Tag`.
-Called by `beamtalk_class_shadow_flags:static_call_target/4` under the tag
-lock, before it puts the key.
+Record that the class tagged `Tag` may have a per-class static call key.
+Called by `beamtalk_class_shadow_flags` under the tag lock, before it puts
+the key.
 """.
--spec record_static_call_key(
-    atom(), {module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}
-) -> ok.
-record_static_call_key(Tag, Key) ->
+-spec record_static_call_tag(atom()) -> ok.
+record_static_call_tag(Tag) ->
     ensure_static_call_keys_table(),
-    true = ets:insert(?STATIC_CALL_KEYS, {Tag, Key}),
+    true = ets:insert(?STATIC_CALL_KEYS, {Tag}),
     ok.
 
 -doc """
-Remove and return every static call key recorded for `Tag`; `[]` when none
-(or the index does not exist yet). Called under the tag lock by
-`beamtalk_class_shadow_flags`, which erases each key.
+Forget `Tag`'s row (no-op when absent, or when the index does not exist yet).
+Called under the tag lock by `beamtalk_class_shadow_flags` once it has erased
+the class's per-class static call key.
 """.
--spec take_static_call_keys(atom()) ->
-    [{module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}].
-take_static_call_keys(Tag) ->
-    try ets:take(?STATIC_CALL_KEYS, Tag) of
-        Rows -> [Key || {_, Key} <- Rows]
+-spec forget_static_call_tag(atom()) -> ok.
+forget_static_call_tag(Tag) ->
+    try ets:delete(?STATIC_CALL_KEYS, Tag) of
+        true -> ok
     catch
-        error:badarg -> []
+        error:badarg -> ok
     end.
 
 -doc """
-Every class tag with at least one recorded static call key, without
-duplicates; `[]` when the index does not exist yet. Used by
+Every class tag recorded as possibly holding a per-class static call key;
+`[]` when the index does not exist yet. Used by
 `beamtalk_class_shadow_flags:erase_all_static_call_keys/0` when a restarted
 class monitor cannot know which classes died while it was down.
 """.
 -spec static_call_key_tags() -> [atom()].
 static_call_key_tags() ->
-    try ets:foldl(fun({Tag, _}, Acc) -> Acc#{Tag => true} end, #{}, ?STATIC_CALL_KEYS) of
-        Tags -> maps:keys(Tags)
+    try ets:select(?STATIC_CALL_KEYS, [{{'$1'}, [], ['$1']}]) of
+        Tags -> Tags
     catch
         error:badarg -> []
     end.

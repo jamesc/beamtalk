@@ -1865,8 +1865,10 @@ impl TypeChecker {
         // B]) needs it. The `-> Self` case needs the static receiver class
         // (which the plain annotation resolver does not thread), so handle it
         // specially via `receiver_type_for_class`. `-> Self class` returns a
-        // class object — existing body-type comparison cannot meaningfully
-        // validate this, so skip.
+        // class object whose class depends on the receiver — skip. A
+        // `-> C class` / `-> P class` return resolves like any annotation;
+        // a class-object body is then judged by `metatype_assignable_to`
+        // below (BT-4440), and any other body against it is skipped.
         //
         // All other arms — including `Generic` — go through the
         // central `resolve_type_annotation` resolver. ADR 0108:
@@ -1878,7 +1880,7 @@ impl TypeChecker {
             TypeAnnotation::SelfType { .. } => {
                 type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
-            TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
+            TypeAnnotation::SelfClass { .. } => return,
             _ => {
                 // ADR 0108 hot-reload re-check trigger: a declared
                 // `-> RestartStrategy` return type is an annotation site too
@@ -1894,6 +1896,28 @@ impl TypeChecker {
                 expected
             }
         };
+
+        // BT-4440: a class-object body (`C class` / `P class`) meets the
+        // declared return type under the same `metatype_assignable_to` rule
+        // arguments, slots and locals use (ADR 0083 tower, ADR 0144
+        // conformance). `-> Self` depends on the receiver side, so skip it.
+        if let Some(class_object) = ClassObjectType::of(body_type) {
+            if !matches!(declared, TypeAnnotation::SelfType { .. }) {
+                self.check_class_object_return(
+                    method,
+                    class_object,
+                    &expected,
+                    class_name,
+                    hierarchy,
+                );
+            }
+            return;
+        }
+        // Any other body against a declared class-object return has no
+        // reliable comparison here — skip, as before BT-4440.
+        if matches!(declared, TypeAnnotation::ClassOf { .. }) {
+            return;
+        }
 
         let InferredType::Known {
             class_name: actual_ty,
@@ -2039,9 +2063,10 @@ impl TypeChecker {
                 );
             }
             // ADR 0083: a declared metatype return (`-> Self class` / `-> X class`)
-            // already short-circuits via the `SelfClass`/`ClassOf` arm above, so
-            // `Meta` is unreachable in practice; skip checking (like `Dynamic`)
-            // to stay safe should a future annotation resolve to a metatype.
+            // already returned above (a class-object body is judged by
+            // `check_class_object_return`), so `Meta` is unreachable in
+            // practice; skip checking (like `Dynamic`) to stay safe should a
+            // future annotation resolve to a metatype.
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
             // `Meta`/`Dynamic` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
             // 0102) declared return type has no single `Known` body
@@ -2052,6 +2077,52 @@ impl TypeChecker {
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
         }
+    }
+
+    /// BT-4440: warn when a method whose body is a class object (`C class` /
+    /// `P class`) declares a return type that class object does not fit,
+    /// judged by [`Self::metatype_assignable_to`] with the
+    /// [`Self::is_type_compatible`] tower (the same rule as an argument,
+    /// which keeps return checking's unknown-class escape). A declared
+    /// `P class` the class misses gets the ADR 0144 conformance wording with
+    /// the missing selectors. A `Dynamic` declared return accepts anything.
+    fn check_class_object_return(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        class_object: ClassObjectType<'_>,
+        expected: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if matches!(expected, InferredType::Dynamic(_)) {
+            return;
+        }
+        let declared_type = expected.display_annotation();
+        if Self::metatype_assignable_to(
+            class_object,
+            &declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            Self::is_type_compatible,
+        ) {
+            return;
+        }
+        let expected_display = expected
+            .display_for_diagnostic()
+            .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+        let selector = method.selector.name();
+        let diag = Self::metatype_mismatch_diagnostic(
+            class_object,
+            &declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            format!(
+                "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+            ),
+            format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+            method.span,
+        );
+        self.diagnostics.push(diag);
     }
 
     /// Returns whether a `Known` type — either a method body's whole inferred
@@ -3661,7 +3732,9 @@ impl TypeChecker {
     /// itself a protocol, and `P class` iff
     /// [`ProtocolInfo::subsumes_conformance_to`](crate::semantic_analysis::protocol_registry::ProtocolInfo::subsumes_conformance_to)`(P, X)`. Any other part models the class object as
     /// `Class` for the metaclass-tower walk (ADR 0083) — `Class` /
-    /// `Behaviour` / `Object` accept it, `Integer` does not — judged by
+    /// `Behaviour` / `Object` accept it, `Integer` does not; a protocol
+    /// literal (`Meta{P}` for a registered protocol) is modelled as
+    /// `Protocol` instead — judged by
     /// `tower`: [`Self::is_assignable_to`] for a slot (a field or a state
     /// default, which has no unknown-class escape), [`Self::is_type_compatible`]
     /// for an argument, as for every other argument type. A type-parameter
@@ -3748,8 +3821,17 @@ impl TypeChecker {
         } else {
             part.into()
         };
-        let class_name_ty: EcoString = "Class".into();
-        tower(&class_name_ty, &part, hierarchy)
+        // A protocol literal (`Meta{P}` for a registered protocol `P`) is a
+        // `Protocol` object, not a class (BT-4440): `:: Protocol` accepts it.
+        let runtime_class: EcoString = match value {
+            ClassObjectType::Class(name)
+                if protocol_registry.is_some_and(|r| r.has_protocol(name)) =>
+            {
+                "Protocol".into()
+            }
+            _ => "Class".into(),
+        };
+        tower(&runtime_class, &part, hierarchy)
     }
 
     /// ADR 0144: when a class object `C class` fails

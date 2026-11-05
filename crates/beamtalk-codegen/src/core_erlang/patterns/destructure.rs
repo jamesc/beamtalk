@@ -63,8 +63,9 @@ impl CoreErlangGenerator {
     /// right-hand side's prelude (a self-send, a conditional whose receiver is
     /// sequenced, BT-4000) is threaded ahead into `stmts` in `frame`, so its
     /// `Bind`s are the body's own statements and the extraction reads the
-    /// already-sequenced value. The one lowering of a destructuring statement
-    /// in those bodies.
+    /// already-sequenced value. The method root binds the names with these
+    /// `let`s alone; every other threaded body also writes them back to its
+    /// frame through `lower_destructure_bind` (BT-4439).
     pub(in crate::core_erlang) fn generate_destructure_bindings_sequenced(
         &mut self,
         pattern: &Pattern,
@@ -127,7 +128,7 @@ impl CoreErlangGenerator {
     /// - `rhs_var_name` is the Core Erlang var holding the evaluated RHS
     /// - `bound_pairs` is `Vec<(beamtalk_name, core_erlang_var)>` for each `Pattern::Variable` bound
     #[allow(clippy::type_complexity)]
-    pub(super) fn generate_destructure_extractions(
+    pub(in crate::core_erlang) fn generate_destructure_extractions(
         &mut self,
         pattern: &Pattern,
         value: &Expression,

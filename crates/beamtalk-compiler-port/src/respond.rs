@@ -11,15 +11,28 @@
 use beamtalk_etf::{atom, binary_from_str as binary};
 use eetf::{List, Map, Term};
 
-use crate::diagnostics::DiagInfo;
+use crate::diagnostics::{DiagInfo, Warning};
 
 // ---------------------------------------------------------------------------
 // Response term construction helpers
 // ---------------------------------------------------------------------------
 
-/// Build ETF warning terms from string messages.
-pub(crate) fn build_warning_terms(warnings: &[String]) -> Vec<Term> {
-    warnings.iter().map(|w| binary(w)).collect()
+/// Build ETF warning terms: one `#{message => Bin}` map per warning, plus
+/// `hint => Bin` when the diagnostic carried a hint (BT-4449). The single
+/// builder every response shape uses, so all warning paths share one wire
+/// shape.
+pub(crate) fn build_warning_terms(warnings: &[Warning]) -> Vec<Term> {
+    warnings
+        .iter()
+        .map(|w| {
+            let mut map: std::collections::HashMap<Term, Term> =
+                std::collections::HashMap::from([(atom("message"), binary(&w.message))]);
+            if let Some(hint) = &w.hint {
+                map.insert(atom("hint"), binary(hint));
+            }
+            Term::from(Map::from(map))
+        })
+        .collect()
 }
 
 /// Appends the `ThreadedIr` verifier diagnostics (`internal: ...`, ADR 0111
@@ -30,9 +43,9 @@ pub(crate) fn build_warning_terms(warnings: &[String]) -> Vec<Term> {
 /// `beamtalk build` report, so they are dropped here and REPL/MCP output is
 /// unchanged.
 pub(crate) fn with_verifier_warnings(
-    warnings: &[String],
+    warnings: &[Warning],
     verifier_diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
-) -> Vec<String> {
+) -> Vec<Warning> {
     let mut all = warnings.to_vec();
     all.extend(
         verifier_diagnostics
@@ -41,7 +54,7 @@ pub(crate) fn with_verifier_warnings(
                 d.category
                     == Some(beamtalk_core::source_analysis::DiagnosticCategory::InternalVerifier)
             })
-            .map(|d| d.message.to_string()),
+            .map(|d| Warning::message_only(d.message.to_string())),
     );
     all
 }
@@ -71,7 +84,7 @@ pub(crate) fn build_referenced_alias_terms(referenced_aliases: &[ecow::EcoString
 }
 
 /// Build a response map for a successful `compile_expression`.
-pub(crate) fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
+pub(crate) fn ok_response(core_erlang: &str, warnings: &[Warning]) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
@@ -94,7 +107,7 @@ pub(crate) fn class_definition_ok_response(
     module_name: &str,
     classes: &[(String, String)],
     trailing_core_erlang: Option<&str>,
-    warnings: &[String],
+    warnings: &[Warning],
     referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
@@ -173,7 +186,7 @@ pub(crate) fn method_definition_ok_response(
     method_source: &str,
     return_type: &str,
     param_types: &[String],
-    warnings: &[String],
+    warnings: &[Warning],
 ) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
@@ -213,7 +226,7 @@ pub(crate) fn protocol_definition_ok_response(
     core_erlang: &str,
     module_name: &str,
     protocol_names: &[String],
-    warnings: &[String],
+    warnings: &[Warning],
     referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let protocol_terms: Vec<Term> = protocol_names.iter().map(|n| binary(n)).collect();
@@ -249,7 +262,7 @@ pub(crate) fn type_alias_definition_ok_response(
     alias_name: &str,
     expansion: &str,
     doc_comment: Option<&str>,
-    warnings: &[String],
+    warnings: &[Warning],
 ) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
@@ -272,7 +285,7 @@ pub(crate) fn compile_ok_response(
     core_erlang: &str,
     module_name: &str,
     classes: &[(String, String)],
-    warnings: &[String],
+    warnings: &[Warning],
     referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     Term::from(Map::from([
@@ -308,7 +321,7 @@ pub(crate) fn compile_method_ok_response(
     merged_class_source: &str,
     return_type: &str,
     param_types: &[String],
-    warnings: &[String],
+    warnings: &[Warning],
     referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     Term::from(Map::from([

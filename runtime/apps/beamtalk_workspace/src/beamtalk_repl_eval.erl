@@ -104,15 +104,20 @@ module loading to beamtalk_repl_loader.
 %% process dictionary (that is seeded only in eval workers).
 -export([announce_binding_changed/3]).
 
+%% Lexeme skippers (conformance-tested against the Rust lexer), shared with
+%% the cockpit hover's keyword-send scanner in `beamtalk_repl_ops_dev`.
+-export([
+    skip_string_literal/1,
+    skip_character_literal/1,
+    skip_line_comment/1,
+    skip_block_comment/1
+]).
+
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
     announce_binding_changed/2,
     extract_assignment/1,
-    skip_string_literal/1,
-    skip_character_literal/1,
-    skip_line_comment/1,
-    skip_block_comment/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
     should_purge_module/2,
@@ -143,9 +148,10 @@ status of a connected-session `Program exit: Code` so the shell can report it an
 terminate the session; `ok`/`error` are the ordinary value/failure shapes.
 """.
 -type eval_result() ::
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), binary(), [beamtalk_repl_protocol:warning()],
+        beamtalk_repl_state:state()}.
 
 -export_type([eval_result/0]).
 
@@ -286,7 +292,9 @@ format_alias_help(Name, #{
     <<Header/binary, CommentBlock/binary, "\n\nDeclared in: ", DeclaredIn/binary>>.
 
 -doc "Handle a `type Name = ...` declaration (ADR 0108 Phase 8).".
--spec handle_type_alias_definition(map(), [binary()], beamtalk_repl_state:state()) ->
+-spec handle_type_alias_definition(
+    map(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()
+) ->
     eval_result().
 handle_type_alias_definition(AliasInfo, Warnings, State) ->
     #{alias_name := Name, expansion := Expansion, doc_comment := DocComment} = AliasInfo,
@@ -579,9 +587,11 @@ Returns `{ok, Steps, Output, Warnings, State}' where
 or `{error, Reason, Output, Warnings, State}' on failure.
 """.
 -spec do_eval_trace(string(), beamtalk_repl_state:state()) ->
-    {ok, [{binary(), term()}], binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
+    {ok, [{binary(), term()}], binary(), [beamtalk_repl_protocol:warning()],
+        beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), binary(), [beamtalk_repl_protocol:warning()],
+        beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     ModuleName = beamtalk_module_name:repl_eval_module(Counter),
@@ -691,8 +701,8 @@ do_eval_trace(Expression, State) ->
 
 -doc "Compile a Beamtalk expression and return Core Erlang source.".
 -spec do_show_codegen(string(), beamtalk_repl_state:state()) ->
-    {ok, binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), [binary()], beamtalk_repl_state:state()}.
+    {ok, binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 do_show_codegen(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     NewState = beamtalk_repl_state:increment_eval_counter(State),
@@ -1521,7 +1531,7 @@ first_token(SelectorBin) ->
 -doc "Handle inline class definition: load class module, eval trailing expressions.".
 -spec handle_class_definition(
     map(),
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     string(),
     map(),
     beamtalk_repl_state:state(),
@@ -1557,16 +1567,20 @@ handle_class_definition(
     end.
 
 -doc "Handle standalone method definition: recompile and reload target class.".
--spec handle_method_definition(map(), [binary()], string(), beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec handle_method_definition(
+    map(), [beamtalk_repl_protocol:warning()], string(), beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     beamtalk_repl_loader:reload_method_definition(MethodInfo, Warnings, Expression, State).
 
 -doc "Handle protocol definition: load module and register protocol.".
--spec handle_protocol_definition(map(), [binary()], beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec handle_protocol_definition(
+    map(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 handle_protocol_definition(ProtocolInfo, Warnings, State) ->
     #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
     case code:load_binary(ModuleName, "", Binary) of
@@ -1644,7 +1658,7 @@ maybe_register_protocol_class(ModuleName) ->
     map(),
     pid() | undefined,
     pid() | undefined,
-    [binary()],
+    [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state()
 ) ->
     eval_result().
@@ -2140,7 +2154,7 @@ strip_internal_bindings(Bindings) ->
     | {error, term(), beamtalk_repl_state:state()}
     | {script_exit, non_neg_integer(), beamtalk_repl_state:state()},
     binary(),
-    [binary()]
+    [beamtalk_repl_protocol:warning()]
 ) -> eval_result().
 inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
@@ -2153,14 +2167,16 @@ inject_output({script_exit, Code, State}, Output, Warnings) ->
 
 -doc "Wrap a compile error as a structured #beamtalk_error{} result tuple.".
 -spec wrap_compile_err(term(), beamtalk_repl_state:state()) ->
-    {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
+    {error, #beamtalk_error{}, binary(), [beamtalk_repl_protocol:warning()],
+        beamtalk_repl_state:state()}.
 wrap_compile_err(Reason, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({compile_error, Reason}),
     {error, Err, <<>>, [], State}.
 
 -doc "Wrap a load error as a structured #beamtalk_error{} result tuple.".
--spec wrap_load_err(term(), [binary()], beamtalk_repl_state:state()) ->
-    {error, #beamtalk_error{}, binary(), [binary()], beamtalk_repl_state:state()}.
+-spec wrap_load_err(term(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()) ->
+    {error, #beamtalk_error{}, binary(), [beamtalk_repl_protocol:warning()],
+        beamtalk_repl_state:state()}.
 wrap_load_err(Reason, Warnings, State) ->
     Err = beamtalk_repl_errors:ensure_structured_error({load_error, Reason}),
     {error, Err, <<>>, Warnings, State}.

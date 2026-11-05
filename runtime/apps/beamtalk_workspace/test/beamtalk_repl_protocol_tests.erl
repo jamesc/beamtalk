@@ -307,6 +307,77 @@ encode_error_with_empty_warnings_omitted_test() ->
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
+%%% BT-4449: structured port warnings carry their hint as its own field
+
+structured_warning_messages_stay_plain_strings_test() ->
+    %% `warnings' stays a list of message strings (old clients keep working);
+    %% hint-less port warnings add no `warning_details'.
+    Msg = make_msg(<<"eval">>, <<"msg-h0">>, undefined),
+    Result = beamtalk_repl_protocol:encode_result(
+        1, Msg, fun identity/1, <<>>, [#{message => <<"plain">>}, <<"runtime">>]
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"plain">>, <<"runtime">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"warning_details">>, Decoded)).
+
+structured_warning_hint_goes_to_warning_details_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-h1">>, undefined),
+    Warnings = [
+        #{message => <<"X class does not conform to P class">>, hint => <<"missing: class m">>},
+        <<"collision">>
+    ],
+    Result = beamtalk_repl_protocol:encode_result(1, Msg, fun identity/1, <<>>, Warnings),
+    Decoded = json:decode(Result),
+    ?assertEqual(
+        [<<"X class does not conform to P class">>, <<"collision">>],
+        maps:get(<<"warnings">>, Decoded)
+    ),
+    ?assertEqual(
+        [
+            #{
+                <<"message">> => <<"X class does not conform to P class">>,
+                <<"hint">> => <<"missing: class m">>
+            },
+            #{<<"message">> => <<"collision">>}
+        ],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
+structured_warning_hint_on_error_response_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-h2">>, undefined),
+    Result = beamtalk_repl_protocol:encode_error(
+        bad, Msg, fun format_err/1, <<>>, [#{message => <<"m">>, hint => <<"h">>}]
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"m">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
+structured_warning_hint_on_codegen_response_test() ->
+    Msg = make_msg(<<"show-codegen">>, <<"msg-h3">>, undefined),
+    Result = beamtalk_repl_protocol:encode_codegen(
+        <<"core">>, [#{message => <<"m">>, hint => <<"h">>}], Msg
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"m">>], maps:get(<<"warnings">>, Decoded)),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
+structured_warning_hint_on_trace_response_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-h4">>, undefined),
+    Result = beamtalk_repl_protocol:encode_trace_result(
+        [], Msg, fun identity/1, <<>>, [#{message => <<"m">>, hint => <<"h">>}]
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(
+        [#{<<"message">> => <<"m">>, <<"hint">> => <<"h">>}],
+        maps:get(<<"warning_details">>, Decoded)
+    ).
+
 %%% encode_error/6 — with metadata
 
 encode_error_with_metadata_new_format_test() ->

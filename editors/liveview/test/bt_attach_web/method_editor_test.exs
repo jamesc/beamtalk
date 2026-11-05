@@ -60,7 +60,8 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
     @moduledoc false
     use BtAttachWeb.StubClientOverrides
 
-    def eval(_pid, _code), do: {:error, :compile_failed, "output", ["a warning"]}
+    def eval(_pid, _code),
+      do: {:error, :compile_failed, "output", [%{message: "a warning", hint: nil}]}
   end
 
   # `save_native_source/2` answering a shape none of the three documented wire

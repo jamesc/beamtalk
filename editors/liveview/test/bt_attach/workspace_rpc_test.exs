@@ -180,7 +180,30 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "success returns the live term with stringified output/warnings" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:ok, 42, ~c"output", [:warn1]}))
 
-      assert Workspace.eval(self(), "1 + 1") == {:ok, 42, "output", ["warn1"]}
+      assert Workspace.eval(self(), "1 + 1") ==
+               {:ok, 42, "output", [%{message: "warn1", hint: nil}]}
+    end
+
+    test "a compiler warning keeps its hint as its own field (BT-4449)" do
+      warnings = [
+        %{
+          message: "Udp class does not conform to Transport class",
+          hint: "missing: class defaultPort"
+        },
+        %{message: "no hint here"}
+      ]
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:ok, 1, ~c"", warnings}))
+
+      assert Workspace.eval(self(), "x") ==
+               {:ok, 1, "",
+                [
+                  %{
+                    message: "Udp class does not conform to Transport class",
+                    hint: "missing: class defaultPort"
+                  },
+                  %{message: "no hint here", hint: nil}
+                ]}
     end
 
     test "an error result carries stringified output/warnings alongside the reason" do
@@ -468,6 +491,13 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "hover/2 returns the formatted docs string" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:docs, "Counter class docs"}))
       assert Workspace.hover(self(), "Counter") == {:ok, "Counter class docs"}
+    end
+
+    test "hover/3 forwards the editor context and returns the docs (BT-4343)" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:docs, "fetch:options: docs"}))
+
+      assert Workspace.hover(self(), "  options:", %{before: "Fetcher fetch: u\n", suffix: " o"}) ==
+               {:ok, "fetch:options: docs"}
     end
 
     test "hover/2 propagates a dispatch error" do

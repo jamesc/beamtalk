@@ -892,17 +892,34 @@
 .cm-inline-result-toggle:hover { color: var(--ink); }
 
 /* Live-image hover tooltips (BT-2555): signature + doc-comment docs sourced
-   from the running session. The docs are the same plain text `:help` shows in
-   the REPL, rendered verbatim in a <pre>; cap the size and let it scroll so a
-   class with a long method listing can't fill the viewport. */
+   from the running session, cap the size and let it scroll so a class with a
+   long method listing can't fill the viewport. BT-4344: the content is
+   `BtAttach.DocFormat` HTML — the `:help` layout as a `.doc-code` <pre>, a
+   method's doc-comment as paragraphs / headings / bullets — styled like the
+   System Browser's `.doc-body-inline` block, only tighter. */
 .cm-tooltip .cm-hover-doc {
   max-width: 42rem; max-height: 22rem; overflow: auto;
+  padding: 6px 9px; font-size: 12px; line-height: 1.45; color: var(--ink);
 }
-.cm-tooltip .cm-hover-doc pre {
-  margin: 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: break-word;
+.cm-tooltip .cm-hover-doc .doc-code {
+  margin: 0 0 6px; padding: 0; white-space: pre-wrap; overflow-wrap: break-word;
   font-family: var(--code-font, ui-monospace, monospace); font-size: 12px;
-  color: var(--ink); background: var(--code-bg);
+  color: var(--ink); background: none;
 }
+.cm-tooltip .cm-hover-doc .doc-code code {
+  background: none; padding: 0; border: none; font: inherit; color: inherit;
+}
+.cm-tooltip .cm-hover-doc .doc-p { margin: 0 0 6px; }
+.cm-tooltip .cm-hover-doc .doc-h {
+  margin: 8px 0 4px; font-weight: 700; font-size: 12.5px;
+}
+.cm-tooltip .cm-hover-doc .doc-list { margin: 0 0 6px; padding-left: 18px; list-style: disc; }
+.cm-tooltip .cm-hover-doc .doc-list li { margin: 1px 0; }
+.cm-tooltip .cm-hover-doc code {
+  padding: 0 3px; border-radius: 3px; background: var(--code-bg);
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 0.95em;
+}
+.cm-tooltip .cm-hover-doc > :last-child { margin-bottom: 0; }
 
 /* Ctrl/Cmd-click go-to-definition affordance (BT-2666): while the platform
    modifier is held, the token under the pointer underlines + turns into a link
