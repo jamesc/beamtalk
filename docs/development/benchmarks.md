@@ -1822,3 +1822,27 @@ sides include the class-side self-send (~0.04 µs), which dominates.
 A guard now costs what the expression form costs. A taken `^` saved about
 0.07 µs (the throw and its catch); a guard that falls through saved
 about 0.01 µs (the `make_ref` and the `try` set-up).
+
+### BT-4452: effectful guards on a typed comparison
+
+BT-4415 left a guard whose `^` value has effects
+(`x > 0 ifTrue: [^self one]`) on the NLR frame unless its receiver was `true`,
+`false` or an `==`-family comparison. A `<`/`>`/`<=`/`>=` comparison whose
+left operand is a literal or a trusted `:: Integer`-family parameter is
+compiled to the bare Erlang BIF, so it is a Boolean by construction too, and
+every guard shape on it now compiles as a direct return.
+
+Same harness as above, with `class sealed guard: x :: Integer => x > 0
+ifTrue: [^self one]. 2` and `expr: x :: Integer => x > 0 ifTrue: [self one]
+ifFalse: [2]` (`one` a sealed class method answering `1`). "before" is the
+same source compiled with the typed-comparison rule switched off (the method
+keeps its `make_ref`).
+
+| Row (µs per iteration, two interleaved runs) | before | after |
+|---|---|---|
+| empty loop | 0.002 | 0.002 – 0.003 |
+| `guard: 1` (`^ self one` taken) | 0.142 – 0.143 | 0.061 |
+| `guard: 0` (falls through) | 0.058 – 0.062 | 0.041 – 0.042 |
+| `expr: 1` (expression form) | 0.060 – 0.066 | 0.062 – 0.067 |
+
+As for BT-4415, the guard now costs what the expression form costs.

@@ -64,9 +64,15 @@
 //! `ifTrue:ifFalse:`. A Boolean-family conditional is therefore rewritten
 //! only when:
 //!
-//! - its receiver is a Boolean by construction ([`is_boolean_by_construction`]:
-//!   `true`, `false`, or a structural BIF comparison such as `=:=`), so the
-//!   send never happens; or
+//! - its receiver is a Boolean by construction, so the send never happens:
+//!   `true`, `false`, a structural BIF comparison such as `=:=`
+//!   ([`is_boolean_by_construction`]), or an ordering comparison
+//!   (`< > <= >=`) codegen lowers to a bare BIF because its left operand is
+//!   a number/string/character literal or a trusted `:: Integer`-family
+//!   parameter ([`Rewriter::typed_comparison`], BT-4452). The rewrite
+//!   records each such comparison, and the compile fails unless codegen did
+//!   lower it bare ([`CoreErlangGenerator::unconfirmed_boolean_comparisons`]);
+//!   or
 //! - it is a one-branch guard, `c ifTrue: [^v]` or `c ifFalse: [^v]`, whose
 //!   `v` has no effects ([`is_effect_free`]). Its receiver is then recorded
 //!   in [`GuardRewrite::conditions`], and codegen
@@ -99,7 +105,9 @@ use beamtalk_core::state_threading_selectors::{
 };
 use ecow::EcoString;
 
+use crate::core_erlang::field_types::{COMPARABLE_TYPES, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::operators::is_comparable_literal;
 use beamtalk_cerl_doc::{Document, docvec, leaf};
 
 /// A method's identity within one generation: its span, side and selector. A
@@ -152,6 +160,11 @@ pub(in crate::core_erlang) struct GuardRewrite {
     /// The receivers of the guards whose condition codegen must decide
     /// through `beamtalk_guard_return`.
     pub(in crate::core_erlang) conditions: HashMap<GuardConditionKey, GuardSense>,
+    /// The left operands of the typed comparisons the rewrite took for
+    /// Booleans by construction ([`Rewriter::typed_comparison`]), which
+    /// codegen must lower to a bare comparison BIF
+    /// ([`CoreErlangGenerator::confirm_bare_comparison`]).
+    pub(in crate::core_erlang) boolean_comparisons: HashSet<GuardConditionKey>,
 }
 
 impl GuardRewrite {
@@ -174,6 +187,11 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
                 rw.conditions
                     .into_iter()
                     .map(|(receiver, sense)| ((key.clone(), receiver), sense)),
+            );
+            rewrite.boolean_comparisons.extend(
+                rw.boolean_comparisons
+                    .into_iter()
+                    .map(|left| (key.clone(), left)),
             );
             rewrite.bodies.insert(key, original);
         }
@@ -210,6 +228,13 @@ fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinitio
 struct Rewriter {
     /// The receiver spans of the method's helper-decided guards.
     conditions: HashMap<Span, GuardSense>,
+    /// The left-operand spans of the typed comparisons the rewrite relied on
+    /// as Booleans by construction.
+    boolean_comparisons: HashSet<Span>,
+    /// The method's parameters codegen trusts to hold a value with a builtin
+    /// total order ([`trusted_param_types`] in [`COMPARABLE_TYPES`]), so a
+    /// comparison on one lowers to a bare BIF.
+    comparable_params: HashSet<EcoString>,
     /// How many times the method assigns each local, nested blocks included.
     assignments: HashMap<EcoString, usize>,
     /// The method's and its blocks' parameter names.
@@ -223,6 +248,12 @@ impl Rewriter {
     fn of(method: &MethodDefinition) -> Self {
         let mut rw = Self {
             conditions: HashMap::new(),
+            boolean_comparisons: HashSet::new(),
+            comparable_params: trusted_param_types(method)
+                .into_iter()
+                .filter(|(_, ty)| COMPARABLE_TYPES.contains(ty))
+                .map(|(name, _)| EcoString::from(name))
+                .collect(),
             assignments: HashMap::new(),
             parameters: method
                 .parameters
@@ -246,6 +277,45 @@ impl Rewriter {
             });
         }
         rw
+    }
+
+    /// Whether `expr` is `true` or `false` whatever it evaluates: a structural
+    /// Boolean ([`is_boolean_by_construction`]) or a [`Self::typed_comparison`].
+    fn is_boolean(&self, expr: &Expression) -> bool {
+        is_boolean_by_construction(expr) || self.typed_comparison(expr).is_some()
+    }
+
+    /// The left operand of `expr` when it is a comparison (`< > <= >=`)
+    /// codegen lowers to a bare Erlang BIF, which answers a Boolean and never
+    /// sends: its left operand is a literal with a builtin total order or a
+    /// trusted comparable parameter — the operands
+    /// [`CoreErlangGenerator::receiver_is_statically_comparable`] accepts
+    /// from the method alone (BT-4452).
+    fn typed_comparison<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Binary(op),
+            is_cast: false,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if !matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+            return None;
+        }
+        let bare = is_comparable_literal(receiver)
+            || matches!(receiver.as_ref(), Expression::Identifier(id)
+                if self.comparable_params.contains(&id.name));
+        bare.then_some(receiver.as_ref())
+    }
+
+    /// Records `receiver`, a conditional's receiver the rewrite treats as a
+    /// Boolean by construction, when that rests on a typed comparison.
+    fn note_boolean(&mut self, receiver: &Expression) {
+        if let Some(left) = self.typed_comparison(receiver) {
+            self.boolean_comparisons.insert(left.span());
+        }
     }
 
     /// Whether `rest`, the statements after a guard, may move into the
@@ -295,7 +365,7 @@ fn rewrite_tail_body(
 ) -> Vec<ExpressionStatement> {
     let guard_at = body.iter().enumerate().position(|(i, stmt)| {
         i + 1 < body.len()
-            && guard_shape(&stmt.expression).is_some()
+            && guard_shape(&stmt.expression, rw).is_some()
             && rw.can_absorb(&body[i + 1..])
     });
     if let Some(i) = guard_at {
@@ -327,8 +397,9 @@ fn rewrite_tail_expression(expr: Expression, rw: &mut Rewriter) -> Expression {
             is_cast: false,
             span,
         } if is_inlined_conditional(&parts, &arguments)
-            && (family_of(&parts) == Family::Nil || is_boolean_by_construction(&receiver)) =>
+            && (family_of(&parts) == Family::Nil || rw.is_boolean(&receiver)) =>
         {
+            rw.note_boolean(&receiver);
             rewrite_conditional_branches(
                 Expression::MessageSend {
                     receiver,
@@ -481,7 +552,7 @@ struct GuardShape {
 
 /// `expr`'s [`GuardShape`] when it is a guard statement (see the module
 /// doc), else `None`.
-fn guard_shape(expr: &Expression) -> Option<GuardShape> {
+fn guard_shape(expr: &Expression, rw: &Rewriter) -> Option<GuardShape> {
     let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Keyword(parts),
@@ -515,7 +586,7 @@ fn guard_shape(expr: &Expression) -> Option<GuardShape> {
     }
     let helper = match family {
         Family::Nil => None,
-        Family::Boolean if is_boolean_by_construction(receiver) => None,
+        Family::Boolean if rw.is_boolean(receiver) => None,
         Family::Boolean => Some(helper_guard_sense(parts, slots[1 - falling_slot]?)?),
     };
     Some(GuardShape {
@@ -572,7 +643,7 @@ fn branch_slots<'a>(
 /// `ifNil:ifNotNil:`), recording its receiver in `conditions` when codegen
 /// decides it through `beamtalk_guard_return`.
 fn absorb_rest(expr: Expression, rest: Vec<ExpressionStatement>, rw: &mut Rewriter) -> Expression {
-    let shape = guard_shape(&expr).expect("absorb_rest is only called on a guard");
+    let shape = guard_shape(&expr, rw).expect("absorb_rest is only called on a guard");
     let Expression::MessageSend {
         receiver,
         selector: MessageSelector::Keyword(parts),
@@ -583,8 +654,12 @@ fn absorb_rest(expr: Expression, rest: Vec<ExpressionStatement>, rw: &mut Rewrit
     else {
         unreachable!("guard_shape matched a keyword send");
     };
-    if let Some(sense) = shape.helper {
-        rw.conditions.insert(receiver.span(), sense);
+    match shape.helper {
+        Some(sense) => {
+            rw.conditions.insert(receiver.span(), sense);
+        }
+        None if shape.family == Family::Boolean => rw.note_boolean(&receiver),
+        None => {}
     }
     let keywords = shape.family.keywords();
     let mut slots: [Option<Block>; 2] = [None, None];
@@ -666,6 +741,34 @@ impl CoreErlangGenerator {
                 .conditions
                 .contains_key(&(method.clone(), receiver.span()))
         })
+    }
+
+    /// Records that `left`, a comparison's left operand, lowered to a bare
+    /// comparison BIF, when it is a recorded typed comparison of the method
+    /// being generated ([`GuardRewrite::boolean_comparisons`]).
+    pub(in crate::core_erlang) fn confirm_bare_comparison(&mut self, left: &Expression) {
+        let Some(method) = self.current_guard_method.clone() else {
+            return;
+        };
+        let key = (method, left.span());
+        if self.guard_rewrite.boolean_comparisons.contains(&key) {
+            self.boolean_comparisons_bare.insert(key);
+        }
+    }
+
+    /// The recorded typed comparisons codegen never lowered to a bare BIF:
+    /// each is a guard the rewrite made exact only for a Boolean receiver,
+    /// whose receiver could then be a non-Boolean answer of a dispatched
+    /// comparison (BT-4452).
+    pub(in crate::core_erlang) fn unconfirmed_boolean_comparisons(&self) -> Vec<GuardConditionKey> {
+        let mut missed: Vec<_> = self
+            .guard_rewrite
+            .boolean_comparisons
+            .difference(&self.boolean_comparisons_bare)
+            .cloned()
+            .collect();
+        missed.sort_by_key(|(m, r)| (m.span.start(), r.start()));
+        missed
     }
 
     /// The recorded guard conditions no conditional consumed: each is a
@@ -839,6 +942,62 @@ mod tests {
         );
         // In tail position the receiver's own answer is the method's.
         assert_eq!(rewritten(&class("    x ifTrue: [^1]")), None);
+    }
+
+    fn typed_class(body: &str) -> String {
+        format!("Object subclass: C\n  m: x :: Integer =>\n{body}\n")
+    }
+
+    /// The typed comparisons the rewrite of `class_source` relied on.
+    fn boolean_comparisons(class_source: &str) -> usize {
+        let mut module = parse(class_source);
+        rewrite_guard_returns(&mut module).boolean_comparisons.len()
+    }
+
+    #[test]
+    fn typed_comparison_allows_every_shape() {
+        // BT-4452: `x :: Integer` makes `x > 0` a bare BIF, so every shape
+        // the helper cannot keep exact on a non-Boolean is exact here.
+        for body in [
+            "    x > 0 ifTrue: [^self withN: 0]\n    2",
+            "    x > 0 ifTrue: [self foo. ^1]\n    2",
+            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
+            "    x >= 0 ifTrue: [^1]",
+            "    0 < x ifFalse: [^x foo]\n    2",
+        ] {
+            let src = typed_class(body);
+            let (out, helpers) =
+                rewritten_with_conditions(&src).unwrap_or_else(|| panic!("{body}"));
+            assert!(!out.contains('^'), "{out}");
+            assert_eq!(helpers, 0, "{body}");
+            assert_eq!(boolean_comparisons(&src), 1, "{body}");
+        }
+    }
+
+    #[test]
+    fn untrusted_comparisons_are_not_boolean() {
+        // Untyped, non-comparable, or rebound parameters dispatch `>`.
+        assert_eq!(
+            rewritten(&class("    x > 0 ifTrue: [^self withN: 0]\n    2")),
+            None
+        );
+        assert_eq!(
+            rewritten(
+                "Object subclass: C\n  m: x :: Point =>\n    x > 0 ifTrue: [^x foo]\n    2\n"
+            ),
+            None
+        );
+        assert_eq!(
+            rewritten(&typed_class(
+                "    #[1] do: [:x | x]\n    x > 0 ifTrue: [^x foo]\n    2"
+            )),
+            None
+        );
+        // A comparison on a send's answer dispatches `>`.
+        assert_eq!(
+            rewritten(&typed_class("    x abs > 0 ifTrue: [^x foo]\n    2")),
+            None
+        );
     }
 
     #[test]

@@ -533,6 +533,10 @@ pub struct CoreErlangGenerator {
     /// [`Self::unconsumed_guard_conditions`]).
     pub(in crate::core_erlang) guard_conditions_used:
         std::collections::HashSet<super::guard_returns::GuardConditionKey>,
+    /// The recorded typed comparisons (BT-4452) codegen lowered to a bare
+    /// comparison BIF (see [`Self::unconfirmed_boolean_comparisons`]).
+    pub(in crate::core_erlang) boolean_comparisons_bare:
+        std::collections::HashSet<super::guard_returns::GuardConditionKey>,
     /// The identity of the method whose body is being generated (set by
     /// `MethodFrame::enter` with [`Self::current_method_span`]): the method
     /// half of a [`super::guard_returns::GuardConditionKey`].
@@ -683,6 +687,7 @@ impl CoreErlangGenerator {
             current_method_span: None,
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
+            boolean_comparisons_bare: std::collections::HashSet::new(),
             current_guard_method: None,
         }
     }

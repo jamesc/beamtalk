@@ -406,6 +406,16 @@ pub fn generate_module_with_warnings(
              `guard_condition_doc` (method, receiver span): {missed:?}"
         )));
     }
+    // BT-4452: a guard the rewrite made exact because its receiver is a
+    // typed comparison relies on that comparison lowering to a bare BIF,
+    // which answers a Boolean; a dispatched one could answer anything.
+    let unconfirmed = generator.unconfirmed_boolean_comparisons();
+    if !unconfirmed.is_empty() {
+        return Err(CodeGenError::Internal(format!(
+            "BT-4452: typed guard comparisons not lowered to a bare BIF \
+             (method, left operand span): {unconfirmed:?}"
+        )));
+    }
 
     generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);

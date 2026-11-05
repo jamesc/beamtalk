@@ -51,7 +51,7 @@ fn canonical_class_side_guard_has_no_try() {
 fn object_method_guard_has_no_try() {
     let code = codegen(
         "Object subclass: G\n\
-         \x20 sign: x :: Integer =>\n\
+         \x20 sign: x =>\n\
          \x20   x > 0 ifTrue: [^1]\n\
          \x20   x < 0 ifTrue: [^-1]\n\
          \x20   0\n",
@@ -110,17 +110,47 @@ fn expect_directive_in_absorbed_statements_compiles() {
 }
 
 #[test]
+fn typed_comparison_guard_needs_no_helper() {
+    // BT-4452: `x :: Integer` lowers `x > 0` to a bare BIF, a Boolean by
+    // construction, so the condition needs no helper.
+    let code = codegen(
+        "Object subclass: G\n\
+         \x20 sign: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^1]\n\
+         \x20   x < 0 ifTrue: [^-1]\n\
+         \x20   0\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
 fn guard_with_effectful_return_on_non_boolean_receiver_keeps_its_frame() {
     // `self withN: 0` would run outside the receiver's own `ifTrue:` once
     // rewritten, so only a Boolean by construction may take this shape.
     let code = codegen(
         "Value subclass: W\n\
          \x20 field: n :: Integer = 0\n\
-         \x20 clamp: x :: Integer =>\n\
+         \x20 clamp: x =>\n\
          \x20   x < 0 ifTrue: [^self withN: 0]\n\
          \x20   self withN: x\n",
     );
     assert!(code.contains("make_ref"), "{code}");
+}
+
+#[test]
+fn guard_with_effectful_return_on_typed_comparison_has_no_frame() {
+    // BT-4452: with `x :: Integer`, `x < 0` is a bare BIF, so the effectful
+    // `^self withN: 0` (and every other guard shape) is exact as rewritten.
+    let code = codegen(
+        "Value subclass: W\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   x < 0 ifTrue: [^self withN: 0]\n\
+         \x20   x > 100 ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
 }
 
 #[test]

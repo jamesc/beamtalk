@@ -46,6 +46,22 @@ TestCase subclass: GuardReturnTest
     self assert: (v clamp: 9) n equals: 99
     self assert: (v clamp: 4) n equals: 4
 
+  testTypedComparisonGuardsWithEffects =>
+    v := GuardReturnValue new
+    self assert: (v bounded: -3) n equals: 0
+    self assert: (v bounded: 500) n equals: 100
+    self assert: (v bounded: 95) n equals: 90
+    self assert: (v bounded: 42) n equals: 42
+    self assert: (v positiveOnly: 7) n equals: 7
+    self assert: (v positiveOnly: -7) equals: false
+
+  testActorTypedComparisonGuardKeepsStateWrittenInBranch =>
+    a := GuardReturnActor spawn
+    self assert: (a bumpBig: 20) equals: 100
+    self assert: a count equals: 100
+    self assert: (a bumpBig: 2) equals: 102
+    self assert: a count equals: 102
+
   // An untyped guard receiver that is not a Boolean is sent the guard's own
   // selector with a block that returns from the method (BT-4244).
   testNonBooleanReceiverThatCallsTheBlockReturnsEarly =>

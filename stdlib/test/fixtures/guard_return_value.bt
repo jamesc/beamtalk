@@ -11,3 +11,19 @@ Value subclass: GuardReturnValue
     x < 0 ifTrue: [^self]
     x =:= 9 ifTrue: [^self withN: 99]
     self withN: x
+
+  // BT-4452: `x :: Integer` makes each comparison a bare BIF (a Boolean by
+  // construction), so effectful returns, two-branch guards and a tail guard
+  // compile as direct returns too.
+  bounded: x :: Integer =>
+    x < 0 ifTrue: [^self withN: 0]
+    x > 100
+      ifTrue: [
+        self withN: 1
+        ^self withN: 100
+      ]
+      ifFalse: [x]
+    x >= 90 ifFalse: [^self withN: x]
+    self withN: 90
+
+  positiveOnly: x :: Integer => 0 < x ifTrue: [^self withN: x]

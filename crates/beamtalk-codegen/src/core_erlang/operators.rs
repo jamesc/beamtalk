@@ -81,6 +81,21 @@ pub(in crate::core_erlang) fn is_structurally_lowered_binary(op: &str) -> bool {
     structural_binary(op).is_some()
 }
 
+/// Whether `expr` is a literal with a builtin total order (a number, string
+/// or character), on which the comparison BIFs (`< > <= >=`) are correct.
+/// The literal half of [`CoreErlangGenerator::receiver_is_statically_comparable`],
+/// shared with the guard-return rewrite (`guard_returns`, BT-4452).
+pub(in crate::core_erlang) fn is_comparable_literal(expr: &Expression) -> bool {
+    use beamtalk_core::ast::Literal;
+    matches!(
+        expr,
+        Expression::Literal(
+            Literal::Integer(_) | Literal::Float(_) | Literal::String(_) | Literal::Character(_),
+            _,
+        )
+    )
+}
+
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
@@ -170,6 +185,9 @@ impl CoreErlangGenerator {
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
         let guard = self.operator_guard(op, left);
+        if guard.is_none() {
+            self.confirm_bare_comparison(left);
+        }
 
         // ADR 0116: number-on-the-left coercion. Every arithmetic call
         // site that can reach a bare BIF with the *left* operand numeric (the
@@ -360,15 +378,8 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
-        use beamtalk_core::ast::Literal;
         match expr {
-            Expression::Literal(
-                Literal::Integer(_)
-                | Literal::Float(_)
-                | Literal::String(_)
-                | Literal::Character(_),
-                _,
-            ) => true,
+            Expression::Literal(..) => is_comparable_literal(expr),
             Expression::Identifier(id) => {
                 if id.name == "self" {
                     matches!(
