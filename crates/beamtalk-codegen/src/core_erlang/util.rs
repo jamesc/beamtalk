@@ -105,7 +105,7 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
 /// contains a space). The runtime spells it in
 /// `beamtalk_class_shadow_flags:static_calls_key/1`;
 /// `GuardedStaticCallTest>>testCallSiteReadsTheRuntimesPerClassKey`
-/// (stdlib/test/guarded_static_call_test.bt) fails if the two differ.
+/// (`stdlib/test/guarded_static_call_test.bt`) fails if the two differ.
 pub(super) fn static_calls_key(class_name: &str) -> String {
     let mut s = metaclass_tag(class_name);
     s.push_str(" static calls");
