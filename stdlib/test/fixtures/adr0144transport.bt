@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0144 (BT-4435): a protocol with class-side requirements, used as the
+// type `Adr0144Transport class` by adr0144protocol_class_test.bt.
+Protocol define: Adr0144Transport
+  class send: data :: Object -> Result(String, Object)
+  class label -> String

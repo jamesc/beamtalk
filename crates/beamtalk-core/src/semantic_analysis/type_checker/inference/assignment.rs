@@ -11,10 +11,11 @@
 
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
-    AssignmentTypeMismatch, CrossObjectFieldMutation,
+    AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
 };
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::Span;
@@ -99,9 +100,26 @@ impl TypeChecker {
         inferred_ty: &InferredType,
         declared: &InferredType,
         hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> Option<AssignmentTypeMismatch> {
         if matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
             return None;
+        }
+        // ADR 0083 / ADR 0144: a class object judged against the declared
+        // type by the one slot rule (`C class` into `P class` iff `C`
+        // conforms to `P`). A miss still falls through to the string check
+        // below, which keeps the narrowing-assignment escape hatch.
+        let class_object = ClassObjectType::of(inferred_ty);
+        if let Some(class_object) = class_object {
+            if Self::metatype_assignable_to(
+                class_object,
+                &declared.display_name(),
+                hierarchy,
+                protocol_registry,
+                Self::is_assignable_to,
+            ) {
+                return None;
+            }
         }
         let is_type_var = |ty: &InferredType| {
             matches!(
@@ -133,6 +151,15 @@ impl TypeChecker {
             inferred_display: inferred_ty
                 .display_for_diagnostic()
                 .unwrap_or_else(|| inferred_name.clone()),
+            nonconformance: match class_object {
+                Some(ClassObjectType::Class(class_name)) => Self::protocol_metatype_nonconformance(
+                    class_name,
+                    &declared_name,
+                    hierarchy,
+                    protocol_registry,
+                ),
+                _ => None,
+            },
         })
     }
 
@@ -200,9 +227,12 @@ impl TypeChecker {
             // Detection (is this RHS type actually incompatible
             // with the declared annotation?) stays here; rendering the
             // resulting fact as a diagnostic is `validation.rs`'s job.
-            if let Some(mismatch) =
-                Self::detect_assignment_type_mismatch(&inferred_ty, &declared, hierarchy)
-            {
+            if let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                &inferred_ty,
+                &declared,
+                hierarchy,
+                self.protocol_registry.as_ref(),
+            ) {
                 self.emit_assignment_type_mismatch(&mismatch, span);
             }
             declared

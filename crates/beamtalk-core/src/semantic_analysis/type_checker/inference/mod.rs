@@ -650,7 +650,7 @@ impl TypeChecker {
                                     type_resolver::resolve_declared_type(
                                         &field_type,
                                         &type_resolver::SubstitutionMap::new(),
-                                        None,
+                                        self.protocol_registry.as_ref(),
                                         self.alias_registry.as_ref(),
                                         TypeStringContext::Declared,
                                     )
@@ -716,7 +716,7 @@ impl TypeChecker {
                                 result = type_resolver::resolve_declared_type(
                                     &field_type,
                                     &type_resolver::SubstitutionMap::new(),
-                                    None,
+                                    self.protocol_registry.as_ref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Declared,
                                 );

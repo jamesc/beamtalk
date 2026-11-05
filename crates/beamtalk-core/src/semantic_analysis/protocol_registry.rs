@@ -259,6 +259,16 @@ impl ProtocolInfo {
         chain
     }
 
+    /// `true` when this protocol is `name` or transitively extends it — so
+    /// every class conforming to this protocol conforms to `name` too
+    /// (ADR 0144: `P class <: Q class` when `P` extends `Q`).
+    #[must_use]
+    pub fn is_or_extends(&self, name: &str, registry: &ProtocolRegistry) -> bool {
+        self.extending_chain(registry)
+            .iter()
+            .any(|p| p.name.as_str() == name)
+    }
+
     /// The type parameters of this protocol and of every protocol it
     /// transitively extends — the names a requirement from
     /// [`Self::all_requirements`] may mention without a substitution

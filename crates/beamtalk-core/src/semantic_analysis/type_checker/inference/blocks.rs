@@ -533,12 +533,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
-                        let current_ty = Self::resolve_narrowing_variable_type(
-                            &info.variable,
-                            env,
-                            hierarchy,
-                            self.alias_registry.as_ref(),
-                        );
+                        let current_ty =
+                            self.narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             arg,
@@ -606,12 +602,8 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty = Self::resolve_narrowing_variable_type(
-                            &info.variable,
-                            env,
-                            hierarchy,
-                            self.alias_registry.as_ref(),
-                        );
+                        let current_ty =
+                            self.narrowing_variable_type(&info.variable, env, hierarchy);
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
@@ -679,12 +671,7 @@ impl TypeChecker {
         let narrowed: Vec<(EnvKey, InferredType)> = variables
             .iter()
             .map(|var| {
-                let current_ty = Self::resolve_narrowing_variable_type(
-                    var,
-                    env,
-                    hierarchy,
-                    self.alias_registry.as_ref(),
-                );
+                let current_ty = self.narrowing_variable_type(var, env, hierarchy);
                 (var.clone(), Self::non_nil_type(&current_ty))
             })
             .collect();
@@ -1524,9 +1511,12 @@ impl TypeChecker {
                         &subst,
                         self.protocol_registry.as_ref(),
                     );
-                    if let Some(mismatch) =
-                        Self::detect_assignment_type_mismatch(&pushed_ty, &declared, hierarchy)
-                    {
+                    if let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                        &pushed_ty,
+                        &declared,
+                        hierarchy,
+                        self.protocol_registry.as_ref(),
+                    ) {
                         self.emit_assignment_type_mismatch(&mismatch, param.span);
                     }
                     declared

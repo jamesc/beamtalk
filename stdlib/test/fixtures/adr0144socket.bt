@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0144 (BT-4435): a value holding a class-as-strategy in a field typed
+// `:: Adr0144Transport class`. Every send through the field is checked
+// against the protocol's class requirements and typed from them.
+Value subclass: Adr0144Socket
+  field: transport :: Adr0144Transport class = Adr0144TcpTransport
+
+  send: data :: Object -> String =>
+    result := self.transport send: data
+    result isOk ifTrue: [result value] ifFalse: ["failed"]
+
+  label -> String => self.transport label
+
+  transportName -> Symbol => self.transport name

@@ -244,6 +244,29 @@ pub enum InferredType {
         /// Where this metatype came from.
         provenance: TypeProvenance,
     },
+    /// The protocol metatype `P class` for a protocol `P` — the class object
+    /// of *any* class that conforms to `P` (ADR 0144).
+    ///
+    /// `C class <: P class` iff `C` conforms to `P`, judged by the one
+    /// structural conformance check
+    /// ([`ProtocolRegistry::check_conformance`]). Sends resolve against `P`'s
+    /// `class` requirements first, then the metaclass tower every class object
+    /// answers (`Class` → `Behaviour` → `Object`), exactly as for a [`Meta`].
+    ///
+    /// A *sibling variant* rather than a marker on [`Meta`] because a
+    /// protocol *literal* (`Transport`, the protocol object) still infers as
+    /// `Meta{Transport}`; a separate variant keeps the two meanings apart and
+    /// makes every `Meta` match arm decide explicitly whether it applies.
+    /// Name-only, like [`Meta`] (ADR 0068): a generic protocol's metatype
+    /// carries no type arguments.
+    ///
+    /// [`Meta`]: InferredType::Meta
+    /// [`ProtocolRegistry::check_conformance`]: crate::semantic_analysis::protocol_registry::ProtocolRegistry::check_conformance
+    ProtocolMeta {
+        protocol_name: EcoString,
+        /// Where this protocol metatype came from.
+        provenance: TypeProvenance,
+    },
     /// Type cannot be determined — skip all checking.
     ///
     /// The [`DynamicReason`] explains *why* the type could not be determined,
@@ -336,7 +359,15 @@ impl PartialEq for InferredType {
             (Self::Union { members: a, .. }, Self::Union { members: b, .. }) => {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
             }
-            (Self::Meta { class_name: a, .. }, Self::Meta { class_name: b, .. }) => a == b,
+            (Self::Meta { class_name: a, .. }, Self::Meta { class_name: b, .. })
+            | (
+                Self::ProtocolMeta {
+                    protocol_name: a, ..
+                },
+                Self::ProtocolMeta {
+                    protocol_name: b, ..
+                },
+            ) => a == b,
             (
                 Self::Negation {
                     base: base_a,
@@ -422,6 +453,35 @@ impl InferredType {
         }
     }
 
+    /// Creates a [`ProtocolMeta`](InferredType::ProtocolMeta) protocol
+    /// metatype `protocol_name class` with `Inferred` provenance (ADR 0144).
+    ///
+    /// Name-only like [`meta`](Self::meta): any `(...)` type-argument suffix
+    /// is stripped.
+    #[must_use]
+    pub fn protocol_meta(protocol_name: impl Into<EcoString>) -> Self {
+        let name: EcoString = protocol_name.into();
+        let base = match name.find('(') {
+            Some(idx) => EcoString::from(&name[..idx]),
+            None => name,
+        };
+        Self::ProtocolMeta {
+            protocol_name: base,
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
+    /// Returns the protocol name of a
+    /// [`ProtocolMeta`](InferredType::ProtocolMeta) (`P class` → `Some("P")`),
+    /// or `None` for any other variant.
+    #[must_use]
+    pub fn as_protocol_meta(&self) -> Option<&EcoString> {
+        match self {
+            Self::ProtocolMeta { protocol_name, .. } => Some(protocol_name),
+            _ => None,
+        }
+    }
+
     /// Creates a `Union` from simple class names with `Inferred` provenance.
     ///
     /// Convenience for the common case of `String | nil` style unions where
@@ -454,6 +514,7 @@ impl InferredType {
             // must be `None` so callers don't mistake the class object for an
             // instance of `C`. Use [`as_meta`](Self::as_meta) instead.
             Self::Meta { .. }
+            | Self::ProtocolMeta { .. }
             | Self::Dynamic(_)
             | Self::Union { .. }
             | Self::Never
@@ -477,6 +538,7 @@ impl InferredType {
             Self::Known { provenance, .. }
             | Self::Union { provenance, .. }
             | Self::Meta { provenance, .. }
+            | Self::ProtocolMeta { provenance, .. }
             | Self::Negation { provenance, .. }
             | Self::Intersection { provenance, .. } => Some(provenance.clone()),
             Self::Dynamic(_) | Self::Never => None,
@@ -510,6 +572,10 @@ impl InferredType {
                     ..
                 }
                 | Self::Meta {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::ProtocolMeta {
                     provenance: TypeProvenance::Aliased { name, .. },
                     ..
                 }
@@ -564,6 +630,10 @@ impl InferredType {
             },
             Self::Meta { class_name, .. } => Self::Meta {
                 class_name,
+                provenance: aliased,
+            },
+            Self::ProtocolMeta { protocol_name, .. } => Self::ProtocolMeta {
+                protocol_name,
                 provenance: aliased,
             },
             Self::Negation { base, excluded, .. } => Self::Negation {
@@ -737,6 +807,10 @@ impl InferredType {
                 };
                 EcoString::from(format!("{rendered_name} class"))
             }
+            // ADR 0144: a protocol metatype renders as its source spelling.
+            Self::ProtocolMeta { protocol_name, .. } => {
+                EcoString::from(format!("{protocol_name} class"))
+            }
             Self::Dynamic(reason) => {
                 if opts.show_dynamic_reason {
                     if let Some(desc) = reason.description() {
@@ -815,6 +889,7 @@ impl InferredType {
             match m {
                 Self::Known { provenance, .. }
                 | Self::Meta { provenance, .. }
+                | Self::ProtocolMeta { provenance, .. }
                 | Self::Negation { provenance, .. }
                 // `Intersection` is opaque to `union_of` (ADR 0102 §1) — treated
                 // like any other opaque member: kept as-is and deduplicated by
@@ -1573,6 +1648,37 @@ pub(in crate::semantic_analysis) fn is_type_var_placeholder(
 // existing `Option<EcoString>` — that one carries no new struct here, only
 // its `validation.rs` renderer moved.)
 
+/// A class-object type as the slot/argument assignability check sees it
+/// (ADR 0083, ADR 0144): the class object of one named class (`Meta{C}`) or
+/// of some class conforming to a protocol (`ProtocolMeta{P}`). Both render
+/// as `<name> class`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::semantic_analysis::type_checker) enum ClassObjectType<'a> {
+    /// `C class` — `Meta{C}`.
+    Class(&'a EcoString),
+    /// `P class` — `ProtocolMeta{P}`.
+    Protocol(&'a EcoString),
+}
+
+impl<'a> ClassObjectType<'a> {
+    /// The class-object view of `ty`, or `None` when it is not a class object.
+    pub(in crate::semantic_analysis::type_checker) fn of(ty: &'a InferredType) -> Option<Self> {
+        match ty {
+            InferredType::Meta { class_name, .. } => Some(Self::Class(class_name)),
+            InferredType::ProtocolMeta { protocol_name, .. } => Some(Self::Protocol(protocol_name)),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ClassObjectType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Class(name) | Self::Protocol(name) => write!(f, "{name} class"),
+        }
+    }
+}
+
 /// An instance-method override whose declared return type does not refine
 /// the one it inherits. Found by `validation.rs::override_return_widening`,
 /// rendered by `check_override_return_compatibility`, and consulted by
@@ -1589,6 +1695,11 @@ pub(crate) struct OverrideReturnWidening {
 pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
     pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
+    /// ADR 0144: when a class object `C class` misses a declared `P class`,
+    /// the protocol `P` and the selectors `C` is missing — rendered as
+    /// `C class does not conform to P class` instead of the plain mismatch.
+    pub(in crate::semantic_analysis::type_checker) nonconformance:
+        Option<(EcoString, Vec<EcoString>)>,
 }
 
 /// An attempt to mutate another object's field (`other.field := value`,

@@ -14,6 +14,7 @@
 use crate::ast::{Expression, MatchArm, MessageSelector, Pattern, WellKnownSelector};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
@@ -192,6 +193,23 @@ impl TypeChecker {
         }
     }
 
+    /// [`Self::resolve_narrowing_variable_type`] with this checker's alias and
+    /// protocol registries.
+    pub(in crate::semantic_analysis::type_checker) fn narrowing_variable_type(
+        &self,
+        var_key: &EnvKey,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        Self::resolve_narrowing_variable_type(
+            var_key,
+            env,
+            hierarchy,
+            self.alias_registry.as_ref(),
+            self.protocol_registry.as_ref(),
+        )
+    }
+
     /// Resolve the current type of a narrowing variable from the environment.
     ///
     /// For locals, this is a simple env lookup. For
@@ -202,12 +220,14 @@ impl TypeChecker {
     /// `alias_registry` (ADR 0108) is threaded
     /// through so a `self.field isNil ifFalse: [...]` narrowing check on a
     /// cross-file alias-typed field expands the alias instead of falling
-    /// back to an opaque nominal class.
+    /// back to an opaque nominal class; `protocol_registry` so a
+    /// `P class | Nil` field resolves to a protocol metatype (ADR 0144).
     pub(in crate::semantic_analysis::type_checker) fn resolve_narrowing_variable_type(
         var_key: &EnvKey,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
         alias_registry: Option<&AliasRegistry>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> InferredType {
         // Regular env lookup first (handles locals and previously-narrowed fields).
         if let Some(ty) = env.get(var_key) {
@@ -221,7 +241,7 @@ impl TypeChecker {
                     return type_resolver::resolve_declared_type(
                         &field_type,
                         &type_resolver::SubstitutionMap::new(),
-                        None,
+                        protocol_registry,
                         alias_registry,
                         TypeStringContext::Declared,
                     );
@@ -297,12 +317,7 @@ impl TypeChecker {
             // `compute_class_narrowing` — `expr` (this exact guard) was
             // already fully type-checked by `infer_stmts` above, so the
             // "comparison can never be true" hint already fired once.
-            let current_ty = Self::resolve_narrowing_variable_type(
-                &info.variable,
-                env,
-                hierarchy,
-                self.alias_registry.as_ref(),
-            );
+            let current_ty = self.narrowing_variable_type(&info.variable, env, hierarchy);
             info = Self::compute_class_narrowing(
                 info,
                 &current_ty,
@@ -321,6 +336,7 @@ impl TypeChecker {
                 env,
                 hierarchy,
                 self.alias_registry.as_ref(),
+                self.protocol_registry.as_ref(),
             );
         }
         if info.responded_selector.is_some() {
@@ -362,6 +378,7 @@ impl TypeChecker {
                 env,
                 hierarchy,
                 self.alias_registry.as_ref(),
+                self.protocol_registry.as_ref(),
             ) else {
                 return;
             };
@@ -519,12 +536,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
     ) {
         for var in variables {
-            let current_ty = Self::resolve_narrowing_variable_type(
-                var,
-                env,
-                hierarchy,
-                self.alias_registry.as_ref(),
-            );
+            let current_ty = self.narrowing_variable_type(var, env, hierarchy);
             env.push_refinement(RefinementLayer::method_remainder(
                 var.clone(),
                 Self::non_nil_type(&current_ty),
@@ -543,6 +555,7 @@ impl TypeChecker {
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
         alias_registry: Option<&AliasRegistry>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> Option<InferredType> {
         if let Some(ref false_ty) = info.false_type {
             Some(false_ty.clone())
@@ -552,6 +565,7 @@ impl TypeChecker {
                 env,
                 hierarchy,
                 alias_registry,
+                protocol_registry,
             );
             Some(Self::non_nil_type(&current_ty))
         } else {

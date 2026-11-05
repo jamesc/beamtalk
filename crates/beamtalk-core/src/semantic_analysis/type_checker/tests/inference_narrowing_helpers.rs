@@ -247,7 +247,7 @@ fn refine_result_narrowing_with_result_type() {
         class_test: None,
     };
     let hierarchy = ClassHierarchy::with_builtins();
-    let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None);
+    let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None, None);
     assert_eq!(refined.true_type, result_ty);
     assert_eq!(refined.false_type, Some(result_ty));
     assert!(refined.is_result_ok_check);
@@ -271,7 +271,7 @@ fn refine_result_narrowing_non_result_disables() {
         class_test: None,
     };
     let hierarchy = ClassHierarchy::with_builtins();
-    let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None);
+    let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None, None);
     assert!(!refined.is_result_ok_check);
     assert!(!refined.is_result_error_check);
     assert!(refined.false_type.is_none());

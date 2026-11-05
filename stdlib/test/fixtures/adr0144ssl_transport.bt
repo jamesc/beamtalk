@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0144 (BT-4435): one of two class-side conformers of Adr0144Transport.
+sealed Object subclass: Adr0144SslTransport
+
+  class send: data :: Object -> Result(String, Object) =>
+    Result ok: "ssl:" ++ data printString
+
+  class label -> String => "ssl"

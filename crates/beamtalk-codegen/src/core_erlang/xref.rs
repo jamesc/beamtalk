@@ -92,9 +92,12 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
         InferredType::Intersection { members, .. } => {
             project_composed(members, RecvType::Intersection)
         }
-        InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {
-            RecvType::Dynamic
-        }
+        // A `P class` receiver (ADR 0144) is the class object of *some*
+        // conforming class — no single class to key on.
+        InferredType::Dynamic(_)
+        | InferredType::Never
+        | InferredType::Negation { .. }
+        | InferredType::ProtocolMeta { .. } => RecvType::Dynamic,
     }
 }
 
