@@ -1410,7 +1410,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # BT-2555: live-image hover docs for the CodeMirror editors. The stub returns
   # docs for a known class name so the UI flow can be exercised, and "" otherwise
   # (the no-tooltip path).
-  def hover(_pid, code) do
+  def hover(_pid, code, _suffix \\ "") do
     if String.contains?(code, "Counter"),
       do: {:ok, "== Counter < Actor ==\nThe Counter class."},
       else: {:ok, ""}

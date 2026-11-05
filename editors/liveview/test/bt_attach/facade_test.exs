@@ -89,8 +89,8 @@ defmodule BtAttach.FacadeTest do
       do: record({:complete, pid, code}) && {:ok, ["size", "sizeWith:"]}
 
     # BT-2555: live-image hover docs for the CodeMirror editors.
-    def hover(pid, code),
-      do: record({:hover, pid, code}) && {:ok, "== Integer < Number =="}
+    def hover(pid, code, suffix),
+      do: record({:hover, pid, code, suffix}) && {:ok, "== Integer < Number =="}
 
     # BT-2556: parse-only diagnostics for the CodeMirror editors. BT-2569: `mode`
     # selects the parse grammar ("expression" | "method").
@@ -580,7 +580,17 @@ defmodule BtAttach.FacadeTest do
       assert Facade.dispatch(:hover, %{session_pid: self(), code: "Integer"}) ==
                {:ok, "== Integer < Number =="}
 
-      assert {:hover, self(), "Integer"} in RecordingClient.calls()
+      assert {:hover, self(), "Integer", ""} in RecordingClient.calls()
+    end
+
+    test "hover passes the line suffix through for keyword-selector hover (BT-4343)" do
+      assert Facade.dispatch(:hover, %{
+               session_pid: self(),
+               code: "Fetcher fetch:",
+               suffix: " u options: o"
+             }) == {:ok, "== Integer < Number =="}
+
+      assert {:hover, self(), "Fetcher fetch:", " u options: o"} in RecordingClient.calls()
     end
 
     test "a bad shape is invalid params, with no dist call" do
@@ -588,6 +598,9 @@ defmodule BtAttach.FacadeTest do
                {:error, :invalid_params}
 
       assert Facade.dispatch(:hover, %{session_pid: self(), code: 42}) ==
+               {:error, :invalid_params}
+
+      assert Facade.dispatch(:hover, %{session_pid: self(), code: "x", suffix: 42}) ==
                {:error, :invalid_params}
 
       assert RecordingClient.calls() == []

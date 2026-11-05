@@ -104,15 +104,20 @@ module loading to beamtalk_repl_loader.
 %% process dictionary (that is seeded only in eval workers).
 -export([announce_binding_changed/3]).
 
+%% Lexeme skippers (conformance-tested against the Rust lexer), shared with
+%% the cockpit hover's keyword-send scanner in `beamtalk_repl_ops_dev`.
+-export([
+    skip_string_literal/1,
+    skip_character_literal/1,
+    skip_line_comment/1,
+    skip_block_comment/1
+]).
+
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
     announce_binding_changed/2,
     extract_assignment/1,
-    skip_string_literal/1,
-    skip_character_literal/1,
-    skip_line_comment/1,
-    skip_block_comment/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
     should_purge_module/2,

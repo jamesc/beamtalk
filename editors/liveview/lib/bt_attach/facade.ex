@@ -468,10 +468,13 @@ defmodule BtAttach.Facade do
   # against the live image via the `hover` op and returns `{:ok, String.t()}`
   # (the markdown, "" when nothing resolves). Capability `:read` (no user code),
   # so the Observer role hovers too. A bad shape is `:invalid_params` with no
-  # dist call, matching `:complete`.
-  defp invoke(:hover, %{session_pid: pid, code: code}, _ctx) do
-    if is_pid(pid) and is_binary(code),
-      do: client().hover(pid, code),
+  # dist call, matching `:complete`. The optional `suffix` (rest of the line,
+  # BT-4343) lets a hovered keyword part resolve its full keyword selector.
+  defp invoke(:hover, %{session_pid: pid, code: code} = params, _ctx) do
+    suffix = Map.get(params, :suffix, "")
+
+    if is_pid(pid) and is_binary(code) and is_binary(suffix),
+      do: client().hover(pid, code, suffix),
       else: {:error, :invalid_params}
   end
 

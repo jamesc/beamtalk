@@ -697,13 +697,18 @@ defmodule BtAttach.Workspace do
   `session_pid` is passed as the op's session so an instance receiver that is a
   bound variable classifies (BT-1045), mirroring `complete/2`.
 
+  `suffix` is the rest of the editor line after the hovered token (BT-4343):
+  when the token is a keyword part (`fetch:`), the op needs the whole send to
+  resolve its full keyword selector (`fetch:options:`). It defaults to `""`.
+
   Returns the formatted markdown as `{:ok, String.t()}` (`""` when nothing
   resolves — the client then shows no tooltip), or `{:error, reason}` on a
   dispatch failure — JSON never crosses the Attach path here either.
   """
-  @spec hover(pid(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def hover(session_pid, code) when is_pid(session_pid) and is_binary(code) do
-    case dispatch_hover(session_pid, code) do
+  @spec hover(pid(), String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def hover(session_pid, code, suffix \\ "")
+      when is_pid(session_pid) and is_binary(code) and is_binary(suffix) do
+    case dispatch_hover(session_pid, code, suffix) do
       {:docs, docs} when is_binary(docs) ->
         {:ok, docs}
 
@@ -1047,8 +1052,8 @@ defmodule BtAttach.Workspace do
   # presence to switch between bare-prefix and context-aware modes (BT-783),
   # whereas hover always resolves the hovered token against its line context, so
   # the distinction does not apply here.
-  defp dispatch_hover(session_pid, code) do
-    request = %{"op" => "hover", "code" => code}
+  defp dispatch_hover(session_pid, code, suffix) do
+    request = %{"op" => "hover", "code" => code, "suffix" => suffix}
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
