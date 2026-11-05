@@ -2015,6 +2015,7 @@ impl LanguageService for SimpleLanguageService {
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
             Some(protocol_registry),
+            Some(self.project_index.alias_registry()),
         )
     }
 

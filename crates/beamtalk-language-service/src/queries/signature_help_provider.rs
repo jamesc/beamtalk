@@ -26,6 +26,8 @@ use crate::queries::{protocols_for_module, type_of_parsed};
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{BinarySegment, ClassDefinition, Expression, MessageSelector, Module};
+use beamtalk_core::ast_walker::cascade_shared_receiver;
+use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
 use beamtalk_core::semantic_analysis::protocol_registry::{
     ProtocolMethodRequirement, ProtocolRegistry,
@@ -64,6 +66,9 @@ struct Lookup<'a> {
 /// plus the module's own), as for completion and hover: a receiver typed
 /// `P class` (ADR 0144) shows the signature of `P`'s `class` requirement.
 /// With `None`, only the module's own protocols are registered.
+/// `alias_registry` resolves type alias annotations (ADR 0108), so a receiver
+/// declared through an alias types as its expansion; `None` leaves them
+/// unresolved.
 #[must_use]
 pub fn compute_signature_help(
     module: &Module,
@@ -72,6 +77,7 @@ pub fn compute_signature_help(
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
+    alias_registry: Option<&AliasRegistry>,
 ) -> Option<SignatureHelp> {
     let offset = position.to_byte_offset(source)?.get();
     let protocol_registry = protocols_for_module(protocol_registry, module, hierarchy);
@@ -80,7 +86,7 @@ pub fn compute_signature_help(
         hierarchy,
         native_types,
         Some(Arc::clone(&protocol_registry)),
-        None,
+        alias_registry,
     );
     let lookup = Lookup {
         hierarchy,
@@ -228,8 +234,10 @@ fn find_signature_in_expr(
                         let active_param =
                             determine_active_parameter(parts, &msg.arguments, offset);
                         let selector_name = msg.selector.name();
+                        // Later cascade messages go to the first send's
+                        // receiver, not to its result.
                         if let Some(help) = resolve_signature(
-                            receiver,
+                            cascade_shared_receiver(receiver),
                             &selector_name,
                             context,
                             lookup,
@@ -646,7 +654,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_signature_help(&module, source, position, &hierarchy, None, None)
+        compute_signature_help(&module, source, position, &hierarchy, None, None, None)
     }
 
     #[test]
@@ -678,6 +686,7 @@ mod tests {
             source,
             Position::new(2, 23),
             &hierarchy,
+            None,
             None,
             None,
         );
@@ -714,6 +723,7 @@ mod tests {
             &hierarchy,
             None,
             None,
+            None,
         );
         let help = result.expect("should get signature help at 'add:' position");
         assert_eq!(
@@ -729,6 +739,7 @@ mod tests {
             source,
             Position::new(2, 24),
             &hierarchy,
+            None,
             None,
             None,
         );
@@ -786,6 +797,7 @@ mod tests {
             &hierarchy,
             Some(&registry),
             None,
+            None,
         );
         let help = result.expect("should find FFI signature help");
         assert_eq!(help.signatures.len(), 1);
@@ -815,6 +827,7 @@ mod tests {
             source,
             Position::new(0, 20),
             &hierarchy,
+            None,
             None,
             None,
         );
@@ -849,6 +862,7 @@ mod tests {
             WIRE_SOURCE,
             Position::new(5, 19),
             &hierarchy,
+            None,
             None,
             None,
         )
@@ -886,6 +900,7 @@ mod tests {
             &hierarchy,
             None,
             None,
+            None,
         );
         assert!(
             without
@@ -901,6 +916,7 @@ mod tests {
             &hierarchy,
             None,
             Some(Arc::new(registry)),
+            None,
         )
         .expect("the class requirement's signature is shown");
         assert_eq!(
@@ -923,12 +939,101 @@ mod tests {
             &hierarchy,
             None,
             None,
+            None,
         )
         .expect("the class-object protocol's signature is shown");
         assert!(
             help.signatures[0].label.starts_with("respondsTo:"),
             "got {}",
             help.signatures[0].label
+        );
+    }
+
+    /// A `class` requirement inherited through `extending:` resolves too.
+    #[test]
+    fn protocol_metatype_signature_help_shows_inherited_class_requirement() {
+        let source = "Protocol define: Wire\n  class send: data :: Object to: port :: Integer -> Boolean\n\nProtocol define: SecureWire\n  extending: Wire\n  class cert -> String\n\nObject subclass: Caller\n  run: w :: SecureWire class =>\n    w send: 1 to: 2\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = wire_hierarchy(&module);
+        let help = compute_signature_help(
+            &module,
+            source,
+            Position::new(9, 19),
+            &hierarchy,
+            None,
+            None,
+            None,
+        )
+        .expect("the inherited class requirement's signature is shown");
+        assert_eq!(
+            help.signatures[0].label.as_str(),
+            "send: Object to: Integer -> Boolean"
+        );
+        assert_eq!(
+            help.signatures[0].documentation.as_deref(),
+            Some("class requirement of protocol `SecureWire`")
+        );
+    }
+
+    /// A cascaded keyword message to a `P class` receiver resolves like the
+    /// first message.
+    #[test]
+    fn protocol_metatype_signature_help_in_cascade() {
+        let source = "Protocol define: Wire\n  class send: data :: Object to: port :: Integer -> Boolean\n\nObject subclass: Caller\n  run: w :: Wire class =>\n    w send: 1 to: 2; send: 3 to: 4\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = wire_hierarchy(&module);
+        // Cursor on the cascaded message's `to:` argument.
+        let help = compute_signature_help(
+            &module,
+            source,
+            Position::new(5, 33),
+            &hierarchy,
+            None,
+            None,
+            None,
+        )
+        .expect("the cascaded send's signature is shown");
+        assert_eq!(
+            help.signatures[0].label.as_str(),
+            "send: Object to: Integer -> Boolean"
+        );
+        assert_eq!(help.active_parameter, 1);
+    }
+
+    /// An ordinary receiver resolves as before when a project registry is
+    /// passed.
+    #[test]
+    fn ordinary_receiver_unchanged_with_project_registry() {
+        let source = "Protocol define: Wire\n  class label -> String\n\nObject subclass: Calc\n  add: a :: Integer to: b :: Integer -> Integer => a + b\n  run => self add: 1 to: 2\n";
+        let (module, _) = parse(lex_with_eof(source));
+        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        hierarchy.register_protocol_classes(&module);
+        let mut registry = ProtocolRegistry::new();
+        let _ = registry.seed_and_register_module(&module, Vec::new(), &hierarchy, None);
+        let with = compute_signature_help(
+            &module,
+            source,
+            Position::new(5, 25),
+            &hierarchy,
+            None,
+            Some(Arc::new(registry)),
+            None,
+        )
+        .expect("the hierarchy method's signature is shown");
+        let without = compute_signature_help(
+            &module,
+            source,
+            Position::new(5, 25),
+            &hierarchy,
+            None,
+            None,
+            None,
+        )
+        .expect("the hierarchy method's signature is shown");
+        assert_eq!(with.signatures[0].label, without.signatures[0].label);
+        assert_eq!(
+            with.signatures[0].label.as_str(),
+            "add: Integer to: Integer -> Integer"
         );
     }
 }
