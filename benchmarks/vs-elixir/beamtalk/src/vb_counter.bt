@@ -13,3 +13,10 @@ Actor subclass: VbCounter
 
   // A self-send the class module does not define (BT-4071's path).
   probe -> Boolean => self hasField: #count
+
+  // Rows 7e/7f (BT-4280): a method that self-sends `increment`. On
+  // VbSubCounter the entry send is inherited (dispatch/4's default arm).
+  viaSelf -> Integer => self increment
+
+  // Row 7g (BT-4279): two getters of a typed sealed Value, summed.
+  sumOf: p :: VbPoint -> Integer => p x + p y

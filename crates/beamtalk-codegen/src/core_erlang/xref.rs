@@ -92,9 +92,12 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
         InferredType::Intersection { members, .. } => {
             project_composed(members, RecvType::Intersection)
         }
-        InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {
-            RecvType::Dynamic
-        }
+        // A `P class` receiver (ADR 0144) is the class object of *some*
+        // conforming class — no single class to key on.
+        InferredType::Dynamic(_)
+        | InferredType::Never
+        | InferredType::Negation { .. }
+        | InferredType::ProtocolMeta { .. } => RecvType::Dynamic,
     }
 }
 
@@ -344,7 +347,8 @@ impl CoreErlangGenerator {
         // identical, verified by the corpus conformance test in
         // `source_analysis::method_span_corpus_tests`, not merely asserted
         // by this comment.
-        let receiver_spans = collect_receiver_spans(method);
+        // BT-4415: the body as written, the one `source` was unparsed from.
+        let receiver_spans = collect_receiver_spans(&self.as_written_method(method));
         // Defensive fallback for a divergence shape the corpus test doesn't
         // cover (see the comment above): a length mismatch means the
         // pre-order-ordinal pairing can't be trusted for *any* entry in this

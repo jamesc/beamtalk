@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4316: the superclass whose class-variable fact a test raises after its
+// subclass's static call key is warm. See guarded_static_call_test.bt.
+
+Object subclass: GscWarmParent

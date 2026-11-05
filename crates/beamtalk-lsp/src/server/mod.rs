@@ -233,6 +233,37 @@ pub struct Backend {
     /// so their whole-session `set_root_packages` / `set_native_types` /
     /// `set_diagnostics_overrides` writes cannot interleave and drop a root.
     root_load_lock: tokio::sync::Mutex<()>,
+    /// Per-root accumulated Erlang FFI type cache (BT-4383): which roots
+    /// have been extracted, and the union of their registries and
+    /// project-known Erlang modules. `load_type_cache` extracts only roots
+    /// not yet in here and merges, so opening the Nth package root under a
+    /// parent folder costs one root's extraction rather than N.
+    type_cache: Mutex<LoadedTypeCache>,
+    /// Session-wide preload file budget still available (BT-4383). Starts at
+    /// `PRELOAD_MAX_FILES`; the startup preload and every per-root load
+    /// `did_open` triggers draw from it, so the total number of preloaded
+    /// files stays bounded however many package roots get opened.
+    preload_budget_remaining: Mutex<usize>,
+    /// Sticky "some preload walk had only partial coverage" flag (BT-4383).
+    /// Once any root load exhausts the budget, no later load — notably the
+    /// startup preload over `config.roots`, which may run after a
+    /// `did_open` root load — may claim project completeness (ADR 0100
+    /// Rule 2).
+    preload_coverage_partial: std::sync::atomic::AtomicBool,
+    /// Test seam (BT-4383): make the next per-root preload walk task fail,
+    /// exercising the unregister-and-retry path.
+    #[cfg(test)]
+    fail_next_root_walk: std::sync::atomic::AtomicBool,
+    /// Test seam (BT-4383): every root `load_type_cache` actually extracted,
+    /// in order, so tests can assert each root is extracted once.
+    #[cfg(test)]
+    type_cache_extractions: Mutex<Vec<PathBuf>>,
+    /// Test seam (BT-4383): when set, overrides whether `load_type_cache`'s
+    /// per-root `extract_type_specs` call succeeds (`true`: an empty
+    /// registry; `false`: `None`, as with an uncompiled runtime), so tests
+    /// don't depend on the machine's OTP type data.
+    #[cfg(test)]
+    type_cache_outcome: Mutex<Option<bool>>,
     /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
     otp_lib_dir: Mutex<Option<PathBuf>>,
     /// ADR 0082 Phase 3: lazy-attached WebSocket client to the
@@ -278,6 +309,18 @@ pub struct Backend {
     /// [`Backend::publish_diagnostics`] call so a subsequent
     /// `didChange`-triggered republish doesn't silently drop them.
     reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
+}
+
+/// The Erlang FFI type cache accumulated across the workspace roots loaded
+/// so far (BT-4383). `NativeTypeRegistry::merge` (keep-on-collision) and the
+/// known-modules set are unions, so a newly registered root can be extracted
+/// alone and merged in — earlier-loaded roots win a module collision.
+#[derive(Default)]
+pub(in crate::server) struct LoadedTypeCache {
+    /// Roots whose type cache has been extracted and merged.
+    roots: HashSet<PathBuf>,
+    registry: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    known_erlang_modules: HashSet<String>,
 }
 
 /// Coarse cache for runtime-attached navigation results.

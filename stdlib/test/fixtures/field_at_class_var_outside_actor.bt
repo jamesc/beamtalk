@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FieldAtClassVarOutsideActor — test fixture for BT-4148 (ADR 0124 §4i)
+//
+// The class receiver of `Cls fieldAt:` / `Cls fieldAt:put:` sent from
+// outside the class. Kept as its own class so the lifecycle test that
+// drives it owns its long-lived class gen_server's class variables.
+
+typed Actor subclass: FieldAtClassVarOutsideActor
+  late classState: current :: Integer
+  classState: total :: Integer = 0
+
+  class getCurrent -> Integer => self.current
+
+  class getTotal -> Integer => self.total

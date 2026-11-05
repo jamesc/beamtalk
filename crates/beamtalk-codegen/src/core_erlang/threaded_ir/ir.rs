@@ -683,8 +683,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// (ADR 0111 Addendum 15) for every `whileTrue:`/`whileFalse:`/
     /// `timesRepeat:`/`to:do:`/`to:by:do:`/`repeat` loop.
     ConditionalLoop {
-        /// Static per-construct function name — `"while"`, `"loop"`,
-        /// `"repeat"` — never gensym'd by `render` (ADR 0111 Addendum 2's
+        /// Static per-construct function name — [`WHILE_LOOP_FN`],
+        /// [`COUNTED_LOOP_FN`] or [`REPEAT_LOOP_FN`] (listed together in
+        /// `STATIC_LOOP_FNS`) — never gensym'd by `render` (ADR 0111 Addendum 2's
         /// "loop-fn-name" finding: production never gensyms this name
         /// either, `while_loops.rs`'s `"while"` literal /
         /// `CountedLoopFrame::fn_name`). Caller-supplied at lowering time,
@@ -802,6 +803,14 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// chain of `Put`s with `Gensym` targets, which this variant already
         /// makes directly expressible).
         exit_arm: Document<'static>,
+        /// BT-4401: the line of the send this loop lowers, resolved at
+        /// LOWERING time (while the generator's `current_send_span` is the
+        /// loop's own send) and carried on the node so the emitter can put it
+        /// on the entry `apply 'FnName'/N (..)` — the one frame the method
+        /// running the loop reports. `None` outside any source (generated
+        /// infrastructure). The recursive back-edge stays bare: it is a tail
+        /// call whose frame is the loop's own.
+        entry_line: Option<CallSiteLine>,
         span: Span,
     },
 
@@ -906,6 +915,58 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         cell: Option<CellBoundary>,
         try_region: TryRegion,
         clauses: Vec<CatchClause>,
+        span: Span,
+    },
+
+    /// BT-4312: the catch half of a compiled `ensure:` (`catch <Type, Error,
+    /// Stack> -> ...`, rendered after the construct's `try ... of ...`). An
+    /// `ensure:` is not a boundary: its cleanup runs while an error or a `^`
+    /// unwinds, and its writes go with whichever boundary that reaches. For an
+    /// error the catch runs the cleanup and re-raises (`other`, opaque). For a
+    /// `^` of the scope's own `token`, whose throw carries the scope's state
+    /// (`carry`) to the boundary that answers it, the `relay` clause runs the
+    /// cleanup from that carried state and resumes the throw with the
+    /// cleanup's resulting state. Re-raising the original throw instead
+    /// answers the state at the `^` and drops every write the cleanup made:
+    /// `w := 0. [^5] ensure: [w := 9]` left `w` at 0 at the REPL, and an
+    /// actor's `[^1] ensure: [self.n := 9]` left `n` unchanged.
+    ///
+    /// `cleanup` says how the cleanup runs and what it can write: inlined,
+    /// ending at a version of the carried family, or applied as a closure
+    /// (an operand that is not a block literal), which writes only through
+    /// the actor-state cell. [`verify`](super::verify::verify) reports
+    /// [`VerifyError::EnsureCleanupLostOnNlr`](super::verify::VerifyError::EnsureCleanupLostOnNlr)
+    /// when a cleanup that can write the carried state has no relay, or a
+    /// relay that re-throws anything but the cleanup's result, or (where the
+    /// state is the cell) a state rebuilt from the `ensure:` site's bindings
+    /// instead of from the carried one.
+    /// Built by `ensure_nlr_relay.rs`'s `ensure_catch`, the single owner of
+    /// every compiled `ensure:` catch.
+    ///
+    /// BT-4429: `Block>>ensure:` reached dynamically (`perform:`) is one too.
+    /// Its structural-fallback body runs in the Block method, where every `^`
+    /// is a foreign throw whose state kind it cannot know
+    /// ([`NlrCarry::Foreign`], no `token`): its relay matches every
+    /// `$bt_nlr` throw and resumes it with the cell over the carried state
+    /// when the carried state is the cell's ([`RethrowSlot::CellIfCarried`]).
+    EnsureCatch {
+        vars: Box<EnsureCatchVars>,
+        /// The scope's own NLR token: `None` when no `^` of the scope can
+        /// cross this `ensure:` (a foreign token's throw is `other`'s).
+        token: Option<TokenId>,
+        /// What the scope's own throw carries, `None` when it carries no
+        /// state a cleanup can write (a class method).
+        carry: Option<NlrCarry>,
+        /// The construct's scratch map is private (`~{}~`): it sits in a
+        /// frame with no `State` chain (a direct-params loop body, a class or
+        /// value-type method), so an inlined cleanup's writes to it die with
+        /// the scope whatever boundary the throw reaches
+        /// ([`NlrCarry::writable_by_cleanup`]). Always `false` for a closure
+        /// cleanup, which has no scratch map.
+        private_scratch: bool,
+        cleanup: EnsureCleanup,
+        relay: Option<EnsureNlrRelay>,
+        other: Document<'static>,
         span: Span,
     },
 
@@ -1078,6 +1139,12 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// A node is verified without its ancestor frames, so the fact travels
         /// on the node. `false` for every well-formed bracket.
         on_private_scratch: bool,
+        /// BT-4279: a guard that proves `call` runs no user code. When it
+        /// holds, the call is the [`FastPath::fast`] value with no store and
+        /// no reload (`load` is `store`); otherwise the bracket runs `call`
+        /// exactly as above. `None` for every bracket whose call has no such
+        /// guard.
+        fast_path: Option<FastPath>,
     },
 
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
@@ -1092,6 +1159,58 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         threads: Vec<String>,
         body: Vec<ThreadedStmt>,
     },
+}
+
+/// BT-4405: the static `fn_name` of a `whileTrue:`/`whileFalse:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const WHILE_LOOP_FN: &str = "while";
+/// BT-4405: the static `fn_name` of a `to:do:`/`to:by:do:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const COUNTED_LOOP_FN: &str = "loop";
+/// BT-4405: the static `fn_name` of a `timesRepeat:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const REPEAT_LOOP_FN: &str = "repeat";
+/// BT-4405: every static loop `fn_name` above — the single list a scanner of
+/// emitted Core Erlang matches loops against. Add a new static name here.
+#[cfg(test)]
+pub(in crate::core_erlang) const STATIC_LOOP_FNS: [&str; 3] =
+    [WHILE_LOOP_FN, COUNTED_LOOP_FN, REPEAT_LOOP_FN];
+/// BT-4405: the stem a gensym'd loop `fn_name` is minted from
+/// (`fresh_temp_var(LOOP_FN_STEM)` → `_Loop<N>`): the generic fallback loops
+/// and the bare `ConditionalLoop` shape.
+pub(in crate::core_erlang) const LOOP_FN_STEM: &str = "Loop";
+
+/// BT-4279: the fast path of a [`ThreadedStmt::SyncedCall`]: a guarded send
+/// whose guard, when it holds, proves the send runs no user code (a builtin
+/// operator on primitive operands, an auto-generated slot read of a tagged
+/// map). Rendered as
+///
+/// ```erlang
+/// <bindings>
+/// let <R, State4> = case <test> of
+///     <'true'> when 'true' -> <<fast>, State3>
+///     <_> when 'true' ->
+///         let _ = call 'beamtalk_actor_state':'store'(State3) in
+///         let Slow = <call> in
+///         let SlowState = call 'beamtalk_actor_state':'take'() in <Slow, SlowState>
+/// end in
+/// ```
+///
+/// so the store and reload run only on the arm that may run user code. The
+/// version step is the bracket's own (`store` to `load`): the fast arm hands
+/// `store` through unchanged as `load`.
+///
+/// `bindings`, `test` and `fast` run no user code by construction (the
+/// emitters build them from type tests, BIFs and `maps:get/2`); `bindings`
+/// binds the operands `test`, `fast` and the bracketed call read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct FastPath {
+    pub(in crate::core_erlang) bindings: Document<'static>,
+    pub(in crate::core_erlang) test: Document<'static>,
+    pub(in crate::core_erlang) fast: Document<'static>,
+    /// Fresh names for the slow arm's call value and reloaded state.
+    pub(in crate::core_erlang) slow_result: String,
+    pub(in crate::core_erlang) slow_state: String,
 }
 
 impl ThreadedStmt {
@@ -1479,6 +1598,141 @@ pub(in crate::core_erlang) struct OnDoCatchVars {
     pub filter_fallback_var: String,
 }
 
+/// The Core Erlang variable names an [`ThreadedStmt::EnsureCatch`] binds: the
+/// catch triple, the three elements of the scope's own `$bt_nlr` throw it
+/// relays, and the fallback clause's pattern variable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_field_names)]
+pub(in crate::core_erlang) struct EnsureCatchVars {
+    pub type_var: String,
+    pub error_var: String,
+    pub stack_var: String,
+    pub nlr_tok_var: String,
+    pub nlr_val_var: String,
+    /// The state the in-flight throw carries (its 4th element).
+    pub nlr_carried_var: String,
+    pub other_pair_var: String,
+    /// BT-4429: the cell as it was before the cleanup ran, bound by the
+    /// relay of an [`NlrCarry::Foreign`] throw for
+    /// [`RethrowSlot::CellIfCarried`]. Empty when that relay is not rendered.
+    pub cell_snapshot_var: String,
+}
+
+/// BT-4312: where the state a scope's own `^` carries lives, as an `ensure:`
+/// whose cleanup runs while that throw unwinds sees it
+/// ([`ThreadedStmt::EnsureCatch`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrCarry {
+    /// The REPL's bindings map, threaded as the construct's `StateAcc`. Only
+    /// an inlined cleanup can write it: a block that assigns a binding cannot
+    /// be stored (ADR 0133), so a cleanup run as a closure never does.
+    Bindings,
+    /// An actor instance method's `State`, threaded as the construct's
+    /// `StateAcc`. A `^` stores it to the actor-state cell before it throws
+    /// (ADR 0137 §5), so a cleanup run as a closure writes its fields there.
+    ActorState,
+    /// A value-type method's `Self` (the `SelfVt` family). Only an inlined
+    /// cleanup can write it: a closure cannot rebind the method's `Self`.
+    SelfVt,
+    /// The actor-state cell, read when the throw is made (an actor closure, a
+    /// merged Tier 2 fun): the cleanup's writes land in the cell itself.
+    Live,
+    /// BT-4429: any `^` whose state kind this code cannot know, because it
+    /// runs in a frame no `^` belongs to: `Block>>ensure:` reached
+    /// dynamically (`perform:`), the structural-fallback body compiled in the
+    /// Block method. Every `{'$bt_nlr', Tok, Val, Carried}` that crosses it
+    /// is foreign, so the relay matches every token. The throw may carry an
+    /// actor's state (an actor method's `State`, which its `^` stored to the
+    /// cell, or the cell itself, read by a closure's `^`), the REPL's bindings
+    /// or a value type's `Self`; the cleanup is a closure, which writes only
+    /// the cell. So the throw resumes with the cell over the carried state
+    /// exactly when the carried state is the cell's
+    /// ([`RethrowSlot::CellIfCarried`]), and as it came otherwise.
+    Foreign,
+}
+
+impl NlrCarry {
+    /// Whether an `ensure:` cleanup can write the state this throw carries,
+    /// given whether the construct's scratch map is private
+    /// ([`ThreadedStmt::EnsureCatch`]'s `private_scratch`). The REPL's
+    /// bindings and an actor method's `State` are threaded as the construct's
+    /// `StateAcc`; where that is a private scratch map the cleanup's writes
+    /// die with the scope, so there is nothing to relay. The one rule both
+    /// the `ensure:` lowering and
+    /// [`verify`](super::verify::verify) read.
+    pub(in crate::core_erlang) fn writable_by_cleanup(self, private_scratch: bool) -> bool {
+        !(private_scratch && matches!(self, Self::Bindings | Self::ActorState))
+    }
+}
+
+/// BT-4312: how the cleanup of an [`ThreadedStmt::EnsureCatch`] runs, which
+/// decides what it can write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum EnsureCleanup {
+    /// The cleanup block is inlined and threads the carried family:
+    /// `final_version` is the version it ends at (`None` when it never
+    /// advances it, so the carried state is already its result).
+    /// `writes_cell`: it may write the actor-state cell (it touches the
+    /// actor's state or runs user code), which is what it writes where the
+    /// state lives in the cell ([`NlrCarry::Live`]).
+    Inlined {
+        final_version: Option<usize>,
+        writes_cell: bool,
+    },
+    /// Neither operand needs state threading, or one is not a block
+    /// literal, so the cleanup is applied as a closure (`apply CleanupFun
+    /// ()`). It threads no version; what it writes it writes in place,
+    /// through the actor-state cell. `writes_cell`: it may (it is not a block
+    /// literal, or it is one that touches the actor's state or runs user
+    /// code).
+    Closure { writes_cell: bool },
+}
+
+/// The state an [`EnsureNlrRelay`] re-throws.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum RethrowSlot {
+    /// The cleanup's final version of the carried family (`StateAcc{N}` or
+    /// `Self{N}`; version 0 is the bare name the relay seeded).
+    Version(usize),
+    /// `beamtalk_actor_state:refresh(Self, Carried)`: the carried state with
+    /// its fields replaced by the cell's, as the cleanup left them, keeping
+    /// the `__local__` keys the throw carried ([`NlrCarry::Live`], and a
+    /// closure cleanup of an [`NlrCarry::ActorState`]).
+    CellOverCarried,
+    /// BT-4429: `beamtalk_actor_state:refresh_carried(Snap, Carried)`, where
+    /// `Snap` ([`EnsureCatchVars::cell_snapshot_var`]) is the cell before the
+    /// cleanup ran, bound by the render ahead of the relay's seed: the
+    /// carried state with the cell's fields over it when it was the cell's
+    /// state, else the carried state untouched ([`NlrCarry::Foreign`]).
+    CellIfCarried,
+    /// The state a fresh `^` at the `ensure:` site would carry, rebuilt there
+    /// from the site's bindings. Never right for a relay: in a merged Tier 2
+    /// fun it re-flushes the captured locals as bound at the `ensure:`, not as
+    /// the `^` carried them (BT-4122). Only the test-only
+    /// `ensure_nlr_relay::fault::RelayFault::RebuildAtSite` builds it, to
+    /// show the verifier rejects it, so it exists only in test builds.
+    #[cfg(any(test, feature = "test"))]
+    SiteState(Document<'static>),
+}
+
+/// The `$bt_nlr` clause of an [`ThreadedStmt::EnsureCatch`]: the cleanup run
+/// from the state the scope's own throw carries, then the throw resumed with
+/// the cleanup's resulting state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct EnsureNlrRelay {
+    /// Binds the cleanup's entry state from the carried one (`let StateAcc =
+    /// Carried in`, `let Self = Carried in`, or the cell refresh that holds
+    /// it). Rendered first.
+    pub seed: Document<'static>,
+    /// The cleanup's code, a `let ... in` chain (verified by its own arm
+    /// frame when it is built).
+    pub cleanup: Document<'static>,
+    /// ADR 0137 §5: store the re-thrown state to the cell before the throw,
+    /// as a `^` does, so a cleanup further out reads it.
+    pub cell_store: bool,
+    pub rethrow: RethrowSlot,
+}
+
 /// The two `$bt_nlr` throw shapes a compiled catch passes through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum NlrThrowShape {
@@ -1653,4 +1907,15 @@ impl ThreadedValue {
             ValueRef::Var(_) | ValueRef::Literal(_) | ValueRef::Version(_)
         )
     }
+}
+
+/// BT-4401: the already-resolved source line of the send a node lowers, plus
+/// the source path to attach (`None` when compiling from a string). Resolved
+/// at lowering time by `CoreErlangGenerator::current_send_call_site_line` so
+/// the emitter, which has no generator access to the current send span, can
+/// still annotate the node's control-transferring `call`/`apply`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct CallSiteLine {
+    pub(in crate::core_erlang) source_path: Option<String>,
+    pub(in crate::core_erlang) line: u32,
 }

@@ -9,9 +9,10 @@
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FrameId,
-    LoopCounter, NlrThrowShape, OnDoCatchVars, RebindLowering, ThreadedStmt, ThreadingMode,
-    TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
+    EnsureCatchVars, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode,
+    TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -219,6 +220,7 @@ pub(in crate::core_erlang) fn render(
                 produces,
                 outer_args,
                 exit_arm,
+                entry_line,
                 span: _,
             } => docs.push(render_conditional_loop(
                 fn_name,
@@ -232,6 +234,7 @@ pub(in crate::core_erlang) fn render(
                 produces,
                 outer_args.as_deref(),
                 exit_arm,
+                entry_line.as_ref(),
                 ctx,
             )),
             // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
@@ -267,6 +270,20 @@ pub(in crate::core_erlang) fn render(
                 cell.as_ref(),
                 try_region,
                 clauses,
+            )),
+            ThreadedStmt::EnsureCatch {
+                vars,
+                token,
+                carry,
+                relay,
+                other,
+                ..
+            } => docs.push(render_ensure_catch(
+                vars,
+                token.as_ref(),
+                *carry,
+                relay.as_ref(),
+                other,
             )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
                 "let ",
@@ -307,15 +324,25 @@ pub(in crate::core_erlang) fn render(
                 result,
                 load,
                 tier2_local_rebinds,
+                fast_path,
                 ..
-            } => docs.push(render_synced_call(
-                store,
-                call,
-                result.as_deref(),
-                load.as_ref(),
-                tier2_local_rebinds,
-                ctx,
-            )),
+            } => docs.push(match (fast_path, result, load) {
+                // BT-4279: a fast path renders only when the bracket has a
+                // result and a reload and no Tier 2 rebinds; the verifier
+                // reports any other shape (`FastPathOnUnsplittableBracket`),
+                // which then renders as the plain bracket.
+                (Some(fast), Some(result), Some(load)) if tier2_local_rebinds.is_empty() => {
+                    render_fast_path_synced_call(store, call, result, load, fast, ctx)
+                }
+                _ => render_synced_call(
+                    store,
+                    call,
+                    result.as_deref(),
+                    load.as_ref(),
+                    tier2_local_rebinds,
+                    ctx,
+                ),
+            }),
         }
     }
     Document::Vec(docs)
@@ -409,6 +436,49 @@ fn render_synced_call(
         }
     }
     Document::Vec(parts)
+}
+
+/// BT-4279: renders a [`ThreadedStmt::SyncedCall`] with a [`FastPath`]: the
+/// guard's `true` arm hands the fast value and the stored `State` through
+/// unchanged; every other arm is the bracket, store, call and reload.
+fn render_fast_path_synced_call(
+    store: &VersionedVar,
+    call: &Document<'static>,
+    result: &str,
+    load: &VersionedVar,
+    fast: &FastPath,
+    ctx: &RenderCtx,
+) -> Document<'static> {
+    let store_name = ctx.resolve_prefix(store);
+    let load_name = ctx.resolve_prefix(load);
+    docvec![
+        fast.bindings.clone(),
+        "let <",
+        leaf::var(result.to_string()),
+        ", ",
+        leaf::var(load_name),
+        "> = case ",
+        fast.test.clone(),
+        " of <'true'> when 'true' -> <",
+        fast.fast.clone(),
+        ", ",
+        leaf::var(store_name.clone()),
+        "> <_> when 'true' -> let _ = ",
+        cell_put_call(leaf::var(store_name)),
+        " in let ",
+        leaf::var(fast.slow_result.clone()),
+        " = ",
+        call.clone(),
+        " in let ",
+        leaf::var(fast.slow_state.clone()),
+        " = ",
+        cell_take_call(),
+        " in <",
+        leaf::var(fast.slow_result.clone()),
+        ", ",
+        leaf::var(fast.slow_state.clone()),
+        "> end in ",
+    ]
 }
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
@@ -646,6 +716,120 @@ fn render_on_do_catch(
     Document::Vec(docs)
 }
 
+/// Renders one [`ThreadedStmt::EnsureCatch`]: `catch <Type, Error, Stack> ->`
+/// and, with a relay, a `case` whose first clause matches the scope's own
+/// `$bt_nlr` throw, runs the relay's cleanup from the state it carries and
+/// resumes the throw with the cleanup's result; every other exception (and a
+/// foreign token's throw) takes `other`. Without a relay the catch is `other`
+/// alone, the shape every `ensure:` had before BT-4312.
+fn render_ensure_catch(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: Option<NlrCarry>,
+    relay: Option<&EnsureNlrRelay>,
+    other: &Document<'static>,
+) -> Document<'static> {
+    let head = docvec![
+        "catch <",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        ", ",
+        leaf::var(vars.stack_var.clone()),
+        "> -> ",
+    ];
+    let (Some(relay), Some(carry)) = (relay, carry) else {
+        return docvec![head, other.clone()];
+    };
+    // The scope's own throw matches its token; a foreign one (BT-4429) is
+    // every `$bt_nlr` throw that reaches the catch.
+    let guard = match (carry, token) {
+        (NlrCarry::Foreign, _) => leaf::atom("true"),
+        (_, Some(token)) => docvec![
+            "call 'erlang':'=:='(",
+            leaf::var(vars.nlr_tok_var.clone()),
+            ", ",
+            leaf::var(token.name().to_string()),
+            ")",
+        ],
+        (_, None) => return docvec![head, other.clone()],
+    };
+    let rethrow = match &relay.rethrow {
+        RethrowSlot::Version(version) => {
+            let family = match carry {
+                NlrCarry::SelfVt => "Self",
+                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live | NlrCarry::Foreign => {
+                    "StateAcc"
+                }
+            };
+            leaf::var(super::super::util::versioned_var(family, *version))
+        }
+        RethrowSlot::CellOverCarried => actor_state_call(
+            actor_state_helper::REFRESH,
+            vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
+        ),
+        RethrowSlot::CellIfCarried => actor_state_call(
+            actor_state_helper::REFRESH_CARRIED,
+            vec![
+                leaf::var(vars.cell_snapshot_var.clone()),
+                leaf::var(vars.nlr_carried_var.clone()),
+            ],
+        ),
+        #[cfg(any(test, feature = "test"))]
+        RethrowSlot::SiteState(doc) => doc.clone(),
+    };
+    // `refresh_carried/2` compares the carried state with the cell as it was
+    // before the cleanup wrote it.
+    let snapshot = if relay.rethrow == RethrowSlot::CellIfCarried {
+        docvec![
+            "let ",
+            leaf::var(vars.cell_snapshot_var.clone()),
+            " = ",
+            actor_state_call(actor_state_helper::SNAPSHOT, vec![]),
+            " in ",
+        ]
+    } else {
+        Document::Nil
+    };
+    let store = if relay.cell_store {
+        docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
+    } else {
+        Document::Nil
+    };
+    docvec![
+        head,
+        "case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of <{'throw', {'$bt_nlr', ",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_val_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_carried_var.clone()),
+        "}}> when ",
+        guard,
+        " -> ",
+        snapshot,
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " ",
+        store,
+        "call 'erlang':'throw'({'$bt_nlr', ",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_val_var.clone()),
+        ", ",
+        rethrow,
+        "}) <",
+        leaf::var(vars.other_pair_var.clone()),
+        "> when 'true' -> ",
+        other.clone(),
+        " end",
+    ]
+}
+
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
     match step {
         CatchStep::ClassVarRestore { snapshot } => {
@@ -718,13 +902,15 @@ fn render_threaded(
 ) -> Document<'static> {
     match mode {
         ThreadingMode::DirectParams => {
-            let fn_name = ctx.fresh_temp_var("Loop");
-            render_loop_skeleton(fn_name, frame, None, body, produces, None, ctx, None, None)
+            let fn_name = ctx.fresh_temp_var(LOOP_FN_STEM);
+            render_loop_skeleton(
+                &fn_name, frame, None, body, produces, None, ctx, None, None, None,
+            )
         }
         ThreadingMode::Hybrid => {
-            let fn_name = ctx.fresh_temp_var("Loop");
+            let fn_name = ctx.fresh_temp_var(LOOP_FN_STEM);
             render_loop_skeleton(
-                fn_name,
+                &fn_name,
                 frame,
                 None,
                 body,
@@ -735,6 +921,7 @@ fn render_threaded(
                     in_loop_body: true,
                     in_hybrid_loop: true,
                 }),
+                None,
                 None,
             )
         }
@@ -798,7 +985,7 @@ struct ConditionalLoopHeader<'a> {
 /// within this file, not just across the Rust/Erlang boundary).
 ///
 /// `fn_name` is already resolved by the caller — the bare shape mints it via
-/// `ctx.fresh_temp_var("Loop")` (`render_threaded`, unchanged behavior);
+/// `ctx.fresh_temp_var(LOOP_FN_STEM)` (`render_threaded`, unchanged behavior);
 /// `ConditionalLoop` carries its own caller-supplied, never-gensym'd name
 /// (the variant's own doc comment: production never gensyms this name
 /// either).
@@ -837,7 +1024,7 @@ struct ConditionalLoopHeader<'a> {
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)] // shared param_list/outer_args/body/final_args plumbing for both bare Threaded loops and real ConditionalLoop nodes
 fn render_loop_skeleton(
-    fn_name: String,
+    fn_name: &str,
     frame: FrameId,
     counter: Option<&LoopCounter>,
     body: &[ThreadedStmt],
@@ -846,6 +1033,7 @@ fn render_loop_skeleton(
     ctx: &mut RenderCtx,
     loop_context: Option<LoopContextFlags>,
     header: Option<ConditionalLoopHeader<'_>>,
+    entry_line: Option<&CallSiteLine>,
 ) -> Document<'static> {
     let arity = produces.len() + usize::from(counter.is_some());
 
@@ -946,35 +1134,54 @@ fn render_loop_skeleton(
         None => render_in_loop_body(ctx),
     };
 
+    // BT-4401: the ENTRY apply is the one frame the method running the loop
+    // reports, so it carries the send's line (resolved at lowering time and
+    // carried on the node); the recursive back-edges above stay bare tail
+    // calls. Both skeleton shapes share this one entry.
+    let entry_apply = {
+        let call = docvec![
+            "apply ",
+            leaf::fname(fn_name.to_string(), arity),
+            " (",
+            outer_args,
+            ")",
+        ];
+        match entry_line {
+            Some(site) => CoreErlangGenerator::annotate_with_line_in(
+                site.source_path.as_deref(),
+                call,
+                site.line,
+            ),
+            None => call,
+        }
+    };
+
     match header {
         None => docvec![
             "letrec ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " = fun (",
             param_list,
             ") -> ",
             body_doc,
             "apply ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             final_args,
             ")",
-            " in apply ",
-            leaf::fname(fn_name, arity),
-            " (",
-            outer_args,
-            ")",
+            " in ",
+            entry_apply,
         ],
         Some(h) => docvec![
             "letrec ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " = fun (",
             param_list,
             ") -> ",
             condition_doc.expect("condition_doc is always Some when header is Some"),
             body_doc,
             " apply ",
-            leaf::fname(fn_name.clone(), arity),
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             final_args,
             ") ",
@@ -985,11 +1192,8 @@ fn render_loop_skeleton(
             // `"in apply "` concatenation (`while_loops.rs`'s
             // `generate_while_loop_direct`) exactly; an extra leading space
             // here would double it.
-            "in apply ",
-            leaf::fname(fn_name, arity),
-            " (",
-            outer_args,
-            ")",
+            "in ",
+            entry_apply,
         ],
     }
 }
@@ -1089,6 +1293,7 @@ fn render_conditional_loop(
     produces: &[VersionedVar],
     outer_args_override: Option<&[Document<'static>]>,
     exit_arm: &Document<'static>,
+    entry_line: Option<&CallSiteLine>,
     ctx: &mut RenderCtx,
 ) -> Document<'static> {
     let loop_context = match mode {
@@ -1113,7 +1318,7 @@ fn render_conditional_loop(
         ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) => None,
     };
     render_loop_skeleton(
-        fn_name.to_string(),
+        fn_name,
         frame,
         counter,
         body,
@@ -1127,6 +1332,7 @@ fn render_conditional_loop(
             continue_arm,
             exit_arm,
         }),
+        entry_line,
     )
 }
 

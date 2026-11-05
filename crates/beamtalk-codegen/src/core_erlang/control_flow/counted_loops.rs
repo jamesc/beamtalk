@@ -88,7 +88,7 @@ impl CoreErlangGenerator {
         //     let _ = apply _BodyFun& () in apply '_LoopN'/0 ()
         // in apply '_LoopN'/0 ()
 
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
         Ok(docvec![
@@ -130,7 +130,7 @@ impl CoreErlangGenerator {
                 receiver_code,
                 " in"
             ],
-            fn_name: "repeat".to_string(),
+            fn_name: threaded_ir::REPEAT_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
             condition_value: docvec![
                 "call 'erlang':'=<'(",
@@ -179,7 +179,7 @@ impl CoreErlangGenerator {
                 limit_code,
                 " in",
             ],
-            fn_name: "loop".to_string(),
+            fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
             condition_value: docvec![
                 "call 'erlang':'=<'(",
@@ -234,7 +234,7 @@ impl CoreErlangGenerator {
                 step_code,
                 " in",
             ],
-            fn_name: "loop".to_string(),
+            fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: docvec![
                 "let Continue = case call 'erlang':'>'(",
                 leaf::var(step_var.clone()),
@@ -397,6 +397,7 @@ impl CoreErlangGenerator {
             produces,
             outer_args: Some(outer_args),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -530,6 +531,7 @@ impl CoreErlangGenerator {
             produces,
             outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -675,6 +677,7 @@ impl CoreErlangGenerator {
                     .collect(),
             ),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);

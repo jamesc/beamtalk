@@ -35,7 +35,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 
-pub(crate) use error_handling::{generate_class_signal_bif, is_caller_safe_class_primitive};
+pub(crate) use error_handling::{generate_class_signal_bif, lowers_to_caller_safe_raise};
 
 /// `call 'beamtalk_primitive':'string_from_binary'(<inner>)` — wrap
 /// BIF-produced bytes as a `String` value (BT-4170: `printString` and
@@ -2180,6 +2180,21 @@ mod tests {
                 "ProtoObject {selector}"
             );
         }
+    }
+
+    /// BT-4410: `Object>>isKindOf:` is a direct call to the runtime
+    /// intrinsic, not the foreign-FFI proxy (`beamtalk_erlang_proxy`).
+    #[test]
+    fn test_object_is_kind_of_lowers_to_direct_intrinsic_call() {
+        let result = doc_to_string(generate_primitive_bif(
+            "Object",
+            "isKindOf:",
+            &["AClass".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_behaviour_intrinsics':'objectIsKindOf'(Self, AClass)".to_string())
+        );
     }
 
     #[test]

@@ -123,6 +123,17 @@ instantiation_test_() ->
                 fun test_check_init_args_first_unknown_sorted/0},
             {"check_init_args passes non-map args through untouched",
                 fun test_check_init_args_non_map_passthrough/0},
+            %% Declared-field memo (BT-4281)
+            {"check_init_args serves the declared fields from the memo, not a re-walk",
+                fun test_declared_fields_memoised/0},
+            {"an ancestor's put_reflection/2 invalidates the declared-fields memo",
+                fun test_declared_fields_put_reflection_invalidates/0},
+            {"a superclass change (merge_identity/5) invalidates the declared-fields memo",
+                fun test_declared_fields_reparent_invalidates/0},
+            {"the declared-fields not_found fallback is never cached",
+                fun test_declared_fields_fallback_not_cached/0},
+            {"published instance variables win over a stale compiled meta (reload window)",
+                fun test_declared_fields_ignore_stale_meta/0},
             {"module-less new with multiple args raises type_error",
                 fun test_generic_new_multi_args/0},
             {"module-less generic instance dispatches a fun-backed method",
@@ -148,9 +159,168 @@ instantiation_test_() ->
                 fun test_new_compiled_map_without_new1/0},
             %% ADR 0123 Phase 0 (BT-3534)
             {"compiled Value class new/0 never carries '__shape_version__'",
-                fun test_compiled_value_new_excludes_shape_version/0}
+                fun test_compiled_value_new_excludes_shape_version/0},
+            %% BT-4404: shadowed class-reference spawn module lookup
+            {"resolve_spawn_module_or_raise answers the module when the kind matches",
+                fun test_resolve_spawn_module_kind_matches/0},
+            {"resolve_spawn_module_or_raise: actor spawn of a supervisor class",
+                fun test_resolve_spawn_module_actor_got_supervisor/0},
+            {"resolve_spawn_module_or_raise: supervisor start of an actor class",
+                fun test_resolve_spawn_module_supervisor_got_actor/0},
+            {"resolve_spawn_module_or_raise: Value/Object class is does_not_understand",
+                fun test_resolve_spawn_module_not_spawnable/0},
+            {"resolve_spawn_module_or_raise: metadata miss is class_not_found",
+                fun test_resolve_spawn_module_metadata_miss/0},
+            {"resolve_spawn_module_or_raise follows a multi-level chain",
+                fun test_resolve_spawn_module_deep_chain/0},
+            {"resolve_spawn_module_or_raise: incomplete ancestor chain passes through",
+                fun test_resolve_spawn_module_incomplete_chain/0}
         ]
     end}.
+
+%%====================================================================
+%% BT-4404: resolve_spawn_module_or_raise/3
+%%====================================================================
+
+%% Module-less-by-code metadata rows: only the module name and the superclass
+%% chain matter to the lookup.
+with_spawn_kind_classes(Fun) ->
+    Rows = [
+        {'Bt4404Actor', bt4404_actor_mod, 'Actor'},
+        {'Bt4404Sup', bt4404_sup_mod, 'Supervisor'},
+        {'Bt4404DynSup', bt4404_dynsup_mod, 'DynamicSupervisor'},
+        {'Bt4404Value', bt4404_value_mod, 'Value'},
+        {'Bt4404Object', bt4404_object_mod, 'Object'},
+        %% Actor -> Bt4404Actor -> Bt4404Mid -> Bt4404Leaf
+        {'Bt4404Mid', bt4404_mid_mod, 'Bt4404Actor'},
+        {'Bt4404Leaf', bt4404_leaf_mod, 'Bt4404Mid'},
+        %% Supervisor -> Bt4404Sup -> Bt4404SupLeaf
+        {'Bt4404SupLeaf', bt4404_sup_leaf_mod, 'Bt4404Sup'},
+        %% An ancestor with no metadata row (removed or renamed).
+        {'Bt4404Orphan', bt4404_orphan_mod, 'Bt4404NeverRegisteredBase'}
+    ],
+    lists:foreach(
+        fun({Name, Mod, Super}) ->
+            ok = beamtalk_class_metadata:insert(Name, Mod, undefined, Super, false)
+        end,
+        Rows
+    ),
+    try
+        Fun()
+    after
+        delete_classes([Name || {Name, _, _} <- Rows])
+    end.
+
+resolve_spawn(Class, Selector, Kind) ->
+    beamtalk_class_instantiation:resolve_spawn_module_or_raise(Class, Selector, Kind).
+
+test_resolve_spawn_module_kind_matches() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(bt4404_actor_mod, resolve_spawn('Bt4404Actor', spawn, actor)),
+        ?assertEqual(
+            bt4404_actor_mod, resolve_spawn('Bt4404Actor', 'spawnMonitoredWith:', actor)
+        ),
+        ?assertEqual(bt4404_sup_mod, resolve_spawn('Bt4404Sup', spawn, supervisor)),
+        ?assertEqual(bt4404_dynsup_mod, resolve_spawn('Bt4404DynSup', 'spawnWith:', supervisor))
+    end).
+
+test_resolve_spawn_module_actor_got_supervisor() ->
+    with_spawn_kind_classes(fun() ->
+        lists:foreach(
+            fun(Class) ->
+                ?assertError(
+                    #{
+                        error := #beamtalk_error{
+                            kind = instantiation_error,
+                            class = Class,
+                            selector = spawn,
+                            details = #{expected_kind := actor, actual_kind := supervisor}
+                        }
+                    },
+                    resolve_spawn(Class, spawn, actor)
+                )
+            end,
+            ['Bt4404Sup', 'Bt4404DynSup']
+        )
+    end).
+
+test_resolve_spawn_module_supervisor_got_actor() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    class = 'Bt4404Actor',
+                    selector = 'spawnWith:',
+                    details = #{expected_kind := supervisor, actual_kind := actor}
+                }
+            },
+            resolve_spawn('Bt4404Actor', 'spawnWith:', supervisor)
+        )
+    end).
+
+test_resolve_spawn_module_not_spawnable() ->
+    with_spawn_kind_classes(fun() ->
+        [
+            ?assertError(
+                #{
+                    error := #beamtalk_error{
+                        kind = does_not_understand, class = Class, selector = spawn
+                    }
+                },
+                resolve_spawn(Class, spawn, Kind)
+            )
+         || Class <- ['Bt4404Value', 'Bt4404Object'], Kind <- [actor, supervisor]
+        ]
+    end).
+
+test_resolve_spawn_module_deep_chain() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(bt4404_leaf_mod, resolve_spawn('Bt4404Leaf', spawn, actor)),
+        ?assertEqual(bt4404_sup_leaf_mod, resolve_spawn('Bt4404SupLeaf', spawn, supervisor)),
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    details = #{expected_kind := supervisor, actual_kind := actor}
+                }
+            },
+            resolve_spawn('Bt4404Leaf', spawn, supervisor)
+        ),
+        ?assertError(
+            #{
+                error := #beamtalk_error{
+                    kind = instantiation_error,
+                    details = #{expected_kind := actor, actual_kind := supervisor}
+                }
+            },
+            resolve_spawn('Bt4404SupLeaf', spawn, actor)
+        )
+    end).
+
+%% A broken chain decides nothing, so it must not be reported as "not
+%% spawnable": the module is answered and the emitted call runs as before.
+test_resolve_spawn_module_incomplete_chain() ->
+    with_spawn_kind_classes(fun() ->
+        ?assertEqual(unknown, beamtalk_supervisor:spawn_kind('Bt4404Orphan')),
+        ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, actor)),
+        ?assertEqual(bt4404_orphan_mod, resolve_spawn('Bt4404Orphan', spawn, supervisor))
+    end).
+
+test_resolve_spawn_module_metadata_miss() ->
+    lists:foreach(
+        fun(Kind) ->
+            ?assertError(
+                #{
+                    error := #beamtalk_error{
+                        kind = class_not_found, class = 'Bt4404NeverRegistered', selector = spawn
+                    }
+                },
+                resolve_spawn('Bt4404NeverRegistered', spawn, Kind)
+            )
+        end,
+        [actor, supervisor]
+    ).
 
 %%====================================================================
 %% handle_spawn tests
@@ -838,6 +1008,158 @@ test_check_init_args_registry_primary_late() ->
             'LateSlotActor', 'spawnWith:', BaseState, InitArgs, []
         )
     ).
+
+%%====================================================================
+%% Declared-field memo (BT-4281)
+%%====================================================================
+
+%% The second check for a class answers from the `{declared_fields, Class}`
+%% memo: after the first call, the parent's metadata row is deleted with a
+%% raw `ets:delete` (which bypasses `invalidate/0`). A re-walk would now hit
+%% a missing non-root level and fall back to the (empty) base state's keys,
+%% rejecting `a`; the memo keeps accepting it until `invalidate/0`.
+test_declared_fields_memoised() ->
+    Parent = 'Bt4281MemoParent',
+    Child = 'Bt4281MemoChild',
+    register_ivar_class(Parent, none, [a]),
+    register_ivar_class(Child, Parent, [b]),
+    Args = #{a => 1, b => 2},
+    try
+        ?assertEqual(Args, check_new(Child, Args)),
+        true = ets:delete(beamtalk_class_metadata, Parent),
+        ?assertEqual(Args, check_new(Child, Args)),
+        beamtalk_class_derived_cache:invalidate(),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
+            check_new(Child, Args)
+        )
+    after
+        delete_classes([Child, Parent])
+    end.
+
+%% `put_reflection/2` invalidates on its own: an ancestor that publishes a
+%% new instance variable is seen by an already-memoised subclass with no
+%% `put_method_records/3` and no manual `invalidate/0` in between.
+test_declared_fields_put_reflection_invalidates() ->
+    Parent = 'Bt4281ReflParent',
+    Child = 'Bt4281ReflChild',
+    register_ivar_class(Parent, none, [a]),
+    register_ivar_class(Child, Parent, [b]),
+    try
+        ?assertEqual(#{a => 1}, check_new(Child, #{a => 1})),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := c}}},
+            check_new(Child, #{c => 1})
+        ),
+        ok = beamtalk_class_metadata:put_reflection(Parent, reflection([a, c])),
+        ?assertEqual(#{c => 1}, check_new(Child, #{c => 1})),
+        %% And the other direction: a removed field stops being accepted.
+        ok = beamtalk_class_metadata:put_reflection(Parent, reflection([c])),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
+            check_new(Child, #{a => 1})
+        )
+    after
+        delete_classes([Child, Parent])
+    end.
+
+%% Hot reload / redefinition re-registers identity through `merge_identity/5`;
+%% a subclass re-parented that way stops answering its old ancestor's fields.
+test_declared_fields_reparent_invalidates() ->
+    OldParent = 'Bt4281OldParent',
+    NewParent = 'Bt4281NewParent',
+    Child = 'Bt4281ReparentChild',
+    register_ivar_class(OldParent, none, [a]),
+    register_ivar_class(NewParent, none, [z]),
+    register_ivar_class(Child, OldParent, [b]),
+    try
+        ?assertEqual(#{a => 1}, check_new(Child, #{a => 1})),
+        ok = beamtalk_class_metadata:merge_identity(Child, undefined, undefined, NewParent, false),
+        ?assertEqual(#{z => 1}, check_new(Child, #{z => 1})),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
+            check_new(Child, #{a => 1})
+        )
+    after
+        delete_classes([Child, NewParent, OldParent])
+    end.
+
+%% A walk that hits a missing non-root level falls back to the base state's
+%% own keys. That answer depends on `BaseState`, so it must not be memoised:
+%% two calls with different base states each get their own keys.
+test_declared_fields_fallback_not_cached() ->
+    Child = 'Bt4281OrphanChild',
+    register_ivar_class(Child, 'Bt4281NeverRegistered', [b]),
+    try
+        Check = fun(Base, Args) ->
+            beamtalk_class_instantiation:check_init_args(Child, 'new:', Base, Args, [])
+        end,
+        ?assertEqual(#{x => 1}, Check(#{x => 0}, #{x => 1})),
+        ?assertEqual([], ets:lookup(beamtalk_class_derived_cache, {declared_fields, Child})),
+        ?assertEqual(#{y => 1}, Check(#{y => 0}, #{y => 1})),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := x}}},
+            Check(#{y => 0}, #{x => 1})
+        )
+    after
+        delete_classes([Child])
+    end.
+
+%% During a hot reload's `-on_load` the OLD code is still current, so
+%% `__beamtalk_meta/0` answers the old `fields` while the published instance
+%% variables already hold the new ones. The walk must answer the published
+%% set: a removed field (`y`) is rejected, not unioned back in and memoised.
+test_declared_fields_ignore_stale_meta() ->
+    Class = 'Bt4281StaleMetaClass',
+    Module = bt4281_stale_meta_mod,
+    load_meta_module(Module, [x, y]),
+    ok = beamtalk_class_metadata:insert(Class, Module, undefined, none, false),
+    ok = beamtalk_class_metadata:put_reflection(Class, reflection([x])),
+    try
+        ?assertEqual(#{x => 1}, check_new(Class, #{x => 1})),
+        ?assertError(
+            #{error := #beamtalk_error{kind = unknown_field, details = #{key := y}}},
+            check_new(Class, #{y => 1})
+        )
+    after
+        delete_classes([Class]),
+        _ = code:purge(Module),
+        _ = code:delete(Module),
+        _ = code:purge(Module)
+    end.
+
+%% Load a throwaway module whose `__beamtalk_meta/0` declares `Fields`.
+load_meta_module(Module, Fields) ->
+    Forms = [
+        {attribute, 1, module, Module},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [
+            {clause, 3, [], [], [erl_parse:abstract(#{fields => Fields}, 3)]}
+        ]}
+    ],
+    {ok, Module, Bin} = compile:forms(Forms),
+    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
+    ok.
+
+%% A module-less metadata row whose only declared names are its published
+%% instance variables (the builder-class shape `own_declared_fields/1` reads).
+register_ivar_class(Name, Superclass, IVars) ->
+    ok = beamtalk_class_metadata:insert(Name, undefined, undefined, Superclass, false),
+    ok = beamtalk_class_metadata:put_reflection(Name, reflection(IVars)).
+
+reflection(IVars) ->
+    #{
+        instance_methods => [],
+        instance_variables => IVars,
+        method_return_types => #{},
+        class_method_return_types => #{}
+    }.
+
+check_new(Class, Args) ->
+    beamtalk_class_instantiation:check_init_args(Class, 'new:', #{}, Args, []).
+
+delete_classes(Names) ->
+    lists:foreach(fun beamtalk_class_metadata:delete/1, Names).
 
 ensure_logging_counter_loaded() ->
     ensure_fixture_class_loaded('LoggingCounter', 'bt@logging_counter').

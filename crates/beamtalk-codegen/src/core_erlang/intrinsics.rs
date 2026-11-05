@@ -43,6 +43,24 @@ pub(in crate::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong arg
 /// self-dispatch by `expr_shape::selector_dispatches_via_self`).
 pub(in crate::core_erlang) const PERFORM_WITH_ARGS_TIMEOUT: &str = "perform:withArguments:timeout:";
 
+/// BT-4075: what an `error:` receiver is statically known to be. Only an
+/// instance takes the `Object>>error:` raise intrinsic unconditionally; a class
+/// object with a class-side `error:` (`Result class>>error:`) receives the send,
+/// decided at run time by `beamtalk_class_dispatch:class_object_understands/2`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ErrorSignalReceiver {
+    /// A literal, or `self` in an instance-side method: raises unconditionally.
+    /// Usually an instance. In an instance-side method of `Behaviour`/`Class`,
+    /// `self` is a class object, and raising is still intended there: those
+    /// methods signal errors about the class, which must not be handed to a
+    /// class-side `error:` such as `Result class>>error:`.
+    Instance,
+    /// `self` in a class method: a class object, sent to via `class_self_send/3`.
+    ClassSelf,
+    /// Anything else: sent to via `beamtalk_message_dispatch:send/3`.
+    Unknown,
+}
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -1783,14 +1801,17 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // `class` (unary, well-known) returns class as first-class object.
         if matches!(selector.well_known(), Some(WellKnownSelector::Class)) {
+            // BT-4127: a receiver typed as a tagged-map class gets the class
+            // object inline, behind the BT-4069 tag guard.
+            if let Ok(super::dispatch_codegen::TypedSendTarget::Tagged(target)) =
+                self.typed_send_target(receiver, selector)
+            {
+                return self.generate_typed_class_of(receiver, &target).map(Some);
+            }
             // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "Obj")?;
             let recv_doc = seq.next();
-            let call_doc = docvec![
-                "call 'beamtalk_primitive':'class_of_object'(",
-                recv_doc,
-                ")",
-            ];
+            let call_doc = Self::class_of_object_call_doc(recv_doc);
             return Ok(Some(seq.close(self, call_doc, "ClassRes")));
         }
 
@@ -2253,29 +2274,77 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         debug_assert_eq!(arguments.len(), 1);
+        // BT-4075: the raise is `Object>>error:`, an *instance*-side method. A
+        // class object (`cls := Result. cls error: #nope`) with its own
+        // class-side `error:` (`Result class>>error:`, `Logger class>>error:`)
+        // must receive the send instead, so only a receiver known to be an
+        // instance raises unconditionally.
+        let receiver_kind = self.error_signal_receiver_kind(receiver);
         // Hoist open-scope receiver + message (e.g. class method self-sends).
         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Err")?;
         let recv_doc = seq.next();
         let msg_doc = seq.next();
         let recv_var = self.fresh_temp_var("Obj");
         let msg_var = self.fresh_temp_var("Msg");
-        let class_var = self.fresh_temp_var("Class");
-        let err0 = self.fresh_temp_var("Err");
-        let err1 = self.fresh_temp_var("Err");
+        let raise_doc = self.object_error_raise_doc(&recv_var, &msg_var);
+        // Possibly a class object: one whose class side understands `error:`
+        // receives the send; anything else (an instance, or a class object
+        // without a class-side `error:`) raises in place, exactly as the
+        // intrinsic always has.
+        let body_doc = match receiver_kind {
+            ErrorSignalReceiver::Instance => raise_doc,
+            // A class-method self-send runs where its method runs (ADR 0142),
+            // never back through the class process.
+            ErrorSignalReceiver::ClassSelf => self.class_side_error_guard(
+                "call 'beamtalk_class_dispatch':'class_self_send'(",
+                &recv_var,
+                &msg_var,
+                receiver,
+                raise_doc,
+            ),
+            ErrorSignalReceiver::Unknown => self.class_side_error_guard(
+                "call 'beamtalk_message_dispatch':'send'(",
+                &recv_var,
+                &msg_var,
+                receiver,
+                raise_doc,
+            ),
+        };
 
         let call_doc = docvec![
             "let ",
-            leaf::var(recv_var.clone()),
+            leaf::var(recv_var),
             " = ",
             recv_doc,
             " in let ",
-            leaf::var(msg_var.clone()),
+            leaf::var(msg_var),
             " = ",
             msg_doc,
-            " in let ",
+            " in ",
+            body_doc,
+        ];
+        Ok(Some(seq.close(self, call_doc, "ErrRes")))
+    }
+
+    /// The `Object>>error:` raise: a `user_error` naming the receiver's class,
+    /// carrying `msg_var` as its message. The one lowering of the raise, shared
+    /// by the call-site intrinsic above and by the compiled `Object>>error:`
+    /// method body (`IntrinsicBody::Error`), which generic dispatch reaches
+    /// (`perform:`, and a class object without a class-side `error:` through
+    /// the class-object protocol fallthrough, BT-4417).
+    pub(in crate::core_erlang) fn object_error_raise_doc(
+        &mut self,
+        recv_var: &str,
+        msg_var: &str,
+    ) -> Document<'static> {
+        let class_var = self.fresh_temp_var("Class");
+        let err0 = self.fresh_temp_var("Err");
+        let err1 = self.fresh_temp_var("Err");
+        docvec![
+            "let ",
             leaf::var(class_var.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
-            leaf::var(recv_var),
+            leaf::var(recv_var.to_string()),
             ") in let ",
             leaf::var(err0.clone()),
             " = call 'beamtalk_error':'new'('user_error', ",
@@ -2285,12 +2354,79 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_error':'with_message'(",
             leaf::var(err0),
             ", ",
-            leaf::var(msg_var),
+            leaf::var(msg_var.to_string()),
             ") in call 'beamtalk_error':'raise'(",
             leaf::var(err1),
             ")",
-        ];
-        Ok(Some(seq.close(self, call_doc, "ErrRes")))
+        ]
+    }
+
+    /// BT-4075: `case class_object_understands(Recv, 'error:') of 'true' ->
+    /// <send_fn>(Recv, 'error:', [Msg]) 'false' -> <raise_doc> end` — the
+    /// class-side `error:` send when the receiver is a class object that
+    /// defines one, the `Object>>error:` raise otherwise.
+    fn class_side_error_guard(
+        &mut self,
+        send_fn: &'static str,
+        recv_var: &str,
+        msg_var: &str,
+        receiver: &Expression,
+        raise_doc: Document<'static>,
+    ) -> Document<'static> {
+        let send_doc = self.annotate_call_node_with_line(
+            docvec![
+                send_fn,
+                leaf::var(recv_var.to_string()),
+                ", ",
+                leaf::atom("error:"),
+                ", [",
+                leaf::var(msg_var.to_string()),
+                "])"
+            ],
+            receiver.span(),
+        );
+        docvec![
+            "case call 'beamtalk_class_dispatch':'class_object_understands'(",
+            leaf::var(recv_var.to_string()),
+            ", ",
+            leaf::atom("error:"),
+            ") of 'true' when 'true' -> ",
+            send_doc,
+            " 'false' when 'true' -> ",
+            raise_doc,
+            " end",
+        ]
+    }
+
+    /// BT-4075: what `receiver` is statically known to be for an `error:`
+    /// send — see [`ErrorSignalReceiver`]. Starts from the shared syntactic
+    /// rule ([`beamtalk_core::ast::is_error_signal_instance_receiver`]: only
+    /// `self` can be an instance) and refines it with the method context.
+    /// Every codegen consumer that treats `error:` as never returning (the
+    /// actor method-body `ErrorSend` classification) asks this.
+    pub(in crate::core_erlang) fn error_signal_receiver_kind(
+        &self,
+        receiver: &Expression,
+    ) -> ErrorSignalReceiver {
+        if !beamtalk_core::ast::is_error_signal_instance_receiver(receiver) {
+            return ErrorSignalReceiver::Unknown;
+        }
+        if !super::expr_shape::is_self_identifier(receiver) {
+            // A literal: never a class object.
+            return ErrorSignalReceiver::Instance;
+        }
+        // A top-level REPL `self` is whatever the eval binds it to (the
+        // Inspector's `evaluate:` binds the inspected value, possibly a class).
+        if self.lookup_var("self").is_none() && self.context == CodeGenContext::Repl {
+            return ErrorSignalReceiver::Unknown;
+        }
+        // `self` is the class object in a class method (including a
+        // `ClassBuilder` class-method block), an instance everywhere else.
+        if self.in_class_method() || self.builder_class_method_class().is_some() {
+            ErrorSignalReceiver::ClassSelf
+        } else {
+            ErrorSignalReceiver::Instance
+        }
     }
 
     /// Generates code for object identity and representation methods.
@@ -2462,6 +2598,29 @@ impl CoreErlangGenerator {
                 match selector.well_known() {
                     Some(WellKnownSelector::FieldAt) => {
                         debug_assert_eq!(arguments.len(), 1);
+                        // Class-method `self fieldAt: k` reads the class
+                        // variable in place, like `self.x` (BT-4421):
+                        // `beamtalk_class_vars:field_at(ClassSelf, Name)`,
+                        // which applies the `Cls fieldAt:` read rule
+                        // (declared `late`, declared set) at run time, the
+                        // name being dynamic. A `class_send` would re-enter
+                        // the class's own gen_server (`dispatch_error`).
+                        if self.is_class_side_self_reflection(receiver) {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in ",
+                                self.class_var_read_helper_call_doc(
+                                    "field_at",
+                                    vec![leaf::var(name_var)],
+                                ),
+                            ];
+                            return Ok(Some(doc));
+                        }
                         // Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         if let Expression::Identifier(id) = receiver {
@@ -2492,7 +2651,6 @@ impl CoreErlangGenerator {
                         let name_doc = seq.next();
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
-                        let pid_var = self.fresh_var("Pid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
@@ -2501,10 +2659,30 @@ impl CoreErlangGenerator {
                         // user-defined value objects are maps and use beamtalk_reflection.
                         let hint = leaf::binary_lit("Value types have no instance variables");
 
-                        // The non-actor branch is split:
+                        // A `#beamtalk_object{}` receiver — an actor instance OR a
+                        // class object, which share that shape — goes through
+                        // `beamtalk_message_dispatch:send/3`, whose
+                        // `classify_receiver` tells them apart (actor →
+                        // `sync_send`; class object → `class_send`, reaching
+                        // `dispatch_class_method`'s `fieldAt:` clause; BT-4148).
+                        // Sending a class object the actor message shape
+                        // instead crashed the class gen_server.
+                        //
+                        // The non-object branch is split:
                         //   - map receiver → delegate to beamtalk_primitive:send (routes
                         //     through dispatch/3 which respects ClassKind::Value vs Object)
-                        //   - other (primitive literal) → raise immutable_value
+                        //   - other (primitive literal) → raise immutable_value inline,
+                        //     keeping this intrinsic's own hint (the dynamic path's
+                        //     primitive `fieldAt:` arm words it differently).
+                        // The dispatch call is nested in a `case`, so it carries its
+                        // own line annotation (BT-4356).
+                        let dispatch_call = self.annotate_current_send_call(docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            leaf::var(receiver_var.clone()),
+                            ", 'fieldAt:', [",
+                            leaf::var(name_var.clone()),
+                            "])",
+                        ]);
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2521,15 +2699,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> let ",
-                            leaf::var(pid_var.clone()),
-                            " = call 'erlang':'element'(4, ",
-                            leaf::var(receiver_var.clone()),
-                            ") in call 'beamtalk_actor':'sync_send'(",
-                            leaf::var(pid_var),
-                            ", 'fieldAt:', [",
-                            leaf::var(name_var.clone()),
-                            "])",
+                            "<'true'> when 'true' -> ",
+                            dispatch_call,
                             // Non-actor: delegate map receivers to beamtalk_primitive:send
                             // which routes through dispatch/3 (respects ClassKind)
                             " <_> when 'true' -> case call 'erlang':'is_map'(",
@@ -2563,6 +2734,36 @@ impl CoreErlangGenerator {
                     }
                     Some(WellKnownSelector::FieldAtPut) => {
                         debug_assert_eq!(arguments.len(), 2);
+                        // Class-method `self fieldAt: k put: v` writes the
+                        // class variable in place, like `self.x := v`
+                        // (BT-4421): `beamtalk_class_vars:field_at_put`,
+                        // `put/3` after the `Cls fieldAt:put:` declared-set
+                        // check. Not a state-threaded write
+                        // (`is_self_field_at_put` excludes class methods,
+                        // ADR 0130); its order against sibling operands is
+                        // pinned by `is_class_side_effect`.
+                        if self.is_class_side_self_reflection(receiver) {
+                            let name_var = self.fresh_var("Name");
+                            let value_var = self.fresh_var("Value");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let value_code = self.expression_doc(&arguments[1])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in let ",
+                                leaf::var(value_var.clone()),
+                                " = ",
+                                value_code,
+                                " in ",
+                                Self::class_var_helper_call_doc(
+                                    "field_at_put",
+                                    vec![leaf::var(name_var), leaf::var(value_var)],
+                                ),
+                            ];
+                            return Ok(Some(doc));
+                        }
                         // Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
                         //
@@ -2614,13 +2815,26 @@ impl CoreErlangGenerator {
                         let receiver_var = self.fresh_var("Receiver");
                         let name_var = self.fresh_var("Name");
                         let value_var = self.fresh_var("Value");
-                        let pid_var = self.fresh_var("Pid");
                         let class_var = self.fresh_var("Class");
                         let error_base = self.fresh_var("Err");
                         let error_sel = self.fresh_var("Err");
                         let error_hint = self.fresh_var("Err");
                         let hint = leaf::binary_lit(super::errors::VALUE_IMMUTABLE_SLOT_HINT);
 
+                        // As `fieldAt:` above: a `#beamtalk_object{}` receiver
+                        // (actor instance or class object) goes through
+                        // `beamtalk_message_dispatch:send/3` (BT-4148); anything
+                        // else raises `immutable_value` inline. The dispatch call
+                        // carries its own line annotation (BT-4356).
+                        let dispatch_call = self.annotate_current_send_call(docvec![
+                            "call 'beamtalk_message_dispatch':'send'(",
+                            leaf::var(receiver_var.clone()),
+                            ", 'fieldAt:put:', [",
+                            leaf::var(name_var.clone()),
+                            ", ",
+                            leaf::var(value_var.clone()),
+                            "])",
+                        ]);
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -2641,17 +2855,8 @@ impl CoreErlangGenerator {
                             "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
                             leaf::var(receiver_var.clone()),
                             "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> let ",
-                            leaf::var(pid_var.clone()),
-                            " = call 'erlang':'element'(4, ",
-                            leaf::var(receiver_var.clone()),
-                            ") in call 'beamtalk_actor':'sync_send'(",
-                            leaf::var(pid_var),
-                            ", 'fieldAt:put:', [",
-                            leaf::var(name_var),
-                            ", ",
-                            leaf::var(value_var),
-                            "])",
+                            "<'true'> when 'true' -> ",
+                            dispatch_call,
                             " <_> when 'true' -> let ",
                             leaf::var(class_var.clone()),
                             " = call 'beamtalk_primitive':'class_of'(",
@@ -2684,7 +2889,7 @@ impl CoreErlangGenerator {
                         // on the class variables, in place (ADR 0130 §2):
                         // `beamtalk_class_vars:has(ClassSelf, Name)`, which
                         // never raises on the name.
-                        if self.is_class_var_has_field(receiver) {
+                        if self.is_class_side_self_reflection(receiver) {
                             let name_var = self.fresh_var("Name");
                             let name_code = self.expression_doc(&arguments[0])?;
                             let doc = docvec![
@@ -2733,22 +2938,16 @@ impl CoreErlangGenerator {
                         // `'hasField:'` clause; value/tagged-map/primitive
                         // → `beamtalk_primitive:send`, reaching the
                         // `hasField:` arm every class's `dispatch/3` now
-                        // carries). Unlike `fieldAt:`/`fieldAt:put:` above
-                        // (which hand-roll an `is_tuple`/`is_map` receiver
-                        // check that only distinguishes "an actor-shaped
-                        // `#beamtalk_object{}` tuple" from "not" — mistaking
-                        // a CLASS object, also `#beamtalk_object{}`-shaped,
-                        // for a plain actor instance and sending it the
-                        // wrong message shape, `{Selector, Args, PropCtx}`
-                        // instead of `{class_method_call, ...}`, which
-                        // crashes the class gen_server with a
-                        // `function_clause` — found via this issue's own
-                        // "from outside" test), `hasField:`/`clearField:`
-                        // reuse the SAME general dispatcher `perform:`
-                        // already does, so a class-object receiver is
-                        // handled correctly (CLAUDE.md no-duplicate-implementations
-                        // rule: `classify_receiver`'s actor/class/value
-                        // distinction lives in exactly one place).
+                        // carries). A class object is also
+                        // `#beamtalk_object{}`-shaped, so treating it as an
+                        // actor instance would send it the wrong message
+                        // shape and crash the class gen_server;
+                        // `hasField:`/`clearField:` reuse the SAME general
+                        // dispatcher `perform:` already does (as
+                        // `fieldAt:`/`fieldAt:put:` do for their
+                        // `#beamtalk_object{}` receivers, BT-4148), so
+                        // `classify_receiver`'s actor/class/value
+                        // distinction lives in exactly one place.
                         let mut seq = self.sequence_call(&[receiver, &arguments[0]], "HasF")?;
                         let recv_doc = seq.next();
                         let name_doc = seq.next();
@@ -2772,25 +2971,18 @@ impl CoreErlangGenerator {
                         // which answers `self`. Routing it through
                         // `class_send` instead would deadlock on the class's
                         // own process.
-                        if self.in_class_method() {
-                            if let Expression::Identifier(id) = receiver {
-                                if id.name == "self" {
-                                    let name_var = self.fresh_var("Name");
-                                    let name_code = self.expression_doc(&arguments[0])?;
-                                    let doc = docvec![
-                                        "let ",
-                                        leaf::var(name_var.clone()),
-                                        " = ",
-                                        name_code,
-                                        " in ",
-                                        Self::class_var_helper_call_doc(
-                                            "clear",
-                                            vec![leaf::var(name_var)],
-                                        ),
-                                    ];
-                                    return Ok(Some(doc));
-                                }
-                            }
+                        if self.is_class_side_self_reflection(receiver) {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in ",
+                                Self::class_var_helper_call_doc("clear", vec![leaf::var(name_var)],),
+                            ];
+                            return Ok(Some(doc));
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.
@@ -2831,13 +3023,12 @@ impl CoreErlangGenerator {
                         // General dispatch: delegate to
                         // `beamtalk_message_dispatch:send/3`, exactly like
                         // `hasField:` above and for the identical reason —
-                        // a hand-rolled `is_tuple`/`is_map` receiver check
-                        // (as `fieldAt:`/`fieldAt:put:` above still do)
-                        // cannot tell a class-object `#beamtalk_object{}`
-                        // apart from an actor-instance one, so it would send
-                        // a live class gen_server the wrong message shape
-                        // and crash it. A value/primitive receiver reaches
-                        // the class's own `dispatch/3`, whose `clearField:`
+                        // a hand-rolled receiver check cannot tell a
+                        // class-object `#beamtalk_object{}` apart from an
+                        // actor-instance one, so it would send a live class
+                        // gen_server the wrong message shape and crash it.
+                        // A value/primitive receiver reaches the class's
+                        // own `dispatch/3`, whose `clearField:`
                         // arm always raises `immutable_value` (added
                         // unconditionally, not only for `ClassKind::Value`
                         // — see `generate_primitive_dispatch`), so no
@@ -3289,11 +3480,81 @@ impl CoreErlangGenerator {
         })
     }
 
-    /// Tries to generate inline `logger:log/3` calls for Logger class sends.
+    /// Emits the `beamtalk_logging_config:log/3` call shared by the call-site
+    /// Logger intrinsic ([`Self::try_generate_logger_intrinsic`]) and the
+    /// `@intrinsic logger*` method bodies
+    /// ([`Self::try_generate_logger_body_intrinsic`]). The call answers `'nil'`.
+    ///
+    /// The message is passed through unchanged: a Beamtalk `String` is the
+    /// tagged `{beamtalk_string, Bin}` term, and the runtime unwraps it (and
+    /// any String keys/values in the metadata) before it reaches OTP's
+    /// formatter (BT-4321).
+    ///
+    /// # Generated Code
+    ///
+    /// For `Logger debug: Msg` in `Counter>>increment`:
+    /// ```erlang
+    /// call 'beamtalk_logging_config':'log'('debug', Msg, ~{
+    ///     'domain' => ['beamtalk' | ['user']],
+    ///     'beamtalk_class' => 'Counter',
+    ///     'beamtalk_selector' => 'increment'
+    /// }~)
+    /// ```
+    ///
+    /// With `metadata: UserMeta`, the injected map is merged over the user's
+    /// (`call 'maps':'merge'(UserMeta, ~{...}~)`), so the domain/class/selector
+    /// keys cannot be overridden.
+    pub(in crate::core_erlang) fn logger_log_call_doc(
+        &self,
+        level: &str,
+        msg_doc: Document<'static>,
+        user_meta_doc: Option<Document<'static>>,
+    ) -> Document<'static> {
+        let ctx_class = self.class_name();
+        let ctx_selector = self
+            .current_method_selector
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let metadata_map_doc = docvec![
+            "~{",
+            "'domain' => ['beamtalk' | ['user']], ",
+            "'beamtalk_class' => ",
+            leaf::atom(ctx_class),
+            ", ",
+            "'beamtalk_selector' => ",
+            leaf::atom(ctx_selector),
+            "}~",
+        ];
+
+        let meta_doc = match user_meta_doc {
+            Some(user_meta) => docvec![
+                "call 'maps':'merge'(",
+                user_meta,
+                ", ",
+                metadata_map_doc,
+                ")"
+            ],
+            None => metadata_map_doc,
+        };
+
+        docvec![
+            "call 'beamtalk_logging_config':'log'(",
+            leaf::atom(level.to_string()),
+            ", ",
+            msg_doc,
+            ", ",
+            meta_doc,
+            ")"
+        ]
+    }
+
+    /// Tries to generate inline Logger calls for Logger class sends.
     ///
     /// Recognizes `Logger debug:`, `Logger info:`, `Logger warn:`, `Logger error:`
-    /// (and their `*:metadata:` variants) and generates direct OTP `logger:log/3`
-    /// calls with domain metadata injected at the call site.
+    /// (and their `*:metadata:` variants) and generates direct
+    /// `beamtalk_logging_config:log/3` calls with domain metadata injected at
+    /// the call site.
     ///
     /// Non-logging selectors fall through to normal class dispatch.
     ///
@@ -3303,23 +3564,7 @@ impl CoreErlangGenerator {
     ///
     /// # Generated Code
     ///
-    /// For `Logger debug: "msg"`:
-    /// ```erlang
-    /// call 'logger':'log'('debug', {"~ts", [<<"msg">>]}, #{
-    ///     'domain' => ['beamtalk', 'user'],
-    ///     'beamtalk_class' => 'Counter',
-    ///     'beamtalk_selector' => 'increment'
-    /// })
-    /// ```
-    ///
-    /// For `Logger debug: "msg" metadata: #{"key" => val}`:
-    /// ```erlang
-    /// call 'logger':'log'('debug', {"~ts", [<<"msg">>]}, call 'maps':'merge'(UserMeta, #{
-    ///     'domain' => ['beamtalk', 'user'],
-    ///     'beamtalk_class' => 'Counter',
-    ///     'beamtalk_selector' => 'increment'
-    /// }))
-    /// ```
+    /// See [`Self::logger_log_call_doc`] for the emitted call.
     pub(in crate::core_erlang) fn try_generate_logger_intrinsic(
         &mut self,
         receiver: &Expression,
@@ -3352,85 +3597,17 @@ impl CoreErlangGenerator {
             _ => return Ok(None),
         };
 
-        // Get the message argument, wrapped as a format+args tuple so OTP's
-        // logger formatter can handle it.  Beamtalk strings are binaries, but
-        // logger:log/3 expects a char-list string, a report, or {Format, Args}.
-        // Passing a binary directly causes the formatter to crash with
-        // "FORMATTER CRASH: {string, <<\"...\">>}".
-        //
         // Hoist message arg (and optional metadata arg) so class method
         // self-sends in sub-expression position (e.g. `Logger info: (self tick)`)
         // thread their class var mutations through to the enclosing scope.
         let arg_exprs: Vec<&Expression> = arguments.iter().collect();
         let mut seq = self.sequence_call(&arg_exprs, "LogArg")?;
-        let raw_msg_doc = seq.next();
-        let msg_doc = docvec!["{\"~ts\", [", raw_msg_doc, "]}"];
-
-        // Build domain metadata map
-        // The class name comes from the compilation context (the class being compiled)
-        let ctx_class = self.class_name();
-        let ctx_selector = self
-            .current_method_selector
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
+        let msg_doc = seq.next();
+        let user_meta_doc = if has_metadata { Some(seq.next()) } else { None };
 
         let _ = class_name; // Logger class name itself is not needed in the metadata
 
-        let metadata_map_doc = docvec![
-            "~{",
-            "'domain' => ['beamtalk' | ['user']], ",
-            "'beamtalk_class' => ",
-            leaf::atom(ctx_class),
-            ", ",
-            "'beamtalk_selector' => ",
-            leaf::atom(ctx_selector),
-            "}~",
-        ];
-
-        // logger:log/3 returns 'ok', but Beamtalk Logger methods return 'nil'.
-        // Bind the result to a temp var and return 'nil'.
-        let discard_var = self.fresh_temp_var("LogOk");
-
-        let log_call_doc = if has_metadata {
-            // With user metadata: merge user map with compiler-injected map
-            // user_meta_doc is the hoisted doc for arguments[1].
-            let user_meta_doc = seq.next();
-            let merge_var = self.fresh_temp_var("LogMeta");
-            docvec![
-                "let ",
-                leaf::var(merge_var.clone()),
-                " = call 'maps':'merge'(",
-                user_meta_doc,
-                ", ",
-                metadata_map_doc,
-                ") in call 'logger':'log'(",
-                leaf::atom(level),
-                ", ",
-                msg_doc,
-                ", ",
-                leaf::var(merge_var),
-                ")"
-            ]
-        } else {
-            // Without user metadata: use compiler-injected map directly
-            docvec![
-                "call 'logger':'log'(",
-                leaf::atom(level),
-                ", ",
-                msg_doc,
-                ", ",
-                metadata_map_doc,
-                ")"
-            ]
-        };
-
-        let call_doc = docvec![
-            "let ",
-            leaf::var(discard_var),
-            " = ",
-            log_call_doc,
-            " in 'nil'"
-        ];
+        let call_doc = self.logger_log_call_doc(level, msg_doc, user_meta_doc);
 
         Ok(Some(seq.close(self, call_doc, "LogRes")))
     }

@@ -8,10 +8,12 @@ Implemented (2026-10-30); accepted 2026-10-29. Epic BT-4297.
 > - **Rule 2 is chain-wide (deviation from §1).** A class keeps its class process when it *or any class in its superclass chain* declares class variables, not only when the resolved method's defining class does. A subclass that declares none of its own holds its ancestors' class variables in its own process, and a method it defines itself reaches them through a class-side `self` send, which would raise `class_state_unreachable` in the caller. The runtime rule is `beamtalk_class_metadata:chain_has_class_variables/1`, the compile-time rule `ClassHierarchy::runs_class_method_in_caller` (Rust), and the derived `direct_call_ok/2` flag folds the class-variable facts over the whole chain (BT-4300, BT-4301).
 > - **The guarded static call** also checks `erlang:function_exported/3`, so a method removed by `removeSelector:` or a reload takes the `class_send` fallback instead of raising `undef`, and gets the class pid by `erlang:whereis/1` of the compile-time registered name. The direct call stays in tail position. Class-side `self foo` and explicit own-class sends go through `class_self_direct_ok/4`, sealed or not; no unguarded class-side direct call remains. The `class_var_abi` is 3 (the class-method calling convention changed); modules compiled for 2 are refused at load.
 > - **Flag erasure** is as amended in §2 below: a class's own derived inputs are raised before its change is visible, its descendants' flags are erased just after.
-> - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 is the follow-up to bring it back.
+> - **Benchmarks** (`benchmarks/vs-elixir/results/bench-bt4300.md`, `bench-bt4301.md`). Rows 3b and 3c went from about 200 reductions through the class process to about 24 with the in-caller dynamic path (BT-4300), then to 7.03 with the guarded static call (BT-4301), meeting the ≤ 10 gate. **Row 3a misses its ≤ 3 target**: it went from 2 to 7.03, the cost of the guard, the `function_exported/3` check and the real class reference that the unguarded `nil` call skipped. The miss was accepted for merge; BT-4316 brought it back to the target with one `persistent_term` read per static call target (§2, amended).
 > - **`performLocally:withArguments:`** now resolves through the class-method chain from the receiving class (an inherited selector is found, a subclass override wins), but applies compiled methods only: a selector whose nearest definition is an ADR 0084 runtime fun raises `does_not_understand`.
 > - **`class-process-ffi`** now also fires in classes that declare `classState:` (they used to be exempt), with a hint to move the call into an instance method or an Actor.
-> - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307); and an explicit own-class send `Base foo` inside an inherited class method runs with the subclass as `self` (BT-4317).
+> - **Class-literal signal sends (BT-4270).** BT-4115's unguarded caller-side raise for `Error signal: m` was the last unguarded class-side verdict. It now sits behind a static call key of its own, `{caller_safe_raise, Primitive, DefiningModule, Fun, ReceiverTag}`, installed by `static_call_target/4` under the same conditions as a direct-call key (extended to an inherited owner without a runtime fun) plus the defining module's metadata mapping the selector to that primitive, and erased by the same writers. Row 8b stays at about 89 reductions (86 before), where the plain dynamic path cost 155 (`results/bench-bt4270.md`).
+> - **Open questions**: an ancestor's class-side extension is not reached by the in-caller owner memo, as it is not on the class-process path (BT-4307).
+> - **Explicit own-class sends (BT-4317, amended 2026-11-04)**: see the amendment at the end of §2.
 
 ## Context
 
@@ -133,7 +135,8 @@ A class method runs **in the caller** when all of these hold:
      0130 §1's no-nesting rule is untouched.
 3. **The selector is not process-bound.** These keep their current routing:
    - `new`, `new:`, `startLink` and `startLink:` (ADR 0129). Value constructors
-     keep their BT-4099 direct path.
+     keep a direct path (BT-4099), behind the same guard (amended, BT-4409:
+     see §2).
    - `spawn` and `spawnWith:`, which have dedicated clauses in
      `beamtalk_class_dispatch`.
    - `Supervisor` `supervise`/`spawn*`, which are routed before
@@ -217,6 +220,108 @@ end
   `beamtalk_class_metadata:put_class_variables/2`.
 - This guard **replaces** the unguarded ADR 0129 static calls, which closes
   BT-4126, BT-4133 and BT-4134 for class methods.
+- **Amended (BT-4316, 2026-11-04): one read per static call target.** The
+  shipped guard read the class's flag, called `function_exported/3` and
+  `erlang:whereis/1` per send (row 3a: 7.03 reductions). A static send now
+  reads one `persistent_term` key per call target, `{Module, FunName, Tag}`
+  (`Tag` is the metaclass tag of the class the call site names), whose value
+  is the class reference the callee receives:
+
+  ```erlang
+  let ClassSelf = case call 'persistent_term':'get'(
+                        {'bt@app@point', 'class_origin', 'Point class'}, 'false') of
+      <'false'> -> call 'beamtalk_class_shadow_flags':'static_call_target'(
+                       {'bt@app@point', 'class_origin', 'Point class'}, 'Point', 'origin', 1)
+      <Ref>     -> Ref
+    end
+  in case ClassSelf of
+    <'false'> -> <today's class_send>
+    <_>       -> call 'bt@app@point':'class_origin'(ClassSelf)
+  end
+  ```
+
+  `static_call_target/4` installs the key, under the class's tag lock, only
+  while `direct_call_ok/2` holds, the dynamic path's in-caller owner
+  (`beamtalk_class_dispatch:in_caller_owner/2`) names this class, module and
+  function, the function is exported and the registered class process is
+  alive. Every erase of the class's derived flag (and so every ancestor
+  write) erases its static call keys, and so does the class monitor's
+  `'DOWN'`.
+  - **The tag is part of the key.** A module is not unique to one class over
+    time: `renameTo:` keeps the module and process, and a removed class's
+    module name can be reused. A call site still naming the old class misses
+    the new class's key and asks for its own class, so it raises
+    `class_not_found` as before, instead of running with the other class's
+    reference.
+  - **Reload has no `undef` window.** A compiled module's `-on_load` hook
+    registers the class synchronously, and the VM keeps the old code current
+    until the hook returns. Both of the reload's erases therefore land while
+    the old code still exports every function a key names. Any install after
+    the second erase reads the new metadata, in which a dropped method is no
+    longer the owner, so it declines. No key names a dropped function once the
+    new code is current, so a static send of it takes the fallback, as the
+    BT-4301 per-send `function_exported/3` check ensured. A method the reload
+    adds is installed only once the new code exports it.
+  - **A declining call site costs more per send.** A site that never gets a
+    key (shadowed, class variables in the chain, another owner, a dead class)
+    runs the unlocked check on every send and then `class_send`. That costs
+    more than the old one-read decline, but less than the `class_send` it
+    leads to. A negative answer is not cached, because every change that lets
+    a site qualify would need to erase it.
+
+  See the `beamtalk_class_shadow_flags` moduledoc and
+  `benchmarks/vs-elixir/results/bench-bt4316.md`.
+- **Amended (BT-4409, 2026-11-05): constructors are guarded too.** The
+  BT-4099 constructor fast path was the last unguarded compile-time verdict
+  on the class side. It now runs behind the same guard:
+  - **Static `X new`** on an eligible Value uses the static call key
+    `{Module, new, Tag}`, with arity 0. The hit path calls `Module:new()`,
+    which takes no `ClassSelf`, so the key's class reference only marks it as
+    installed. Since `new` is process-bound, `in_caller_owner/2` never names
+    it. `static_call_target/4` asks the dynamic path's question instead:
+    `beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])` must
+    answer `{ok, Module}`. The class's baked `direct_constructors` set is
+    published after a reload's erases, so a change to it erases the class's
+    keys too.
+  - **Dynamic `new`/`new:`** requires `direct_call_ok/2`. A class-side
+    extension or ADR 0084 runtime fun of `new`/`new:` on the class itself
+    then takes the fallback, and the class process's `{new, _}` handler runs
+    it. An ancestor's class-side `new` extension does not shadow the class's
+    own synthesized `new`, as on the class-process lookup.
+  - **The `new:` chain fact is decided at run time.** Rust bakes a per-class
+    fact into `__beamtalk_meta/0`, `defines_user_class_new1`: "this class
+    defines a class-side `new:` that is user code". `Value` is exempt, because
+    its `new:` is the `basicNewWith` router. One Rust helper,
+    `ClassHierarchy::defines_user_class_new1`, decides the fact for the bake
+    and for the compile-time chain walk. A dynamic `new:` builds in the caller
+    only while `beamtalk_class_metadata:chain_has_user_new1/1` finds no
+    ancestor that publishes a user `new:` or has a runtime-fun `new:`. The
+    walk fails closed on a missing row, link or fact, and on a cycle. It is
+    memoised in `beamtalk_class_derived_cache`. So an ancestor reloaded with
+    a user `new:` is honoured by already-loaded descendants without
+    recompiling them. BT-4126's reload warning becomes informational.
+  - Static `new:` stays on `class_send`; its fast path is the dynamic one.
+
+**Amended (BT-4317, 2026-11-04): a class literal always denotes that
+class.** Inside a class method of `Base`, an explicit own-class send `Base
+foo` binds `self` to `Base`, as the same send does anywhere else and as
+Smalltalk does; only `self foo` late-binds to the receiver. It used to run
+with the receiver as `self` when the method was inherited by a subclass `C`
+(`self name` answered `#C`, class variables were `C`'s and `Base new` built a
+`C`), a leftover of the own-class deadlock workaround. The send now cases on
+the running receiver's tag: when it is `Base`, the own-class direct path
+above runs it in the current process (for a stateful chain that is `Base`'s
+own class process, which a `class_send` would deadlock on); otherwise it is
+the ordinary literal class send to `Base` (the guarded static call or
+`class_send`), which runs in the caller for a stateless chain and in `Base`'s
+class process for a stateful one, never in the process already running.
+Rejected: keeping "receiver as `self`" (it contradicts what a class literal
+evaluates to), and passing `Base`'s reference to a direct call in the
+current process (for a stateful chain `Base`'s class variables live in
+`Base`'s process, not `C`'s). Consequence: if a `Base` class method running
+in `Base`'s process sends to `C`, and `C`'s inherited method then sends
+`Base bar`, that is a cross-process cycle between two stateful classes, like
+any other.
 
 ### 3. What moves into the caller
 
@@ -476,7 +581,7 @@ open-class class method.
 - Phase 2b: BT-4302, the `class-method-process-resource` lint.
 - Phase 3: BT-4303, REPL-protocol e2e test, docs, ADR amendments, CLAUDE.md and CHANGELOG.
 
-**Status:** Done (2026-10-30). Follow-ups: BT-4316 (row 3a), BT-4317, BT-4307.
+**Status:** Done (2026-10-30). Follow-ups: BT-4316 (row 3a), BT-4317 (done, amendment in §2), BT-4307.
 
 ## Migration Path
 

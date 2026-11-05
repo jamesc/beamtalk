@@ -59,33 +59,62 @@ pub(crate) enum LintTree {
     Parsed,
 }
 
+/// What a [`LintPass`] may consult besides the module it walks.
+///
+/// `hierarchy` is the class hierarchy to resolve class names against —
+/// actor/value kind (`resolve_class_kind`, the single authority, which walks
+/// the full ancestor chain), `all_state`, class variables, `spawns_block`.
+/// On `beamtalk lint` and the MCP lint tool it is the cross-file hierarchy
+/// `analyse_full` already built for this file (out-of-file classes injected
+/// via `add_from_beam_meta`), handed in through
+/// [`run_lint_passes_with_hierarchy`] at no extra cost (BT-4183), so a
+/// subclass whose actor ancestor lives in another file resolves as an actor.
+/// [`run_lint_passes`] builds a module-local one instead.
+///
+/// That hierarchy is built from a trait-expanded clone of the module while a
+/// pass walks the caller's tree; every lint lookup is by class name, so the
+/// two agree.
+pub(crate) struct LintContext<'a> {
+    pub(crate) hierarchy: &'a ClassHierarchy,
+}
+
 /// A single lint pass.
 ///
 /// Implementors inspect `module` and push any [`Diagnostic`]s with
-/// [`Severity::Lint`] into `diagnostics`.
+/// [`Severity::Lint`] into `diagnostics`. A pass that needs class
+/// resolution reads `ctx.hierarchy` (see [`LintContext`]), never
+/// `class.class_kind`: the lints run on the freshly parsed module, before
+/// `apply_class_kind_writeback` (codegen-only), so that field is still
+/// `ClassKind::from_superclass_name`'s direct-superclass-only placeholder.
 pub(crate) trait LintPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>);
+    fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>);
 
-    /// The tree [`run_lint_passes`] hands to [`LintPass::check`].
+    /// The tree [`run_lint_passes_with_hierarchy`] hands to [`LintPass::check`].
     fn tree(&self) -> LintTree {
         LintTree::Normalised
     }
 }
 
-/// Build a [`ClassHierarchy`] for ancestor-aware class-kind resolution in lint passes.
-///
-/// `run_lint_passes` runs on the freshly-parsed module, before
-/// `apply_class_kind_writeback` (which only runs inside codegen). So
-/// `class.class_kind` is still `ClassKind::from_superclass_name`'s shallow,
-/// direct-superclass-only placeholder — it misses indirect Actor/Value
-/// subclasses (e.g. `class Foo extends Bar` where `Bar extends Actor`).
-/// Lint passes that need correct actor/value classification should build a
-/// hierarchy from this module and use `resolve_class_kind`, the single
-/// authority for actor/value classification, which walks the full
-/// ancestor chain.
-pub(crate) fn hierarchy_for_lint(module: &Module) -> ClassHierarchy {
+/// The module-local [`ClassHierarchy`]: this file's classes only, for
+/// [`run_lint_passes`] (a caller with no cross-file context) and pass tests.
+fn module_hierarchy(module: &Module) -> ClassHierarchy {
     let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
     hierarchy_result.expect("ClassHierarchy::build is infallible")
+}
+
+/// The fix hint for a synchronous send to the actor that should be an async
+/// cast, shared by the lints that flag one (`actor_state_abroad`,
+/// `sync_send_in_timer_block`).
+///
+/// `cast` is the concrete cast spelling (`self bump!`) when one exists: only a
+/// plain unary send has one — `!` terminates the full send, so the cast of
+/// `self update: 42` is `self update: 42!`, never `self update:!`, and a
+/// cascade message has no cast spelling. Without one the hint is generic.
+pub(crate) fn async_cast_hint(cast: Option<&str>) -> String {
+    cast.map_or_else(
+        || "Use an async cast (`!` after the full send) instead (ADR 0137)".to_string(),
+        |cast| format!("Use `{cast}` (async cast) instead (ADR 0137)"),
+    )
 }
 
 /// Construct the ordered list of all active lint passes.
@@ -109,7 +138,13 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
     ]
 }
 
-/// Run all lint passes on a parsed module and return any lint diagnostics.
+/// Run all lint passes on a parsed module against `hierarchy` and return
+/// any lint diagnostics.
+///
+/// `hierarchy` resolves class names for the passes that need it (see
+/// [`LintContext`]): the lint surfaces pass the cross-file hierarchy
+/// `analyse_full` built for this file, through the hook of
+/// `run_post_analysis_lint_pipeline` (BT-4183).
 ///
 /// Each pass reads the tree its [`LintPass::tree`] names: the operand-
 /// normalised module (computed once, BT-4238) unless it inspects the
@@ -118,16 +153,30 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
 /// The returned diagnostics all have [`Severity::Lint`] and will not appear
 /// during normal compilation.
 #[must_use]
-pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
+pub fn run_lint_passes_with_hierarchy(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+) -> Vec<Diagnostic> {
     let normalised = beamtalk_core::ast::normalize::normalised(module);
+    let ctx = LintContext { hierarchy };
     let mut diagnostics = Vec::new();
     for pass in all_passes() {
         pass.check(
             tree_for(pass.as_ref(), module, &normalised),
+            &ctx,
             &mut diagnostics,
         );
     }
     diagnostics
+}
+
+/// [`run_lint_passes_with_hierarchy`] against this module's own hierarchy,
+/// built once: for callers with no cross-file context (and pass tests). A
+/// class whose ancestor is declared in another file resolves as if that
+/// ancestor were unknown.
+#[must_use]
+pub fn run_lint_passes(module: &Module) -> Vec<Diagnostic> {
+    run_lint_passes_with_hierarchy(module, &module_hierarchy(module))
 }
 
 /// The tree `pass` reads: `parsed` or its `normalised` form (see
@@ -139,10 +188,25 @@ fn tree_for<'m>(pass: &dyn LintPass, parsed: &'m Module, normalised: &'m Module)
     }
 }
 
-/// One pass on `module`, reading the tree [`run_lint_passes`] would hand it:
+/// One pass on `module`, reading the tree [`run_lint_passes`] would hand it
+/// and against the same module-local hierarchy:
 /// for a pass's own tests.
 #[cfg(test)]
 pub(crate) fn run_pass(pass: &dyn LintPass, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
     let normalised = beamtalk_core::ast::normalize::normalised(module);
-    pass.check(tree_for(pass, module, &normalised), diagnostics);
+    let hierarchy = module_hierarchy(module);
+    pass.check(
+        tree_for(pass, module, &normalised),
+        &LintContext {
+            hierarchy: &hierarchy,
+        },
+        diagnostics,
+    );
+}
+
+/// The module-local hierarchy, for a pass test that adjusts it (injects an
+/// out-of-file class, marks names shadowed) before linting.
+#[cfg(test)]
+pub(crate) fn module_hierarchy_for_test(module: &Module) -> ClassHierarchy {
+    module_hierarchy(module)
 }

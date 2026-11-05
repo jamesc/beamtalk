@@ -296,6 +296,14 @@ impl Analyser {
                     }
                 }
             }
+            BinaryConstruction { segments, .. } => {
+                for expr in segments
+                    .iter()
+                    .flat_map(crate::ast::BinarySegment::sub_expressions)
+                {
+                    self.collect_captures_and_mutations(expr, captures, mutations);
+                }
+            }
         }
     }
 }

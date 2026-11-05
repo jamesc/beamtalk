@@ -337,9 +337,10 @@ fn test_workspace_binding_compiles_as_normal_class() {
         batch_code.contains("Transcript"),
         "Batch mode should reference the Transcript class, got:\n{batch_code}"
     );
-    assert!(
-        !batch_code.contains("persistent_term"),
-        "Should NOT generate persistent_term lookup, got:\n{batch_code}"
+    assert_eq!(
+        non_static_call_key_persistent_term_reads(&batch_code),
+        0,
+        "Should NOT generate a persistent_term binding lookup, got:\n{batch_code}"
     );
 
     // ADR 0019 Phase 4: Actor methods in workspace mode use class_send only,
@@ -349,10 +350,23 @@ fn test_workspace_binding_compiles_as_normal_class() {
         ws_code.contains("Transcript"),
         "Workspace mode should reference the Transcript class, got:\n{ws_code}"
     );
-    assert!(
-        !ws_code.contains("persistent_term"),
-        "Workspace mode should NOT use persistent_term (ADR 0019 Phase 4), got:\n{ws_code}"
+    assert_eq!(
+        non_static_call_key_persistent_term_reads(&ws_code),
+        0,
+        "Workspace mode should NOT use a persistent_term binding (ADR 0019 Phase 4), got:\n{ws_code}"
     );
+}
+
+/// `persistent_term` reads in `code` other than guarded static class sends'
+/// static call keys (BT-4316): each of those reads is paired with exactly one
+/// miss-path `static_call_target` call, so any surplus read is something else
+/// (such as the BT-491 workspace-binding lookup).
+fn non_static_call_key_persistent_term_reads(code: &str) -> usize {
+    let reads = code.matches("call 'persistent_term':").count();
+    let static_keys = code
+        .matches("call 'beamtalk_class_shadow_flags':'static_call_target'(")
+        .count();
+    reads.saturating_sub(static_keys)
 }
 
 /// BT-941: Smoke test — typed class annotation warnings are emitted correctly.

@@ -8,7 +8,7 @@
 //! The `Analyser` walks the AST after name resolution and type checking,
 //! recording block captures, mutations, and context (control flow, stored, passed).
 
-use crate::ast::{Expression, MatchArm, Module};
+use crate::ast::{BinarySegment, Expression, MatchArm, Module};
 use crate::semantic_analysis::{
     AnalysisResult, BindingKind, TypeMap, block_context, method_validators, scope,
 };
@@ -325,6 +325,11 @@ impl Analyser {
                     if let crate::ast::StringSegment::Interpolation(expr) = segment {
                         self.analyse_expression(expr, None);
                     }
+                }
+            }
+            BinaryConstruction { segments, .. } => {
+                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.analyse_expression(expr, None);
                 }
             }
         }

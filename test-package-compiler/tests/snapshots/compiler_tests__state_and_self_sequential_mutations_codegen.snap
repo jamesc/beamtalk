@@ -399,7 +399,11 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
 
 
 'safe_dispatch'/3 = fun (Selector, Args, State) ->
-    let Self = call 'beamtalk_actor':'make_self'(State) in
+    let Self = case State of
+        <~{'__class_mod__' := 'state_and_self_sequential_mutations'}~> when call 'erlang':'not'(call 'erlang':'is_map_key'('$beamtalk_class', State)) ->
+            {'beamtalk_object', 'SeqStateCtr', 'state_and_self_sequential_mutations', call 'erlang':'self'()}
+        <_> when 'true' -> call 'beamtalk_actor':'make_self'(State)
+    end in
     apply 'safe_dispatch'/4 (Selector, Args, Self, State)
 
 'safe_dispatch'/4 = fun (Selector, Args, Self, State) ->
@@ -414,70 +418,81 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'incrementTwice'> when 'true' ->
-            let _ExitReply@14 = let _ = call 'beamtalk_actor_state':'store'(State) in let _Synced@7 = let _BinLeft@4 = call 'maps':'get'('n', State) in let _BinRight@5 = 1 in case call 'erlang':'is_number'(_BinLeft@4) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@4, _BinRight@5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@4, '+', [_BinRight@5]) <_BinOpNoMatch@6> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@6}) end in let State1 = call 'beamtalk_actor_state':'take'() in let _Val@8 = _Synced@7 in let State2 = call 'maps':'put'('n', _Val@8, State1) in let _ = call 'beamtalk_actor_state':'store'(State2) in let _Synced@12 = let _BinLeft@9 = call 'maps':'get'('n', State2) in let _BinRight@10 = 1 in case call 'erlang':'is_number'(_BinLeft@9) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@9, _BinRight@10) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@9, '+', [_BinRight@10]) <_BinOpNoMatch@11> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@11}) end in let State3 = call 'beamtalk_actor_state':'take'() in let _Val@13 = _Synced@12 in let State4 = call 'maps':'put'('n', _Val@13, State3) in let _Result = call 'maps':'get'('n', State4) in {'reply', _Result, State4} in case _ExitReply@14 of <{'reply', _, _ExitState@15}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@15) in _ExitReply@14 <_> when 'true' -> _ExitReply@14 end
+            let _ExitReply@18 = let _BinLeft@4 = call 'maps':'get'('n', State) in let _BinRight@5 = 1 in let <_Synced@9, State1> = case call 'erlang':'is_number'(_BinLeft@4) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@4, _BinRight@5), State> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(State) in let _SyncedSlow@7 = case call 'erlang':'is_number'(_BinLeft@4) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@4, _BinRight@5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@4, '+', [_BinRight@5]) <_BinOpNoMatch@6> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@6}) end in let _SyncedSlowState@8 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@7, _SyncedSlowState@8> end in let _Val@10 = _Synced@9 in let State2 = call 'maps':'put'('n', _Val@10, State1) in let _BinLeft@11 = call 'maps':'get'('n', State2) in let _BinRight@12 = 1 in let <_Synced@16, State3> = case call 'erlang':'is_number'(_BinLeft@11) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@11, _BinRight@12), State2> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(State2) in let _SyncedSlow@14 = case call 'erlang':'is_number'(_BinLeft@11) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@11, _BinRight@12) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@11, '+', [_BinRight@12]) <_BinOpNoMatch@13> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@13}) end in let _SyncedSlowState@15 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@14, _SyncedSlowState@15> end in let _Val@17 = _Synced@16 in let State4 = call 'maps':'put'('n', _Val@17, State3) in let _Result = call 'maps':'get'('n', State4) in {'reply', _Result, State4} in case _ExitReply@18 of <{'reply', _, _ExitState@19}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@19) in _ExitReply@18 <_> when 'true' -> _ExitReply@18 end
         <'resetAndBump'> when 'true' ->
-            let _ExitReply@23 = let _Val@16 = 0 in let State1 = call 'maps':'put'('n', _Val@16, State) in let _Val@17 = {'beamtalk_string', #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#} in let State2 = call 'maps':'put'('label', _Val@17, State1) in let _ = call 'beamtalk_actor_state':'store'(State2) in let _Synced@21 = let _BinLeft@18 = call 'maps':'get'('n', State2) in let _BinRight@19 = 1 in case call 'erlang':'is_number'(_BinLeft@18) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@18, _BinRight@19) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@18, '+', [_BinRight@19]) <_BinOpNoMatch@20> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@20}) end in let State3 = call 'beamtalk_actor_state':'take'() in let _Val@22 = _Synced@21 in let State4 = call 'maps':'put'('n', _Val@22, State3) in let _Result = call 'maps':'get'('n', State4) in {'reply', _Result, State4} in case _ExitReply@23 of <{'reply', _, _ExitState@24}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@24) in _ExitReply@23 <_> when 'true' -> _ExitReply@23 end
+            let _ExitReply@29 = let _Val@20 = 0 in let State1 = call 'maps':'put'('n', _Val@20, State) in let _Val@21 = {'beamtalk_string', #{#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#} in let State2 = call 'maps':'put'('label', _Val@21, State1) in let _BinLeft@22 = call 'maps':'get'('n', State2) in let _BinRight@23 = 1 in let <_Synced@27, State3> = case call 'erlang':'is_number'(_BinLeft@22) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@22, _BinRight@23), State2> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(State2) in let _SyncedSlow@25 = case call 'erlang':'is_number'(_BinLeft@22) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@22, _BinRight@23) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@22, '+', [_BinRight@23]) <_BinOpNoMatch@24> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@24}) end in let _SyncedSlowState@26 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@25, _SyncedSlowState@26> end in let _Val@28 = _Synced@27 in let State4 = call 'maps':'put'('n', _Val@28, State3) in let _Result = call 'maps':'get'('n', State4) in {'reply', _Result, State4} in case _ExitReply@29 of <{'reply', _, _ExitState@30}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@30) in _ExitReply@29 <_> when 'true' -> _ExitReply@29 end
         <OtherSelector> when 'true' ->
-            %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-            let ExtLookup = try call 'beamtalk_extensions':'lookup'('SeqStateCtr', OtherSelector)
-                of ExtLookupResult -> ExtLookupResult
-                catch <_EType, _EReason, _EStack> -> 'not_found'
+            %% BT-4280: a memoised verdict picks the direct inherited call.
+            let InheritedOutcome =
+                case call 'beamtalk_dispatch':'inherited_target'('SeqStateCtr', OtherSelector) of
+                    <{'compiled', InhOwner, InhModule}> when 'true' ->
+                        call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)
+                    <_InhSlow> when 'true' ->
+                        %% BT-229/ADR 0005: Check extension registry before hierarchy walk
+                        let ExtLookup = try call 'beamtalk_extensions':'lookup'('SeqStateCtr', OtherSelector)
+                            of ExtLookupResult -> ExtLookupResult
+                            catch <_EType, _EReason, _EStack> -> 'not_found'
+                        in
+                        case ExtLookup of
+                            <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                                %% BT-1512/BT-2250: Invoke via the runtime helper, which
+                                %% accepts both the 3-arity actor shape
+                                %% (fun(Args, Self, State) -> {Result, NewState}) and the
+                                %% 2-arity value shape (fun(Args, Self) -> Result), so a
+                                %% foreign extension whose codegen-time arity could not be
+                                %% resolved still dispatches correctly. Returns {reply, _, _}.
+                                %% BT-3199: Selector/ClassName are threaded through so a
+                                %% crashing extension body is caught and converted to a
+                                %% structured error naming what was sent, instead of
+                                %% re-raising a bare Erlang exception.
+                                %% BT-3920: that structured error comes back as the
+                                %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
+                                %% own {error, E, State} contract (state rolled back, as for a
+                                %% crashing method body) so handle_call replies with it
+                                %% instead of crashing the actor on an unmatched result.
+                                %% ADR 0137 §2: the extension fun is Erlang that does not bracket
+                                %% what it calls, so it runs through call_foreign/3.
+                                case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'SeqStateCtr', Args, Self, State]) of
+                                    <{'reply', ExtResult, ExtState}> when 'true' ->
+                                        {'reply', ExtResult, ExtState}
+                                    <{'error', ExtError}> when 'true' ->
+                                        {'error', ExtError, State}
+                                end
+                            <'not_found'> when 'true' ->
+                                %% ADR 0006: Try hierarchy walk before DNU
+                                %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                                call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'SeqStateCtr'])
+                        end
+                end
             in
-            case ExtLookup of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    %% BT-1512/BT-2250: Invoke via the runtime helper, which
-                    %% accepts both the 3-arity actor shape
-                    %% (fun(Args, Self, State) -> {Result, NewState}) and the
-                    %% 2-arity value shape (fun(Args, Self) -> Result), so a
-                    %% foreign extension whose codegen-time arity could not be
-                    %% resolved still dispatches correctly. Returns {reply, _, _}.
-                    %% BT-3199: Selector/ClassName are threaded through so a
-                    %% crashing extension body is caught and converted to a
-                    %% structured error naming what was sent, instead of
-                    %% re-raising a bare Erlang exception.
-                    %% BT-3920: that structured error comes back as the
-                    %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
-                    %% own {error, E, State} contract (state rolled back, as for a
-                    %% crashing method body) so handle_call replies with it
-                    %% instead of crashing the actor on an unmatched result.
-                    %% ADR 0137 §2: the extension fun is Erlang that does not bracket
-                    %% what it calls, so it runs through call_foreign/3.
-                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'SeqStateCtr', Args, Self, State]) of
-                        <{'reply', ExtResult, ExtState}> when 'true' ->
-                            {'reply', ExtResult, ExtState}
-                        <{'error', ExtError}> when 'true' ->
-                            {'error', ExtError, State}
-                    end
-                <'not_found'> when 'true' ->
-                    %% ADR 0006: Try hierarchy walk before DNU
-                    %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
-                    case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'SeqStateCtr']) of
-                        <{'reply', InheritedResult, InheritedState}> when 'true' ->
-                            {'reply', InheritedResult, InheritedState}
-                        <{'error', DispatchError}> when 'true' ->
-                            %% BT-2842: only mask genuine "not found" as DNU; a real
-                            %% error raised by an inherited method must propagate.
-                            case call 'beamtalk_error':'is_does_not_understand'(DispatchError) of
+            case InheritedOutcome of
+                <{'reply', InheritedResult, InheritedState}> when 'true' ->
+                    {'reply', InheritedResult, InheritedState}
+                <{'error', DispatchError}> when 'true' ->
+                    %% BT-2842: only mask genuine "not found" as DNU; a real
+                    %% error raised by an inherited method must propagate.
+                    case call 'beamtalk_error':'is_does_not_understand'(DispatchError) of
+                        <'true'> when 'true' ->
+                            %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
+                            let DnuSelector = 'doesNotUnderstand:args:' in
+                            let Methods = call 'state_and_self_sequential_mutations':'method_table'() in
+                            case call 'maps':'is_key'(DnuSelector, Methods) of
                                 <'true'> when 'true' ->
-                                    %% Not in hierarchy - try doesNotUnderstand:args: (BT-29)
-                                    let DnuSelector = 'doesNotUnderstand:args:' in
-                                    let Methods = call 'state_and_self_sequential_mutations':'method_table'() in
-                                    case call 'maps':'is_key'(DnuSelector, Methods) of
-                                        <'true'> when 'true' ->
-                                            call 'state_and_self_sequential_mutations':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
-                                        <'false'> when 'true' ->
-                                            %% No DNU handler - return #beamtalk_error{} record
-                                            let ClassName = 'SeqStateCtr' in
-                                            let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
-                                            let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
-                                            let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
-                                            let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
-                                            {'error', Error, State}
-                                    end
+                                    call 'state_and_self_sequential_mutations':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)
                                 <'false'> when 'true' ->
-                                    call 'beamtalk_error':'raise'(DispatchError)
+                                    %% No DNU handler - return #beamtalk_error{} record
+                                    let ClassName = 'SeqStateCtr' in
+                                    let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in
+                                    let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in
+                                    let HintMsg = #{#<67>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<84>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<39>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']])}# in
+                                    let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in
+                                    {'error', Error, State}
                             end
+                        <'false'> when 'true' ->
+                            call 'beamtalk_error':'raise'(DispatchError)
                     end
+                <{'error', ExtError, ExtErrorState}> when 'true' ->
+                    {'error', ExtError, ExtErrorState}
             end
     end
 
@@ -536,7 +551,9 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
       'method_info' => ~{'incrementTwice' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'resetAndBump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false',
+      'threads_actor_state' => 'true'
     }~
 
 'register_class'/0 = fun () ->
@@ -577,7 +594,9 @@ module 'state_and_self_sequential_mutations' ['start_link'/1, 'start_link'/2, 'i
       'method_info' => ~{'incrementTwice' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'resetAndBump' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false',
+      'threads_actor_state' => 'true'
     }~,
             'isConstructible' => 'false'
         }~

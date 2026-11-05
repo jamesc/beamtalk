@@ -201,6 +201,30 @@ fn escaping_block_messages_name_the_shape() {
     }
 }
 
+/// BT-4283: a block passed to a class reference whose name another package in
+/// scope also declares escapes to a class method: the name is one last-wins
+/// runtime class, so the stateless `CvA` this unit declares need not be the
+/// class that answers. The unshadowed control is the `CvA onEvent:` row of
+/// [`escaping_block_messages_name_the_shape`].
+#[test]
+fn block_passed_to_a_shadowed_class_escapes_to_a_class_method() {
+    let src = in_value("CvA onEvent: [:e | t := t + 1]\nt");
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(declared_by(
+            "dep",
+            "Object subclass: CvA\n  class onEvent: b => b value\n",
+        ));
+    let diags = analyse_full(&parse_module(&src), ctx).diagnostics;
+    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+    assert_eq!(s6.len(), 1, "{diags:?}");
+    assert_eq!(
+        s6[0].message.as_str(),
+        "`t` is assigned in a block passed to a class method (`onEvent:`); it would run in \
+         another process"
+    );
+}
+
 /// The note's construct list is generated from `state_threading_selectors`,
 /// the one list codegen reads: every selector it names threads a block literal
 /// written directly as its argument (no diagnostic), and the one shape it
@@ -1386,31 +1410,233 @@ fn section6_cascade_messages_are_never_inlined() {
     }
 }
 
-/// BT-3913 (BT-3738 follow-up): a loop or fold that writes a local of its
-/// arm, as the value of an assignment in that arm, keeps the
-/// `UnthreadedLocalWrite` error — the arm frame carries only method-level
-/// locals, so the write would not thread back. The compliant rewrite (the
-/// writing loop as a statement of its own, the pure fold value captured)
-/// draws no diagnostic; `adr0131cond_non_producer_test.bt` runs both.
+/// BT-3913 (BT-3738 follow-up), BT-4367: a loop or fold that writes a local of
+/// its own conditional arm, as the value of an assignment in that arm. The
+/// conditional writes no outer local, so its arms are plain `BranchArm` frames
+/// in which a loop or fold is a producer (BT-3911, BT-3949): an actor or
+/// value-type method lowers it right (`bt4367arm_local_test.bt` runs it on a
+/// BEAM). A class method's plain arm does not (`Tuple does not understand
+/// 'plusFromNumber:'`, wrong sums), so it keeps the `UnthreadedLocalWrite` error.
 #[test]
-fn residual_arm_local_producer_as_assign_value_is_rejected() {
+fn arm_local_producer_as_assign_value_is_accepted_in_actor_and_value_methods() {
+    for body in [
+        "true ifTrue: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "true ifTrue: [\n  m := 0\n  sq := #(1, 2) collect: [:e | m := m + e]\n  sq size + m]",
+        "true ifTrue: [\n  m := 0\n  sq := #(1, 2, 3) select: [:e | m := m + e. e > 1]\n  sq size + m]",
+        "true ifTrue: [\n  m := 0\n  f := #(1, 2) anySatisfy: [:e | m := m + e. e > 5]\n  m]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{kind}: {body}: {diags:?}");
+        }
+    }
+}
+
+/// BT-4367 review: a plain arm registers only loop and fold sites in codegen,
+/// so a conditional, `on:do:` or `match:` nested in one is not a producer
+/// there. A loop inside such a nested construct keeps the position error; it
+/// used to be accepted and then silently dropped its write (a loop in a nested
+/// `on:do:` body answered 0 instead of 3). A conditional that is not at the
+/// method root (a plain arm inside a loop or fold body) is not covered by the
+/// runtime differential either, so it keeps the error too.
+#[test]
+fn arm_local_producer_nested_in_a_plain_arm_construct_is_still_rejected() {
+    for body in [
+        // In a nested conditional's arm, as an operand and as an assigned value.
+        "true ifTrue: [\n  m := 0\n  true ifTrue: [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r] ifFalse: [0]\n  m]",
+        "true ifTrue: [\n  m := 0\n  true ifTrue: [r := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. r] ifFalse: [0]\n  m]",
+        // In the protected body of an `on:do:`.
+        "true ifTrue: [\n  m := 0\n  [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r] on: Error do: [:e | 0]\n  m]",
+        // In an arm of a `match:`.
+        "true ifTrue: [\n  m := 0\n  3 match: [_ -> [r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]). r]]\n  m]",
+        // A plain arm inside a loop body.
+        "#(1, 2) do: [:x |\n  true ifTrue: [\n    m := 0\n    s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n    m + s]]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
+/// BT-4367 review: only the `Conditional` family with a proven selector has
+/// plain arms. A `Dictionary` lookup handler (`at:ifAbsent:` and the
+/// `ifPresent:` forms) is a real closure in codegen, since only a producer
+/// lookup is inlined, and a loop in it answered a crash in an actor method
+/// (`Tuple does not understand 'plusFromNumber:'`); `and:`/`or:` are not
+/// exercised by the runtime grid. Both keep the position error.
+#[test]
+fn arm_local_producer_in_a_lookup_handler_or_and_or_is_still_rejected() {
+    for body in [
+        "d := Dictionary new\nd at: #b ifAbsent: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "d := Dictionary new\nd at: #b ifPresent: [:v | 0] ifAbsent: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
+        "true and: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s > 0]",
+        "false or: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s > 0]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
+/// Every proven selector accepts the assigned loop in its taken arm, in actor
+/// and value-type methods (the runtime grid runs each on a BEAM).
+#[test]
+fn arm_local_producer_is_accepted_for_every_proven_conditional_selector() {
+    let arm = "m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s";
+    for conditional in [
+        format!("true ifTrue: [\n  {arm}] ifFalse: [0]"),
+        format!("false ifTrue: [0] ifFalse: [\n  {arm}]"),
+        format!("true ifTrue: [\n  {arm}]"),
+        format!("false ifFalse: [\n  {arm}]"),
+        format!("nil ifNil: [\n  {arm}] ifNotNil: [:x | x]"),
+        format!("1 ifNil: [0] ifNotNil: [:x | {arm}]"),
+        format!("1 ifNotNil: [:x | {arm}] ifNil: [0]"),
+        format!("1 ifNotNil: [:x | 0] ifNil: [\n  {arm}]"),
+        format!("nil ifNil: [\n  {arm}]"),
+        format!("1 ifNotNil: [:x | {arm}]"),
+    ] {
+        for (kind, src) in [
+            ("actor", in_actor(&conditional)),
+            ("value", in_value(&conditional)),
+        ] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{kind}: {conditional}: {diags:?}");
+        }
+    }
+}
+
+/// `PLAIN_ARM_SELECTORS` claims each selector is proven by the runtime grid; this
+/// is the check that backs the claim (no keep-in-sync comment without a test).
+/// The grid names each test `test_<context>_<selector>_<position>_<body>` with the
+/// selector's colons turned into underscores, and a two-arm selector's loop in
+/// the second arm as `<selector>Second`. The prefix is anchored on the position
+/// token so a single-keyword selector is not satisfied by a longer one's tests
+/// (`test_actor_ifTrue_` is a prefix of `test_actor_ifTrue_ifFalse_...`), and
+/// every position is required, in both contexts, in each arm the validator
+/// accepts (it makes every block argument of the conditional a plain arm).
+#[test]
+fn plain_arm_selectors_are_all_in_the_runtime_grid() {
+    let grid = include_str!("../../../../../stdlib/test/bt4367arm_local_grid_test.bt");
+    assert!(
+        !crate::semantic_analysis::validators::PLAIN_ARM_SELECTORS.is_empty(),
+        "the selector list is not empty"
+    );
+    for selector in crate::semantic_analysis::validators::PLAIN_ARM_SELECTORS {
+        let token = selector.as_str().trim_end_matches(':').replace(':', "_");
+        let mut tokens = vec![token.clone()];
+        if token.contains('_') {
+            tokens.push(format!("{token}Second"));
+        }
+        for token in tokens {
+            for context in ["actor", "value"] {
+                for position in ["last", "nonlast", "assign", "return", "operand"] {
+                    let prefix = format!("test_{context}_{token}_{position}_");
+                    assert!(
+                        grid.contains(&prefix),
+                        "`{}` is in PLAIN_ARM_SELECTORS but the runtime grid has no `{prefix}...` test",
+                        selector.as_str()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A fold assigned inside a loop that is itself inside a plain arm is judged by
+/// the ordinary loop-body frame rule, exactly as the same loop is at the method
+/// root: an actor method rejects it either way (an actor fold's value-bearing
+/// site is not lowered, BT-3797), a value-type method accepts it either way
+/// (`bt4367arm_local_test.bt` runs it on a BEAM). The plain arm adds nothing.
+#[test]
+fn fold_in_a_loop_inside_a_plain_arm_is_judged_as_at_the_method_root() {
+    let at_root =
+        "m := 0\n#(1, 2) do: [:x | s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. s]\nm";
+    let in_arm = "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:x | s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]. s]\n  m] ifFalse: [0]";
+    let count = |src: String| {
+        of_category(
+            &adr0131_diagnostics(&src),
+            DiagnosticCategory::UnthreadedLocalWrite,
+        )
+        .len()
+    };
+    assert!(
+        count(in_actor(at_root)) > 0,
+        "an actor rejects it at the root"
+    );
+    assert_eq!(
+        count(in_actor(in_arm)) > 0,
+        count(in_actor(at_root)) > 0,
+        "an actor arm is judged as the root"
+    );
+    assert_eq!(
+        count(in_value(at_root)),
+        0,
+        "a value type accepts it at the root"
+    );
+    assert_eq!(
+        count(in_value(in_arm)),
+        0,
+        "a value-type arm is judged as the root"
+    );
+}
+
+/// A loop at an operand or array-literal site of a plain arm keeps the error:
+/// an actor `ifTrue:ifFalse:` arm lowers it to Core Erlang with an unbound
+/// arm-local.
+#[test]
+fn arm_local_producer_at_an_operand_site_of_a_plain_arm_is_still_rejected() {
+    for body in [
+        "true ifTrue: [\n  m := 0\n  r := 1 + (#(1, 2) inject: 0 into: [:a :e | m := m + e. a + e])\n  r + m]",
+        "true ifTrue: [\n  m := 0\n  arr := #[(#(1, 2) collect: [:e | m := m + e])]\n  m + arr size]",
+        // A chained assignment: the loop is the value of the inner assignment,
+        // which the runtime grid never runs.
+        "true ifTrue: [\n  m := 0\n  a := s := #(1, 2) inject: 0 into: [:acc :e | m := m + e. acc + e]\n  a + m + s]",
+    ] {
+        for (kind, src) in [("actor", in_actor(body)), ("value", in_value(body))] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(
+                !of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).is_empty(),
+                "{kind}: {body}: {diags:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn arm_local_producer_as_assign_value_is_still_rejected_in_a_class_method() {
     for body in [
         "true ifTrue: [\n  m := 0\n  s := #(1, 2) inject: 0 into: [:a :e | m := m + e. a + e]\n  m + s]",
         "true ifTrue: [\n  m := 0\n  sq := #(1, 2) collect: [:e | m := m + e]\n  sq size + m]",
     ] {
-        let diags = adr0131_diagnostics(&in_actor(body));
+        let diags = adr0131_diagnostics(&in_class(body));
         assert_eq!(
             of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len(),
             1,
             "{body}: {diags:?}"
         );
     }
+}
+
+/// The compliant rewrite (the writing loop as a statement of its own, the pure
+/// fold value captured) draws no diagnostic in any method context.
+#[test]
+fn arm_local_producer_hoisted_to_a_statement_draws_no_diagnostic() {
     for body in [
         "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  s := #(1, 2) inject: 0 into: [:a :e | a + e]\n  m + s]",
         "true ifTrue: [\n  m := 0\n  #(1, 2) do: [:e | m := m + e]\n  sq := #(1, 2) collect: [:e | e * 2]\n  sq size + m]",
     ] {
-        let diags = adr0131_diagnostics(&in_actor(body));
-        assert!(diags.is_empty(), "{body}: {diags:?}");
+        for src in [in_actor(body), in_value(body), in_class(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{body}: {diags:?}");
+        }
     }
 }
 
@@ -4722,7 +4948,7 @@ fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
         assert!(
             errors
                 .iter()
-                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4288")),
+                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4312")),
             "REPL {input}: {errors:?}"
         );
     }
@@ -4758,4 +4984,162 @@ fn bt4288_a_return_in_a_repl_loop_body_is_accepted() {
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
     }
+}
+
+/// BT-4312 (owner decision A + A1): every REPL `^` run in place ends the
+/// input, as in a method, so the BT-4288 rule covers a `^` at the root, in a
+/// conditional arm, an evaluated block and a protected block too. Such a `^`
+/// in a multi-statement input is accepted wherever it sits; inside the value
+/// of a top-level assignment it is the BT-4288 error, since the workspace
+/// would bind the variable to the input's value. A `^` in a closure is
+/// neither: it answers its value where it stands.
+#[test]
+fn bt4312_a_return_run_in_place_at_the_repl_ends_the_input() {
+    for input in [
+        "x := 1\n^7\nx := 2\n",
+        "true ifTrue: [^3]\n5\n",
+        "x := 4\nx > 3 ifTrue: [^x * 10] ifFalse: [0]\nx := 0\n",
+        "[^4] value\nx := 0\n",
+        "[1 / 0] on: Error do: [:e | ^#caught]\nx := 0\n",
+        "[^55] ensure: [0]\nx := 0\n",
+        "true ifTrue: [r := true ifTrue: [^3]]\n",
+        "r := [:y | ^y]\nr value: 3\n",
+        "r := [true ifTrue: [^3]]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(errors.is_empty(), "REPL {input}: {errors:?}");
+    }
+    for input in [
+        "r := true ifTrue: [^3]\n",
+        "r := false ifTrue: [0] ifFalse: [^4]\n",
+        "x := 1\nr := x > 0 ifTrue: [^3] ifFalse: [4]\n",
+        "r := [^3] value\n",
+        "r := [^3] on: Error do: [:e | 0]\n",
+        "r := [1 / 0] on: Error do: [:e | ^0]\n",
+        "r := [^3] ensure: [0]\n",
+        "r := (true ifTrue: [^3]) + 1\n",
+        "#(a, b) := true ifTrue: [^#(1, 2)]\n",
+    ] {
+        let errors = analysis_errors(input, &[]);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("never completes") && e.message.contains("BT-4312")),
+            "REPL {input}: {errors:?}"
+        );
+    }
+}
+
+/// BT-4312: the one classifier of a top-level scope's `^`s, and the REPL
+/// eval's share of it (every in-place `^` but the input's whole last
+/// statement).
+#[test]
+fn bt4312_in_place_returns_classify_every_return_position() {
+    use crate::semantic_analysis::block_facts::{classify_in_place_returns, repl_eval_returns};
+    use crate::source_analysis::{lex_with_eof, parse};
+    let classify = |src: &str| {
+        let (parsed, diags) = parse(lex_with_eof(src));
+        assert!(diags.is_empty(), "{src}: {diags:?}");
+        let exprs: Vec<_> = parsed
+            .expressions
+            .into_iter()
+            .map(|s| s.expression)
+            .collect();
+        let returns = classify_in_place_returns(exprs.iter());
+        (
+            returns.in_place.len(),
+            returns.in_closure.len(),
+            repl_eval_returns(&exprs).len(),
+        )
+    };
+    // (source, in place, in a closure's loop, throw to the eval)
+    for (src, expected) in [
+        ("^7", (1, 0, 0)),
+        ("x := 1\n^7", (1, 0, 0)),
+        ("x := 1\n^7\nx := 2", (1, 0, 1)),
+        ("true ifTrue: [^3]", (1, 0, 1)),
+        ("true ifTrue: [^3]\n5", (1, 0, 1)),
+        ("[^4] value", (1, 0, 1)),
+        ("[^5] on: Error do: [:e | ^6]", (2, 0, 2)),
+        ("[^55] ensure: [0]", (1, 0, 1)),
+        ("#(1, 2) do: [:x | ^x]", (1, 0, 1)),
+        ("^(#(1, 2) do: [:x | ^x])", (2, 0, 1)),
+        ("b := [:x | ^x]", (0, 0, 0)),
+        ("b := [true ifTrue: [^3]]", (0, 0, 0)),
+        ("b := [#(1, 2) do: [:x | ^x]]", (0, 1, 0)),
+        ("#(1, 2) do: [:z | b := [:y | ^y * z]]", (0, 0, 0)),
+    ] {
+        assert_eq!(classify(src), expected, "{src}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BT-4430: an `on:do:`/`ensure:` that codegen does not inline
+// ---------------------------------------------------------------------------
+
+/// An `on:do:`/`ensure:` whose protected body or handler is not a block
+/// literal compiles its literal block as a closure, which cannot write an
+/// outer local: the write used to be dropped silently (or, in a value-type
+/// method, crash the unpack). It is an ADR 0133 escape in every context, the
+/// REPL included. Wrapping the block value in a literal threads the write, and
+/// a `^` or a read in the closure is still accepted.
+#[test]
+fn a_write_in_an_uninlined_exception_block_is_an_escape_in_every_context() {
+    for (body, selector) in [
+        ("b := [5]\nb ensure: [t := 9]\nt", "ensure:"),
+        ("c := [nil]\n[t := 9] ensure: c\nt", "ensure:"),
+        ("b := [1 / 0]\nb on: Error do: [:e | t := 7]\nt", "on:do:"),
+        ("h := [:e | 0]\n[t := 1 / 0] on: Error do: h\nt", "on:do:"),
+        ("(self foo: [5]) ensure: [t := 9]\nt", "ensure:"),
+        // A write in a construct nested in the closure is the closure's.
+        (
+            "b := [5]\nb ensure: [#(1, 2) do: [:y | t := t + y]]\nt",
+            "ensure:",
+        ),
+        ("b := [5]\nb ensure: [true ifTrue: [t := 9]]\nt", "ensure:"),
+    ] {
+        let message = format!(
+            "`t` is assigned in a block of an `{selector}` whose blocks are not all written in \
+             place, which the compiler runs as a closure and does not thread it through"
+        );
+        let mut srcs = vec![
+            (in_class(body), &[][..]),
+            (in_value(body), &[][..]),
+            (in_actor(body), &[][..]),
+            (in_testcase(body), &[][..]),
+        ];
+        // No `self` receiver at the REPL root.
+        if !body.contains("self") {
+            srcs.push((format!("{body}\n"), &["t"][..]));
+        }
+        for (src, known) in srcs {
+            let diags = adr0131_diagnostics_with(&src, known);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+            assert_eq!(s6[0].message.as_str(), message, "{src}");
+            let at = &src[s6[0].span.start() as usize..s6[0].span.end() as usize];
+            assert!(at.starts_with("t := "), "{src}: {at}");
+            let hint = s6[0].hint.as_deref().unwrap_or_default();
+            assert!(hint.contains("[b value]"), "{hint}");
+        }
+    }
+    for body in [
+        "b := [5]\n[b value] ensure: [t := 9]\nt",
+        "c := [nil]\n[t := 9] ensure: [c value]\nt",
+        "b := [5]\nb ensure: [^t]\nt",
+        "c := [nil]\n[^t] ensure: c\nt",
+        "b := [5]\nb ensure: [Transcript show: t printString]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            assert!(diags.is_empty(), "{src}: {diags:?}");
+        }
+        let diags = adr0131_diagnostics_with(&format!("{body}\n"), &["t"]);
+        assert!(diags.is_empty(), "REPL {body}: {diags:?}");
+    }
+    // An actor field write in such a closure goes through the actor-state cell
+    // (BT-4312), so it is no escape.
+    let src = in_actor("b := [5]\nb ensure: [self.n := 9]\nself.n");
+    let errors = analysis_errors(&src, &[]);
+    assert!(errors.is_empty(), "{src}: {errors:?}");
 }

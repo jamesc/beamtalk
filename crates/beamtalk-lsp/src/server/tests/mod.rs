@@ -14,7 +14,9 @@
 //! - [`did_close_racing`] — `did_close` reverting to disk vs. racing a
 //!   reopen or `did_change`
 //! - [`nested_package_root`] — per-open-file package root discovery when
-//!   the workspace folder is a parent of the package root (BT-4158)
+//!   the workspace folder is a parent of the package root (BT-4158), and
+//!   its retry, sticky-partial-coverage, incremental type-cache and
+//!   session-budget behaviour (BT-4383)
 //! - [`preload_files`] — `collect_preload_files` /
 //!   `preload_workspace_source_files`
 //! - [`formatting_and_paths`] — `format_source`, `resolve_path_for_uri`,

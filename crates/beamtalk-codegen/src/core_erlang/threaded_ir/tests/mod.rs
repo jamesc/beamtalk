@@ -16,6 +16,7 @@
 //!   per-scope invariant
 //! - [`dual_run`] — the dual-run byte-parity harness
 //! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
+//! - [`ensure_catch`] — BT-4312 `EnsureCatch` / `EnsureCleanupLostOnNlr`
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
 //! - [`local_rebind`] — ADR 0131 §2 `LocalRebind` lowering per (frame mode ×
@@ -59,6 +60,7 @@ mod catch_boundary;
 mod class_method_scope;
 mod close_and_value;
 mod dual_run;
+mod ensure_catch;
 mod fold_family;
 mod fold_locals;
 mod local_rebind;

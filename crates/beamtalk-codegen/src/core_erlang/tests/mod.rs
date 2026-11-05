@@ -152,15 +152,27 @@ pub(crate) fn parse_normalised(
     (module, diagnostics)
 }
 
+/// Parse `src` as a single-class Beamtalk module and run codegen with an explicit module name.
+///
+/// Use this when the generated module name matters (e.g. supervisor tests that assert on
+/// `'bt@leaf'` or actor tests that use a name like `"stopper"`).  For tests that do not
+/// care about the module name, prefer [`codegen`], which hard-codes `"test"`.
+pub(crate) fn codegen_named(src: &str, module_name: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new(module_name),
+    )
+    .expect("codegen should succeed")
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
 /// boilerplate across every sub-module.
 pub(crate) fn codegen(src: &str) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new("test"))
-        .expect("codegen should succeed")
+    codegen_named(src, "test")
 }
 
 /// BT-4244: asserts that every runtime send of `selector` in `code` (outside the
@@ -284,11 +296,12 @@ pub(crate) fn make_value_subclass_point() -> Module {
 mod analysis_handoff;
 mod arm_local_slot_verifier_corpus;
 mod arm_operand_carrier_corpus;
+mod binary_construction;
 mod block_value_arity_agreement;
 mod branch_context;
 mod call_site_lines;
-mod caller_safe_class_primitive;
 mod cascade_operand_state_corpus;
+mod class_literal_signal;
 mod class_side_operand_producer_corpus;
 mod closed_fun_state_version;
 mod closure_self_send_state_guard_corpus;
@@ -296,6 +309,7 @@ mod control_flow;
 mod cross_file_abstract;
 mod dispatch;
 mod dynamic_site_report;
+mod ensure_relay_corpus;
 mod evaluated_block_arg_local_producer;
 mod evaluated_block_grid_corpus;
 mod evaluated_block_producer;
@@ -306,6 +320,7 @@ mod field_write_sites;
 mod fold_locals_carried_corpus;
 mod fresh_temp_namespace;
 mod gen_server;
+mod guard_returns;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
 mod inline_block_local_in_loop_corpus;
@@ -344,6 +359,7 @@ mod trait_flattening;
 mod tuple_acc_state_read_corpus;
 mod typed_sealed;
 mod value_immutable_slot_hint_conformance;
+mod value_inherited_target;
 mod value_position_assignment_agreement;
 mod value_type_conditional_family_verifier_corpus;
 mod value_type_fold_family_corpus;

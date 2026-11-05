@@ -49,6 +49,7 @@
 //! ```
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
+use super::super::ensure_nlr_relay::EnsureCatchTriple;
 use super::super::erlang_types::ErlangVar;
 use super::super::intrinsics::{
     STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
@@ -56,9 +57,9 @@ use super::super::intrinsics::{
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars,
-    RebindFrame, RebindFrameKind, RenderCtx, StateReadSite, ThreadedStmt, TryRegion, ValueRef,
-    VersionPrefix, VersionedVar,
+    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureNlrRelay, FrameId,
+    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot,
+    StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -110,6 +111,32 @@ struct ArmEntry {
     /// The locals the construct threads ([`CoreErlangGenerator::branch_threaded_locals`]
     /// over the try and cleanup blocks).
     locals: Vec<String>,
+}
+
+/// The state an `on:do:` / `ensure:` / `tryDo:` scratch map starts from
+/// ([`CoreErlangGenerator::exception_body_outer_state`]).
+struct ExceptionOuterState {
+    /// Bound ahead of the construct's seed (the cell `take` of a bracketed
+    /// region), else [`Document::Nil`].
+    prefix: Document<'static>,
+    /// The variable the scratch map starts from, or the empty map literal
+    /// when it is private.
+    state: String,
+    /// The scratch map is private (`~{}~`): the construct sits in a frame
+    /// with no `State` chain (a class or value-type method, a direct-params
+    /// loop body), so its writes to it die with the construct.
+    private_scratch: bool,
+}
+
+impl ExceptionOuterState {
+    /// A scratch map that continues the enclosing `state`.
+    fn continues(prefix: Document<'static>, state: String) -> Self {
+        Self {
+            prefix,
+            state,
+            private_scratch: false,
+        }
+    }
 }
 
 impl CoreErlangGenerator {
@@ -568,8 +595,11 @@ impl CoreErlangGenerator {
         };
 
         if receiver_needs || handler_needs {
-            if let (Expression::Block(recv_block), Expression::Block(handler_block)) =
-                (receiver, handler)
+            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
+            if let Some((recv_block, handler_block)) =
+                beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                    receiver, handler,
+                )
             {
                 return self.generate_on_do_with_mutations(
                     recv_block,
@@ -637,8 +667,9 @@ impl CoreErlangGenerator {
     /// (BT-4295, [`Self::class_name_only_reference`]): `matches_class/2`
     /// reads only the name, so building the class object would cost a
     /// `module_name_safe/1` lookup and a tuple for nothing. Any other filter
-    /// (a variable, a REPL top-level class literal, a package-qualified
-    /// class) is evaluated as an ordinary expression.
+    /// (a variable, a REPL top-level class literal) is evaluated as an
+    /// ordinary expression. A package-qualified literal (`pkg@Error`) is
+    /// passed by its bare name like any other (BT-4074).
     fn on_do_filter_doc(&mut self, ex_class: &Expression) -> Result<Document<'static>> {
         match self.class_name_only_reference(ex_class) {
             Some(doc) => Ok(doc),
@@ -762,7 +793,11 @@ impl CoreErlangGenerator {
         // the protected body of an `on:do:` producer: a loop, fold, conditional
         // or exception in it rebinds its locals into that frame.
         let arm = self.exception_arm_frame(&[body], true);
-        let (outer_prefix, current_state) = self.exception_body_outer_state(body.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            ..
+        } = self.exception_body_outer_state(body.span);
         let (seed_doc, base_state) = self.seed_conditional_locals(&[body], &current_state);
         let seed_doc = docvec![outer_prefix, seed_doc];
         let families = ThreadedFamilies::default();
@@ -876,7 +911,7 @@ impl CoreErlangGenerator {
     fn exception_body_outer_state(
         &mut self,
         at: beamtalk_core::source_analysis::Span,
-    ) -> (Document<'static>, String) {
+    ) -> ExceptionOuterState {
         // ADR 0131 §2 (`MethodBody (REPL)` row): the REPL root threads its
         // bindings map, so the construct continues it (as a REPL conditional or
         // loop does) and its element 2 is the next bindings map.
@@ -887,7 +922,7 @@ impl CoreErlangGenerator {
         // private there as in a class method.
         if self.closure_scratch_continues_state(self.current_frame()) {
             return match self.actor_state_source(StateReadSite::ExceptionBodyOuterState, at) {
-                ActorStateSource::Var(var) => (Document::Nil, var),
+                ActorStateSource::Var(var) => ExceptionOuterState::continues(Document::Nil, var),
                 ActorStateSource::Cell => {
                     let take_var = self.fresh_temp_var("TakeOuter");
                     let prefix = docvec![
@@ -897,7 +932,7 @@ impl CoreErlangGenerator {
                         threaded_ir::cell_take_call(),
                         " in "
                     ];
-                    (prefix, take_var)
+                    ExceptionOuterState::continues(prefix, take_var)
                 }
             };
         }
@@ -906,9 +941,13 @@ impl CoreErlangGenerator {
             .get(&self.current_frame())
             .is_none_or(|frame| frame.kind.extends_state_chain());
         if (self.in_actor_instance_context() && state_chain) || self.is_repl_mode() {
-            (Document::Nil, self.current_state_var())
+            ExceptionOuterState::continues(Document::Nil, self.current_state_var())
         } else {
-            (Document::Nil, "~{}~".to_string())
+            ExceptionOuterState {
+                prefix: Document::Nil,
+                state: "~{}~".to_string(),
+                private_scratch: true,
+            }
         }
     }
 
@@ -961,7 +1000,11 @@ impl CoreErlangGenerator {
         // Bind exception class
         let ex_class_code = self.on_do_filter_doc(ex_class)?;
         // Rename current state to StateAcc for uniform threading
-        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            private_scratch,
+        } = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by either the
         // try (receiver) block or the handler block — only one of the two ever
         // runs at a given call, so (mirroring `ifTrue:ifFalse:`'s two branches)
@@ -1060,7 +1103,7 @@ impl CoreErlangGenerator {
         // exhaustive fallback.
         // (A frame with no `State` chain holds a private scratch map as its outer
         // state; the cell's pre-region version is then the enclosing `State`.)
-        let pre_region_state = if current_state.starts_with('~') {
+        let pre_region_state = if private_scratch {
             self.state_var_to_store()
         } else {
             current_state.clone()
@@ -1123,8 +1166,11 @@ impl CoreErlangGenerator {
         };
 
         if receiver_needs || cleanup_needs {
-            if let (Expression::Block(recv_block), Expression::Block(cleanup_block)) =
-                (receiver, cleanup)
+            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
+            if let Some((recv_block, cleanup_block)) =
+                beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                    receiver, cleanup,
+                )
             {
                 return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
             }
@@ -1142,6 +1188,58 @@ impl CoreErlangGenerator {
         // Capture expression outputs (ADR 0018 bridge pattern)
         let receiver_code = self.expression_doc(receiver)?;
         let cleanup_code = self.expression_doc(cleanup)?;
+
+        // BT-4312: the cleanup closure threads no version; what it writes it
+        // writes in place, through the actor-state cell. Where the state a
+        // `^` of this scope carries is the cell, or an actor method's `State`
+        // (which the `^` stored to the cell before it threw), the throw resumes
+        // with the carried state under the cell as the cleanup left it
+        // (`ensure_nlr_relay`). The REPL's bindings and a value type's `Self`
+        // are not in the cell, and no closure can write them. A cleanup that
+        // is a block literal touching neither the actor's state nor user code
+        // writes nothing.
+        let carry = self.nlr_slot().carry();
+        let writes_cell = Self::extract_block_literal(cleanup)
+            .is_none_or(|block| self.block_touches_actor_state(block));
+        let relays = writes_cell
+            && matches!(carry, Some(NlrCarry::Live | NlrCarry::ActorState))
+            && self.scope_nlr_token().is_some();
+        let relay = relays.then(|| {
+            let cleanup_apply = self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_var.clone()),
+                " ()"
+            ]);
+            EnsureNlrRelay {
+                seed: Document::Nil,
+                cleanup: docvec!["let _ = ", cleanup_apply, " in"],
+                cell_store: false,
+                rethrow: RethrowSlot::CellOverCarried,
+            }
+        });
+        let other = docvec![
+            "do ",
+            self.annotate_current_send_call(docvec![
+                "apply ",
+                leaf::var(cleanup_var.clone()),
+                " ()"
+            ]),
+            " ",
+            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+        ];
+        let catch = self.ensure_catch(
+            EnsureCatchTriple {
+                type_var,
+                error_var,
+                stack_var,
+                carried_var: None,
+            },
+            (carry, false),
+            EnsureCleanup::Closure { writes_cell },
+            relay,
+            other,
+            receiver.span(),
+        );
 
         Ok(docvec![
             "let ",
@@ -1172,16 +1270,7 @@ impl CoreErlangGenerator {
             " in ",
             leaf::var(result_var),
             " ",
-            "catch <",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> do ",
-            self.annotate_current_send_call(docvec!["apply ", leaf::var(cleanup_var), " ()"]),
-            " ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
+            catch,
         ])
     }
 
@@ -1315,7 +1404,11 @@ impl CoreErlangGenerator {
         let state_after_try = self.fresh_temp_var("StateAfterTry");
 
         // Rename current state to StateAcc
-        let (outer_prefix, current_state) = self.exception_body_outer_state(receiver_block.span);
+        let ExceptionOuterState {
+            prefix: outer_prefix,
+            state: current_state,
+            private_scratch,
+        } = self.exception_body_outer_state(receiver_block.span);
         // seed `__local__` keys for outer locals mutated by the try
         // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
         // (see `generate_on_do_with_mutations`) so a local written only
@@ -1340,7 +1433,7 @@ impl CoreErlangGenerator {
         // ADR 0137 §5: entering the `ensure:` stores the current `State` to the
         // cell, so a closure the protected body runs reads it, and the cleanup an
         // error runs starts from it.
-        let cell_boundary = self.synced_calls_active() && !current_state.starts_with('~');
+        let cell_boundary = self.synced_calls_active() && !private_scratch;
         let entry_store = if cell_boundary {
             docvec![
                 "let _ = ",
@@ -1396,62 +1489,259 @@ impl CoreErlangGenerator {
         // path's re-seed.
         self.set_self_version(outer_self);
 
-        // Error: run cleanup for side effects (from original StateAcc), then re-raise
-        docs.push(docvec![
-            "catch <",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> ",
-        ]);
-
-        // ADR 0137 §5: the cleanup of a failed body starts from the cell, which
-        // holds the state at entry plus the body's own writes made before the
-        // error (and a `^` stores before it throws), keeping the locals the
-        // arm's scratch map seeded.
-        if cell_boundary {
-            docs.push(docvec![
-                "let StateAcc = ",
-                actor_state_call(
-                    actor_state_helper::REFRESH,
-                    vec![leaf::var("Self"), leaf::var("StateAcc")]
-                ),
-                " in "
-            ]);
-        }
-        // Cleanup body generates state mutations that are discarded (re-raise
-        // follows) — including any extra-family version it mints: this path
-        // re-raises rather than returning a tuple, so it has no trailing
-        // slot to carry one (BT-3486/BT-3506). It still gets the version-0
-        // arm seed, since its own frame must verify like any other.
-        self.push_exception_arm(
-            &mut docs,
+        // ADR 0111 Addendum 5: sibling with_branch_context frames — the try
+        // body, the success-path cleanup run, the error-path cleanup run and
+        // the relay's (`cleanup_block` is compiled once per path, each its own
+        // arm) — each `generate_exception_body_with_threading` call mints its
+        // own fresh FrameId and `verify()`s its own real IR internally, so any
+        // two independently reaching the same StateAcc version number is
+        // correctly NOT a NonLinearVersion violation — see the matching
+        // comment in `generate_on_do_with_mutations`.
+        let catch = self.ensure_with_mutations_catch(
+            EnsureCatchTriple {
+                type_var,
+                error_var,
+                stack_var,
+                carried_var: None,
+            },
             cleanup_block,
             &families,
-            outer_version,
             arm.as_ref(),
+            (cell_boundary, private_scratch),
+            outer_version,
+            receiver_block.span,
         )?;
-
-        // ADR 0111 Addendum 5: three sibling with_branch_context
-        // frames — the try body, the success-path cleanup run, and the
-        // error-path cleanup run (`cleanup_block` is compiled twice, once
-        // per path, each its own arm) — each `generate_exception_body_with_threading`
-        // call mints its own fresh FrameId and `verify()`s its own real IR
-        // internally, so any two independently reaching the same StateAcc
-        // version number is correctly NOT a NonLinearVersion violation —
-        // see the matching comment in `generate_on_do_with_mutations`.
-
-        docs.push(docvec![
-            " ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
-        ]);
+        docs.push(catch);
         // ADR 0122 / BT-3506: leave the method's live versions as found — see
         // the matching restore at the end of `generate_on_do_with_mutations`.
         self.set_self_version(outer_self);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// The catch of [`Self::generate_ensure_with_mutations`]: the error path
+    /// (the cleanup from the pre-`try` state, or the cell refresh where the
+    /// cell is live, then the re-raise) and, for a `^` of this scope, the
+    /// BT-4312 relay ([`Self::ensure_relay`]), as one
+    /// [`ThreadedStmt::EnsureCatch`]. `(cell_boundary, private_scratch)`:
+    /// whether the actor-state cell is live here, and whether the construct's
+    /// scratch map is private (`~{}~`). Leaves the `SelfVt` version at the
+    /// construct's own baseline.
+    #[allow(clippy::too_many_arguments)] // the pieces of one catch clause
+    fn ensure_with_mutations_catch(
+        &mut self,
+        triple: EnsureCatchTriple,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        arm: Option<&ArmFrame>,
+        (cell_boundary, private_scratch): (bool, bool),
+        outer_version: usize,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Result<Document<'static>> {
+        let outer_self = self.self_version();
+        // Error: run cleanup for side effects (from original StateAcc), then
+        // re-raise. ADR 0137 §5: the cleanup of a failed body starts from the
+        // cell, which holds the state at entry plus the body's own writes made
+        // before the error, keeping the locals the arm's scratch map seeded.
+        let mut other: Vec<Document<'static>> = Vec::new();
+        if cell_boundary {
+            other.push(Self::ensure_cell_refresh_doc());
+        }
+        // The cleanup's state mutations are discarded (re-raise follows) —
+        // including any extra-family version it mints: this path re-raises
+        // rather than returning a tuple, so it has no trailing slot to carry
+        // one (BT-3486/BT-3506). It still gets the version-0 arm seed, since
+        // its own frame must verify like any other.
+        other.push(self.seed_exception_arm_family(families, outer_version));
+        let error_arm =
+            self.generate_exception_body_with_threading(cleanup_block, families, arm, None)?;
+        other.push(error_arm.doc);
+        other.push(docvec![
+            " ",
+            Self::emit_raw_raise(
+                triple.type_var.clone(),
+                triple.error_var.clone(),
+                triple.stack_var.clone()
+            ),
+        ]);
+        self.set_self_version(outer_self);
+
+        // BT-4312: a `^` of this scope carries its state to the boundary that
+        // answers it, so the cleanup it runs threads from that state and the
+        // throw resumes with the cleanup's result (`ensure_nlr_relay`). The
+        // carried family is what the scope's throw carries (`NlrSlot`), and
+        // nothing where this construct's scratch map is private (a
+        // direct-params loop body, a class method): its writes die with the
+        // scope whatever the boundary answers. The node records the carry and
+        // `private_scratch` as they are; the verifier applies the same rule.
+        let scope_carry = self.nlr_slot().carry();
+        let carry = scope_carry.filter(|carry| carry.writable_by_cleanup(private_scratch));
+        let cleanup_final = match carry {
+            Some(NlrCarry::Bindings | NlrCarry::ActorState) => {
+                (error_arm.state_version > 0).then_some(error_arm.state_version)
+            }
+            Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
+            // A scope's own throw is never foreign: only the
+            // `Block>>ensure:` fallback relays a foreign one.
+            Some(NlrCarry::Live | NlrCarry::Foreign) | None => None,
+        };
+        let writes_cell = self.block_touches_actor_state(cleanup_block);
+        let relays = self.scope_nlr_token().is_some()
+            && (cleanup_final.is_some() || (carry == Some(NlrCarry::Live) && writes_cell));
+        let carried_var = relays.then(|| self.ensure_relay_carried_var());
+        let relay = match (carry, &carried_var) {
+            (Some(carry), Some(carried)) => Some(self.ensure_relay(
+                carry,
+                carried,
+                cleanup_block,
+                families,
+                arm,
+                cell_boundary,
+                outer_version,
+            )?),
+            _ => None,
+        };
+        self.set_self_version(outer_self);
+        Ok(self.ensure_catch(
+            EnsureCatchTriple {
+                carried_var,
+                ..triple
+            },
+            (scope_carry, private_scratch),
+            EnsureCleanup::Inlined {
+                final_version: cleanup_final,
+                writes_cell,
+            },
+            relay,
+            Document::Vec(other),
+            span,
+        ))
+    }
+
+    /// ADR 0137 §5: `let StateAcc = refresh(Self, StateAcc) in`, the cell's
+    /// fields over the scratch map's locals: where an `ensure:` cleanup that
+    /// an error or a `^` runs starts from in an actor method (a `^` stores
+    /// its state to the cell before it throws).
+    fn ensure_cell_refresh_doc() -> Document<'static> {
+        docvec![
+            "let StateAcc = ",
+            actor_state_call(
+                actor_state_helper::REFRESH,
+                vec![leaf::var("Self"), leaf::var("StateAcc")]
+            ),
+            " in "
+        ]
+    }
+
+    /// BT-4312: the `$bt_nlr` relay of an `ensure:` with state threading
+    /// (`ensure_nlr_relay`): the cleanup compiled once more, seeded from the
+    /// state the scope's own throw carries (`carried`, the clause's pattern
+    /// variable), and the slot the throw resumes with.
+    ///
+    /// - [`NlrCarry::Bindings`] / [`NlrCarry::ActorState`]: the REPL's
+    ///   bindings map, or an actor method's `State`. Seeded from the carried
+    ///   map; where the actor-state
+    ///   cell is live, from the cell refresh the error path uses, which holds
+    ///   the carried state (a `^` stores it before it throws, and every relay
+    ///   further in stores its own result). Re-throws the cleanup's final
+    ///   `StateAcc`, stored to the cell first where it is live.
+    /// - [`NlrCarry::SelfVt`]: a value-type method's `Self`, seeded from the
+    ///   carried one; re-throws the cleanup's final `Self`.
+    /// - [`NlrCarry::Live`]: the state is the cell, which the cleanup writes
+    ///   in place; re-throws the carried state with the cell's fields over it
+    ///   ([`RethrowSlot::CellOverCarried`]), so the `__local__` keys a merged
+    ///   Tier 2 fun's `^` flushed keep the values they had at the `^`
+    ///   (BT-4122), not the ones bound at this `ensure:`.
+    #[allow(clippy::too_many_arguments)] // the pieces of one relay clause
+    fn ensure_relay(
+        &mut self,
+        carry: NlrCarry,
+        carried: &str,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        arm: Option<&ArmFrame>,
+        cell_boundary: bool,
+        outer_version: usize,
+    ) -> Result<EnsureNlrRelay> {
+        let cell_seed = || {
+            if cell_boundary {
+                Self::ensure_cell_refresh_doc()
+            } else {
+                Document::Nil
+            }
+        };
+        let relay = match carry {
+            NlrCarry::Bindings | NlrCarry::ActorState => {
+                let seed = if cell_boundary {
+                    Self::ensure_cell_refresh_doc()
+                } else {
+                    docvec!["let StateAcc = ", leaf::var(carried.to_string()), " in "]
+                };
+                let family_seed = self.seed_exception_arm_family(families, outer_version);
+                let cleanup = self.generate_exception_body_with_threading(
+                    cleanup_block,
+                    families,
+                    arm,
+                    None,
+                )?;
+                EnsureNlrRelay {
+                    seed: docvec![seed, family_seed],
+                    cleanup: cleanup.doc,
+                    cell_store: cell_boundary,
+                    rethrow: RethrowSlot::Version(cleanup.state_version),
+                }
+            }
+            NlrCarry::SelfVt => {
+                // The seed below binds the bare `Self` to the carried one, so
+                // the cleanup's arm mints `Self1`, `Self2`, … from there. Looked
+                // up by name: `families` is ordered, and `SelfVt` need not be
+                // its first member.
+                if families.contains(&VersionPrefix::SelfVt) {
+                    self.set_family_version(&VersionPrefix::SelfVt, 0);
+                }
+                let cleanup = self.generate_exception_body_with_threading(
+                    cleanup_block,
+                    families,
+                    arm,
+                    None,
+                )?;
+                EnsureNlrRelay {
+                    seed: docvec![
+                        cell_seed(),
+                        "let Self = ",
+                        leaf::var(carried.to_string()),
+                        " in "
+                    ],
+                    cleanup: cleanup.doc,
+                    cell_store: false,
+                    rethrow: RethrowSlot::Version(
+                        cleanup.family_mutated_version.map_or(0, |(_, v)| v),
+                    ),
+                }
+            }
+            NlrCarry::Live => {
+                let family_seed = self.seed_exception_arm_family(families, outer_version);
+                let cleanup = self.generate_exception_body_with_threading(
+                    cleanup_block,
+                    families,
+                    arm,
+                    None,
+                )?;
+                EnsureNlrRelay {
+                    seed: docvec![cell_seed(), family_seed],
+                    cleanup: cleanup.doc,
+                    cell_store: false,
+                    rethrow: RethrowSlot::CellOverCarried,
+                }
+            }
+            NlrCarry::Foreign => {
+                return Err(CodeGenError::Internal(
+                    "an inlined `ensure:` cleanup relays its own scope's `^`, never a foreign one"
+                        .to_string(),
+                ));
+            }
+        };
+        Ok(relay)
     }
 
     /// Builds the Tier 1 (pure protected block) `try`/`catch` body for
@@ -1604,6 +1894,51 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4429: the catch of `Block>>ensure:`'s structural fallback, an
+    /// [`ThreadedStmt::EnsureCatch`](threaded_ir::ThreadedStmt::EnsureCatch)
+    /// whose relay takes every foreign `^` ([`NlrCarry::Foreign`]).
+    fn ensure_structural_fallback_catch(&mut self, cleanup_param: &str) -> Document<'static> {
+        let type_var = self.fresh_temp_var("Type");
+        let error_var = self.fresh_temp_var("Error");
+        let stack_var = self.fresh_temp_var("Stack");
+        // BT-4429: every `^` that crosses this catch is foreign (this is the
+        // Block method's frame), so its state kind is known only at run time.
+        // The cleanup is a closure, which writes only the actor-state cell:
+        // the relay resumes the throw with the cell over the carried state
+        // when the throw carried the cell's state (an actor method's or
+        // closure's `^`), and as it came otherwise (`ensure_nlr_relay`).
+        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
+        let relay = EnsureNlrRelay {
+            seed: Document::Nil,
+            cleanup: docvec![
+                "let _ = ",
+                self.annotate_current_send_call(cleanup_apply()),
+                " in"
+            ],
+            cell_store: false,
+            rethrow: RethrowSlot::CellIfCarried,
+        };
+        let other = docvec![
+            "do ",
+            self.annotate_current_send_call(cleanup_apply()),
+            " ",
+            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+        ];
+        self.ensure_catch(
+            EnsureCatchTriple {
+                type_var,
+                error_var,
+                stack_var,
+                carried_var: None,
+            },
+            (Some(NlrCarry::Foreign), false),
+            EnsureCleanup::Closure { writes_cell: true },
+            Some(relay),
+            other,
+            beamtalk_core::source_analysis::Span::default(),
+        )
+    }
+
     /// Generates the fallback method body for `ensure` — Block's
     /// `ensure:`. Reached only via generic dispatch bypassing the call-site
     /// interception `generate_ensure` normally provides (e.g. `perform:`).
@@ -1647,10 +1982,8 @@ impl CoreErlangGenerator {
 
         let try_result_var = self.fresh_temp_var("TryResult");
         let result_var = self.fresh_temp_var("Result");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-
+        let catch = self.ensure_structural_fallback_catch(&cleanup_param);
+        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.clone()), " ()"];
         let tier1_try = docvec![
             "try let ",
             leaf::var(try_result_var.clone()),
@@ -1661,27 +1994,11 @@ impl CoreErlangGenerator {
             " of ",
             leaf::var(result_var.clone()),
             " -> let _ = ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_param.clone()),
-                " ()"
-            ]),
+            self.annotate_current_send_call(cleanup_apply()),
             " in ",
             leaf::var(result_var),
-            " catch <",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> do ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_param.clone()),
-                " ()"
-            ]),
             " ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
+            catch,
         ];
 
         let cleanup_stateful_error = self.generate_stateful_block_dispatch_error(
@@ -1810,6 +2127,36 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// The frame an arm entered after the try body ([`ArmEntry`]) lowers its
+    /// entry `LocalRebind`s by: the frame the arm itself is rendered as
+    /// (`render_branch_arm`), so the verifier's `LocalRebindModeMismatch`
+    /// reads the same cell of ADR 0131 §2's table. Outside the REPL that is
+    /// the `BranchArm` frame carrying the arm's `threads`. A REPL arm is not a
+    /// `BranchArm`: it runs over the bindings map (the `StateAcc` frame
+    /// [`Self::with_repl_arm_rebind_frame`] registers), where every binding is
+    /// a member (`RebindFrame::with_repl_binding`), so an entry rebind is a
+    /// `Put` of the binding's key (BT-4424: inside a REPL loop body, a binding
+    /// the body wrote before the `ensure:` is bound in the generated code and
+    /// threaded here, and was lowered as a plain `let`).
+    fn arm_entry_rebind_frame(
+        &self,
+        frame: FrameId,
+        arm: Option<&ArmFrame>,
+        locals: &[String],
+    ) -> Result<RebindFrame> {
+        if !self.is_repl_mode() {
+            return Ok(RebindFrame {
+                frame,
+                kind: RebindFrameKind::BranchArm,
+                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
+            });
+        }
+        let repl_arm = self.rebind_frame_of(frame)?;
+        Ok(locals
+            .iter()
+            .fold(repl_arm, |frame, local| frame.with_repl_binding(local)))
+    }
+
     /// The `BranchArm` frame shared by the arms of an `on:do:`/`ensure:` that
     /// is a local-threading producer: the construct's seeded set
     /// ([`Self::branch_threaded_locals`] over `blocks`). `None` for the legacy
@@ -1882,15 +2229,11 @@ impl CoreErlangGenerator {
 
         // ADR 0131 §2 (Phase 3b): an arm entered after the try body (the
         // success-path cleanup of `ensure:`) reads the locals the try body
-        // wrote back from its returned tuple, as `LocalRebind`s lowered by this
-        // arm's frame (a legacy arm, which threads nothing of its own, binds
-        // them with a plain `let`).
+        // wrote back from its returned tuple, as `LocalRebind`s lowered by the
+        // frame the arm is rendered as ([`Self::arm_entry_rebind_frame`]: a
+        // REPL arm `Put`s each binding over the bindings map, BT-4424).
         if let Some(entry) = entry {
-            let enclosing = RebindFrame {
-                frame,
-                kind: RebindFrameKind::BranchArm,
-                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
-            };
+            let enclosing = self.arm_entry_rebind_frame(frame, arm, &entry.locals)?;
             let carrier = self.fresh_temp_var("ExEntry");
             let prelude = self.construct_rebind_prelude(
                 &enclosing,

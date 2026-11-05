@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// An indirect user Value (VbBase is the `Value subclass:`) with its own
+// field, so it gets a synthesized keyword constructor `w:` (row 2e, BT-4132).
+VbBase subclass: VbLeaf
+  field: w :: Integer = 0

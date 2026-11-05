@@ -113,6 +113,8 @@
 
 mod actor_codegen;
 mod actor_state_access;
+mod binary_construction;
+mod binary_segments;
 mod block_analysis;
 mod blocks;
 mod class_builder_source;
@@ -127,6 +129,7 @@ mod driver;
 #[cfg(any(test, feature = "test"))]
 pub mod dropped_assignment_probe;
 mod dynamic_site_report;
+pub mod ensure_nlr_relay;
 pub mod erlang_types;
 mod error;
 mod errors;
@@ -135,6 +138,7 @@ mod expressions;
 mod field_types;
 mod gen_server;
 pub(in crate::core_erlang) mod generator;
+mod guard_returns;
 mod intrinsics;
 mod method_frame;
 pub mod module_shell;
@@ -218,9 +222,11 @@ impl CoreErlangGenerator {
         match expr {
             Expression::Literal(lit, _) => self.generate_literal(lit),
             Expression::Identifier(id) => self.generate_identifier(id),
-            Expression::ClassReference { name, package, .. } => {
-                self.generate_class_reference(&name.name, package.as_ref().map(|p| p.name.as_str()))
-            }
+            // BT-4074: a package qualifier (`pkg@Foo`) selects nothing at
+            // runtime — the class process is registered under the bare name —
+            // so a qualified reference yields the same canonical class object
+            // as `Foo`.
+            Expression::ClassReference { name, .. } => self.generate_class_reference(&name.name),
             Expression::Super(_) => {
                 // Super by itself is not a valid expression - it must be used
                 // as a message receiver (e.g., `super increment`). Semantic
@@ -315,11 +321,12 @@ impl CoreErlangGenerator {
                 // If inside a block with NLR infrastructure active, generate a throw
                 // so the return escapes from the block closure back to the enclosing method.
                 // Otherwise (at method body level, or no NLR), just emit the value.
-                // BT-4288: a REPL `^` in a loop or fold body throws to the
-                // eval's boundary (`repl_nlr`); every other REPL `^` has none.
+                // BT-4288 / BT-4312: a REPL `^` run in place throws to the
+                // eval's boundary (`repl_nlr`); a closure's `^` and one that
+                // is the input's whole last statement have none.
                 let nlr_token = match self.current_nlr_token().cloned() {
                     Some(token) => Some(token),
-                    None => self.repl_loop_return_token(*span),
+                    None => self.repl_return_token(*span),
                 };
                 if let Some(nlr_token) = nlr_token {
                     // Emit diagnostic for NLR throw/catch generation.
@@ -397,62 +404,8 @@ impl CoreErlangGenerator {
                         let result_doc = self.threaded_value_doc(&tv.value);
                         (dispatch_doc, result_doc)
                     };
-                    // All NLR throws carry state as a 4-tuple.
-                    // Actor methods use the current gen_server state; value type
-                    // methods use the latest Self{N} snapshot so field mutations
-                    // accumulated before the ^ are preserved.
-                    // Class methods carry no state (ADR 0130 §3): class
-                    // variables are written in place, so a `^` unwinding out
-                    // of a class method has nothing to hand back beside the
-                    // value, and the slot is `nil`.
-                    let state_doc = if let Some(merged) = self.tier2_merged_fun.clone() {
-                        // BT-4122: a `^` out of a merged Tier 2 fun carries
-                        // the cell merged with the fun's current locals — the
-                        // throw bypasses the exit flush, so without this the
-                        // fun's local writes would be lost.
-                        let take_var = self.fresh_temp_var("T2Nlr");
-                        let (flush_doc, final_acc) =
-                            self.tier2_flush_locals_doc(&take_var, &merged.captured);
-                        docvec![
-                            "let ",
-                            leaf::var(take_var),
-                            " = ",
-                            threaded_ir::cell_take_call(),
-                            " in ",
-                            flush_doc,
-                            leaf::var(final_acc),
-                        ]
-                    } else if self.in_class_method() {
-                        leaf::atom("nil")
-                    } else if self.is_repl_mode() {
-                        // BT-4288: a REPL throw carries the workspace bindings
-                        // map at the `^` (a loop body's `StateAcc`), which the
-                        // eval's catch answers as its bindings.
-                        leaf::var(self.current_state_var())
-                    } else if self.in_cell_closure() {
-                        // ADR 0137 §3: an actor closure holds no threaded
-                        // `State`; the throw carries the actor's current one,
-                        // the cell at home (the creation-time capture away).
-                        self.cell_view_doc()
-                    } else if self.context == CodeGenContext::Actor {
-                        // A direct-params loop binds no `StateAcc`: its body cannot
-                        // write `State`, so the throw carries the state the loop
-                        // captured on entry (BT-3562's `current_field_read_state_var`).
-                        // BT-4121: unless the loop brackets guarded operators, whose
-                        // slow paths wrote the cell — then the throw carries the
-                        // live cell, like the loop's own exit pack, and the
-                        // pre-throw store below keeps those writes instead of
-                        // clobbering them with the entry state.
-                        // (BT-4180: decided and recorded by the read choke point.)
-                        match self
-                            .actor_state_source(threaded_ir::StateReadSite::NlrThrowState, *span)
-                        {
-                            synced_call::ActorStateSource::Cell => threaded_ir::cell_take_call(),
-                            synced_call::ActorStateSource::Var(var) => leaf::var(var),
-                        }
-                    } else {
-                        leaf::var(self.current_self_var())
-                    };
+                    // All NLR throws carry state as a 4-tuple (`nlr_throw_state_doc`).
+                    let state_doc = self.nlr_throw_state_doc(*span);
                     let throw_doc = docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
                         leaf::var(nlr_token),
@@ -507,6 +460,10 @@ impl CoreErlangGenerator {
             Expression::StringInterpolation { segments, .. } => {
                 self.generate_string_interpolation(segments)
             }
+            // ADR 0143: `<<...>>` in expression position builds a binary.
+            Expression::BinaryConstruction { segments, .. } => {
+                self.generate_binary_construction(segments)
+            }
             Expression::DestructureAssignment { span, .. } => {
                 // DestructureAssignment is only valid as a statement in a body context.
                 // All statement-body generators handle it explicitly. Reaching here means
@@ -534,23 +491,16 @@ impl CoreErlangGenerator {
     /// convenience names (Transcript, Beamtalk, Workspace), then falls back
     /// to class registry lookup. In batch mode, goes directly to the registry.
     ///
-    /// ADR 0070 Phase 2: When `package` is `Some`, the class is from a known
-    /// dependency and the module name is deterministic (`bt@{pkg}@{snake}`).
-    /// The class registry lookup uses the class name for now — package-aware
+    /// A package-qualified reference (`pkg@Foo`, ADR 0070) compiles exactly
+    /// like `Foo`: the registry lookup is by bare name, and the class object
+    /// carries the canonical `'Foo class'` tag so it compares equal to every
+    /// runtime-built class object for the same class (BT-4074). Package-aware
     /// registry disambiguation is a future phase.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_class_reference(
         &mut self,
         class_name: &str,
-        package: Option<&str>,
     ) -> Result<Document<'static>> {
-        // ADR 0070 Phase 2: For package-qualified references, we know the exact
-        // display name to use in the class object tuple.
-        let display_name = match package {
-            Some(pkg) => format!("{pkg}@{class_name}"),
-            None => class_name.to_string(),
-        };
-
         // ADR 0129 §7: REPL top-level expressions resolve a name through the
         // session map (locals and `bind:as:` entries) before the class registry.
         // Methods and batch-compiled code use the registry only, so a missing
@@ -573,17 +523,18 @@ impl CoreErlangGenerator {
                 Self::registered_class_pid_doc(class_name),
                 " of ",
                 error_doc,
-                Self::class_object_from_registry_clause(
-                    &class_pid_var,
-                    &class_mod_var,
-                    &display_name
-                ),
+                Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name),
                 "end end",
             ]);
         }
 
         let class_pid_var = self.fresh_var("ClassPid");
-        let class_mod_var = self.fresh_var("ClassModName");
+        let object_clause = if let Some(module) = self.pinned_builtin_class_module(class_name) {
+            Self::class_object_with_module_clause(&class_pid_var, module, class_name)
+        } else {
+            let class_mod_var = self.fresh_var("ClassModName");
+            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name)
+        };
         let error_doc = self.class_not_found_error_doc(class_name);
 
         Ok(docvec![
@@ -591,9 +542,23 @@ impl CoreErlangGenerator {
             Self::registered_class_pid_doc(class_name),
             " of ",
             error_doc,
-            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, &display_name),
+            object_clause,
             "end",
         ])
+    }
+
+    /// BT-4411: the compile-time module of a built-in class literal, when its
+    /// routing-fixture row pins one ([`routing::pinned_class_module`]) and that
+    /// module is the class's own compiled module (the one
+    /// `module_name_safe/1` would read at run time). `None` for every other
+    /// class, and for a name declared by more than one package
+    /// ([`Self::is_shadowed_class`]): those keep the run-time module lookup.
+    fn pinned_builtin_class_module(&self, class_name: &str) -> Option<&'static str> {
+        if self.is_shadowed_class(class_name) {
+            return None;
+        }
+        let module = routing::pinned_class_module(class_name)?;
+        (self.compiled_module_name(class_name) == module).then_some(module)
     }
 
     /// `call 'erlang':'whereis'('beamtalk_class_<Name>')`: the pid of the class
@@ -605,9 +570,10 @@ impl CoreErlangGenerator {
     /// fixture), so a class reference costs one `erlang:whereis/1` instead of
     /// `whereis_class/1`'s per-use `binary_to_atom`. Only the *name* is
     /// compile-time: the pid is looked up on every use, never baked, so a
-    /// restarted class process is found (ADR 0025 amendment §3), and the
-    /// module stays a run-time lookup, so a REPL redefinition into a new
-    /// module is seen.
+    /// restarted class process is found (ADR 0025 amendment §3). The module
+    /// stays a run-time lookup for user classes, so a REPL redefinition into a
+    /// new module is seen; a stdlib built-in whose routing-fixture row pins its
+    /// own module bakes it (BT-4411), since a stdlib class cannot be redefined.
     pub(in crate::core_erlang) fn registered_class_pid_doc(class_name: &str) -> Document<'static> {
         docvec![
             "call 'erlang':'whereis'(",
@@ -632,18 +598,13 @@ impl CoreErlangGenerator {
     /// only the `module_name_safe/1` ETS reads and the class-object tuple are
     /// dropped. Returns `None` where the full class object is still needed:
     /// a REPL top-level expression (a session binding may shadow the name,
-    /// ADR 0129 §7) and a package-qualified reference (whose class object
-    /// carries the qualified display tag).
+    /// ADR 0129 §7). A package-qualified reference resolves by its bare name
+    /// like any other (BT-4074).
     pub(in crate::core_erlang) fn class_name_only_reference(
         &mut self,
         expr: &Expression,
     ) -> Option<Document<'static>> {
-        let Expression::ClassReference {
-            name,
-            package: None,
-            ..
-        } = expr
-        else {
+        let Expression::ClassReference { name, .. } = expr else {
             return None;
         };
         if self.context == CodeGenContext::Repl {
@@ -674,7 +635,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn class_object_from_registry_clause(
         class_pid_var: &str,
         class_mod_var: &str,
-        display_name: &str,
+        class_name: &str,
     ) -> Document<'static> {
         docvec![
             "<",
@@ -685,13 +646,60 @@ impl CoreErlangGenerator {
             " = call 'beamtalk_object_class':'module_name_safe'(",
             leaf::var(class_pid_var.to_string()),
             ") in ",
+            Self::class_object_tuple_doc(
+                class_name,
+                leaf::var(class_mod_var.to_string()),
+                leaf::var(class_pid_var.to_string()),
+            ),
+            " ",
+        ]
+    }
+
+    /// `{'beamtalk_object', '<Name> class', Module, ClassPid}`: the class object
+    /// for `class_name`, the shape `beamtalk_object_class` builds at run time
+    /// (tag, module, pid). Every codegen site that builds a class object from
+    /// a class pid uses this, so the field order lives in one place: the class
+    /// literal ([`Self::generate_class_reference`]), the typed `class` send
+    /// (`generate_typed_class_of`) and the guarded class direct call
+    /// (`guarded_class_direct_call_doc`).
+    pub(in crate::core_erlang) fn class_object_tuple_doc(
+        class_name: &str,
+        module: Document<'static>,
+        class_pid: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
             "{'beamtalk_object', ",
-            leaf::atom(util::metaclass_tag(display_name)),
+            leaf::atom(util::metaclass_tag(class_name)),
             ", ",
-            leaf::var(class_mod_var.to_string()),
+            module,
             ", ",
+            class_pid,
+            "}",
+        ]
+    }
+
+    /// BT-4411: the `<ClassPid> when 'true' -> {'beamtalk_object', Tag,
+    /// 'module', ClassPid}` clause for a built-in whose module is known at
+    /// compile time ([`Self::pinned_builtin_class_module`]). The pid is still
+    /// the run-time `whereis` result, so a restarted class process is seen
+    /// (ADR 0025 amendment §3); only the `module_name_safe/1` lookup is
+    /// dropped. The tuple is `=:=` to the one
+    /// [`Self::class_object_from_registry_clause`] builds.
+    fn class_object_with_module_clause(
+        class_pid_var: &str,
+        module: &'static str,
+        class_name: &str,
+    ) -> Document<'static> {
+        docvec![
+            "<",
             leaf::var(class_pid_var.to_string()),
-            "} ",
+            "> when 'true' -> ",
+            Self::class_object_tuple_doc(
+                class_name,
+                leaf::atom(module),
+                leaf::var(class_pid_var.to_string()),
+            ),
+            " ",
         ]
     }
 

@@ -157,16 +157,21 @@ pub enum SuperclassTypeArg {
 /// Constructor synthesis record: what the class's own compilation
 /// emitted for value construction.
 ///
-/// `Some` for direct `Value` subclasses only: extraction sees the AST
-/// kind before writeback, so indirect subclasses keep `None` and take
-/// the slow path.
+/// `Some` for every class compiled as a `Value` (its post-writeback kind):
+/// direct `Value subclass:` declarations at extraction, and indirect Value
+/// subclasses once `ClassHierarchy::propagate_class_kind` (or, where the
+/// stored state determines the keyword decision,
+/// `propagate_cross_file_class_kind`) has walked the chain (BT-4132). The
+/// one rule is [`ClassInfo::record_constructor_anchor`].
 ///
-/// `None` for non-Value classes, for Value classes whose AST kind fell back
-/// (cross-file parent gaps — `propagate_class_kind` corrects `is_value` for
-/// the type checker but deliberately leaves this unset, since codegen emits
-/// no value treatment there), and for hand-written/cross-wire infos that
-/// predate the field (`#[serde(default)]`). Readers treat `None` as "no
-/// direct constructor calls" (safe fallback to `class_send`).
+/// `None` for non-Value classes, for AST-less classes whose keyword decision
+/// is not derivable from stored state, for binary-only classes decoded from
+/// BEAM metadata (the wire does not carry the anchor), and for
+/// hand-written/cross-wire infos that predate the field
+/// (`#[serde(default)]`). Readers treat `None` as "no direct constructor
+/// calls" (safe fallback to `class_send`). `Some` only makes a class
+/// eligible to try the direct path: every direct constructor call is
+/// guarded at run time (BT-4409).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AutoConstructors {
@@ -231,8 +236,8 @@ pub struct ClassInfo {
     /// Native actors delegate to a backing Erlang module and cannot declare
     /// `state:` fields (state is owned by the Erlang `gen_server`).
     pub is_native: bool,
-    /// Constructor synthesis record, if the class's AST kind was `Value` at
-    /// extraction. See [`AutoConstructors`] for the invariant.
+    /// Constructor synthesis record, if the class compiles as a `Value`
+    /// (direct or indirect). See [`AutoConstructors`] for the invariant.
     #[cfg_attr(feature = "serde", serde(default))]
     pub auto_ctors: Option<AutoConstructors>,
     /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
@@ -450,16 +455,22 @@ impl ClassInfo {
     }
 
     /// Whether `selector` is a class-variable reflection send (`hasField:`,
-    /// `clearField:`): the class process answers it from its own state ahead
-    /// of the class-method lookup (`beamtalk_object_class:
-    /// is_class_var_reflection_selector/1`), so a class method of that name is
-    /// never what a send reaches and is never direct-call eligible.
+    /// `clearField:`, `fieldAt:`, `fieldAt:put:`; BT-4148): the class process
+    /// answers it from its own state ahead of the class-method lookup
+    /// (`beamtalk_object_class:is_class_var_reflection_selector/1`), so a
+    /// class method of that name is never what a send reaches and is never
+    /// direct-call eligible. Both sides are pinned to
+    /// `runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json`.
     #[must_use]
     pub fn is_class_var_reflection_selector(selector: &str) -> bool {
+        use crate::ast::WellKnownSelector;
         matches!(
-            crate::ast::WellKnownSelector::from_name(selector),
+            WellKnownSelector::from_name(selector),
             Some(
-                crate::ast::WellKnownSelector::HasField | crate::ast::WellKnownSelector::ClearField
+                WellKnownSelector::HasField
+                    | WellKnownSelector::ClearField
+                    | WellKnownSelector::FieldAt
+                    | WellKnownSelector::FieldAtPut
             )
         )
     }
@@ -478,7 +489,7 @@ impl ClassInfo {
     /// duplicating the field-mapping logic.
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to struct fields
     pub(super) fn from_class_definition(class: &ClassDefinition) -> Self {
-        let mut instance_methods: Vec<MethodInfo> = class
+        let instance_methods: Vec<MethodInfo> = class
             .methods
             .iter()
             .map(|m| MethodInfo {
@@ -504,7 +515,7 @@ impl ClassInfo {
             })
             .collect();
 
-        let mut class_methods: Vec<MethodInfo> = class
+        let class_methods: Vec<MethodInfo> = class
             .class_methods
             .iter()
             .map(|m| MethodInfo {
@@ -529,23 +540,7 @@ impl ClassInfo {
             })
             .collect();
 
-        // For `Value subclass:` classes, synthesize auto-generated slot
-        // methods so the type checker and cross-file consumers can resolve them.
-        // The recorded keyword decision is also the constructor-emission
-        // anchor: `Some` here means direct construction verdicts apply.
-        let auto_ctors = if class.class_kind == ClassKind::Value {
-            Some(AutoConstructors {
-                keyword_constructor: ClassHierarchy::add_value_auto_methods(
-                    class,
-                    &mut instance_methods,
-                    &mut class_methods,
-                ),
-            })
-        } else {
-            None
-        };
-
-        Self {
+        let mut info = Self {
             name: class.name.name.clone(),
             superclass: class.superclass.as_ref().map(|s| s.name.clone()),
             is_sealed: class.is_sealed,
@@ -555,7 +550,8 @@ impl ClassInfo {
             package: None, // Populated later by the build pipeline or BEAM metadata
             is_value: class.class_kind == ClassKind::Value,
             is_native: class.backing_module.is_some(),
-            auto_ctors,
+            // Set below for a `Value subclass:` (BT-4132's shared rule).
+            auto_ctors: None,
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             surface_incomplete: false,
             // AST-built classes always compile to a module.
@@ -631,7 +627,44 @@ impl ClassInfo {
                     })
                     .collect()
             },
+        };
+        // For `Value subclass:` classes, synthesize auto-generated slot
+        // methods so the type checker and cross-file consumers can resolve
+        // them, and record the constructor anchor. An indirect Value subclass
+        // gets the same treatment from `propagate_class_kind`, once its chain
+        // is known.
+        if class.class_kind == ClassKind::Value {
+            info.synthesize_value_surface(class);
         }
+        info
+    }
+
+    /// Synthesize a class's Value slot methods from its AST and record the
+    /// constructor anchor (BT-4132): the one place an AST-built class becomes
+    /// eligible for direct construction, shared by `from_class_definition`
+    /// (direct `Value subclass:`) and `ClassHierarchy::propagate_class_kind`
+    /// (indirect Value subclasses, once the chain is known).
+    pub(super) fn synthesize_value_surface(&mut self, class: &ClassDefinition) {
+        let keyword_constructor = ClassHierarchy::add_value_auto_methods(
+            class,
+            &mut self.methods,
+            &mut self.class_methods,
+        );
+        self.record_constructor_anchor(keyword_constructor);
+    }
+
+    /// Record the constructor anchor for a class compiled as a Value: its
+    /// synthesized keyword constructor decision (BT-4132). Codegen emits the
+    /// synthesized `new/0`, `new/1` and keyword constructor for every class
+    /// whose post-writeback kind is `Value`, direct or indirect, so the anchor
+    /// only makes the class eligible to *try* the direct path; the run-time
+    /// guard (BT-4409) decides each send. Callers set it only where the
+    /// keyword decision is known; everywhere else the anchor stays `None`
+    /// (fail closed: no direct-construction verdicts).
+    pub(super) fn record_constructor_anchor(&mut self, keyword_constructor: Option<EcoString>) {
+        self.auto_ctors = Some(AutoConstructors {
+            keyword_constructor,
+        });
     }
 }
 

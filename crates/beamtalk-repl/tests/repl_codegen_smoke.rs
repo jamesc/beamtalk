@@ -1450,7 +1450,7 @@ fn test_repl_expression_spawn_with_args_uses_class_module_index() {
 fn test_qualified_class_reference_standalone() {
     // ADR 0070 Phase 2: `json@Parser` as a standalone expression should use
     // the class registry with the short name 'Parser' and produce the
-    // display name 'json@Parser class' in the class object tuple.
+    // canonical tag 'Parser class' in the class object tuple (BT-4074).
     use beamtalk_core::ast::{Expression, Identifier, Module};
     use beamtalk_core::source_analysis::Span;
 
@@ -1481,10 +1481,14 @@ fn test_qualified_class_reference_standalone() {
         "Should look up 'Parser' (short name) in class registry. Got:\n{code}"
     );
 
-    // Display name in the class object tuple includes package qualifier
+    // BT-4074: the class object carries the canonical tag, not a qualified one
     assert!(
-        code.contains("'json@Parser class'"),
-        "Class object tuple should use 'json@Parser class' as display name. Got:\n{code}"
+        code.contains("{'beamtalk_object', 'Parser class', "),
+        "Class object tuple should use the canonical 'Parser class' tag. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("json@Parser class"),
+        "No package-qualified tag may be emitted. Got:\n{code}"
     );
 }
 
@@ -1678,7 +1682,8 @@ fn repl_sealed_stateless_class_method_emits_direct_call() {
     );
     // BT-4301 (ADR 0142 §2): guarded, with `class_send` as the fallback.
     assert!(
-        code.contains("'direct_call_ok'('Facade class', 'Facade')"),
+        (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
+            && code.contains(", 'Facade class'}, 'Facade', ")),
         "Eligible send must be guarded in: {code}"
     );
 }
@@ -1691,7 +1696,8 @@ fn repl_non_sealed_class_method_emits_guarded_direct_call() {
     let code = repl_code_with_facade_hierarchy("Facade plain");
     assert!(
         code.contains("call 'bt@facade':'class_plain'(")
-            && code.contains("'direct_call_ok'('Facade class', 'Facade')"),
+            && (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
+                && code.contains(", 'Facade class'}, 'Facade', ")),
         "A class method of a stateless class is a guarded direct call in: {code}"
     );
 }
@@ -1756,7 +1762,8 @@ fn repl_beamtalk_class_named_emits_direct_call() {
         "Expected a direct call into bt@stdlib@beamtalk in: {code}"
     );
     assert!(
-        code.contains("'direct_call_ok'('Beamtalk class', 'Beamtalk')"),
+        (code.contains("call 'beamtalk_class_shadow_flags':'static_call_target'({")
+            && code.contains(", 'Beamtalk class'}, 'Beamtalk', ")),
         "Beamtalk classNamed: must be guarded in: {code}"
     );
 }

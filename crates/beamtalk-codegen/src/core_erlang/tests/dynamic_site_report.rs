@@ -25,6 +25,31 @@ fn report(src: &str) -> Vec<String> {
         .collect()
 }
 
+/// The dynamic-dispatch hints of compiling `src` with diagnostics on, after
+/// the full analysis pass (`analyse_full`) — needed for anything the plain
+/// self-sufficient path does not register, such as a module's type aliases.
+fn report_full(src: &str) -> Vec<String> {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let analysis = beamtalk_core::semantic_analysis::analyse_full(
+        &module,
+        beamtalk_core::semantic_analysis::AnalysisContext::default(),
+    );
+    let result = crate::core_erlang::generate_module_with_warnings(
+        &module,
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_analysis(analysis)
+            .with_codegen_diagnostics(true),
+    )
+    .expect("codegen should succeed");
+    result
+        .warnings
+        .into_iter()
+        .map(|w| w.message.to_string())
+        .filter(|m| m.contains("dynamic dispatch"))
+        .collect()
+}
+
 /// The one hint for `selector`.
 fn hint_for(src: &str, selector: &str) -> String {
     let hints = report(src);
@@ -62,18 +87,36 @@ fn routed_builtin_send_is_converted() {
 
 #[test]
 fn builtin_receiver_reports_its_routing_row() {
+    // BT-4390: a `String` special selector names itself, not the whole row.
     let hint = hint_for(
-        "Object subclass: Caller\n  run: s :: String => s size\n",
-        "size",
+        "Object subclass: Caller\n  run: s :: String => s asBase64\n",
+        "asBase64",
     );
     assert!(
         hint.contains(
-            "reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string"
+            "reason: builtin — String: the dynamic path answers 'asBase64' outside bt@stdlib@string"
         ),
         "{hint}"
     );
     assert!(hint.contains("receiver: String"), "{hint}");
     assert!(hint.contains("declared]"), "{hint}");
+}
+
+#[test]
+fn string_and_pid_ordinary_selectors_are_converted() {
+    // BT-4390: only the fixture's special selectors keep a `String` or `Pid`
+    // send dynamic; any other selector takes the guarded direct call.
+    let hints = report(concat!(
+        "Object subclass: Caller\n",
+        "  run: s :: String => s size\n",
+        "  go: p :: Pid => p frobnicate\n",
+    ));
+    assert!(
+        !hints
+            .iter()
+            .any(|h| h.starts_with("Send 'size'") || h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
 }
 
 #[test]
@@ -103,17 +146,18 @@ fn builtin_without_a_single_module_reports_why() {
 }
 
 #[test]
-fn builtin_special_selectors_keep_the_whole_row_dynamic() {
-    // `Pid` answers the future protocol through `beamtalk_future`, so even a
-    // selector outside it stays dynamic: the row's module does not speak for
-    // the whole protocol.
+fn builtin_special_selector_reports_itself() {
+    // `Pid` answers the future protocol through `beamtalk_future`, so
+    // `whenResolved:` stays dynamic; the reason names that one selector (the
+    // old whole-row wording read "and 0 other selectors" for a one-entry
+    // list).
     let hint = hint_for(
-        "Object subclass: Caller\n  run: p :: Pid => p frobnicate\n",
-        "frobnicate",
+        "Object subclass: Caller\n  run: p :: Pid => p whenResolved: [:v | v]\n",
+        "whenResolved:",
     );
     assert!(
         hint.contains(
-            "reason: builtin — Pid: 'await' and 4 other selectors are answered outside bt@stdlib@pid"
+            "reason: builtin — Pid: the dynamic path answers 'whenResolved:' outside bt@stdlib@pid"
         ),
         "{hint}"
     );
@@ -254,4 +298,56 @@ fn tuple_type_pattern_rejects_every_reserved_tag() {
         );
     }
     super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn alias_typed_builtin_send_is_converted() {
+    // BT-4412: a receiver declared through a type alias of a single-route
+    // built-in carries `Aliased` provenance; it takes the same guarded direct
+    // call as the unaliased type instead of reporting `untyped`.
+    let hints = report_full(concat!(
+        "type Pair = Tuple(Integer, Integer)\n",
+        "type Opts = Dictionary(Symbol, Integer)\n\n",
+        "Object subclass: Caller\n",
+        "  first: p :: Pair => p at: 1\n",
+        "  put: d :: Opts => d at: #k put: 1\n",
+    ));
+    assert!(
+        !hints
+            .iter()
+            .any(|h| h.starts_with("Send 'at:'") || h.starts_with("Send 'at:put:'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn alias_typed_value_class_send_is_converted() {
+    // BT-4412: an alias naming a tagged-map Value class is trusted like the
+    // class name itself.
+    let hints = report_full(concat!(
+        "type Point = OpenPoint\n\n",
+        "Object subclass: Caller\n",
+        "  run: p :: Point => p frobnicate\n\n",
+        "Value subclass: OpenPoint\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn alias_of_a_union_stays_dynamic() {
+    // BT-4412: trusting `Aliased` does not widen anything else — an alias
+    // whose expansion is a union is not a single `Known` class.
+    let hints = report_full(concat!(
+        "type Either = Integer | String\n\n",
+        "Object subclass: Caller\n",
+        "  run: v :: Either => v frobnicate\n",
+    ));
+    assert!(
+        hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
 }

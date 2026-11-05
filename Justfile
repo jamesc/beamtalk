@@ -854,7 +854,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-lint-stamp
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-coverage-skips test-lint-stamp
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -898,6 +898,21 @@ lint-removed-facade-names:
 [windows]
 lint-removed-facade-names:
     @echo "lint-removed-facade-names: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-4408): every `--skip` name in `coverage_rust_skip` must still match
+# a Rust function, so renaming a live-only `#[ignore]` test cannot silently
+# re-enable it in coverage-rust (libtest's `--skip` is a substring filter that
+# never complains). To clear a failure: update the name in `coverage_rust_skip`.
+# The self-test first proves a stale name is reported. Unix-only (bash); Linux
+# CI covers it.
+[unix]
+lint-coverage-skips:
+    @bash scripts/ci/lint-coverage-skips.sh --self-test
+    @bash scripts/ci/lint-coverage-skips.sh
+
+[windows]
+lint-coverage-skips:
+    @echo "lint-coverage-skips: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-3758): runtime/stdlib Erlang sources must recognise `^` non-local
 # returns with the `?IS_NLR(T)` guard from beamtalk.hrl, never a hand-rolled
@@ -1184,7 +1199,10 @@ test-rust: (_test-rust "")
 # NOTE (BT-4331): `beamtalk-cli`'s `cli_run` e2e tests need the `just build`
 # artifacts (`runtime/apps/beamtalk_stdlib/ebin/*.beam`); without a preceding
 # `just build` they fail fast naming that prerequisite instead of passing.
-test-rust-crate CRATE: (_test-rust "-p " + CRATE)
+# A bin-only crate (no `lib` target, e.g. `beamtalk-compiler-port`) runs its
+# bin/test/example targets only: cargo rejects `--lib` and `--doc` for it
+# (BT-4419), so `_test-rust` drops both after asking `cargo metadata`.
+test-rust-crate CRATE: (_test-rust CRATE)
 
 # PARTITION is an optional nextest `--partition` spec (e.g. `count:1/2`) so CI can
 # shard the tier across jobs; empty runs the whole tier.
@@ -1228,35 +1246,50 @@ platform_skip_cargo_args := "--workspace " + replace_regex(platform_independent_
 
 test-rust-platform: (_test-rust "" platform_skip_filterset platform_skip_cargo_args)
 
-# ARGS is the cargo package selection, e.g. `-p <crate>`. SKIP_FILTERSET is a
+# The cargo target kinds `--lib` and `--doc` select (a `[lib]` with a
+# `crate-type` list reports those types instead of `lib`).
+lib_target_kinds := "^(lib|rlib|dylib|cdylib|staticlib|proc-macro)$"
+
+# CRATE is one package to test (`-p <crate>`), or empty for the workspace. A
+# crate without a `lib` target gets neither `--lib` nor the `--doc` pass, which
+# cargo rejects for it (BT-4419). SKIP_FILTERSET is a
 # nextest filterset of tests not to run, and SKIP_CARGO_ARGS the same packages
 # as cargo-test arguments for the no-nextest fallback (see `test-rust-platform`).
 # `cargo test --doc` runs the doctests nextest does not. The criterion bench
 # smoke is not here: see `test-benches-smoke` (nightly only, BT-3886).
 [unix]
-_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
+_test-rust CRATE SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     #!/usr/bin/env bash
     set -o pipefail
     echo "🧪 Running Rust tests (fast)..."
+    pkg=() lib=(--lib) doc=(--doc) lib_kinds='{{ lib_target_kinds }}'
+    if [ -n "{{ CRATE }}" ]; then
+        pkg=(-p "{{ CRATE }}")
+        command -v jq >/dev/null 2>&1 || { echo "❌ jq is required to inspect {{ CRATE }}'s targets"; exit 1; }
+        kinds=$(cargo metadata --no-deps --format-version 1 | jq -r --arg n "{{ CRATE }}" '.packages[] | select(.name == $n) | .targets[].kind[]') || exit $?
+        [ -n "$kinds" ] || { echo "❌ no workspace package named {{ CRATE }}"; exit 1; }
+        grep -qxE "$lib_kinds" <<<"$kinds" || { lib=(); doc=(); }
+    fi
     if command -v cargo-nextest >/dev/null 2>&1; then
-        cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }} || exit $?
+        cargo nextest run "${lib[@]}" --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' "${pkg[@]}" || exit $?
         rest=()
     else
         echo "⚠️  cargo-nextest not found; falling back to cargo test (serial per binary, slower; runs the corpus tier and the bench smoke too)"
         rest=("--all-targets {{ SKIP_CARGO_ARGS }}")
     fi
-    for targets in "${rest[@]}" "--doc"; do
-        output=$(cargo test $targets --quiet {{ ARGS }} 2>&1) && rc=0 || rc=$?
+    for targets in "${rest[@]}" "${doc[@]}"; do
+        output=$(cargo test $targets --quiet "${pkg[@]}" 2>&1) && rc=0 || rc=$?
         echo "$output" | grep -E '^test result:|FAILED|^error' || true
         if [ $rc -ne 0 ]; then echo "$output"; exit $rc; fi
     done
     echo "✅ Rust tests complete"
 
 [windows]
-_test-rust ARGS SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
+_test-rust CRATE SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     @echo "🧪 Running Rust tests (fast)..."
-    @if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run --lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' {{ ARGS }}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet {{ ARGS }} {{ SKIP_CARGO_ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
-    @$output = cargo test --doc --quiet {{ ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode }
+    @$pkg = @(); $lib = @('--lib'); $doc = $true; if ('{{ CRATE }}' -ne '') { $pkg = @('-p', '{{ CRATE }}'); $meta = cargo metadata --no-deps --format-version 1 | Out-String; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $p = ($meta | ConvertFrom-Json).packages | Where-Object { $_.name -eq '{{ CRATE }}' }; if (-not $p) { Write-Output "no workspace package named {{ CRATE }}"; exit 1 }; if (-not ($p.targets | Where-Object { $_.kind -match '{{ lib_target_kinds }}' })) { $lib = @(); $doc = $false } }; \
+    if (Get-Command cargo-nextest -ErrorAction SilentlyContinue) { cargo nextest run @lib --bins --tests --examples --no-fail-fast --status-level fail --final-status-level fail -E 'not ({{ corpus_tests }}){{ if SKIP_FILTERSET == "" { "" } else { " & not (" + SKIP_FILTERSET + ")" } }}' @pkg; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } } else { Write-Output "cargo-nextest not found; falling back to cargo test (serial per binary, slower)"; $output = cargo test --all-targets --quiet @pkg {{ SKIP_CARGO_ARGS }} 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }; \
+    if ($doc) { $output = cargo test --doc --quiet @pkg 2>&1 | Out-String; $exitCode = $LASTEXITCODE; $output -split "`n" | Select-String -Pattern "^test result:|FAILED|^error"; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } }
     @echo "✅ Rust tests complete"
 
 # Bench smoke (BT-3886): every criterion bench binary once, in test mode
@@ -1359,21 +1392,45 @@ test-install: build-release build-stdlib
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
 
-    # 2b. Verify the stdlib class beams (bt@*.beam) were installed, and all of
-    # them: they come from `build-stdlib`'s output dir, not rebar3's _build
-    # (scripts/install-otp-apps.sh, BT-4119). A source count of 0 means the
-    # stdlib build no longer writes where install-otp-apps.sh reads.
-    SRC_CLASS_COUNT=$(find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | wc -l)
-    INSTALLED_CLASS_COUNT=$(find "$STDLIB_DIR" -maxdepth 1 -name 'bt@*.beam' | wc -l)
-    if [ "$SRC_CLASS_COUNT" -eq 0 ]; then
+    # 2b. Verify the installed stdlib class beams (bt@*.beam) are exactly the
+    # modules the installed beamtalk_stdlib.app activates. Both come from
+    # `build-stdlib`'s output dir, not rebar3's _build
+    # (scripts/install-otp-apps.sh, BT-4119/BT-4384): a class beam missing
+    # from the `classes`/`protocol_modules` env is never activated, an env
+    # entry with no beam fails activation at startup, and the `modules` list
+    # must match the installed beams. A count of 0 means the stdlib build no
+    # longer writes where install-otp-apps.sh reads.
+    if ! find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | grep -q .; then
         echo "❌ No bt@*.beam in runtime/apps/beamtalk_stdlib/ebin after build-stdlib — has its output dir moved?"
         exit 1
     fi
-    if [ "$INSTALLED_CLASS_COUNT" -ne "$SRC_CLASS_COUNT" ]; then
-        echo "❌ Installed $INSTALLED_CLASS_COUNT stdlib class beams, expected $SRC_CLASS_COUNT"
+    erl -noshell -eval '
+        [Ebin] = init:get_plain_arguments(),
+        {ok, [{application, beamtalk_stdlib, Props}]} =
+            file:consult(filename:join(Ebin, "beamtalk_stdlib.app")),
+        Env = proplists:get_value(env, Props),
+        Activated = lists:usort(
+            [maps:get(module, C) || C <- proplists:get_value(classes, Env)] ++
+                proplists:get_value(protocol_modules, Env)),
+        Listed = lists:usort(proplists:get_value(modules, Props)),
+        Beams = lists:usort([list_to_atom(filename:basename(F, ".beam"))
+                             || F <- filelib:wildcard("*.beam", Ebin)]),
+        ClassBeams = [M || M <- Beams, lists:prefix("bt@", atom_to_list(M))],
+        Checks = [{"class beams missing from the classes/protocol_modules env", ClassBeams -- Activated},
+                  {"classes/protocol_modules env entries with no installed beam", Activated -- ClassBeams},
+                  {"installed beams missing from the modules list", Beams -- Listed},
+                  {"modules list entries with no installed beam", Listed -- Beams}],
+        Failed = [{What, Mods} || {What, Mods} <- Checks, Mods =/= []],
+        [io:format("installed beamtalk_stdlib.app mismatch: ~s: ~p~n", [What, Mods])
+         || {What, Mods} <- Failed],
+        io:format("~b~n", [length(ClassBeams)]),
+        halt(case Failed of [] -> 0; _ -> 1 end).
+    ' -extra "$STDLIB_DIR" > "$TMPDIR/stdlib-app-check.out" || {
+        cat "$TMPDIR/stdlib-app-check.out"
+        echo "❌ Installed stdlib class beams and beamtalk_stdlib.app disagree"
         exit 1
-    fi
-    echo "✅ All $INSTALLED_CLASS_COUNT stdlib class beams installed"
+    }
+    echo "✅ All $(tail -n 1 "$TMPDIR/stdlib-app-check.out") installed stdlib class beams match beamtalk_stdlib.app"
 
     # 3. Verify runtime include headers are present
     test -f "$TMPDIR/lib/beamtalk/lib/beamtalk_runtime/include/beamtalk.hrl"
@@ -1888,7 +1945,7 @@ coverage_rust_skip := "--skip valid_specs_pass_dialyzer_validation \
     --skip predict_node_name_matches_a_live_epmd_registration \
     --skip resolve_registered_node_name_matches_a_live_epmd_registration \
     --skip bad_cookie_readiness_resolves_within_the_default_budget \
-    --skip a_real_port_conflict_exits_within_the_calibrated_grace_period \
+    --skip concurrent_launches_each_report_their_own_port \
     --skip detach_kills_the_front_and_it_exits_cleanly \
     --skip dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang"
 

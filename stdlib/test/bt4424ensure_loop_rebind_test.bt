@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4424: a loop-body `ensure:` whose cleanup writes a binding the loop body
+// also writes. The cleanup runs in every iteration; when the protected block
+// writes the binding too, the cleanup reads that write. The REPL answers the
+// same (crates/beamtalk-repl/tests/repl_loop_body_return.rs, the
+// "loop-written binding" positions). Fixtures:
+// fixtures/bt4424ensure_loop_{value,actor}.bt.
+
+TestCase subclass: Bt4424EnsureLoopRebindTest
+
+  testValueMethodCleanupWrites =>
+    self assert: Bt4424EnsureLoopValue new cleanupWrites equals: 306
+
+  testValueMethodProtectedAndCleanupWrite =>
+    self assert: Bt4424EnsureLoopValue new protectedAndCleanupWrite equals: 722
+
+  testClassMethodCleanupWrites =>
+    self assert: Bt4424EnsureLoopValue cleanupWrites equals: 306
+
+  testClassMethodProtectedAndCleanupWrite =>
+    self assert: Bt4424EnsureLoopValue protectedAndCleanupWrite equals: 722
+
+  testActorMethodCleanupWrites =>
+    self assert: Bt4424EnsureLoopActor spawn cleanupWrites equals: 306
+
+  testActorMethodProtectedAndCleanupWrite =>
+    self assert: Bt4424EnsureLoopActor spawn protectedAndCleanupWrite equals: 722
+
+  testActorMethodCleanupWritesField =>
+    self assert: Bt4424EnsureLoopActor spawn cleanupWritesField equals: 306

@@ -67,9 +67,11 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let project = if stdlib_mode {
         None
     } else {
+        // A method patch is never part of a `load_project` batch: always
+        // verify the project scope afresh.
         source_path
             .as_deref()
-            .and_then(crate::project_context::project_context_for_source)
+            .and_then(|path| crate::project_context::project_context_for_source(path, None))
     };
     let pre_loaded_aliases = match project.as_ref() {
         Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),

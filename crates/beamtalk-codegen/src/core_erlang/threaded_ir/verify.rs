@@ -15,10 +15,11 @@ use std::collections::HashMap;
 
 use super::super::{CodeGenContext, CoreErlangGenerator};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId,
-    LOCAL_STATE_KEY_PREFIX, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
-    RebindLowering, RebindShape, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
-    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
+    EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
+    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -467,17 +468,53 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
 
-    /// BT-4288: a `^` in the body of a loop or fold run in place
-    /// (`beamtalk-core`'s `loop_body_returns`) lowered with no NLR boundary to
-    /// throw to, so it compiles to its bare value inside the loop's `fun`: the
-    /// loop ignores it and runs on (`#(1, 2) do: [:x | ^x]` answered the loop's
-    /// value; `[n < 3] whileTrue: [^10]` never ended). Invariant, in every
-    /// scope: such a `^` is a throw to the scope's boundary. A method, a
-    /// class method and a value-type method mint theirs whenever a block holds
-    /// a `^` (`body_has_block_nlr`); the REPL eval mints its own for exactly
-    /// these returns (`repl_nlr`). The repro was every REPL loop or fold whose
-    /// body held a `^`.
-    LoopReturnWithoutBoundary { at: Span },
+    /// BT-4288 / BT-4312: a REPL `^` run in place (`beamtalk-core`'s
+    /// `block_facts::repl_eval_returns`: at the root, in a conditional arm,
+    /// an evaluated or protected block, a loop or fold body; not the input's
+    /// whole last statement) lowered with no NLR boundary to throw to, so it
+    /// compiles to its bare value. In a loop's `fun` the loop ignores it and
+    /// runs on (`#(1, 2) do: [:x | ^x]` answered the loop's value; `[n < 3]
+    /// whileTrue: [^10]` never ended); elsewhere the input's later statements
+    /// run on (`x := 1. ^7. x := 2` answered 2; `true ifTrue: [^3]. 5`
+    /// answered 5). Invariant, in every scope: a `^` that must end its scope
+    /// from inside a construct's `fun`, or before the scope's later
+    /// statements, is a throw to the scope's boundary. A
+    /// method, a class method and a value-type method mint theirs whenever a
+    /// block holds a `^` (`body_has_block_nlr`); the REPL eval mints its own
+    /// for exactly these returns (`repl_nlr`). The repros were every REPL
+    /// loop or fold whose body held a `^` (BT-4288) and every non-final root
+    /// or arm `^` (BT-4312).
+    ReplReturnWithoutBoundary { at: Span },
+
+    /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
+    /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
+    /// an `ensure:` is not a boundary, so a write its cleanup makes reaches
+    /// whichever boundary the in-flight NLR or exception reaches. For an
+    /// error the cleanup runs and the error propagates (the boundary that
+    /// catches it decides what is kept). A `^` carries the scope's state to
+    /// its boundary in the throw (the REPL's bindings map, an actor's
+    /// `State`, a value type's `Self`; a class method carries none, its class
+    /// variables are written in place), so the catch must run the cleanup from
+    /// that carried state and resume the throw with the cleanup's result.
+    /// That holds however the cleanup runs: inlined, or applied as a closure
+    /// when an operand is not a block literal (which writes the actor-state
+    /// cell in place, so the result is the carried state with the cell's
+    /// fields over it).
+    /// Fires when the cleanup can write the carried state (an inlined one
+    /// advances the carried family; a closure one in an actor method; any
+    /// cleanup where the state lives in the cell) and the node has no relay
+    /// ([`EnsureRelayDefect::NoRelay`]), or its relay re-throws anything but
+    /// the cleanup's result ([`EnsureRelayDefect::RethrowsStaleState`]), or,
+    /// where the state lives in the cell, a state rebuilt from the `ensure:`
+    /// site's bindings instead of from the carried one
+    /// (`EnsureRelayDefect::RebuildsCarriedStateAtSite`, test builds). The repros:
+    /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
+    /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
+    /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
+    /// nor did `c := [self.n := 9]. [^1] ensure: c`, nor (BT-4429) the same
+    /// sent with `perform:`, whose `Block>>ensure:` fallback relays every
+    /// foreign throw ([`NlrCarry::Foreign`]).
+    EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
@@ -617,6 +654,14 @@ pub(in crate::core_erlang) enum VerifyError {
     /// verified without its ancestor frames.
     SyncedCallOnPrivateScratch { at: Span },
 
+    /// BT-4279: a [`ThreadedStmt::SyncedCall`] carries a
+    /// [`FastPath`](super::ir::FastPath) but is not a value bracket that
+    /// reloads (`result` and `load` both set, no Tier 2 rebinds): the fast
+    /// arm hands the stored `State` through as `load` and answers the bracket's
+    /// `result`, so a store-only, statement-form or Tier 2 merge bracket has
+    /// no shape for it. The emitter renders such a node as the plain bracket.
+    FastPathOnUnsplittableBracket { at: Span },
+
     /// BT-4178: a tuple-accumulator fold body resolved the actor-state map
     /// (a field read, a `^`'s carried state, a closure's capture, a nested
     /// loop's seed) to `read_from`, which is not the fold's entry state
@@ -731,6 +776,24 @@ pub(in crate::core_erlang) enum ClassMethodDefect {
     /// [`VerifyError::UnbracketedUserCodeSend`] shape), not by the structural
     /// walk: the repack's seed is not in any node for the walk to check.
     TupleAccRepackFromAmbientState,
+}
+
+/// What is wrong with an [`ThreadedStmt::EnsureCatch`]'s `$bt_nlr` clause
+/// ([`VerifyError::EnsureCleanupLostOnNlr`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum EnsureRelayDefect {
+    /// The scope's own throw is re-raised untouched.
+    NoRelay,
+    /// The relay re-throws a state other than the cleanup's result.
+    RethrowsStaleState,
+    /// Where the state lives in the actor-state cell, the relay re-throws
+    /// what a fresh `^` at the `ensure:` site would carry
+    /// ([`RethrowSlot::SiteState`]) instead of the carried state with the
+    /// cell over it: in a merged Tier 2 fun that re-flushes the captured
+    /// locals as bound at the `ensure:`, dropping the values the `^` carried.
+    /// Test builds only, with the one node shape that has it.
+    #[cfg(any(test, feature = "test"))]
+    RebuildsCarriedStateAtSite,
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -1104,6 +1167,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::OnDoCatch { .. }
+            | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
@@ -1687,15 +1751,24 @@ impl VerifyWalk<'_> {
             // frame it sits in, exactly as the `Bind` it steps like.
             ThreadedStmt::SyncedCall {
                 store,
+                result,
                 load,
                 span,
                 on_private_scratch,
+                tier2_local_rebinds,
+                fast_path,
                 ..
             } => {
                 self.check_use(store, *span);
                 if *on_private_scratch {
                     self.errors
                         .push(VerifyError::SyncedCallOnPrivateScratch { at: *span });
+                }
+                if fast_path.is_some()
+                    && (result.is_none() || load.is_none() || !tier2_local_rebinds.is_empty())
+                {
+                    self.errors
+                        .push(VerifyError::FastPathOnUnsplittableBracket { at: *span });
                 }
                 if let Some(load) = load {
                     self.check_class_method_family(load, *span);
@@ -1786,6 +1859,23 @@ impl VerifyWalk<'_> {
                         .push(VerifyError::CatchFilterNotClosed { at: *span });
                 }
             }
+            ThreadedStmt::EnsureCatch {
+                token,
+                carry,
+                private_scratch,
+                cleanup,
+                relay,
+                span,
+                ..
+            } => {
+                let carry = carry.filter(|carry| carry.writable_by_cleanup(*private_scratch));
+                if let Some(defect) =
+                    check_ensure_relay(token.is_some(), carry, *cleanup, relay.as_ref())
+                {
+                    self.errors
+                        .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
+                }
+            }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
                 self.check_class_method_family(state, *span);
@@ -1825,6 +1915,66 @@ impl VerifyWalk<'_> {
                 // consumer of a prior version.
             }
         }
+    }
+}
+
+/// BT-4312 obligation of one [`ThreadedStmt::EnsureCatch`]: when a `^` of
+/// the scope can cross it (`has_token`) carrying state its cleanup can write,
+/// the relay must re-throw the cleanup's result. An inlined cleanup writes
+/// the carried family when it advances it (its result is that version); a
+/// closure writes only through the actor-state cell, so it can write an actor
+/// method's `State` but never the REPL's bindings or a value type's `Self`;
+/// where the state lives in the cell, any cleanup that may write the cell
+/// writes it. A result in the cell is the carried state with the cell's
+/// fields over it, never one rebuilt from the `ensure:` site's bindings.
+/// A foreign throw (BT-4429, `Block>>ensure:` reached dynamically) has no
+/// token of the scope to match and a state kind known only at run time: a
+/// cleanup that may write the cell resumes it with the cell over the carried
+/// state when that state is the cell's.
+fn check_ensure_relay(
+    has_token: bool,
+    carry: Option<NlrCarry>,
+    cleanup: EnsureCleanup,
+    relay: Option<&EnsureNlrRelay>,
+) -> Option<EnsureRelayDefect> {
+    let carry = carry.filter(|carry| has_token || *carry == NlrCarry::Foreign)?;
+    let expected = match (carry, cleanup) {
+        (
+            NlrCarry::Foreign,
+            EnsureCleanup::Inlined {
+                writes_cell: true, ..
+            }
+            | EnsureCleanup::Closure { writes_cell: true },
+        ) => RethrowSlot::CellIfCarried,
+        (
+            NlrCarry::Live,
+            EnsureCleanup::Inlined {
+                writes_cell: true, ..
+            }
+            | EnsureCleanup::Closure { writes_cell: true },
+        )
+        | (NlrCarry::ActorState, EnsureCleanup::Closure { writes_cell: true }) => {
+            RethrowSlot::CellOverCarried
+        }
+        (
+            NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::SelfVt,
+            EnsureCleanup::Inlined {
+                final_version: Some(version),
+                ..
+            },
+        ) => RethrowSlot::Version(version),
+        _ => return None,
+    };
+    let Some(relay) = relay else {
+        return Some(EnsureRelayDefect::NoRelay);
+    };
+    match (&relay.rethrow, &expected) {
+        (found, expected) if found == expected => None,
+        #[cfg(any(test, feature = "test"))]
+        (RethrowSlot::SiteState(_), RethrowSlot::CellOverCarried) => {
+            Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
+        }
+        _ => Some(EnsureRelayDefect::RethrowsStaleState),
     }
 }
 

@@ -39,6 +39,7 @@ see the `BT-4173` clauses); anything else raises `type_error` via
     split_on/2,
     repeat/2,
     as_list/1,
+    as_charlist/1,
     join/1,
     join/2,
     each/2,
@@ -351,6 +352,44 @@ as_list({beamtalk_string, Str}) when is_binary(Str) ->
 as_list(Bin) when is_binary(Bin) -> as_list({beamtalk_string, Bin});
 as_list(Str) ->
     raise_not_string('asList', Str).
+
+-doc """
+Convert a String to an Erlang charlist of Unicode code points (BT-4380).
+
+Uses `unicode:characters_to_list/2` — the OTP charlist convention, and the
+same conversion the FFI proxy applies when it retries a call with a
+`String` argument coerced to a charlist (`beamtalk_erlang_proxy`'s
+`coerce_arg/1`), so `"café" asCharlist` names the same file as passing
+`"café"` straight to `file:`/`filename:`. A `String` built with
+`asStringUnchecked` from bytes that are not valid UTF-8 has no code-point
+reading and raises a `type_error` rather than answering a partial list.
+
+A bare binary is accepted too, for symmetry with this module's other
+`t() | binary()` entry points. Beamtalk never sends `asCharlist` to a
+`Binary` (BT-4380: raw bytes have no charlist reading), so this clause is
+reachable only from a direct Erlang call; it reads valid UTF-8 the same way,
+and its error names `Binary`, not `String` (BT-4382).
+""".
+-spec as_charlist(t() | binary()) -> [char()].
+as_charlist({beamtalk_string, Str}) when is_binary(Str) ->
+    utf8_code_points(
+        Str, 'String', <<"String is not valid UTF-8; use toBytes for the raw bytes">>
+    );
+as_charlist(Bin) when is_binary(Bin) ->
+    utf8_code_points(
+        Bin,
+        'Binary',
+        <<"Binary is not valid UTF-8 and has no charlist reading; use toBytes for its bytes">>
+    );
+as_charlist(Str) ->
+    raise_not_string('asCharlist', Str).
+
+-spec utf8_code_points(binary(), atom(), binary()) -> [char()].
+utf8_code_points(Bin, Class, Hint) ->
+    case unicode:characters_to_list(Bin, utf8) of
+        Chars when is_list(Chars) -> Chars;
+        _ -> beamtalk_error:raise_type_error(Class, asCharlist, Hint)
+    end.
 
 -doc """
 Join a list of grapheme Strings into a single string.

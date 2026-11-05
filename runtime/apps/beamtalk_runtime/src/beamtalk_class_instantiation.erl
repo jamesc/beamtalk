@@ -40,6 +40,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     abstract_class_error/2,
     resolve_is_abstract_or_raise/2,
     resolve_module_or_raise/2,
+    resolve_spawn_module_or_raise/3,
     check_init_args/5,
     %% ADR 0123 §3: shared with beamtalk_shape_migration's reconcile step —
     %% a Value class has no init/1, so its declared-field defaults are
@@ -341,13 +342,12 @@ Full declared field set for `Class`: own, inherited, and `late` names.
 
 Walks the superclass chain over ETS-only metadata reads
 (`lookup_instance_variables/1`, `lookup_superclass/1`, plus each level's
-own `__beamtalk_meta/0` `fields`) — deliberately no `gen_server:call`,
-which issued from `init/1` while the spawning class server is still inside
-its own `{spawn, ...}` handler would deadlock the two against each other
-(the same reason `publish_reflection/1` exists). Unioning the meta list
-with the published variables keeps a level fail-open: a stale extra name
-at worst accepts a key for a removed field (the pre-BT-4030 behaviour),
-never rejects a valid one.
+own `__beamtalk_meta/0` `fields` when it has published none) — deliberately
+no `gen_server:call`, which issued from `init/1` while the spawning class
+server is still inside its own `{spawn, ...}` handler would deadlock the two
+against each other (the same reason `publish_reflection/1` exists). A
+level's published variables come from the same compiled meta `fields` list
+its registration passed in, so preferring them rejects no valid name.
 
 Every level of a class being instantiated is registered by the time this
 runs: a module's `on_load` `register_class/0` re-raises failures instead
@@ -361,10 +361,30 @@ the whole walk to the base state's own keys: fail-open on the actor
 inheritance path (whose merged state already carries the user keys, so
 nothing is rejected) and default-complete on the base and value paths
 (whose states hold exactly their own defaults).
+
+The walk's answer is memoised per class in `beamtalk_class_derived_cache`
+under `{declared_fields, Class}` (BT-4281): every `new:`/`spawnWith:` with
+a map used to re-walk the chain. Only a completed walk (`{ok, Fields}`) is
+cached; the `not_found` fallback depends on `BaseState`, so it is
+recomputed every time. Every input of the walk is written by a path that
+invalidates the cache — `module`/`superclass` by `insert/5` and
+`merge_identity/5` (load, hot reload, redefinition), `instance_variables`
+by `put_reflection/2` — so a reload is seen on the next call. A level's
+compiled `__beamtalk_meta/0` is read only when it has published no
+instance variables: during a reload's `-on_load` the old code is still
+current, so that read would answer the old `fields` (see
+`own_declared_fields/1`).
 """.
 -spec declared_fields(class_name(), map()) -> [term()].
 declared_fields(Class, BaseState) ->
-    case declared_fields_walk(Class, [], 0) of
+    case
+        beamtalk_class_derived_cache:fetch({declared_fields, Class}, fun() ->
+            case declared_fields_walk(Class, [], 0) of
+                {ok, _} = Walked -> {cache, Walked};
+                not_found -> {nocache, not_found}
+            end
+        end)
+    of
         {ok, Fields} ->
             Fields;
         not_found ->
@@ -406,33 +426,45 @@ declared_fields_walk(Class, Acc, Depth) ->
             not_found
     end.
 
-%% One level's own declared names: the union of the compiled meta `fields`
-%% list (always includes `late` slots) and the published instance
-%% variables (the only source for module-less builder classes).
+%% One level's own declared names. The published instance variables are the
+%% source of truth whenever the level has published them: every compiled
+%% registration passes its own `__beamtalk_meta/0` map in `ClassInfo`, and
+%% `apply_class_info/2` / `init/1` publish its `fields` (which always include
+%% `late` slots), so they already equal the new module's meta. The compiled
+%% meta is read only for a level with no published row yet.
+%%
+%% Never union the two (BT-4281 review): during a hot reload's `-on_load`
+%% the OLD code is still current, so `read_meta/1` answers the old `fields`.
+%% A walk racing that window would union a removed field back in and memoise
+%% it under the post-invalidation generation, accepting the removed key
+%% until some unrelated class write.
 -spec own_declared_fields(class_name()) -> {ok, [term()]} | not_found.
 own_declared_fields(Class) ->
-    MetaFields =
-        case beamtalk_class_metadata:lookup_module(Class) of
-            {ok, Module} ->
-                case beamtalk_class_metadata:read_meta(Module) of
-                    {ok, Meta} ->
-                        case maps:get(fields, Meta, []) of
-                            L when is_list(L) -> L;
-                            _ -> []
-                        end;
-                    not_available ->
-                        []
-                end;
-            not_found ->
-                []
-        end,
     case beamtalk_class_metadata:lookup_instance_variables(Class) of
         {ok, IVars} ->
-            {ok, MetaFields ++ (IVars -- MetaFields)};
-        not_found when MetaFields =/= [] ->
-            {ok, MetaFields};
+            {ok, IVars};
         not_found ->
-            not_found
+            case compiled_meta_fields(Class) of
+                [] -> not_found;
+                MetaFields -> {ok, MetaFields}
+            end
+    end.
+
+-spec compiled_meta_fields(class_name()) -> [term()].
+compiled_meta_fields(Class) ->
+    case beamtalk_class_metadata:lookup_module(Class) of
+        {ok, Module} ->
+            case beamtalk_class_metadata:read_meta(Module) of
+                {ok, Meta} ->
+                    case maps:get(fields, Meta, []) of
+                        L when is_list(L) -> L;
+                        _ -> []
+                    end;
+                not_available ->
+                    []
+            end;
+        not_found ->
+            []
     end.
 
 -doc """
@@ -877,6 +909,106 @@ resolve_module_or_raise(ClassName, Selector) ->
             ),
             error(Wrapped)
     end.
+
+-doc """
+Resolve the module for a spawn-family send to an unqualified, shadowed class
+reference (BT-4278, BT-4404), and check the runtime class can take the call
+shape codegen emitted.
+
+A shadowed class name is one last-wins runtime class, so the class that wins
+at call time need not be the kind the compiler saw in its own package's
+`ClassInfo`. Codegen fixes two things at compile time from that `ClassInfo`:
+whether the send is an actor spawn (`Module:spawn/0,1` /
+`Module:spawn_monitored/0,1`) or a supervisor start
+(`beamtalk_supervisor:class_start/4`). `Kind` names which one was emitted:
+
+- `actor` needs a non-supervisor `Actor` subclass;
+- `supervisor` needs a `Supervisor` or `DynamicSupervisor` subclass.
+
+Raises (never answers a module that would then fail with a raw `undef` or a
+confused supervisor start):
+
+- `class_not_found` when the class has no metadata row — unlike the
+  `ClassSelf` path (`resolve_module_or_raise/2`), a class reference can reach
+  a miss in ordinary situations (the class was removed after compiling the
+  caller), so it is not reported as an internal bug;
+- `does_not_understand` when the class is neither an actor nor a supervisor
+  (a Value or Object class has no spawn family at all);
+- `instantiation_error` when the class is the other spawnable kind (an actor
+  where a supervisor start was compiled, or vice versa).
+
+An ancestor chain that cannot be followed (`beamtalk_supervisor:spawn_kind/1`
+answers `unknown`: an ancestor row removed, renamed or not loaded yet) is not
+treated as a mismatch: the module is answered and the emitted call runs as it
+did before this check.
+""".
+-spec resolve_spawn_module_or_raise(class_name(), atom(), actor | supervisor) -> module().
+resolve_spawn_module_or_raise(ClassName, Selector, Kind) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, Module} ->
+            case beamtalk_supervisor:spawn_kind(ClassName) of
+                Kind ->
+                    Module;
+                unknown ->
+                    %% An incomplete ancestor chain (an ancestor row removed,
+                    %% renamed or not loaded yet) decides nothing: keep the
+                    %% pre-check behaviour and let the emitted call run.
+                    Module;
+                none ->
+                    raise_wrapped(
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(does_not_understand, ClassName, Selector),
+                            <<"Only Actor and Supervisor classes can be spawned">>
+                        )
+                    );
+                Other ->
+                    raise_wrapped(spawn_kind_mismatch_error(ClassName, Selector, Kind, Other))
+            end;
+        not_found ->
+            raise_wrapped(
+                beamtalk_error:with_hint(
+                    beamtalk_error:new(class_not_found, ClassName, Selector),
+                    <<"The class is not loaded; it may have been removed after this code was compiled">>
+                )
+            )
+    end.
+
+-spec spawn_kind_mismatch_error(
+    class_name(), atom(), actor | supervisor, actor | supervisor
+) ->
+    #beamtalk_error{}.
+spawn_kind_mismatch_error(ClassName, Selector, Expected, Actual) ->
+    Name = atom_to_binary(ClassName, utf8),
+    Hint = iolist_to_binary([
+        <<"This send was compiled as ">>,
+        call_shape_phrase(Expected),
+        <<", but the loaded ">>,
+        Name,
+        <<" is ">>,
+        kind_phrase(Actual),
+        <<" (more than one package declares ">>,
+        Name,
+        <<"). Qualify the class with its package (pkg@">>,
+        Name,
+        <<") to pick one.">>
+    ]),
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(instantiation_error, ClassName, Selector),
+            Hint
+        ),
+        #{expected_kind => Expected, actual_kind => Actual}
+    ).
+
+call_shape_phrase(actor) -> <<"an actor spawn">>;
+call_shape_phrase(supervisor) -> <<"a supervisor start">>.
+
+kind_phrase(actor) -> <<"an Actor">>;
+kind_phrase(supervisor) -> <<"a Supervisor">>.
+
+-spec raise_wrapped(#beamtalk_error{}) -> no_return().
+raise_wrapped(Error) ->
+    error(beamtalk_exception_handler:ensure_wrapped(Error)).
 
 -doc """
 Resolve a class's `is_abstract` flag for a class-method self-send

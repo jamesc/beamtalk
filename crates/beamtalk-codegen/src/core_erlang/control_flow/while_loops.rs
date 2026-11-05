@@ -192,7 +192,7 @@ impl CoreErlangGenerator {
             ("'true'", "'false'")
         };
 
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let cond_var = self.fresh_temp_var("CondFun");
         let cond_code = self.expression_doc(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
@@ -540,7 +540,7 @@ impl CoreErlangGenerator {
         }
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -564,6 +564,7 @@ impl CoreErlangGenerator {
             // other entry.
             outer_args: Some(vec![leaf::var(init_state)]),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1039,7 +1040,7 @@ impl CoreErlangGenerator {
             .collect();
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -1052,6 +1053,7 @@ impl CoreErlangGenerator {
             produces,
             outer_args: Some(initial_direct_args.into_iter().map(leaf::var).collect()),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1207,7 +1209,7 @@ impl CoreErlangGenerator {
                 .collect();
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -1227,6 +1229,7 @@ impl CoreErlangGenerator {
                     .collect(),
             ),
             exit_arm,
+            entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
         let errors = self.verify_threaded_ir(&ir);
@@ -1442,7 +1445,7 @@ impl CoreErlangGenerator {
         } else {
             ("'true'", "'false'")
         };
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -1460,9 +1463,10 @@ impl CoreErlangGenerator {
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
-            "> when 'true' -> 'nil' end in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            "> when 'true' -> 'nil' end in ",
+            // BT-4392: the loop's entry call carries the send's line, as in
+            // `generate_while_simple`.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let body_stateful_error = self.generate_stateful_block_dispatch_error(
@@ -1530,7 +1534,7 @@ impl CoreErlangGenerator {
             ")",
         ];
 
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -1538,9 +1542,9 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
             " in apply ",
             leaf::fname(loop_fn.clone(), 0),
-            " () in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
+            " () in ",
+            // BT-4392: the loop's entry call carries the send's line.
+            self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
         let stateful_error = self.generate_stateful_block_dispatch_error(

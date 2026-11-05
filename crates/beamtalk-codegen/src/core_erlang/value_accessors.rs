@@ -45,16 +45,6 @@ impl AutoSlotMethods {
     pub(super) fn with_star_selector(field_name: &str) -> String {
         beamtalk_core::synthetic_selectors::with_star_selector(field_name)
     }
-
-    /// Returns the keyword constructor selector for the given slot names.
-    ///
-    /// E.g. `["x", "y"]` → `"x:y:"`. Delegates to the shared naming authority in
-    /// [`beamtalk_core::synthetic_selectors`].
-    fn keyword_selector(slots: &[String]) -> String {
-        beamtalk_core::synthetic_selectors::keyword_constructor_selector(
-            slots.iter().map(String::as_str),
-        )
-    }
 }
 
 /// Computes which slot methods to auto-generate for a `Value subclass:` class.
@@ -95,21 +85,12 @@ pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoS
         .map(|s| s.name.name.to_string())
         .collect();
 
-    let keyword_constructor = if class.state.is_empty() {
-        None
-    } else {
-        let all_slots: Vec<String> = class
-            .state
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
-        let sel = AutoSlotMethods::keyword_selector(&all_slots);
-        if user_class_selectors.contains(&sel) {
-            None
-        } else {
-            Some(sel)
-        }
-    };
+    // The shared decision (BT-4132): the hierarchy's `auto_ctors` anchor and
+    // the stdlib builtins generator make the same call.
+    let keyword_constructor = beamtalk_core::synthetic_selectors::synthesized_keyword_constructor(
+        class.state.iter().map(|s| s.name.name.as_str()),
+        |sel| user_class_selectors.contains(sel),
+    );
 
     Some(AutoSlotMethods {
         getters,
@@ -185,6 +166,32 @@ impl CoreErlangGenerator {
             "    call 'maps':'get'(",
             leaf::atom(field_name.to_string()),
             ", Self)\n",
+            "\n",
+        ]
+    }
+
+    /// BT-4279: `'__is_slot'/1`: `'true'` exactly for the selectors whose
+    /// `dispatch/3` clause in this module is an auto-generated slot getter
+    /// (`getters`, [`compute_auto_slot_methods`]), `'false'` for every other
+    /// term. A typed slot read in an actor method asks the loaded module this
+    /// before skipping its cell bracket, so a reload that replaces a getter
+    /// with a method is seen at once.
+    ///
+    /// ```erlang
+    /// '__is_slot'/1 = fun (IsSlotSelector) ->
+    ///     case IsSlotSelector of <'x'> when 'true' -> 'true' <_> when 'true' -> 'false' end
+    /// ```
+    pub(in crate::core_erlang) fn generate_is_slot(getters: &[String]) -> Document<'static> {
+        let arms: Vec<Document<'static>> = getters
+            .iter()
+            .map(|field| docvec!["<", leaf::atom(field.clone()), "> when 'true' -> 'true' "])
+            .collect();
+        docvec![
+            leaf::fname("__is_slot".to_string(), 1),
+            " = fun (IsSlotSelector) ->\n",
+            "    case IsSlotSelector of ",
+            concat(arms),
+            "<_> when 'true' -> 'false' end\n",
             "\n",
         ]
     }

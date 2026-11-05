@@ -20,6 +20,9 @@
 
 use std::collections::HashSet;
 
+use super::super::binary_segments::{
+    SegmentDirection, expand_utf_string_literals, int_to_f64, segment_spec_tail,
+};
 use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::util::index_lit;
@@ -28,9 +31,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
-    BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, Expression,
-    ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector, Pattern,
-    WellKnownSelector,
+    BinarySegment, BinarySegmentType, Block, Expression, ExpressionStatement, Identifier, Literal,
+    MatchArm, MessageSelector, Pattern, WellKnownSelector,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -1020,7 +1022,14 @@ impl CoreErlangGenerator {
     /// Returns the `let`-prefix (ending in `in `) plus the fresh variable
     /// name — the same open-`let`-chain convention
     /// `interpolation_segment_chain` uses.
-    fn binary_match_scrutinee(&mut self, match_var: &str) -> (Document<'static>, String) {
+    ///
+    /// ADR 0143 § String values: a construction's `binary`/`bits` segment
+    /// value unwraps through this same `case`, so a `String` builds its
+    /// UTF-8 bytes in both directions.
+    pub(in crate::core_erlang) fn binary_match_scrutinee(
+        &mut self,
+        match_var: &str,
+    ) -> (Document<'static>, String) {
         let scrutinee = self.fresh_temp_var("BinMatch");
         let inner = self.fresh_temp_var("BinInner");
         let other = self.fresh_temp_var("BinOther");
@@ -1843,38 +1852,11 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         // BT-4143: a string literal with a `utf8`/`utf16`/`utf32` type
         // expands to one segment per character — exactly what `erlc` emits
-        // for `<<"hi"/utf16>> (two `'utf16'` segments). Sizes and units
-        // never reach here on such segments (the parser rejects them), so
-        // the expansion carries every other specifier unchanged.
-        let mut expanded: Vec<BinarySegment> = Vec::with_capacity(segments.len());
-        for seg in segments {
-            let utf_string = match &seg.value {
-                Pattern::Literal(Literal::String(s), span) => match seg.segment_type {
-                    Some(
-                        BinarySegmentType::Utf8
-                        | BinarySegmentType::Utf16
-                        | BinarySegmentType::Utf32,
-                    ) if seg.size.is_none() => Some((s.clone(), *span)),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if let Some((s, span)) = utf_string {
-                for c in s.chars() {
-                    expanded.push(BinarySegment {
-                        value: Pattern::Literal(Literal::Character(c), span),
-                        size: None,
-                        segment_type: seg.segment_type,
-                        signedness: seg.signedness,
-                        endianness: seg.endianness,
-                        unit: seg.unit,
-                        span: seg.span,
-                    });
-                }
-            } else {
-                expanded.push(seg.clone());
-            }
-        }
+        // for `<<"hi"/utf16>>` (two `'utf16'` segments). Shared with
+        // construction (ADR 0143).
+        let expanded = expand_utf_string_literals(segments, |c, span| {
+            Pattern::Literal(Literal::Character(c), span)
+        });
         let segments = expanded.as_slice();
         self.push_scope();
         let mut bound_here: HashSet<&str> = HashSet::new();
@@ -2007,76 +1989,23 @@ impl CoreErlangGenerator {
             _ => self.generate_pattern(&seg.value)?,
         };
 
-        // Size: explicit, or default based on type
+        // Size: explicit, or the type default (`segment_spec_tail`); a
+        // folded string literal spans its bytes (8 bits each).
         let size_doc = if let Some(size_expr) = &seg.size {
-            self.generate_binary_size(size_expr)?
+            Some(self.generate_binary_size(size_expr)?)
+        } else if let (Pattern::Literal(Literal::String(s), _), BinarySegmentType::Integer) =
+            (&seg.value, seg_type)
+        {
+            Some(index_lit(s.len().saturating_mul(8)))
         } else {
-            match seg_type {
-                BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'all'"),
-                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32 => {
-                    Document::Str("'undefined'")
-                }
-                BinarySegmentType::Integer => {
-                    // A folded string literal spans its bytes (8 bits each).
-                    if let Pattern::Literal(Literal::String(s), _) = &seg.value {
-                        index_lit(s.len().saturating_mul(8))
-                    } else {
-                        Document::Str("8")
-                    }
-                }
-                BinarySegmentType::Float => Document::Str("64"),
-            }
+            None
         };
-
-        // Unit: explicit override (`/unit:N`, or synthetic split tails from
-        // BT-4096) or the type default — 8 for binary, 1 for bitstring
-        // (bits) and integer/float, 'undefined' for utf8/utf16/utf32.
-        let unit_doc = match seg.unit {
-            Some(unit) => index_lit(unit),
-            None => match seg_type {
-                BinarySegmentType::Binary => Document::Str("8"),
-                BinarySegmentType::Utf8 | BinarySegmentType::Utf16 | BinarySegmentType::Utf32 => {
-                    Document::Str("'undefined'")
-                }
-                BinarySegmentType::Integer
-                | BinarySegmentType::Float
-                | BinarySegmentType::Bitstring => Document::Str("1"),
-            },
-        };
-
-        // Type atom. Note: `bits`/`bitstring` segments emit the `binary`
-        // type with unit 1 — Core Erlang patterns have no `bitstring` type;
-        // this is exactly what `erlc` emits for `/bits` and `/bitstring`.
-        let type_doc = match seg_type {
-            BinarySegmentType::Integer => Document::Str("'integer'"),
-            BinarySegmentType::Float => Document::Str("'float'"),
-            BinarySegmentType::Binary | BinarySegmentType::Bitstring => Document::Str("'binary'"),
-            BinarySegmentType::Utf8 => Document::Str("'utf8'"),
-            BinarySegmentType::Utf16 => Document::Str("'utf16'"),
-            BinarySegmentType::Utf32 => Document::Str("'utf32'"),
-        };
-
-        // Flags: cons-cell list ['signedness'|['endianness']]
-        // Defaults: unsigned, big
-        let sign_str = match seg.signedness.unwrap_or(BinarySignedness::Unsigned) {
-            BinarySignedness::Signed => "'signed'",
-            BinarySignedness::Unsigned => "'unsigned'",
-        };
-        let end_str = match seg.endianness.unwrap_or(BinaryEndianness::Big) {
-            BinaryEndianness::Big => "'big'",
-            BinaryEndianness::Little => "'little'",
-            BinaryEndianness::Native => "'native'",
-        };
-        let flags_doc = docvec![
-            "[",
-            Document::Str(sign_str),
-            "|[",
-            Document::Str(end_str),
-            "]]"
-        ];
 
         Ok(docvec![
-            "#<", value_doc, ">(", size_doc, ",", unit_doc, ",", type_doc, ",", flags_doc, ")"
+            "#<",
+            value_doc,
+            ">",
+            segment_spec_tail(seg, size_doc, SegmentDirection::Pattern)
         ])
     }
 
@@ -2286,16 +2215,6 @@ fn binary_needs_segmented(segments: &[BinarySegment]) -> bool {
 /// ceiling at 8 bytes.
 fn binary_string_folded_value(s: &str) -> Document<'static> {
     leaf::bigint_lit(s.as_bytes())
-}
-
-/// The float an integer literal in a `float` segment denotes — `erlc`
-/// applies `float/1` to it (BT-4376).
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "matches erlc's float/1 conversion: the nearest f64, exactly like the runtime value"
-)]
-fn int_to_f64(v: i64) -> f64 {
-    v as f64
 }
 
 /// True for sizes that emit inline: literals and variables, with any

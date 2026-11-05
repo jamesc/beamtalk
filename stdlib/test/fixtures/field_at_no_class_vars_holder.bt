@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FieldAtNoClassVarsHolder — test fixture for BT-4148 (ADR 0124 §4i)
+//
+// A class with no `classState:` at all: `Cls fieldAt: #x put: v` from
+// outside must not create a class variable on it.
+
+Object subclass: FieldAtNoClassVarsHolder
+
+  class answer -> Integer => 42

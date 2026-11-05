@@ -27,6 +27,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+-compile({inline, [has_class_suffix/1]}).
+
 -export([
     whereis_class/1,
     all_classes/0,
@@ -79,7 +81,11 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_state_snapshot/2,
     class_state_snapshot/1,
     class_state_snapshot_lookup/1,
-    forget_class_state_snapshot/1
+    forget_class_state_snapshot/1,
+    ensure_static_call_keys_table/0,
+    record_static_call_key/2,
+    take_static_call_keys/1,
+    static_call_key_tags/0
 ]).
 
 -ifdef(TEST).
@@ -800,12 +806,22 @@ is_class_object(_) ->
 -doc "Check if a class name (atom or binary) represents a class object (ends with \" class\").".
 -spec is_class_name(atom() | binary()) -> boolean().
 is_class_name(ClassName) when is_atom(ClassName) ->
-    is_class_name(atom_to_binary(ClassName, utf8));
+    %% On every actor send (beamtalk_message_dispatch:classify_receiver/1),
+    %% so one BIF and a guard test, no recursion or `binary:part/3` call (BT-4265).
+    has_class_suffix(atom_to_binary(ClassName, utf8));
 is_class_name(ClassName) when is_binary(ClassName) ->
-    Size = byte_size(ClassName) - 6,
-    Size >= 0 andalso binary:part(ClassName, Size, 6) =:= <<" class">>;
+    has_class_suffix(ClassName);
 is_class_name(_) ->
     false.
+
+%% A guard `binary_part/3` rather than a binary match: the match would
+%% allocate a match context on every send.
+has_class_suffix(Name) ->
+    Size = byte_size(Name) - 6,
+    if
+        Size >= 0, binary_part(Name, Size, 6) =:= <<" class">> -> true;
+        true -> false
+    end.
 
 -doc """
 Strip " class" suffix from a class object name to get the display name.
@@ -1431,4 +1447,83 @@ walk_return_type(ClassName, Selector, Lookup) ->
                         {ok, Super} -> walk_return_type(Super, Selector, Lookup)
                     end
             end
+    end.
+
+%%====================================================================
+%% Static Call Key Index (BT-4316)
+%%====================================================================
+
+-define(STATIC_CALL_KEYS, beamtalk_class_static_call_keys).
+
+-doc """
+Ensure the static call key index exists (idempotent): a `bag` of
+`{Tag, Key}`, one row per `persistent_term` static call key
+`beamtalk_class_shadow_flags:static_call_target/4` installed for the class
+whose metaclass tag is `Tag`. `beamtalk_class_shadow_flags` writes and takes
+rows only under that tag's lock, so its erase finds every installed key.
+Public, heir-protected like `ensure_backing_module_index_table/0`.
+""".
+-spec ensure_static_call_keys_table() -> ok.
+ensure_static_call_keys_table() ->
+    case ets:info(?STATIC_CALL_KEYS) of
+        undefined ->
+            try
+                ets:new(
+                    ?STATIC_CALL_KEYS,
+                    [
+                        bag,
+                        public,
+                        named_table,
+                        {write_concurrency, true}
+                        | beamtalk_ets_heir:heir_option()
+                    ]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            beamtalk_ets_heir:maybe_set_heir(?STATIC_CALL_KEYS),
+            ok
+    end.
+
+-doc """
+Record that the static call key `Key` is installed for the class tagged `Tag`.
+Called by `beamtalk_class_shadow_flags:static_call_target/4` under the tag
+lock, before it puts the key.
+""".
+-spec record_static_call_key(
+    atom(), {module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}
+) -> ok.
+record_static_call_key(Tag, Key) ->
+    ensure_static_call_keys_table(),
+    true = ets:insert(?STATIC_CALL_KEYS, {Tag, Key}),
+    ok.
+
+-doc """
+Remove and return every static call key recorded for `Tag`; `[]` when none
+(or the index does not exist yet). Called under the tag lock by
+`beamtalk_class_shadow_flags`, which erases each key.
+""".
+-spec take_static_call_keys(atom()) ->
+    [{module(), atom(), atom()} | {caller_safe_raise, atom(), module(), atom(), atom()}].
+take_static_call_keys(Tag) ->
+    try ets:take(?STATIC_CALL_KEYS, Tag) of
+        Rows -> [Key || {_, Key} <- Rows]
+    catch
+        error:badarg -> []
+    end.
+
+-doc """
+Every class tag with at least one recorded static call key, without
+duplicates; `[]` when the index does not exist yet. Used by
+`beamtalk_class_shadow_flags:erase_all_static_call_keys/0` when a restarted
+class monitor cannot know which classes died while it was down.
+""".
+-spec static_call_key_tags() -> [atom()].
+static_call_key_tags() ->
+    try ets:foldl(fun({Tag, _}, Acc) -> Acc#{Tag => true} end, #{}, ?STATIC_CALL_KEYS) of
+        Tags -> maps:keys(Tags)
+    catch
+        error:badarg -> []
     end.

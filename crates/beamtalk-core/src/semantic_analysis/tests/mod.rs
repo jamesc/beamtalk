@@ -47,6 +47,14 @@ fn bare(expr: Expression) -> ExpressionStatement {
     ExpressionStatement::bare(expr)
 }
 
+/// The classes `src` declares, as `package` exports them: the cross-file
+/// declarations a build hands `analyse_full` for a dependency (BT-4283).
+fn declared_by(package: &str, src: &str) -> Vec<class_hierarchy::ClassInfo> {
+    let mut infos = ClassHierarchy::extract_class_infos(&parse_module(src));
+    ClassHierarchy::stamp_package_on_infos(&mut infos, package);
+    infos
+}
+
 mod abstract_and_native_instantiation;
 mod adr0103_handle_scope_and_sendability;
 mod adr0123_shape_version_and_migrations;

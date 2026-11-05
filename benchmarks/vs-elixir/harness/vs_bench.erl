@@ -28,11 +28,12 @@
 %% loop with a constant body). Words count only process heaps: off-heap
 %% (refc) binaries and ETS are not included.
 %%
-%% Entry points: main/1 (bench) and profile/1 (per-row call counts).
+%% Entry points: main/1 (bench), profile/1 (per-row call counts) and
+%% invalidate/1 (the metadata-write cost of static call keys over a hierarchy).
 
 -module(vs_bench).
 
--export([main/1, profile/1, rows/0, ffi_ok/0]).
+-export([main/1, profile/1, invalidate/1, rows/0, ffi_ok/0]).
 
 %% Fixture callee for row 13d: an FFI target returning the bare atom `ok`,
 %% which the proxy coerces to `Result ok: nil`. No pure OTP function returns
@@ -68,6 +69,13 @@ rows() ->
         ]},
         {"2b", alloc, "construct: VbPoint x: a y: 4 / %Point{x: a, y: 4}", 50000, 'construct:a:',
             int, [{construct, int}]},
+        {"2c", alloc,
+            "construct via new: VbPoint new: #{#x => a, #y => 4} / struct!(Point, %{x: a, y: 4})",
+            50000, 'constructMap:a:', int, [{construct_map, int}, {construct, int}]},
+        {"2d", alloc, "construct an indirect stdlib Value: Bag new / MapSet.new()", 50000,
+            'constructBag:', none, [{mapset_new, none}]},
+        {"2e", alloc, "keyword construct, indirect user Value: VbLeaf w: a / %Point{x: a, y: 4}",
+            50000, 'constructLeaf:a:', int, [{construct, int}]},
         {"3a", dispatch, "`class sealed` method, sealed class / Mod.fun(arg)", 200000,
             'classSealedMethod:', none, [{remote_call, none}]},
         {"3b", dispatch, "class method, sealed class / Mod.fun(arg)", 50000, 'sealedClassMethod:',
@@ -81,6 +89,14 @@ rows() ->
             'inheritedClassMethod:', none, [{remote_call, none}]},
         {"3f", dispatch, "class method, class with classState: / Mod.fun(arg)", 50000,
             'statefulClassMethod:', none, [{remote_call, none}]},
+        {"3g", dispatch, "class method, class variables published after compile / Mod.fun(arg)",
+            50000, 'lateStateClassMethod:', none, [{remote_call, none}]},
+        {"3h", dispatch, "as 3g, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
+            late_state_math_class, [{dyn_remote_call, late_state_math_class}, {remote_call, none}]},
+        {"3i", dispatch, "class method shadowed by a class-side extension / Mod.fun(arg)", 50000,
+            'shadowedClassMethod:', none, [{remote_call, none}]},
+        {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
+            shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
         {"4a", dispatch, "untyped receiver: o x / o.x", 200000, 'dynGetter:o:', point, [
             {getter_dot, point}
         ]},
@@ -119,6 +135,12 @@ rows() ->
             bt_counter, [{gen_cast, ex_counter}]},
         {"7d", machinery, "actor method doing self hasField: / GenServer.call", 20000,
             'actorProbe:c:', bt_counter, [{gen_probe, ex_counter}]},
+        {"7e", machinery, "inherited actor method doing self increment / delegated GenServer.call",
+            20000, 'actorViaSelfSub:c:', sub_counter, [{gen_via_self, sub_counter}]},
+        {"7f", machinery, "actor method doing self increment / GenServer.call", 20000,
+            'actorViaSelf:c:', counter, [{gen_via_self, counter}]},
+        {"7g", machinery, "actor method reading two getters of a typed sealed Value / GenServer.call",
+            20000, 'actorSumOf:c:', bt_counter, [{gen_sum_of, ex_counter}]},
         {"8a", machinery, "on: Error do: without a raise / try-rescue", 100000, 'onDoNoRaise:',
             none, [{try_no_raise, none}]},
         {"8b", machinery, "on: Error do: with a raise / raise-rescue", 10000, 'onDoRaise:', none, [
@@ -195,10 +217,14 @@ fixtures() ->
         string => {Bt(string), ?EX:string()},
         tuple => {Bt(tuple), ?EX:tuple()},
         math_class => {Bt(openMathClass), ?EX:math_module()},
+        late_state_math_class => {Bt(lateStateMathClass), ?EX:math_module()},
+        shadowed_math_class => {Bt(shadowedMathClass), ?EX:math_module()},
         bt_ok => {Bt(okResult), none},
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
-        ex_counter => {none, ?EX:counter()}
+        ex_counter => {none, ?EX:counter()},
+        counter => {Bt(counter), ?EX:counter()},
+        sub_counter => {Bt(subCounter), ?EX:sub_counter()}
     }.
 
 class_fn(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
@@ -276,6 +302,11 @@ boot() ->
     %% Elixir protocol dispatch is only representative when consolidated.
     true = 'Elixir.Protocol':'consolidated?'('Elixir.VeBench.Area'),
     true = 'Elixir.Protocol':'consolidated?'('Elixir.Enumerable'),
+    %% Rows 3g/3h (BT-4431): `VbLateStateMath` was compiled with no class
+    %% state; publish "declares class variables" for it, the metadata write a
+    %% reload adding `classState:` makes, so its static call site declines.
+    ok = beamtalk_class_metadata:put_class_variables('VbLateStateMath', true),
+    true = beamtalk_class_metadata:chain_has_class_variables('VbLateStateMath'),
     timer:sleep(1000).
 
 load_all(Dir, Glob) ->
@@ -484,8 +515,14 @@ compiles_to("1b") -> "send(P, x, []) -> classify, tagged-map class lookup (ETS +
 compiles_to("1c") -> "send(P, sum, []), same path as 1a";
 compiles_to("2a") -> "send(P, 'withX:', [3]), same path as 1a + maps:put";
 compiles_to("2b") -> "whereis_class + class_send: gen_server:call into the VbPoint class process";
+compiles_to("2c") ->
+    "class_send('new:') -> direct constructor: VbPoint:new/1 in the caller -> check_init_args/5, declared fields from one {declared_fields, C} derived-cache hit (BT-4281)";
+compiles_to("2d") ->
+    "guarded static `new` (BT-4409): one persistent_term:get of the {bt@stdlib@bag, new, Tag} key, then bt@stdlib@bag:new() in the caller (BT-4132 anchors indirect Values)";
+compiles_to("2e") ->
+    "guarded direct keyword constructor: one persistent_term:get of the static call key, then VbLeaf:'w:'(ClassRef, A) (BT-4132)";
 compiles_to("3a") ->
-    "guarded direct call: erlang:whereis(registered name) + direct_call_ok/2, Mod:'class_double:'(ClassRef, 21) (BT-4301)";
+    "guarded direct call: one persistent_term:get of the {Mod, Fun, Tag} static call key, whose value is ClassRef, then Mod:'class_double:'(ClassRef, 21) (BT-4316)";
 compiles_to("3b") ->
     "guarded direct call, as 3a: `class sealed` plays no part (ADR 0142, BT-4301)";
 compiles_to("3c") -> "guarded direct call, as 3a: open class (ADR 0142, BT-4301)";
@@ -495,6 +532,14 @@ compiles_to("3e") ->
     "whereis_class + class_send: inherited method resolved by the owner memo, runs in the caller (BT-4300)";
 compiles_to("3f") ->
     "whereis_class + class_send: gen_server:call; stays there under ADR 0142 (class state)";
+compiles_to("3g") ->
+    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (class variables) -> whereis_class + class_send: gen_server:call (BT-4431)";
+compiles_to("3h") ->
+    "send(C, 'double:', [21]) -> class_send: gen_server:call (control for 3g, BT-4431)";
+compiles_to("3i") ->
+    "guarded direct call whose key is never installed: persistent_term miss -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
+compiles_to("3j") ->
+    "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";
@@ -510,8 +555,11 @@ compiles_to("7a") -> "send(C, count, []) -> beamtalk_actor:sync_send, gen_server
 compiles_to("7b") -> "as 7a";
 compiles_to("7c") -> "beamtalk_message_dispatch:cast -> gen_server:cast + the same hooks";
 compiles_to("7d") -> "as 7a; in the actor `self hasField:` misses the module and walks the runtime method resolver";
+compiles_to("7e") -> "as 7a; the subclass's dispatch/4 default arm takes the memoised inherited_target/2 verdict to the owner (BT-4280)";
+compiles_to("7f") -> "as 7a; the self-send is a static call inside the class module";
+compiles_to("7g") -> "as 7a; each `p x` is a tag + __is_slot/1-guarded maps:get with no cell bracket, the `+` a guarded BIF with none either (BT-4279)";
 compiles_to("8a") -> "`Error` class ref built per entry (whereis_class + module_name gen_server:call), class_vars snapshot, try";
-compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller (class_signal_message/2, BT-4115), wrapped and class-matched; frames built only on read";
+compiles_to("8b") -> "as 8a + `Error signal:` raised in the caller behind its caller-safe raise key (one persistent_term read, BT-4270), wrapped and class-matched; frames built only on read";
 compiles_to("9a") -> "class_send(Result, 'ok:') gen_server:call; `value` as a block-or-send case";
 compiles_to("9b") -> "tag-guarded direct Result:dispatch/3 (BT-4069); mismatch falls back to send/3";
 compiles_to("10a") -> "send(D, 'at:put:', ...) -> Dictionary:dispatch/3 -> maps:put";
@@ -523,15 +571,15 @@ compiles_to("11a") -> "letrec loop; + with is_number guard and coercion try";
 compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
-compiles_to("12a") -> "beamtalk_primitive:class_of_object: derived-cache hit (counter + ETS read + pid liveness)";
-compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> objectIsKindOf/2: one memoised {is_kind_of, C, B} lookup (BT-4221)";
-compiles_to("12c") -> "as 12b, but the send walks String/Binary/Collection/Value/Object dispatch (an extensions lookup per level) to Object>>isKindOf:";
+compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
+compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
+compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
 compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode precomputed (BT-4153), integer fast path";
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
-compiles_to("14a") -> "send(T, 'at:', [1]) -> Tuple:dispatch/3 (typed built-in stays dynamic until BT-4294)";
-compiles_to("14b") -> "class reference built per use (whereis_class), BT-4295";
+compiles_to("14a") -> "is_tuple-guarded direct Tuple:dispatch/3 (BT-4294); 'at:' reads an in-range element inline (BT-4400)";
+compiles_to("14b") -> "class reference per use: whereis of the compile-time registered name + module_name_safe (BT-4295)";
 compiles_to(_) -> "".
 
 %%====================================================================
@@ -701,3 +749,155 @@ print_counts(Counts, N) ->
         [] -> io:format("(no function called >= 0.5 times per op)~n", []);
         _ -> ok
     end.
+
+%%====================================================================
+%% invalidate/1 over a hierarchy (BT-4431)
+%%====================================================================
+
+%% `beamtalk_class_shadow_flags:invalidate/1` erases the class's and every
+%% descendant's static call keys (BT-4316), and each `persistent_term:erase/1`
+%% of a present key starts a global literal-area release. This times one
+%% `invalidate/1` of a root class with N subclasses, each holding K warmed
+%% static call keys, on an idle node, beside 10k idle processes and beside one
+%% busy process per scheduler. Between rounds every
+%% key is re-installed through `static_call_target/4`, as the next static send
+%% of each call site would. Prints a markdown table of median and min µs.
+%%
+%% Args: [] or [Rounds].
+-define(INV_MOD, vs_bench_inv_methods).
+-define(INV_MAX_K, 10).
+
+invalidate(Args) ->
+    Rounds =
+        case Args of
+            [R | _] -> list_to_integer(R);
+            [] -> 20
+        end,
+    boot(),
+    ok = load_inv_module(?INV_MAX_K),
+    io:format("# vs-elixir invalidate/1 bench~n", []),
+    io:format("# otp ~s, erts ~s, schedulers ~p, processes ~p~n", [
+        erlang:system_info(otp_release),
+        erlang:system_info(version),
+        erlang:system_info(schedulers_online),
+        erlang:system_info(process_count)
+    ]),
+    io:format("# load average: ~s~n", [string:trim(os:cmd("uptime"))]),
+    io:format("# rounds ~p~n~n", [Rounds]),
+    io:format("| background | subclasses N | keys per subclass K | keys erased | "
+              "rounds | invalidate/1 median us | min us |~n", []),
+    io:format("|---|--:|--:|--:|--:|--:|--:|~n", []),
+    Shapes = [{0, 0}, {1, 1}, {1, 10}, {50, 0}, {50, 1}, {50, 10}],
+    Schedulers = erlang:system_info(schedulers_online),
+    %% An erase waits for every scheduler to pass a thread-progress point, so
+    %% what else the node is doing matters: nothing, 10k processes blocked in
+    %% `receive`, or one runnable (spinning) process per scheduler. Spinning
+    %% schedulers make each erase much slower, so they get fewer rounds.
+    Loads = [
+        {"idle", fun() -> spawn(fun() -> receive stop -> ok end end) end, 0, Rounds},
+        {"10000 idle processes", fun() -> spawn(fun() -> receive stop -> ok end end) end, 10000,
+            Rounds},
+        {io_lib:format("~p busy processes", [Schedulers]), fun() -> spawn(fun spin/0) end,
+            Schedulers, min(Rounds, 5)}
+    ],
+    lists:foreach(
+        fun({Label, Spawn, Count, LoadRounds}) ->
+            Procs = [Spawn() || _ <- lists:seq(1, Count)],
+            try
+                [inv_shape(Label, N, K, LoadRounds) || {N, K} <- Shapes]
+            after
+                [exit(P, kill) || P <- Procs]
+            end
+        end,
+        Loads
+    ),
+    %% The BEAM's own price per erase on this machine, for attribution: one
+    %% `persistent_term:erase/1` of a present key, no lock, no ETS index.
+    Bare = [inv_bare_erase(100) || _ <- lists:seq(1, Rounds)],
+    io:format("~nbare `persistent_term:erase/1` of a present key: median ~.1f us, min ~.1f us "
+              "(100 keys per round, idle node)~n", [median(Bare), lists:min(Bare)]),
+    io:format("~n# load average after: ~s~n", [string:trim(os:cmd("uptime"))]),
+    ok.
+
+%% Class names are unique per shape: the class monitor's asynchronous 'DOWN'
+%% handling of the previous shape's classes runs `invalidate/1` on their names,
+%% and must not erase this shape's keys mid-round.
+inv_shape(Load, N, K, Rounds) ->
+    Shape = lists:flatten(io_lib:format("~p_~p_~p", [erlang:phash2(Load), N, K])),
+    RootName = list_to_atom("VsInvRoot" ++ Shape),
+    Subs = [list_to_atom("VsInvSub" ++ Shape ++ "_" ++ integer_to_list(I)) || I <- lists:seq(1, N)],
+    Root = inv_start(RootName, none),
+    SubPids = [inv_start(Sub, RootName) || Sub <- Subs],
+    try
+        Keys = [{Sub, I} || Sub <- Subs, I <- lists:seq(1, K)],
+        Times = [
+            begin
+                ok = inv_warm(Keys),
+                {Us, ok} = timer:tc(fun() -> beamtalk_class_shadow_flags:invalidate(RootName) end),
+                false = lists:any(fun inv_key_present/1, Keys),
+                Us
+            end
+         || _ <- lists:seq(1, Rounds)
+        ],
+        io:format("| ~s | ~p | ~p | ~p | ~p | ~p | ~p |~n", [
+            Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times)
+        ])
+    after
+        [catch gen_server:stop(P, normal, 5000) || P <- [Root | SubPids]]
+    end.
+
+%% A runnable process that never blocks (one per scheduler: a busy node).
+spin() -> spin().
+
+%% Per-key µs to erase `Count` present keys holding a class reference.
+inv_bare_erase(Count) ->
+    Keys = [{?MODULE, inv_bare, I} || I <- lists:seq(1, Count)],
+    [persistent_term:put(Key, {beamtalk_object, 'VsInvBare class', ?INV_MOD, self()}) || Key <- Keys],
+    {Us, _} = timer:tc(fun() -> [persistent_term:erase(Key) || Key <- Keys] end),
+    Us / Count.
+
+%% A class whose K class methods are `?INV_MOD:class_m<I>/1`.
+inv_start(Name, Superclass) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => Superclass,
+        module => ?INV_MOD,
+        class_methods => maps:from_list([{inv_sel(I), #{arity => 0}} || I <- lists:seq(1, ?INV_MAX_K)]),
+        class_state => #{},
+        meta => #{process_bound_class_selectors => [new, spawn]}
+    }),
+    Pid.
+
+inv_sel(I) -> list_to_atom("m" ++ integer_to_list(I)).
+
+inv_key({Sub, I}) ->
+    {?INV_MOD, class_fn(inv_sel(I)), beamtalk_class_registry:class_object_tag(Sub)}.
+
+inv_key_present(SubI) -> persistent_term:get(inv_key(SubI), false) =/= false.
+
+%% Install every key the way a static send's miss path does.
+inv_warm(Keys) ->
+    lists:foreach(
+        fun({Sub, I} = SubI) ->
+            case beamtalk_class_shadow_flags:static_call_target(inv_key(SubI), Sub, inv_sel(I), 1) of
+                false -> error({static_call_key_declined, Sub, I});
+                _Ref -> ok
+            end
+        end,
+        Keys
+    ).
+
+%% `class_m<I>(_ClassSelf) -> ok.` for I in 1..K, loaded before any class
+%% process starts (a compiled class's module registers from `on_load`).
+load_inv_module(K) ->
+    Funs = [
+        {function, 1, class_fn(inv_sel(I)), 1, [{clause, 1, [{var, 1, '_'}], [], [{atom, 1, ok}]}]}
+     || I <- lists:seq(1, K)
+    ],
+    Forms = [
+        {attribute, 1, module, ?INV_MOD},
+        {attribute, 1, export, [{class_fn(inv_sel(I)), 1} || I <- lists:seq(1, K)]}
+        | Funs
+    ],
+    {ok, ?INV_MOD, Bin} = compile:forms(Forms, []),
+    {module, ?INV_MOD} = code:load_binary(?INV_MOD, "vs_bench_inv_methods.erl", Bin),
+    ok.

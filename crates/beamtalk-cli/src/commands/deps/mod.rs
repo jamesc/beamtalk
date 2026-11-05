@@ -282,7 +282,7 @@ fn discover_all_dep_roots(
 /// Discovers the full transitive graph so that transitive deps are not lost.
 ///
 /// Dependencies are visited in the compile order of the graph compile
-/// ([`beamtalk_cli::dep_order::topological_order`]) and each is indexed against
+/// ([`beamtalk_core::compilation::dep_order::topological_order`]) and each is indexed against
 /// the dependencies before it that it reaches in the graph
 /// ([`path::with_dependency_closure`], BT-4375), exactly as
 /// `compile_dependency_at` does, so the exported (flattened) `class_infos` are
@@ -297,8 +297,10 @@ fn collect_fresh_deps(
         .iter()
         .map(|dep| (dep.name.clone(), dep.deps.clone()))
         .collect();
-    let compile_order =
-        beamtalk_cli::dep_order::topological_order(&dependencies, &parsed.package.name)?;
+    let compile_order = beamtalk_core::compilation::dep_order::topological_order(
+        &dependencies,
+        &parsed.package.name,
+    )?;
     let mut resolved: Vec<path::ResolvedDependency> = Vec::new();
 
     for name in compile_order {
@@ -2140,6 +2142,86 @@ mod tests {
         assert!(
             !deps_are_fresh(&root, &parsed),
             "A corrupt graph snapshot must force re-resolution"
+        );
+    }
+
+    #[test]
+    fn test_deps_stale_when_graph_snapshot_has_old_schema() {
+        // A schema-1 snapshot (before BT-4394 recorded each dependency's
+        // own edges) is unusable, so the next build re-resolves and
+        // rewrites it.
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
+        create_dep_ebin_with_beam(temp.path(), "utils");
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        assert!(
+            deps_are_fresh_with_snapshot(&root, &parsed),
+            "should start fresh"
+        );
+
+        fs::write(
+            BuildLayout::new(&root).dep_graph_path(),
+            r#"{"schema": 1, "deps": [{"name": "utils", "via": [], "source": "path: utils"}]}"#,
+        )
+        .unwrap();
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "An old-schema graph snapshot must force re-resolution"
+        );
+    }
+
+    #[test]
+    fn test_graph_snapshot_records_every_diamond_edge() {
+        // my_app -> {a, b}; a -> c; b -> c. Discovery reaches `c` through
+        // `a` first, but the snapshot must record `b -> c` too (BT-4394).
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        for (name, deps) in [
+            ("a", "[dependencies]\nc = { path = \"../c\" }"),
+            ("b", "[dependencies]\nc = { path = \"../c\" }"),
+            ("c", ""),
+        ] {
+            let dir = temp.path().join(name);
+            fs::create_dir_all(&dir).unwrap();
+            write_manifest(&dir, name, "0.1.0", deps);
+        }
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\na = { path = \"a\" }\nb = { path = \"b\" }",
+        );
+
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        record_dep_graph_snapshot(&root, &parsed);
+        let snapshot = beamtalk_core::compilation::dep_graph::read_dep_graph_snapshot(
+            BuildLayout::new(&root).dep_graph_path().as_std_path(),
+        )
+        .unwrap();
+        let edges: Vec<(&str, Vec<&str>)> = snapshot
+            .deps
+            .iter()
+            .map(|e| {
+                (
+                    e.name.as_str(),
+                    e.dependencies.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            edges,
+            [("a", vec!["c"]), ("b", vec!["c"]), ("c", Vec::new())]
         );
     }
 

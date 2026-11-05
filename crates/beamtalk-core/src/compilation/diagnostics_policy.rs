@@ -15,7 +15,7 @@
 //! downward only; `beamtalk-lsp` may depend on `beamtalk-core`, never on
 //! `beamtalk-cli`).
 
-use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::ast::{BinarySegment, ExpectCategory, Expression, ExpressionStatement, Module};
 use crate::ast_walker::expression_contains_block;
 use crate::semantic_analysis::stdlib_protocols::is_stdlib_package;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
@@ -157,6 +157,10 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     (
         "class-method-process-resource",
         DiagnosticCategory::ClassMethodProcessResource,
+    ),
+    (
+        "class-var-reflection-shadowing",
+        DiagnosticCategory::ClassVarReflectionShadowing,
     ),
     ("actor-state-abroad", DiagnosticCategory::ActorStateAbroad),
     ("ffi-nested-string", DiagnosticCategory::FfiNestedString),
@@ -516,8 +520,8 @@ pub fn compute_diagnostics_with_known_vars(
 /// simultaneously otherwise. [`apply_expect_directives_excluding_lint_only`]
 /// is the staleness entry point for every pipeline that does not run lint
 /// passes; only `beamtalk lint` itself (and any other caller that actually
-/// calls `run_lint_passes` first, e.g. the MCP server's own lint-equivalent
-/// path) should keep calling plain [`apply_expect_directives`], which
+/// runs the lint passes, e.g. the MCP server's own lint-equivalent path —
+/// both through `run_post_analysis_lint_pipeline`'s lint hook) should keep calling plain [`apply_expect_directives`], which
 /// validates every category unconditionally.
 ///
 /// [`DiagnosticCategory::Lint`] is here for the same reason: every
@@ -604,6 +608,7 @@ fn expect_category_unchecked(
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
         | ExpectCategory::ClassMethodProcessResource
+        | ExpectCategory::ClassVarReflectionShadowing
         | ExpectCategory::FfiNestedString
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
@@ -923,6 +928,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::ClassMethodProcessResource)
                 )
                 | (
+                    ExpectCategory::ClassVarReflectionShadowing,
+                    Some(DiagnosticCategory::ClassVarReflectionShadowing)
+                )
+                | (
                     ExpectCategory::ActorStateAbroad,
                     Some(DiagnosticCategory::ActorStateAbroad)
                 )
@@ -1061,6 +1070,11 @@ fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDi
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_directives_from_expr(e, directives);
+            }
+        }
         // Leaf nodes — nothing to recurse into.
         Expression::Literal(..)
         | Expression::Identifier(..)
@@ -1119,6 +1133,7 @@ match-arm-block = "off"
 class-state-abroad = "off"
 class-process-ffi = "off"
 class-method-process-resource = "off"
+class-var-reflection-shadowing = "off"
 actor-state-abroad = "off"
 ffi-nested-string = "off"
 handleinfo-no-catch-all = "error"

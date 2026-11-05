@@ -7,8 +7,9 @@
 //! class, so the compile-time package's module is not necessarily the one a
 //! dynamic send reaches. Covered here: guarded class-method direct calls
 //! (ADR 0142 §2), keyword constructors and nullary `new`
-//! (BT-4099). Each negative has an unshadowed positive control so it cannot
-//! pass vacuously.
+//! (BT-4099). The spawn family and the ADR 0135 supervisor start keep their
+//! caller-side spawn but resolve the module at call time (BT-4278). Each
+//! negative has an unshadowed positive control so it cannot pass vacuously.
 
 use super::super::{CodegenOptions, CoreErlangGenerator, DirectCallClassInfo, generate_module};
 use beamtalk_core::ast::{
@@ -251,8 +252,9 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
         .expect("codegen should succeed")
     };
     let forwarded = "'class_helper:'(ClassSelf, ";
+    // BT-4316: the guarded direct call reads the call target's static call key.
     let probe_direct =
-        "call 'bt@parser':'class_helper:'({'beamtalk_object', 'Parser class', 'bt@parser', ";
+        "call 'persistent_term':'get'({'bt@parser', 'class_helper:', 'Parser class'}, 'false')";
 
     // Control: no rival, so the class-reference send in `probe` direct-calls.
     let control = compile(vec![]);
@@ -275,5 +277,161 @@ fn own_class_sibling_call_is_unaffected_by_shadowing() {
     assert!(
         code.contains(forwarded),
         "the own-class sibling call must still pass `ClassSelf` under shadowing. Got:\n{code}"
+    );
+}
+
+// --- spawn family and supervisor start (BT-4278) -------------------------
+//
+// These keep their caller-side spawn (a dynamic `class_send` would start the
+// process in the class `gen_server`, with no monitored-spawn clause), so a
+// shadowed unqualified reference resolves the module at call time instead of
+// pinning the compile-time one.
+
+// BT-4404: the lookup also names the call shape it was lowered to, so the
+// runtime can raise a structured error when the winning class is a
+// different kind.
+const RUNTIME_MODULE_LOOKUP: &str =
+    "call 'beamtalk_class_instantiation':'resolve_spawn_module_or_raise'(";
+
+fn counter_reference(package: Option<&str>) -> Expression {
+    Expression::ClassReference {
+        name: Identifier::new("Counter", Span::new(0, 7)),
+        package: package.map(|p| Identifier::new(p, Span::new(0, 0))),
+        span: Span::new(0, 7),
+    }
+}
+
+/// `Counter <selector>` (one integer argument for a keyword selector) on a
+/// fresh generator, `Counter` shadowed or not, a supervisor class or not.
+fn send_spawn(selector: &str, shadowed: bool, package: Option<&str>, supervisor: bool) -> String {
+    let mut generator = CoreErlangGenerator::new("bt@test@main");
+    if shadowed {
+        generator.set_shadowed_class_names(std::iter::once("Counter".into()).collect());
+    }
+    if supervisor {
+        generator.supervisor_classes.insert("Counter".to_string());
+    }
+    let (selector, arguments) = if selector.ends_with(':') {
+        (
+            MessageSelector::Keyword(vec![KeywordPart::new(selector, Span::new(8, 20))]),
+            vec![Expression::Literal(Literal::Integer(1), Span::new(21, 22))],
+        )
+    } else {
+        (MessageSelector::Unary(selector.into()), vec![])
+    };
+    generator
+        .generate_message_send(&counter_reference(package), &selector, &arguments)
+        .expect("codegen should succeed")
+        .to_pretty_string()
+}
+
+#[test]
+fn spawn_family_on_shadowed_class_resolves_module_at_runtime() {
+    for (selector, function) in [
+        ("spawn", "'spawn'"),
+        ("spawnWith:", "'spawn'"),
+        ("spawnMonitored", "'spawn_monitored'"),
+        ("spawnMonitoredWith:", "'spawn_monitored'"),
+    ] {
+        let control = send_spawn(selector, false, None, false);
+        assert!(
+            control.contains(&format!("call 'bt@test@counter':{function}(")),
+            "control: unshadowed `Counter {selector}` should call the compile-time module. \
+             Got:\n{control}"
+        );
+        assert!(!control.contains(RUNTIME_MODULE_LOOKUP), "Got:\n{control}");
+
+        let output = send_spawn(selector, true, None, false);
+        assert!(
+            output.contains(&format!(
+                "{RUNTIME_MODULE_LOOKUP}'Counter', '{selector}', 'actor')"
+            )),
+            "shadowed `Counter {selector}` must resolve its module at runtime. Got:\n{output}"
+        );
+        assert!(
+            !output.contains("'bt@test@counter'"),
+            "shadowed `Counter {selector}` must not pin the compile-time module. Got:\n{output}"
+        );
+        assert!(
+            output.contains(&format!(":{function}(")) && !output.contains(CLASS_SEND),
+            "shadowed `Counter {selector}` must still spawn in the caller. Got:\n{output}"
+        );
+    }
+}
+
+#[test]
+fn qualified_spawn_on_shadowed_class_keeps_its_named_module() {
+    // `json@Counter spawn` names its package's module explicitly.
+    let output = send_spawn("spawn", true, Some("json"), false);
+    assert!(
+        output.contains("call 'bt@json@counter':'spawn'(")
+            && !output.contains(RUNTIME_MODULE_LOOKUP),
+        "a package-qualified spawn keeps its named module. Got:\n{output}"
+    );
+}
+
+#[test]
+fn supervisor_start_on_shadowed_class_resolves_module_at_runtime() {
+    let control = send_spawn("spawn", false, None, true);
+    assert!(
+        control.contains(
+            "call 'beamtalk_supervisor':'class_start'('Counter', 'bt@test@counter', 'spawn', [])"
+        ),
+        "control: unshadowed supervisor start passes the compile-time module. Got:\n{control}"
+    );
+    let output = send_spawn("spawnWith:", true, None, true);
+    assert!(
+        output.contains(&format!(
+            "call 'beamtalk_supervisor':'class_start'('Counter', \
+             {RUNTIME_MODULE_LOOKUP}'Counter', 'spawnWith:', 'supervisor'), 'spawnWith:', ["
+        )),
+        "shadowed supervisor start must resolve its module at runtime. Got:\n{output}"
+    );
+    assert!(!output.contains("'bt@test@counter'"), "Got:\n{output}");
+}
+
+#[test]
+fn shadowed_spawn_family_module_compiles_through_erlc() {
+    // End to end: `Counter` declared by two packages, so every spawn-family
+    // send in `Caller` resolves the module at call time — and the emitted
+    // module is valid Core Erlang.
+    let counter = |package: &str| ClassInfo {
+        name: "Counter".into(),
+        superclass: Some("Actor".into()),
+        is_sealed: false,
+        class_methods: vec![],
+        ..sealed_parser(Some(package))
+    };
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(concat!(
+        "Object subclass: Caller\n",
+        "  a => Counter spawn\n",
+        "  b => Counter spawnWith: #{}\n",
+        "  c => Counter spawnMonitored\n",
+        "  d => Counter spawnMonitoredWith: #{}\n",
+    ));
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("caller").with_class_hierarchy(vec![counter("json"), counter("xml")]),
+    )
+    .expect("codegen should succeed");
+    assert_eq!(
+        code.matches(RUNTIME_MODULE_LOOKUP).count(),
+        4,
+        "every spawn-family send should resolve its module at runtime. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("caller", &code);
+}
+
+#[test]
+fn class_self_module_lookup_keeps_the_unchecked_two_arity_helper() {
+    // BT-4404 shares one lookup builder between the `ClassSelf` intrinsics
+    // and class-reference spawns; only the latter may carry the kind check.
+    let doc = CoreErlangGenerator::class_self_module_doc("spawn").to_pretty_string();
+    assert!(
+        doc.starts_with("call 'beamtalk_class_instantiation':'resolve_module_or_raise'(")
+            && doc.ends_with(", 'spawn')")
+            && !doc.contains(RUNTIME_MODULE_LOOKUP),
+        "the ClassSelf lookup must stay resolve_module_or_raise/2. Got:\n{doc}"
     );
 }

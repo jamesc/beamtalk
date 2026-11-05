@@ -848,3 +848,50 @@ fn lint_knows_hex_dep_and_native_modules_but_warns_on_unknown() {
         .stderr(contains("Unknown Erlang module `fakelib`").not())
         .stderr(contains("Unknown Erlang module `my_nif`").not());
 }
+
+/// BT-4183: the lint passes run against `analyse_full`'s cross-file
+/// hierarchy, so a subclass whose actor ancestor is declared in another file
+/// of the package resolves as an actor and its away block warns
+/// `actor-state-abroad` in the subclass's file. Linted module-locally (the
+/// old behaviour) `Sub` resolved non-actor and the warning was missed.
+#[test]
+fn actor_state_abroad_resolves_out_of_file_actor_ancestor_bt_4183() {
+    let project = cli_common::fixture_project();
+    let src = project.path().join("src");
+    std::fs::write(
+        src.join("Base.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Base\n\
+         \x20\x20state: count = 0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src.join("Sub.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Base subclass: Sub\n\
+         \x20\x20startLate => Timer after: 100 do: [self.count := 1]\n",
+    )
+    .unwrap();
+
+    let output = cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["lint", "--format=json"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let abroad: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.contains("block writes field 'count' of Sub"))
+        .collect();
+    assert_eq!(
+        abroad.len(),
+        1,
+        "expected one actor-state-abroad diagnostic, got:\n{stdout}"
+    );
+    assert!(abroad[0].contains("Sub.bt"), "{}", abroad[0]);
+    assert!(!output.status.success(), "lint must fail:\n{stdout}");
+}

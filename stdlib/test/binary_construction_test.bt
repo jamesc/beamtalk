@@ -1,0 +1,366 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4348: Binary construction (ADR 0143). `<<...>>` in expression position
+// builds a binary with the same segment grammar binary patterns use, so
+// each test builds a value and matches it back (or reads its bytes).
+// Parse-time checks (`<<"hi"/binary>>` is an error, misfit literals warn)
+// are covered by the parser tests in
+// crates/beamtalk-core/src/source_analysis/parser/tests/binary_construction_tests.rs.
+
+TestCase subclass: BinaryConstructionTest
+
+  // --- Integer segments ---
+  testIntegerLiteralSegments =>
+    self assert: <<1, 2, 255>> toBytes equals: #(1, 2, 255)
+
+  testIntegerSizedRoundTrip =>
+    v := 4660
+    bin := <<v:16, 7:8>>
+    self assert: bin toBytes equals: #(18, 52, 7)
+    result := bin match: [
+      <<a:16, b:8>> -> {a, b};
+      _ -> nil
+    ]
+    self assert: result equals: {4660, 7}
+
+  testSubByteFieldsRoundTrip =>
+    // 3 + 5 bits make one byte: 0b111_01010 = 234.
+    flags := 7
+    v := 10
+    bin := <<flags:3, v:5>>
+    self assert: bin toBytes equals: #(234)
+    result := bin match: [
+      <<f:3, w:5>> -> {f, w};
+      _ -> nil
+    ]
+    self assert: result equals: {7, 10}
+
+  testVariableSizeRoundTrip =>
+    n := 12
+    v := 2748
+    bin := <<v:n, 15:4>>
+    self assert: bin bitSize equals: 16
+    result := bin match: [
+      <<w:n, rest:4>> -> {w, rest};
+      _ -> nil
+    ]
+    self assert: result equals: {2748, 15}
+
+  testParenthesisedSizeAndValue =>
+    a := 3
+    // A computed size leaves alignment unknown statically, so the result
+    // is typed `Bitstring | Binary`; a `:: Binary` arm narrows it.
+    bin := <<(a * 100):(a + 13)>>
+    bytes := bin match: [
+      b :: Binary -> b toBytes;
+      _ -> nil
+    ]
+    self assert: bytes equals: #(1, 44)
+
+  testSignedLittleEndianRoundTrip =>
+    v := -2
+    bin := <<v:16/signed-little>>
+    self assert: bin toBytes equals: #(254, 255)
+    result := bin match: [
+      <<w:16/signed-little>> -> w;
+      _ -> nil
+    ]
+    self assert: result equals: -2
+    self assert: <<-1:8/signed>> toBytes equals: #(255)
+
+  testUnitRoundTrip =>
+    // size 2, unit 8: 16 bits.
+    v := 4660
+    bin := <<v:2/unit:8>>
+    self assert: bin toBytes equals: #(18, 52)
+    result := bin match: [
+      <<w:2/unit:8>> -> w;
+      _ -> nil
+    ]
+    self assert: result equals: 4660
+
+  // --- Float segments ---
+  testFloat64RoundTrip =>
+    x := 1.5
+    bin := <<x/float>>
+    self assert: bin toBytes equals: #(63, 248, 0, 0, 0, 0, 0, 0)
+    result := bin match: [
+      <<y/float>> -> y;
+      _ -> nil
+    ]
+    self assert: result equals: 1.5
+
+  testFloat32RoundTrip =>
+    x := -3.0
+    bin := <<x:32/float>>
+    self assert: bin toBytes equals: #(192, 64, 0, 0)
+    result := bin match: [
+      <<y:32/float>> -> y;
+      _ -> nil
+    ]
+    self assert: result equals: -3.0
+
+  testFloat16RoundTrip =>
+    x := 0.5
+    bin := <<x:16/float>>
+    self assert: bin toBytes equals: #(56, 0)
+    result := bin match: [
+      <<y:16/float>> -> y;
+      _ -> nil
+    ]
+    self assert: result equals: 0.5
+
+  testFloatLiteralsFold =>
+    // Literals fold to their IEEE bytes; an integer literal in a float
+    // segment is the float it denotes.
+    self assert: <<1.5/float>> toBytes equals: #(63, 248, 0, 0, 0, 0, 0, 0)
+    self assert: <<1.5:32/float-little>> toBytes equals: #(0, 0, 192, 63)
+    self assert: <<1/float>> toBytes equals: #(63, 240, 0, 0, 0, 0, 0, 0)
+    self assert: <<-3:32/float>> toBytes equals: #(192, 64, 0, 0)
+    self assert: <<1.5:16/float>> toBytes equals: #(62, 0)
+
+  // --- Character and string literals ---
+  testCharacterLiteral =>
+    bin := <<$A, $z>>
+    self assert: bin toBytes equals: #(65, 122)
+    result := bin match: [
+      <<$A, c:8>> -> c;
+      _ -> nil
+    ]
+    self assert: result equals: 122
+
+  testStringLiteralIsUtf8Bytes =>
+    self assert: <<"hi">> toBytes equals: #(104, 105)
+    self assert: <<"é">> toBytes equals: #(195, 169)
+    self assert: <<"">> toBytes equals: #()
+    result := <<"GET ", "/x">> match: [
+      <<"GET ", path/binary>> -> path toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(47, 120)
+
+  testStringLiteralIsNeverAString =>
+    // Construction builds bytes, never text (ADR 0143 § Result class).
+    self assert: <<"hi">> class equals: Binary
+
+  // --- utf segments ---
+  testUtf8RoundTrip =>
+    c := 233
+    bin := <<c/utf8>>
+    self assert: bin toBytes equals: #(195, 169)
+    result := bin match: [
+      <<d/utf8>> -> d;
+      _ -> nil
+    ]
+    self assert: result equals: 233
+
+  testUtf16RoundTrip =>
+    c := 128512
+    bin := <<c/utf16>>
+    self assert: bin toBytes equals: #(216, 61, 222, 0)
+    result := bin match: [
+      <<d/utf16>> -> d;
+      _ -> nil
+    ]
+    self assert: result equals: 128512
+    self assert: <<"hi"/utf16>> toBytes equals: #(0, 104, 0, 105)
+    self assert: <<$A/utf16-little>> toBytes equals: #(65, 0)
+
+  testUtf32RoundTrip =>
+    c := 65
+    bin := <<c/utf32>>
+    self assert: bin toBytes equals: #(0, 0, 0, 65)
+    result := bin match: [
+      <<d/utf32>> -> d;
+      _ -> nil
+    ]
+    self assert: result equals: 65
+    self assert: <<"A"/utf32-little>> toBytes equals: #(65, 0, 0, 0)
+
+  // --- binary and bits tails ---
+  testBinaryTailRoundTrip =>
+    payload := Binary fromBytes: #(104, 105)
+    bin := <<16:8, payload/binary>>
+    self assert: bin toBytes equals: #(16, 104, 105)
+    result := bin match: [
+      <<16:8, rest/binary>> -> rest;
+      _ -> nil
+    ]
+    self assert: result equals: payload
+
+  testSizedBinarySegment =>
+    payload := Binary fromBytes: #(1, 2, 3, 4)
+    self assert: <<payload:2/binary>> toBytes equals: #(1, 2)
+
+  testStringValueInBinarySegment =>
+    // A String builds its UTF-8 bytes (ADR 0143 § String values).
+    name := "hé"
+    bin := <<name/binary>>
+    self assert: bin toBytes equals: #(104, 195, 169)
+    self assert: bin class equals: Binary
+    text := "abc"
+    bytes := <<3:8, text/binary>>
+    self assert: bytes toBytes equals: #(3, 97, 98, 99)
+
+  testLengthPrefixedFrameRoundTrip =>
+    // ADR 0143: sizes computed from values, matched back.
+    payload := Binary fromBytes: #(104, 101, 108, 108, 111)
+    len := payload size
+    frame := <<16:8, 3:8, len:24, payload/binary>>
+    self assert: frame size equals: 10
+    result := frame match: [
+      <<16:8, 3:8, n:24, rest:n/binary>> -> {n, rest toBytes};
+      _ -> nil
+    ]
+    self assert: result equals: {5, #(104, 101, 108, 108, 111)}
+
+  testSizeFromSend =>
+    payload := "abc"
+    frame := <<(payload size):16, payload/binary>>
+    self assert: frame toBytes equals: #(0, 3, 97, 98, 99)
+
+  testBitsTailRoundTrip =>
+    tail := (Binary fromBytes: #(234)) match: [
+      <<_:3, r/bitstring>> -> r;
+      _ -> nil
+    ]
+    bin := <<5:3, tail/bitstring>>
+    self assert: bin class equals: Binary
+    self
+      assert: (bin match: [
+        <<5:3, back:5>> -> back;
+        _ -> nil
+      ])
+      equals: 10
+
+  // --- Result class (ADR 0141) ---
+  testUnalignedResultIsBitstring =>
+    bits := <<1:3>>
+    self assert: bits class equals: Bitstring
+    self assert: bits bitSize equals: 3
+    self assert: bits toBits equals: #(0, 0, 1)
+    longer := <<1:4, 1:5>>
+    self assert: longer class equals: Bitstring
+    self assert: longer bitSize equals: 9
+
+  testAlignedResultIsBinary =>
+    self assert: <<1:3, 1:5>> class equals: Binary
+    self assert: <<>> class equals: Binary
+    self assert: <<>> size equals: 0
+
+  // --- Evaluation order (ADR 0118 literal-container rule) ---
+  testSegmentsEvaluateLeftToRight =>
+    t := 0
+    b := <<t:8, (t := t + 1):8, t:8>>
+    self assert: b toBytes equals: #(0, 1, 1)
+    self assert: t equals: 1
+
+  testAssignmentInSizeIsSequenced =>
+    // The value is evaluated before its own size.
+    t := 0
+    b := <<(t := t + 8):(t + 8)>>
+    self assert: b bitSize equals: 16
+    self
+      assert: (b match: [
+        <<v:16>> -> v;
+        _ -> nil
+      ])
+      equals: 8
+
+  testSendSegmentsRunInOrder =>
+    // Sends with side effects run one segment at a time, left to right.
+    // (TestCase is a Value, so its own field writes do not persist; the
+    // self-send case lives in BinaryFrameActor below.)
+    c := BinaryFrameActor spawn
+    b := <<(c next):8, (c next):8, (c getCount):8>>
+    self assert: b toBytes equals: #(1, 2, 2)
+    c stop
+
+  testSegmentsInLoop =>
+    acc := <<>>
+    t := 0
+    #(1, 2, 3) do: [:k | acc := <<acc/binary, (t := t + k):8, t:8>>]
+    self assert: acc toBytes equals: #(1, 1, 3, 3, 6, 6)
+    self assert: t equals: 6
+
+  // --- Inside actor methods ---
+  testActorFieldValue =>
+    a := BinaryFrameActor spawn
+    self assert: a header toBytes equals: #(3, 7)
+    a stop
+
+  testActorSelfSendSegmentsRunInOrder =>
+    a := BinaryFrameActor spawn
+    self assert: a selfSendFrame toBytes equals: #(1, 2, 2)
+    self assert: a getCount equals: 2
+    a stop
+
+  testActorFieldWriteSegmentsRunInOrder =>
+    a := BinaryFrameActor spawn
+    self assert: a fieldWriteFrame toBytes equals: #(0, 1, 1)
+    self assert: a getCount equals: 1
+    a stop
+
+  testActorLocalSegmentsRunInOrder =>
+    a := BinaryFrameActor spawn
+    self assert: a localFrame toBytes equals: #(10, 11, 11)
+    a stop
+
+  testActorLoopBuildsFrame =>
+    a := BinaryFrameActor spawn
+    self assert: (a runningTotals: #(1, 2, 3)) toBytes equals: #(1, 3, 6)
+    self assert: a getCount equals: 6
+    a stop
+
+  // --- Run-time failures ---
+  // ADR 0143 § Runtime failures (BT-4406): a failed construction is an
+  // `argument_error` whose message names the segment's 1-based position
+  // and type (BT-4414) and the offending value (a scalar as its
+  // printString).
+  testNonBinaryInBinarySegmentRaises =>
+    v := 1
+    self should: [<<v/binary>>] raise: #argument_error
+    message := [<<v/binary>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: segment 1 of type 'binary': expected a binary but got: 1"
+
+  testNegativeVariableSizeRaises =>
+    n := 0 - 1
+    self should: [<<5:n>>] raise: #argument_error
+    // A size the BEAM compiler can see is negative (`0 - 1` folds) fails
+    // with the plain "invalid argument"; a size known only at run time is
+    // named with its segment.
+    m := #(-1) first
+    message := [<<5:m>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: segment 1 of type 'integer': expected a non-negative integer as size but got: -1"
+
+  testNonIntegerInIntegerSegmentNamesValue =>
+    v := #(#foo) first
+    self should: [<<v:8>>] raise: #argument_error
+    message := [<<1:8, v:8>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: segment 2 of type 'integer': expected an integer but got: #foo"
+
+  testFailedConstructionRecordsSegmentDetails =>
+    v := 1
+    details := [<<v/binary>>] on: Error do: [:e | e details]
+    self assert: (details at: #segment) equals: 1
+    self assert: (details at: #segment_type) equals: #binary
+    self assert: (details at: #failure) equals: #type
+    self assert: (details at: #value) equals: 1
+    // For a size failure, `value` is the offending size.
+    m := #(-1) first
+    sizeDetails := [<<5:m>>] on: Error do: [:e | e details]
+    self assert: (sizeDetails at: #failure) equals: #size
+    self assert: (sizeDetails at: #value) equals: -1
+
+  testLaterSegmentFailureNamesItsSourcePosition =>
+    // The position is the source segment's: a string literal counts as one
+    // segment however many bytes it builds.
+    v := 1
+    message := [<<"ab", 16:8, v:4/binary, v:8>>] on: Error do: [:e | e message]
+    self assert: message equals: "binary construction: segment 3 of type 'binary': expected a binary but got: 1"
+    w := "hi"
+    message2 := [
+      <<"é"/utf16, 1:8, (w size):8, w:8>>
+    ] on: Error do: [:e | e message]
+    self assert: message2 equals: "binary construction: segment 4 of type 'integer': expected an integer but got: ""hi"""

@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4281: `new:` validates a runtime Dictionary against the class's declared
+// fields (BT-4030), and the declared-field set is memoised per class in the
+// derived cache. Redefining a class (hot reload) must invalidate that memo in
+// both directions: a field added to the class or an ancestor is accepted, and
+// a removed field is rejected again. A runtime Dictionary is used throughout
+// so the check runs at run time, not as the compile-time literal-dict check.
+
+Value subclass: Bt4281Pt
+  field: x = 0
+// => "Bt4281Pt"
+
+Bt4281Pt subclass: Bt4281SubPt
+  field: z = 0
+// => "Bt4281SubPt"
+
+d := (Dictionary new at: #x put: 1) at: #y put: 2
+// => _
+
+// `y` is not declared yet: both the class and its subclass reject it
+// (and the rejection fills the memo for both).
+[(Bt4281Pt new: d) x] on: RuntimeError do: [:e | e kind]
+// => unknown_field
+
+[(Bt4281SubPt new: d) z] on: RuntimeError do: [:e | e kind]
+// => unknown_field
+
+// ---------------------------------------------------------------------------
+// Redefine the parent with a new field `y`
+// ---------------------------------------------------------------------------
+
+Value subclass: Bt4281Pt
+  field: x = 0
+  field: y = 0
+// => "Bt4281Pt"
+
+(Bt4281Pt new: d) y
+// => 2
+
+// The subclass was not redefined; it inherits the new key.
+(Bt4281SubPt new: d) z
+// => 0
+
+// ---------------------------------------------------------------------------
+// Redefine the parent again without `y`: the memo must not keep accepting it
+// ---------------------------------------------------------------------------
+
+Value subclass: Bt4281Pt
+  field: x = 0
+// => "Bt4281Pt"
+
+[(Bt4281Pt new: d) x] on: RuntimeError do: [:e | e kind]
+// => unknown_field
+
+[(Bt4281SubPt new: d) z] on: RuntimeError do: [:e | e kind]
+// => unknown_field

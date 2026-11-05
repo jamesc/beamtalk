@@ -42,7 +42,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     handle_class_method_call/6,
     handle_async_dispatch/5,
     class_understands_class_selector/2,
-    find_class_method_from_class/2
+    class_object_understands/2,
+    find_class_method_from_class/2,
+    in_caller_owner/2,
+    class_method_body/2
 ]).
 
 -type selector() :: atom().
@@ -56,6 +59,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
+-export_type([owner/0]).
 
 -doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
@@ -236,6 +240,10 @@ relies on a derived flag having been erased. As for every metadata-driven path,
 a hot reload's new code is current a moment before its class process publishes
 the new metadata; the raw `class_vars` input is published first
 (`beamtalk_object_class:apply_class_info/2`) to keep that window short.
+
+Exported for `beamtalk_class_shadow_flags:static_call_target/4` (BT-4316),
+which installs a static call key only while this answer names the call
+site's own class, module and function: one rule for both paths.
 """.
 -spec in_caller_owner(pid(), selector()) -> owner() | decline.
 in_caller_owner(ClassPid, Selector) when node(ClassPid) =:= node() ->
@@ -395,21 +403,39 @@ Resolve a dynamic `new`/`new:` send to a direct module call, if eligible.
 
 Eligible when the class's baked `direct_constructors` lists the selector, the
 class names a module and has no runtime-installed class-method funs (the
-`lookup_direct_constructor/2` gates), and the module exports `new` at the
-right arity (`new/0` for `new`, `new/1` for `new:` with a map argument). A
-non-map `new:` argument is never eligible: the gen_server path reproduces
-the legacy `IsConstructible = false` fallback and the `new: expects a
-Dictionary argument` error there.
+`beamtalk_class_metadata:lookup_direct_constructor/2` gates),
+`beamtalk_class_shadow_flags:direct_call_ok/2` holds for the class (ADR 0142
+§1 rules 1-2: no class-side extension on it, no ADR 0084 runtime fun, no class
+variables in its chain; BT-4409), and the module exports `new` at the right
+arity (`new/0` for `new`, `new/1` for `new:` with a map argument). For `new:`,
+no ancestor may define a user class-side `new:`
+(`beamtalk_class_metadata:chain_has_user_new1/1`, from the facts the
+ancestors publish). A non-map `new:` argument is never eligible: the
+gen_server path reproduces the legacy `IsConstructible = false` fallback and
+the `new: expects a Dictionary argument` error there.
 
-The verdict is generated metadata (Rust's `direct_constructors`), never
-re-derived here. `new` needs no chain check because `new/0` is itself the
-override slot (a custom `new` compiles to, or delegates from, it), so the
-direct call and the gen_server path reach the same function either way.
-`new:` shares the direct-call trust model: reloading a class re-syncs its own
-verdicts, while an ancestor reload does not re-bake descendants. The
-export check only sees loaded code, so a class
-whose module nobody has touched yet takes one gen_server fallback (which
-loads it) before going direct.
+The class's own verdict is generated metadata (Rust's `direct_constructors`),
+never re-derived here: the baked `new:` entry only says the class's own
+synthesized `new:` is eligible (Rust also folds in the chain as it was at
+compile time, which can only keep it off). The chain is decided at run time
+(BT-4409), so an ancestor reloaded with a user `new:` is honoured by an
+already-loaded descendant without recompiling it, and dropping it again
+brings the fast path back. `new` needs no chain check because `new/0` is
+itself the override slot (a custom `new` compiles to, or delegates from, it),
+so the direct call and the gen_server path reach the same function either
+way; an ancestor's class-side `new` extension does not shadow the class's own
+synthesized `new`, as on the class-process path.
+
+The class, its tag and module (or the decline) are memoised per class pid and
+selector in `beamtalk_class_derived_cache` (`{direct_constructor, ClassPid,
+Selector}`), flushed by every class-metadata write; `direct_call_ok/2` (one
+`persistent_term` read) and the export check run on every send. The export
+check only sees loaded code, so a class whose module nobody has touched yet
+takes one gen_server fallback (which loads it) before going direct.
+
+`beamtalk_class_shadow_flags:static_call_target/4` installs a static `new`
+call key only while this answers `{ok, Module}` for the call site's module
+(BT-4409): one rule for both paths.
 """.
 -spec lookup_direct_constructor(pid(), selector(), list()) -> {ok, module()} | error.
 lookup_direct_constructor(ClassPid, new, []) when is_pid(ClassPid) ->
@@ -421,18 +447,51 @@ lookup_direct_constructor(_ClassPid, _Selector, _Args) ->
 
 -spec lookup_direct_constructor_module(pid(), selector(), arity()) -> {ok, module()} | error.
 lookup_direct_constructor_module(ClassPid, Selector, Arity) ->
+    case direct_constructor_owner(ClassPid, Selector) of
+        {ok, ClassName, Tag, Module} ->
+            case
+                beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName) andalso
+                    erlang:function_exported(Module, new, Arity)
+            of
+                true -> {ok, Module};
+                false -> error
+            end;
+        error ->
+            error
+    end.
+
+%% The memoised part of `lookup_direct_constructor/3` (see its doc).
+-spec direct_constructor_owner(pid(), selector()) ->
+    {ok, class_name(), atom(), module()} | error.
+direct_constructor_owner(ClassPid, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {direct_constructor, ClassPid, Selector},
+        fun() -> compute_direct_constructor_owner(ClassPid, Selector) end
+    ).
+
+-spec compute_direct_constructor_owner(pid(), selector()) ->
+    {cache | nocache, {ok, class_name(), atom(), module()} | error}.
+compute_direct_constructor_owner(ClassPid, Selector) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
-                {ok, Module} = Found ->
-                    case erlang:function_exported(Module, new, Arity) of
-                        true -> Found;
-                        false -> error
-                    end;
-                error ->
-                    error
-            end;
+            {cache, direct_constructor_owner_of(ClassName, Selector)};
         not_found ->
+            {nocache, error}
+    end.
+
+-spec direct_constructor_owner_of(class_name(), selector()) ->
+    {ok, class_name(), atom(), module()} | error.
+direct_constructor_owner_of(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
+        {ok, Module} ->
+            case
+                Selector =:= 'new:' andalso
+                    beamtalk_class_metadata:chain_has_user_new1(ClassName)
+            of
+                true -> error;
+                false -> {ok, ClassName, receiver_tag(ClassName), Module}
+            end;
+        error ->
             error
     end.
 
@@ -451,6 +510,21 @@ send takes (BT-4252). This is what lets a Beamtalk-bodied protocol method
 that sends to its receiver (`Class>>printString => self name asString`)
 answer when it runs in the class process.
 
+The class-variable reflection sends (`hasField:`, `clearField:`,
+`fieldAt:`, `fieldAt:put:` with a Symbol name: the one decision,
+`beamtalk_object_class:class_var_reflection_op/2`, that the class process
+itself answers ahead of its method lookup) answer in place
+(`class_var_reflection_in_place/1`, BT-4423): the class method running here
+holds this class's variables in the process dictionary, so the
+`beamtalk_class_vars` helpers that a compiled `self fieldAt:` calls answer
+them, exactly as the class process would. This is how a cascade on `self`
+(`self fieldAt: #x put: 1; yourself`) and the class's own name
+(`Counter fieldAt: #x` inside a `Counter` class method) answer: both are
+ordinary sends whose receiver is this class. The receiver is always the
+class whose process this is, never the running method's `ClassSelf`, so an
+inherited method sending to its defining class by name from a subclass's
+process reaches the defining class's own process instead.
+
 A selector the class itself understands would run one of its own class
 methods re-entrantly, which has no safe route, so it still raises the
 structured `dispatch_error` (`handle_class_self_call/1`). So does a protocol
@@ -460,11 +534,16 @@ effect.
 """.
 -spec class_send_from_own_process(selector(), list()) -> term() | no_return().
 class_send_from_own_process(Selector, Args) ->
-    %% The same decision the external send makes before skipping the class
-    %% process (`class_chain_only_send/3`), so the two cannot disagree: the
-    %% class-variable reflection sends (`hasField:`/`clearField:`), which only
-    %% the class process answers from its own state, stay on the
-    %% `dispatch_error` path.
+    case beamtalk_object_class:class_var_reflection_op(Selector, Args) of
+        none -> class_send_from_own_process_lookup(Selector, Args);
+        Op -> class_var_reflection_in_place(Op)
+    end.
+
+%% A send `class_var_reflection_in_place/1` does not answer: the same decision
+%% the external send makes before skipping the class process
+%% (`class_chain_only_send/3`), so the two cannot disagree.
+-spec class_send_from_own_process_lookup(selector(), list()) -> term() | no_return().
+class_send_from_own_process_lookup(Selector, Args) ->
     case class_chain_only_send(self(), Selector, Args) of
         {ok, ClassName, Module} ->
             %% This is the class's own process, so `self()` is its pid.
@@ -474,6 +553,23 @@ class_send_from_own_process(Selector, Args) ->
             class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf);
         error ->
             handle_class_self_call(Selector)
+    end.
+
+%% A class-variable reflection send to this class from inside its own process
+%% (`class_send_from_own_process/2`, BT-4423): the same `beamtalk_class_vars`
+%% helper a compiled class-side `self hasField:` / `clearField:` / `fieldAt:` /
+%% `fieldAt:put:` calls, on this class's object (`class_object_from_pid/1`
+%% reads the name and module from this process's dictionary, no call).
+-spec class_var_reflection_in_place(
+    {has | clear | get, atom()} | {put, atom(), term()}
+) -> term().
+class_var_reflection_in_place(Op) ->
+    ClassSelf = beamtalk_class_registry:class_object_from_pid(self()),
+    case Op of
+        {has, Name} -> beamtalk_class_vars:has(ClassSelf, Name);
+        {clear, Name} -> beamtalk_class_vars:clear(ClassSelf, Name);
+        {get, Name} -> beamtalk_class_vars:field_at(ClassSelf, Name);
+        {put, Name, Value} -> beamtalk_class_vars:field_at_put(ClassSelf, Name, Value)
     end.
 
 -doc """
@@ -1607,18 +1703,30 @@ export. Shared by `apply_class_method_in_context/6` and the in-caller path
 apply_class_method_body(
     ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
 ) ->
-    %% ADR 0084: a runtime-installed class-method fun shadows
-    %% the compiled export. The retrieval store is keyed by the resolved
-    %% DefiningClass, so this works identically for own and inherited
-    %% methods, and is gated so compile-time-only classes pay no extra
-    %% read on the dispatch hot path.
-    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
-        {ok, #{block := Fun}} ->
+    case class_method_body(DefiningClass, Selector) of
+        {runtime_fun, Fun} ->
             apply_class_method_fun(Fun, ClassSelf, Args, ClassName, Selector);
-        error ->
+        compiled ->
             apply_compiled_class_method(
                 ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
             )
+    end.
+
+-doc """
+Which body a class-side `Selector` resolved to `DefiningClass` runs: its ADR
+0084 runtime-installed fun, which shadows the compiled export, or the
+compiled export. The retrieval store is keyed by the resolved
+`DefiningClass`, so this works identically for own and inherited methods,
+and is gated so compile-time-only classes pay no extra read on the dispatch
+hot path. The one rule behind `apply_class_method_body/7` and
+`beamtalk_class_shadow_flags`' static call keys (BT-4270), which name a
+compiled function only while this answers `compiled`.
+""".
+-spec class_method_body(class_name(), selector()) -> {runtime_fun, fun()} | compiled.
+class_method_body(DefiningClass, Selector) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+        {ok, #{block := Fun}} -> {runtime_fun, Fun};
+        error -> compiled
     end.
 
 -doc """
@@ -1892,6 +2000,24 @@ superclass_from_ets(ClassName) ->
         {ok, Super} -> Super;
         not_found -> none
     end.
+
+-doc """
+Is `Receiver` a class object whose own class side understands `Selector`
+(`class_understands_class_selector/2`)? Answers `false` for any other value,
+including a class object that only reaches `Selector` through the generic
+`Class`/`Behaviour`/`Object` protocol.
+
+BT-4075: guards the `error:` intrinsic. `Object>>error:` raises, but a class
+object with a class-side `error:` (`Result class>>error:`, `Logger
+class>>error:`) must receive the send instead, so codegen asks this before
+raising when the receiver is not statically known to be an instance.
+""".
+-spec class_object_understands(term(), selector()) -> boolean().
+class_object_understands(#beamtalk_object{class = Tag} = Receiver, Selector) ->
+    beamtalk_class_registry:is_class_object(Receiver) andalso
+        class_understands_class_selector(beamtalk_primitive:class_name_from_tag(Tag), Selector);
+class_object_understands(_Receiver, _Selector) ->
+    false.
 
 -doc """
 Test whether `ClassName`'s own metaclass tag understands `Selector`

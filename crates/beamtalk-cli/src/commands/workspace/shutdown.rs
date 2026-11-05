@@ -368,19 +368,11 @@ mod tests {
                 let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) else {
                     continue;
                 };
-                if req.get("op").and_then(|v| v.as_str()) == Some("describe") {
-                    send(
-                        &mut ws,
-                        serde_json::json!({
-                            "id": req.get("id"),
-                            "status": ["done"],
-                            "ops": {},
-                            "versions": {
-                                "beamtalk": "0.0.0-stale",
-                                "protocol": "0.0",
-                            },
-                        }),
-                    );
+                if crate::commands::test_support::answer_describe(
+                    &mut ws,
+                    &req,
+                    Some(&crate::commands::test_support::stale_versions()),
+                ) {
                     continue;
                 }
                 match error {

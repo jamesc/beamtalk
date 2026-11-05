@@ -87,7 +87,7 @@ pub struct ResolvedDependency {
 }
 
 /// Runs `f` over the dependencies in `resolved` that `dep_name` depends on,
-/// directly or transitively ([`beamtalk_cli::dep_order::dependency_closure`]
+/// directly or transitively ([`beamtalk_core::compilation::dep_order::dependency_closure`]
 /// over `dependencies`), in their order in `resolved` — the `prior_deps` a
 /// dependency compiles and indexes against (BT-4375).
 ///
@@ -101,7 +101,7 @@ pub(crate) fn with_dependency_closure<R>(
     dep_name: &str,
     f: impl FnOnce(&[ResolvedDependency]) -> R,
 ) -> R {
-    let closure = beamtalk_cli::dep_order::dependency_closure(dependencies, dep_name);
+    let closure = beamtalk_core::compilation::dep_order::dependency_closure(dependencies, dep_name);
     let in_closure: Vec<bool> = resolved
         .iter()
         .map(|dep| closure.contains(&dep.name))
@@ -960,14 +960,12 @@ fn extract_dep_protocol_alias_metadata(
                 Some(dep_name),
             ),
         );
-        let mut infos =
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+        alias_infos.extend(
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
                 module,
-            );
-        for info in &mut infos {
-            info.package = Some(dep_name.into());
-        }
-        alias_infos.extend(infos);
+                Some(dep_name),
+            ),
+        );
     }
 
     DepProtocolAliasMetadata {

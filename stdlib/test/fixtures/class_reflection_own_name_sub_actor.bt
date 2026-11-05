@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ClassReflectionOwnNameSubActor — test fixture for BT-4423
+//
+// Inherits `ClassReflectionCascadeOwnNameActor`'s class methods and declares
+// its own `total` (class variables are per class, ADR 0130). In an inherited
+// method, `self` is this class, while the parent's name is always the parent:
+// `namedRead` reads the parent's `total`, `cascadeRead` this class's.
+
+ClassReflectionCascadeOwnNameActor subclass: ClassReflectionOwnNameSubActor
+  classState: total :: Integer = 100
+  classState: extra

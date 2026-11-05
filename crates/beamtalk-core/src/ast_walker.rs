@@ -33,7 +33,9 @@
 //! awareness (e.g. `cascade_candidate`) keep their own recursive traversal.
 //! This module handles the common pre-order-visitor pattern.
 
-use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module, StringSegment};
+use crate::ast::{
+    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, StringSegment,
+};
 
 // ── Module-level iterators ────────────────────────────────────────────────────
 
@@ -179,6 +181,11 @@ where
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_expression(e, f);
+            }
+        }
         // Leaf nodes — nothing to recurse into.
         Expression::Literal(..)
         | Expression::Identifier(..)
@@ -278,6 +285,14 @@ where
                 if let StringSegment::Interpolation(e) = seg {
                     walk_expression_mut(e, f);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments
+                .iter_mut()
+                .flat_map(BinarySegment::sub_expressions_mut)
+            {
+                walk_expression_mut(e, f);
             }
         }
         // Leaf nodes — nothing to recurse into.

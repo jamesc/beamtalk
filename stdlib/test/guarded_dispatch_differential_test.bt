@@ -47,6 +47,12 @@
 // fixtures/guarded_diff_proxy.bt, fixtures/type_pattern_actor_fixture.bt,
 // fixtures/counter.bt.
 
+// BT-4412: receivers declared through a type alias take the same guarded
+// direct call as the aliased type (`testAliasTypedReceivers`).
+type GuardedDiffPair = Tuple(Integer, Integer)
+type GuardedDiffOptions = Dictionary(Symbol, Integer)
+type GuardedDiffPointAlias = GuardedDiffPoint
+
 DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
 
   // === Receivers ===
@@ -87,6 +93,13 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       args: #(Erlang erlang binary_to_atom: path, #(#imports))
     (reply value at: 2) first at: 2
 
+  // A pid that has exited: a future-protocol send to it only posts a
+  // message, so it answers the same however often it is sent.
+  deadPid =>
+    pid := [nil] fork
+    50 timesRepeat: [pid isAlive ifTrue: [Timer sleep: 10]]
+    pid
+
   // === Typed sends that DNU, in methods so `@expect` can mark them ===
   typedUnknown: r :: GuardedDiffPoint =>
     @expect dnu
@@ -95,6 +108,21 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   typedUnknownKeyword: r :: GuardedDiffPoint =>
     @expect dnu
     r noSuch: 1 selector: 2
+
+  // BT-4390: `Pid` special selectors (the future protocol `send_pid/3`
+  // answers through `beamtalk_future`) and a run-time `String` extension;
+  // neither is declared on the class, so the checker would flag the send.
+  typedPidWhenResolved: r :: Pid =>
+    @expect dnu
+    r whenResolved: [:v | v]
+
+  typedPidWhenRejected: r :: Pid =>
+    @expect dnu
+    r whenRejected: [:e | e]
+
+  typedStringExtension: r :: String =>
+    @expect dnu
+    r bt4390Extended
 
   // === Open Value class: plain and keyword sends, inheritance, errors ===
   testOpenValueSends =>
@@ -158,17 +186,16 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   testOpenValueTypedSendsCompileToTheDirectShape =>
     self assert: (self importedCalls includes: {self pointModule, #dispatch, 3})
 
-  // BT-4294: the built-in typed rows with a single route in the routing
-  // fixture really take the representation-guarded direct call, and the rows
-  // the fixture keeps dynamic (String, Binary, Pid) do not.
+  // BT-4294, BT-4390: the built-in typed rows with a route in the routing
+  // fixture really take the representation-guarded direct call (String and
+  // Pid for their ordinary selectors), and the row the fixture keeps dynamic
+  // (Binary) does not.
   testBuiltinTypedSendsCompileToTheDirectShape =>
     imports := self importedCalls
-    #(#'bt@stdlib@integer', #'bt@stdlib@float', #'bt@stdlib@symbol', #'bt@stdlib@true', #'bt@stdlib@false', #'bt@stdlib@undefined_object', #'bt@stdlib@block', #'bt@stdlib@tuple', #'bt@stdlib@list', #'bt@stdlib@dictionary', #'bt@stdlib@reference', #'bt@stdlib@port') do: [:m |
+    #(#'bt@stdlib@integer', #'bt@stdlib@float', #'bt@stdlib@string', #'bt@stdlib@symbol', #'bt@stdlib@true', #'bt@stdlib@false', #'bt@stdlib@undefined_object', #'bt@stdlib@block', #'bt@stdlib@tuple', #'bt@stdlib@list', #'bt@stdlib@dictionary', #'bt@stdlib@pid', #'bt@stdlib@reference', #'bt@stdlib@port') do: [:m |
       self assert: (imports includes: {m, #dispatch, 3})
     ]
-    #(#'bt@stdlib@string', #'bt@stdlib@binary', #'bt@stdlib@pid') do: [:m |
-      self deny: (imports includes: {m, #dispatch, 3})
-    ]
+    self deny: (imports includes: {#'bt@stdlib@binary', #dispatch, 3})
 
   // `perform:` and its family, including `perform:withArguments:timeout:`,
   // which `send/3` rewrites before it classifies the receiver.
@@ -281,6 +308,30 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       dynamic: [:r | r baseOnly]
       on: #{#x => 1}
 
+  // BT-4412: an alias-typed receiver hits and misses its guard exactly like
+  // the aliased type.
+  testAliasTypedReceivers =>
+    self
+      send: #aliasTuple
+      typed: [:r :: GuardedDiffPair | r at: 1]
+      dynamic: [:r | r at: 1]
+      on: (Tuple withAll: #(7, 8))
+    self
+      send: #aliasDictionary
+      typed: [:r :: GuardedDiffOptions | r at: #k put: 1]
+      dynamic: [:r | r at: #k put: 1]
+      on: #{#a => 1}
+    self
+      send: #aliasValue
+      typed: [:r :: GuardedDiffPointAlias | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: self point
+    self
+      send: #aliasValueMiss
+      typed: [:r :: GuardedDiffPointAlias | r baseOnly]
+      dynamic: [:r | r baseOnly]
+      on: #{#x => 1}
+
   // One hit per guarded row of the routing fixture.
   testBuiltinReceivers =>
     self
@@ -299,9 +350,19 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       dynamic: [:r | r size]
       on: "abc"
     self
+      send: #stringKeyword
+      typed: [:r :: String | r includesSubstring: "b"]
+      dynamic: [:r | r includesSubstring: "b"]
+      on: "abc"
+    self
       send: #stringSpecialSelector
       typed: [:r :: String | r asHex]
       dynamic: [:r | r asHex]
+      on: "abc"
+    self
+      send: #stringSpecialKeyword
+      typed: [:r :: String | r byteAt: 1]
+      dynamic: [:r | r byteAt: 1]
       on: "abc"
     self
       send: #binary
@@ -353,6 +414,21 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: Pid | r isAlive]
       dynamic: [:r | r isAlive]
       on: Pid current
+    self
+      send: #pidPrintString
+      typed: [:r :: Pid | r printString]
+      dynamic: [:r | r printString]
+      on: Pid current
+    self
+      send: #pidSpecialSelector
+      typed: [:r | self typedPidWhenResolved: r]
+      dynamic: [:r | r whenResolved: [:v | v]]
+      on: self deadPid
+    self
+      send: #pidSpecialRejected
+      typed: [:r | self typedPidWhenRejected: r]
+      dynamic: [:r | r whenRejected: [:e | e]]
+      on: self deadPid
     self
       send: #reference
       typed: [:r :: Reference | r printString]
@@ -461,9 +537,19 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: String | r size]
       dynamic: [:r | r size]
       on: (Erlang erlang list_to_binary: #(1, 2))
+    self
+      send: #symbolTypedString
+      typed: [:r :: String | r size]
+      dynamic: [:r | r size]
+      on: #abc
+    self
+      send: #integerTypedPid
+      typed: [:r :: Pid | r isAlive]
+      dynamic: [:r | r isAlive]
+      on: 42
 
   // An actor reference (a reserved `beamtalk_object` tuple) typed as a
-  // Tuple, and typed as the open Value class.
+  // Tuple, as the open Value class, and as a Pid (BT-4390).
   testActorReceiverMisses =>
     c := Counter spawn
     [
@@ -476,6 +562,11 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
         send: #actorTypedValue
         typed: [:r :: GuardedDiffPoint | r sum]
         dynamic: [:r | r sum]
+        on: c
+      self
+        send: #actorTypedPid
+        typed: [:r :: Pid | r isAlive]
+        dynamic: [:r | r isAlive]
         on: c
     ] ensure: [c stop]
 
@@ -578,6 +669,28 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       self assert: p shadowedThenRemoved equals: #fromBase
     ] ensure: [
       GuardedDiffPoint removeSelector: #shadowedThenRemoved ifAbsent: [nil]
+    ]
+
+  // BT-4390: a `String` extension registered at run time is reached by a
+  // typed `String` send, which now direct-calls `bt@stdlib@string`: that
+  // module's `dispatch/3` consults the extension registry itself, and the
+  // runtime's `beamtalk_extensions:has('String', _)` check only steers the
+  // shared byte-level (special) selectors, which stay dynamic.
+  testRuntimeStringExtension =>
+    Erlang beamtalk_extensions
+      register: #String
+      selector: #bt4390Extended
+      fun: [:args :receiver | receiver size * 10]
+      owner: #bt4390
+    [
+      self
+        send: #stringExtension
+        typed: [:r | self typedStringExtension: r]
+        dynamic: [:r | r bt4390Extended]
+        on: "abcd"
+      self assert: (self typedStringExtension: "abcd") equals: 40
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #String selector: #bt4390Extended
     ]
 
   checkShadowed: label :: Symbol on: p =>

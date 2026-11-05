@@ -43,6 +43,24 @@ impl ClassHierarchy {
         chain
     }
 
+    /// Whether `class_name`'s compiled instance methods thread actor `State`
+    /// (ADR 0137 amended §1): a non-native class below `Actor` (not `Actor`
+    /// itself, whose methods are compiled without actor `State`).
+    ///
+    /// The one rule behind the static `CompiledSelfSend` and `super`-send
+    /// classifications and the `'threads_actor_state'` flag in
+    /// `__beamtalk_meta/0`, which `beamtalk_dispatch:inherited_target/2` reads
+    /// at run time (BT-4280), so the Rust and Erlang sides cannot disagree.
+    #[must_use]
+    pub fn threads_actor_state(&self, class_name: &str) -> bool {
+        self.get_class(class_name).is_some_and(|c| !c.is_native)
+            && class_name != "Actor"
+            && self
+                .superclass_chain(class_name)
+                .iter()
+                .any(|c| c.as_str() == "Actor")
+    }
+
     /// Returns the names of all classes whose immediate superclass is
     /// `class_name`.
     ///
@@ -461,11 +479,18 @@ impl ClassHierarchy {
     /// synthesized.
     pub(crate) fn propagate_class_kind(&mut self, module: &Module) {
         // Collect names of classes that need is_value = true but don't have it yet.
+        // A class an earlier run already fixed is skipped: re-synthesizing
+        // would find its keyword constructor present and misread it as a
+        // user collision, clearing the recorded keyword decision.
         let classes_to_fix: Vec<EcoString> = module
             .classes
             .iter()
             .filter(|class| {
                 class.class_kind != ClassKind::Value
+                    && self
+                        .classes
+                        .get(class.name.name.as_str())
+                        .is_some_and(|info| !info.is_value)
                     && self.is_value_subclass(class.name.name.as_str())
             })
             .map(|class| class.name.name.clone())
@@ -477,18 +502,29 @@ impl ClassHierarchy {
             }
         }
 
-        // Synthesize auto-slot methods for newly-discovered Value subclasses.
+        // Synthesize auto-slot methods for newly-discovered Value subclasses
+        // and record their constructor anchor (BT-4132): codegen gives them
+        // full value treatment (`apply_class_kind_writeback`), so they are as
+        // eligible for direct construction as a direct `Value subclass:`.
         // We need the AST `ClassDefinition` for slot info, so look it up.
-        // Discard the keyword decision: without a `Value` AST kind these
-        // classes keep a `None` anchor and take the slow path.
+        // `Value` itself (reached here when compiling `value.bt`) is not a
+        // Value subclass: it keeps its methods and its `None` anchor.
         for class in &module.classes {
             if classes_to_fix.contains(&class.name.name) {
+                let anchored = self
+                    .classes
+                    .get(class.name.name.as_str())
+                    .is_some_and(|info| self.ancestors_include_value(info.superclass.as_ref()));
                 if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
-                    let _ = Self::add_value_auto_methods(
-                        class,
-                        &mut info.methods,
-                        &mut info.class_methods,
-                    );
+                    if anchored {
+                        info.synthesize_value_surface(class);
+                    } else {
+                        let _ = Self::add_value_auto_methods(
+                            class,
+                            &mut info.methods,
+                            &mut info.class_methods,
+                        );
+                    }
                 }
             }
         }
@@ -555,7 +591,7 @@ impl ClassHierarchy {
                 (slot_data, existing_instance, existing_class)
             {
                 let info = self.classes.get_mut(class_name.as_str()).unwrap();
-                Self::synthesize_auto_methods_from_state(
+                let keyword_decision = Self::synthesize_auto_methods_from_state(
                     class_name,
                     &slots,
                     &inst_sels,
@@ -563,6 +599,15 @@ impl ClassHierarchy {
                     &mut info.methods,
                     &mut info.class_methods,
                 );
+                // BT-4132: anchor only where the stored state determines the
+                // keyword decision, and never over an anchor the info already
+                // carries (e.g. a generated stdlib builtin's, decided from its
+                // AST); otherwise leave `None` (fail closed).
+                if info.auto_ctors.is_none() {
+                    if let KeywordDecision::Known(keyword_constructor) = keyword_decision {
+                        info.record_constructor_anchor(keyword_constructor);
+                    }
+                }
             }
         }
         self.rebuild_all_indexes();
@@ -570,21 +615,11 @@ impl ClassHierarchy {
 
     /// Check if the superclass chain includes Value.
     pub(super) fn ancestors_include_value(&self, superclass: Option<&EcoString>) -> bool {
-        let mut current = superclass.map(ToString::to_string);
-        let mut visited = HashSet::new();
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if name == "Value" {
-                return true;
-            }
-            current = self
-                .classes
-                .get(name.as_str())
-                .and_then(|info| info.superclass.as_ref().map(ToString::to_string));
-        }
-        false
+        superclass_chain_includes_value(superclass.map(EcoString::as_str), |name| {
+            self.classes
+                .get(name)
+                .and_then(|info| info.superclass.as_deref())
+        })
     }
 
     /// Constructor direct-call eligibility for the named class.
@@ -600,23 +635,26 @@ impl ClassHierarchy {
     ///   (`has_class_new_in_chain`), so any user `new:` in the class or its
     ///   ancestors disables the fast path — except `Value`'s own, which is
     ///   the `@intrinsic basicNewWith` router that just forwards to the
-    ///   receiver's `new/1` (pinned by a test parsing `value.bt`).
+    ///   receiver's `new/1` (pinned by a test parsing `value.bt`). The
+    ///   ancestors' part is checked again at run time, from the facts the
+    ///   ancestors publish (`defines_user_class_new1`, BT-4409), so an
+    ///   ancestor that gains a user `new:` after this class was compiled is
+    ///   honoured; this compile-time walk can only keep the verdict off.
     /// - keyword constructors ignore `ClassSelf` and resolve own-first, so
     ///   only the class's own synthesis record matters.
     ///
-    /// Abstractness is checked here, at the *caller's* compile time only
-    /// (BT-4200). The emitted `call '<mod>':'new'()` skips the `gen_server`
-    /// `{new, _}` abstract rejection, so a caller compiled while the class was
-    /// concrete still instantiates it after only the class's file is reloaded
-    /// as `abstract`. This is deliberate: the callee cannot reject it itself,
-    /// because a Value subclass's generated `new/0` chains through its
-    /// superclass module's `new/0` to collect inherited field defaults (and
-    /// `beamtalk_class_instantiation:ancestor_compiled_defaults/1` calls it
-    /// too), so an abstract class's `new/0` must stay a plain map builder.
-    /// Recompiling the callers (the normal build / REPL redefinition flow
-    /// recompiles dependents) restores the rejection; an abstract class's
-    /// instance is a plain tagged map either way, so no invariant beyond the
-    /// abstract-instantiation diagnostic is at stake.
+    /// Abstractness is decided here: an abstract class gets no direct
+    /// constructors (BT-4200). A caller's static `X new` is guarded by the
+    /// BT-4316 static call key `{Module, new, Tag}` (BT-4409), installed only
+    /// while the class's published `direct_constructors` still lists `new`.
+    /// Reloading the class as `abstract` publishes `[]`, which erases the key
+    /// (`beamtalk_class_metadata:put_direct_constructors/2`), so the next
+    /// send takes `class_send` and gets the `gen_server` `{new, _}` abstract
+    /// rejection without recompiling the caller. The callee cannot reject it
+    /// itself, because a Value subclass's generated `new/0` chains through
+    /// its superclass module's `new/0` to collect inherited field defaults
+    /// (and `beamtalk_class_instantiation:ancestor_compiled_defaults/1` calls
+    /// it too), so an abstract class's `new/0` must stay a plain map builder.
     ///
     /// Unknown classes, unknown ancestors, cycles, chains deeper than the
     /// runtime's cap, and parse-incomplete surfaces (where a missing user
@@ -657,11 +695,15 @@ impl ClassHierarchy {
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
-    /// that is real user code.
+    /// that is real user code ([`Self::defines_user_class_new1`], asked of
+    /// each ancestor).
     ///
-    /// `Value` itself is skipped: its `new:` is the `@intrinsic basicNewWith`
-    /// router, not an override (skipping by name is sound: `Value` is a
-    /// runtime-protected class name, so no user class can shadow it).
+    /// The compile-time half of the `new:` chain rule: it only ever keeps the
+    /// baked `direct_constructors` verdict off. The run-time half,
+    /// `beamtalk_class_metadata:chain_has_user_new1/1`, walks the same
+    /// per-class fact as each ancestor publishes it (BT-4409), so an ancestor
+    /// reloaded with a user `new:` turns a descendant's fast path off without
+    /// recompiling the descendant.
     /// Mirrors the runtime's `has_class_new_in_chain` depth cap (50);
     /// anything unknown fails closed so the `new:` fast path stays off.
     fn chain_has_user_new_init(&self, class_name: &str) -> bool {
@@ -676,32 +718,54 @@ impl ClassHierarchy {
                 return true;
             }
             depth += 1;
+            if self.defines_user_class_new1(name.as_str()) {
+                return true;
+            }
             let Some(info) = self.classes.get(name.as_str()) else {
                 return true;
             };
-            // Error recovery can drop method definitions, so an ancestor
-            // whose surface is incomplete may hide a user `new:` — fail
-            // closed, like the leaf check in `direct_constructors`.
-            if info.surface_incomplete {
-                return true;
-            }
-            if name.as_str() != "Value"
-                && info
-                    .class_methods
-                    .iter()
-                    .any(|m| m.selector.as_str() == "new:")
-            {
-                return true;
-            }
             current.clone_from(&info.superclass);
         }
         false
+    }
+
+    /// Whether the named class itself defines a class-side `new:` that is
+    /// real user code: the one per-class rule behind both the compile-time
+    /// chain walk ([`Self::chain_has_user_new_init`]) and the fact baked into
+    /// each class's `__beamtalk_meta/0` as `defines_user_class_new1`, which
+    /// the runtime's `new:` chain check walks (BT-4409).
+    ///
+    /// `Value` answers `false`: its `new:` is the `@intrinsic basicNewWith`
+    /// router, not an override (skipping by name is sound: `Value` is a
+    /// runtime-protected class name, so no user class can shadow it). An
+    /// unknown class, or one whose surface is incomplete (error recovery can
+    /// drop method definitions, so it may hide a user `new:`), answers `true`:
+    /// fail closed, like the leaf check in `direct_constructors`.
+    #[must_use]
+    pub fn defines_user_class_new1(&self, class_name: &str) -> bool {
+        let Some(info) = self.classes.get(class_name) else {
+            return true;
+        };
+        if info.surface_incomplete {
+            return true;
+        }
+        class_name != "Value"
+            && info
+                .class_methods
+                .iter()
+                .any(|m| m.selector.as_str() == "new:")
     }
 
     /// Synthesize auto-generated slot methods from `ClassInfo` state fields.
     ///
     /// This is the `ClassInfo`-only equivalent of `add_value_auto_methods` which
     /// works from the AST `ClassDefinition`.
+    ///
+    /// Returns the keyword decision (BT-4132): known for a slot-less class
+    /// (no keyword constructor) and when the keyword constructor was
+    /// synthesized here; ambiguous when the class side already holds the
+    /// selector, which may be a user method or an earlier synthesis, so the
+    /// caller leaves the anchor unset.
     pub(super) fn synthesize_auto_methods_from_state(
         class_name: &EcoString,
         slots: &[(EcoString, Option<DeclaredType>)],
@@ -709,7 +773,7 @@ impl ClassHierarchy {
         existing_class_selectors: &HashSet<EcoString>,
         instance_methods: &mut Vec<MethodInfo>,
         class_methods: &mut Vec<MethodInfo>,
-    ) {
+    ) -> KeywordDecision {
         for (slot_name, slot_type) in slots {
             // Auto-getter
             if !existing_instance_selectors.contains(slot_name) {
@@ -750,29 +814,34 @@ impl ClassHierarchy {
             }
         }
 
-        // Keyword constructor (class method)
-        if !slots.is_empty() {
-            let kw_sel: EcoString =
-                EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
-                    slots.iter().map(|(name, _)| name.as_str()),
-                ));
-            if !existing_class_selectors.contains(&kw_sel) {
-                class_methods.push(MethodInfo {
-                    selector: kw_sel,
-                    arity: slots.len(),
-                    kind: MethodKind::Primary,
-                    defined_in: class_name.clone(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(DeclaredType::simple(class_name.clone())),
-                    param_types: vec![None; slots.len()],
-                    doc: Some(EcoString::from("*(compiler-generated)*")),
-                    origin: None,
-                    primitive: None,
-                });
-            }
+        // Keyword constructor (class method). Without the AST, a selector
+        // already on the class side is either a user collision or an earlier
+        // synthesis: the keyword decision is not derivable, so no anchor.
+        if slots.is_empty() {
+            return KeywordDecision::Known(None);
         }
+        let Some(kw_sel) = crate::synthetic_selectors::synthesized_keyword_constructor(
+            slots.iter().map(|(name, _)| name.as_str()),
+            |sel| existing_class_selectors.contains(sel),
+        ) else {
+            return KeywordDecision::Ambiguous;
+        };
+        let kw_sel = EcoString::from(kw_sel);
+        class_methods.push(MethodInfo {
+            selector: kw_sel.clone(),
+            arity: slots.len(),
+            kind: MethodKind::Primary,
+            defined_in: class_name.clone(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(DeclaredType::simple(class_name.clone())),
+            param_types: vec![None; slots.len()],
+            doc: Some(EcoString::from("*(compiler-generated)*")),
+            origin: None,
+            primitive: None,
+        });
+        KeywordDecision::Known(Some(kw_sel))
     }
 
     /// Returns true if `class_name` is a numeric type (Integer, Float, Number,
@@ -1172,17 +1241,12 @@ impl ClassHierarchy {
         }
 
         // Auto keyword constructor on the class side (e.g., `x:y:`)
-        if class.state.is_empty() {
-            return None;
-        }
         let kw_sel: EcoString =
-            EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
+            EcoString::from(crate::synthetic_selectors::synthesized_keyword_constructor(
                 class.state.iter().map(|s| s.name.name.as_str()),
-            ));
+                |sel| user_class_selectors.contains(sel),
+            )?);
         let arity = class.state.len();
-        if user_class_selectors.contains(&kw_sel) {
-            return None;
-        }
         let args_desc: String = class
             .state
             .iter()
@@ -1213,4 +1277,42 @@ impl ClassHierarchy {
         });
         Some(kw_sel)
     }
+}
+
+/// Whether the superclass chain starting at `superclass` reaches `Value`,
+/// following `superclass_of` and stopping at a cycle or an unknown class: the
+/// strict "is a Value subclass" test over a class's ancestors (`Value` itself
+/// does not pass, since its own chain never reaches it).
+///
+/// Shared by [`ClassHierarchy`]'s propagation passes and the stdlib builtins
+/// generator (`build_stdlib.rs`), which has only its per-file metadata, not a
+/// hierarchy: both anchor the constructor record on this rule (BT-4132).
+pub fn superclass_chain_includes_value<'a>(
+    superclass: Option<&'a str>,
+    superclass_of: impl Fn(&str) -> Option<&'a str>,
+) -> bool {
+    let mut current = superclass;
+    let mut visited = HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name) {
+            break;
+        }
+        if name == "Value" {
+            return true;
+        }
+        current = superclass_of(name);
+    }
+    false
+}
+
+/// A Value class's synthesized keyword-constructor decision as
+/// [`ClassHierarchy::synthesize_auto_methods_from_state`] can derive it from
+/// stored state (BT-4132).
+pub(super) enum KeywordDecision {
+    /// The decision is known: the synthesized selector, or `None` when the
+    /// class has no keyword constructor.
+    Known(Option<EcoString>),
+    /// The class side already holds the selector (a user method or an
+    /// earlier synthesis): not derivable, so no anchor.
+    Ambiguous,
 }

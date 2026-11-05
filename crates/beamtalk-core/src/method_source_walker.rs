@@ -32,8 +32,8 @@
 //! results — any sub-trees that parsed successfully still contribute results.
 
 use crate::ast::{
-    CascadeMessage, Expression, Identifier, MessageSelector, MethodDefinition, Pattern,
-    StringSegment, TypeAnnotation,
+    BinarySegment, CascadeMessage, Expression, Identifier, MessageSelector, MethodDefinition,
+    Pattern, StringSegment, TypeAnnotation,
 };
 use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, parse};
 
@@ -331,6 +331,11 @@ fn walk_expr<V: SendVisitor>(expr: &Expression, source: &str, visitor: &mut V) {
                 if let StringSegment::Interpolation(inner) = segment {
                     walk_expr(inner, source, visitor);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                walk_expr(inner, source, visitor);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
@@ -639,6 +644,10 @@ pub fn find_selector_send_spans(
 /// binary-pattern segment's size expression) are not walked — self/super
 /// sends there are vanishingly rare and, per this function's own doc,
 /// missing one is a completeness gap, not a corruption risk.
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive match over every Expression variant, kept as one function"
+)]
 fn collect_selector_send_spans(
     expr: &Expression,
     source: &str,
@@ -716,6 +725,11 @@ fn collect_selector_send_spans(
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_selector_send_spans(inner, source, old_selector, new_selector, out);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_selector_send_spans(inner, source, old_selector, new_selector, out);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
@@ -1246,6 +1260,11 @@ fn collect_all_references(expr: &Expression, source: &str, hits: &mut Vec<(Strin
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_all_references(inner, source, hits);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_all_references(inner, source, hits);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

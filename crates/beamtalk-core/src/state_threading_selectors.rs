@@ -590,7 +590,7 @@ pub fn is_try_do_selector(sel: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendUserCode {
     /// An intrinsic that can never dispatch to user code, whatever its
-    /// arguments are (`isNil`, `class`, `hash`, `error:`, the field
+    /// arguments are (`isNil`, `class`, `hash`, `error:` to `self` or a literal, the field
     /// reflection family, `spawn`/`await`, `asType:`, `yourself`).
     Never,
     /// A construct the compiler lowers in place (`ifTrue:`, `whileTrue:`, an
@@ -631,6 +631,16 @@ pub fn send_user_code(
 ) -> SendUserCode {
     let is_block = |e: &Expression| matches!(e.unwrap_parens(), Expression::Block(_));
     if let Some(wk) = selector.well_known() {
+        // BT-4075: `error:` is the never-returning raise only for a receiver
+        // known to be an instance; a class object's class-side `error:` is an
+        // ordinary send, so any other receiver falls through to `MayRun`.
+        if wk == WellKnownSelector::Error {
+            return if crate::ast::is_error_signal_instance_receiver(receiver) {
+                SendUserCode::Never
+            } else {
+                SendUserCode::MayRun
+            };
+        }
         if matches!(
             wk,
             WellKnownSelector::Class
@@ -638,7 +648,6 @@ pub fn send_user_code(
                 | WellKnownSelector::IsNil
                 | WellKnownSelector::NotNil
                 | WellKnownSelector::Hash
-                | WellKnownSelector::Error
                 | WellKnownSelector::FieldAt
                 | WellKnownSelector::FieldAtPut
                 | WellKnownSelector::FieldNames
@@ -1276,7 +1285,8 @@ mod tests {
             "x class",
             "x hash",
             "x respondsTo: #foo",
-            "x error: 'boom'",
+            "self error: 'boom'",
+            "0 error: 'boom'",
             "x fieldNames",
             "x yourself",
             "x asType: Integer",
@@ -1284,6 +1294,19 @@ mod tests {
             "x await",
         ] {
             assert_eq!(classify(src), SendUserCode::Never, "{src}");
+        }
+    }
+
+    /// BT-4075: `error:` to anything but `self` may be a class object's
+    /// class-side `error:`, an ordinary send that can run user code.
+    #[test]
+    fn error_send_to_a_non_self_receiver_may_run_user_code() {
+        for src in [
+            "x error: 'boom'",
+            "Result error: #nope",
+            "(Logger) error: 'x'",
+        ] {
+            assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
         }
     }
 

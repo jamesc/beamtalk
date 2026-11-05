@@ -618,13 +618,7 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_tcp_ready_errors_on_timeout() {
-        // Bind then immediately drop to get a port nothing is listening on,
-        // rather than guessing at an unused one.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind loopback");
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let port = beamtalk_repl_protocol::test_ports::closed_port();
 
         let err = wait_for_tcp_ready(port, std::time::Duration::from_millis(300))
             .await

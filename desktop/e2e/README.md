@@ -32,7 +32,7 @@ verifiable without one, split across two test surfaces:
    `dead_workspace_readiness_resolves_to_dead_workspace_not_a_hang` (added by
    BT-2989) call the *exact* library functions
    `desktop/src-tauri/src/commands.rs`'s `attach`/`detach` Tauri commands call
-   (`spawn_front_with_port_retry`, `wait_ready`, `Child::kill`/`.wait()`) —
+   (`launch_front`, `wait_ready`, `Child::kill`/`.wait()`) —
    the Tauri command handlers are thin wrappers over this crate, so this is a
    faithful stand-in for "the desktop app attaches/detaches" minus the actual
    window chrome. Run those via `cargo test -p beamtalk-desktop-broker --test

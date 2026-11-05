@@ -152,6 +152,13 @@ impl FileWalker {
     ///   directories from the repository root down to the walk root apply
     ///   too. Without a repository, only the walk root's own and nested
     ///   `.gitignore` files apply.
+    /// - A directory below the walk root that contains `.git` (a directory,
+    ///   or a file as for submodules and `git worktree` checkouts) is a
+    ///   nested repository: whether it is walked at all is decided by the
+    ///   outer rules, but inside it only its own `.gitignore` files apply,
+    ///   never the outer repository's (BT-4386). Likewise, a walk rooted
+    ///   inside a nested repository takes ancestor rules from that nearest
+    ///   enclosing repository only.
     /// - Rules are matched against each entry the walk visits, never against
     ///   the walk root itself: an explicitly requested directory is always
     ///   walked even if an ancestor rule ignores it (e.g. a dependency
@@ -343,8 +350,9 @@ impl FileWalker {
     }
 
     /// Walk `dir`, whose canonical path is `canonical_dir` when gitignore
-    /// handling is active, pushing its own `.gitignore` (if any) for the
-    /// duration of its subtree.
+    /// handling is active, applying its own `.gitignore` (if any) — and, at
+    /// a nested repository, dropping the outer rules — for the duration of
+    /// its subtree (see [`IgnoreStack::enter_dir`]).
     fn walk_dir(
         &self,
         dir: &Utf8Path,
@@ -355,10 +363,10 @@ impl FileWalker {
         if self.budget_exhausted(files) {
             return Ok(());
         }
-        let pushed = canonical_dir.is_some_and(|canonical| ignores.push_dir(canonical));
+        let entered = canonical_dir.map(|canonical| ignores.enter_dir(canonical));
         let result = self.walk_dir_entries(dir, canonical_dir, ignores, files);
-        if pushed {
-            ignores.pop_dir();
+        if let Some(entered) = entered {
+            ignores.leave_dir(entered);
         }
         result
     }
@@ -533,6 +541,16 @@ struct IgnoreStack {
     matchers: Vec<Gitignore>,
 }
 
+/// What [`IgnoreStack::enter_dir`] changed, for
+/// [`IgnoreStack::leave_dir`] to undo.
+#[derive(Debug)]
+struct EnteredDir {
+    /// Whether the directory's own `.gitignore` was pushed.
+    pushed: bool,
+    /// The outer matchers set aside at a nested repository root.
+    outer: Option<Vec<Gitignore>>,
+}
+
 impl IgnoreStack {
     /// Seed the stack with the rules that apply from above a walk rooted at
     /// `canonical_root`: the `.gitignore` files of the directories from the
@@ -604,8 +622,34 @@ impl IgnoreStack {
         }
     }
 
-    fn pop_dir(&mut self) {
-        self.matchers.pop();
+    /// Enter `dir` during the walk: push its `.gitignore`, and when `dir`
+    /// is the root of a nested repository (it contains `.git`, a directory
+    /// or — for submodules and worktrees — a file), first set aside every
+    /// outer matcher, since git applies only the nested repository's own
+    /// rules inside it (BT-4386). Whether `dir` itself is ignored was
+    /// already decided by the outer rules before the walk entered it.
+    ///
+    /// At the walk root the reset is a no-op: [`above_walk_root`] seeds
+    /// nothing from above a root that contains `.git`.
+    ///
+    /// [`above_walk_root`]: Self::above_walk_root
+    fn enter_dir(&mut self, dir: &Path) -> EnteredDir {
+        let outer = dir
+            .join(".git")
+            .exists()
+            .then(|| std::mem::take(&mut self.matchers));
+        let pushed = self.push_dir(dir);
+        EnteredDir { pushed, outer }
+    }
+
+    /// Undo the matching [`enter_dir`](Self::enter_dir).
+    fn leave_dir(&mut self, entered: EnteredDir) {
+        if entered.pushed {
+            self.matchers.pop();
+        }
+        if let Some(outer) = entered.outer {
+            self.matchers = outer;
+        }
     }
 
     /// Whether the entry at canonical `path` is ignored. The innermost
@@ -1063,6 +1107,41 @@ mod tests {
         // The rule still applies to a walk from the repository root.
         let files = FileWalker::lint_files().walk(repo).unwrap();
         assert_eq!(relative_names(repo, &files), vec!["src/a.bt"]);
+    }
+
+    /// A nested repository (`sub/.git`, here a file as for a submodule) is
+    /// governed by its own `.gitignore` files only: the outer `*.gen.bt`
+    /// rule stops applying inside it, `sub/.gitignore` still does, and the
+    /// outer rules apply again once the walk leaves it (BT-4386).
+    #[test]
+    fn test_walk_nested_repository_resets_outer_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(dir.path()).unwrap();
+        fs::create_dir(root.join(".git")).unwrap();
+        write_file(&root.join(".gitignore"), "*.gen.bt\n");
+        write_file(&root.join("a.gen.bt"), "");
+        write_file(&root.join("sub/.git"), "gitdir: ../.git/modules/sub\n");
+        write_file(&root.join("sub/.gitignore"), "*.tmp.bt\n");
+        write_file(&root.join("sub/x.gen.bt"), "");
+        write_file(&root.join("sub/y.tmp.bt"), "");
+        write_file(&root.join("sub/deep/z.gen.bt"), "");
+        write_file(&root.join("sub/deep/w.tmp.bt"), "");
+        write_file(&root.join("z/after.gen.bt"), "");
+        write_file(&root.join("z/after.tmp.bt"), "");
+
+        let expected = vec!["sub/deep/z.gen.bt", "sub/x.gen.bt", "z/after.tmp.bt"];
+        let files = FileWalker::lint_files().walk(root).unwrap();
+        assert_eq!(relative_names(root, &files), expected);
+
+        // A `.git` directory marks a nested repository too, and a walk
+        // rooted inside the nested repository sees only its rules.
+        fs::remove_file(root.join("sub/.git")).unwrap();
+        fs::create_dir(root.join("sub/.git")).unwrap();
+        let files = FileWalker::lint_files().walk(root).unwrap();
+        assert_eq!(relative_names(root, &files), expected);
+        let deep = root.join("sub/deep");
+        let files = FileWalker::lint_files().walk(&deep).unwrap();
+        assert_eq!(relative_names(&deep, &files), vec!["z.gen.bt"]);
     }
 
     /// Outside any repository, `.gitignore` files above the walk root do

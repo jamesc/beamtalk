@@ -13,6 +13,7 @@
 //! (`compute_direct_call_eligible`, `is_actor_class`) live here too.
 
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::guard_returns;
 use crate::core_erlang::{
     CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
 };
@@ -217,45 +218,21 @@ pub fn generate_module_with_warnings(
     // hands its whole scope in through `with_class_hierarchy`, so the signal
     // needs no per-producer plumbing.
     //
-    // A pre-loaded entry for one of this unit's own classes is usually that
-    // same class seen from outside (its Pass 1 info, or its live entry on a
-    // REPL reload), not a rival. It counts as the unit's own declaration
-    // when its package is either name this unit goes by: the package its
-    // module name encodes (what its `__beamtalk_meta` will carry) or the
-    // package analysis stamped on the class (`current_package` — which
-    // differs for `beamtalk test`'s unqualified `bt@<stem>` modules, BT-4152).
+    // The unit's own package is the one its module name encodes (what its
+    // `__beamtalk_meta` will carry); `shadowed_class_names_in_scope` (the
+    // rule `analyse_full` applies too, BT-4283) also accepts the package
+    // analysis stamped on the class. The set goes on `hierarchy` (for the
+    // hierarchy's consumers) and the generator (`is_shadowed_class`); both
+    // answer through `ShadowedClassNames::is_shadowed`.
     let own_package = generator.own_package_id();
-    let own_module_package = own_package.declaring_package();
-    let is_own_declaration =
-        |info: &beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo| {
-            module
-                .classes
-                .iter()
-                .any(|class| class.name.name == info.name)
-                && (info.package.as_deref() == own_module_package
-                    || hierarchy
-                        .get_class(info.name.as_str())
-                        .is_some_and(|own| own.package == info.package))
-        };
-    generator.set_shadowed_class_names(beamtalk_core::semantic_analysis::shadowed_class_names(
-        options
-            .pre_class_hierarchy
-            .iter()
-            .map(|info| {
-                let package = if is_own_declaration(info) {
-                    own_module_package
-                } else {
-                    info.package.as_deref()
-                };
-                (info.name.as_str(), package)
-            })
-            .chain(
-                module
-                    .classes
-                    .iter()
-                    .map(|class| (class.name.name.as_str(), own_module_package)),
-            ),
-    ));
+    let shadowed = beamtalk_core::semantic_analysis::shadowed_class_names_in_scope(
+        &options.pre_class_hierarchy,
+        module,
+        own_package.declaring_package(),
+        &hierarchy,
+    );
+    hierarchy.set_shadowed_class_names(shadowed.clone());
+    generator.set_shadowed_class_names(shadowed);
 
     // ADR 0050 Phase 4: inject richer user-class entries from BEAM metadata first,
     // so that add_external_superclasses (which uses contains_key before inserting)
@@ -396,12 +373,39 @@ pub fn generate_module_with_warnings(
         "generate_module_with_warnings",
     );
 
+    // BT-4415: compile guard-style early returns (`c ifTrue: [^v]. rest`)
+    // as direct returns, on a clone, after every rewrite above. The tree
+    // changed, so the facts derived from it are recomputed over the clone;
+    // reflected method source keeps the bodies as written.
+    let guard_rewritten_storage;
+    let module: &Module = if guard_returns::has_guard_returns(module) {
+        let mut owned = module.clone();
+        generator.guard_rewrite = guard_returns::rewrite_guard_returns(&mut owned);
+        generator.semantic_facts = beamtalk_core::semantic_analysis::compute_semantic_facts(&owned);
+        guard_rewritten_storage = owned;
+        &guard_rewritten_storage
+    } else {
+        module
+    };
+
     // Route based on whether class is actor or value type
     let doc = if CoreErlangGenerator::is_actor_class(module, &hierarchy) {
         generator.generate_actor_module(module)?
     } else {
         generator.generate_value_type_module(module)?
     };
+
+    // BT-4415: a rewritten guard whose receiver no conditional decided
+    // through `guard_condition_doc` would send a non-Boolean receiver
+    // `ifTrue:ifFalse:` in place of the guard's own selector. A wrong
+    // compile is worse than a refused one, so this holds in every build.
+    let missed = generator.unconsumed_guard_conditions();
+    if !missed.is_empty() {
+        return Err(CodeGenError::Internal(format!(
+            "BT-4415: guard conditions never decided through \
+             `guard_condition_doc` (method, receiver span): {missed:?}"
+        )));
+    }
 
     generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);

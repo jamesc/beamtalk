@@ -23,6 +23,7 @@ fn synced(store: VersionedVar, load: Option<VersionedVar>) -> ThreadedStmt {
         span: span(),
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: false,
+        fast_path: None,
     }
 }
 
@@ -51,6 +52,7 @@ fn a_store_only_synced_call_renders_the_statement_verbatim_after_the_store() {
         span: span(),
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: false,
+        fast_path: None,
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
@@ -107,6 +109,7 @@ fn a_store_only_synced_call_consumes_nothing() {
             span: span(),
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
+            fast_path: None,
         },
         ThreadedStmt::Bind {
             target: state(2, frame),
@@ -179,6 +182,7 @@ fn a_synced_call_on_a_private_scratch_is_reported() {
         span: span(),
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: true,
+        fast_path: None,
     }];
     let errors = verify(&ir);
     assert!(
@@ -191,5 +195,71 @@ fn a_synced_call_on_a_private_scratch_is_reported() {
     assert_eq!(
         verify(&[synced(state(0, frame), Some(state(1, frame)))]),
         vec![]
+    );
+}
+
+fn with_fast_path(mut stmt: ThreadedStmt) -> ThreadedStmt {
+    if let ThreadedStmt::SyncedCall { fast_path: f, .. } = &mut stmt {
+        *f = Some(fast_path());
+    }
+    stmt
+}
+
+fn fast_path() -> FastPath {
+    FastPath {
+        bindings: docvec!["let L = X in "],
+        test: docvec!["call 'erlang':'is_number'(L)"],
+        fast: docvec!["call 'erlang':'+'(L, 1)"],
+        slow_result: "_SyncedSlow1".to_string(),
+        slow_state: "_SyncedSlowState1".to_string(),
+    }
+}
+
+/// BT-4279: a fast-path bracket hands the stored `State` through as the
+/// reload on the guard's `true` arm and brackets only the other arm, stepping
+/// `State` from `store` to `load` exactly like the plain bracket.
+#[test]
+fn a_fast_path_synced_call_brackets_only_its_slow_arm() {
+    let frame = FrameId::ROOT;
+    let ir = [with_fast_path(synced(
+        state(3, frame),
+        Some(state(4, frame)),
+    ))];
+    assert_eq!(
+        lower_and_render(&ir).to_pretty_string(),
+        "let L = X in let <_Synced1, State4> = case call 'erlang':'is_number'(L) of \
+         <'true'> when 'true' -> <call 'erlang':'+'(L, 1), State3> \
+         <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(State3) in \
+         let _SyncedSlow1 = call 'beamtalk_message_dispatch':'send'(Recv, 'do:', [Block]) in \
+         let _SyncedSlowState1 = call 'beamtalk_actor_state':'take'() in \
+         <_SyncedSlow1, _SyncedSlowState1> end in "
+    );
+    let ir = [
+        with_fast_path(synced(state(0, frame), Some(state(1, frame)))),
+        ThreadedStmt::Bind {
+            target: state(2, frame),
+            source: state(1, frame),
+            op: BindOp::Put {
+                field: "n".to_string(),
+                value: ValueRef::Var("V".to_string()),
+            },
+            span: span(),
+        },
+    ];
+    assert_eq!(verify(&ir), Vec::new());
+}
+
+/// BT-4279: a fast path on a bracket with no reload (the store-only
+/// self-send form) has no `State` to hand through: reported.
+#[test]
+fn a_fast_path_on_a_store_only_bracket_is_reported() {
+    let frame = FrameId::ROOT;
+    let ir = [with_fast_path(synced(state(0, frame), None))];
+    let errors = verify(&ir);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, VerifyError::FastPathOnUnsplittableBracket { .. })),
+        "{errors:?}"
     );
 }

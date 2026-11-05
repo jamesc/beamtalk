@@ -28,6 +28,13 @@ supervisor restart-intensity counter cannot provide.
 
 Normal exits (`normal`, `shutdown`, `{shutdown, _}`) are deliberate stops —
 `removeFromSystem` uses `gen_server:stop/1` — and are never restarted.
+
+Every `'DOWN'` of a watched class, deliberate or not, first calls
+`beamtalk_class_shadow_flags:invalidate/1` (BT-4316): the class's static call
+keys serve a class reference holding the dead pid, and must go before a
+restart registers a new one. A class that died while no monitor was running
+sends no `'DOWN'`, so `init/1` erases every class's static call keys
+(`beamtalk_class_shadow_flags:erase_all_static_call_keys/0`).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -149,6 +156,16 @@ init(Opts) ->
         State0,
         Survivors
     ),
+    %% BT-4316: a class killed while no monitor was running sent no 'DOWN',
+    %% so its static call keys (which hold the dead pid) were never erased.
+    %% A fresh monitor cannot tell which classes died, so it erases them all;
+    %% each call site re-installs from the live class on its next send. This
+    %% runs after adoption: a survivor that dies from here on sends a 'DOWN'
+    %% (`noproc` if it is already dead), and one that died before adoption is
+    %% caught by this sweep. A restart (eager or lazy) re-registers through
+    %% `beamtalk_class_metadata:merge_identity/5`, which invalidates, so a
+    %% missed 'DOWN' cannot outlive a restart either.
+    ok = beamtalk_class_shadow_flags:erase_all_static_call_keys(),
     {ok, State1}.
 
 handle_call({watch, ClassName, Pid}, _From, State) ->
@@ -178,6 +195,14 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, #state{watched = Watched, refs 
         error ->
             {noreply, State1};
         {ok, ClassName} ->
+            %% BT-4316: the class's static call keys hold this pid in the
+            %% class reference they serve; erase them (and the derived flag)
+            %% before any restart, so a dead pid is never served once the
+            %% death is seen, whatever the reason. This waits on the tag
+            %% locks; their holders only do ETS and `persistent_term` reads
+            %% and writes, never a gen_server call, so they cannot block on
+            %% this monitor.
+            ok = beamtalk_class_shadow_flags:invalidate(ClassName),
             case is_deliberate_stop(Reason) of
                 true -> {noreply, State1};
                 false -> {noreply, restart_within_budget(ClassName, Reason, State1)}

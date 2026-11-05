@@ -71,6 +71,15 @@ pub enum Document<'a> {
     Nest(isize, Box<Document<'a>>),
     /// A sequence of documents.
     Vec(Vec<Document<'a>>),
+    /// A complete `( node -| [Line ...] )` line-annotation node, built only by
+    /// [`leaf::annotated`] / [`leaf::annotated_bare`]. Renders exactly as its
+    /// inner document; it exists so a caller can ask "is this already an
+    /// annotation node?" ([`Document::is_annotated`]) by type rather than by
+    /// inspecting leaf text (Core Erlang cannot annotate an annotated node).
+    ///
+    /// **Internal, not part of the public `Document` API (ADR 0089):** codegen
+    /// constructs it only through the `leaf` helpers.
+    Annotated(Box<Document<'a>>),
     /// A group that can be rendered flat or broken across lines.
     Group(Box<Document<'a>>),
     /// A break point — rendered as given string when flat, newline when broken.
@@ -248,20 +257,11 @@ fn len_as_isize(len: usize) -> isize {
 }
 
 impl Document<'_> {
-    /// Returns the text content of a `Str` or `Owned` leaf, or `None` for
-    /// any other variant (including `Vec`, `Nest`, …).
-    ///
-    /// Callers that need to inspect literal text (e.g. to detect a known
-    /// structural marker like `"( "`) should use this rather than matching
-    /// on the variant directly — `Document::Owned` is construction-restricted
-    /// to typed-leaf helpers (ADR 0089).
+    /// Whether this document is exactly one line-annotation node built by
+    /// [`leaf::annotated`] / [`leaf::annotated_bare`] (BT-4392).
     #[must_use]
-    pub fn as_text(&self) -> Option<&str> {
-        match self {
-            Document::Str(s) => Some(s),
-            Document::Owned(s) => Some(s.as_str()),
-            _ => None,
-        }
+    pub fn is_annotated(&self) -> bool {
+        matches!(self, Document::Annotated(_))
     }
 
     /// Renders the document to a string using the default line width.
@@ -332,6 +332,9 @@ impl Document<'_> {
                     for d in docs.iter().rev() {
                         work.push_front((indent, mode, d));
                     }
+                }
+                Document::Annotated(inner) => {
+                    work.push_front((indent, mode, inner));
                 }
                 Document::Group(inner) => {
                     // Fit check: group content in Flat mode + continuation in
@@ -420,7 +423,7 @@ fn fits_deque(
                 Mode::Flat => remaining -= len_as_isize(unbroken.len()),
                 Mode::Break => return true,
             },
-            Document::Nest(_, inner) => local.push((mode, inner)),
+            Document::Nest(_, inner) | Document::Annotated(inner) => local.push((mode, inner)),
             Document::Vec(docs) => {
                 for d in docs.iter().rev() {
                     local.push((mode, d));

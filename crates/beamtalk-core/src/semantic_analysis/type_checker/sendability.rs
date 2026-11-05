@@ -231,7 +231,7 @@ fn tier_of_depth(
         // Uninhabited — no value ever crosses a boundary. Silent.
         InferredType::Never => Tier::Sendable,
         // A class object is an atom-like reference (module name); free to copy.
-        InferredType::Meta { .. } => Tier::Sendable,
+        InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => Tier::Sendable,
         InferredType::Known {
             class_name,
             type_args,

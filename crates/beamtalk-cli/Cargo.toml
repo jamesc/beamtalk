@@ -93,6 +93,8 @@ predicates = "3"
 # generator in this crate.
 beamtalk-core = { workspace = true, features = ["test"] }
 proptest.workspace = true
+# why: BT-4382 — shared `closed_port()` test helper (no async deps).
+beamtalk-repl-protocol = { workspace = true, features = ["test-ports"] }
 
 [[bench]]
 name = "build_bench"

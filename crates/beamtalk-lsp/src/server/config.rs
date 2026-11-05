@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::InitializeParams;
 
-const PRELOAD_MAX_FILES: usize = 5000;
+/// Session-wide cap on preloaded source files: the startup preload and every
+/// per-root load `did_open` triggers (BT-4158) together draw from one budget
+/// of this size (BT-4383), tracked on `Backend::preload_budget_remaining`.
+pub(in crate::server) const PRELOAD_MAX_FILES: usize = 5000;
 #[derive(Clone)]
 pub(in crate::server) struct PreloadConfig {
     pub(in crate::server) roots: Vec<PathBuf>,
@@ -24,6 +27,9 @@ pub(in crate::server) struct PreloadedFiles {
     /// mid-walk. When true, workspace coverage may be partial and the
     /// language service must NOT claim `KnowledgeScope::ProjectComplete`.
     pub(in crate::server) budget_exhausted: bool,
+    /// How much of the budget this walk drew (paths found, before reading),
+    /// to subtract from the session-wide remainder (BT-4383).
+    pub(in crate::server) budget_used: usize,
     /// Whether any workspace root has fetched package dependencies
     /// (`_build/deps/*/src` present). Dependency extension contributions
     /// are invisible until fetched, so diagnostics must stay conservative.
@@ -213,12 +219,24 @@ pub(in crate::server) fn preload_covers(path: &Path, roots: &[PathBuf]) -> bool 
                 .any(|dep_src| path.starts_with(dep_src))
     })
 }
+/// [`collect_preload_files_within`] with a whole fresh [`PRELOAD_MAX_FILES`]
+/// budget — the walk's behaviour in isolation, for tests.
+#[cfg(test)]
 pub(in crate::server) fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
+    collect_preload_files_within(config, PRELOAD_MAX_FILES)
+}
+/// [`collect_preload_files`] with an explicit file budget — the share of the
+/// session-wide [`PRELOAD_MAX_FILES`] budget still unspent (BT-4383). A zero
+/// budget walks nothing and reports `budget_exhausted`.
+pub(in crate::server) fn collect_preload_files_within(
+    config: PreloadConfig,
+    budget: usize,
+) -> PreloadedFiles {
     use beamtalk_core::file_walker::FileWalker;
 
     let PreloadConfig { roots, stdlib_dirs } = config;
     let mut user_paths = Vec::new();
-    let mut remaining_budget = PRELOAD_MAX_FILES;
+    let mut remaining_budget = budget;
 
     let preload_walker = FileWalker::preload_files(remaining_budget);
 
@@ -319,6 +337,7 @@ pub(in crate::server) fn collect_preload_files(config: PreloadConfig) -> Preload
         user_files,
         stdlib_files,
         budget_exhausted: remaining_budget == 0,
+        budget_used: budget - remaining_budget,
         deps_present,
     }
 }

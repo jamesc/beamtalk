@@ -11,10 +11,14 @@
 //! build the try/catch scaffolding around a 4-tuple
 //! `{'$bt_nlr', Token, Value, State}` throw. See ADR 0041.
 
+use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::synced_call::ActorStateSource;
+use crate::core_erlang::threaded_ir::{self, NlrCarry};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::{Document, INDENT, line, nest};
+use beamtalk_core::source_analysis::Span;
 
 /// Fresh temporary variable names shared by all three NLR try/catch wrappers
 /// (Actor, class-method, and value-type).
@@ -196,7 +200,110 @@ impl NlrCatchVars {
     }
 }
 
+/// ADR 0041: where the state a `^` thrown from the code being lowered comes
+/// from, which is what its boundary answers. The one place the rule is
+/// written: the throw ([`CoreErlangGenerator::nlr_throw_state_doc`]) and an
+/// `ensure:` cleanup that the throw runs while it unwinds (BT-4312,
+/// [`NlrSlot::carry`]) both read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrSlot {
+    /// BT-4122: a merged Tier 2 fun: the cell merged with the fun's current
+    /// locals (the throw bypasses the fun's exit flush).
+    Tier2Merged,
+    /// A class method: `nil`. Class variables are written in place (ADR 0130
+    /// §3), so a `^` unwinding out of one has nothing to hand back.
+    ClassMethod,
+    /// BT-4288: the REPL: the workspace bindings map at the `^` (the
+    /// threaded `StateAcc`), which the eval's catch answers as its bindings.
+    Repl,
+    /// ADR 0137 §3: an actor closure holds no threaded `State`; the actor's
+    /// current one, the cell at home (the creation-time capture away).
+    CellClosure,
+    /// An actor instance method: its threaded `State` (or the live cell where
+    /// the read choke point decides so, BT-4121/BT-4180).
+    Actor,
+    /// A value-type method: the latest `Self{N}`, so the field writes made
+    /// before the `^` are kept.
+    ValueType,
+}
+
+impl NlrSlot {
+    /// BT-4312: what an `ensure:` cleanup run by such a throw must thread its
+    /// writes through, so they reach the boundary with it. `None` for a class
+    /// method, whose throw carries no state.
+    pub(in crate::core_erlang) fn carry(self) -> Option<NlrCarry> {
+        match self {
+            Self::Tier2Merged | Self::CellClosure => Some(NlrCarry::Live),
+            Self::ClassMethod => None,
+            Self::Repl => Some(NlrCarry::Bindings),
+            Self::Actor => Some(NlrCarry::ActorState),
+            Self::ValueType => Some(NlrCarry::SelfVt),
+        }
+    }
+}
+
 impl CoreErlangGenerator {
+    /// The [`NlrSlot`] of the code being lowered.
+    pub(in crate::core_erlang) fn nlr_slot(&self) -> NlrSlot {
+        if self.tier2_merged_fun.is_some() {
+            NlrSlot::Tier2Merged
+        } else if self.in_class_method() {
+            NlrSlot::ClassMethod
+        } else if self.is_repl_mode() {
+            NlrSlot::Repl
+        } else if self.in_cell_closure() {
+            NlrSlot::CellClosure
+        } else if self.context == CodeGenContext::Actor {
+            NlrSlot::Actor
+        } else {
+            NlrSlot::ValueType
+        }
+    }
+
+    /// The state a `^` thrown here carries in its 4th element
+    /// (`{'$bt_nlr', Token, Value, State}`), from the current versions
+    /// ([`NlrSlot`]).
+    pub(in crate::core_erlang) fn nlr_throw_state_doc(&mut self, span: Span) -> Document<'static> {
+        match self.nlr_slot() {
+            NlrSlot::Tier2Merged => {
+                let captured = self
+                    .tier2_merged_fun
+                    .as_ref()
+                    .map(|merged| merged.captured.clone())
+                    .unwrap_or_default();
+                let take_var = self.fresh_temp_var("T2Nlr");
+                let (flush_doc, final_acc) = self.tier2_flush_locals_doc(&take_var, &captured);
+                docvec![
+                    "let ",
+                    leaf::var(take_var),
+                    " = ",
+                    threaded_ir::cell_take_call(),
+                    " in ",
+                    flush_doc,
+                    leaf::var(final_acc),
+                ]
+            }
+            NlrSlot::ClassMethod => leaf::atom("nil"),
+            NlrSlot::Repl => leaf::var(self.current_state_var()),
+            NlrSlot::CellClosure => self.cell_view_doc(),
+            // A direct-params loop binds no `StateAcc`: its body cannot write
+            // `State`, so the throw carries the state the loop captured on entry
+            // (BT-3562's `current_field_read_state_var`). BT-4121: unless the
+            // loop brackets guarded operators, whose slow paths wrote the cell
+            // — then the throw carries the live cell, like the loop's own exit
+            // pack, and the pre-throw store keeps those writes instead of
+            // clobbering them with the entry state. (BT-4180: decided and
+            // recorded by the read choke point.)
+            NlrSlot::Actor => {
+                match self.actor_state_source(threaded_ir::StateReadSite::NlrThrowState, span) {
+                    ActorStateSource::Cell => threaded_ir::cell_take_call(),
+                    ActorStateSource::Var(var) => leaf::var(var),
+                }
+            }
+            NlrSlot::ValueType => leaf::var(self.current_self_var()),
+        }
+    }
+
     /// Allocates fresh temporary variable names for an NLR try/catch wrapper.
     fn alloc_nlr_catch_vars(&mut self, token_var: &str) -> NlrCatchVars {
         NlrCatchVars {
@@ -259,6 +366,16 @@ impl CoreErlangGenerator {
         token_var: &str,
     ) -> NlrCatchVars {
         self.alloc_nlr_catch_vars(token_var)
+    }
+
+    /// BT-4312: the token of the scope being lowered: a method's (bound when a
+    /// block of it holds a `^`), or the REPL eval's. Only a throw of this
+    /// token carries this scope's state; a throw of any other token belongs to
+    /// another scope.
+    pub(in crate::core_erlang) fn scope_nlr_token(&self) -> Option<String> {
+        self.current_nlr_token()
+            .cloned()
+            .or_else(|| self.repl_eval_token())
     }
 
     /// Returns the current NLR token variable name, if any.

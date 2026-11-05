@@ -57,6 +57,11 @@ start(_StartType, _StartArgs) ->
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_backing_module_index_table(),
 
+    %% The static call key index (BT-4316), owned by the application master
+    %% for the same reason: an index row lost with a dying owner would leave
+    %% its `persistent_term` key unerasable.
+    beamtalk_class_registry:ensure_static_call_keys_table(),
+
     %% Root application supervisor registry (`Program rootSupervisor`), owned by
     %% the runtime so it works in REPL, run, service and release alike.
     beamtalk_supervisor:ensure_root_table(),

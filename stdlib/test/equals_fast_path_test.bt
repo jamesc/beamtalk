@@ -1,0 +1,70 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4416: an `equals:` send to a primitive receiver is answered by `=:=`
+// without walking the dispatch chain when nothing on the receiver's class
+// chain overrides `equals:` — but an override, including an extension
+// installed after the first send, still wins.
+//
+// The extensions registered here are deliberately narrow: they only widen
+// equality for the marker pair <<65, 22>> / <<68, 22>>, so a test
+// running concurrently that compares other binaries is unaffected (an
+// `equals:` override may only make *more* values equal).
+
+TestCase subclass: EqualsFastPathTest
+
+  testDefaultEqualsIsRawEquality =>
+    a := <<1, 2>>
+    self assert: (a equals: <<1, 2>>)
+    self deny: (a equals: <<1, 3>>)
+    self assert: ("ab" equals: "ab")
+    self deny: ("ab" equals: "ba")
+    self assert: (42 equals: 42)
+    self deny: (42 equals: 42.0)
+    self assert: (#sym equals: #sym)
+    self deny: (#sym equals: #other)
+    self assert: (nil equals: nil)
+    self deny: (true equals: false)
+    self assert: (#(1, 2) equals: #(1, 2))
+    self deny: (#(1, 2) equals: #(2, 1))
+
+  testExtensionOnTheReceiverClassWins =>
+    a := <<65, 22>>
+    b := <<68, 22>>
+    self deny: (a equals: b)
+    Erlang beamtalk_extensions
+      register: #Binary
+      selector: #equals:
+      fun: [:args :receiver |
+        (receiver =:= args first) or: [
+          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]
+        ]
+      ]
+      owner: #bt4416
+    [
+      self assert: (a equals: b)
+      // A raw hit still answers true (the reflexivity contract).
+      self assert: (a equals: <<65, 22>>)
+      self deny: (b equals: a)
+      Binary removeSelector: #equals:
+      self deny: (a equals: b)
+    ] ensure: [Binary removeSelector: #equals: ifAbsent: [nil]]
+
+  testExtensionOnASuperclassWins =>
+    a := <<65, 22>>
+    b := <<68, 22>>
+    self deny: (a equals: b)
+    Erlang beamtalk_extensions
+      register: #Collection
+      selector: #equals:
+      fun: [:args :receiver |
+        (receiver =:= args first) or: [
+          (receiver =:= <<65, 22>>) and: [args first =:= <<68, 22>>]
+        ]
+      ]
+      owner: #bt4416
+    [
+      self assert: (a equals: b)
+      Collection removeSelector: #equals:
+      self deny: (a equals: b)
+    ] ensure: [Collection removeSelector: #equals: ifAbsent: [nil]]

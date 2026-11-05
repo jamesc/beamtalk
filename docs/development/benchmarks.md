@@ -1018,7 +1018,9 @@ or ~40% of the open actor send, getting it to about the sealed actor's cost); th
 
 Every actor module now exports `safe_dispatch/4 (Selector, Args, Self, State)`, which holds the try/catch.
 `safe_dispatch/3` (used by `handle_call`/`handle_cast`/`handle_info`/`init`, which only have `State`) builds
-`Self` with `make_self/1` and delegates to `/4`. The open self-send call site passes its in-scope `Self`:
+`Self` and delegates to `/4`. Since BT-4265 it builds `Self` inline from the class and module codegen knows
+when `State` is the module's own (its `__class_mod__`, no `$beamtalk_class` tag), and calls `make_self/1` only
+for any other state. The open self-send call site passes its in-scope `Self`:
 
 ```erlang
 let _SDArgs = [Args] in
@@ -1745,3 +1747,78 @@ reductions, heap words and ns per operation, plus what each Beamtalk row
 compiles to and the functions it calls. Run it with `just bench-vs-elixir`.
 Method, results (main at `dc216bf52`), the analysis and the effect of BT-4065
 and BT-4071 are in [`benchmarks/vs-elixir/README.md`](../../benchmarks/vs-elixir/README.md).
+
+## BT-4416: `equals:` on a primitive receiver
+
+`a equals: b` compiles to `beamtalk_message_dispatch:send/3`. For a primitive
+receiver it used to walk the whole dispatch chain (for a `Binary`:
+`bt@stdlib@binary` → `collection` → `value` → `object`, an extension-registry
+probe at each level) to reach `Object>>equals:`, which is `=:=`.
+`send/3` now routes a primitive receiver to
+`beamtalk_equality:primitive_equals/2`: a raw hit answers `true` (the
+reflexivity contract), and a raw miss answers `false` when no class on the
+receiver's chain overrides `equals:` (compiled or extension). That check is
+memoised in `beamtalk_class_derived_cache` and, for the hot path, in the
+calling process's dictionary tagged with the cache generation, so an
+extension registered later is seen by the next send.
+
+### Harness
+
+`runtime/perf/bench_equals_fast_path.escript`. Run from `runtime/` after
+`just build`:
+
+```bash
+escript perf/bench_equals_fast_path.escript
+```
+
+"before" calls the stdlib module's `dispatch/3` directly (the chain the old
+`send/3` ran, minus its own receiver classification, so it slightly
+understates the old cost); "after" is the real `send/3`.
+
+### Results (200k calls, µs per call)
+
+| Receiver | before | after | raw `=:=` |
+|---|---|---|---|
+| `Binary`, miss | 0.360 | 0.081 | 0.009 |
+| `Binary`, hit | 0.364 | 0.020 | 0.009 |
+| `Integer`, miss | 0.344 | 0.075 | 0.008 |
+| `Symbol`, miss | 0.155 | 0.106 | 0.011 |
+
+The remaining miss cost is mostly the generation read
+(`persistent_term:get` + `atomics:get`) that keeps the memo honest when an
+override is installed later.
+
+## BT-4415: guard-style `^` as a direct return
+
+A `^` inside an inlined conditional at a method's top level
+(`x > 0 ifTrue: [^1]`) used to make the whole method a non-local-return
+frame: `make_ref/0`, a `try` around the body, and a `throw` for the `^`. The
+cost was paid on every call, taken or not. Codegen now compiles such a method
+as the expression form (`x > 0 ifTrue: [1] ifFalse: [...]`) when every block
+`^` in it is a guard (`core_erlang/guard_returns.rs`). When the receiver
+might not be a Boolean (`x > 0` dispatches `>` on a non-number), the `case`
+reads `case X of true -> true; false -> false; Other ->
+beamtalk_guard_return:if_true(Other) end`. That keeps the BT-4244 send for a
+non-Boolean and costs a Boolean nothing measurable.
+
+### Harness
+
+A sealed, stateless class with `class sealed guard: x :: Integer => x > 0
+ifTrue: [^1]. 2`, the hand-written `expr: x :: Integer => x > 0 ifTrue: [1]
+ifFalse: [2]`, and loops of the shape `n timesRepeat: [last := self guard:
+1]`, called from Erlang as `'class_run:'(ClassRef, 5000000)`, median of 5.
+"before" is the same source compiled with the rewrite switched off. Both
+sides include the class-side self-send (~0.04 µs), which dominates.
+
+### Results (µs per iteration, two interleaved runs)
+
+| Row | before | after |
+|---|---|---|
+| empty loop | 0.002 | 0.002 |
+| `guard: 1` (`^` taken) | 0.115 – 0.123 | 0.042 – 0.051 |
+| `guard: 0` (falls through) | 0.051 – 0.057 | 0.040 – 0.044 |
+| `expr: 1` (expression form) | 0.042 | 0.040 – 0.042 |
+
+A guard now costs what the expression form costs. A taken `^` saved about
+0.07 µs (the throw and its catch); a guard that falls through saved
+about 0.01 µs (the `make_ref` and the `try` set-up).

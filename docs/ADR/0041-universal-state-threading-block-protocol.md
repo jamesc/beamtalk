@@ -103,6 +103,50 @@ them: the closure may run in a later REPL input, after the eval that created
 it has ended, so the REPL rejects it (`LoopBodyReturns::in_closure`); in a
 method it throws to the method's boundary as before.
 
+## Amendment (BT-4312, 2026-11-04): every in-place REPL `^` throws to the eval
+
+A REPL input is a method body. The REPL eval's boundary now catches every `^`
+run in place, not only a loop-body one: at the root of the input, in a
+conditional arm, an evaluated or protected block, as well as a loop or fold
+body. One rule, `block_facts::InPlaceReturns` (renamed from
+`LoopBodyReturns`; `classify_in_place_returns`), is read by the REPL check and
+by codegen (`repl_eval_returns`). So `x := 1. ^7. x := 2` answers 7 and
+`true ifTrue: [^3]. 5` answers 3, as in a method. A `^` that is the input's
+whole last statement keeps its bare-value lowering: it already ends the input.
+A `^` run in place inside the value of a top-level assignment is a compile
+error, as the loop-body case was. The verifier error is renamed
+`VerifyError::ReplReturnWithoutBoundary`. `in_closure` is unchanged: a `^` in
+a stored closure answers its value where it stands.
+
+**An `ensure:` cleanup run by a `^` keeps its writes.** An `ensure:` is not a
+boundary, so a write its cleanup makes reaches whichever boundary the
+in-flight NLR or exception reaches. The invariant, for every scope kind: on an
+error the cleanup runs and the error propagates (the catching boundary decides
+what is kept). On a `^` of the scope, whose throw carries the scope's state to
+its boundary (the REPL's bindings map, an actor method's `State`, a value-type
+method's `Self`; the cell in an actor closure or merged Tier 2 fun; nothing in a
+class method, whose class variables are written in place), the catch runs the
+cleanup from the carried state and resumes the throw with the cleanup's
+result. That holds wherever the `ensure:` sits: a statement, a conditional
+arm, a loop or fold body, an `on:do:` arm, another `ensure:`'s cleanup (each
+relay hands the next one out its result), a stored closure, up to the method's
+or the eval's boundary. A `^` of another scope is re-raised as it came. The
+catch re-raised the original throw before, so its boundary answered the state
+at the `^`: `w := 0. [^5] ensure: [w := 9]` left `w` at 0 once this amendment
+made that `^` a throw (BT-4288's loop-body `^` had the same gap), and an actor
+method's `[^1] ensure: [self.n := 9]` never kept `n`. The same holds however
+the cleanup runs: when an operand is not a block literal the cleanup is a
+closure that writes the actor-state cell in place, and an actor method's `^`
+stored its `State` there before it threw, so the throw resumes with the
+carried state under the cell (`c := [self.n := 9]. [^1] ensure: c` kept no `n`
+before). Where the state is the cell, the relay never rebuilds it from the
+`ensure:` site's bindings: a merged Tier 2 fun's `^` flushed its captured
+locals as they were at the `^`. The catch is one
+`ThreadedStmt::EnsureCatch` node (`ensure_nlr_relay.rs`), and
+`VerifyError::EnsureCleanupLostOnNlr` fails a cleanup that can write the
+carried state with no relay, or a relay that re-throws anything but the
+cleanup's result.
+
 ## Decision
 
 Replace the hardcoded control-flow whitelist with a **universal block protocol** where all blocks that capture mutable state use `fun(Args..., StateAcc) -> {Result, NewStateAcc}`. This makes state threading a first-class part of the block calling convention rather than a special case for known selectors.

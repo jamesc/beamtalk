@@ -24,7 +24,9 @@
 //! - `match_validators` — pattern match exhaustiveness
 //! - `native_validators` — native actor validation
 //! - `operator_validators` — non-dispatchable operator declaration checks
-//! - `reserved_name_validators` — reserved internal-namespace name checks
+//! - `reserved_name_validators` — reserved internal-namespace name checks,
+//!   and class-side methods shadowed by the class process's class-variable
+//!   reflection selectors (BT-4422)
 //! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
 //!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
 
@@ -59,6 +61,8 @@ pub(crate) use class_validators::{
 };
 pub(crate) use handleinfo_catch_all_validators::check_handle_info_catch_all;
 pub(crate) use late_slot_validators::check_late_slot_declarations;
+#[cfg(test)]
+pub(crate) use local_threading::PLAIN_ARM_SELECTORS;
 pub(crate) use local_threading::check_local_threading;
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.
@@ -81,7 +85,7 @@ pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
 pub use reserved_name_validators::MODULE_INFO_FUNCTION;
 pub(crate) use reserved_name_validators::{
-    check_reserved_internal_names, check_reserved_module_info,
+    check_class_var_reflection_shadowing, check_reserved_internal_names, check_reserved_module_info,
 };
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,

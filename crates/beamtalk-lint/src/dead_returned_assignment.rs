@@ -25,8 +25,7 @@
 //!
 //! It is a warning, never a compile error.
 
-use crate::LintPass;
-use crate::hierarchy_for_lint;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::semantic_analysis::local_threading_diagnostics;
@@ -36,9 +35,8 @@ use beamtalk_core::source_analysis::{Diagnostic, Span};
 pub(crate) struct DeadReturnedAssignmentPass;
 
 impl LintPass for DeadReturnedAssignmentPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        let hierarchy = hierarchy_for_lint(module);
-        let rejected: Vec<Span> = local_threading_diagnostics(module, &hierarchy)
+    fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+        let rejected: Vec<Span> = local_threading_diagnostics(module, ctx.hierarchy)
             .iter()
             .map(|d| d.span)
             .collect();

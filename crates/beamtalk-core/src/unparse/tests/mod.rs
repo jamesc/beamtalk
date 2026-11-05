@@ -10,6 +10,7 @@
 
 mod common;
 
+mod binary_construction_round_trip;
 mod canonical_source;
 mod corpus_conformance_tests;
 mod declaration_order_and_blank_lines;

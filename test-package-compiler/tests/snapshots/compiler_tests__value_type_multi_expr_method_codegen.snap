@@ -2,7 +2,7 @@
 source: test-package-compiler/tests/compiler_tests.rs
 expression: core_erlang
 ---
-module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tripleStep:with:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tripleStep:with:'/3, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
   attributes ['on_load' = [{'register_class', 0}],
      'beamtalk_class' = [{'MultiExprTest', 'Object'}]]
 
@@ -17,13 +17,13 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
 
 
 'addAndDouble:'/2 = fun (Self, _x@1) ->
-    let _seq@2 = let _Arg@3 = _x@1 in let _DirectCall@5 = let _ClassPid@4 = call 'erlang':'whereis'('beamtalk_class_Transcript') in case call 'beamtalk_class_shadow_flags':'direct_call_ok'('Transcript class', 'Transcript') of <'true'> when call 'erlang':'is_pid'(_ClassPid@4) -> case call 'erlang':'function_exported'('bt@stdlib@transcript', 'class_show:', 2) of <'true'> when 'true' -> call 'bt@stdlib@transcript':'class_show:'({'beamtalk_object', 'Transcript class', 'bt@stdlib@transcript', _ClassPid@4}, _Arg@3) <_> when 'true' -> call 'beamtalk_object_class':'class_send'(_ClassPid@4, 'show:', [_Arg@3]) end <_> when 'true' -> call 'beamtalk_object_class':'class_send'(_ClassPid@4, 'show:', [_Arg@3]) end in _DirectCall@5 in
-    let _BinLeft@6 = _x@1 in let _BinRight@7 = 2 in case call 'erlang':'is_number'(_BinLeft@6) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft@6, _BinRight@7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@6, '*', [_BinRight@7]) <_BinOpNoMatch@8> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@8}) end
+    let _seq@2 = let _Arg@3 = _x@1 in let _DirectCall@7 = let _StaticSelf@4 = case call 'persistent_term':'get'({'bt@stdlib@transcript', 'class_show:', 'Transcript class'}, 'false') of <'false'> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@stdlib@transcript', 'class_show:', 'Transcript class'}, 'Transcript', 'show:', 2) <_StaticRef@5> when 'true' -> _StaticRef@5 end in case _StaticSelf@4 of <'false'> when 'true' -> let _ClassPid@6 = call 'erlang':'whereis'('beamtalk_class_Transcript') in call 'beamtalk_object_class':'class_send'(_ClassPid@6, 'show:', [_Arg@3]) <_> when 'true' -> call 'bt@stdlib@transcript':'class_show:'(_StaticSelf@4, _Arg@3) end in _DirectCall@7 in
+    let _BinLeft@8 = _x@1 in let _BinRight@9 = 2 in case call 'erlang':'is_number'(_BinLeft@8) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '*', [_BinRight@9]) <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end
 
-'tripleStep:with:'/3 = fun (Self, _a@9, _b@10) ->
-    let _seq@11 = let _BinLeft@12 = _a@9 in let _BinRight@13 = _b@10 in case call 'erlang':'is_number'(_BinLeft@12) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@12, _BinRight@13) of <_BinCoerceTry@14> -> _BinCoerceTry@14 catch <_BinCoerceType@15, _BinCoerceError@16, _BinCoerceStack@17> -> case {_BinCoerceType@15, _BinCoerceError@16} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@13) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@15, _BinCoerceError@16, _BinCoerceStack@17) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@13, 'plusFromNumber:', [_BinLeft@12], '+') <_BinCoerceNoMatch@19> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@19}) end <_BinCoerceOther@18> when 'true' -> primop 'raw_raise'(_BinCoerceType@15, _BinCoerceError@16, _BinCoerceStack@17) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@12, '+', [_BinRight@13]) <_BinOpNoMatch@20> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@20}) end in
-    let _seq@21 = let _BinLeft@22 = _a@9 in let _BinRight@23 = _b@10 in case call 'erlang':'is_number'(_BinLeft@22) of <'true'> when 'true' -> try call 'erlang':'-'(_BinLeft@22, _BinRight@23) of <_BinCoerceTry@24> -> _BinCoerceTry@24 catch <_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27> -> case {_BinCoerceType@25, _BinCoerceError@26} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@23) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@23, 'minusFromNumber:', [_BinLeft@22], '-') <_BinCoerceNoMatch@29> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@29}) end <_BinCoerceOther@28> when 'true' -> primop 'raw_raise'(_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@22, '-', [_BinRight@23]) <_BinOpNoMatch@30> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@30}) end in
-    let _BinLeft@31 = _a@9 in let _BinRight@32 = _b@10 in case call 'erlang':'is_number'(_BinLeft@31) of <'true'> when 'true' -> try call 'erlang':'*'(_BinLeft@31, _BinRight@32) of <_BinCoerceTry@33> -> _BinCoerceTry@33 catch <_BinCoerceType@34, _BinCoerceError@35, _BinCoerceStack@36> -> case {_BinCoerceType@34, _BinCoerceError@35} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@32) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@34, _BinCoerceError@35, _BinCoerceStack@36) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@32, 'timesFromNumber:', [_BinLeft@31], '*') <_BinCoerceNoMatch@38> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@38}) end <_BinCoerceOther@37> when 'true' -> primop 'raw_raise'(_BinCoerceType@34, _BinCoerceError@35, _BinCoerceStack@36) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@31, '*', [_BinRight@32]) <_BinOpNoMatch@39> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@39}) end
+'tripleStep:with:'/3 = fun (Self, _a@11, _b@12) ->
+    let _seq@13 = let _BinLeft@14 = _a@11 in let _BinRight@15 = _b@12 in case call 'erlang':'is_number'(_BinLeft@14) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@14, _BinRight@15) of <_BinCoerceTry@16> -> _BinCoerceTry@16 catch <_BinCoerceType@17, _BinCoerceError@18, _BinCoerceStack@19> -> case {_BinCoerceType@17, _BinCoerceError@18} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@15) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@17, _BinCoerceError@18, _BinCoerceStack@19) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@15, 'plusFromNumber:', [_BinLeft@14], '+') <_BinCoerceNoMatch@21> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@21}) end <_BinCoerceOther@20> when 'true' -> primop 'raw_raise'(_BinCoerceType@17, _BinCoerceError@18, _BinCoerceStack@19) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@14, '+', [_BinRight@15]) <_BinOpNoMatch@22> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@22}) end in
+    let _seq@23 = let _BinLeft@24 = _a@11 in let _BinRight@25 = _b@12 in case call 'erlang':'is_number'(_BinLeft@24) of <'true'> when 'true' -> try call 'erlang':'-'(_BinLeft@24, _BinRight@25) of <_BinCoerceTry@26> -> _BinCoerceTry@26 catch <_BinCoerceType@27, _BinCoerceError@28, _BinCoerceStack@29> -> case {_BinCoerceType@27, _BinCoerceError@28} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@25) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@27, _BinCoerceError@28, _BinCoerceStack@29) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@25, 'minusFromNumber:', [_BinLeft@24], '-') <_BinCoerceNoMatch@31> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@31}) end <_BinCoerceOther@30> when 'true' -> primop 'raw_raise'(_BinCoerceType@27, _BinCoerceError@28, _BinCoerceStack@29) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@24, '-', [_BinRight@25]) <_BinOpNoMatch@32> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@32}) end in
+    let _BinLeft@33 = _a@11 in let _BinRight@34 = _b@12 in case call 'erlang':'is_number'(_BinLeft@33) of <'true'> when 'true' -> try call 'erlang':'*'(_BinLeft@33, _BinRight@34) of <_BinCoerceTry@35> -> _BinCoerceTry@35 catch <_BinCoerceType@36, _BinCoerceError@37, _BinCoerceStack@38> -> case {_BinCoerceType@36, _BinCoerceError@37} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@34) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@36, _BinCoerceError@37, _BinCoerceStack@38) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@34, 'timesFromNumber:', [_BinLeft@33], '*') <_BinCoerceNoMatch@40> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@40}) end <_BinCoerceOther@39> when 'true' -> primop 'raw_raise'(_BinCoerceType@36, _BinCoerceError@37, _BinCoerceStack@38) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@33, '*', [_BinRight@34]) <_BinOpNoMatch@41> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@41}) end
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
@@ -72,11 +72,47 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             let <DispArg1> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
             call 'value_type_multi_expr_method':'tripleStep:with:'(Self, DispArg0, DispArg1)
         <_Other> when 'true' ->
-            case call 'beamtalk_extensions':'lookup'('MultiExprTest', Selector) of
-                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                    apply ExtFun(Args, Self)
-                <'not_found'> when 'true' ->
-                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'class'> when 'true' -> 'slow'
+                <'clearField:'> when 'true' -> 'slow'
+                <'delegate'> when 'true' -> 'slow'
+                <'displayString'> when 'true' -> 'slow'
+                <'equals:'> when 'true' -> 'slow'
+                <'error:'> when 'true' -> 'slow'
+                <'fieldAt:'> when 'true' -> 'slow'
+                <'fieldAt:put:'> when 'true' -> 'slow'
+                <'fieldNames'> when 'true' -> 'slow'
+                <'hasField:'> when 'true' -> 'slow'
+                <'hash'> when 'true' -> 'slow'
+                <'ifNil:'> when 'true' -> 'slow'
+                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
+                <'inspect'> when 'true' -> 'slow'
+                <'isKindOf:'> when 'true' -> 'slow'
+                <'isNil'> when 'true' -> 'slow'
+                <'notImplemented'> when 'true' -> 'slow'
+                <'notNil'> when 'true' -> 'slow'
+                <'perform:'> when 'true' -> 'slow'
+                <'perform:withArguments:'> when 'true' -> 'slow'
+                <'printString'> when 'true' -> 'slow'
+                <'respondsTo:'> when 'true' -> 'slow'
+                <'show:'> when 'true' -> 'slow'
+                <'showCr:'> when 'true' -> 'slow'
+                <'subclassResponsibility'> when 'true' -> 'slow'
+                <'yourself'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('MultiExprTest', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('MultiExprTest', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                    end
             end
     end
 
@@ -94,6 +130,16 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
             case call 'beamtalk_extensions':'has'('MultiExprTest', Selector) of
                 <'true'> when 'true' -> 'true'
                 <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'addAndDouble:', 'tripleStep:with:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('MultiExprTest', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
             end
     end
 
@@ -138,7 +184,8 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -175,7 +222,8 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
       'method_info' => ~{'addAndDouble:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tripleStep:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
-      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:']
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
     }~
 
 'module_info'/0 = fun () ->

@@ -1232,6 +1232,9 @@ loader_integration_test_() ->
             {"protocol reload fans out to a loaded user", fun() ->
                 t_protocol_reload_fanout_reaches_user(Proj)
             end},
+            {"protocol reload fan-out carries the load_project batch (BT-4394)", fun() ->
+                t_protocol_reload_fanout_carries_project_batch(Proj)
+            end},
             {"protocol reload rejects and installs nothing when a user fails", fun() ->
                 t_protocol_reload_rejected_names_failing_user(Proj)
             end},
@@ -1612,6 +1615,52 @@ t_protocol_reload_fanout_reaches_user(Proj) ->
     SrcAfter = stored_method_source(UserNameAtom, greet),
     ?assert(binary:match(SrcAfter, <<"hi">>) =/= nomatch),
     ?assertEqual(nomatch, binary:match(SrcAfter, <<"hello">>)).
+
+%% BT-4394: a protocol reload inside a `load_project` batch
+%% (`reload_class_file/3`) tags every compile it issues — the protocol's own
+%% and each fan-out user's recompile — with the batch's `project_batch`, so
+%% a fan-out mid-batch never resets the compiler port's verified batch.
+t_protocol_reload_fanout_carries_project_batch(Proj) ->
+    N = integer_to_list(erlang:unique_integer([positive])),
+    ProtoName = "Bt4394Greeter" ++ N,
+    UserName = "Bt4394GreeterUser" ++ N,
+    ProtoPath = write_bt(
+        Proj,
+        ProtoName ++ ".bt",
+        list_to_binary("Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hello\"\n")
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(ProtoPath, State0),
+    UserPath = write_bt(
+        Proj,
+        UserName ++ ".bt",
+        list_to_binary("Value subclass: " ++ UserName ++ "\n  uses: " ++ ProtoName ++ "\n")
+    ),
+    {ok, _, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+    ok = file:write_file(
+        ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
+    ),
+
+    Batch = #{project_batch => <<"bt4394-", (list_to_binary(N))/binary>>},
+    meck:new(beamtalk_repl_compiler, [passthrough]),
+    try
+        Result = beamtalk_repl_loader:reload_class_file(ProtoPath, undefined, Batch),
+        ?assertMatch({ok, _}, Result),
+        {ok, ReloadedClasses} = Result,
+        ?assert(lists:member(UserName, [Name || #{name := Name} <- ReloadedClasses])),
+        CompiledPaths = [
+            {filename:basename(Path), maps:get(project_batch, Indexes, missing)}
+         || {_Pid, {beamtalk_repl_compiler, compile_file, [_, Path, _, _, Indexes]}, _Ret} <-
+                meck:history(beamtalk_repl_compiler)
+        ],
+        ExpectedBatch = maps:get(project_batch, Batch),
+        ?assertEqual(
+            lists:sort([{ProtoName ++ ".bt", ExpectedBatch}, {UserName ++ ".bt", ExpectedBatch}]),
+            lists:sort(CompiledPaths)
+        )
+    after
+        meck:unload(beamtalk_repl_compiler)
+    end.
 
 %% All-or-nothing: a protocol edit that a loaded user cannot satisfy (here,
 %% a newly-added required method the user never implemented) is rejected

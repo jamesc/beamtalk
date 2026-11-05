@@ -210,6 +210,17 @@ fn require_built_stdlib() {
     );
 }
 
+/// Copy the checked-in fixture project at `relative` (from the workspace
+/// root) into a fresh temp directory, so a test can build and edit it
+/// without touching the source tree.
+#[allow(dead_code)] // some test binaries don't call every helper
+pub fn copied_fixture_project(relative: &str) -> TempDir {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    beamtalk_workspace::copy_tree(&project_root().join(relative), dir.path())
+        .expect("copy fixture project");
+    dir
+}
+
 /// `beamtalk run`, ready for its operands: [`beamtalk`] with `run` as the
 /// first argument, after asserting the stdlib beams `run` resolves classes
 /// against exist ([`require_built_stdlib`], BT-4331). Every run-mode test

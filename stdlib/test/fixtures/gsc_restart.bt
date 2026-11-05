@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4316: a class whose class process a test kills after its static call
+// key is warm. See guarded_static_call_test.bt.
+
+sealed Object subclass: GscRestart
+
+  class sealed me => self

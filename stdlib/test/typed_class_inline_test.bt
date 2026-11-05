@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4127: `obj class` on a receiver typed as a tagged-map class compiles to
+// an inline class object behind the BT-4069 tag guard (one `erlang:whereis/1`
+// and a tuple carrying the compile-time module pin) instead of
+// `beamtalk_primitive:class_of_object/1`. Each case compares the typed shape
+// (`typedClassOf:`) with its untyped twin (`dynClassOf:`) and with the class
+// reference: the answers must be identical. The codegen half is pinned in
+// crates/beamtalk-codegen/src/core_erlang/tests/typed_sealed.rs; the
+// redefinition half (it needs a live workspace) is
+// tests/repl-protocol/cases/typed_class_inline.btscript.
+//
+// Fixtures: fixtures/sealed_direct_diff_widget.bt,
+// fixtures/sealed_direct_diff_impostor.bt.
+
+TestCase subclass: TypedClassInlineTest
+
+  widget -> SealedDirectDiffWidget =>
+    SealedDirectDiffWidget new: #{#x => 3, #y => 4}
+
+  // The inline shape: the parameter is typed.
+  typedClassOf: w :: SealedDirectDiffWidget => w class
+
+  // The reference: the same send on an untyped parameter.
+  dynClassOf: w => w class
+
+  testTypedClassIsTheClassReference =>
+    self assert: (self typedClassOf: self widget) == SealedDirectDiffWidget
+
+  testTypedClassMatchesTheDynamicAnswer =>
+    w := self widget
+    self assert: (self typedClassOf: w) == (self dynClassOf: w)
+
+  testTypedClassMatchesClassNamed =>
+    self assert: (self typedClassOf: self widget) == (Beamtalk classNamed: #SealedDirectDiffWidget)
+
+  testTypedClassClassIsTheMetaclass =>
+    cls := self typedClassOf: self widget
+    self assert: cls class == SealedDirectDiffWidget class
+    self assert: cls class isMetaclass
+
+  testTypedClassAnswersClassProtocol =>
+    cls := self typedClassOf: self widget
+    self assert: cls name equals: #SealedDirectDiffWidget
+    self assert: (cls new: #{#x => 1, #y => 2}) sum equals: 3
+
+  // A lying annotation: another tagged map misses the guard and takes the
+  // dynamic fallback.
+  testImpostorTakesTheFallback =>
+    impostor := SealedDirectDiffImpostor new: #{#x => 5}
+    @expect type
+    cls := self typedClassOf: impostor
+    self assert: cls == SealedDirectDiffImpostor
+
+  // A non-map value misses the `is_map` arm.
+  testIntegerTakesTheFallback =>
+    @expect type
+    cls := self typedClassOf: 42
+    self assert: cls == Integer
+
+  testStringTakesTheFallback =>
+    @expect type
+    cls := self typedClassOf: "s"
+    self assert: cls == String

@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4279: a guarded send whose guard proves it runs no user code (a builtin
+// operator on primitive operands, an auto-generated slot read of a tagged
+// Value) skips its cell bracket; every other arm keeps it. These cases pin
+// the answers, and that a field write made by a block on a bracketed arm
+// still lands (ADR 0137).
+//
+// Fixtures: fixtures/bt4279pt.bt, fixtures/bt4279slot_reader.bt.
+
+TestCase subclass: Bt4279GuardedFastPathTest
+  field: r = nil
+
+  setUp => self.r := Bt4279SlotReader spawn
+
+  tearDown => self.r isNil ifFalse: [self.r stop]
+
+  testSlotReadsAndOperatorAtTheMethodRoot =>
+    self
+      assert: (self.r
+        sumOf: (Bt4279Pt
+          x: 3
+          y: 4
+          blk: nil))
+      equals: 7
+
+  testGuardedOperatorFastAndDispatchingArms =>
+    self.r bump: 41
+    self assert: self.r n equals: 42
+    self.r bump: 1.5
+    self assert: self.r n equals: 2.5
+
+  testCoercingOperatorsOnIntegersAndFloats =>
+    self assert: (self.r add: 2 to: 3) equals: 5
+    self assert: (self.r add: 1.5 to: 1) equals: 2.5
+    self assert: (self.r div: 6 by: 3) equals: 2.0
+
+  testSlotReadsInALoop =>
+    self
+      assert: (self.r
+        sumIn: (Bt4279Pt
+          x: 1
+          y: 2
+          blk: nil)
+        times: 4)
+      equals: 12
+
+  testSlotReadsInAnOnDoBody =>
+    self
+      assert: (self.r
+        guardedSum: (Bt4279Pt
+          x: 5
+          y: 6
+          blk: nil))
+      equals: 11
+
+  testABlockWriteOnTheBracketedArmIsKept =>
+    self
+      assert: (self.r
+        bumpVia: (Bt4279Pt
+          x: 2
+          y: 0
+          blk: nil))
+      equals: 102
+    self assert: self.r n equals: 100

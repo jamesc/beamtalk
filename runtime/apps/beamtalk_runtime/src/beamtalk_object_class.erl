@@ -41,6 +41,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     put_method/4,
     put_class_method/3,
     put_class_method/4,
+    remove_class_method/2,
     instance_variables/1,
     is_sealed/1,
     is_typed/1,
@@ -68,6 +69,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_class_methods_map/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
+    class_var_reflection_op/2,
     is_class_var_reflection_send/2,
     is_class_var_reflection_selector/1,
     %% ADR 0114: in-place identity move for a dynamic
@@ -97,6 +99,15 @@ and join the `beamtalk_classes` pg group for enumeration.
     arity => non_neg_integer(),
     block => fun(),
     is_sealed => boolean()
+}.
+
+%% BT-4438: what a selector held on the class side before a runtime fun
+%% replaced it. Each key is present only if the class had that entry.
+-type shadowed_class_method() :: #{
+    info => method_info(),
+    source => binary(),
+    signature => binary(),
+    return_type => meta_type_repr()
 }.
 
 -record(class_state, {
@@ -143,7 +154,11 @@ and join the `beamtalk_classes` pg group for enumeration.
     %% field here uses, so a ClassBuilder `shapeVersion:` (ClassInfo, no
     %% compiled meta) and a compiled `shapeVersion:` header clause (Meta)
     %% both answer correctly from the same `shape_version/1` accessor.
-    shape_version = 1 :: pos_integer()
+    shape_version = 1 :: pos_integer(),
+    %% BT-4438: the class-side bookkeeping a runtime fun (`put_class_method`)
+    %% replaced, keyed by selector, so `remove_class_method` can restore it.
+    %% Recorded by the first put over a selector; a reload (disk wins) drops it.
+    shadowed_class_methods = #{} :: #{selector() => shadowed_class_method()}
 }).
 
 %%====================================================================
@@ -969,6 +984,18 @@ put_class_method(ClassPid, Selector, Fun, Source) ->
     gen_server:call(ClassPid, {put_class_method, Selector, Fun, Source}).
 
 -doc """
+Remove a class-side runtime fun installed by `put_class_method/3,4` (BT-4438).
+
+The inverse of `put_class_method/4`: the selector gets back whatever the class
+held for it before the first runtime fun replaced it (its compiled method, or
+nothing, so dispatch falls through to an inherited method or DNU). Answers
+`absent` when `Selector` has no runtime fun on this class.
+""".
+-spec remove_class_method(pid(), selector()) -> removed | absent.
+remove_class_method(ClassPid, Selector) ->
+    gen_server:call(ClassPid, {remove_class_method, Selector}).
+
+-doc """
 ADR 0130 §3: a class-method fun is `fun(ClassSelf, Args...)`, arity
 `selector_arity + 1`. Any other arity is refused here with the structured error
 `beamtalk_class_builder:validate_class_method_arities/2` produces (the same rule
@@ -1435,11 +1462,24 @@ handle_call(
     %% auto-generated. We check `erlang:function_exported/3` on each module in the
     %% superclass chain, which is true only when the BEAM module contains an
     %% explicit `class_new:` function — correctly supporting inherited constructors.
-    case Args =/= [] andalso has_class_new_in_chain(ClassName, Module) of
+    %%
+    %% BT-4409: a class-side extension or ADR 0084 runtime fun on the class
+    %% itself for `new`/`new:` is honoured the same way: it is what turned the
+    %% caller's direct constructor path off (`direct_call_ok/2`), so this
+    %% fallback must answer it rather than the synthesized constructor.
+    Selector =
+        case Args of
+            [] -> 'new';
+            _ -> 'new:'
+        end,
+    case
+        constructor_shadowed(ClassName, Selector) orelse
+            (Args =/= [] andalso has_class_new_in_chain(ClassName, Module))
+    of
         true ->
             case
                 beamtalk_class_dispatch:handle_class_method_call(
-                    'new:', Args, ClassName, Module, ClassMethods, ClassVars
+                    Selector, Args, ClassName, Module, ClassMethods, ClassVars
                 )
             of
                 {reply, Result, NewClassVars} ->
@@ -1447,7 +1487,7 @@ handle_call(
                     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
                     {reply, Result, State#class_state{class_state = NewClassVars}};
                 {error, not_found} ->
-                    Err = beamtalk_error:new(does_not_understand, ClassName, 'new:'),
+                    Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
                     {reply, {error, Err}, State}
             end;
         false ->
@@ -1509,6 +1549,14 @@ handle_call(
             ok = publish_reflection(State#class_state{name = NewName}),
             beamtalk_class_metadata:put_direct_constructors(
                 NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
+            ),
+            %% BT-4409: the per-class `new:` fact moves too.
+            beamtalk_class_metadata:put_defines_user_class_new1(
+                NewName,
+                case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
+                    unknown -> undefined;
+                    Defines -> Defines
+                end
             ),
             %% BT-4299: the class-variable fact and process-bound list move too.
             beamtalk_class_metadata:put_class_variables(
@@ -1646,6 +1694,7 @@ handle_call(
     MethodInfo = #{block => Fun, arity => Arity},
     NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
     NewState = State#class_state{
+        shadowed_class_methods = remember_shadowed_class_method(Selector, State),
         class_methods = NewClassMethods,
         class_method_source = maps:put(Selector, Source, State#class_state.class_method_source),
         class_method_signatures = maps:remove(
@@ -1660,11 +1709,12 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
-    %% BT-4126: the gate flag above turns this class's own direct paths off,
-    %% but a gained `new:` strands subclasses' baked `direct_constructors`.
-    %% Static class-method call sites need no warning: each is guarded by
-    %% `direct_call_ok/2`, which the raised `runtime_fun` flag turns off
-    %% (ADR 0142 §2, BT-4301).
+    %% BT-4126: the gate flag above turns this class's own direct paths off;
+    %% a gained `new:` also reaches subclasses' dynamic `new:` through the
+    %% run-time chain check (BT-4409), so the warning about their baked
+    %% `direct_constructors` is informational. Static class-method call sites
+    %% are guarded by `direct_call_ok/2`, which the raised `runtime_fun` flag
+    %% turns off (ADR 0142 §2, BT-4301).
     warn_stale_subclass_constructors(
         ClassName, State#class_state.class_methods, NewClassMethods
     ),
@@ -1679,6 +1729,18 @@ handle_call(
     %% descendant walked through it.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     {reply, ok, NewState};
+%% BT-4438: remove a class-side runtime fun -- the inverse of
+%% {put_class_method, ...}. Restores what the first put over `Selector`
+%% replaced (see `remember_shadowed_class_method/2`), or drops the selector
+%% when the class had nothing there, so dispatch falls through to the
+%% compiled export, an inherited method, or DNU.
+handle_call({remove_class_method, Selector}, _From, #class_state{name = ClassName} = State) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        error ->
+            {reply, absent, State};
+        {ok, _} ->
+            {reply, removed, do_remove_class_method(Selector, State)}
+    end;
 %% Update class metadata after redefinition (hot reload).
 %% Validation (shadowing + collision) delegated to beamtalk_class_registry.
 %% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
@@ -1848,13 +1910,8 @@ handle_call(get_module, _From, #class_state{module = Module} = State) ->
 handle_call(
     {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
 ) ->
-    %% ADR 0124 §1/§4i/B4: a declared-`late` class variable is an error when
-    %% unassigned, agreeing with the instance-side direct read
-    %% (`generate_late_field_read`) — keyed on *declared* late. Any other
-    %% absent name goes through the shared declared-set rule below (BT-3807):
-    %% undeclared raises `undeclared_class_variable` as a method-body read
-    %% does, and a class with unknown metadata (ClassBuilder) answers `nil`.
-    %% The metadata is read once for both decisions.
+    %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
+    %% `read_class_var/4`, shared with `Cls fieldAt:` (BT-4148).
     %%
     %% Replies `{error, Error}` rather than raising here: this
     %% `handle_call` clause runs directly in the class gen_server's own
@@ -1867,33 +1924,9 @@ handle_call(
     %% caller with a catchable error, so it is never called directly.
     %% `get_class_var_declared_late_unassigned_errors_without_crashing_test_`
     %% (`beamtalk_object_class_tests.erl`) pins that the process survives.
-    Kinds = beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName),
-    case class_var_declared_late(Kinds, Name) of
-        true ->
-            %% BT-4061: presence — not value — is assignment (ADR 0124 §2,
-            %% as amended). The presence question is `class_var_assigned/2`,
-            %% shared with the `has_class_var` clause below, so the raising
-            %% read and `hasField:` cannot drift apart again.
-            case class_var_assigned(ClassVars, Name) of
-                true ->
-                    {reply, maps:get(Name, ClassVars), State};
-                false ->
-                    {reply, {error, beamtalk_class_var_errors:uninitialized_error(ClassName, Name)},
-                        State}
-            end;
-        false ->
-            %% BT-3807: an absent name follows the method-body read rule
-            %% (`beamtalk_class_vars:check_declared/2`, own-only); unknown
-            %% metadata (ClassBuilder) stays lenient and answers nil.
-            case maps:find(Name, ClassVars) of
-                {ok, Value} ->
-                    {reply, Value, State};
-                error ->
-                    case beamtalk_class_vars:check_declared(ClassName, Name, Kinds) of
-                        ok -> {reply, nil, State};
-                        {error, _} = Err -> {reply, Err, State}
-                    end
-            end
+    case read_class_var(ClassName, ClassVars, Name, in_process) of
+        {ok, Value} -> {reply, Value, State};
+        {error, _} = Err -> {reply, Err, State}
     end;
 handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
     NewClassVars = ClassVars#{Name => Value},
@@ -1901,9 +1934,10 @@ handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = Clas
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
     {reply, Value, State#class_state{class_state = NewClassVars}};
 handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises. Shared with `get_class_var`'s
-    %% declared-`late` branch above (BT-4061).
-    {reply, class_var_assigned(ClassVars, Name), State};
+    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
+    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
+    %% declared-`late` branch (`read_in/4`, BT-4061).
+    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
 handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
     %% the instance-side intrinsic's `clearField: -> Self` convention.
@@ -2038,29 +2072,34 @@ notify_compiler_server_register(ClassName, Meta) ->
     end.
 
 -doc """
-True when `Name` is declared `late` (ADR 0124 §1) as a `classState:` on
-`ClassName` itself (class variables are not inherited, BT-3801) — the class-side
-counterpart to `beamtalk_reflection`'s `declared_late/2`, over the kinds read by
-`beamtalk_class_metadata:class_var_kinds_or_unknown/1` (`unknown` is not late).
-Keyed on *declared* late: an undeclared name is not late and falls through to
-the `check_declared/3` branch of `get_class_var`.
+Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
+`{ok, Value}`, or `{error, Error}` (built, not raised, so the class gen_server
+can reply with it instead of crashing). The rule itself is
+`beamtalk_class_vars:read_in/4`, shared with the in-process `self fieldAt: #x`
+of a class method (BT-4421), so the gen_server's `get_class_var`, the outside
+`Cls fieldAt: #x` (BT-4148) and the inside read cannot drift apart.
 """.
--spec class_var_declared_late(unknown | #{atom() => eager | late}, atom()) -> boolean().
-class_var_declared_late(unknown, _Name) ->
-    false;
-class_var_declared_late(Kinds, Name) ->
-    maps:get(Name, Kinds, eager) =:= late.
+-spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+read_class_var(ClassName, ClassVars, Name, Caller) ->
+    beamtalk_class_vars:read_in(ClassName, ClassVars, Name, Caller).
 
 -doc """
-Presence test for a class variable in a class-state map (BT-4061): the one
-"is this variable assigned" helper, shared by `get_class_var`'s
-declared-`late` branch and the `has_class_var` clause, so the raising read
-and `hasField:` cannot drift apart again. Presence — not value — is
-assignment (ADR 0124 §2, as amended): a stored `nil` is assigned.
+Write class variable `Name` into the class-state map `ClassVars` of
+`ClassName` for the `Cls fieldAt: #x put: v` reflection send (BT-4148):
+`{ok, NewClassVars}`, or `{error, Error}` (built, not raised).
+
+**Checked**, unlike the out-of-band `{set_class_var, ...}` runtime-API call
+(ADR 0124). The rule is `beamtalk_class_vars:check_write/3`, shared with the
+in-process `self fieldAt: #x put: v` of a class method (BT-4421).
 """.
--spec class_var_assigned(map(), atom()) -> boolean().
-class_var_assigned(ClassVars, Name) ->
-    maps:is_key(Name, ClassVars).
+-spec write_class_var(class_name(), map(), atom(), term()) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
+write_class_var(ClassName, ClassVars, Name, Value) ->
+    case beamtalk_class_vars:check_write(ClassName, ClassVars, Name) of
+        ok -> {ok, ClassVars#{Name => Value}};
+        {error, _} = Err -> Err
+    end.
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
@@ -2080,20 +2119,18 @@ ownership when there is no session context to fall back to (tier 1).
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
-%% ADR 0124 §1/§4i/B4: `Cls hasField:`/`Cls clearField:` reach the class
-%% gen_server here, ahead of the local-class-method/superclass-chain/DNU
-%% priority order below — like `fieldAt:`/`fieldAt:put:` on an instance
-%% (`sealed` on `Object`, ADR 0035), these are reflection primitives, not
-%% overridable class methods. `ClassVars` lives in `State` directly, so
-%% neither needs `handle_class_method_call/6`'s method-lookup machinery;
-%% `has_class_var`/`clear_class_var`'s own `handle_call` clauses provide the
-%% identical read/write for `beamtalk_object_class:has_class_var/2` /
-%% `clear_class_var/2`'s direct-message-shape callers, so this clause is the
-%% ordinary-message-send route to the SAME two operations, not a third
-%% implementation of them (CLAUDE.md's no-duplicate-implementations rule
-%% notwithstanding — `maps:is_key/2`/`maps:remove/2` are the whole
-%% operation, so there is nothing to extract into a shared helper beyond
-%% the builtin itself).
+%% ADR 0124 §1/§4i/B4, BT-4148: `Cls hasField:`, `Cls clearField:`,
+%% `Cls fieldAt:` and `Cls fieldAt:put:` reach the class gen_server here,
+%% ahead of the local-class-method/superclass-chain/DNU priority order below.
+%% Like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
+%% 0035), these are reflection primitives, not overridable class methods.
+%% `ClassVars` lives in `State` directly, so none of them needs
+%% `handle_class_method_call/6`'s method-lookup machinery. `has`/`clear` are
+%% the same operations as the `has_class_var`/`clear_class_var` `handle_call`
+%% clauses (`maps:is_key/2`/`maps:remove/2` are the whole operation); `get`
+%% shares `read_class_var/4` with `get_class_var`; and `put` is the checked
+%% counterpart (`write_class_var/4`) of the deliberately unchecked
+%% `set_class_var`.
 dispatch_class_method(Selector, Args, From, State, Restore) ->
     case class_var_reflection_op(Selector, Args) of
         {has, Name} ->
@@ -2114,19 +2151,47 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
             beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
             NewState = State#class_state{class_state = NewClassVars},
             {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
+        {get, Name} ->
+            %% BT-4148: `Cls fieldAt: #x` — the `get_class_var` read rule
+            %% (`read_class_var/4`, reflective form). An error is replied as `{error, Error}`,
+            %% which the caller (`class_method_result/4`) raises in its own
+            %% process, so the class gen_server survives it.
+            Restore(),
+            #class_state{name = ClassName, class_state = ClassVars} = State,
+            {reply, read_class_var(ClassName, ClassVars, Name, reflective), State};
+        {put, Name, Value} ->
+            %% BT-4148: `Cls fieldAt: #x put: v` — a checked write
+            %% (`write_class_var/4` records why). Answers the assigned value,
+            %% like instance-side `fieldAt:put:`.
+            Restore(),
+            #class_state{name = ClassName, class_state = ClassVars} = State,
+            case write_class_var(ClassName, ClassVars, Name, Value) of
+                {ok, NewClassVars} ->
+                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+                    {reply, {ok, Value}, State#class_state{class_state = NewClassVars}};
+                {error, _} = Err ->
+                    {reply, Err, State}
+            end;
         none ->
             dispatch_class_method_lookup(Selector, Args, From, State, Restore)
     end.
 
 -doc """
 The class-variable reflection sends `dispatch_class_method/5` answers from the
-class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x`, ADR
-0124 §1/§4i/B4), or `none` for every other send. The single decision behind
-both `dispatch_class_method/5` and `is_class_var_reflection_send/2`.
+class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x` /
+`Cls fieldAt: #x` / `Cls fieldAt: #x put: v`, ADR 0124 §1/§4i/B4, BT-4148), or
+`none` for every other send. The single decision behind
+`dispatch_class_method/5`, `is_class_var_reflection_send/2`,
+`is_class_var_reflection_selector/1` and the in-place answer to the same
+send made from inside the class's own process
+(`beamtalk_class_dispatch:class_send_from_own_process/2`, BT-4423).
 """.
--spec class_var_reflection_op(atom(), list()) -> {has | clear, atom()} | none.
+-spec class_var_reflection_op(atom(), list()) ->
+    {has | clear | get, atom()} | {put, atom(), term()} | none.
 class_var_reflection_op('hasField:', [Name]) when is_atom(Name) -> {has, Name};
 class_var_reflection_op('clearField:', [Name]) when is_atom(Name) -> {clear, Name};
+class_var_reflection_op('fieldAt:', [Name]) when is_atom(Name) -> {get, Name};
+class_var_reflection_op('fieldAt:put:', [Name, Value]) when is_atom(Name) -> {put, Name, Value};
 class_var_reflection_op(_Selector, _Args) -> none.
 
 -doc """
@@ -2147,7 +2212,9 @@ selector alone, so it declines these selectors outright.
 """.
 -spec is_class_var_reflection_selector(atom()) -> boolean().
 is_class_var_reflection_selector(Selector) ->
-    class_var_reflection_op(Selector, [Selector]) =/= none.
+    %% Any atom stands in for the Symbol name; `put`'s value is unconstrained.
+    Args = lists:duplicate(beamtalk_class_builder:selector_arity(Selector), Selector),
+    class_var_reflection_op(Selector, Args) =/= none.
 
 -spec dispatch_class_method_lookup(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -2382,6 +2449,25 @@ find_inherited_class_method(_Selector, none) ->
     nil;
 find_inherited_class_method(Selector, SuperName) ->
     published_compiled_method(SuperName, class, Selector).
+
+-doc """
+Whether a class-side extension registered on `ClassName` itself, or an ADR
+0084 runtime class-method fun of `ClassName`, answers the constructor
+`Selector` (`new` or `new:`) (BT-4409). The `{new, _}` handler then runs it
+like any other class method (`handle_class_method_call/6`, which checks the
+extension first) instead of the synthesized constructor, so a constructor
+shadowed after a caller warmed up is honoured on the path the caller falls
+back to. The raw shadow flags (`beamtalk_class_shadow_flags:is_shadowed/2`,
+one `persistent_term` read each) pre-screen the common unshadowed class. Only
+the class's own shadows count: an ancestor's class-side `new` extension does
+not shadow the class's synthesized `new`, as on the class-process lookup.
+""".
+-spec constructor_shadowed(class_name(), selector()) -> boolean().
+constructor_shadowed(ClassName, Selector) ->
+    Tag = beamtalk_class_registry:class_object_tag(ClassName),
+    beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName) andalso
+        (beamtalk_dispatch:check_extension(Tag, Selector) =/= not_found orelse
+            beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error).
 
 -doc """
 Check whether `class_new:/2` is exported anywhere in the superclass chain.
@@ -2628,6 +2714,11 @@ Copies `direct_constructors` from `Meta` into the unified metadata row, where
 without the key (dynamic classes, older modules) clears the set, so a reload
 that makes a class ineligible takes effect immediately. Only `new`/`new:`
 atoms are kept; anything else in the list is dropped defensively.
+
+Also publishes the class's own `defines_user_class_new1` fact (BT-4409),
+which descendants' dynamic `new:` reads through
+`beamtalk_class_metadata:chain_has_user_new1/1`; Meta without it stores
+`undefined` (unknown), so the chain walk fails closed.
 """.
 -spec sync_direct_constructors(class_name(), map()) -> ok.
 sync_direct_constructors(ClassName, Meta) ->
@@ -2636,6 +2727,12 @@ sync_direct_constructors(ClassName, Meta) ->
             L when is_list(L) -> [S || S <- L, S =:= new orelse S =:= 'new:'];
             _ -> []
         end,
+    DefinesNew1 =
+        case maps:get(defines_user_class_new1, Meta, undefined) of
+            B when is_boolean(B) -> B;
+            _ -> undefined
+        end,
+    beamtalk_class_metadata:put_defines_user_class_new1(ClassName, DefinesNew1),
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
@@ -2671,13 +2768,16 @@ sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
 Warn when `ClassName` has just gained a class-side `new:` that its subclasses'
 baked `direct_constructors` verdicts do not know about (BT-4126).
 
-A subclass's `new:` verdict is baked only when no ancestor defines a
-class-side `new:` (Rust's `chain_has_user_new_init`). If `ClassName` *gains*
-one (by a compiled reload or a runtime-fun `put_class_method`), every
-transitive subclass whose row still lists `new:` keeps building in the caller
-and silently skips the new override. Those subclasses are named, so the
-warning says exactly what to recompile. Losing a `new:` needs no warning:
-stale descendants then just take the (correct, slower) gen_server path.
+A subclass's `new:` verdict is baked only when no ancestor defined a
+class-side `new:` at its compile time (Rust's `chain_has_user_new_init`).
+Since BT-4409 the chain is also decided at run time: a dynamic `new:` builds
+in the caller only while `beamtalk_class_metadata:chain_has_user_new1/1`
+finds no ancestor publishing a user `new:` (nor an ancestor's runtime-fun
+`new:`), so if `ClassName` *gains* one (by a compiled reload or a runtime-fun
+`put_class_method`), its subclasses route through it at once, without being
+recompiled. This warning is therefore informational: it names the subclasses
+whose baked verdict no longer matches their ancestors, which a recompile
+brings back in line. Losing a `new:` needs no warning.
 
 "Has a class-side `new:`" is read from the class-method map, which for a
 compiled class is the module's `class_method_info` (user primary methods only,
@@ -2719,6 +2819,125 @@ warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
     end.
 
 -doc """
+BT-4438: record what `Selector` held on the class side before a runtime fun
+replaces it, so `remove_class_method/2` can restore it. Only the first put
+over a selector records anything: a later put replaces a runtime fun, and
+removing that must still restore the compiled method the first put hid.
+""".
+-spec remember_shadowed_class_method(selector(), #class_state{}) ->
+    #{selector() => shadowed_class_method()}.
+remember_shadowed_class_method(
+    Selector, #class_state{shadowed_class_methods = Shadowed} = State
+) ->
+    case maps:is_key(Selector, Shadowed) of
+        true ->
+            Shadowed;
+        false ->
+            Entries = [
+                {info, State#class_state.class_methods},
+                {source, State#class_state.class_method_source},
+                {signature, State#class_state.class_method_signatures},
+                {return_type, State#class_state.class_method_return_types}
+            ],
+            Previous = maps:from_list([
+                {Key, Value}
+             || {Key, Map} <- Entries, {ok, Value} <- [maps:find(Selector, Map)]
+            ]),
+            maps:put(Selector, Previous, Shadowed)
+    end.
+
+-doc """
+BT-4438: undo `{put_class_method, ...}` for `Selector`, whose runtime fun the
+caller has found installed. The same metadata writes as the put, in the order
+that keeps a concurrent dispatch from resolving a selector with no body:
+publish the restored selector set, then drop (or restore) the fun, then close
+the gate if this class has no runtime funs left.
+""".
+-spec do_remove_class_method(selector(), #class_state{}) -> #class_state{}.
+do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
+    %% ADR 0142 §2: a class-metadata write -- erase the derived direct-call
+    %% flags and static call keys of this class and its descendants first.
+    beamtalk_class_shadow_flags:invalidate(ClassName),
+    Previous = maps:get(Selector, State#class_state.shadowed_class_methods, #{}),
+    Restore = fun(Key, Map) ->
+        case maps:find(Key, Previous) of
+            {ok, Value} -> maps:put(Selector, Value, Map);
+            error -> maps:remove(Selector, Map)
+        end
+    end,
+    OldClassMethods = State#class_state.class_methods,
+    NewClassMethods = Restore(info, OldClassMethods),
+    NewState = State#class_state{
+        shadowed_class_methods = maps:remove(Selector, State#class_state.shadowed_class_methods),
+        class_methods = NewClassMethods,
+        class_method_source = Restore(source, State#class_state.class_method_source),
+        class_method_signatures = Restore(signature, State#class_state.class_method_signatures),
+        class_method_return_types = Restore(
+            return_type, State#class_state.class_method_return_types
+        )
+    },
+    %% A concurrent dispatch in another process that already resolved
+    %% `Selector` to this class may read the funs table after the delete below
+    %% and run the compiled branch instead; `put_class_method` has the mirror
+    %% window. Neither is new to removal (ADR 0084's lock-free reads).
+    Funs = maps:filter(fun(_, Info) -> is_runtime_fun_info(Info) end, NewClassMethods),
+    case maps:find(Selector, Funs) of
+        {ok, RestoredFun} ->
+            %% The first put replaced a builder-installed fun: put it back.
+            beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, RestoredFun),
+            beamtalk_class_metadata:set_runtime_class_methods(
+                ClassName, maps:keys(NewClassMethods)
+            );
+        error ->
+            beamtalk_class_metadata:set_class_method_selectors(
+                ClassName, maps:keys(NewClassMethods)
+            ),
+            beamtalk_class_metadata:delete_class_method_fun(ClassName, Selector),
+            case maps:size(Funs) of
+                0 -> beamtalk_class_metadata:reset_runtime_class_methods(ClassName);
+                _ -> ok
+            end
+    end,
+    %% BT-4301 pattern: erase again now that the change is visible, so a flag
+    %% derived from the half-written state in between does not survive.
+    beamtalk_class_shadow_flags:invalidate(ClassName),
+    warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods),
+    case maps:find(source, Previous) of
+        {ok, Source} -> put_method_xref(ClassName, true, Selector, Source);
+        error -> safe_xref(fun() -> beamtalk_xref:purge_method(ClassName, true, Selector) end)
+    end,
+    ok = publish_reflection(NewState),
+    notify_hot_patch(NewState),
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
+    NewState.
+
+-doc """
+BT-4438: the stash entries that survive a reload. A reload whose class info
+names no class methods keeps the old `class_methods` map, so a put fun stays
+installed; its stash must stay too, or removing it would drop the selector
+instead of restoring what the put hid. Any selector the reload re-defined
+loses its stash (disk wins).
+""".
+-spec carried_over_shadowed(#class_state{}, map()) ->
+    #{selector() => shadowed_class_method()}.
+carried_over_shadowed(
+    #class_state{shadowed_class_methods = Shadowed, class_methods = Old}, NewClassMethods
+) ->
+    maps:filter(
+        fun(Selector, _) ->
+            case {maps:find(Selector, Old), maps:find(Selector, NewClassMethods)} of
+                {{ok, Info}, {ok, Info}} -> is_runtime_fun_info(Info);
+                _ -> false
+            end
+        end,
+        Shadowed
+    ).
+
+-spec is_runtime_fun_info(term()) -> boolean().
+is_runtime_fun_info(Info) ->
+    is_map(Info) andalso maps:is_key(block, Info).
+
+-doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.
 
 ADR 0084: picks out the entries that carry a `block` (runtime/builder
@@ -2728,10 +2947,7 @@ entries leave the gate flag false so their dispatch never reads the funs table.
 """.
 -spec seed_runtime_class_methods(class_name(), map()) -> ok.
 seed_runtime_class_methods(ClassName, ClassMethods) ->
-    Funs = maps:filter(
-        fun(_Selector, Info) -> is_map(Info) andalso maps:is_key(block, Info) end,
-        ClassMethods
-    ),
+    Funs = maps:filter(fun(_Selector, Info) -> is_runtime_fun_info(Info) end, ClassMethods),
     case maps:size(Funs) of
         0 ->
             ok;
@@ -2951,9 +3167,11 @@ apply_class_info(State, ClassInfo) ->
     %% reload adding a custom `new` drops it from the baked set immediately).
     sync_direct_constructors(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
-    %% the reload strands descendants' `direct_constructors`. Static
-    %% class-method call sites are guarded by `direct_call_ok/2` (ADR 0142 §2,
-    %% BT-4301), so they cannot go stale and need no warning.
+    %% the reload leaves descendants' baked `direct_constructors` behind their
+    %% ancestors (informational: their dynamic `new:` re-checks the chain at
+    %% run time, BT-4409). Static class-method call sites are guarded by
+    %% `direct_call_ok/2` (ADR 0142 §2, BT-4301), so they cannot go stale and
+    %% need no warning.
     warn_stale_subclass_constructors(
         State#class_state.name, State#class_state.class_methods, NewClassMethods
     ),
@@ -2963,6 +3181,9 @@ apply_class_info(State, ClassInfo) ->
         superclass = NewSuperclass,
         instance_methods = NewInstanceMethods,
         class_methods = NewClassMethods,
+        %% BT-4438: disk wins -- a fun the reload replaced takes its stash
+        %% with it; a put fun the reload carried over keeps it.
+        shadowed_class_methods = carried_over_shadowed(State, NewClassMethods),
         fields = maps:get(
             fields,
             Meta,

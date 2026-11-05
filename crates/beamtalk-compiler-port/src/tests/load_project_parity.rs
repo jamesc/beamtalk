@@ -29,10 +29,11 @@ use std::fs;
 /// plus the absolute path of the file under test:
 ///
 /// ```text
-/// <root>/beamtalk.toml            ([diagnostics] type/type-annotation = "error")
+/// <root>/beamtalk.toml            ([dependencies] fakedep; [diagnostics] type/type-annotation = "error")
 /// <root>/src/parity_config.bt     (type Scheme = #http | #https, plus a class)
 /// <root>/src/parity_state.bt      (typed class: Scheme default + zero-arg FFI)
 /// <root>/src/parity_bad.bt        (typed class: genuine Integer/"oops" mismatch)
+/// <root>/_build/deps/.dep-graph.json            (resolved graph: fakedep)
 /// <root>/_build/deps/fakedep/beamtalk.toml
 /// <root>/_build/deps/fakedep/src/dep_types.bt   (type DepAddr = #local | #remote)
 /// <root>/_build/type_cache/erlang_<hash>.json    (seeded monotonic_time/0 spec)
@@ -46,7 +47,7 @@ fn write_parity_project() -> (tempfile::TempDir, std::path::PathBuf) {
 
     fs::write(
         root.join("beamtalk.toml"),
-        "[package]\nname = \"parityproj\"\nversion = \"0.1.0\"\n\n[diagnostics]\ntype = \"error\"\ntype-annotation = \"error\"\n",
+        "[package]\nname = \"parityproj\"\nversion = \"0.1.0\"\n\n[dependencies]\nfakedep = { git = \"https://example.test/fakedep\", tag = \"v0.1.0\" }\n\n[diagnostics]\ntype = \"error\"\ntype-annotation = \"error\"\n",
     )
     .expect("fixture beamtalk.toml");
     fs::write(
@@ -99,6 +100,9 @@ fn write_parity_project() -> (tempfile::TempDir, std::path::PathBuf) {
          \x20 defaultAddr -> Symbol => #local\n",
     )
     .expect("fixture dep_types.bt");
+    // The build's resolved dependency graph (BT-4378): the port reads the
+    // dependency set from here, not from a listing of `_build/deps/`.
+    write_dep_graph_snapshot(root, &["fakedep"]);
 
     // Seeded OTP spec entry for `erlang:monotonic_time/0 -> integer`, in the
     // exact shape `beamtalk lint`'s fixture seeding uses: replay
@@ -116,6 +120,39 @@ fn write_parity_project() -> (tempfile::TempDir, std::path::PathBuf) {
     .expect("fixture type_cache entry");
 
     (dir, state_path)
+}
+
+/// Record `deps` (each with no dependencies of its own) as the project's
+/// resolved dependency graph, in the schema `beamtalk build` writes after a
+/// resolve.
+fn write_dep_graph_snapshot(root: &std::path::Path, deps: &[&str]) {
+    let graph: Vec<(&str, &[&str])> = deps.iter().map(|name| (*name, &[][..])).collect();
+    write_dep_graph_snapshot_with_edges(root, &graph);
+}
+
+/// Record `graph` — each dependency with its own direct dependencies — as
+/// the project's resolved dependency graph.
+fn write_dep_graph_snapshot_with_edges(root: &std::path::Path, graph: &[(&str, &[&str])]) {
+    use beamtalk_core::compilation::dep_graph::{
+        DEP_GRAPH_SNAPSHOT_FILE, DepGraphEntry, DepGraphSnapshot,
+    };
+    let snapshot = DepGraphSnapshot::new(
+        graph
+            .iter()
+            .map(|(name, dependencies)| DepGraphEntry {
+                name: (*name).to_string(),
+                via: Vec::new(),
+                dependencies: dependencies.iter().map(|d| (*d).to_string()).collect(),
+                source: format!("git: https://example.test/{name} (tag: v0.1.0)"),
+            })
+            .collect(),
+    );
+    fs::create_dir_all(root.join("_build/deps")).expect("fixture _build/deps/");
+    fs::write(
+        root.join("_build/deps").join(DEP_GRAPH_SNAPSHOT_FILE),
+        serde_json::to_string_pretty(&snapshot).expect("serialise snapshot"),
+    )
+    .expect("fixture dependency-graph snapshot");
 }
 
 /// `compile` request shaped like the workspace load path sends it: the file's
@@ -366,14 +403,12 @@ fn manifest_less_and_stdlib_files_keep_legacy_scope() {
     );
 }
 
-/// Editing a project alias file re-resolves on the next compile: the memo
-/// is keyed by an exact path→mtime fingerprint, so the second compile sees
-/// the new expansion rather than a stale cached one.
-#[test]
-fn edited_alias_file_resolves_on_next_compile() {
-    let (dir, state_path) = write_parity_project();
-    let source = fs::read_to_string(&state_path).expect("read fixture state file");
-    let first = handle_compile(&load_like_compile_request(&source, &state_path));
+/// Compile the fixture's state file and assert the baseline sees `Scheme`
+/// (so a later compile's outcome reflects an edit, not a broken fixture).
+/// Returns the state file's source for the recompile.
+fn compile_baseline_state_file(state_path: &std::path::Path) -> String {
+    let source = fs::read_to_string(state_path).expect("read fixture state file");
+    let first = handle_compile(&load_like_compile_request(&source, state_path));
     assert_eq!(
         response_status(&first).as_deref(),
         Some("ok"),
@@ -386,10 +421,17 @@ fn edited_alias_file_resolves_on_next_compile() {
         "baseline must see Scheme: {:#?}",
         compile_warnings(&first)
     );
+    source
+}
 
-    // Narrow the alias so `#http` no longer matches.
+/// Rewrite the fixture's alias file, narrowing `Scheme` to `#https` so the
+/// state file's `#http` default no longer matches. The new content is
+/// shorter than the original, so the file's length changes. Returns the
+/// alias file's path.
+fn narrow_scheme_alias(root: &std::path::Path) -> std::path::PathBuf {
+    let alias_path = root.join("src/parity_config.bt");
     fs::write(
-        dir.path().join("src/parity_config.bt"),
+        &alias_path,
         "// Copyright 2026 James Casey\n\
          // SPDX-License-Identifier: Apache-2.0\n\
          \n\
@@ -399,22 +441,375 @@ fn edited_alias_file_resolves_on_next_compile() {
          \x20 defaultScheme -> Symbol => #http\n",
     )
     .expect("rewrite fixture alias file");
-    let second = handle_compile(&load_like_compile_request(&source, &state_path));
-    let Term::Map(ref m) = second else {
+    alias_path
+}
+
+/// Set `path`'s mtime to `time`.
+fn set_mtime(path: &std::path::Path, time: std::time::SystemTime) {
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open file to set mtime")
+        .set_modified(time)
+        .expect("set mtime");
+}
+
+/// Assert a recompile after [`narrow_scheme_alias`] saw the narrowed alias:
+/// the `#http` default is now a genuine mismatch, which the project's
+/// `type = "error"` escalates.
+fn assert_sees_narrowed_alias(second: &Term) {
+    let Term::Map(m) = second else {
         panic!("Expected map response: {second:?}");
     };
-    // Narrowing `Scheme` to `#https` turns the `#http` default into a genuine
-    // mismatch, which the project's `type = "error"` escalates.
     assert_eq!(
         map_get(m, "status"),
         Some(&atom("error")),
         "edited alias must reject the old default: {second:?}"
     );
-    let messages = error_diagnostic_messages(&second);
+    let messages = error_diagnostic_messages(second);
     assert!(
         messages
             .iter()
             .any(|msg| msg.contains("declared as Scheme (#https)")),
         "edited alias expansion must be visible on recompile: {messages:?}"
+    );
+}
+
+/// Editing a project alias file re-resolves on the next compile: the memo
+/// is keyed by an exact path→(mtime, length) fingerprint, so the second
+/// compile sees the new expansion rather than a stale cached one.
+#[test]
+fn edited_alias_file_resolves_on_next_compile() {
+    let (dir, state_path) = write_parity_project();
+    let source = compile_baseline_state_file(&state_path);
+
+    // Bump the mtime forward explicitly rather than relying on wall-clock
+    // time: on NTFS both writes can land in one ~15.6 ms tick, leaving the
+    // mtime unchanged (BT-4365). This test covers the ordinary mtime-change
+    // path; `same_mtime_alias_edit_resolves_on_next_compile` covers the
+    // same-mtime path deterministically.
+    let alias_path = narrow_scheme_alias(dir.path());
+    let bumped = fs::metadata(&alias_path)
+        .and_then(|m| m.modified())
+        .expect("read rewritten alias mtime")
+        + std::time::Duration::from_secs(5);
+    set_mtime(&alias_path, bumped);
+
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_sees_narrowed_alias(&second);
+}
+
+/// BT-4365: an edit that keeps the alias file's mtime (two writes within one
+/// coarse filesystem tick, or `cp -p`/`rsync -t`) still re-resolves, because
+/// the fingerprint also records the file length and the edit changes it.
+#[test]
+fn same_mtime_alias_edit_resolves_on_next_compile() {
+    let (dir, state_path) = write_parity_project();
+    let alias_path = dir.path().join("src/parity_config.bt");
+    let original = fs::metadata(&alias_path).expect("stat original alias");
+    let original_mtime = original.modified().expect("read original alias mtime");
+    let source = compile_baseline_state_file(&state_path);
+
+    narrow_scheme_alias(dir.path());
+    set_mtime(&alias_path, original_mtime);
+    let edited = fs::metadata(&alias_path).expect("stat edited alias");
+    assert_eq!(
+        edited.modified().expect("read edited alias mtime"),
+        original_mtime,
+        "fixture must restore the original mtime"
+    );
+    assert_ne!(
+        edited.len(),
+        original.len(),
+        "fixture edit must change the file length"
+    );
+
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_sees_narrowed_alias(&second);
+}
+
+/// Copy the shared `tests/parity/projects/stubbed_ffi/` fixture — the same
+/// package `cli_build`'s BT-4378 test builds — into a fresh tempdir, so a
+/// test can edit it (and the port's per-root memo sees a new root).
+fn stubbed_ffi_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir for stubbed_ffi project");
+    beamtalk_workspace::copy_tree(
+        &beamtalk_workspace::cargo_workspace_root!().join("tests/parity/projects/stubbed_ffi"),
+        dir.path(),
+    )
+    .expect("copy stubbed_ffi fixture");
+    dir
+}
+
+/// BT-4378 AC: a package that types its FFI through `stubs/*.bt`, under
+/// `[diagnostics] type = "error"`, gets the verdict `beamtalk build` gives
+/// it (`cli_build::build_types_ffi_through_project_stubs_like_load_project`
+/// builds the same fixture): accepted with the stub, rejected for the
+/// untyped FFI call once the stub is gone. The fixture was never built, so
+/// the project-local stub tier is the only registry input.
+#[test]
+fn compile_file_types_ffi_through_project_stubs_like_build() {
+    let project = stubbed_ffi_project();
+    let path = project.path().join("src/stubbed_answer.bt");
+    let source = fs::read_to_string(&path).expect("read fixture source");
+
+    let response = handle_compile(&load_like_compile_request(&source, &path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "the stub types the FFI call, as in `beamtalk build`: {response:?}"
+    );
+    assert!(
+        !compile_warnings(&response)
+            .iter()
+            .any(|w| w.contains("untyped FFI")),
+        "{response:?}"
+    );
+
+    // Without the stub the call is untyped, which `type = "error"` rejects
+    // — and the memo must notice the stub tier changed.
+    fs::remove_dir_all(project.path().join("stubs")).expect("remove stubs/");
+    let response = handle_compile(&load_like_compile_request(&source, &path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("error"),
+        "an untyped FFI call fails under type = \"error\": {response:?}"
+    );
+    assert!(
+        error_diagnostic_messages(&response)
+            .iter()
+            .any(|msg| msg.contains("untyped FFI")),
+        "{response:?}"
+    );
+}
+
+/// The parity project's manifest with its `fakedep` dependency removed.
+const MANIFEST_WITHOUT_DEPS: &str = "[package]\nname = \"parityproj\"\nversion = \"0.1.0\"\n\n[diagnostics]\ntype = \"error\"\ntype-annotation = \"error\"\n";
+
+/// BT-4378 AC: a dependency removed from `beamtalk.toml` stops contributing
+/// aliases, even though its checkout still sits in `_build/deps/` and the
+/// last resolve's graph snapshot still lists it.
+#[test]
+fn removed_dependency_aliases_do_not_resolve() {
+    let (dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let first = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert!(
+        !compile_warnings(&first)
+            .iter()
+            .any(|w| w.contains("declared as DepAddr")),
+        "baseline must see the dependency alias: {first:?}"
+    );
+
+    fs::write(dir.path().join("beamtalk.toml"), MANIFEST_WITHOUT_DEPS)
+        .expect("drop fakedep from the manifest");
+    let second = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&second).as_deref(),
+        Some("error"),
+        "an undeclared dependency's alias must not resolve: {second:?}"
+    );
+    assert!(
+        error_diagnostic_messages(&second)
+            .iter()
+            .any(|msg| msg.contains("DepAddr")),
+        "{second:?}"
+    );
+}
+
+/// A leftover checkout under `_build/deps/` — neither declared nor in the
+/// resolved graph, as after a rebuild that dropped the dependency —
+/// contributes no aliases: the dependency set is never a directory listing.
+#[test]
+fn leftover_checkout_aliases_do_not_resolve() {
+    let (dir, state_path) = write_parity_project();
+    fs::write(dir.path().join("beamtalk.toml"), MANIFEST_WITHOUT_DEPS)
+        .expect("drop fakedep from the manifest");
+    write_dep_graph_snapshot(dir.path(), &[]);
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("error"),
+        "a checkout outside the resolved graph must not leak aliases: {response:?}"
+    );
+    assert!(
+        error_diagnostic_messages(&response)
+            .iter()
+            .any(|msg| msg.contains("DepAddr")),
+        "{response:?}"
+    );
+}
+
+/// A missing dep-graph snapshot (never written, older toolchain, or a
+/// best-effort write that failed) must not drop the directly declared
+/// dependency: its `_build/deps/` checkout still supplies its aliases, as
+/// `beamtalk build` sees them.
+#[test]
+fn missing_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::remove_file(dir.path().join("_build/deps/.dep-graph.json"))
+        .expect("remove the dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve without a snapshot: {response:?}"
+    );
+}
+
+/// A corrupt snapshot behaves like a missing one.
+#[test]
+fn corrupt_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::write(dir.path().join("_build/deps/.dep-graph.json"), "{ not json")
+        .expect("corrupt the dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve with a corrupt snapshot: {response:?}"
+    );
+}
+
+/// An unknown-schema snapshot (a newer or older toolchain's) behaves like a
+/// missing one.
+#[test]
+fn unknown_schema_snapshot_still_resolves_declared_dependencies() {
+    let (dir, state_path) = write_parity_project();
+    fs::write(
+        dir.path().join("_build/deps/.dep-graph.json"),
+        r#"{"schema": 99, "deps": []}"#,
+    )
+    .expect("write an unknown-schema dep-graph snapshot");
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let response = handle_compile(&load_like_compile_request(&source, &state_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a declared dependency must resolve with an unknown-schema snapshot: {response:?}"
+    );
+}
+
+/// Adds a transitive dependency to the parity project — `fakedep` declares
+/// `transdep`, whose checkout defines `type TransAddr` — plus a project file
+/// using that alias under `type = "error"`. Returns the new file's path.
+fn add_transitive_dependency(root: &std::path::Path) -> std::path::PathBuf {
+    fs::create_dir_all(root.join("_build/deps/transdep/src")).expect("fixture transdep src/");
+    fs::write(
+        root.join("_build/deps/fakedep/beamtalk.toml"),
+        "[package]\nname = \"fakedep\"\nversion = \"0.1.0\"\n\n[dependencies]\ntransdep = { git = \"https://example.test/transdep\", tag = \"v0.1.0\" }\n",
+    )
+    .expect("fixture dep beamtalk.toml");
+    fs::write(
+        root.join("_build/deps/transdep/beamtalk.toml"),
+        "[package]\nname = \"transdep\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("fixture transdep beamtalk.toml");
+    fs::write(
+        root.join("_build/deps/transdep/src/trans_types.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         type TransAddr = #near | #far\n\
+         \n\
+         Value subclass: TransTypes\n\
+         \x20 defaultAddr -> Symbol => #near\n",
+    )
+    .expect("fixture trans_types.bt");
+    let path = root.join("src/parity_trans.bt");
+    fs::write(
+        &path,
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: ParityTrans\n\
+         \x20 field: addr :: TransAddr = #near\n",
+    )
+    .expect("fixture parity_trans.bt");
+    path
+}
+
+/// BT-4394: with a usable snapshot, a transitive dependency resolves through
+/// the edge its parent's entry records.
+#[test]
+fn transitive_dependency_aliases_resolve_through_recorded_edges() {
+    let (dir, _) = write_parity_project();
+    let trans_path = add_transitive_dependency(dir.path());
+    let source = fs::read_to_string(&trans_path).expect("read fixture trans file");
+
+    // The fixture's snapshot records `fakedep` with no edges, so the
+    // `transdep` checkout sits outside the resolved graph.
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("error"),
+        "a checkout outside the recorded graph must not resolve: {response:?}"
+    );
+
+    write_dep_graph_snapshot_with_edges(
+        dir.path(),
+        &[("fakedep", &["transdep"]), ("transdep", &[])],
+    );
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a transitive dependency's alias must resolve: {response:?}"
+    );
+}
+
+/// BT-4394: an unusable snapshot (here, missing) still resolves transitive
+/// dependencies — the fallback scans `_build/deps/` checkouts with a
+/// manifest, not only the directly declared names.
+#[test]
+fn missing_snapshot_still_resolves_transitive_dependencies() {
+    let (dir, _) = write_parity_project();
+    let trans_path = add_transitive_dependency(dir.path());
+    fs::remove_file(dir.path().join("_build/deps/.dep-graph.json"))
+        .expect("remove the dep-graph snapshot");
+    let source = fs::read_to_string(&trans_path).expect("read fixture trans file");
+    let response = handle_compile(&load_like_compile_request(&source, &trans_path));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "a transitive dependency's alias must resolve without a snapshot: {response:?}"
+    );
+}
+
+/// BT-4378: requests sharing a `project_batch` token verify the project
+/// scope once — an edit made mid-batch is not seen until the next batch (or
+/// an untagged request), which re-verifies.
+#[test]
+fn project_batch_verifies_scope_once_per_batch() {
+    let (dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let batched = |batch: &str| {
+        let mut request = load_like_compile_request(&source, &state_path);
+        request.map.insert(atom("project_batch"), binary(batch));
+        handle_compile(&request)
+    };
+    assert_eq!(response_status(&batched("1")).as_deref(), Some("ok"));
+
+    // Narrow `Scheme` so `#http` no longer matches.
+    fs::write(
+        dir.path().join("src/parity_config.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         type Scheme = #https\n",
+    )
+    .expect("rewrite fixture alias file");
+    assert_eq!(
+        response_status(&batched("1")).as_deref(),
+        Some("ok"),
+        "the rest of batch 1 reuses its verified scope"
+    );
+    assert_eq!(
+        response_status(&batched("2")).as_deref(),
+        Some("error"),
+        "batch 2 re-verifies and sees the narrowed alias"
     );
 }

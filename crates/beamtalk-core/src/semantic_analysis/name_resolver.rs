@@ -16,8 +16,8 @@
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
 use crate::ast::{
-    Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MatchArm,
-    MessageSelector, MethodDefinition, Module, Pattern,
+    BinarySegment, Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal,
+    MatchArm, MessageSelector, MethodDefinition, Module, Pattern,
 };
 use crate::ast_walker::cascade_shared_receiver;
 use crate::semantic_analysis::scope::{BindingKind, Scope};
@@ -433,6 +433,11 @@ impl NameResolver {
                     if let crate::ast::StringSegment::Interpolation(expr) = segment {
                         self.resolve_expression(expr);
                     }
+                }
+            }
+            BinaryConstruction { segments, .. } => {
+                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.resolve_expression(expr);
                 }
             }
 

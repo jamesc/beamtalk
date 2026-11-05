@@ -93,13 +93,18 @@ pub(super) use emit::{
     RenderCtx, cell_put_call, cell_take_call, render, render_value, take_cell_store_emitted,
 };
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
+pub(super) use ir::CallSiteLine;
+// BT-4405: the loop `fn_name`s, one source for producers and test scanners.
 pub(super) use ir::RebindFrameKind;
+#[cfg(test)]
+pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
-    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, FoldCarry, FrameId, LoopCounter,
-    NlrThrowShape, OnDoCatchVars, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
-    VersionedVar,
+    BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
+    EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape,
+    OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode,
+    TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
+pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
@@ -121,7 +126,9 @@ pub(super) use verify::{
 #[cfg(test)]
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
-pub(super) use verify::{CatchRestoreDefect, ScopeKind, verify, verify_in_scope};
+pub(super) use verify::{
+    CatchRestoreDefect, EnsureRelayDefect, ScopeKind, verify, verify_in_scope,
+};
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level
 // imports used to provide into scope for `tests`' `use super::*` — the

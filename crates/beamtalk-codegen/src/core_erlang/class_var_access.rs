@@ -21,7 +21,8 @@
 //! body (`let CVKey = {'$bt_class_vars', element(2, ClassSelf)} in ...`, BT-3719)
 //! so an inlined access reuses it instead of rebuilding the tuple.
 //!
-//! `clearField:` and `hasField:` are rare and stay helper calls.
+//! The reflective `clearField:`, `hasField:`, `fieldAt:` and `fieldAt:put:`
+//! are rare and stay helper calls.
 
 use super::CodeGenError;
 use super::CoreErlangGenerator;
@@ -218,16 +219,28 @@ impl CoreErlangGenerator {
             && self.class_var_names().contains(field.name.as_str())
     }
 
-    /// THE predicate for "`receiver hasField: ...` lowers to
-    /// `beamtalk_class_vars:has`": in a class method, a `self` receiver. The
-    /// `HasField` intrinsic calls it; the capture walker
-    /// ([`Self::block_reads_class_var`]) applies the same rule.
+    /// THE predicate for "a reflective class-variable send lowers in place":
+    /// in a class method, a `self` receiver. `self hasField:` lowers to
+    /// `beamtalk_class_vars:has`, `self fieldAt:` to `field_at`,
+    /// `self fieldAt:put:` to `field_at_put` and `self clearField:` to `clear`
+    /// (BT-4421), never a `class_send` back into the class's own `gen_server`.
+    /// The reflection intrinsics call it; the capture walker
+    /// ([`Self::block_reads_class_var`]) applies the same rule to the reads.
+    ///
+    /// A cascade message to `self` and a send to the class's own name stay
+    /// ordinary sends here (BT-4423): the runtime answers them in place when
+    /// they reach the class from inside its own process
+    /// (`beamtalk_class_dispatch:class_send_from_own_process/2`), and by
+    /// message from anywhere else, so they never read a capture and the
+    /// walker rightly does not count them. A class name always means that
+    /// class, never the running method's `ClassSelf`, so lowering it here
+    /// against `ClassSelf`'s key would be wrong in an inherited method.
     ///
     /// No method is special-cased (BT-4301): a method of an open stateless
     /// class may run for a subclass receiver that declares class variables,
     /// so its `hasField:` is not a constant. In the caller, with no
     /// class-variable home, `has/2` answers `false` for a stateless chain.
-    pub(super) fn is_class_var_has_field(&self, receiver: &Expression) -> bool {
+    pub(super) fn is_class_side_self_reflection(&self, receiver: &Expression) -> bool {
         self.in_class_method() && Self::is_self_receiver(receiver)
     }
 
@@ -238,12 +251,12 @@ impl CoreErlangGenerator {
     /// the one the `class-state-abroad` lint uses too (BT-3761): a `self.<class
     /// variable>` read outside an assignment target (exactly the nodes for which
     /// [`Self::is_class_var_field_read`] holds, the caller having checked
-    /// [`Self::in_class_method`]), or a non-cascade `self hasField:` probe, which
-    /// lowers to `beamtalk_class_vars:has` ([`Self::is_class_var_has_field`]).
+    /// [`Self::in_class_method`]), a non-cascade `self hasField:` probe, which
+    /// lowers to `beamtalk_class_vars:has`, or a non-cascade `self fieldAt:`
+    /// read, which lowers to `field_at` ([`Self::is_class_side_self_reflection`]).
     /// A write-only block reads nothing and binds no capture.
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
-        let accesses = class_var_accesses(block, self.class_var_names());
-        !accesses.reads.is_empty() || !accesses.has_field_probes.is_empty()
+        class_var_accesses(block, self.class_var_names()).reads_class_state()
     }
 
     /// Runs `build_fun` (which generates the `fun` of block literal `block`) inside

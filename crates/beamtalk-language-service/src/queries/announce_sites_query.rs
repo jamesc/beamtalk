@@ -50,7 +50,7 @@
 
 use super::selector_span;
 use beamtalk_core::announce_selectors::is_announce_selector;
-use beamtalk_core::ast::{Expression, Pattern, StringSegment};
+use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -223,6 +223,11 @@ fn collect_announce_sites(expr: &Expression, source: &str, hits: &mut Vec<Announ
                 if let StringSegment::Interpolation(inner) = segment {
                     collect_announce_sites(inner, source, hits);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_announce_sites(inner, source, hits);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {

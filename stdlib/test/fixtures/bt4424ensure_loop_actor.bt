@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4424: a loop-body `ensure:` whose cleanup writes a local or a field the
+// loop body also writes, in an actor method. See
+// bt4424ensure_loop_rebind_test.bt.
+
+Actor subclass: Bt4424EnsureLoopActor
+  state: n = 0
+
+  cleanupWrites =>
+    w := 0
+    #(1, 2, 3)
+      do: [:x |
+        w := w + x
+        [x == 2] ensure: [w := w + 100]
+      ]
+    w
+
+  protectedAndCleanupWrite =>
+    w := 0
+    #(1, 2, 3)
+      do: [:x |
+        w := w + x
+        [w := w * 2] ensure: [w := w + 100]
+      ]
+    w
+
+  cleanupWritesField =>
+    self.n := 0
+    #(1, 2, 3)
+      do: [:x |
+        self.n := self.n + x
+        [x == 2] ensure: [self.n := self.n + 100]
+      ]
+    self.n

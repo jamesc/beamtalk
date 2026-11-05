@@ -970,7 +970,7 @@ True for selectors where `String` and `Binary` behave identically.
 Derived from `binary.bt`'s own instance methods that `string.bt` does *not*
 redefine — per ADR 0086's method override table, these are the byte-level
 primitives String inherits unchanged (`byteAt:`, `part:size:`, `concat:`,
-`toBytes`, `asCharlist`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
+`toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
 `asHex`, `bitSize`).
 Every other Binary-defined selector (`size`, `at:`, `do:`,
 `printString`, `asString`) is overridden by `String` with grapheme-aware
@@ -1016,7 +1016,6 @@ is_string_binary_shared_selector(toBytes) -> true;
 is_string_binary_shared_selector(asStringUnchecked) -> true;
 is_string_binary_shared_selector(asBase64) -> true;
 is_string_binary_shared_selector(asBase64Url) -> true;
-is_string_binary_shared_selector(asCharlist) -> true;
 is_string_binary_shared_selector(asHex) -> true;
 is_string_binary_shared_selector(bitSize) -> true;
 is_string_binary_shared_selector(_) -> false.

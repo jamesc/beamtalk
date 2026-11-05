@@ -10,10 +10,13 @@
 //! these passes coordinate cross-file concerns like extension method indexing
 //! and conflict detection.
 
+pub mod dep_graph;
+pub mod dep_order;
 pub mod dependency;
 pub mod diagnostics_policy;
 pub mod extension_conflicts;
 pub mod extension_index;
+pub mod ffi_stubs;
 
 pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
 pub use diagnostics_policy::{

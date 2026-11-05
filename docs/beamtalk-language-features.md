@@ -452,7 +452,7 @@ This holds for instance-side sends on actors and value classes, for class-side s
 
 `super` is the exception by design — it is always bound to the superclass of the class that *contains* the method. A `sealed` class cannot be subclassed, so its instance-side self-sends are compiled as direct calls (no lookup); class-side self-sends take the guarded direct call described below, sealed or not. Inside a class method, `super foo` resolves against the superclass's *class* methods (the metaclass chain), not its instance methods, and the compiler checks it there: a selector only the superclass's instances understand is reported as not understood (BT-4001). The lookup starts at the superclass and never consults the sending class, so a class-side extension override (`C class >> peek: x => (super peek: x) + 1`) reaches the superclass's `peek:` instead of itself; at each ancestor a class-side extension counts as one of its class methods, so `super` finds a superclass method whether its class body or an extension defined it. The superclass method runs with the live receiver, so a subclass inheriting the method keeps its own class variables. When no class method on the chain answers the selector, `self` and `super` sends from a class method fall through to the class object's own protocol (`Class` → `Behaviour` → …), exactly as an outside send to the class does: `self name`, `super name` and `super superclass` answer what `C name` and `C superclass` answer, for the receiving class (BT-4252).
 
-Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send to a selector the class defines, sealed or not, calls the compiled method directly when the receiver is the defining class and nothing shadows it (`beamtalk_class_dispatch:class_self_direct_ok/4`), and otherwise walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/3`). A class-side self-send runs wherever its calling method runs: in the caller when the class's chain has no class variables, in the class process otherwise ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)). Every path passes the real class reference as `self` (BT-4037 retired the old `nil`). Only `self foo` late-binds: naming the class explicitly (`Base foo`) calls `Base`'s own method directly, behind the same guard, but the running receiver (`ClassSelf` and its class variables) is still the subclass's, so `self` sends nested inside `Base foo` still late-bind to overrides, `self name` answers the subclass's name, and class-variable writes go to the subclass's class variables. Whether an explicit `Base foo` should instead bind `self` to `Base`, as a literal send does in Smalltalk, is an open question ([BT-4317](https://linear.app/beamtalk/issue/BT-4317)); today's behaviour is the one described here. Class variables live in the class process and are read and written in place (ADR 0130), so a write is visible to every later read wherever it happens: at a class method's top level, inside bare blocks, loops, conditionals, `ensure:`/`on:do:` bodies, and in a stored closure invoked by a later statement. Nothing is threaded through class-side self-sends. A write made inside a catch boundary (`on:do:`, `Result tryDo:`) whose block then raises is discarded with the rest of that protected region (ADR 0130 §4); writes made before entering the boundary are kept. A selector declared `class sealed` cannot be overridden; its sends compile to the same guarded direct call as any other own selector.
+Implementation notes: an actor self-send dispatches through the module named by the instance's own `'__class_mod__'` state key (a per-send map lookup); a class-side self-send to a selector the class defines, sealed or not, calls the compiled method directly when the receiver is the defining class and nothing shadows it (`beamtalk_class_dispatch:class_self_direct_ok/4`), and otherwise walks the class hierarchy from the receiving class (`beamtalk_class_dispatch:class_self_send/3`). A class-side self-send runs wherever its calling method runs: in the caller when the class's chain has no class variables, in the class process otherwise ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)). Every path passes the real class reference as `self` (BT-4037 retired the old `nil`). Only `self foo` late-binds. A class literal always denotes that class: naming the class explicitly (`Base foo`) runs `Base`'s `foo` with `self` bound to `Base`, even inside a class method that a subclass `C` inherits and is running, exactly as the same send does from anywhere else and as in Smalltalk. So inside `foo`, `self name` answers `#Base`, class variables are `Base`'s, and `Base new` builds a `Base`; `self` sends nested inside it late-bind from `Base`, not `C` ([BT-4317](https://linear.app/beamtalk/issue/BT-4317)). When the running receiver is `Base` itself, the send calls the method directly in the current process, behind the same guard; otherwise it is the ordinary class send to `Base`: in the caller for a stateless chain, in `Base`'s class process for one with class variables. Class variables live in the class process and are read and written in place (ADR 0130), so a write is visible to every later read wherever it happens: at a class method's top level, inside bare blocks, loops, conditionals, `ensure:`/`on:do:` bodies, and in a stored closure invoked by a later statement. Nothing is threaded through class-side self-sends. A write made inside a catch boundary (`on:do:`, `Result tryDo:`) whose block then raises is discarded with the rest of that protected region (ADR 0130 §4); writes made before entering the boundary are kept. A selector declared `class sealed` cannot be overridden; its sends compile to the same guarded direct call as any other own selector.
 
 **Cost:** every non-sealed actor self-send does a `maps:get('__class_mod__', State, Module)` lookup (tens of nanoseconds). A class-side `self foo` is a guarded direct call, sealed or not: when the receiver is the defining class itself and no class-side extension or runtime-installed method shadows `foo`, it calls the compiled `class_foo` directly after one `persistent_term` read of the shadow flag (`class_self_direct_ok/4`); when the receiver is a subclass it walks the class hierarchy (microseconds). Sealing the class or the selector no longer changes this (ADR 0142).
 
@@ -820,7 +820,7 @@ Both containers use `=:=` for identity, so they agree with each other and with `
 
 The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
 
-An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss, and so does an `equals:` send to a primitive receiver (`Integer`, `Binary`, `String`, `Symbol`, …): a raw hit answers `true` without dispatch, and a raw miss answers `false` without dispatch unless the receiver's class chain overrides `equals:` (for a primitive, through an extension).
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
@@ -933,6 +933,8 @@ Object subclass: Validator
 
 `^` at the top level of a method body is an early return (the method exits immediately). `^` inside a block argument causes the *method* to exit with that value.
 
+Guard clauses like `Validator>>validate:` above compile to plain branches, with no non-local-return frame. A method whose only block `^`s are early returns from inlined conditionals at its top level (`ifTrue:`, `ifFalse:`, `ifNil:`, `ifNotNil:` and their two-branch forms) compiles them as if written `x isNil ifTrue: ["missing"] ifFalse: [...]`. A receiver that turns out not to be a Boolean is still sent `ifTrue:` with a block that returns from the method. For an `ifTrue:`/`ifFalse:` guard whose receiver might not be a Boolean, this holds when the block is just `^` and a literal, a variable or a field of `self`. Other guard blocks compile this way only when the receiver is `true`, `false` or an `==`/`=:=`/`/=`/`=/=` comparison. Any other block `^`, including one inside a real closure (`do:`, `detect:`, a stored block), needs the non-local-return throw/catch, and the method then compiles every `^` that way.
+
 ### Abstract and Stub Methods
 
 Empty method bodies are a **compile-time error**. Use one of these two explicit forms instead:
@@ -977,7 +979,7 @@ Common uses:
 - **FFI namespaces:** `File readAll: path`, `Json parse: str` — class methods wrapping Erlang modules
   **Where a class method runs (ADR 0142).** A class method runs in the *caller's* process, like a function in an Erlang module, unless the class needs its process. The class's gen_server (the class process) runs it only when:
   - **the class or any class in its superclass chain declares class variables** (`classState:`). The rule is chain-wide: a subclass holds its ancestors' class variables in its own process, and its own methods reach them through `self` sends, so it keeps its process for every class method, including ones it defines itself; or
-  - **the selector is process-bound**: `new`, `new:`, `startLink`, `startLink:`, `spawn`, `spawnWith:`, `supervise`, `spawnAs:`, `spawnWith:as:`, and the `TestCase` run selectors `runAll`, `runAll:`, `run:` and `run:method:`. These keep their routing whatever the class declares, even when a class defines a class method of that name. The class-variable reflection sends `hasField:` and `clearField:` are answered by the class process itself; or
+  - **the selector is process-bound**: `new`, `new:`, `startLink`, `startLink:`, `spawn`, `spawnWith:`, `supervise`, `spawnAs:`, `spawnWith:as:`, and the `TestCase` run selectors `runAll`, `runAll:`, `run:` and `run:method:`. These keep their routing whatever the class declares, even when a class defines a class method of that name. The class-variable reflection sends `hasField:`, `clearField:`, `fieldAt:` and `fieldAt:put:` are answered by the class process itself; or
   - **something shadows the receiving class's own methods**: a class-side extension (ADR 0066) or an ADR 0084 runtime class-method fun installed on that class clears its direct-call flag, and its class process applies the shadow, as before. A runtime fun on an *ancestor* counts as that ancestor's method and is applied in the caller.
 
   `sealed` and `class sealed` play no part. The rule is decided once, in the compiler (`ClassHierarchy::runs_class_method_in_caller`), and re-checked at run time by one `persistent_term` flag read (`beamtalk_class_shadow_flags:direct_call_ok/2`), so it holds however the method is reached: a literal send, a class in a variable, `perform:`, `Beamtalk classNamed:`, a class passed as an argument, or an Erlang caller of `class_send`. A class that needs a serialising home declares `classState:` or delegates to an Actor. For a pure wrapper the difference is invisible; it matters for FFI that depends on which process runs it, and for resources the method creates, which now belong to the caller and die with it. Two lints, split on that one rule, warn at a direct `(Erlang mod) fn …` call in a class method (a call gets at most one of them):
@@ -987,6 +989,8 @@ Common uses:
   v1 limits (both): one curated table of `gen_tcp`/`gen_udp`/`ssl`/`erlang`/`ets`/`timer`/`file:sendfile` functions, direct calls only (a helper that does the FFI is not followed), process-bound selectors (`new`, `startLink`, `spawn`, …) are not inspected, and `ClassBuilder classMethods:` blocks are not inspected.
 - **Supervisor lifecycle:** `class supervise`, `class current` (configuration such as `childSpecs` and `strategy` is instance-side, ADR 0135)
 - **Singleton access:** `class current` — return the singleton instance (see `classState:` below)
+
+**`error:` on a class object.** A class object is an `Object`, so a class with no class-side `error:` answers `error:` with `Object>>error:`: `Integer error: "x"` raises a `user_error` (its `errorClass` is `Integer class`), whether the class is written literally, held in a variable or reached with `perform:`, and so does `self error: "x"` in its class methods. A class that defines a class-side `error:` (`Result class>>error:`, `Logger class>>error:`) receives the send instead, by every route: `Result error: #x` builds a `Result`. Inside such a method, `self error: m` sends to that same class-side `error:` again, so `class error: m => self error: m` recurses instead of raising. To raise from it, use `super error: m` (which reaches `Object>>error:`) or `Error signal: m`.
 
 **`classState:`** declares mutable class-level state — shared across all instances and accessible from class methods. Used for singletons:
 
@@ -1080,6 +1084,12 @@ also auto-indexed for `SystemNavigation` source-text queries.
 with the same `>>` patcher used for instance methods (see *Live Patching* and
 *Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
 The class-side dispatch path picks up the new class method immediately (ADR 0084).
+Separately, a runtime class-method fun (a builder `classMethods:` fun, or one
+installed from Erlang with `beamtalk_object_class:put_class_method/3,4`) is
+removable: `X class removeSelector: #sel` takes it back and restores the
+compiled method it replaced, if any (BT-4438; see *Removing methods* below).
+This does not apply to a `>>` live edit like the one above: that recompiles the
+class, so `removeSelector:` removes the edited method outright.
 
 > The grammar form (`Object subclass: …`) remains the idiomatic way to define a
 > class in source. The programmatic builder is for tooling, REPL exploration, and
@@ -1365,7 +1375,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. It re-raises the stacktrace captured when the exception was caught, with each frame's argument values reduced to its arity, as `e stackTrace` shows them. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
-**Where a class-side signal raises (BT-4115).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, and calls the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. A subclass that overrides `class signal:` keeps the ordinary class send, so the override runs. The decision is made when the call site is compiled, as with other direct calls: a `class signal:` override added later by hot reload, or a class-side extension that shadows it, is not seen by call sites compiled before it until they are recompiled. `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
+**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. (A class-side extension on an *ancestor* of the receiving class is not seen, by this shortcut or by the ordinary class send: [BT-4307](https://linear.app/beamtalk/issue/BT-4307).) `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
 
 ```beamtalk
 [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
@@ -1736,7 +1746,32 @@ answers whether the named field is declared, and on a primitive (`Integer`,
 already raises, since a `Value` is fully constructed and never reassigned.
 The class-side counterpart (`classState:`) works the same way, both from
 inside a class method (`self hasField:`/`self clearField:`) and from
-outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`).
+outside (`SomeClass hasField: #x`/`SomeClass clearField: #x`). From
+outside, `SomeClass fieldAt: #x` reads a class variable (an unassigned
+`late` one raises `uninitialized_state_error`) and `SomeClass fieldAt: #x
+put: v` writes one, answering `v`. Both raise `undeclared_class_variable`
+for a name the class does not declare, including on a class that declares
+no class variables at all, so a typo neither reads `nil` nor creates a
+variable. The exception is a class built at runtime with `ClassBuilder`:
+it carries no class-variable declarations to check against, so it stays
+lenient — `SomeClass fieldAt: #typo` answers `nil` and `SomeClass fieldAt:
+#typo put: v` creates the variable. Because the class process answers these
+four selectors itself whenever the name argument is a Symbol, a class-side
+method named `hasField:`, `clearField:`, `fieldAt:` or `fieldAt:put:` is
+never reached by such a send; the compiler warns at its declaration
+(`class-var-reflection-shadowing`; rename it). A non-Symbol argument still
+reaches the method, so a deliberate `class fieldAt: index :: Integer` is
+legitimate: put `@expect class_var_reflection_shadowing` above it, or set
+`class-var-reflection-shadowing = "off"` under `[diagnostics]`. Inside a class method, `self fieldAt: #x`
+and `self fieldAt: #x put: v` read and write in place, like `self.x` and
+`self.x := v`, under the same rules. So do the four reflection sends written
+as a cascade on `self` (`self fieldAt: #x put: 1; yourself`) or with the
+class's own name as the receiver (`Counter fieldAt: #x` in a `Counter` class
+method): the class answers them in place from inside its own process
+([BT-4423](https://linear.app/beamtalk/issue/BT-4423)). A class's name always
+means that class, so in a method a subclass inherits, `Counter fieldAt: #x`
+reads `Counter`'s variable (by message, from the subclass's process) while
+`self fieldAt: #x` reads the subclass's own.
 
 **Supplying a `late` slot via `spawnWith:` counts as assigned** — this is
 legitimate dependency injection (substituting a value for a slot normally
@@ -1927,6 +1962,18 @@ klass instanceCount         // resolves class-side method
 // FFI returns. `new` / `basicNew` on a *concrete* class metatype infers an
 // instance of that class; on an *abstract* class (e.g. `Collection`,
 // `Behaviour`) it stays Dynamic — instantiating an abstract class is an error.
+
+// <Protocol> class — a protocol metatype annotation (ADR 0144). For a
+// protocol `P`, `P class` is the class object of *any* class conforming to
+// `P`: `C class <: P class` iff `C conformsTo: P` (the same structural check,
+// open-world rules included). Sends resolve against `P`'s `class`
+// requirements (typed from their declared signatures), then the class-object
+// protocol every class answers (`name`, `printString`, `respondsTo:`, …).
+// `new` / `basicNew` infer `P` unless `P` declares `class new`. A value that
+// *is* a protocol object is typed `:: Protocol`. See Class Method Requirements.
+field: transport :: Transport class = TCPTransport
+// `self.transport send: s data: d` is checked against `Transport`'s
+// `class send:data:` requirement and typed `Result(Nil, Object)`.
 
 // Block parameter annotations — accepted by the parser and preserved by
 // `beamtalk fmt`. A union (or `&`/`\` chain) needs grouping parens so its
@@ -2285,6 +2332,32 @@ Protocol define: Serializable
 ```
 
 A class conforms to `Serializable` only if it has both the instance method `asString` and the class method `fromString:`. This is useful for factory methods, singleton patterns, and other class-level contracts.
+
+**Classes as strategies: `P class` (ADR 0144).** To hold a *class* that implements a protocol's class-side contract — a class passed around as a strategy — type it `P class`. It denotes the class object of any class conforming to `P`:
+
+```text
+C class <: P class      iff      C conformsTo: P
+```
+
+```beamtalk
+Protocol define: Transport
+  class send: socket :: Object data: data :: Object -> Result(Nil, Object)
+  class close: socket :: Object -> Result(Nil, Object)
+
+Value subclass: Socket
+  field: socket :: Object
+  field: transport :: Transport class = TCPTransport   // any conforming class
+
+  send: data :: Object -> Result(Nil, Object) =>
+    result := self.transport send: self.socket data: data  // checked, typed
+    result isOk ifTrue: [self countSent: data]               // `isOk` on Result
+    result
+```
+
+- Assigning or passing a class that does not conform warns, naming the missing selectors: `Integer class does not conform to Transport class` / `missing: class send:data:, class close:`. Classes the checker cannot see completely (a `doesNotUnderstand:` override, a cross-file superclass) conform, as for `:: P`.
+- A send to a `P class` value resolves against `P`'s `class` requirements (including those of protocols it extends), using their declared parameter and return types, then against the class-object protocol (`Class` → `Behaviour` → `Object`). Anything else is reported as not understood.
+- `P class` flows into `:: Class`, `:: Behaviour` and `:: Object`; the reverse is a narrowing and warns. `P class | Nil` narrows after `isNil` checks, `P class & Q class` requires both, and `P class` flows into `Q class` when every selector in `Q`'s type (required and provided on the instance side, required on the class side) is also in `P`'s — e.g. when `P` extends `Q`.
+- Like every metatype, `P class` is name-only: `Collection class` is valid, `Collection(E) class` is not. The type is erased at run time; class-side sends through it stay dynamic sends.
 
 ### Type Parameter Bounds
 
@@ -3109,7 +3182,7 @@ processItems =>
 
 ### What Works and What Doesn't
 
-**A block that assigns a captured local may not escape** ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which made ADR 0131 §6's error the permanent rule). A block literal that assigns a local of the enclosing method (a *Tier 2 block value*, ADR 0041) may only be written where the compiler lowers it in place: as the block of a control-flow message (`whileTrue:`, `do:`, `inject:into:`, the conditionals, `on:do:`/`ensure:`, `Result tryDo:`, `[...] value`, and the handlers of a `Dictionary`'s `at:ifAbsent:`, `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a method body, a conditional or `on:do:` block, or a loop or fold body). A block that escapes is a compile error in every context (class, value-type and actor methods, and the REPL), reported at the assignment and naming the shape:
+**A block that assigns a captured local may not escape** ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md), which made ADR 0131 §6's error the permanent rule). A block literal that assigns a local of the enclosing method (a *Tier 2 block value*, ADR 0041) may only be written where the compiler lowers it in place: as the block of a control-flow message (`whileTrue:`, `do:`, `inject:into:`, the conditionals, `on:do:`/`ensure:` with both blocks written in place, `Result tryDo:`, `[...] value`, and the handlers of a `Dictionary`'s `at:ifAbsent:`, `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a method body, a conditional or `on:do:` block, or a loop or fold body). A block that escapes is a compile error in every context (class, value-type and actor methods, and the REPL), reported at the assignment and naming the shape:
 
 | Shape | Message |
 |---|---|
@@ -3121,8 +3194,9 @@ processItems =>
 | `Erlang lists foreach: [:e \| t := t + e] with: xs` | `` `t` is assigned in a block passed to Erlang `lists` `foreach:with:`, which calls it as a plain fun `` |
 | `#([t := t + 1])` | `` `t` is assigned in a block placed in a collection literal `` |
 | `xs collect: [:x \| [t := t + x]]` | `` `t` is assigned in a block answered by the block of a collection operation `` |
+| `b ensure: [t := 9]` (`b` a block value) | `` `t` is assigned in a block of an `ensure:` whose blocks are not all written in place, which the compiler runs as a closure and does not thread it through `` |
 
-A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process when it keeps its class process (its class or an ancestor declares class variables, or the selector is process-bound); a block passed to one that runs in the caller is reported like a block passed to any other method ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for value-type object state: a block that assigns `self.field` in a value-type method and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; a `Value` subclass reports `Cannot assign to slot` instead, since value types are immutable). An actor field write, or a class-variable write in a class method, in an escaping block is legal: the block writes the live state at home (ADR 0137) and the live class variable (ADR 0130). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
+An `on:do:` or `ensure:` threads a write only when its protected block and its handler or cleanup are both block literals: with a block value in either position (`b ensure: [t := 9]`, `[t := 9] ensure: c`) the compiler runs the literal block as a closure, so the write is the same error (BT-4430). Wrap the block value in a literal (`[b value] ensure: [t := 9]`); a `^` in such a block still returns from the method. A stored block is an error however it is used later, a `value` send included; so is a self-send to a `sealed` method of an actor's own class, which ADR 0131 §6 (BT-3755) exempted and ADR 0133 retires, and so is a collection message (`do:`, `inject:into:`, ...) an actor sends to `self` or `super` inside its own method, which is a message to its own method rather than the inlined collection loop (BT-3918). A class method is said to run in another process when it keeps its class process (its class or an ancestor declares class variables, or the selector is process-bound); a block passed to one that runs in the caller is reported like a block passed to any other method ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)). A block literal that assigns a captured local and is passed as an Erlang FFI argument (`Erlang lists foreach: [:e \| t := t + e] with: xs`) is the same compile error (BT-3917): Erlang calls it as a plain fun and the write would be dropped. Return the value from the block and use the call's result instead (ADR 0041 §Erlang Interop Boundary); a block that only reads captured variables is fine. The same holds for value-type object state: a block that assigns `self.field` in a value-type method and escapes is the same compile error, reported at the assignment as `self.field` (BT-3922; a `Value` subclass reports `Cannot assign to slot` instead, since value types are immutable). An actor field write, or a class-variable write in a class method, in an escaping block is legal: the block writes the live state at home (ADR 0137) and the live class variable (ADR 0130). Reading captured variables and `^` inside an escaping block are unaffected, and so are writes to the block's own parameters and locals.
 
 **An actor block that reads a field may escape** (ADR 0137; this retires the BT-3952 restriction of ADR 0133's amendment). In an actor instance method a block reads the actor's fields as they are when it runs, not when it was made; see [Actor Blocks See Live State](#actor-blocks-see-live-state). The local-threading rows listed in `validators/local_threading.rs` remain until BT-3913 lowers them.
 
@@ -3230,7 +3304,7 @@ error: `detect:ifNone:` writes outer local `t`, but as a statement inside a cond
        the write is not threaded back (BT-3913)
 ```
 
-The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. What stays an error: a construct as a cascade part, a conditional's receiver, an interpolation or a `match:` subject (there is no statement boundary for the write to come back through); a statement inside a `whileTrue:`/`whileFalse:` condition block the loop does not thread; a `detect:ifNone:` with a stored search block; a `^` whose value is a loop or fold inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape); a value-bearing site in an actor fold body (the producer does not lower one, BT-3797); and a `match:` arm write where the `match:` is not a producer (a guard write, or a `match:` at no producer site). These are permanent restrictions, not gaps: the 733-shape oracle reports zero silent drops. One further shape is a current limit of the lowering rather than a designed restriction: a loop or fold that writes a local of its own conditional arm and is the value of an assignment in an actor method (`c ifTrue: [m := 0. s := xs inject: 0 into: [:a :e | m := m + e. a + e]. ...]`; the retired legacy arm lowering accepted it, BT-3913 rejects it, because the arm frame carries only method-level locals: hoist the writing loop to a statement and capture the pure fold value).
+The rewrite is the same as for the §6 error: bind the construct's value to a local, or hoist it out of the nesting. What stays an error: a construct as a cascade part, a conditional's receiver, an interpolation or a `match:` subject (there is no statement boundary for the write to come back through); a statement inside a `whileTrue:`/`whileFalse:` condition block the loop does not thread; a `detect:ifNone:` with a stored search block; a `^` whose value is a loop or fold inside a plain closure in an actor method (`^xs do: [...]` inside a `detect:ifNone:` handler or sort block; class and value-type methods accept this shape); a value-bearing site in an actor fold body (the producer does not lower one, BT-3797); and a `match:` arm write where the `match:` is not a producer (a guard write, or a `match:` at no producer site). These are permanent restrictions, not gaps: the 733-shape oracle reports zero silent drops. A loop or fold that writes a local of its own conditional arm (`c ifTrue: [m := 0. s := xs inject: 0 into: [:a :e | m := m + e. a + e]. ...]`) is accepted as a statement or as the whole value of an assignment in that arm, when the conditional is at the method root of an actor or value-type method and is an `ifTrue:` / `ifFalse:` / `ifNil:` / `ifNotNil:` conditional in any of their keyword combinations (BT-4367). Limits of the lowering remain, none a designed restriction: in a class method the same shape is rejected (the class-method arm does not lower it, and compiles to wrong answers if let through); the loop at an operand or array-literal site of an arm is rejected (`r := 1 + (xs inject: ...)`, `#[(xs collect: ...)]`); the arms of `and:` / `or:` and the handlers of a dictionary lookup (`at:ifAbsent:`, `at:ifPresent:ifAbsent:`) are rejected; and a conditional nested in a loop, a fold or another arm, or an `on:do:` or `match:` in such an arm, keeps its own rules. Hoist the writing loop to a statement and capture the pure fold value to get a rewrite that works everywhere.
 
 **Assignments used as values.** A local assignment whose value is used by the expression around it, rather than standing as its own statement, rebinds the local like any other assignment ([BT-3910](https://linear.app/beamtalk/issue/BT-3910), ADR 0131 §1). That covers an operand (`x := (t := t + 1) + 1`), a collection-literal or interpolated element (`#[t, (t := 7), t]`), the value of another assignment or of `^` (`x := t := 7`, `^t := 7`), and a message receiver, including a conditional's or a cascade's (`(t := t + 1) > 0 ifTrue: [...]`), in methods, in loop and fold bodies and in the REPL alike. The value of the assignment is the assigned value, and a sibling that is read before it sees the old value:
 
@@ -3259,16 +3333,20 @@ An actor's fields and class variables are not affected: an `ensure:` cleanup rea
 
 **A `^` in a stored closure answers what the closure captured.** A block that is not run where it is written (stored in a local, passed to a method, ...) captures the values of the locals it reads when it is created. A `^` in such a block that reads a local the method assigns after the block is created, or inside the body of a loop or fold that creates it, may answer the old value, so it is rejected conservatively as a compile error ([BT-4003](https://linear.app/beamtalk/issue/BT-4003)); at the REPL, so is one that reads any workspace binding (a later input may assign it). The rule treats every such block as escaping (as ADR 0133 does for a block passed to a user method), so it also rejects a block that is in fact run before the assignment and would answer right: `t := 0. self withFallback: [^t]. t := 5` is an error even if `withFallback:` runs the block at once. Pass the current value in as an argument (`[:v | ^v] value: t`) or write the block where it is run.
 
-**A `^` in a REPL loop body.** At the REPL, a `^` in the body of a loop or collection operation (`#(1, 2) do: [:x | ^x]`, `[n < 3] whileTrue: [^10]`, also through a conditional arm, an evaluated or protected block or a nested loop in the body) ends the input with its value, as it ends a method ([BT-4288](https://linear.app/beamtalk/issue/BT-4288)). The bindings written before the `^` keep their values, and the rest of the input does not run:
+**A `^` at the REPL ends the input.** A REPL input is a method body: a `^` that runs in place, at the root of the input, in a conditional arm, in an evaluated or protected block (`value`, `on:do:`, `ensure:`), or in the body of a loop or collection operation (`#(1, 2) do: [:x | ^x]`, `[n < 3] whileTrue: [^10]`), ends the input with its value, as it ends a method ([BT-4288](https://linear.app/beamtalk/issue/BT-4288), [BT-4312](https://linear.app/beamtalk/issue/BT-4312)). The bindings written before the `^` keep their values, and the rest of the input does not run:
 
 ```beamtalk
 w := 0
 #(1, 2, 3) do: [:x | w := w + x. x == 2 ifTrue: [^w]]   // => 3
 w                                                        // => 3
 3 timesRepeat: [^8]. w := 99                             // => 8 (w is still 3)
+k := 1. ^7. k := 2                                       // => 7 (k is 1)
+true ifTrue: [^3]. 5                                     // => 3
 ```
 
-Such a `^` inside the value of a top-level assignment (`r := #(1, 2) do: [:x | ^x]`) is a compile error: a method never assigns `r`, but the workspace would bind it to the input's value. So is a loop with a `^` in its body held in a block that is not run where it is written (`b := [#(1, 2) do: [:x | ^x]]`, or such a block passed to a method): the block may run in a later input, after the one that created it has ended, so nothing could catch the `^`. Answer the value with `detect:ifNone:` or `inject:into:` and assign that, or leave the assignment out. A `^` at the root of an input, in a conditional arm, an evaluated or protected block outside a loop, or a stored closure answers its value where it stands.
+An `ensure:` cleanup that such a `^` runs on its way out keeps its writes, as in a method: `w := 0`, then `[^5] ensure: [w := 9]` answers 5 and leaves `w` at 9. The same holds for an actor's fields: a field an `ensure:` cleanup writes while a method's `^` unwinds is kept.
+
+Such a `^` inside the value of a top-level assignment (`r := true ifTrue: [^3]`, `r := #(1, 2) do: [:x | ^x]`) is a compile error: a method never assigns `r`, but the workspace would bind it to the input's value. Drop the `^` and assign the value (in a loop, answer it with `detect:ifNone:` or `inject:into:`), or leave the assignment out and let the `^` answer the input. The rule is deliberately conservative: it rejects such a `^` in every statement of the input, including a statement that is not the last of a multi-statement input (`r := true ifTrue: [^3]. r`), where the throw would already end the input before `r` is assigned and so give method semantics. It does not depend on where the statement sits in the input. A loop with a `^` in its body held in a block that is not run where it is written (`b := [#(1, 2) do: [:x | ^x]]`, or such a block passed to a method) is a compile error too: the block may run in a later input, after the one that created it has ended, so nothing could catch the `^`. A `^` in a stored closure outside any loop (`b := [:x | ^x]`) answers its value where it stands, as the closure's value.
 
 ### Actor Blocks See Live State
 
@@ -3512,11 +3590,12 @@ Object subclass: Driver
 Arguments and return values cross that boundary as copies, so blocks that compute answers work normally. Two things do *not* survive the hop:
 
 - **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
-- **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form. The exception is the class-object protocol that only reads the class: a selector the class itself does not define as a class method (`name`, `superclass`, `doc`, `printString`, `includesSelector:`, ...) answers in place, the same as `self name` in a class method does ([BT-4262](https://linear.app/beamtalk/issue/BT-4262)). Two kinds of protocol still raise `dispatch_error` from inside the class's own class method. One is the class-variable reflection sends `hasField:` and `clearField:`, which only the class process can answer. The other is every protocol method that changes or messages the class: `removeFromSystem`, `renameTo:`, `reload`, `removeSelector:`, `renameSelector:to:`, `compile:source:`, `tryCompile:source:`, `doc:` and `setDocForMethod:to:`. These are refused before they do anything. From a block running in another class's class method while this class waits on it, they cannot reach the class either: `removeFromSystem` and `renameTo:` see that the class is waiting on the caller, directly or through other classes and actors, and raise a structured `timeout` after 5 seconds, before changing anything (a class that is only busy is waited for, as before, unless its own wait chain passes a process that monitors the caller and it stays busy for more than 5 seconds), and the others fail when their call to the class times out ([BT-4290](https://linear.app/beamtalk/issue/BT-4290)). Change a class from outside it.
+- **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form. The exception is the class-object protocol that only reads the class: a selector the class itself does not define as a class method (`name`, `superclass`, `doc`, `printString`, `includesSelector:`, ...) answers in place, the same as `self name` in a class method does ([BT-4262](https://linear.app/beamtalk/issue/BT-4262)). The class-variable reflection sends `hasField:`, `clearField:`, `fieldAt:` and `fieldAt:put:` with a Symbol name answer in place too, against the variables of the class whose method is running ([BT-4423](https://linear.app/beamtalk/issue/BT-4423)). One kind of protocol still raises `dispatch_error` from inside the class's own class method: every protocol method that changes or messages the class: `removeFromSystem`, `renameTo:`, `reload`, `removeSelector:`, `renameSelector:to:`, `compile:source:`, `tryCompile:source:`, `doc:` and `setDocForMethod:to:`. These are refused before they do anything. From a block running in another class's class method while this class waits on it, they cannot reach the class either: `removeFromSystem` and `renameTo:` see that the class is waiting on the caller, directly or through other classes and actors, and raise a structured `timeout` after 5 seconds, before changing anything (a class that is only busy is waited for, as before, unless its own wait chain passes a process that monitors the caller and it stays busy for more than 5 seconds), and the others fail when their call to the class times out ([BT-4290](https://linear.app/beamtalk/issue/BT-4290)). Change a class from outside it.
+- **Own-class sends from an inherited method are cross-class sends.** `Base foo` inside a class method that a subclass `C` inherits goes to `Base`, not to the process running the method ([BT-4317](https://linear.app/beamtalk/issue/BT-4317)). If `Base` and `C` both keep their class processes (their chain declares class variables), a `Base` class method running in `Base`'s process that sends to `C`, whose inherited method then sends `Base bar`, is a cycle between two class processes, like any other: `Base` waits on `C` while `C` waits on `Base`, and the send fails when the class call times out. Likewise, a block created in `C`'s inherited method that runs inside a `Base` class method and sends to `Base` is a re-entrant class send and raises `dispatch_error`, as the same block would from outside both classes.
 
 Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. A `^` is not an error, so a class variable written before the block escaped keeps its write ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §4).
 
-**Hot-patching and direct calls.** A literal send of a class method the class itself defines compiles to a *guarded* direct call: it reads the class's direct-call flag (`beamtalk_class_shadow_flags:direct_call_ok/2`, one `persistent_term` read) and checks that the method is still exported, and otherwise falls back to the ordinary class send, which answers what a dynamic send answers. An inherited method sent to a literal receiver takes the dynamic path, which also runs in the caller, so no call site names a superclass module. Reloading a class, giving it or an ancestor class variables, re-parenting it, `removeSelector:`, a class-side extension or a runtime class-method fun all erase the flag, so code compiled earlier follows the change without being recompiled. A descendant's flag is erased just after an ancestor's change is written, so for a moment a descendant's static send can still run in the caller: the same window a reload has for its own new code.
+**Hot-patching and direct calls.** A literal send of a class method the class itself defines compiles to a *guarded* direct call: it reads one `persistent_term` key for that call target, holding the class reference the method receives, which the runtime installs only while the class's direct-call flag holds (`beamtalk_class_shadow_flags:direct_call_ok/2`), a dynamic send would run that same compiled method in the caller, the method is still exported and the class process is alive; otherwise it falls back to the ordinary class send, which answers what a dynamic send answers. An inherited method sent to a literal receiver takes the dynamic path, which also runs in the caller, so no call site names a superclass module. Reloading a class, giving it or an ancestor class variables, re-parenting it, `removeSelector:`, a class-side extension, a runtime class-method fun or the class process going down all erase the flag and those keys, so code compiled earlier follows the change without being recompiled. A reload erases them while the old code is still current, so a static send of a method the reload dropped answers what a dynamic send answers, never `undef`. The key also names the class, so after `renameTo:` (or when a removed class's module name is reused) a call site that still names the old class does not reach the new one. A descendant's flag is erased just after an ancestor's change is written, so for a moment a descendant's static send can still run in the caller: the same window a reload has for its own new code.
 
 The `new`/`new:` direct-construction verdicts of `Value` classes are still baked into each compiled module. If a class gains a class-side `new:`, the runtime logs a warning naming every subclass that still builds `new:` directly and so bypasses the new override (BT-4126). Recompile the code the warning names. A release upgrade recompiles everything, so this only affects targeted hot-patches.
 
@@ -3601,7 +3680,7 @@ The write made inside the protected block is discarded when the error crosses th
 
 **Class-module ABI.** Every compiled class module records its class-variable calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
 
-**The `class-state-abroad` lint.** Where the compiler can see the case, it says what a block means abroad instead of leaving it to run time: a block literal that reads class variables and is passed to an asynchronous send, handed to an actor, stored or returned, or a block literal that writes class variables and is passed to another class's class-side method that runs in that class's process, gets a `class-state-abroad` warning at the block. Suppress it with `@expect class_state_abroad`, or package-wide with `class-state-abroad = "off"` under `[diagnostics]`. It is a lint, not a guarantee: a block passed through a variable or an instance method is only caught at run time, and only for writes. Cascade messages after the first are inspected (e.g. `self log; bump`), and an inherited method (sealed or not) of an open class that makes a late-bound `self` send to a non-sealed selector is flagged when a subclass override could write a class variable.
+**The `class-state-abroad` lint.** Where the compiler can see the case, it says what a block means abroad instead of leaving it to run time: a block literal that reads class variables and is passed to an asynchronous send, handed to an actor, stored or returned, or a block literal that writes class variables (directly, with `self fieldAt:put:` or `self clearField:`, or through a send) and is passed to another class's class-side method that runs in that class's process, gets a `class-state-abroad` warning at the block. Suppress it with `@expect class_state_abroad`, or package-wide with `class-state-abroad = "off"` under `[diagnostics]`. It is a lint, not a guarantee: a block passed through a variable or an instance method is only caught at run time, and only for writes. Cascade messages after the first are inspected (e.g. `self log; bump`), and an inherited method (sealed or not) of an open class that makes a late-bound `self` send to a non-sealed selector is flagged when a subclass override could write a class variable.
 
 This matters most when building a `Collection` subclass: implementing `do:` by delegating to a class-side helper works, and so does a helper that reaches back into its own class.
 
@@ -4689,6 +4768,19 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // <<$A>> matches byte 65. With a utf type a string matches per
 // character instead: <<"hi"/utf16>> matches bytes #(0, 104, 0, 105).
 
+// Binary construction (ADR 0143): the same <<...>> in expression position
+// builds a binary, so a built value matches back with the same segments.
+payload := Binary fromBytes: #(104, 105)
+len := payload size
+frame := <<16:8, len:24, payload/binary>>
+frame toBytes
+// => #(16, 0, 0, 2, 104, 105)
+frame match: [
+  <<16:8, n:24, rest:n/binary>> -> rest toBytes;
+  _ -> #()
+]
+// => #(104, 105)
+
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
 value := nil
 value match: [
@@ -4727,7 +4819,41 @@ x match: [
 // => 2
 ```
 
-**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `name`, `name:size`, `name/type`, or `name:size/type-modifiers`, where the size is an integer literal, a variable, or a parenthesized expression, and the type is `integer` (default), `float`, `binary`/`bytes`, `bits`/`bitstring`, or `utf8` with `signed`/`unsigned` and `big`/`little`/`native` modifiers. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local; the value may be an integer literal (`<<0:1, v:7>>`). A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). A `/bitstring` (`/bits`) segment binds whatever the bits are: a `Binary` when they are a whole number of bytes, otherwise a [`Bitstring`](#bitstring--unaligned-bits) (ADR 0141), which understands only bit-level messages (`bitSize`, `toBits`, `concat:`, `asBinary`). A type pattern `b :: Bitstring` matches exactly the unaligned values; `b :: Binary` never matches one. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+**Binary patterns** match bytes and bits: `<<first:8, _/binary>>` binds the first byte, `<<_:8, rest/binary>>` the tail. A segment is `value`, `value:size`, `value/specifiers`, or `value:size/specifiers`. The specifiers are joined with `-` and name a type, `integer` (the default), `float`, `binary`/`bytes`, `bits`/`bitstring`, `utf8`, `utf16`, or `utf32`, plus `signed`/`unsigned`, `big`/`little`/`native`, and `unit:N` (1 to 256). A size is an integer literal, a variable, or a parenthesized expression. It counts units: the unit is 1 bit for `integer`, `float` and `bits`, and 8 bits for `binary`, so `v:2/unit:8` reads 16 bits and `p:3/binary` reads 3 bytes. Without a size, an integer is 8 bits, a float is 64, and a `binary`/`bits` segment takes the rest. A size may name a variable bound by an earlier segment of the same pattern (`<<n:8, payload:n/binary>>`), a parameter, or a local. A size that names an earlier segment of the *same* binary, or a size expression, is only supported when the binary pattern is the whole arm pattern — match the enclosing value first, then the binary. A binary nested inside a tuple in a `match:` arm is matched after the tuple, so its sizes may name a variable the tuple or an earlier nested binary binds (`{n, <<head:n/binary, _/binary>>}`). Destructuring assignment does not accept nested patterns. A binary pattern matches a `String` subject by its UTF-8 bytes, whether it is the whole arm pattern or nested inside a tuple (`{#ok, <<71, 69, 84, 32, rest/binary>>}` matches `{#ok, "GET /x"}`); `/binary` segments always bind a `Binary` (BT-4173, BT-4223). A `/bitstring` (`/bits`) segment binds whatever the bits are: a `Binary` when they are a whole number of bytes, otherwise a [`Bitstring`](#bitstring--unaligned-bits) (ADR 0141), which understands only bit-level messages (`bitSize`, `toBits`, `concat:`, `asBinary`). A type pattern `b :: Bitstring` matches exactly the unaligned values; `b :: Binary` never matches one. Every `_` in a pattern is a fresh anonymous variable, so `{#a, _, x, _}` compiles.
+
+**Binary segment values and checks** (BT-4097, BT-4143, BT-4376). Besides a variable or `_`, a segment value may be a literal, which must match exactly:
+
+- An **integer** literal, optionally negative (`<<0:1, v:7>>`, `<<-1:8/signed>>`).
+- A **float** literal (`<<1.5/float>>`). An integer or character literal in a `float` segment is read as a float, as `erlc` does: `<<1/float>>` matches `1.0`.
+- A **character** literal, which is its code point (`<<$A>>` matches byte 65; `<<c/utf8>>` binds a code point).
+- A **string** literal. With no specifiers it stands for its UTF-8 bytes (`<<"hi", rest/binary>>`; `<<"é">>` matches the two bytes `#(195, 169)`). Here Beamtalk differs from `erlc`, which turns each character into one byte, so in Erlang `<<"é">>` is the single byte 233. With `utf8`, `utf16` or `utf32` the string matches one encoded character at a time (`<<"hi"/utf16>>` matches `#(0, 104, 0, 105)`). Any other type, size, signedness, endianness or unit on a string literal is a compile error, as in `erlc` ("a literal string in a binary pattern must not have a type or a size").
+
+These segment rules are compile errors, with `erlc`'s wording: a negative literal size; a size or `unit:` on a `utf8`/`utf16`/`utf32` segment; a `unit:` without a size on an `integer` or `float` segment (a sizeless `binary` or `bits` segment may take one: `rest/binary-unit:16` matches a tail whose bit length is a multiple of 16); and a `unit:` that conflicts with the one the type implies. `bits`/`bitstring` imply unit 1 and `bytes` implies unit 8, so `x:2/bits-unit:8` is "conflict in unit specification for bit field: '8' and '1'", while `bytes-unit:8` and `binary-unit:N` are accepted.
+
+An arm that can never match is a **warning**, as it is in `erlc`. Examples: a literal that does not fit its segment (`<<300>>` in the default 8 bits, or `<<-1:8>>` in an unsigned segment); an integer literal in a `binary`/`bits` segment; a float literal in a non-`float` segment; and a float size other than 16, 32 or 64 bits (size × unit). A non-ASCII character literal (U+0080 to U+00FF) in an 8-bit integer segment (the default size, or an explicit size × unit of 8 such as `$é:8`) also warns: `<<$é>>` matches the single byte 233 (its code point), not the UTF-8 bytes that `<<"é">>` matches, so write `"é"` or `$é/utf8` instead. To silence one of these warnings, use `@expect`. `--warnings-as-errors` turns them into errors.
+
+**Binary construction** (ADR 0143, BT-4346/4347/4348). `<<...>>` where an expression is expected builds a binary, with the same segment grammar as a binary pattern: `<<v:4, p/binary>>`, `<<s:8/unit:2>>`, `<<1.5/float>>`, `<<$A>>`, `<<"hi">>`, `<<h:16/big-unsigned-integer>>`. A leading `<<` opens a construction; `<<` is not a binary operator, so an infix `a << b` is a parse error. Every pattern example above reads as construction, so build-then-match round-trips:
+
+```beamtalk
+v := 4660
+<<v:16/little>> toBytes                       // => #(52, 18)
+<<-2:16/signed>> toBytes                      // => #(255, 254)
+<<1.5:32/float>> toBytes                      // => #(63, 192, 0, 0)
+<<"é">> toBytes                               // => #(195, 169) (UTF-8 bytes)
+<<"hi"/utf16>> toBytes                        // => #(0, 104, 0, 105)
+name := "hé"
+<<name/binary>> toBytes                       // => #(104, 195, 169)
+<<(name size):8, name/binary>> toBytes        // => #(2, 104, 195, 169)
+<<1:3>> class                                 // => Bitstring
+(<<7:3, 10:5>> match: [<<f:3, w:5>> -> {f, w}; _ -> nil])   // => {7, 10}
+```
+
+- **Segment values.** A segment value is a variable, a literal (integer, optionally negative; float; character; string), or a **parenthesised expression** for anything else: `<<(payload size):16>>`, `<<(a + b):4>>`. A field access or send must be parenthesised too: `<<(self.len):8>>`, since `<<self.len:8>>` is a parse error with a "parenthesize" hint (`name:` lexes as a keyword, so `<<x size:8>>` would read as the send `x size: 8`). Sizes follow the pattern rule: an integer literal, a variable, or a parenthesised expression.
+- **Evaluation order.** Segment values and sizes are evaluated left to right, each value before its own size, before the binary is built. An assignment or a send with side effects in one segment is seen by the segments after it: with `t := 0`, `<<t:8, (t := t + 1):8, t:8>>` builds `#(0, 1, 1)`. This holds in actor methods and loops too (`<<(self next):8, (self next):8>>`).
+- **String values.** A string literal with no specifiers is its UTF-8 bytes, as in patterns (`<<"é">>` is `#(195, 169)`; in Erlang it would be the single byte 233); with `utf8`/`utf16`/`utf32` it is encoded one character at a time. A `String` held in a variable contributes its UTF-8 bytes in a `binary`/`bytes`/`bits` segment. A type or size on a string *literal* (`<<"hi"/binary>>`) is a **compile error**, "a literal string in a binary construction must not have a type or a size", because it can never build (`erlc` only warns and raises `badarg` at run time). Write `<<"hi">>`, or bind the string to a variable first.
+- **Literal checks.** The same checks as patterns, worded for construction. A literal that does not fit its segment warns and is truncated to its low bits, exactly as a variable holding that value would be (`<<(-1):4>>` warns "...is truncated to 15"). A float literal in a non-float segment, an integer literal in a `binary` segment, and a float size other than 16, 32 or 64 bits warn ("binary construction will fail"). The error rows (negative literal size, size or unit on `utf*`, `unit:` without a size on `integer`/`float`, conflicting `unit:`) are errors in both directions.
+- **Result type.** Construction always builds bytes, never text: the result is a `Binary` when the total bit size is a multiple of 8 and a [`Bitstring`](#bitstring--unaligned-bits) otherwise (`<<1:3>>`), never a `String` (use `asString` to decode). Statically the type checker answers `Binary` when every segment's size is known and the sum is a multiple of 8 (a `float` segment always counts as whole bytes: it is 16, 32 or 64 bits or fails), `Bitstring` when the known sum is not, and `Bitstring | Binary` when a variable size or a `bits` value leaves alignment unknown. Narrow a union with a `:: Binary` arm: `bin match: [b :: Binary -> b toBytes; _ -> nil]`.
+- **Run-time failures.** A value of the wrong kind for its segment (a non-integer in an `integer` segment, a non-binary in a `binary` segment), a negative or non-integer variable size, or a `binary` size larger than the value raises the BEAM's `badarg`, which surfaces as an `argument_error` `#beamtalk_error{}` whose message names the segment's 1-based position in the source, its type and the offending value (`<<16:8, v/binary>>` with `v := 1`: `binary construction: segment 2 of type 'binary': expected a binary but got: 1`). A string literal counts as one segment, however many bytes it builds. A scalar value (number, Symbol, `nil`/`true`/`false`, String, Binary) shows as its `printString`, cut to its first 32 bytes; a collection, Value Object or other compound value shows as its depth-limited Erlang term (`[1,2]`), so the error path never runs a user `printString`. `details` records `segment`, `segment_type`, `failure` (`#type` for a value of the wrong kind, `#size` for a bad size, or OTP's other reasons such as `#short` and `#unit`) and `value` (the offending size for a `#size` failure, the segment value otherwise). A construction the BEAM compiler can already see will fail (e.g. a size bound to `0 - 1`) raises the plain "invalid argument" instead.
 
 **An arm body is an expression, not a block.** `pattern -> [ ... ]` answers the block as a value and does **not** run its statements: `1 match: [1 -> [2 + 3]; _ -> [0]]` answers a `Block`, not `5`. A zero-parameter block body alongside non-block arms warns (`MatchArmBlock`: "this `match:` arm answers a Block without running it"); a match whose every arm is a block literal is read as an intentional dispatch table and stays silent. In an actor or `Server` method, such a block that writes a field or sends to `self` (`#tick -> [self.count := self.count + 1]`) is additionally a compile error. For an arm that needs several statements, call a method (`#tick -> self tick`), or evaluate the block in place (`#tick -> [ ... ] value`). A single field write can be the arm itself (`{#tick, n} -> self.count := self.count + n`). Suppress a deliberate block-valued arm with `@expect match_arm_block`, or the whole package with `match-arm-block = "off"` under `[diagnostics]`.
 
@@ -4777,7 +4903,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
-| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails (BT-663, BT-4096, BT-4097) |
+| Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails; `utf8`/`utf16`/`utf32` and `unit:N`; integer, float, character and string literal values; a misfit literal warns (BT-663, BT-4096, BT-4097, BT-4143, BT-4376) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
 | Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only (plus the sealed `Binary`, subclass-aware) — see restrictions below (BT-2855, ADR 0107) |
 
@@ -4974,9 +5100,18 @@ ordinary dynamic send. A built-in receiver with its own representation
 `Symbol`, `True`, `False`, `UndefinedObject`, `Block`, `Tuple`, `Reference`,
 `Port`) compiles to a direct call guarded by the same representation test the
 dynamic send routes on (`is_integer`, `is_list`, a map with no class tag, …).
-`String`, `Binary`, `Pid`, `Boolean`, `Bitstring` and `Character` receivers,
-abstract classes, `Object`, `Value`, actors, and the supervisor and exception
-families always send dynamically. The result is always what a dynamic send answers
+`String` and `Pid` receivers do the same for every selector except the few the
+dynamic send answers outside their module, which stay dynamic: `Pid`'s future
+protocol (`await`, `whenResolved:`, …) and the byte-level selectors `String`
+shares with `Binary` (`byteAt:`, `asHex`, …). The exact lists are the
+`special_selectors` of the `String` and `Pid` rows in the routing fixture
+(`tagged_map_routing_conformance.json`), which the runtime conformance tests
+check against `beamtalk_primitive`. A `String`
+extension never moves any other selector: it is looked up inside `String`'s
+module, so a typed call site sees it at once. `Binary`, `Boolean`,
+`Bitstring` and `Character` receivers, abstract classes, `Object`, `Value`,
+actors, and the supervisor and exception families always send
+dynamically. The result is always what a dynamic send answers
 ([ADR 0025](ADR/0025-gradual-typing-and-protocols.md) amendment). Live patches
 (`Point >> sel => …`), `removeSelector:`, extensions and a reload into the same
 module all reach typed call sites at once, because they act inside that
@@ -5167,6 +5302,27 @@ String >> shout => self uppercase ++ "!"
 "hi" shout                     // => "HI!"
 String removeSelector: #shout
 "hi" respondsTo: #shout        // => false
+```
+
+On the class side, `removeSelector:` also removes a runtime class-method fun
+(ADR 0084) installed with `beamtalk_object_class:put_class_method/3,4`. It
+checks the extension registry first, then the runtime fun, then the compiled
+class method: the order dispatch resolves them. Removing the fun gives the
+selector back what it had before the first fun replaced it: the class's
+compiled method, or nothing, so the send falls through to an inherited method
+or `does_not_understand`. A static send compiled while the fun was installed
+takes the restored method on its next call. `X class includesSelector: #sel`
+answers `true` while such a fun is installed (BT-4438):
+
+```erlang
+%% Erlang side: hot-patch a class method, then take the patch back.
+ok = beamtalk_object_class:put_class_method(Pid, answer, fun(_ClassSelf) -> patched end).
+```
+
+```beamtalk
+Counter answer                          // => #patched
+Counter class removeSelector: #answer
+Counter answer                          // the compiled method's answer again
 ```
 
 **The bare form raises; `removeSelector:ifAbsent:` is the paired escape
@@ -7490,6 +7646,7 @@ dispatch follows the class.
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
 bin := Binary fromIolist: #("hello", " ", "world")
+bin := <<104, 101, 108, 108, 111>>   // bit syntax, see Binary construction (ADR 0143)
 
 // Byte access (1-based, Collection protocol) — elements are byte Integers
 bin := Binary fromBytes: #(104, 101, 108)
@@ -8153,6 +8310,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `class_state_abroad` | A block that reads or writes its class's variables where it runs outside an invocation of that class (ADR 0130 §5) |
 | `class_process_ffi` | A class-side method that runs in its class's process (its class or an ancestor declares class variables) and directly calls process-sensitive FFI (`gen_tcp:accept`, `controlling_process`, `erlang:self`, …) (BT-4031) |
 | `class_method_process_resource` | A class-side method that runs in the caller's process (no class variables in its chain, ADR 0142) directly creates a resource tied to the caller (`ets:new`, `open_port`, `link`, `monitor`, timers, …) or acts on the caller (`self()`, the process dictionary, `process_flag`) (BT-4302) |
+| `class_var_reflection_shadowing` | A class-side method named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which the class process answers itself for a Symbol argument (BT-4422, BT-4426) |
 | `ffi_nested_string` | A `String` nested in a collection argument (`List(String)`, `Dictionary` keys/values, `Tuple`) to a stock Erlang call reaches it tagged; an Erlang comparison against raw binaries misses (BT-4243, see [Strings at the FFI boundary](beamtalk-native-erlang.md#strings-at-the-ffi-boundary)) |
 | `actor_state_abroad` | A block that touches its actor's state where it runs outside the actor's process (ADR 0137) *(lint-only, see below)* |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |

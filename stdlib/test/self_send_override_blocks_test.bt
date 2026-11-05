@@ -78,9 +78,12 @@ TestCase subclass: SelfSendOverrideBlocksTest
     self assert: SsoBlocksSub viaForeign equals: 2
     self assert: SsoBlocksSub subHits equals: 2
 
+  // BT-4317: an explicit own-class send binds `self` to the named class, so
+  // `SsoBlocksBase wrapper` run for the subclass reaches the base's `foo:`
+  // (which writes nothing), not the subclass override.
   testOwnClassWrapperInBlock =>
     SsoBlocksSub viaOwnClassBlock
-    self assert: SsoBlocksSub subHits equals: 2
+    self assert: SsoBlocksSub subHits equals: 0
 
   testSealedSelectorWrapperInBlock =>
     SsoBlocksSub viaSealedSelectorBlock
@@ -147,11 +150,13 @@ TestCase subclass: SelfSendOverrideBlocksTest
     SsoStaleSub completedKept
     self assert: SsoStaleSub hits equals: 2
 
-  // A statically bound wrapper in a loop that READS before its own late-bound
-  // send sees the previous iteration's write.
+  // BT-4317: an explicit own-class wrapper in a loop run for the subclass
+  // binds `self` to the base, so it reads the base's `hits` and its late-bound
+  // `self foo` runs the base's `foo` (no write): the subclass override and the
+  // subclass's `hits` are untouched.
   testWrapperReadSeesPreviousIteration =>
-    self assert: SsoStaleSub viaReadLoop equals: #(0, 1, 2)
-    self assert: SsoStaleSub hits equals: 3
+    self assert: SsoStaleSub viaReadLoop equals: #(0, 0, 0)
+    self assert: SsoStaleSub hits equals: 0
 
   // Sealed and open classes agree: a class's own mutating self-send nested in
   // a conditional arm keeps its write.

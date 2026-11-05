@@ -52,9 +52,12 @@ pub(crate) fn generate_exception_bif(
 /// The class-side `Exception` primitives that are *caller-safe*: they read
 /// nothing from the receiving class but its name, touch no class state, and
 /// need no class process. A send of one of these to a class literal
-/// (`Error signal: m`) is inlined at the call site, raising in the caller
-/// instead of making a `gen_server:call` into the class process only to
-/// raise there and relay the error back (BT-4115).
+/// (`Error signal: m`) raises at the call site, in the caller, instead of
+/// making a `gen_server:call` into the class process only to raise there and
+/// relay the error back (BT-4115), but only behind its run-time key (BT-4270,
+/// `caller_safe_signal_target` in `dispatch_codegen`): while the send still
+/// resolves to the defining class's compiled primitive, which that class's
+/// `'caller_safe_class_primitives'` meta entry (`class_meta.rs`) certifies.
 ///
 /// This list is the one place that owns that decision;
 /// [`generate_class_signal_bif`] lowers exactly these.
@@ -72,14 +75,31 @@ pub(crate) fn is_caller_safe_class_primitive(name: &str) -> bool {
     CALLER_SAFE_CLASS_PRIMITIVES.contains(&name)
 }
 
+/// BT-4270: whether a class-side method of `class_name` whose body is
+/// `@primitive "<primitive>"` compiles to that caller-safe raise, i.e. the
+/// primitive is caller-safe and `class_name`'s primitive table
+/// ([`super::generate_primitive_bif`], the one registry) lowers it. A class
+/// other than `Exception` declaring the same primitive name gets the runtime
+/// placeholder, not the raise, so it is never certified.
+#[must_use]
+pub(crate) fn lowers_to_caller_safe_raise(class_name: &str, primitive: &str) -> bool {
+    if !is_caller_safe_class_primitive(primitive) {
+        return false;
+    }
+    let params: Vec<String> = (0..primitive.matches(':').count())
+        .map(|i| format!("P{i}"))
+        .collect();
+    super::generate_primitive_bif(class_name, primitive, &params).is_some()
+}
+
 /// Lowers a caller-safe class primitive to its `beamtalk_exception_handler`
 /// call, given the argument documents and the receiving class's document.
 ///
 /// Two callers share this one selector-to-handler mapping:
 /// [`generate_exception_bif`] (the `Exception class` method body, passing the
-/// `ClassSelf` variable and the method's parameters) and the class-literal
-/// send in `dispatch_codegen` (passing the class-name atom and the threaded
-/// argument values). Answers `None` for any other primitive, or when the
+/// `ClassSelf` variable and the method's parameters) and the hit arm of a
+/// class-literal send's caller-safe raise key in `dispatch_codegen` (passing
+/// the class-name atom and the bound argument values, BT-4270). Answers `None` for any other primitive, or when the
 /// argument count does not match the primitive.
 pub(crate) fn generate_class_signal_bif(
     primitive: &str,

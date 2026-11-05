@@ -23,7 +23,21 @@ defmodule BtAttach.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: BtAttach.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    with {:ok, pid} <- Supervisor.start_link(children, opts) do
+      # Desktop broker handoff (BT-4398): a broker-spawned front binds PORT=0
+      # and reports the port it actually got. A failed report fails the start,
+      # so the broker sees an exit instead of waiting for a file that never
+      # appears. No-op unless BT_ATTACH_PORT_FILE is set.
+      case BtAttach.PortReport.maybe_write(BtAttachWeb.Endpoint) do
+        :ok ->
+          {:ok, pid}
+
+        {:error, reason} ->
+          Supervisor.stop(pid)
+          {:error, reason}
+      end
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration

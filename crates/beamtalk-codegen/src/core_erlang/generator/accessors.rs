@@ -16,7 +16,6 @@ use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
-use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -33,6 +32,14 @@ impl CoreErlangGenerator {
             direct_constructors: &self.own_direct_constructors,
             overrides_collection_selector: self.own_overrides_collection_selector,
             overrides_species_construction: self.own_overrides_species_construction,
+            threads_actor_state: self
+                .class_hierarchy
+                .as_ref()
+                .is_some_and(|h| h.threads_actor_state(&self.class_name())),
+            defines_user_class_new1: self
+                .class_hierarchy
+                .as_ref()
+                .map(|h| h.defines_user_class_new1(&self.class_name())),
         }
     }
 
@@ -308,7 +315,7 @@ impl CoreErlangGenerator {
     /// [`beamtalk_core::semantic_analysis::shadowed_class_names`]).
     pub(in crate::core_erlang) fn set_shadowed_class_names(
         &mut self,
-        names: std::collections::HashSet<ecow::EcoString>,
+        names: beamtalk_core::semantic_analysis::ShadowedClassNames,
     ) {
         self.class_context_mut().shadowed_class_names = names;
     }
@@ -321,7 +328,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn is_shadowed_class(&self, class_name: &str) -> bool {
         self.class_context
             .as_ref()
-            .is_some_and(|ctx| ctx.shadowed_class_names.contains(class_name))
+            .is_some_and(|ctx| ctx.shadowed_class_names.is_shadowed(class_name))
     }
 
     /// Computes and installs the direct-call eligibility table from `hierarchy`.
@@ -777,21 +784,6 @@ impl CoreErlangGenerator {
         Self::annotate_with_line_in(self.source_path.as_deref(), doc, line_num)
     }
 
-    /// Whether `doc` is exactly one `( node -| [Line ...] )` annotation node, as
-    /// [`Self::annotate_with_line_in`] builds it: a sequence opening with `( `
-    /// and closing with the annotation's `] )`.
-    fn is_annotated_node(doc: &Document<'static>) -> bool {
-        let Document::Vec(parts) = doc else {
-            return false;
-        };
-        let text = |d: &Document<'static>| d.as_text().map(str::to_string);
-        let (Some(first), Some(last)) = (parts.first().and_then(text), parts.last().and_then(text))
-        else {
-            return false;
-        };
-        first == "( " && last.ends_with("] )") && parts.iter().any(|p| p.as_text() == Some(" -| ["))
-    }
-
     /// [`Self::annotate_with_line`] against an explicit `source_path` — for a
     /// caller that captured the path while a flattened method's protocol
     /// source was still in scope (see `MethodFrame`) but annotates after the
@@ -805,21 +797,13 @@ impl CoreErlangGenerator {
         // (`( ( X -| [..] ) -| [..] )` is a parse error), and a call node
         // annotated by its lowering can reach the send's whole-document
         // annotation unchanged. The inner (call-node) annotation wins.
-        if Self::is_annotated_node(&doc) {
+        if doc.is_annotated() {
             return doc;
         }
         match source_path {
             Some(path) => leaf::annotated(doc, &leaf::BtSpan::new(path, line_num)),
-            None => {
-                // No source path — use bare line number annotation
-                docvec![
-                    "( ",
-                    doc,
-                    " -| [",
-                    leaf::int_lit(i64::from(line_num)),
-                    "] )"
-                ]
-            }
+            // No source path — use bare line number annotation
+            None => leaf::annotated_bare(doc, line_num),
         }
     }
 }

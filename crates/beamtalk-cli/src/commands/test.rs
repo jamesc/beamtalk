@@ -44,6 +44,7 @@ type MergedClassIndexes = (
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
 );
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -525,27 +526,13 @@ fn generate_core_file(
 /// without it `test` would emit diagnostics `build` suppresses (and vice
 /// versa), reopening the CLI/REPL verdict split this helper closes.
 ///
-/// Returns `(knowledge_scope, has_package_dependencies)`.
+/// Returns `(knowledge_scope, has_package_dependencies)`, by the shared
+/// [`manifest::package_checker_scope`] rule.
 fn test_compile_scope(
     source_path: &Utf8Path,
 ) -> (beamtalk_core::semantic_analysis::KnowledgeScope, bool) {
-    let scope = |root: &Utf8Path| {
-        let has_deps = manifest::find_manifest_full(root)
-            .ok()
-            .flatten()
-            .is_some_and(|m| !m.dependencies.is_empty());
-        (
-            beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-            has_deps,
-        )
-    };
-    find_package_root(source_path).map_or(
-        (
-            beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
-            false,
-        ),
-        |root| scope(&root),
-    )
+    let scope = manifest::package_checker_scope(find_package_root(source_path).as_deref());
+    (scope.knowledge_scope, scope.has_package_dependencies)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -965,9 +952,11 @@ struct TestPipeline {
     /// and `beamtalk build`'s own `pre_loaded_aliases` wiring
     /// (`beam_compiler.rs`).
     all_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    /// Fixture-defined protocols so the unresolved-class validator
-    /// and type checker recognise protocol names declared in `fixtures/*.bt`.
-    fixture_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Protocols the unresolved-class validator and type checker recognise
+    /// in fixtures and test files: each package's `src/` and dependency
+    /// protocols (as `beamtalk build` pre-loads them; BT-4446), plus those
+    /// declared in `fixtures/*.bt`.
+    protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Full ASTs + source files of fixture-defined carried
     /// protocols, so a fixture/test `uses:` flattens a trait declared in a
     /// different fixture file (ADR 0127 §10a; BT-3625).
@@ -1177,7 +1166,12 @@ fn discover_packages_with_manifests(
 /// from a parent directory containing multiple packages. The merged index is
 /// used for fixture compilation (which can reference any package's classes).
 ///
-/// Returns `(pkg_class_indexes, class_module_index, class_superclass_index, all_class_infos, all_alias_infos)`.
+/// Returns `(pkg_class_indexes, class_module_index, class_superclass_index,
+/// all_class_infos, all_alias_infos, all_protocol_infos)`. The protocol infos
+/// are every package's `src/` protocols plus its dependencies' exported ones,
+/// the same set `beamtalk build` pre-loads (`build_class_index`), so a test
+/// file resolves a package protocol — and `P class` (ADR 0144) — as `build`
+/// does (BT-4446).
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
 ) -> MergedClassIndexes {
@@ -1195,6 +1189,12 @@ fn build_merged_class_indexes(
         Vec::new();
     let mut dep_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> =
         Vec::new();
+    let mut source_protocol_infos: Vec<
+        beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo,
+    > = Vec::new();
+    let mut dep_protocol_infos: Vec<
+        beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo,
+    > = Vec::new();
     for (pkg_root, pkg) in discovered_packages {
         let mut pkg_src = None;
         let src_dir = pkg_root.join("src");
@@ -1224,6 +1224,7 @@ fn build_merged_class_indexes(
             source_alias_infos.extend(super::build::collect_project_alias_infos(
                 &src_files, &pkg.name,
             ));
+            source_protocol_infos.extend(super::build::collect_project_protocol_infos(&src_files));
         }
 
         // Load dependency class metadata so the type checker and validator
@@ -1252,6 +1253,7 @@ fn build_merged_class_indexes(
                     }
                     dep_class_infos.extend(dep.class_infos.clone());
                     dep_alias_infos.extend(dep.alias_infos.clone());
+                    dep_protocol_infos.extend(dep.protocol_infos.clone());
                 }
             }
             Err(e) => {
@@ -1286,6 +1288,8 @@ fn build_merged_class_indexes(
         super::build::collect_all_class_infos(&[&source_class_infos, &dep_class_infos]);
     let all_alias_infos =
         super::build::collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]);
+    let all_protocol_infos =
+        super::build::collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]);
 
     (
         pkg_class_indexes,
@@ -1293,6 +1297,7 @@ fn build_merged_class_indexes(
         class_superclass_index,
         all_class_infos,
         all_alias_infos,
+        all_protocol_infos,
     )
 }
 
@@ -1399,6 +1404,7 @@ fn initialize_pipeline(
         class_superclass_index,
         all_class_infos,
         mut all_alias_infos,
+        package_protocol_infos,
     ) = build_merged_class_indexes(&discovered_packages);
 
     // See `collect_sibling_src_alias_infos`'s doc: only engages when
@@ -1440,7 +1446,7 @@ fn initialize_pipeline(
         class_superclass_index,
         all_class_infos,
         all_alias_infos,
-        fixture_protocol_infos: Vec::new(),
+        protocol_infos: package_protocol_infos,
         fixture_protocol_defs: FixtureProtocolDefs::default(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
@@ -1510,20 +1516,18 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     pipeline.all_class_infos.extend(fixture_class_infos);
     // Fixture-defined protocols need to flow through to each test
     // file's compilation so their names resolve in the unresolved-class validator.
-    pipeline
-        .fixture_protocol_infos
-        .extend(fixture_protocol_infos);
+    pipeline.protocol_infos.extend(fixture_protocol_infos);
     // Fixture-defined type aliases (BT-3563) need to flow through the same
     // way, so a `type Name = ...` declared in one fixture file resolves
     // when referenced as a declared field type from another fixture/test
-    // file — mirrors `fixture_protocol_infos` immediately above.
+    // file — mirrors `protocol_infos` immediately above.
     pipeline.all_alias_infos.extend(fixture_alias_infos);
 
     let fixture_hierarchy = ClassHierarchyContext {
         class_module_index: pipeline.class_module_index.clone(),
         class_superclass_index: pipeline.class_superclass_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
-        pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_protocols: pipeline.protocol_infos.clone(),
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
@@ -1649,7 +1653,7 @@ fn compile_single_test_file(
         class_module_index: file_class_index.clone(),
         class_superclass_index: file_super_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
-        pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        pre_loaded_protocols: pipeline.protocol_infos.clone(),
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),

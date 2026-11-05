@@ -304,6 +304,7 @@ name = "beamtalk-desktop-broker"
 version = "0.4.0"
 dependencies = [
  "base64",
+ "beamtalk-repl-protocol",
  "beamtalk-workspace",
  "dirs",
  "libc",

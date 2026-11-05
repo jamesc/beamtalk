@@ -17,7 +17,7 @@
 //! Each hint reads
 //!
 //! ```text
-//! Send 'size' at line 12: dynamic dispatch (receiver: String [Value, declared]; reason: builtin — String: 'asBase64' and 9 other selectors are answered outside bt@stdlib@string)
+//! Send 'whenResolved:' at line 12: dynamic dispatch (receiver: Pid [Object, declared]; reason: builtin — Pid: the dynamic path answers 'whenResolved:' outside bt@stdlib@pid)
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
@@ -48,6 +48,7 @@ fn describe_type(ty: Option<&InferredType>, kind: Option<ClassKind>) -> String {
         InferredType::Negation { .. } => "negation".to_string(),
         InferredType::Intersection { .. } => "intersection".to_string(),
         InferredType::Meta { .. } => "metatype".to_string(),
+        InferredType::ProtocolMeta { .. } => "protocol metatype".to_string(),
         InferredType::Dynamic(_) => "dynamic".to_string(),
         InferredType::Never => "never".to_string(),
     };
@@ -76,15 +77,8 @@ fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
         NoBuiltinRoute::NoSingleRoute => {
             format!("builtin — {class} has no single representation route")
         }
-        NoBuiltinRoute::SpecialSelectors => {
-            let specials = row.map_or(&[][..], |row| row.special_selectors);
-            match specials.split_first() {
-                Some((first, rest)) => format!(
-                    "builtin — {class}: '{first}' and {} other selectors are answered outside {target}",
-                    rest.len()
-                ),
-                None => format!("builtin — {class}: some selectors are answered outside {target}"),
-            }
+        NoBuiltinRoute::SpecialSelector(selector) => {
+            format!("builtin — {class}: the dynamic path answers '{selector}' outside {target}")
         }
         NoBuiltinRoute::GuardSpansRoutes => format!(
             "builtin — {class}: its representation test also admits values routed away from {target}"

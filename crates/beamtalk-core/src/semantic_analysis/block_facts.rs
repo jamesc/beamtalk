@@ -10,8 +10,8 @@
 
 use crate::ast::well_known::WellKnownSelector;
 use crate::ast::{
-    Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement, MatchArm,
-    MessageSelector, MethodKind, ParameterDefinition,
+    BinarySegment, Block, BlockParameter, ClassDefinition, Expression, ExpressionStatement,
+    MatchArm, MessageSelector, MethodKind, ParameterDefinition,
 };
 use crate::ast_walker::{
     SendSite, WalkEvent, cascade_sends, walk_expression_and_sends, walk_sends,
@@ -526,6 +526,65 @@ pub struct ClassVarAccesses {
     /// message is not a probe: a cascade dispatches every message, the first
     /// included, as an ordinary send, never through the `HasField` intrinsic.
     pub has_field_probes: std::collections::BTreeSet<HasFieldProbe>,
+    /// Variables read reflectively as `self fieldAt: #name`, sorted (BT-4184,
+    /// BT-4421): in a class method this lowers to an in-place read
+    /// (`beamtalk_class_vars:field_at`, through a capture abroad), on an actor
+    /// a read of the cell. A literal name outside `vars` is left out, as a
+    /// `self.name` of a non-variable is: it reads no captured state and
+    /// raises anyway (at home `undeclared_class_variable`, abroad with no
+    /// capture `class_state_unreachable`). `vars` may include inherited
+    /// names, while the runtime's `field_at` checks only the class's own
+    /// declared set (BT-3801). Not a cascade message or a cast, which are
+    /// ordinary sends.
+    pub field_at_reads: std::collections::BTreeSet<String>,
+    /// Whether some `self fieldAt: k` read has a computed argument (it may
+    /// name a variable).
+    pub computed_field_at_read: bool,
+    /// Reflective writes, `self fieldAt: #name put: v` and
+    /// `self clearField: #name`, in walk order (BT-4184, BT-4428): in a class
+    /// method these lower to in-place writes (`beamtalk_class_vars:field_at_put`
+    /// / `clear`), on an actor to writes of the cell, so away from home they
+    /// raise like a `self.name := v`. Every name is recorded, in `vars` or
+    /// not: what a write of a non-variable does is the caller's to judge. Not
+    /// a cascade message or a cast, which are ordinary sends.
+    pub reflective_writes: Vec<ReflectiveWrite>,
+}
+
+/// Which reflective write a [`ReflectiveWrite`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflectiveWriteKind {
+    /// `self fieldAt: #name put: v`.
+    FieldAtPut,
+    /// `self clearField: #name`.
+    ClearField,
+}
+
+/// A reflective write on `self` ([`ClassVarAccesses::reflective_writes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflectiveWrite {
+    /// `fieldAt:put:` or `clearField:`.
+    pub kind: ReflectiveWriteKind,
+    /// The name a symbol-literal argument gives; `None` when computed.
+    pub name: Option<String>,
+    /// Where the send starts, for source-order priority against `self.x :=`.
+    pub start: u32,
+}
+
+impl ReflectiveWrite {
+    /// The write as a verb phrase: ``writes {noun} 'n' of {class} with
+    /// `fieldAt:put:` ``, ``clears a {noun} of {class} with `clearField:` ``.
+    /// How the `class-state-abroad` and `actor-state-abroad` lints name it.
+    #[must_use]
+    pub fn describe(&self, noun: &str, class: &str) -> String {
+        let (verb, selector) = match self.kind {
+            ReflectiveWriteKind::FieldAtPut => ("writes", "fieldAt:put:"),
+            ReflectiveWriteKind::ClearField => ("clears", "clearField:"),
+        };
+        match &self.name {
+            Some(name) => format!("{verb} {noun} '{name}' of {class} with `{selector}`"),
+            None => format!("{verb} a {noun} of {class} with `{selector}`"),
+        }
+    }
 }
 
 /// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
@@ -562,7 +621,60 @@ impl ClassVarAccesses {
     /// (outside a direct-called method) and the lint's read rule considers.
     #[must_use]
     pub fn reads_class_state(&self) -> bool {
-        !self.reads.is_empty() || !self.has_field_probes.is_empty()
+        !self.reads.is_empty() || !self.has_field_probes.is_empty() || self.reads_with_field_at()
+    }
+
+    /// Whether the block makes a reflective `self fieldAt:` read
+    /// ([`Self::field_at_reads`], [`Self::computed_field_at_read`]).
+    #[must_use]
+    pub fn reads_with_field_at(&self) -> bool {
+        !self.field_at_reads.is_empty() || self.computed_field_at_read
+    }
+
+    /// The `fieldAt:` reads as a noun phrase: `{noun} n, m`, or `a {noun}`
+    /// when only computed reads were seen; `None` when there are none. A
+    /// name also read as `self.name` ([`Self::reads`]) is left out, so
+    /// [`Self::reads_phrase`] names each variable once.
+    #[must_use]
+    pub fn field_at_read_noun(&self, noun: &str) -> Option<String> {
+        let names: Vec<&str> = self
+            .field_at_reads
+            .difference(&self.reads)
+            .map(String::as_str)
+            .collect();
+        if !names.is_empty() {
+            Some(format!("{noun} {}", names.join(", ")))
+        } else if self.computed_field_at_read {
+            Some(format!("a {noun}"))
+        } else {
+            None
+        }
+    }
+
+    /// The block's reads as a verb phrase, `self.name` and reflective
+    /// `fieldAt:` reads joined: ``reads {noun} n of {class}``, ``reads
+    /// {noun} n of {class} and {noun} m with `fieldAt:` ``; `None` when the
+    /// block makes neither. How the `class-state-abroad` and
+    /// `actor-state-abroad` lints name them.
+    #[must_use]
+    pub fn reads_phrase(&self, noun: &str, class: &str) -> Option<String> {
+        let direct = (!self.reads.is_empty()).then(|| {
+            let names = self
+                .reads
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{noun} {names}")
+        });
+        match (direct, self.field_at_read_noun(noun)) {
+            (None, None) => None,
+            (Some(direct), None) => Some(format!("reads {direct} of {class}")),
+            (None, Some(refl)) => Some(format!("reads {refl} of {class} with `fieldAt:`")),
+            (Some(direct), Some(refl)) => Some(format!(
+                "reads {direct} of {class} and {refl} with `fieldAt:`"
+            )),
+        }
     }
 }
 
@@ -614,6 +726,43 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                     _ => HasFieldProbe::Computed,
                 };
                 accesses.has_field_probes.insert(probed);
+            }
+            WalkEvent::Send(send)
+                if send.site == SendSite::Plain
+                    && !send.is_cast
+                    && is_self_reference(send.receiver)
+                    && send.selector.well_known() == Some(WellKnownSelector::FieldAt) =>
+            {
+                match send.arguments.first() {
+                    Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
+                        if vars.contains(name.as_str()) {
+                            accesses.field_at_reads.insert(name.to_string());
+                        }
+                    }
+                    _ => accesses.computed_field_at_read = true,
+                }
+            }
+            WalkEvent::Send(send)
+                if send.site == SendSite::Plain
+                    && !send.is_cast
+                    && is_self_reference(send.receiver) =>
+            {
+                let kind = match send.selector.well_known() {
+                    Some(WellKnownSelector::FieldAtPut) => ReflectiveWriteKind::FieldAtPut,
+                    Some(WellKnownSelector::ClearField) => ReflectiveWriteKind::ClearField,
+                    _ => return,
+                };
+                let name = match send.arguments.first() {
+                    Some(Expression::Literal(crate::ast::Literal::Symbol(name), _)) => {
+                        Some(name.to_string())
+                    }
+                    _ => None,
+                };
+                accesses.reflective_writes.push(ReflectiveWrite {
+                    kind,
+                    name,
+                    start: send.receiver.span().start(),
+                });
             }
             _ => {}
         });
@@ -671,6 +820,11 @@ fn analyze_expression(
                 if let crate::ast::StringSegment::Interpolation(expr) = segment {
                     analyze_expression(expr, analysis, ctx);
                 }
+            }
+        }
+        Expression::BinaryConstruction { segments, .. } => {
+            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                analyze_expression(expr, analysis, ctx);
             }
         }
 
@@ -1539,6 +1693,11 @@ impl OuterWriteWalker<'_> {
                     }
                 }
             }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    self.expr(e);
+                }
+            }
             Expression::Literal(..)
             | Expression::Identifier(_)
             | Expression::ClassReference { .. }
@@ -1599,6 +1758,13 @@ pub struct LocalThreadingConstruct<'a> {
     pub family: LocalThreadingFamily,
     /// The construct's block literals, receiver first.
     pub blocks: Vec<&'a Block>,
+    /// Whether codegen inlines the construct's blocks. False only for an
+    /// `on:do:`/`ensure:` whose protected body or handler is not a block
+    /// literal (`b ensure: [w := 9]`, `[w := 9] ensure: c`): codegen compiles
+    /// such a send's literal block as a closure (BT-4430), so the block still
+    /// runs during the send ([`Self::runs_in_place`]) but its outer-local
+    /// writes are not threaded back ([`Self::is_threaded_today`]).
+    pub inlined: bool,
 }
 
 impl LocalThreadingConstruct<'_> {
@@ -1607,8 +1773,26 @@ impl LocalThreadingConstruct<'_> {
     /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)).
     /// The one predicate the nested-construct walks ([`threaded_today_block_writes`])
     /// and the Phase 0 check filter on.
+    ///
+    /// BT-4430: and not an `on:do:`/`ensure:` that codegen does not inline
+    /// ([`Self::inlined`]): its literal block is a closure, which can write no
+    /// outer local, so the Phase 0 check reports such a write (ADR 0133).
     #[must_use]
     pub fn is_threaded_today(&self) -> bool {
+        self.inlined && self.runs_in_place()
+    }
+
+    /// Whether the construct's blocks run during the send, in the activation
+    /// that holds it: every family but a lookup whose selector is not
+    /// [`dictionary_inline`](crate::state_threading_selectors::LookupShape::dictionary_inline)
+    /// (whose block is handed to the runtime). Unlike
+    /// [`Self::is_threaded_today`], an `on:do:`/`ensure:` that codegen does not
+    /// inline still runs its literal block here, as a closure applied inside
+    /// the `try` (BT-4430): a `^` in it ends the method or REPL input, and it
+    /// reads the locals as they stand. The predicate the `^` classification
+    /// ([`classify_in_place_returns`]) and the evaluation-order walks read.
+    #[must_use]
+    pub fn runs_in_place(&self) -> bool {
         match self.family {
             LocalThreadingFamily::Lookup => {
                 crate::state_threading_selectors::is_dictionary_inline_lookup(&self.selector)
@@ -1679,11 +1863,13 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         })
     };
     let mut blocks: Vec<&Block> = Vec::new();
+    let mut inlined = true;
     let family = match selector {
         MessageSelector::Keyword(_) => {
             if is_exception_selector(&sel) {
                 blocks.extend(receiver_block);
                 blocks.extend(literal_args());
+                inlined = exception_send_inlined(&sel, receiver, arguments);
                 LocalThreadingFamily::Exception
             } else if is_conditional_selector(&sel) {
                 blocks.extend(literal_args());
@@ -1737,40 +1923,82 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             selector: sel,
             family,
             blocks,
+            inlined,
         })
     }
 }
 
-/// BT-4288: the `^`s in `exprs` whose nearest enclosing block run in a loop's
-/// or fold's place is a loop or fold body: walking outward from the `^`, a
-/// block of a [`local_threading_construct`] of the
-/// [`LocalThreadingFamily::Loop`] or [`LocalThreadingFamily::Fold`] family
-/// that codegen threads today ([`LocalThreadingConstruct::is_threaded_today`])
-/// is reached before any closure (a block literal that is no construct block:
-/// stored, passed to a method, ...). Such a `^` is compiled inside the loop's
-/// `fun`, so it reaches the end of its scope only as a non-local-return throw
-/// to that scope's boundary.
+/// BT-4430: whether codegen inlines the `on:do:`/`ensure:` send of `selector`
+/// to `receiver` with `arguments`: its protected body (the receiver) and its
+/// handler or cleanup are both block literals, the shape
+/// [`exception_arm_blocks`] and codegen's `generate_on_do`/`generate_ensure`
+/// lower in place. Any other such send compiles its literal block as a
+/// closure. The one rule behind [`LocalThreadingConstruct::inlined`] and the
+/// ADR 0133 escape check (`validators/local_threading.rs`); codegen's
+/// generators decide through [`inlined_exception_blocks`], which it reads.
+#[must_use]
+pub fn exception_send_inlined(
+    selector: &str,
+    receiver: &Expression,
+    arguments: &[Expression],
+) -> bool {
+    match crate::state_threading_selectors::state_threaded_block_arg_indices(selector) {
+        &[handler_index] => arguments
+            .get(handler_index)
+            .is_some_and(|handler| inlined_exception_blocks(receiver, handler).is_some()),
+        _ => false,
+    }
+}
+
+/// BT-4430: the protected body and the handler or cleanup of an
+/// `on:do:`/`ensure:` when the send is inlined ([`exception_send_inlined`]):
+/// both are bare block literals. `None` when either is not, and codegen's
+/// `generate_on_do`/`generate_ensure` compile the send's blocks as closures.
+#[must_use]
+pub fn inlined_exception_blocks<'a>(
+    receiver: &'a Expression,
+    handler: &'a Expression,
+) -> Option<(&'a Block, &'a Block)> {
+    match (receiver, handler) {
+        (Expression::Block(protected), Expression::Block(handler)) => Some((protected, handler)),
+        _ => None,
+    }
+}
+
+/// BT-4288 / BT-4312: the `^`s of a top-level scope (a REPL input), by where
+/// they run. The one rule both the REPL check
+/// (`validators/local_threading.rs`) and codegen's REPL eval boundary
+/// (`beamtalk-codegen`'s `repl_nlr.rs`, through [`repl_eval_returns`]) read.
+///
+/// A block is *run in place* when it is a block of a
+/// [`local_threading_construct`] whose blocks run during the send
+/// ([`LocalThreadingConstruct::runs_in_place`]): a conditional arm, an
+/// evaluated or protected block (`value`, `on:do:`, `ensure:`), a loop or
+/// fold body. Any other block literal is a *closure* (stored, passed to a
+/// method, ...).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LoopBodyReturns {
-    /// Every enclosing block is run in place (a conditional arm, an evaluated
-    /// or protected block, a loop or fold body): the `^` runs while the
-    /// method or REPL input that holds it runs, so it can end it. At the REPL,
-    /// codegen establishes the eval's boundary for exactly these, and only
-    /// these throw to it.
+pub struct InPlaceReturns {
+    /// No closure encloses the `^` (it is at the root, or every enclosing
+    /// block is run in place): the `^` runs while the method or REPL input
+    /// that holds it runs, so it ends it with its value, as in a method.
     pub in_place: Vec<Span>,
-    /// A closure encloses the loop (`b := [#(1, 2) do: [:x | ^x]]`,
-    /// `Holder keep: [...]`): the `^` may run in a later REPL input, after
-    /// the eval that created it has ended, so no REPL boundary can catch it.
-    /// At the REPL it answers its value inside the loop, which ignores it, so
-    /// the REPL check rejects it (BT-4003).
+    /// The `^` is in a loop or fold body (walking outward, a loop or fold
+    /// body is reached before any closure) and a closure encloses that loop
+    /// (`b := [#(1, 2) do: [:x | ^x]]`, `Holder keep: [...]`): the `^` may
+    /// run in a later REPL input, after the eval that created it has ended,
+    /// so no REPL boundary can catch it. At the REPL it answers its value
+    /// inside the loop, which ignores it, so the REPL check rejects it
+    /// (BT-4003). A `^` held by a closure but in no loop body of its own
+    /// (`b := [:x | ^x]`) is in neither list: it answers its value where it
+    /// stands, the closure's value.
     pub in_closure: Vec<Span>,
 }
 
-/// Classifies the loop-body `^`s of `exprs` ([`LoopBodyReturns`]).
+/// Classifies the `^`s of `exprs` ([`InPlaceReturns`]).
 #[must_use]
-pub fn classify_loop_body_returns<'a>(
+pub fn classify_in_place_returns<'a>(
     exprs: impl IntoIterator<Item = &'a Expression>,
-) -> LoopBodyReturns {
+) -> InPlaceReturns {
     let mut in_place: HashSet<Span> = HashSet::new();
     let mut loop_bodies: HashSet<Span> = HashSet::new();
     let mut blocks: Vec<Span> = Vec::new();
@@ -1781,7 +2009,7 @@ pub fn classify_loop_body_returns<'a>(
             Expression::Return { span, .. } => returns.push(*span),
             Expression::MessageSend { .. } => {
                 let Some(construct) =
-                    local_threading_construct(e).filter(LocalThreadingConstruct::is_threaded_today)
+                    local_threading_construct(e).filter(LocalThreadingConstruct::runs_in_place)
                 else {
                     return;
                 };
@@ -1801,7 +2029,7 @@ pub fn classify_loop_body_returns<'a>(
     }
     let encloses =
         |outer: Span, inner: Span| outer.start() <= inner.start() && inner.end() <= outer.end();
-    let mut result = LoopBodyReturns::default();
+    let mut result = InPlaceReturns::default();
     for ret in returns {
         // The blocks enclosing the `^`, innermost first.
         let mut enclosing: Vec<Span> = blocks
@@ -1810,27 +2038,35 @@ pub fn classify_loop_body_returns<'a>(
             .filter(|b| encloses(*b, ret))
             .collect();
         enclosing.sort_by_key(|b| b.end() - b.start());
-        let Some(loop_at) = enclosing
-            .iter()
-            .position(|b| !in_place.contains(b) || loop_bodies.contains(b))
-            .filter(|&at| loop_bodies.contains(&enclosing[at]))
-        else {
-            continue;
-        };
-        if enclosing[loop_at..].iter().all(|b| in_place.contains(b)) {
+        if enclosing.iter().all(|b| in_place.contains(b)) {
             result.in_place.push(ret);
-        } else {
+        } else if enclosing
+            .iter()
+            .find(|b| !in_place.contains(*b) || loop_bodies.contains(*b))
+            .is_some_and(|b| loop_bodies.contains(b))
+        {
             result.in_closure.push(ret);
         }
     }
     result
 }
 
-/// The [`LoopBodyReturns::in_place`] returns of `exprs`: the ones a REPL eval
-/// boundary catches.
+/// The [`InPlaceReturns::in_place`] returns of the REPL input `exprs` that
+/// throw to the eval's boundary: every one but a `^` that is the input's
+/// whole last statement (`x := 1. ^x`). That one already ends the input where
+/// it stands, so it keeps its bare-value lowering and, in trace mode, the
+/// steps of the statements before it.
 #[must_use]
-pub fn loop_body_returns<'a>(exprs: impl IntoIterator<Item = &'a Expression>) -> Vec<Span> {
-    classify_loop_body_returns(exprs).in_place
+pub fn repl_eval_returns(exprs: &[Expression]) -> Vec<Span> {
+    let last_root = match exprs.last() {
+        Some(Expression::Return { span, .. }) => Some(*span),
+        _ => None,
+    };
+    classify_in_place_returns(exprs)
+        .in_place
+        .into_iter()
+        .filter(|span| Some(*span) != last_root)
+        .collect()
 }
 
 /// ADR 0131 §1 "Transitive closure" (BT-3746): the outer locals a
@@ -2275,6 +2511,9 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
     };
     match construct.family {
         LocalThreadingFamily::Exception => {
+            if !construct.inlined {
+                return None;
+            }
             let &[handler_index] =
                 crate::state_threading_selectors::state_threaded_block_arg_indices(
                     &construct.selector,
@@ -2282,6 +2521,7 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
             else {
                 return None;
             };
+            // `inlined` ([`exception_send_inlined`]) holds: both are literals.
             match (receiver.as_ref(), arguments.get(handler_index)) {
                 (Expression::Block(protected), Some(Expression::Block(handler))) => {
                     Some(vec![protected, handler])
@@ -2916,6 +3156,11 @@ pub fn operand_loop_constructs_with_holders(
                     }
                 }
             }
+            Expression::BinaryConstruction { segments, .. } => {
+                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                    walk(e, holders, out);
+                }
+            }
             Expression::FieldAccess { receiver, .. } => walk(receiver, holders, out),
             Expression::Assignment { value, .. }
             | Expression::DestructureAssignment { value, .. }
@@ -3455,7 +3700,12 @@ pub fn is_self_field_target(target: &Expression) -> bool {
 /// sequencing them through `threaded_expression`, so a local-threading
 /// producer among them would leak its raw `{Value, State}` tuple and drop the
 /// write. Those are the actor body lowerings of a `super` send, an `error:`
-/// send, `self fieldAt:put:` / `self clearField:`, a block `value`-family send
+/// send (the actor `ErrorSend` body lowering, which takes only an `error:` to
+/// an instance receiver; this stops at every `error:` send whatever its
+/// receiver, a safe over-approximation, since the `error:` lowering sequences
+/// its own operands for every receiver kind, see
+/// [`crate::ast::is_error_signal_instance_receiver`]),
+/// `self fieldAt:put:` / `self clearField:`, a block `value`-family send
 /// (`value:`, `valueWithArguments:`; a possible Tier 2 call on a local or a
 /// `self.field`) and a self-send carrying a block argument (a
 /// possible Tier 2 self-send). Applied in every context, so the diagnostic does
@@ -3529,7 +3779,9 @@ pub enum UnsequencedOperand {
     Cast,
     /// An argument of a `super` send.
     SuperSend,
-    /// The argument of an `error:` send.
+    /// The argument of an `error:` send, for any receiver: an
+    /// over-approximation of the actor `ErrorSend` body lowering, which takes
+    /// only an instance receiver (see [`operands_not_sequenced`]).
     ErrorSend,
     /// An argument of `self fieldAt:put:`.
     FieldAtPut,
@@ -3613,9 +3865,12 @@ pub fn unsequenced_operand_holder(expr: &Expression) -> Option<UnsequencedOperan
         Expression::Assignment { .. } => Some(UnsequencedOperand::Assignment),
         Expression::DestructureAssignment { .. } => Some(UnsequencedOperand::Destructure),
         Expression::Match { .. } => Some(UnsequencedOperand::MatchSubject),
-        // A literal collection's elements are walked. Nothing else holds an
-        // operand the walks reach that can be a loop or fold (a field access's
-        // receiver is an identifier: the parser forms one only after it).
+        // A literal collection's elements are walked, and so are a binary
+        // construction's segment values and sizes (ADR 0143): codegen
+        // sequences them as literal-container children, left to right.
+        // Nothing else holds an operand the walks reach that can be a loop or
+        // fold (a field access's receiver is an identifier: the parser forms
+        // one only after it).
         _ => None,
     }
 }
@@ -3871,6 +4126,11 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
                 crate::ast::StringSegment::Interpolation(e) => stored_block_var_uses(e, var_name),
                 crate::ast::StringSegment::Literal(_) => (false, false),
             })
+            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .map(|e| stored_block_var_uses(e, var_name))
             .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
     }
 }
@@ -4421,6 +4681,98 @@ mod tests {
         // Not to `self`: not a probe of the class-variable home.
         let acc = cv_accesses("[:o | o hasField: #n]");
         assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_field_at_is_a_read_of_a_named_variable() {
+        let acc = cv_accesses("[self fieldAt: #n]");
+        assert_eq!(acc.field_at_reads, names(&["n"]));
+        assert!(acc.reads_class_state());
+        assert!(acc.reads.is_empty(), "not a `self.n` read: {acc:?}");
+        assert_eq!(
+            acc.field_at_read_noun("class variable").as_deref(),
+            Some("class variable n")
+        );
+        // A literal name that is no variable reads no captured state (it
+        // raises anyway).
+        let acc = cv_accesses("[self fieldAt: #nope]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // A computed name may name one.
+        let acc = cv_accesses("[:k | self fieldAt: k]");
+        assert!(acc.computed_field_at_read && acc.reads_class_state());
+        assert_eq!(acc.field_at_read_noun("field").as_deref(), Some("a field"));
+        // A write is not a read; a cascade message or another receiver is
+        // an ordinary send.
+        let acc = cv_accesses("[self fieldAt: #n put: 1]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        let acc = cv_accesses("[self fieldAt: #n; fieldAt: #m]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        let acc = cv_accesses("[:o | o fieldAt: #n]");
+        assert!(!acc.reads_class_state(), "{acc:?}");
+    }
+
+    #[test]
+    fn class_var_accesses_reads_phrase_names_each_variable_once() {
+        let acc = cv_accesses("[self.n printString. self fieldAt: #n. self fieldAt: #m]");
+        assert_eq!(
+            acc.reads_phrase("class variable", "C").as_deref(),
+            Some("reads class variable n of C and class variable m with `fieldAt:`")
+        );
+        let acc = cv_accesses("[self.n printString. self fieldAt: #n]");
+        assert_eq!(
+            acc.reads_phrase("field", "C").as_deref(),
+            Some("reads field n of C")
+        );
+        let acc = cv_accesses("[:k | self.n printString. self fieldAt: #n. self fieldAt: k]");
+        assert_eq!(
+            acc.reads_phrase("field", "C").as_deref(),
+            Some("reads field n of C and a field with `fieldAt:`")
+        );
+        assert_eq!(
+            cv_accesses("[self hasField: #n]").reads_phrase("f", "C"),
+            None
+        );
+    }
+
+    #[test]
+    fn class_var_accesses_records_reflective_writes_in_walk_order() {
+        let src =
+            "[:k | self clearField: #nope. [self fieldAt: k put: 1]. self fieldAt: #n put: 2]";
+        let acc = cv_accesses(src);
+        let found: Vec<(ReflectiveWriteKind, Option<&str>)> = acc
+            .reflective_writes
+            .iter()
+            .map(|w| (w.kind, w.name.as_deref()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (ReflectiveWriteKind::ClearField, Some("nope")),
+                (ReflectiveWriteKind::FieldAtPut, None),
+                (ReflectiveWriteKind::FieldAtPut, Some("n")),
+            ]
+        );
+        let first = u32::try_from(src.find("self clearField").expect("fixture")).expect("small");
+        assert_eq!(acc.reflective_writes[0].start, first);
+        assert_eq!(
+            acc.reflective_writes[0].describe("class variable", "C"),
+            "clears class variable 'nope' of C with `clearField:`"
+        );
+        assert_eq!(
+            acc.reflective_writes[1].describe("field", "C"),
+            "writes a field of C with `fieldAt:put:`"
+        );
+        // A write is not a read.
+        assert!(!acc.reads_class_state(), "{acc:?}");
+        // A cascade message, a cast or another receiver is an ordinary send.
+        for src in [
+            "[self fieldAt: #n put: 1; clearField: #m]",
+            "[self clearField: #n!]",
+            "[:o | o fieldAt: #n put: 1. o clearField: #n]",
+        ] {
+            let acc = cv_accesses(src);
+            assert!(acc.reflective_writes.is_empty(), "{src}: {acc:?}");
+        }
     }
 
     #[test]
@@ -5118,6 +5470,31 @@ mod tests {
                 !src.contains("ifAbsentPut:"),
                 "{src}"
             );
+            assert_eq!(
+                construct.runs_in_place(),
+                construct.is_threaded_today(),
+                "{src}"
+            );
+        }
+        // BT-4430: an `on:do:`/`ensure:` with a non-literal protected body or
+        // handler is a construct whose literal block runs in place, but codegen
+        // compiles it as a closure, so its writes are not threaded.
+        for (src, blocks) in [
+            ("b ensure: [i := 2]", 1),
+            ("[i := 1] ensure: c", 1),
+            ("b on: Error do: [:e | i := 2]", 1),
+            ("[i := 1] on: Error do: h", 1),
+            ("(self make) ensure: [i := 2]", 1),
+        ] {
+            let expr = parse_first_expr(src);
+            let construct =
+                local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
+            assert_eq!(construct.family, Exception, "{src}");
+            assert_eq!(construct.blocks.len(), blocks, "{src}");
+            assert!(!construct.inlined, "{src}");
+            assert!(!construct.is_threaded_today(), "{src}");
+            assert!(construct.runs_in_place(), "{src}");
+            assert!(exception_arm_blocks(&expr).is_none(), "{src}");
         }
         for src in [
             "items foo: [:x | i := x]",

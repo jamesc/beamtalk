@@ -88,9 +88,9 @@ pub use class_module_registry::{
     RegistryEntry, relative_module_segments, validate_stdlib_module_name,
 };
 pub use collision_checker::{
-    DepInfo, DependencyRegistry, build_dependency_registry, build_dependency_registry_with_graph,
-    check_collision_at_use_sites, check_stdlib_reservation, check_transitive_dep_usage,
-    shadowed_class_names,
+    DepInfo, DependencyRegistry, ShadowedClassNames, build_dependency_registry,
+    build_dependency_registry_with_graph, check_collision_at_use_sites, check_stdlib_reservation,
+    check_transitive_dep_usage, shadowed_class_names, shadowed_class_names_in_scope,
 };
 pub use definite_assignment::{
     admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,
@@ -897,6 +897,19 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         pre_loaded_classes
     };
 
+    // BT-4283: before the pre-loaded entries are folded into the hierarchy
+    // (which keeps one entry per name), record which class names more than
+    // one package in scope declares — the same rule over the same kind of
+    // scope the codegen driver uses, so the block-escape validators ask
+    // `class_reference_send_runs_in_caller` with the shadowing codegen sees.
+    let shadowed = shadowed_class_names_in_scope(
+        &pre_loaded_classes,
+        module,
+        current_package,
+        &result.class_hierarchy,
+    );
+    result.class_hierarchy.set_shadowed_class_names(shadowed);
+
     // ADR 0050 Phase 4: inject REPL-session class metadata before TypeChecking
     if !pre_loaded_classes.is_empty() {
         result
@@ -944,31 +957,18 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Seed the registry with pre-loaded protocols (e.g. BUnit fixture
     // protocols) *before* registering the current module's protocols so that
     // fixture protocol names are visible to `extending:` resolution and the
-    // unresolved-class validator. Skip pre-loaded entries whose names also
-    // appear in the current module — this mirrors `cross_file_class_infos`
+    // unresolved-class validator. Pre-loaded entries whose names also appear
+    // in the current module are skipped — this mirrors `cross_file_class_infos`
     // and prevents spurious "Duplicate protocol definition" errors when a
     // fixture file is itself being compiled (its own protocols are already
     // present in the pre_loaded slice).
-    if !pre_loaded_protocols.is_empty() {
-        let current_names: std::collections::HashSet<&EcoString> =
-            module.protocols.iter().map(|p| &p.name.name).collect();
-        let cross_file_protocols: Vec<_> = pre_loaded_protocols
-            .into_iter()
-            .filter(|p| !current_names.contains(&p.name))
-            .collect();
-        let collision_diags = result.protocol_registry.add_pre_loaded(
-            cross_file_protocols,
-            &result.class_hierarchy,
-            trait_package,
-        );
-        result.diagnostics.extend(collision_diags);
-    }
-    if !module.protocols.is_empty() {
-        let proto_diags = result
-            .protocol_registry
-            .register_module(module, &result.class_hierarchy);
-        result.diagnostics.extend(proto_diags);
-    }
+    let proto_diags = result.protocol_registry.seed_and_register_module(
+        module,
+        pre_loaded_protocols,
+        &result.class_hierarchy,
+        trait_package,
+    );
+    result.diagnostics.extend(proto_diags);
 
     // Phase 0.55: Trait semantic checks (ADR 0127 §3 step 5, §3a, §5, §7;
     // BT-3589) — the post-`ClassHierarchy` half of the two-part expansion
@@ -1190,6 +1190,9 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // lowers straight to Erlang BIFs (`=:=`, `=/=`, `==`, `/=`, ADR 0002) —
     // they never dispatch, so such a method is silently dead code.
     validators::check_non_overridable_operator_methods(module, &mut result.diagnostics);
+    // Warn on a class method named after a class-variable reflection
+    // selector, which the class process answers ahead of it (BT-4422).
+    validators::check_class_var_reflection_shadowing(module, &mut result.diagnostics);
     validators::check_class_variable_access(
         module,
         &result.class_hierarchy,

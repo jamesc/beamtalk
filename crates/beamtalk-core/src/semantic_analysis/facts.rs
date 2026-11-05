@@ -10,8 +10,8 @@
 //! inline at every call site.
 
 use crate::ast::{
-    Block, BlockId, CascadeMessage, Expression, ExpressionStatement, MessageSelector, MethodKind,
-    Module, StringSegment,
+    BinarySegment, Block, BlockId, CascadeMessage, Expression, ExpressionStatement,
+    MessageSelector, MethodKind, Module, StringSegment,
 };
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::Span;
@@ -339,6 +339,10 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
             StringSegment::Literal(_) => false,
             StringSegment::Interpolation(e) => expr_has_block_nlr(e, inside_block),
         }),
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .any(|e| expr_has_block_nlr(e, inside_block)),
         Expression::DestructureAssignment { value, .. } => expr_has_block_nlr(value, inside_block),
         Expression::Literal(..)
         | Expression::Identifier(..)
@@ -580,6 +584,11 @@ fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
                 }
             }
         }
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                collect_expression_facts(e, facts);
+            }
+        }
 
         // Leaf nodes: no sub-expressions to recurse into
         Expression::Literal(..)
@@ -813,6 +822,12 @@ fn compute_state_effects(
             }
             eff
         }
+        Expression::BinaryConstruction { segments, .. } => segments
+            .iter()
+            .flat_map(BinarySegment::sub_expressions)
+            .fold(StateEffects::default(), |eff, e| {
+                eff.union(compute_state_effects(e, in_class_method, out))
+            }),
     };
     out.insert(expr.span(), effects);
     effects

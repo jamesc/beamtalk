@@ -8,6 +8,8 @@
 #
 #   bench    (default) interleaved rounds, markdown table on stdout
 #   profile  per-row function call counts (what each operation calls)
+#   invalidate  invalidate/1 of a base class over N subclasses x K warmed
+#            static call keys (BT-4431); ROUNDS is the rounds per shape
 #
 # BEAMTALK selects the compiler (default: `beamtalk` on PATH, else the repo's
 # dist/bin/beamtalk); its sysroot supplies the runtime and stdlib.
@@ -57,7 +59,8 @@ paths+=("$elixir_ebin" "$ex_build/ebin" "$ex_build/consolidated" "$bt_ebin" "$ou
 case "$mode" in
   bench) args="[\"$rounds\"${rows:+, \"$rows\"}]"; entry="main" ;;
   profile) args="[${rows:+\"$rows\"}]"; entry="profile" ;;
-  *) echo "usage: $0 [bench|profile] [ROUNDS] [ROW_IDS]" >&2; exit 2 ;;
+  invalidate) args="[\"$rounds\"]"; entry="invalidate" ;;
+  *) echo "usage: $0 [bench|profile|invalidate] [ROUNDS] [ROW_IDS]" >&2; exit 2 ;;
 esac
 
 export VS_BENCH_BT_EBIN="$bt_ebin"

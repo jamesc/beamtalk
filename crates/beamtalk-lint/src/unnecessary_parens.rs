@@ -22,8 +22,8 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
-use crate::{LintPass, LintTree};
-use beamtalk_core::ast::{Block, Expression, MessageSelector, Module};
+use crate::{LintContext, LintPass, LintTree};
+use beamtalk_core::ast::{BinarySegment, Block, Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::for_each_expr_seq;
 use beamtalk_core::source_analysis::Diagnostic;
 
@@ -37,7 +37,7 @@ impl LintPass for UnnecessaryParensPass {
         LintTree::Parsed
     }
 
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         for_each_expr_seq(module, |seq| {
             for stmt in seq {
                 check_expr(&stmt.expression, diagnostics);
@@ -103,7 +103,9 @@ fn check_interpolated_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>)
 /// Used for map literal keys: `#{(x) => v}` uses parens to signal a dynamic
 /// variable key (bare words are a compile error), so `(x)` there
 /// is semantically meaningful.  Deeper nesting (e.g., `#{((x)) => v}`) still
-/// recurses and may flag the inner `(x)`.
+/// recurses and may flag the inner `(x)`. Also used for binary construction
+/// segment values and sizes, where `(...)` is the only way to write a value
+/// other than a variable or literal (ADR 0143).
 fn check_map_key(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
     if let Expression::Parenthesized { expression, .. } = expr {
         check_expr(expression, diagnostics);
@@ -264,6 +266,14 @@ fn check_expr(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
                     check_interpolated_expr(e, diagnostics);
                 }
+            }
+        }
+        // A construction segment value or size other than a variable or
+        // literal must be parenthesised (ADR 0143 § Segment values), so a
+        // top-level `(...)` there is significant: lint only its contents.
+        Expression::BinaryConstruction { segments, .. } => {
+            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
+                check_map_key(e, diagnostics);
             }
         }
 

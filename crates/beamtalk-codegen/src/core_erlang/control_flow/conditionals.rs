@@ -582,7 +582,7 @@ impl CoreErlangGenerator {
                 .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
             chain = docvec![
                 "call 'maps':'put'(",
-                leaf::atom(Self::local_state_key(var)),
+                leaf::atom(self.local_scratch_key(var)),
                 ", ",
                 leaf::var(core_var),
                 ", ",
@@ -739,7 +739,14 @@ impl CoreErlangGenerator {
         // compile) would otherwise double-dispatch a class-var receiver:
         // `thread_ahead` now threads it, so a second compile must not
         // re-run its producer a second time.
-        self.threaded_expression(receiver, frame)
+        let mut tv = self.threaded_expression(receiver, frame)?;
+        // BT-4415: a rewritten guard's condition is decided by
+        // `beamtalk_guard_return` for a non-Boolean receiver.
+        if self.is_guard_condition(receiver) {
+            let value_doc = self.threaded_value_doc(&tv.value);
+            tv.value = ValueRef::Doc(self.guard_condition_doc(receiver, value_doc));
+        }
+        Ok(tv)
     }
 
     /// Whether an arm statement `expr` with mutations is lowered through
@@ -2330,11 +2337,7 @@ impl CoreErlangGenerator {
         let val_var = self.fresh_temp_var("Val");
         // In REPL mode, use the plain variable name as the key (no
         // __local__ prefix), so reads and writes agree on the key.
-        let state_key: String = if self.is_repl_mode() {
-            id.name.to_string()
-        } else {
-            Self::local_state_key(&id.name)
-        };
+        let state_key = self.local_scratch_key(&id.name);
 
         // C2z — BT-3493: the RHS is itself a field write (`r := (self.x
         // := ...)`, at any parenthesization depth) — the shared ADR 0111
@@ -3558,7 +3561,7 @@ impl CoreErlangGenerator {
                                     "let ",
                                     leaf::var(core_var),
                                     " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
+                                    leaf::atom(self.local_scratch_key(var)),
                                     ", ",
                                     leaf::var(new_state_name.clone()),
                                     ") in ",

@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4270: inherits `class signal:` from Bt4270RaiseMid (and so from
+// Exception). See class_literal_signal_test.bt.
+
+Bt4270RaiseMid subclass: Bt4270RaiseLeaf

@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4279: a typed slot read in an actor method skips its cell bracket only
+// while the loaded module's `__is_slot/1` says the selector is still the
+// auto-generated getter. A live patch that turns the getter into a method
+// regenerates `__is_slot/1`, so the next read takes the bracketed arm: here
+// the new method runs a block that writes a field of the calling actor, and
+// the write is kept. Needs a live workspace (it recompiles the class).
+
+sealed Value subclass: SlotReloadPt
+  field: x :: Integer = 0
+  field: blk :: Dynamic = nil
+// => "SlotReloadPt"
+
+Actor subclass: SlotReloadReader
+  state: n :: Integer = 0
+  readOf: p :: SlotReloadPt -> Integer => p x + self.n
+// => "SlotReloadReader"
+
+SlotReloadReader >> pointWithBump -> SlotReloadPt => SlotReloadPt x: 5 blk: [self.n := self.n + 100]
+// => "SlotReloadReader>>pointWithBump"
+
+reader := SlotReloadReader spawn
+// => Actor(SlotReloadReader, _)
+
+p := reader pointWithBump
+// => _
+
+reader readOf: p
+// => 5
+
+// The getter becomes a method that runs the stored block, then answers 1.
+// `p x` runs first, so `self.n` then reads the block's write: 1 + 100.
+SlotReloadPt >> x => self.blk value. 1
+// => "SlotReloadPt>>x"
+
+reader readOf: p
+// => 101
+
+reader stop
+// => _

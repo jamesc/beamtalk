@@ -818,3 +818,79 @@ fn is_self_receiver_false_for_other_ident() {
 fn is_self_receiver_false_for_non_ident() {
     assert!(!TypeChecker::is_self_receiver(&int_lit(1)));
 }
+
+// ---- Binary construction result class (ADR 0143 § Result class) ----
+
+/// The inferred type of the binary construction `source` (one statement;
+/// warnings allowed, no errors).
+fn binary_construction_type_of(source: &str) -> InferredType {
+    let (module, diagnostics) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(source));
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity != crate::source_analysis::Severity::Error),
+        "{source}: {diagnostics:?}"
+    );
+    let expr = &module.expressions[0].expression;
+    assert!(
+        matches!(expr, Expression::BinaryConstruction { .. }),
+        "{source}: {expr:?}"
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    checker.infer_expr(expr, &hierarchy, &mut env, false)
+}
+
+#[test]
+fn byte_aligned_binary_construction_is_a_binary() {
+    for source in [
+        "<<>>",
+        "<<16:8, 3:8, len:24, payload/binary>>",
+        "<<v>>",
+        "<<1.5/float>>",
+        "<<1.5:32/float>>",
+        // BT-4407: a float segment is 16/32/64 bits whatever its size
+        // expression, or the construction fails.
+        "<<v:n/float>>",
+        "<<v:n/float-unit:2>>",
+        "<<1:4, v:n/float, 1:4>>",
+        "<<$A>>",
+        "<<\"hi\">>",
+        "<<c/utf8, c/utf16>>",
+        "<<v:4, w:4>>",
+        "<<v:n/binary>>",
+        "<<v:n/unit:8>>",
+        "<<v:2/unit:4>>",
+        "<<b:3/bits, c:5/bits>>",
+    ] {
+        assert_eq!(
+            binary_construction_type_of(source),
+            InferredType::known("Binary"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unaligned_binary_construction_is_a_bitstring() {
+    for source in ["<<1:3>>", "<<1:4, 1:5>>", "<<v:1/unit:4>>", "<<b:3/bits>>"] {
+        assert_eq!(
+            binary_construction_type_of(source),
+            InferredType::known("Bitstring"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn binary_construction_of_unknown_alignment_is_a_union() {
+    let union = InferredType::union_of(&[
+        InferredType::known("Bitstring"),
+        InferredType::known("Binary"),
+    ]);
+    for source in ["<<b/bits>>", "<<v:n>>", "<<1:8, b/bitstring>>"] {
+        assert_eq!(binary_construction_type_of(source), union, "{source}");
+    }
+}

@@ -23,7 +23,7 @@
 //! parent's ordinary AST-directed compile substitutes that value instead of
 //! compiling (and, for a self-send, dispatching) the child a second time.
 
-use super::threaded_ir::{ThreadedStmt, VerifyError};
+use super::threaded_ir::{CallSiteLine, ThreadedStmt, VerifyError};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -298,12 +298,29 @@ impl CoreErlangGenerator {
     /// ([`CoreErlangGenerator::current_send_span`]), and leaves it bare when
     /// there is none (generated infrastructure outside any method).
     pub(super) fn annotate_current_send_call(&self, call: Document<'static>) -> Document<'static> {
-        // Outside any expression (a primitive-bodied method), the method's own
-        // line is the best the frame can name.
-        match self.current_send_span.or(self.current_method_span) {
-            Some(span) => self.annotate_call_node_with_line(call, span),
+        // BT-4405: the span -> line rule lives only in
+        // `current_send_call_site_line`, so this and the `ThreadedIr` loop
+        // entries cannot drift.
+        match self.current_send_call_site_line() {
+            Some(site) => Self::annotate_with_line_in(site.source_path.as_deref(), call, site.line),
             None => call,
         }
+    }
+
+    /// BT-4401: the [`CallSiteLine`] of the innermost send being lowered,
+    /// resolved now so a `ThreadedIr` node can carry it to the emitter (which
+    /// has no access to `current_send_span`). The single owner of the
+    /// send-span -> line rule; [`Self::annotate_current_send_call`] uses it.
+    /// `None` where the call is left bare (generated infrastructure outside
+    /// any method).
+    pub(super) fn current_send_call_site_line(&self) -> Option<CallSiteLine> {
+        // Outside any expression (a primitive-bodied method), the method's own
+        // line is the best the frame can name.
+        let span = self.current_send_span.or(self.current_method_span)?;
+        Some(CallSiteLine {
+            source_path: self.source_path.clone(),
+            line: self.span_to_line(span)?,
+        })
     }
 
     /// Removes every entry `scope` registered, once the parent compile

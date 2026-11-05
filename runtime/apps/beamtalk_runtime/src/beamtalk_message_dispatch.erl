@@ -60,6 +60,10 @@ See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messagi
 """.
 -export([send/3, send/4, cast/3, send_number_coercion/4]).
 
+%% Every send classifies its receiver: inline the classification so an actor
+%% send pays no local calls for it (BT-4265).
+-compile({inline, [classify_receiver/1, is_actor/1, is_actor_ref/1]}).
+
 %% Compiled stdlib modules are generated from Core Erlang.
 %% Dialyzer can't resolve them if stdlib hasn't been built yet.
 % elp:fixme W0048 intentional suppression for dynamic dispatch
@@ -115,6 +119,19 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
         {error, Error} ->
             beamtalk_exception_handler:reraise(Error)
     end;
+send(Receiver, 'equals:', [Arg]) when
+    is_number(Receiver);
+    is_atom(Receiver);
+    is_bitstring(Receiver);
+    is_list(Receiver);
+    is_function(Receiver);
+    is_tuple(Receiver), tuple_size(Receiver) =:= 2, element(1, Receiver) =:= beamtalk_string
+->
+    %% BT-4416: `=:=` fast path for `equals:` on a primitive receiver, which
+    %% otherwise walks the whole dispatch chain to reach `Object>>equals:`.
+    %% An override on the receiver's class — compiled or an extension — still
+    %% wins; see `beamtalk_equality:primitive_equals/2`.
+    beamtalk_equality:primitive_equals(Receiver, Arg);
 send(Receiver, Selector, Args) ->
     case classify_receiver(Receiver) of
         primitive ->
@@ -271,7 +288,11 @@ classify_receiver(Receiver) ->
                 'Metaclass' ->
                     metaclass;
                 ClassName ->
-                    case beamtalk_class_registry:is_class_object(Receiver) of
+                    %% `is_class_object/1`'s test, on the class field the
+                    %% record match above already read (BT-4265).
+                    case
+                        is_atom(ClassName) andalso beamtalk_class_registry:is_class_name(ClassName)
+                    of
                         true ->
                             {class, element(4, Receiver)};
                         false ->

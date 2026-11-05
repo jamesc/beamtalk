@@ -17,7 +17,7 @@
 //! answer => 42
 //! ```
 
-use crate::LintPass;
+use crate::{LintContext, LintPass};
 use beamtalk_core::ast::Module;
 use beamtalk_core::source_analysis::Diagnostic;
 
@@ -25,7 +25,7 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct EffectFreeStatementPass;
 
 impl LintPass for EffectFreeStatementPass {
-    fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         // This lint always checks module.expressions (skip_module_expression_lint = false)
         beamtalk_core::semantic_analysis::validators::check_effect_free_statements(
             module,

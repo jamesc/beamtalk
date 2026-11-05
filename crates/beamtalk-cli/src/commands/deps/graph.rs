@@ -536,7 +536,7 @@ fn discover_single_dep(
 }
 
 /// Orders the discovered dependency graph for compilation (leaves first, root's
-/// direct deps last), via [`beamtalk_cli::dep_order::topological_order`] — the
+/// direct deps last), via [`beamtalk_core::compilation::dep_order::topological_order`] — the
 /// order the fresh-deps and offline paths reproduce. The root package itself is
 /// NOT included in the output.
 ///
@@ -545,7 +545,7 @@ fn discover_single_dep(
 /// Returns an error if a cycle is detected (should not happen if `discover_deps`
 /// already checked, but this is a safety net).
 fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Result<Vec<String>> {
-    beamtalk_cli::dep_order::topological_order(&dependency_edges(graph), root_name)
+    beamtalk_core::compilation::dep_order::topological_order(&dependency_edges(graph), root_name)
 }
 
 /// Each package's direct-dependency names — the graph's edges.

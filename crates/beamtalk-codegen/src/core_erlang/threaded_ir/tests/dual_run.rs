@@ -169,6 +169,7 @@ fn dual_run_conditional_loop_direct_params_byte_parity() {
         produces: vec![sum_v0],
         outer_args: None,
         exit_arm: ir_exit_arm,
+        entry_line: None,
         span: span(),
     }];
     let mut ctx = RenderCtx::new(&mut render_gen);
@@ -251,6 +252,7 @@ fn dual_run_conditional_loop_direct_params_condition_with_prelude() {
         body,
         produces: vec![sum_v0],
         outer_args: None,
+        entry_line: None,
         exit_arm,
         span: span(),
     }];
@@ -418,6 +420,7 @@ fn dual_run_conditional_loop_hybrid_state_prefix_matches_live_generator() {
         produces: vec![sum_v0],
         outer_args: None,
         exit_arm: ir_exit_arm,
+        entry_line: None,
         span: span(),
     }];
     let mut ctx = RenderCtx::new(&mut render_gen);

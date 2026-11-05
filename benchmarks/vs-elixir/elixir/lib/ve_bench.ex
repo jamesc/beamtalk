@@ -38,6 +38,7 @@ defmodule VeBench do
   def square, do: %VeBench.Square{}
   def sub, do: %Sub{}
   def counter, do: elem(Counter.start(), 1)
+  def sub_counter, do: elem(VeBench.SubCounter.start(), 1)
   def adder, do: fn x -> x + 1 end
   def list100, do: Enum.to_list(1..100)
   def dict, do: %{a: 1, b: 2, k: 3}
@@ -61,6 +62,8 @@ defmodule VeBench do
 
   defbench(:with_x, p, do: %{p | x: 3})
   defbench(:construct, a, do: %Point{x: a, y: 4})
+  defbench(:construct_map, a, do: struct!(Point, %{x: a, y: 4}))
+  defbench(:mapset_new, _, do: MapSet.new())
 
   # === 3. Remote call ===
 
@@ -93,6 +96,8 @@ defmodule VeBench do
   defbench(:gen_call, pid, do: GenServer.call(pid, :count))
   defbench(:gen_update, pid, do: GenServer.call(pid, :increment))
   defbench(:gen_probe, pid, do: GenServer.call(pid, :probe))
+  defbench(:gen_sum_of, pid, do: GenServer.call(pid, {:sum_of, %Point{x: 1, y: 2}}))
+  defbench(:gen_via_self, pid, do: GenServer.call(pid, :via_self))
 
   # n casts, then one call so every cast has been handled.
   def gen_cast(n, pid) do

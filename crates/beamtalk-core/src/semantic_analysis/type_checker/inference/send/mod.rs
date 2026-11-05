@@ -88,6 +88,12 @@ impl TypeChecker {
         matches!(expr, Expression::Identifier(ident) if ident.name == "self")
     }
 
+    /// Returns true if `expr` is `self` or `super`. A send receiver is
+    /// already peeled of parentheses by `ast::normalize` (BT-4059).
+    pub(in crate::semantic_analysis::type_checker) fn is_self_or_super(expr: &Expression) -> bool {
+        Self::is_self_receiver(expr) || matches!(expr, Expression::Super(_))
+    }
+
     /// Returns true if `expr` is `self` or `super` inside a class method — a
     /// send to it resolves against class-side methods (BT-4001: a class-side
     /// `super` walks the superclass's class methods, so its receiver type is
@@ -98,8 +104,7 @@ impl TypeChecker {
         expr: &Expression,
         env: &TypeEnv,
     ) -> bool {
-        env.in_class_method
-            && (Self::is_self_receiver(expr) || matches!(expr, Expression::Super(_)))
+        env.in_class_method && Self::is_self_or_super(expr)
     }
 
     /// Returns true if `expr` resolves to a class-side receiver — either a

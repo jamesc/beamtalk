@@ -7,7 +7,7 @@
 //!
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
-use super::{param, wrap_string_result};
+use super::{call_self_p0, param, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -20,11 +20,27 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
     match selector {
         "size" => Some(Document::Str("call 'erlang':'tuple_size'(Self)")),
         "at:" => {
+            // BT-4400: the in-range case reads the element inline, so a typed
+            // `t at: i` costs no more than any other direct call (no extra hop
+            // into the runtime helper). Every other index (non-integer, out of
+            // range) takes the helper, which raises the structured error — so
+            // the error behaviour is the helper's, unchanged.
             let p0 = params.first()?;
+            let idx = || leaf::var(p0.clone());
             Some(docvec![
-                "call 'beamtalk_tuple':'at'(Self, ",
-                leaf::var(p0.clone()),
-                ")"
+                "case ",
+                idx(),
+                " of <_> when call 'erlang':'and'(call 'erlang':'is_integer'(",
+                idx(),
+                "), call 'erlang':'and'(call 'erlang':'>='(",
+                idx(),
+                ", 1), call 'erlang':'=<'(",
+                idx(),
+                ", call 'erlang':'tuple_size'(Self)))) -> call 'erlang':'element'(",
+                idx(),
+                ", Self) <_> when 'true' -> call 'beamtalk_tuple':'at'(Self, ",
+                idx(),
+                ") end"
             ])
         }
         "isOk" => Some(Document::Str(
@@ -151,11 +167,20 @@ pub(crate) fn generate_proto_object_bif(
 /// Object primitive implementations.
 ///
 /// Object is the root class — methods here are inherited by all objects.
-pub(crate) fn generate_object_bif(
-    _selector: &str,
-    _params: &[String],
-) -> Option<Document<'static>> {
-    None
+///
+/// `isKindOf:` (BT-4410) calls the runtime intrinsic directly: it answers a
+/// boolean and raises only `#beamtalk_error{}`, so the foreign-FFI wrapper
+/// (`beamtalk_erlang_proxy:direct_call/4` and its result coercion) did
+/// nothing for it but cost four calls per send.
+pub(crate) fn generate_object_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "isKindOf:" => Some(call_self_p0(
+            "beamtalk_behaviour_intrinsics",
+            "objectIsKindOf",
+            param(params, 0, "_Class"),
+        )),
+        _ => None,
+    }
 }
 
 /// `Value` primitive implementations (ADR 0094, Phase 2).
@@ -279,10 +304,19 @@ mod tests {
 
     #[test]
     fn test_tuple_at_with_param() {
-        let result = doc_to_string(generate_tuple_bif("at:", &["Idx".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'at'(Self, Idx)".to_string())
+        let result = doc_to_string(generate_tuple_bif("at:", &["Idx".to_string()]))
+            .expect("at: should produce code");
+        // BT-4400: an in-range integer index reads the element inline...
+        assert!(
+            result.contains(
+                "when call 'erlang':'and'(call 'erlang':'is_integer'(Idx), call 'erlang':'and'(call 'erlang':'>='(Idx, 1), call 'erlang':'=<'(Idx, call 'erlang':'tuple_size'(Self)))) -> call 'erlang':'element'(Idx, Self)"
+            ),
+            "{result}"
+        );
+        // ...and every other index keeps the helper, which owns the errors.
+        assert!(
+            result.contains("<_> when 'true' -> call 'beamtalk_tuple':'at'(Self, Idx)"),
+            "{result}"
         );
     }
 
@@ -421,7 +455,7 @@ mod tests {
     // generate_object_bif tests
 
     #[test]
-    fn test_object_always_returns_none() {
+    fn test_object_unknown_returns_none() {
         assert_eq!(doc_to_string(generate_object_bif("anything", &[])), None);
         assert_eq!(doc_to_string(generate_object_bif("size", &[])), None);
     }

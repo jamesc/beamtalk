@@ -133,6 +133,13 @@ kill_and_wait(Pid, Reason) ->
 wait_until(Fun) ->
     wait_until(Fun, 300).
 
+%% Whether the registered monitor currently watches Pid. Matches the
+%% `#state{}` tuple positionally, so a change to the record's shape fails
+%% this match loudly instead of reading the wrong field.
+is_watched(Pid) ->
+    {state, _Max, _Window, Watched, _Refs, _History} = sys:get_state(beamtalk_class_monitor),
+    maps:is_key(Pid, Watched).
+
 wait_until(_Fun, 0) ->
     timeout;
 wait_until(Fun, Retries) ->
@@ -348,8 +355,13 @@ restart_budget_exhausted_test_() ->
                 %% budget window as the first.
                 Dummy2 = spawn_dummy(),
                 ok = beamtalk_class_monitor:watch('BudgetClass', Dummy2),
+                %% watch/2 is a synchronous call here, so Dummy2 is already watched.
+                ?assert(is_watched(Dummy2)),
                 kill_and_wait(Dummy2, kill),
-                timer:sleep(200),
+                %% The 'DOWN' handler drops Dummy2 from `watched` in the same
+                %% step that decides (here: refuses) the restart, so once it
+                %% is gone the restart count is final (BT-4382).
+                ?assertEqual(ok, wait_until(fun() -> not is_watched(Dummy2) end)),
                 ?assertEqual(
                     1, meck:num_calls(beamtalk_class_registry, restart_class, ['BudgetClass'])
                 )

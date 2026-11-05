@@ -28,6 +28,7 @@ Debug targets are tracked in an ETS table so that
 -include_lib("kernel/include/logger.hrl").
 
 -export([
+    log/3,
     set_domain/1,
     transcript_domain/0,
     install_transcript_handler/0,
@@ -95,6 +96,43 @@ subsystem_modules(_) ->
 %%====================================================================
 %% Public API
 %%====================================================================
+
+-doc """
+File one `Logger` send (`Logger info:` / `warn:` / `error:` / `debug:` and
+their `metadata:` variants) with OTP `logger` and answer `nil`.
+
+Both the call-site `Logger` intrinsic and the `@intrinsic logger*` method
+bodies lower to this call, so the String-to-OTP translation lives in one
+place (BT-4321). A Beamtalk `String` is the tagged term
+`{beamtalk_string, Bin}` (BT-4170), which OTP's formatters cannot render:
+`~ts` over the tuple files a `FORMAT ERROR` dump instead of the message.
+So the message and the metadata (keys and values, recursively) are unwrapped
+to bare binaries via `beamtalk_primitive:deep_unwrap_strings/1` first. A
+message that is still not text after unwrapping (e.g. an Integer sent
+through `perform:`) is printed with `~tp` instead of failing the format.
+
+The unwrap is skipped when `Level` is below the primary level. The gate
+checks the primary level only, never `logger:allow(Level, ?MODULE)`: every
+user `Logger` send funnels through this module, so a module-level override
+on it must not silence or unlock user logging. The event carries no `mfa`,
+so `logger:log/4` also applies only the primary level, matching the previous
+inline `logger:log/3` call.
+""".
+-spec log(logger:level(), term(), map()) -> nil.
+log(Level, Message, Meta) ->
+    case logger:compare_levels(Level, maps:get(level, logger:get_primary_config())) =/= lt of
+        true ->
+            Msg = beamtalk_primitive:deep_unwrap_strings(Message),
+            Format =
+                case is_binary(Msg) of
+                    true -> "~ts";
+                    false -> "~tp"
+                end,
+            logger:log(Level, Format, [Msg], beamtalk_primitive:deep_unwrap_strings(Meta));
+        false ->
+            ok
+    end,
+    nil.
 
 -doc """
 Set the OTP logger process-metadata domain for the calling process.

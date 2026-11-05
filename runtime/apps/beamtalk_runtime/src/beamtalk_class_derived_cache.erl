@@ -35,7 +35,19 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
-`{class_method_owner, ClassPid, Selector}`).
+`{class_method_owner, ClassPid, Selector}`,
+`{inherited_target, Class, Selector}`, `{declared_fields, Class}`,
+`{chain_has_user_new1, Class}`, `{direct_constructor, ClassPid, Selector}`).
+`chain_has_user_new1` is whether an ancestor of `Class` defines a user
+class-side `new:` (`beamtalk_class_metadata:chain_has_user_new1/1`, BT-4409);
+`direct_constructor` is the dynamic `new`/`new:` verdict built on it
+(`beamtalk_class_dispatch:lookup_direct_constructor/3`): the class, its tag
+and the module whose `new/0`/`new/1` may build in the caller, or `error`,
+before the per-send `direct_call_ok/2` and export checks.
+`declared_fields` is the full declared field set (own, inherited and `late`
+names) that `beamtalk_class_instantiation:check_init_args/5` validates a
+`new:`/`spawnWith:` map against (BT-4281); only a completed superclass walk
+is cached, never its `BaseState`-derived `not_found` fallback.
 `instance_method_info` is `beamtalk_method_resolver:instance_method_info/2`,
 the dispatch-time method lookup behind
 `beamtalk_primitive:runtime_instance_method/2`; `class_object` is the
@@ -54,6 +66,14 @@ or `respondsTo:` probe), so the table holds up to one row per class and
 selector atom sent through that path; selectors are existing atoms, and the
 next class write flushes them all. The `defining_method` key caches hits
 only; a miss re-walks so errors keep their exact shape.
+`inherited_target` (BT-4280, BT-4260) is the verdict a compiled class's
+default dispatch arm asks first (`beamtalk_dispatch:inherited_target/2`):
+`{compiled, Owner, Module}` when an inherited send may call the owner's
+compiled `State`-threading method directly (an actor's `dispatch/4` arm),
+`{value, Owner, Module}` when it may call the owner's state-less `dispatch/3`
+directly (a value-type `dispatch/3` arm), else `slow`. All are cached (an
+unregistered class is not), and a `compiled` hit re-checks the module's
+`dispatch/4` export (a `value` hit needs no check; its remote call loads it).
 
 ## Invalidation
 
@@ -61,11 +81,16 @@ Every write that can change a class's `module`, `superclass` or published
 method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
 `merge_identity/5` (hot reload, redefinition), instance-side
 `put_method_records/3` (every `publish_reflection/1`: `init/1`, `put_method`,
-reload) and `delete/1` (removal, `terminate/2`), plus the
+reload), `put_reflection/2` (instance variables, which the `declared_fields`
+memo reads; it invalidates on its own rather than relying on
+`publish_reflection/1` calling `put_method_records/3` after it) and
+`delete/1` (removal, `terminate/2`), plus the
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
 write has landed. So do the class-side writes the `class_method_owner` memo
 reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),
-`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change. Extension install and removal do too: compiled
+`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change,
+and the constructor facts `put_direct_constructors/2` and
+`put_defines_user_class_new1/2` (BT-4409). Extension install and removal do too: compiled
 `has_method_local/1` consults the extension table, so an extension changes
 resolution for every chain through its class.
 Invalidation is global, not per class: a derived fact about
@@ -104,6 +129,7 @@ so they share an owner and heir and are lost together.
     invalidate/0,
     fetch/2,
     fetch/3,
+    generation/0,
     inherits_from/2
 ]).
 
@@ -210,6 +236,22 @@ fetch_valid(Key, Compute, Valid) ->
             catch
                 error:badarg -> element(2, Compute())
             end
+    end.
+
+-doc """
+The current cache generation, or `undefined` before `new/0`.
+
+Every `invalidate/0` bumps it, so a caller that memoises a derived fact
+somewhere cheaper than this module's ETS table (BT-4416: a per-process memo
+on the `equals:` send path, where one ETS read is most of the cost) can tag
+the memo with the generation read *before* computing it and treat a
+mismatch as a miss.
+""".
+-spec generation() -> integer() | undefined.
+generation() ->
+    case persistent_term:get(?GEN_KEY, undefined) of
+        undefined -> undefined;
+        Ref -> atomics:get(Ref, 1)
     end.
 
 -doc """

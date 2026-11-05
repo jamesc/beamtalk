@@ -890,51 +890,24 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
     Ok(())
 }
 
-/// Client side of the version lock (BT-4327): ask the node for its
-/// `describe` versions and refuse a stale node.
-///
-/// A node predating the server gate ignores the new `auth` fields, so
-/// without this check a new client would silently compile against a stale
-/// toolchain.
-///
-/// The node queues actor-snapshot push frames ahead of our reply, so this
-/// waits for the frame echoing our `describe` id rather than trusting the
-/// next frame off the socket.
+/// Client side of the version lock (BT-4327): refuse a stale node via
+/// [`handshake::verify_server_versions_via_describe`].
 async fn verify_server_versions(ws: &mut WsStream) -> Result<(), String> {
-    use tokio_tungstenite::tungstenite::Message;
-
-    let describe = RequestBuilder::describe();
-    let want_id = describe
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let describe_str = serde_json::to_string(&describe)
-        .map_err(|e| format!("failed to serialise describe: {e}"))?;
-    ws.send(Message::Text(describe_str.into()))
-        .await
-        .map_err(|e| format!("failed to send describe: {e}"))?;
-    // Bound the whole wait: a node emitting a continuous push stream would
-    // otherwise delay connect indefinitely.
-    let deadline = tokio::time::Instant::now() + IO_TIMEOUT;
-    loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err("timed out waiting for the describe version check".to_string());
-        }
-        let response = read_text(ws).await?;
-        let response_json: serde_json::Value = serde_json::from_str(&response)
-            .map_err(|e| format!("failed to parse describe response: {e}"))?;
-        let parsed: ReplResponse = serde_json::from_value(response_json)
-            .map_err(|e| format!("failed to decode describe response: {e}"))?;
-        if want_id.is_some() && parsed.id == want_id {
-            return handshake::verify_server_versions(
-                parsed.versions.as_ref(),
-                handshake::beamtalk_version(),
-                handshake::PROTOCOL_VERSION,
-            );
-        }
-        // Anything else (actor-snapshot pushes queued ahead of our reply)
-        // is not our answer — keep waiting.
-    }
+    handshake::verify_server_versions_via_describe(
+        ws,
+        IO_TIMEOUT,
+        async |ws: &mut WsStream, text: String| {
+            ws.send(Message::Text(text.into()))
+                .await
+                .map_err(|e| e.to_string())
+        },
+        async |ws: &mut WsStream, remaining| {
+            tokio::time::timeout(remaining, read_text(ws))
+                .await
+                .map_err(|_| "timed out waiting for the describe version check".to_string())?
+        },
+    )
+    .await
 }
 
 async fn read_text(ws: &mut WsStream) -> Result<String, String> {
@@ -1716,12 +1689,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_to_fails_when_nothing_is_listening() {
-        // Bind then drop, so the port is known-free for the length of the test.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        drop(listener);
+        let port = beamtalk_repl_protocol::test_ports::closed_port();
 
         let sinks = Sinks::new();
         let result = RuntimeClient::connect_to(

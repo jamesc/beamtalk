@@ -120,12 +120,15 @@ pub(in crate::core_erlang) struct ClassContext {
     /// that would direct-call its module — `class sealed` class methods,
     /// keyword constructors and nullary `new` (`class_reference_direct_call_info`,
     /// BT-4271). Own-class self-sends are unaffected (`self` is this module's
-    /// own class). The spawn family on a class reference still calls the
-    /// compile-time module's `spawn`/`spawn_monitored` (BT-4278). Set once by
-    /// the driver before generation.
+    /// own class). The spawn family on an unqualified class reference
+    /// (`spawn`/`spawnWith:`/`spawnMonitored`/`spawnMonitoredWith:`, and the
+    /// ADR 0135 supervisor start) keeps its caller-side spawn but resolves
+    /// the module at call time from the class registry instead of pinning
+    /// it (`spawn_module_resolved_at_runtime`, BT-4278). Set once by the
+    /// driver before generation.
     ///
     /// [`CoreErlangGenerator::is_shadowed_class`]: crate::core_erlang::CoreErlangGenerator::is_shadowed_class
-    pub shadowed_class_names: std::collections::HashSet<ecow::EcoString>,
+    pub shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames,
     /// The class this unit compiles (the module's first class), set by the
     /// driver via [`CoreErlangGenerator::register_own_class_module`]. Its
     /// compiled module is this unit's own `module_name`, whatever the index
@@ -211,7 +214,7 @@ impl ClassContext {
             class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
-            shadowed_class_names: std::collections::HashSet::new(),
+            shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames::default(),
             own_class_name: None,
             sealed_method_selectors: std::collections::HashSet::new(),
             class_slot_constructor_selector: None,

@@ -66,7 +66,25 @@ defmodule VeBench.Counter do
   def handle_call(:count, _from, n), do: {:reply, n, n}
   def handle_call(:increment, _from, n), do: {:reply, n + 1, n + 1}
   def handle_call(:probe, _from, n), do: {:reply, is_integer(n), n}
+  def handle_call(:via_self, _from, n), do: {:reply, increment(n), increment(n)}
+  def handle_call({:sum_of, %VeBench.Point{x: x, y: y}}, _from, n), do: {:reply, x + y, n}
+
+  defp increment(n), do: n + 1
 
   @impl true
   def handle_cast(:increment, n), do: {:noreply, n + 1}
+end
+
+# Row 7e (BT-4280): the inherited twin of 7f, a GenServer whose call handler
+# is delegated to VeBench.Counter's.
+defmodule VeBench.SubCounter do
+  use GenServer
+
+  def start, do: GenServer.start(__MODULE__, 0)
+
+  @impl true
+  def init(n), do: {:ok, n}
+
+  @impl true
+  defdelegate handle_call(msg, from, n), to: VeBench.Counter
 end

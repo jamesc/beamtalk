@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4132: an indirect Value subclass (here `Bag`, a `Collection(E)
+// subclass:`, and the user fixture `GcLeaf`, a `GcBase subclass:`) is now
+// eligible for the BT-4099 constructor fast path. Eligibility only lets it
+// try: the BT-4409 run-time guard decides each send, so a class-side
+// extension of `Bag class new` registered at run time still wins, for the
+// static send and the dynamic one.
+//
+// Serial: the extension changes `Bag new` for every process while it is
+// registered.
+//
+// Fixtures: fixtures/gc_base.bt, fixtures/gc_leaf.bt.
+
+TestCase subclass: IndirectValueConstructorTest
+
+  class serial -> Boolean => true
+
+  // The class held as a Dynamic value: sends to it compile to `class_send`.
+  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
+
+  testBagNewExtensionRegisteredAfterWarmUpWins =>
+    self assert: Bag new size equals: 0
+    self assert: (self lookUp: #Bag) new size equals: 0
+    Erlang beamtalk_extensions
+      register: #'Bag class'
+      selector: #new
+      fun: [:args :receiver | #extension]
+      owner: #test
+    literal := Bag new
+    dynamic := (self lookUp: #Bag) new
+    Erlang beamtalk_extensions
+      unregister: #Bag
+      selector: #new
+      classSide: true
+    self assert: literal equals: #extension
+    self assert: dynamic equals: #extension
+    self assert: Bag new size equals: 0
+
+  // The indirect user Value's synthesized constructors all build a
+  // correct instance, statically and dynamically.
+  testIndirectUserValueConstructors =>
+    // The keyword constructor covers the class's own fields only.
+    self assert: (GcLeaf y: 2) y equals: 2
+    self assert: (GcLeaf y: 2) x equals: 0
+    self assert: GcLeaf new y equals: 0
+    self assert: (GcLeaf new: #{#y => 3}) y equals: 3
+    leaf := self lookUp: #GcLeaf
+    self assert: (leaf new: #{#x => 4, #y => 5}) x equals: 4
+    self assert: leaf new y equals: 0
