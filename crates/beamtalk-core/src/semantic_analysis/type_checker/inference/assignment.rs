@@ -85,10 +85,18 @@ impl TypeChecker {
     /// Returns `None` when the RHS is `Dynamic` (the primary use case for
     /// annotations — accepted silently) or `Never` (a diverging expression
     /// like `self error:`, compatible with any declared type as the bottom
-    /// of the type lattice), or when either type is assignable to the
+    /// of the type lattice), when the declared type is `Dynamic` (it accepts
+    /// anything), or when either type is assignable to the
     /// other — including the narrowing-assignment escape hatch (declared
     /// assignable to inferred, e.g. `Dictionary := <Object>`, the
     /// type-erasure pattern the annotation exists for).
+    ///
+    /// Class objects — the whole RHS or members of a union RHS — never take
+    /// part in that name comparison (BT-4445): each is judged by
+    /// [`Self::metatype_assignable_to`] alone, since a protocol literal
+    /// (`Meta{P}`) and a protocol metatype (`ProtocolMeta{P}`) share the
+    /// spelling `P class`, and the name check accepts any `X class` it cannot
+    /// find in the hierarchy.
     ///
     /// Also `None` when either side is a bare type-variable placeholder
     /// (`E`, `T` — see `is_type_var_placeholder`). Inside a method body a
@@ -102,25 +110,91 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> Option<AssignmentTypeMismatch> {
-        if matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+        if matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never)
+            || matches!(declared, InferredType::Dynamic(_))
+        {
             return None;
         }
-        // ADR 0083 / ADR 0144: a class object judged against the declared
-        // type by the one slot rule (`C class` into `P class` iff `C`
-        // conforms to `P`). A miss still falls through to the string check
-        // below, which keeps the narrowing-assignment escape hatch.
-        let class_object = ClassObjectType::of(inferred_ty);
-        if let Some(class_object) = class_object {
-            if Self::metatype_assignable_to(
-                class_object,
-                &declared.display_name(),
+        // ADR 0083 / ADR 0144: class objects — bare, or members of a union
+        // value — are judged against the declared type by the one slot rule
+        // (`C class` into `P class` iff `C` conforms to `P`), never by name:
+        // the protocol literal `Meta{P}` and the protocol metatype
+        // `ProtocolMeta{P}` both spell `P class`, and the name check below
+        // waves unknown names (`X class` is no hierarchy entry) through.
+        let declared_name = declared.display_name();
+        let members: &[InferredType] = match inferred_ty {
+            InferredType::Union { members, .. } => members,
+            other => std::slice::from_ref(other),
+        };
+        let refused_class_object =
+            members
+                .iter()
+                .filter_map(ClassObjectType::of)
+                .find(|class_object| {
+                    !Self::metatype_assignable_to(
+                        *class_object,
+                        &declared_name,
+                        hierarchy,
+                        protocol_registry,
+                        Self::is_assignable_to,
+                    )
+                });
+        let rest: Vec<InferredType> = members
+            .iter()
+            .filter(|m| ClassObjectType::of(m).is_none())
+            .cloned()
+            .collect();
+        if refused_class_object.is_none()
+            && (rest.is_empty()
+                || Self::non_class_objects_assignable(
+                    &InferredType::union_of(&rest),
+                    declared,
+                    &declared_name,
+                    hierarchy,
+                ))
+        {
+            return None;
+        }
+        // ADR 0144: a class object missing a declared `P class` is reported
+        // by name (`C class does not conform to P class`), even as one member
+        // of a union value.
+        let nonconformance = match refused_class_object {
+            Some(ClassObjectType::Class(class_name)) => Self::protocol_metatype_nonconformance(
+                class_name,
+                &declared_name,
                 hierarchy,
                 protocol_registry,
-                Self::is_assignable_to,
-            ) {
-                return None;
+            ),
+            _ => None,
+        };
+        let inferred_display = match (&nonconformance, refused_class_object) {
+            (Some(_), Some(class_object)) => {
+                InferredType::class_name_for_diagnostic(&class_object.to_string())
             }
-        }
+            // Use source-sympathetic spelling (`Nil`) for user-facing messages.
+            _ => inferred_ty
+                .display_for_diagnostic()
+                .unwrap_or_else(|| inferred_ty.display_name()),
+        };
+        Some(AssignmentTypeMismatch {
+            declared_display: declared
+                .display_for_diagnostic()
+                .unwrap_or_else(|| declared_name.clone()),
+            inferred_display,
+            nonconformance,
+        })
+    }
+
+    /// The name-based half of [`Self::detect_assignment_type_mismatch`], for
+    /// a value with no class-object member: `true` when either side is a
+    /// bare type-variable placeholder, or either type is assignable to the
+    /// other (the narrowing-assignment escape hatch).
+    fn non_class_objects_assignable(
+        inferred_ty: &InferredType,
+        declared: &InferredType,
+        declared_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
         let is_type_var = |ty: &InferredType| {
             matches!(
                 ty,
@@ -132,58 +206,11 @@ impl TypeChecker {
             )
         };
         if is_type_var(inferred_ty) || is_type_var(declared) {
-            return None;
+            return true;
         }
         let inferred_name = inferred_ty.display_name();
-        let declared_name = declared.display_name();
-        // A protocol literal (`Meta{P}`) into a declared `P class`
-        // (`ProtocolMeta{P}`) was already refused by `metatype_assignable_to`
-        // above; both display as `"P class"`, so the name comparison below
-        // would wrongly accept it.
-        let protocol_literal_into_protocol_metatype =
-            matches!(
-                (class_object, protocol_registry),
-                (Some(ClassObjectType::Class(name)), Some(registry)) if registry.has_protocol(name)
-            ) && Self::mentions_protocol_metatype(declared);
-        if !protocol_literal_into_protocol_metatype {
-            let rhs_assignable_to_declared =
-                Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
-            let declared_assignable_to_rhs =
-                Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
-            if rhs_assignable_to_declared || declared_assignable_to_rhs {
-                return None;
-            }
-        }
-        // Use source-sympathetic spelling (`Nil`) for user-facing messages.
-        Some(AssignmentTypeMismatch {
-            declared_display: declared
-                .display_for_diagnostic()
-                .unwrap_or_else(|| declared_name.clone()),
-            inferred_display: inferred_ty
-                .display_for_diagnostic()
-                .unwrap_or_else(|| inferred_name.clone()),
-            nonconformance: match class_object {
-                Some(ClassObjectType::Class(class_name)) => Self::protocol_metatype_nonconformance(
-                    class_name,
-                    &declared_name,
-                    hierarchy,
-                    protocol_registry,
-                ),
-                _ => None,
-            },
-        })
-    }
-
-    /// `true` when `ty` is a protocol metatype `P class`, or a union or
-    /// intersection with one among its members (ADR 0144).
-    fn mentions_protocol_metatype(ty: &InferredType) -> bool {
-        match ty {
-            InferredType::ProtocolMeta { .. } => true,
-            InferredType::Union { members, .. } | InferredType::Intersection { members, .. } => {
-                members.iter().any(Self::mentions_protocol_metatype)
-            }
-            _ => false,
-        }
+        Self::is_assignable_to(&inferred_name, declared_name, hierarchy)
+            || Self::is_assignable_to(declared_name, &inferred_name, hierarchy)
     }
 
     /// Infer an assignment `target := value` (optionally `target :: Type :=

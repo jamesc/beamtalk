@@ -624,3 +624,65 @@ Object subclass: Caller
         );
     }
 }
+
+#[test]
+fn protocol_literal_in_a_union_is_not_a_protocol_metatype_value() {
+    // BT-4445: `Meta{Wire}` (the protocol literal) and `ProtocolMeta{Wire}`
+    // both spell `Wire class`; a union carrying the literal, or a
+    // non-conformer's class object, must not slip past a declared
+    // `Wire class | Nil` on the name comparison.
+    let source = wire_source(
+        r"
+Object subclass: Caller
+  literal: flag :: Boolean =>
+    w :: Wire class | Nil := flag ifTrue: [Wire] ifFalse: [nil]
+    w
+  nonconformer: flag :: Boolean =>
+    w :: Wire class | Nil := flag ifTrue: [Integer] ifFalse: [nil]
+    w
+  fine: flag :: Boolean =>
+    a :: Wire class | Nil := flag ifTrue: [Tcp] ifFalse: [nil]
+    b :: Wire class := flag ifTrue: [Tcp] ifFalse: [Ssl]
+    c :: Object := flag ifTrue: [Wire] ifFalse: [nil]
+    d :: Class | Nil := flag ifTrue: [Integer] ifFalse: [nil]
+    e :: Integer | Nil := flag ifTrue: [3] ifFalse: [nil]
+    f :: Dynamic := Integer
+    g :: Dynamic := 3
+    h :: Object := Wire
+    a
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let line_of = |needle: &str| {
+        source[..source.find(needle).expect("fixture line")]
+            .lines()
+            .count()
+    };
+    let at = |needle: &str| -> Vec<&Diagnostic> {
+        diags
+            .iter()
+            .filter(|d| source[..d.span.start() as usize].lines().count() == line_of(needle))
+            .collect()
+    };
+    let literal = at("ifTrue: [Wire] ifFalse: [nil]\n    w");
+    assert!(
+        literal
+            .iter()
+            .any(|d| d.message.contains("Wire class | Nil")),
+        "the protocol literal in a union is refused: {diags:#?}"
+    );
+    let nonconformer = at("ifTrue: [Integer] ifFalse: [nil]\n    w");
+    assert!(
+        nonconformer.iter().any(|d| d
+            .message
+            .contains("Integer class does not conform to Wire class")),
+        "a non-conformer in a union reports its non-conformance: {diags:#?}"
+    );
+    let fine = line_of("fine: flag");
+    assert!(
+        diags
+            .iter()
+            .all(|d| source[..d.span.start() as usize].lines().count() < fine),
+        "conformers, `Object` and `Class` accept class objects in a union: {diags:#?}"
+    );
+}
