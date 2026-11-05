@@ -1082,10 +1082,12 @@ also auto-indexed for `SystemNavigation` source-text queries.
 with the same `>>` patcher used for instance methods (see *Live Patching* and
 *Extension Methods* below), e.g. `Counter class >> reset => self.opened := 0`.
 The class-side dispatch path picks up the new class method immediately (ADR 0084).
-A runtime class-method fun (a builder `classMethods:` fun, or one installed with
-`beamtalk_object_class:put_class_method/3,4`) is removable:
-`Counter class removeSelector: #reset` takes it back and restores the compiled
-method it replaced, if any (BT-4438; see *Removing methods* below).
+Separately, a runtime class-method fun (a builder `classMethods:` fun, or one
+installed from Erlang with `beamtalk_object_class:put_class_method/3,4`) is
+removable: `X class removeSelector: #sel` takes it back and restores the
+compiled method it replaced, if any (BT-4438; see *Removing methods* below).
+This does not apply to a `>>` live edit like the one above: that recompiles the
+class, so `removeSelector:` removes the edited method outright.
 
 > The grammar form (`Object subclass: …`) remains the idiomatic way to define a
 > class in source. The programmatic builder is for tooling, REPL exploration, and
