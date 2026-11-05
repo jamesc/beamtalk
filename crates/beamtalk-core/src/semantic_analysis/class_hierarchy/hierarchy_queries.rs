@@ -708,10 +708,12 @@ impl ClassHierarchy {
     /// - `self delegate` on a `native:` class (lowered to
     ///   `beamtalk_erlang_proxy:native_call/5` on the backing module), or
     /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
-    ///   and which has no effect on the calling process (not a
-    ///   `class-method-process-resource` row: `ets new:`, `erlang self`,
-    ///   `spawn_link`, ...; those keep the class process, which owns what
-    ///   they create),
+    ///   and which is not a row of the curated class-method FFI table read by
+    ///   the `class-process-ffi` / `class-method-process-resource` lints
+    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
+    ///   those keep the class process, which owns what they create. FFI
+    ///   outside that table is not recognised, exactly as for the lints,
+    ///   and runs in the caller like any other in-caller class method,
     ///
     /// so it reads no `self`, no class variable and nothing from the class
     /// process's dictionary (`basicNew` does, which is why a body sending to
@@ -763,7 +765,7 @@ impl ClassHierarchy {
                 ..
             } => {
                 crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
-                    !crate::semantic_analysis::validators::ffi_call_has_caller_effect(
+                    !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
                         module, selector,
                     )
                 }) && arguments

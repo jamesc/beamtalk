@@ -288,16 +288,6 @@ end
     then takes the fallback, and the class process's `{new, _}` handler runs
     it. An ancestor's class-side `new` extension does not shadow the class's
     own synthesized `new`, as on the class-process lookup.
-- **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
-  whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
-  with literal arguments, not a `class-method-process-resource` row such as
-  `ets new:`: the lint never inspects `new`, so those keep the class process) or `self delegate` on a `native:` class bakes `new`
-  into `direct_constructors` too (`ClassHierarchy::
-  explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
-  class variables in its chain. Its `new/0` is `class_new('undefined')`, which
-  is all the `{new, []}` handler would run, so the guarded direct call is the
-  same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
-  it; a body that sends to `self` (`self basicNew`) does not.
   - **The `new:` chain fact is decided at run time.** Rust bakes a per-class
     fact into `__beamtalk_meta/0`, `defines_user_class_new1`: "this class
     defines a class-side `new:` that is user code". `Value` is exempt, because
@@ -311,6 +301,18 @@ end
     a user `new:` is honoured by already-loaded descendants without
     recompiling them. BT-4126's reload warning becomes informational.
   - Static `new:` stays on `class_send`; its fast path is the dynamic one.
+- **Amended (BT-4464, 2026-11-05): explicit FFI-forward `new`.** A class
+  whose own class-side `new` body is one plain FFI forward (`(Erlang mod) fn`
+  with literal arguments) or `self delegate` on a `native:` class bakes `new`
+  into `direct_constructors` too (`ClassHierarchy::
+  explicit_class_new_builds_in_caller`), on a concrete non-actor class with no
+  class variables in its chain. An FFI call listed in the curated
+  class-method FFI table (`ets new:`, `spawn_link`, `gen_udp open:`, ...)
+  keeps the class process: neither lint inspects `new`, and the class process
+  used to own what it creates. Its `new/0` is `class_new('undefined')`, which
+  is all the `{new, []}` handler would run, so the guarded direct call is the
+  same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
+  it; a body that sends to `self` (`self basicNew`) does not.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

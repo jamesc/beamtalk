@@ -180,17 +180,17 @@ fn table_row(module: &str, function: &str) -> Option<&'static ClassMethodFfi> {
         .find(|r| r.module == module && r.function == function)
 }
 
-/// Whether `(Erlang <module>) <selector>` is a curated call with an effect on
-/// the *calling* process (the `class-method-process-resource` rows: a
-/// resource tied to the caller, or the caller's identity). BT-4464: an
-/// explicit class-side `new` making such a call keeps the class process
-/// (`ClassHierarchy::explicit_class_new_builds_in_caller`), since the lint
-/// never inspects process-bound selectors and moving it would silently hand
-/// the resource to whichever caller ran first.
-pub(crate) fn ffi_call_has_caller_effect(module: &str, selector: &MessageSelector) -> bool {
-    erlang_function_name(selector)
-        .and_then(|function| table_row(module, &function))
-        .is_some_and(|entry| entry.in_caller.is_some())
+/// Whether `(Erlang <module>) <selector>` is any row of the curated
+/// [`CLASS_METHOD_FFI`] table: a call whose effect depends on which process
+/// runs it (a resource or socket it owns, its identity, its mailbox), in
+/// either direction. BT-4464: an explicit class-side `new` making such a call
+/// keeps the class process (`ClassHierarchy::explicit_class_new_builds_in_caller`
+/// fails closed on every row), since `new` used to be guaranteed to run there,
+/// neither lint inspects process-bound selectors, and moving it would hand
+/// what it creates to whichever caller ran first. Calls outside the table
+/// (`file open:`, a user `start_link`) are not recognised, as for the lints.
+pub(crate) fn ffi_call_is_process_sensitive(module: &str, selector: &MessageSelector) -> bool {
+    erlang_function_name(selector).is_some_and(|function| table_row(module, &function).is_some())
 }
 
 /// Runs both class-method FFI lints over every class-side method of `module`

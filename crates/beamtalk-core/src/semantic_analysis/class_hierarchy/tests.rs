@@ -4331,6 +4331,11 @@ fn explicit_class_new_reading_class_or_args_stays_on_class_process() {
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  class new => (Erlang erlang) self\n"
     ));
+    // Any table row fails closed, including the socket-owning ones with no
+    // caller-side lint row: the class process used to own the socket.
+    assert!(!bt4464_explicit_new_verdict(
+        "Object subclass: Tag\n  class new => (Erlang gen_udp) open: 0\n"
+    ));
     // More than one statement is not a plain forward.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  class new =>\n    (Erlang erlang) make_ref.\n    (Erlang erlang) make_ref\n"
