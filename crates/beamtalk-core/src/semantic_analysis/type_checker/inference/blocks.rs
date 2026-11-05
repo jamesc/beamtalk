@@ -1546,7 +1546,8 @@ impl TypeChecker {
         arg_types: &[InferredType],
         hierarchy: &ClassHierarchy,
     ) {
-        let Expression::Block(block) = receiver.unwrap_parens() else {
+        // `ast::normalize` (BT-4059) already peeled parens off a send receiver.
+        let Expression::Block(block) = receiver else {
             return;
         };
         if arguments.is_empty()
