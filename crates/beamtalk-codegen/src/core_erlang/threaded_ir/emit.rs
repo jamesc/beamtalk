@@ -10,9 +10,9 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    EnsureCatchVars, EnsureNlrRelay, FastPath, FrameId, LoopCounter, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion,
-    ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode,
+    TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -867,13 +867,13 @@ fn render_threaded(
 ) -> Document<'static> {
     match mode {
         ThreadingMode::DirectParams => {
-            let fn_name = ctx.fresh_temp_var("Loop");
+            let fn_name = ctx.fresh_temp_var(LOOP_FN_STEM);
             render_loop_skeleton(
                 &fn_name, frame, None, body, produces, None, ctx, None, None, None,
             )
         }
         ThreadingMode::Hybrid => {
-            let fn_name = ctx.fresh_temp_var("Loop");
+            let fn_name = ctx.fresh_temp_var(LOOP_FN_STEM);
             render_loop_skeleton(
                 &fn_name,
                 frame,
@@ -950,7 +950,7 @@ struct ConditionalLoopHeader<'a> {
 /// within this file, not just across the Rust/Erlang boundary).
 ///
 /// `fn_name` is already resolved by the caller — the bare shape mints it via
-/// `ctx.fresh_temp_var("Loop")` (`render_threaded`, unchanged behavior);
+/// `ctx.fresh_temp_var(LOOP_FN_STEM)` (`render_threaded`, unchanged behavior);
 /// `ConditionalLoop` carries its own caller-supplied, never-gensym'd name
 /// (the variant's own doc comment: production never gensyms this name
 /// either).

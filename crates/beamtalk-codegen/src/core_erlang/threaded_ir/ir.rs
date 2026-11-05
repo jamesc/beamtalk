@@ -683,8 +683,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// (ADR 0111 Addendum 15) for every `whileTrue:`/`whileFalse:`/
     /// `timesRepeat:`/`to:do:`/`to:by:do:`/`repeat` loop.
     ConditionalLoop {
-        /// Static per-construct function name — `"while"`, `"loop"`,
-        /// `"repeat"` — never gensym'd by `render` (ADR 0111 Addendum 2's
+        /// Static per-construct function name — [`WHILE_LOOP_FN`],
+        /// [`COUNTED_LOOP_FN`] or [`REPEAT_LOOP_FN`] (listed together in
+        /// `STATIC_LOOP_FNS`) — never gensym'd by `render` (ADR 0111 Addendum 2's
         /// "loop-fn-name" finding: production never gensyms this name
         /// either, `while_loops.rs`'s `"while"` literal /
         /// `CountedLoopFrame::fn_name`). Caller-supplied at lowering time,
@@ -1151,6 +1152,25 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         body: Vec<ThreadedStmt>,
     },
 }
+
+/// BT-4405: the static `fn_name` of a `whileTrue:`/`whileFalse:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const WHILE_LOOP_FN: &str = "while";
+/// BT-4405: the static `fn_name` of a `to:do:`/`to:by:do:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const COUNTED_LOOP_FN: &str = "loop";
+/// BT-4405: the static `fn_name` of a `timesRepeat:`
+/// [`ThreadedStmt::ConditionalLoop`].
+pub(in crate::core_erlang) const REPEAT_LOOP_FN: &str = "repeat";
+/// BT-4405: every static loop `fn_name` above — the single list a scanner of
+/// emitted Core Erlang matches loops against. Add a new static name here.
+#[cfg(test)]
+pub(in crate::core_erlang) const STATIC_LOOP_FNS: [&str; 3] =
+    [WHILE_LOOP_FN, COUNTED_LOOP_FN, REPEAT_LOOP_FN];
+/// BT-4405: the stem a gensym'd loop `fn_name` is minted from
+/// (`fresh_temp_var(LOOP_FN_STEM)` → `_Loop<N>`): the generic fallback loops
+/// and the bare `ConditionalLoop` shape.
+pub(in crate::core_erlang) const LOOP_FN_STEM: &str = "Loop";
 
 /// BT-4279: the fast path of a [`ThreadedStmt::SyncedCall`]: a guarded send
 /// whose guard, when it holds, proves the send runs no user code (a builtin

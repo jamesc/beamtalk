@@ -192,7 +192,7 @@ impl CoreErlangGenerator {
             ("'true'", "'false'")
         };
 
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let cond_var = self.fresh_temp_var("CondFun");
         let cond_code = self.expression_doc(condition)?;
         let body_var = self.fresh_temp_var("BodyFun");
@@ -540,7 +540,7 @@ impl CoreErlangGenerator {
         }
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -1040,7 +1040,7 @@ impl CoreErlangGenerator {
             .collect();
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -1209,7 +1209,7 @@ impl CoreErlangGenerator {
                 .collect();
 
         let ir = vec![ThreadedStmt::ConditionalLoop {
-            fn_name: "while".to_string(),
+            fn_name: threaded_ir::WHILE_LOOP_FN.to_string(),
             mode: plan.threading_mode(),
             frame,
             threads: plan.threaded_locals.clone(),
@@ -1445,7 +1445,7 @@ impl CoreErlangGenerator {
         } else {
             ("'true'", "'false'")
         };
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -1534,7 +1534,7 @@ impl CoreErlangGenerator {
             ")",
         ];
 
-        let loop_fn = self.fresh_temp_var("Loop");
+        let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),

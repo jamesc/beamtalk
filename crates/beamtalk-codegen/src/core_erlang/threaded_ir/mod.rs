@@ -94,13 +94,17 @@ pub(super) use emit::{
 };
 // ADR 0131 §1a: `sequence_children`'s sibling-read check.
 pub(super) use ir::CallSiteLine;
+// BT-4405: the loop `fn_name`s, one source for producers and test scanners.
 pub(super) use ir::RebindFrameKind;
+#[cfg(test)]
+pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
     EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape,
     OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode,
     TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
+pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
