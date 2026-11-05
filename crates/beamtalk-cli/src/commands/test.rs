@@ -1361,12 +1361,13 @@ fn compute_native_type_registry(
         };
         let auto_extract = super::build::extract_type_specs(&layout, true, false);
 
-        let (pkg_registry, _stub_diags) = super::build::resolve_package_type_registry(
+        let pkg_registry = super::build::resolve_package_type_registry(
             pkg_root,
             auto_extract,
             &resolved_deps,
             Some(super::OutputFormat::Text),
-        );
+        )
+        .registry;
 
         if let Some(reg) = pkg_registry {
             merged.apply_overrides(reg);

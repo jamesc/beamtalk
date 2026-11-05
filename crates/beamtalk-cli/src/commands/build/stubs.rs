@@ -74,10 +74,7 @@ pub(crate) fn resolve_package_type_registry(
     auto_extract: Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     resolved_deps: &[crate::commands::deps::path::ResolvedDependency],
     echo: Option<OutputFormat>,
-) -> (
-    Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    Vec<beamtalk_core::source_analysis::Diagnostic>,
-) {
+) -> ResolvedTypeRegistry {
     let dependency_stubs = load_dependency_stub_registries(
         resolved_deps,
         distribution_stubs_dir().as_deref(),
@@ -86,15 +83,82 @@ pub(crate) fn resolve_package_type_registry(
     );
     let project_stubs = load_project_stub_registry(package_root, auto_extract.as_ref(), echo);
     if dependency_stubs.is_none() && project_stubs.is_none() {
-        return (auto_extract, Vec::new());
+        return ResolvedTypeRegistry {
+            registry: auto_extract,
+            diagnostics: Vec::new(),
+            stub_inputs_hash: String::new(),
+        };
     }
     let mut merged = auto_extract.unwrap_or_default();
     let mut diagnostics = Vec::new();
-    for (registry, diags) in [dependency_stubs, project_stubs].into_iter().flatten() {
-        merged.apply_overrides(registry);
-        diagnostics.extend(diags);
+    let mut stub_inputs = Vec::new();
+    for layer in [dependency_stubs, project_stubs].into_iter().flatten() {
+        merged.apply_overrides(layer.registry);
+        diagnostics.extend(layer.diagnostics);
+        stub_inputs.extend(layer.inputs);
     }
-    (Some(merged), diagnostics)
+    ResolvedTypeRegistry {
+        registry: Some(merged),
+        diagnostics,
+        stub_inputs_hash: stub_inputs_hash(&stub_inputs),
+    }
+}
+
+/// The result of [`resolve_package_type_registry`].
+#[derive(Debug)]
+pub(crate) struct ResolvedTypeRegistry {
+    /// The merged FFI type registry, or `None` when neither auto-extraction
+    /// nor any stub tier contributed anything.
+    pub registry: Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    /// The stub tiers' own diagnostics (skipped signatures, version drift,
+    /// collisions).
+    pub diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    /// Content hash of every stub file read by every tier, in merge order
+    /// (empty when no tier had any stub file). `beamtalk build` folds it into
+    /// each source file's incremental cache key (BT-4393), so adding, editing
+    /// or removing a stub recompiles the package instead of replaying
+    /// diagnostics computed against the old stubs.
+    pub stub_inputs_hash: String,
+}
+
+/// One or more stub-tier directories merged into a single registry, plus
+/// their diagnostics and a fingerprint of the stub files they were read from.
+#[derive(Debug)]
+pub(crate) struct StubLayer {
+    /// The merged declarations, later files/tiers winning per function/arity.
+    pub registry: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+    /// Every stub file's diagnostics, in merge order.
+    pub diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    /// One `path` + content-hash line per stub file read, in merge order —
+    /// the inputs [`ResolvedTypeRegistry::stub_inputs_hash`] is computed from.
+    pub inputs: Vec<String>,
+}
+
+impl StubLayer {
+    fn empty() -> Self {
+        Self {
+            registry: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new(),
+            diagnostics: Vec::new(),
+            inputs: Vec::new(),
+        }
+    }
+
+    /// Apply `other` on top of `self` (its declarations win on overlap).
+    fn absorb(&mut self, other: StubLayer) {
+        self.registry.apply_overrides(other.registry);
+        self.diagnostics.extend(other.diagnostics);
+        self.inputs.extend(other.inputs);
+    }
+}
+
+/// Hash of the stub-file fingerprint lines (see [`StubLayer::inputs`]);
+/// empty when there are none, so a project without stubs keeps its cache
+/// keys unchanged.
+fn stub_inputs_hash(inputs: &[String]) -> String {
+    if inputs.is_empty() {
+        return String::new();
+    }
+    crate::commands::util::sha256_hex(inputs.join("\n").as_bytes())
 }
 
 /// Locate the compiler distribution's own curated FFI type stubs (ADR 0075
@@ -162,10 +226,7 @@ pub(crate) fn load_project_stub_registry(
     project_root: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     echo: Option<OutputFormat>,
-) -> Option<(
-    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
-    Vec<beamtalk_core::source_analysis::Diagnostic>,
-)> {
+) -> Option<StubLayer> {
     load_stub_registry_from_dir(
         &project_root.join(beamtalk_core::compilation::ffi_stubs::PROJECT_STUBS_DIR),
         auto_extract,
@@ -202,20 +263,13 @@ pub(crate) fn load_dependency_stub_registries(
     distribution_stubs_dir: Option<&Utf8Path>,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     echo: Option<OutputFormat>,
-) -> Option<(
-    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
-    Vec<beamtalk_core::source_analysis::Diagnostic>,
-)> {
-    let mut registry = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
-    let mut diagnostics = Vec::new();
+) -> Option<StubLayer> {
+    let mut merged = StubLayer::empty();
     let mut found_any = false;
 
     if let Some(dist_dir) = distribution_stubs_dir {
-        if let Some((dist_registry, dist_diagnostics)) =
-            load_stub_registry_from_dir(dist_dir, auto_extract, echo)
-        {
-            registry.apply_overrides(dist_registry);
-            diagnostics.extend(dist_diagnostics);
+        if let Some(dist_layer) = load_stub_registry_from_dir(dist_dir, auto_extract, echo) {
+            merged.absorb(dist_layer);
             found_any = true;
         }
     }
@@ -229,22 +283,19 @@ pub(crate) fn load_dependency_stub_registries(
         let Some(stubs_dir) = dep.stubs_dir.as_deref() else {
             continue;
         };
-        if let Some((dep_registry, dep_diagnostics)) =
-            load_stub_registry_from_dir(stubs_dir, auto_extract, echo)
-        {
-            diagnostics.extend(warn_on_package_stub_collisions(
-                &dep_registry,
+        if let Some(dep_layer) = load_stub_registry_from_dir(stubs_dir, auto_extract, echo) {
+            merged.diagnostics.extend(warn_on_package_stub_collisions(
+                &dep_layer.registry,
                 &dep.name,
                 &mut package_stub_owners,
                 echo,
             ));
-            registry.apply_overrides(dep_registry);
-            diagnostics.extend(dep_diagnostics);
+            merged.absorb(dep_layer);
             found_any = true;
         }
     }
 
-    found_any.then_some((registry, diagnostics))
+    found_any.then_some(merged)
 }
 
 /// Records every `(module, function, arity)` in `dep_registry` as owned by
@@ -334,18 +385,29 @@ fn load_stub_registry_from_dir(
     stubs_dir: &Utf8Path,
     auto_extract: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     echo: Option<OutputFormat>,
-) -> Option<(
-    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
-    Vec<beamtalk_core::source_analysis::Diagnostic>,
-)> {
+) -> Option<StubLayer> {
     let load = beamtalk_core::compilation::ffi_stubs::load_stub_registry_from_dir(
         stubs_dir,
         auto_extract,
     )?;
-    for file in &load.files {
-        render_stub_file_diagnostics(file, echo);
-    }
-    Some(load.into_parts())
+    let inputs = load
+        .files
+        .iter()
+        .map(|file| {
+            render_stub_file_diagnostics(file, echo);
+            format!(
+                "{}\0{}",
+                file.path,
+                crate::commands::util::sha256_hex(file.source.as_bytes())
+            )
+        })
+        .collect();
+    let (registry, diagnostics) = load.into_parts();
+    Some(StubLayer {
+        registry,
+        diagnostics,
+        inputs,
+    })
 }
 
 /// Render one stub file's diagnostics against its own source, mirroring
