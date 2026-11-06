@@ -98,6 +98,7 @@ raises (and logs it).
     attachMany/3,
     beamtalk_ffi_raw_results/0,
     detach/1,
+    hasHandlers/1,
     detach_handler/1,
     %% telemetry handler callback for Beamtalk blocks
     handle_event/4,
@@ -211,6 +212,19 @@ detach(HandlerId) ->
         false -> ok
     end,
     nil.
+
+-doc """
+`Telemetry hasHandlers: eventPrefix` — whether any `telemetry` handler is
+attached to an event under `EventPrefix` (`telemetry:list_handlers/1` is
+non-empty). Counts every handler, Erlang and Elixir ones included, so an
+emitter can skip building a span's measurements and metadata when nobody
+listens. Answers `false` when `telemetry` is not loaded or its handler table
+is not running.
+""".
+-spec hasHandlers(term()) -> boolean().
+hasHandlers(EventPrefix) ->
+    check_event_name(EventPrefix, 'hasHandlers:', <<"eventPrefix">>),
+    list_handlers(EventPrefix) =/= [].
 
 -doc """
 Opt out of `beamtalk_erlang_proxy`'s ok/error → `Result` coercion (ADR 0076)
@@ -528,8 +542,13 @@ beamtalk_dispatch_handler_attached() ->
 
 %% Every telemetry handler on an event under [beamtalk, actor, dispatch].
 dispatch_handlers() ->
+    list_handlers(?DISPATCH_PREFIX).
+
+%% Every telemetry handler on an event under Prefix; none when `telemetry` is
+%% not loaded or its handler table is not running.
+list_handlers(Prefix) ->
     try
-        telemetry:list_handlers(?DISPATCH_PREFIX)
+        telemetry:list_handlers(Prefix)
     catch
         error:undef -> [];
         exit:{noproc, _} -> []

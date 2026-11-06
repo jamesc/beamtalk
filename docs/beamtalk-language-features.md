@@ -6821,6 +6821,15 @@ Telemetry detach: #auditMisses
 - The runtime's own handler ids (the ones `Tracing` relies on) are reserved: `attach:` and `detach:` refuse them with `#reserved_name`.
 - Exporters (StatsD, Prometheus, OpenTelemetry) are still attached in Erlang. Attaching from Beamtalk is mainly for tests and in-image consumers.
 
+### Skipping work nobody listens to
+
+`Telemetry hasHandlers: eventPrefix` answers whether any handler (Beamtalk, Erlang or Elixir) is attached to an event whose name starts with `eventPrefix`, like Elixir libraries' `:telemetry.list_handlers/1` check. An emitter can use it to skip a span's timestamps and metadata when nobody listens. `eventPrefix` is a non-empty List of Symbols, as for `span:`.
+
+```beamtalk
+Telemetry hasHandlers: #(#myapp, #nobodyListens)
+// => false
+```
+
 `Telemetry` is `native: beamtalk_telemetry`: each method is a `self delegate` pass-through to the runtime module ([`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object)), so a wrapped error names `Telemetry` and the selector. An emit costs about 0.2–0.4 µs more than a raw `telemetry:execute/3` (`docs/development/benchmarks.md`).
 
 ---
