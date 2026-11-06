@@ -23,8 +23,18 @@ TestCase subclass: ValueTypeNlrAnswerTest
     self assert: (self countOf: (NlrAnswerFinder items: #(1, 2, 3))) equals: 3
     self assert: (self itemsOf: ((NlrAnswerFinder items: #()) withItems: #(7))) equals: #(7)
     self assert: (self itemsOf: (self replaced: (NlrAnswerFinder items: #(1)) by: #(8, 9))) equals: #(8, 9)
-    self assert: (self between: (NlrAnswerFinder items: #(1, 5, 9)) lo: 4 hi: 8) equals: 5
-    self assert: (self between: (NlrAnswerFinder items: #(1)) lo: 4 hi: 8) equals: nil
+    self
+      assert: (self
+        between: (NlrAnswerFinder items: #(1, 5, 9))
+        lo: 4
+        hi: 8)
+      equals: 5
+    self
+      assert: (self
+        between: (NlrAnswerFinder items: #(1))
+        lo: 4
+        hi: 8)
+      equals: nil
 
   testDynamicSendAnswersItsValue =>
     self assert: ((NlrAnswerFinder items: #(1, 11)) perform: #firstBig) equals: 11
@@ -42,7 +52,8 @@ TestCase subclass: ValueTypeNlrAnswerTest
 
   itemsOf: f :: NlrAnswerFinder -> List => f items
 
-  replaced: f :: NlrAnswerFinder by: xs :: List -> NlrAnswerFinder => f withItems: xs
+  replaced: f :: NlrAnswerFinder by: xs :: List -> NlrAnswerFinder =>
+    f withItems: xs
 
   between: f :: NlrAnswerFinder lo: lo :: Integer hi: hi :: Integer -> Integer | Nil =>
     f firstBetween: lo and: hi
