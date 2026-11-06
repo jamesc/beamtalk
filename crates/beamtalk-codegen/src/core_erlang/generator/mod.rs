@@ -285,6 +285,14 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-4461: the Core variables that hold a REPL binding as written into
+    /// its frame's bindings map (a slot `Put`, or a `LocalRebind` stepping or
+    /// held in the map). A REPL frame's variable that is not one (a block
+    /// parameter, a handler's `:e`, a `match:` pattern variable) has no key in
+    /// the map, so a producer never re-reads it from there
+    /// (`repl_cached_bindings_written_by`). Variable names are fresh, so the
+    /// set needs no scoping.
+    pub(in crate::core_erlang) repl_map_vars: std::collections::HashSet<String>,
     /// BT-3910 (ADR 0131 §1): the spans of the value-position local
     /// assignments of the body being lowered (`beamtalk_core`'s
     /// `value_position_assignment_spans`), the producers `threaded_expression`
@@ -666,6 +674,7 @@ impl CoreErlangGenerator {
             precompiled_subexprs: std::collections::HashMap::new(),
             current_send_span: None,
             local_producer_sites: std::collections::HashSet::new(),
+            repl_map_vars: std::collections::HashSet::new(),
             value_assign_sites: std::collections::HashSet::new(),
             tier2_evaluated_block_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,

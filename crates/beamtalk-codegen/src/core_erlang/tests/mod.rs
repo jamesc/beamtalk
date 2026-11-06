@@ -348,6 +348,7 @@ mod plain_arm_nested_construct_corpus;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod repl_cached_binding_corpus;
 mod residual_dynamic_sends;
 mod shadowed_class_direct_calls;
 mod sibling_snapshot;

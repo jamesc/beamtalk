@@ -478,6 +478,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// legitimate; reported by [`VerifyWalk::walk_stmt`] wherever one is.
     ConstructLocalsRereadOpaquely { locals: Vec<String>, at: Span },
 
+    /// BT-4461 (ADR 0131 §2, the `MethodBody (REPL)` row): a REPL frame other
+    /// than the root (a conditional arm, an `on:do:`/`ensure:` block) holds
+    /// the bindings it has written in Core variables, and a construct at one
+    /// of its producer sites writes `locals`, some of them, but its
+    /// [`ThreadedStmt::ConstructTuple`] leaves them out of `threads` (BT-4461): the producer
+    /// adopted the bindings map whole (`element(2, carrier)`) and no
+    /// [`ThreadedStmt::LocalRebind`] read them back out of it, so the
+    /// frame's later reads answer the value from before the construct, and
+    /// a loop of the construct that reads them never sees its own writes. The
+    /// repros were `c ifTrue: [m := 1. c ifTrue: [m := 5] ifFalse: [nil]. m]
+    /// ifFalse: [0]`, answering 1, and `c ifTrue: [m := 1. [m < 5]
+    /// whileTrue: [m := m + 1]. m] ifFalse: [0]`, which never ended. Checked
+    /// by [`verify_repl_producer_sites_threaded`] in every REPL frame that
+    /// registers its producer sites.
+    ReplCachedBindingStale { locals: Vec<String>, at: Span },
+
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
@@ -1094,18 +1110,7 @@ pub(in crate::core_erlang) fn verify_producer_sites_threaded(
     body: &[ThreadedStmt],
     sites: &[(Span, Vec<String>)],
 ) -> Vec<VerifyError> {
-    sites
-        .iter()
-        .filter(|(site, locals)| {
-            !body.iter().any(|stmt| match stmt {
-                ThreadedStmt::ConstructTuple { threads, span, .. } => {
-                    span.start() >= site.start()
-                        && span.end() <= site.end()
-                        && locals.iter().all(|l| threads.contains(l))
-                }
-                _ => false,
-            })
-        })
+    unthreaded_sites(body, sites)
         .map(|(site, locals)| {
             if locals.is_empty() {
                 VerifyError::ConstructCarrierInPlace { at: *site }
@@ -1115,6 +1120,46 @@ pub(in crate::core_erlang) fn verify_producer_sites_threaded(
                     at: *site,
                 }
             }
+        })
+        .collect()
+}
+
+/// The `(site, locals)` of `sites` with no [`ThreadedStmt::ConstructTuple`] in
+/// `body` inside the site's span threading every one of `locals`: the one
+/// matcher of [`verify_producer_sites_threaded`] and
+/// [`verify_repl_producer_sites_threaded`].
+fn unthreaded_sites<'s>(
+    body: &'s [ThreadedStmt],
+    sites: &'s [(Span, Vec<String>)],
+) -> impl Iterator<Item = &'s (Span, Vec<String>)> {
+    sites.iter().filter(|(site, locals)| {
+        !body.iter().any(|stmt| match stmt {
+            ThreadedStmt::ConstructTuple { threads, span, .. } => {
+                span.start() >= site.start()
+                    && span.end() <= site.end()
+                    && locals.iter().all(|l| threads.contains(l))
+            }
+            _ => false,
+        })
+    })
+}
+
+/// BT-4461, [`VerifyError::ReplCachedBindingStale`] over one REPL frame's
+/// statement list: each `(site, locals)` of `sites` (a producer site of the
+/// frame whose construct writes `locals`, bindings the frame holds in Core
+/// variables) must have a [`ThreadedStmt::ConstructTuple`] in `body` inside the
+/// site's span whose `threads` lists every one of `locals`, and so (by
+/// [`VerifyError::ThreadedLocalDropped`]) one [`ThreadedStmt::LocalRebind`]
+/// each. The sites are read off the AST and the generator's scope before the
+/// statement is lowered; the nodes off the lowered IR.
+pub(in crate::core_erlang) fn verify_repl_producer_sites_threaded(
+    body: &[ThreadedStmt],
+    sites: &[(Span, Vec<String>)],
+) -> Vec<VerifyError> {
+    unthreaded_sites(body, sites)
+        .map(|(site, locals)| VerifyError::ReplCachedBindingStale {
+            locals: locals.clone(),
+            at: *site,
         })
         .collect()
 }

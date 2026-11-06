@@ -1680,3 +1680,52 @@ fn a_seed_older_than_a_state_the_frame_already_bound_is_stale() {
     );
     assert_eq!(verify(&seeded_after_step(1)), Vec::new());
 }
+
+// ── BT-4461: a REPL frame's producer sites ──────────────────────────────
+
+/// A producer site of a REPL frame whose construct writes `m`, a binding the
+/// frame holds in a variable: its `ConstructTuple` (inside the site) must
+/// thread `m`.
+#[test]
+fn repl_site_whose_construct_does_not_thread_the_cached_binding_is_stale() {
+    let site = (Span::new(0, 10), threads(&["m"]));
+    let adopted_whole = vec![build_construct_tuple(
+        CARRIER,
+        tuple_doc(),
+        Vec::new(),
+        Span::new(2, 8),
+    )];
+    assert_eq!(
+        verify_repl_producer_sites_threaded(&adopted_whole, std::slice::from_ref(&site)),
+        vec![VerifyError::ReplCachedBindingStale {
+            locals: threads(&["m"]),
+            at: Span::new(0, 10),
+        }]
+    );
+    let rethreaded = vec![build_construct_tuple(
+        CARRIER,
+        tuple_doc(),
+        threads(&["m"]),
+        Span::new(2, 8),
+    )];
+    assert!(
+        verify_repl_producer_sites_threaded(&rethreaded, std::slice::from_ref(&site)).is_empty()
+    );
+}
+
+/// A `ConstructTuple` outside the site's span is another construct's: the site
+/// is still stale.
+#[test]
+fn repl_site_is_not_threaded_by_a_construct_outside_it() {
+    let site = (Span::new(0, 10), threads(&["m"]));
+    let elsewhere = vec![build_construct_tuple(
+        CARRIER,
+        tuple_doc(),
+        threads(&["m"]),
+        Span::new(12, 20),
+    )];
+    assert_eq!(
+        verify_repl_producer_sites_threaded(&elsewhere, &[site]).len(),
+        1
+    );
+}
