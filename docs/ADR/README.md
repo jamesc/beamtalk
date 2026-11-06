@@ -171,6 +171,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |
 | [0143](0143-binary-construction-syntax.md) | Binary Construction Syntax — Reuse `<<...>>` in Expression Position | Accepted | 2026-11-01 |
 | [0144](0144-class-side-protocol-types.md) | Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`" | Implemented | 2026-11-04 |
+| [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Accepted | 2026-11-06 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

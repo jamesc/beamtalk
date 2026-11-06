@@ -420,7 +420,7 @@ Actor subclass: Counter
 - **Future class remains.** `beamtalk_future.erl` and `Future.bt` continue to exist for explicit async patterns (forking blocks, parallel computation). They are no longer on the actor message-send hot path.
 - **`beamtalk_message_dispatch:send/3` routing changes.** The dispatch layer must route actor sends through `sync_send/3` instead of `async_send/4` for `.` sends, and through a new cast path for `!` sends.
 - **Self-send behavior unchanged.** Self-sends already bypass gen_server via direct dispatch. `self increment.` remains a direct call to `Module:safe_dispatch`. `self increment!` is also a direct call but the return value is discarded — this is syntactic sugar, not a gen_server:cast, since self-sends never go through gen_server.
-- **Cascade semantics deferred.** Cascade (`;`) interaction with `.` vs `!` is deferred to ADR 0044. Until then, cascades use the existing async path. The parser does not need to handle `actor msg1; msg2!` until ADR 0044 specifies cascade+bang semantics.
+- **Cascade semantics deferred.** Cascade (`;`) interaction with `.` vs `!` was deferred to a planned "ADR 0044" (a number that went to comments-as-AST-nodes). ADR 0145 (Accepted) keeps `;` fan-out unchanged and does not specify cascade+bang semantics, so that question remains open. Until it is decided, cascades use the existing async path, and the parser does not need to handle `actor msg1; msg2!`.
 
 ## Implementation
 
