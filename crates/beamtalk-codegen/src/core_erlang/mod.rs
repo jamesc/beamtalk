@@ -220,7 +220,7 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
         match expr {
-            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Literal(lit, _) => Ok(Self::literal_doc(lit)),
             Expression::Identifier(id) => self.generate_identifier(id),
             // BT-4074: a package qualifier (`pkg@Foo`) selects nothing at
             // runtime — the class process is registered under the bare name —

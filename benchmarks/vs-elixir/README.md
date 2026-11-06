@@ -170,6 +170,12 @@ share of each figure.
   call-site key to the class reference), so an erase costs at most two
   updates per class: `results/bench-bt4442.md` (50 subclasses × 10 targets,
   103 ms down to 20 ms; rows 3a-3c still 3 reductions).
+- **A class-side constant (3k-3m)**, a class method whose whole body is one
+  literal (`class protocolError => 1`), answers the literal in place behind
+  its own constant-value key (BT-4363, BT-4504): 1 reduction and 0 words for
+  an integer, a string or a symbol, against 2 for `Math.protocol_error()`. A
+  string's key carries the tagged binary, so its map match costs more time
+  than an integer's: `results/bench-bt4504.md`.
 - **Blocks (6a)**: `blk value: 41` is an `is_function/2` guard and an `apply`,
   the same as `fun.(41)`.
 - **`collect:`, `inject:into:` and a `do:` that assigns nothing (6c-6e)**

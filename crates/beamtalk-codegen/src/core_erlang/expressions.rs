@@ -26,8 +26,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
-    CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector, SlotKind,
-    StringSegment,
+    CascadeMessage, ConstantValue, Expression, Identifier, Literal, MapPair, MessageSelector,
+    SlotKind, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -48,34 +48,56 @@ fn guarded_op_live_field_read_doc(field_name: &str) -> Document<'static> {
 }
 
 impl CoreErlangGenerator {
-    /// Generates code for a literal value.
+    /// Generates code for a literal value: the Core Erlang term a Beamtalk
+    /// literal is.
     ///
-    /// Maps Beamtalk literals to Core Erlang:
     /// - Integers: `42` → `42`
     /// - Floats: `3.14` → `3.14`
     /// - Strings: `"hello"` → tagged `{'beamtalk_string', #{#<104>(8,1,...), ...}#}` (BT-4170)
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
-    pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
+    pub(super) fn literal_doc(lit: &Literal) -> Document<'static> {
         match lit {
-            Literal::Integer(n) => Ok(leaf::int_lit(*n)),
-            Literal::Float(f) => Ok(leaf::float_lit(*f)),
-            Literal::String(s) => Ok(leaf::tagged_string_lit(s)),
-            Literal::Symbol(s) => Ok(leaf::atom(s.to_string())),
-            Literal::Character(c) => Ok(leaf::int_lit(i64::from(*c as u32))),
+            Literal::Integer(n) => leaf::int_lit(*n),
+            Literal::Float(f) => leaf::float_lit(*f),
+            Literal::String(s) => leaf::tagged_string_lit(s),
+            Literal::Symbol(s) => leaf::atom(s.to_string()),
+            Literal::Character(c) => leaf::int_lit(i64::from(*c as u32)),
             Literal::List(elements) => {
                 let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
                         parts.push(Document::Str(", "));
                     }
-                    parts.push(self.generate_literal(elem)?);
+                    parts.push(Self::literal_doc(elem));
                 }
                 parts.push(Document::Str("]"));
-                Ok(Document::Vec(parts))
+                Document::Vec(parts)
             }
+        }
+    }
+
+    /// The atom a reserved pseudo-variable (`true`, `false`, `nil`) is, or
+    /// `None` for any other name.
+    pub(super) fn pseudo_variable_doc(name: &str) -> Option<Document<'static>> {
+        match name {
+            "true" => Some(Document::Str("'true'")),
+            "false" => Some(Document::Str("'false'")),
+            "nil" => Some(Document::Str("'nil'")),
+            _ => None,
+        }
+    }
+
+    /// The Core Erlang term a constant method body is (BT-4363, BT-4504):
+    /// lowered exactly as the body's own literal or pseudo-variable is
+    /// ([`Self::literal_doc`], [`Self::pseudo_variable_doc`]), so a folded
+    /// send and the `constant_class_methods` row answer the term the method
+    /// itself returns.
+    pub(super) fn constant_value_doc(value: &ConstantValue) -> Document<'static> {
+        match value.as_literal() {
+            Ok(literal) => Self::literal_doc(&literal),
+            Err(name) => Self::pseudo_variable_doc(name).unwrap_or_else(|| leaf::atom(name)),
         }
     }
 
@@ -314,10 +336,10 @@ impl CoreErlangGenerator {
     ///    - **Repl context**: `State` from bindings
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<Document<'static>> {
         // Handle special reserved identifiers as atoms
+        if let Some(atom) = Self::pseudo_variable_doc(id.name.as_str()) {
+            return Ok(atom);
+        }
         match id.name.as_str() {
-            "true" => Ok(Document::Str("'true'")),
-            "false" => Ok(Document::Str("'false'")),
-            "nil" => Ok(Document::Str("'nil'")),
             "self" => {
                 if self.lookup_var("self").is_none() && self.context == super::CodeGenContext::Repl
                 {

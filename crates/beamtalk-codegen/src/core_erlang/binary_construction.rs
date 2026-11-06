@@ -161,7 +161,12 @@ impl CoreErlangGenerator {
                     }
                 }),
             };
-            parts.extend(self.construction_segment(*source_segment, seg, value, size)?);
+            parts.extend(Self::construction_segment(
+                *source_segment,
+                seg,
+                value,
+                size,
+            )?);
         }
 
         let construction = docvec![
@@ -196,7 +201,6 @@ impl CoreErlangGenerator {
     /// failures). Folded constant bytes (a string literal, a constant float)
     /// cannot fail and, as from `erlc`, carry none.
     fn construction_segment(
-        &self,
         source_segment: usize,
         seg: &BinarySegment<Expression>,
         value: SegmentValue<'_>,
@@ -243,13 +247,13 @@ impl CoreErlangGenerator {
                         }
                         leaf::float_lit(f)
                     }
-                    None => self.generate_literal(lit)?,
+                    None => Self::literal_doc(lit),
                 }
             }
             // `$A` is its code point (`#<65>`); any other literal lowers as
             // itself, and a misfit (`<<1.5>>`, warned at parse time) fails at
             // run time exactly as `erlc` leaves it to.
-            SegmentValue::Literal(lit) => self.generate_literal(lit)?,
+            SegmentValue::Literal(lit) => Self::literal_doc(lit),
         };
         Ok(vec![segment_numbered(
             docvec![

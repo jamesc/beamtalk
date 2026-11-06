@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4363: a class-literal send of a class-side method whose whole body is
-// one integer literal answers the literal in place, behind a constant-value
+// one scalar literal (BT-4504: not only an integer) answers the literal in place, behind a constant-value
 // static call key that the runtime installs only while the class's published
 // metadata still certifies that literal. These are the workspace halves of
 // stdlib/test/constant_class_method_test.bt: each warms the key through a call
@@ -124,3 +124,147 @@ Object subclass: CckParent
 
 CckChildCaller run
 // => 5
+
+// ===========================================================================
+// BT-4504: THE SAME ERASERS FOR A STRING BODY
+// ===========================================================================
+
+Object subclass: CckStrTarget
+  class answer => "one"
+// => "CckStrTarget"
+
+Object subclass: CckStrCaller
+  class run => CckStrTarget answer
+// => "CckStrCaller"
+
+(CckStrCaller run) =:= "one"
+// => true
+
+// The hit path is taken: the warmed key carries the string as the term it
+// compiles to.
+strKey := Erlang erlang list_to_tuple: #(#constant_value, "one", (Erlang erlang element: 3 of: CckStrTarget), #class_answer, #'CckStrTarget class')
+// => _
+
+(Erlang beamtalk_class_shadow_flags static_call_key_value: strKey) == CckStrTarget
+// => true
+
+// A redefinition with another string.
+Object subclass: CckStrTarget
+  class answer => "two"
+// => "CckStrTarget"
+
+(CckStrCaller run) =:= "two"
+// => true
+
+// A redefinition whose body is no longer a literal.
+Object subclass: CckStrTarget
+  class answer => "th" ++ "ree"
+// => "CckStrTarget"
+
+(CckStrCaller run) =:= "three"
+// => true
+
+// A redefinition with a literal of another kind but the same spelling.
+Object subclass: CckStrTarget
+  class answer => #two
+// => "CckStrTarget"
+
+(CckStrCaller run) =:= #two
+// => true
+
+(CckStrCaller run) =:= "two"
+// => false
+
+// A redefinition without the method: does_not_understand.
+Object subclass: CckStrTarget
+  class other => #other
+// => "CckStrTarget"
+
+[CckStrCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// removeSelector: of a class-body string constant, after a fresh warm-up.
+Object subclass: CckStrTarget
+  class answer => "one"
+// => "CckStrTarget"
+
+(CckStrCaller run) =:= "one"
+// => true
+
+CckStrTarget class removeSelector: #answer
+// => CckStrTarget class
+
+[CckStrCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// ===========================================================================
+// BT-4504: THE SAME ERASERS FOR A SYMBOL BODY
+// ===========================================================================
+
+Object subclass: CckSymTarget
+  class answer => #one
+// => "CckSymTarget"
+
+Object subclass: CckSymCaller
+  class run => CckSymTarget answer
+// => "CckSymCaller"
+
+(CckSymCaller run) =:= #one
+// => true
+
+// The hit path is taken: the warmed key carries the symbol as the term it
+// compiles to.
+symKey := Erlang erlang list_to_tuple: #(#constant_value, #one, (Erlang erlang element: 3 of: CckSymTarget), #class_answer, #'CckSymTarget class')
+// => _
+
+(Erlang beamtalk_class_shadow_flags static_call_key_value: symKey) == CckSymTarget
+// => true
+
+// A redefinition with another symbol.
+Object subclass: CckSymTarget
+  class answer => #two
+// => "CckSymTarget"
+
+(CckSymCaller run) =:= #two
+// => true
+
+// A redefinition whose body is no longer a literal.
+Object subclass: CckSymTarget
+  class answer => #two asString
+// => "CckSymTarget"
+
+(CckSymCaller run) =:= "two"
+// => true
+
+// A redefinition with a literal of another kind but the same spelling.
+Object subclass: CckSymTarget
+  class answer => "two"
+// => "CckSymTarget"
+
+(CckSymCaller run) =:= "two"
+// => true
+
+(CckSymCaller run) =:= #two
+// => false
+
+// A redefinition without the method: does_not_understand.
+Object subclass: CckSymTarget
+  class other => #other
+// => "CckSymTarget"
+
+[CckSymCaller run] on: Error do: [:e | e kind]
+// => does_not_understand
+
+// removeSelector: of a class-body symbol constant, after a fresh warm-up.
+Object subclass: CckSymTarget
+  class answer => #one
+// => "CckSymTarget"
+
+(CckSymCaller run) =:= #one
+// => true
+
+CckSymTarget class removeSelector: #answer
+// => CckSymTarget class
+
+[CckSymCaller run] on: Error do: [:e | e kind]
+// => does_not_understand

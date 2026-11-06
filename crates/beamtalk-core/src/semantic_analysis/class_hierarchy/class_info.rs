@@ -6,7 +6,9 @@
 //! Contains `MethodInfo`, `SuperclassTypeArg`, and `ClassInfo` — the value objects
 //! that describe classes and methods in the static hierarchy.
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind, SlotKind};
+use crate::ast::{
+    ClassDefinition, ClassKind, ConstantValue, Expression, MethodDefinition, MethodKind, SlotKind,
+};
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashMap};
 
@@ -108,17 +110,35 @@ pub struct MethodInfo {
     /// (BT-4115).
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive: Option<EcoString>,
-    /// The integer when the method body is exactly one integer literal
-    /// ([`MethodDefinition::literal_integer_body`](crate::ast::MethodDefinition::literal_integer_body)),
+    /// The literal when the method body is exactly one scalar literal
+    /// ([`MethodDefinition::literal_constant_body`](crate::ast::MethodDefinition::literal_constant_body)),
     /// else `None`. Codegen answers a class-literal send of such a class-side
     /// method with the literal, behind a static call key the runtime installs
     /// only while the defining module's metadata still certifies that body
-    /// (BT-4363).
+    /// (BT-4363, BT-4504).
     #[cfg_attr(feature = "serde", serde(default))]
-    pub constant_value: Option<i64>,
+    pub constant_value: Option<ConstantValue>,
 }
 
 impl MethodInfo {
+    /// The [`MethodInfo::constant_value`] to record for `method`: its literal
+    /// body ([`MethodDefinition::literal_constant_body`]) on the class side,
+    /// `None` on the instance side.
+    ///
+    /// Only a class-literal send of a *class-side* method is folded
+    /// (BT-4363). An instance-side constant would put method bodies into the
+    /// interface surface, so a body-only edit (`=> self name` to `=> "x"`)
+    /// would rebuild unchanged callers (BT-4504). Every producer of
+    /// `MethodInfo`/stdlib method metadata goes through this one rule.
+    #[must_use]
+    pub fn recorded_constant(method: &MethodDefinition, class_side: bool) -> Option<ConstantValue> {
+        if class_side {
+            method.literal_constant_body()
+        } else {
+            None
+        }
+    }
+
     /// Returns `true` if `self` (a subclass method) can override `ancestor`.
     ///
     /// A method cannot override a sealed method with the same selector.
@@ -520,7 +540,7 @@ impl ClassInfo {
                 // `MethodInfo::origin`'s doc for why it can't be set here.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
-                constant_value: m.literal_integer_body(),
+                constant_value: MethodInfo::recorded_constant(m, false),
             })
             .collect();
 
@@ -546,7 +566,7 @@ impl ClassInfo {
                 // methods are never flattened in v1, so this is always `None`.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
-                constant_value: m.literal_integer_body(),
+                constant_value: MethodInfo::recorded_constant(m, true),
             })
             .collect();
 

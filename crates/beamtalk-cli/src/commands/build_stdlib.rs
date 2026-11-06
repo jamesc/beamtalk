@@ -19,7 +19,7 @@ use crate::commands::app_file;
 use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
-use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
+use beamtalk_core::semantic_analysis::class_hierarchy::{DeclaredType, MethodInfo};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -930,9 +930,9 @@ struct MethodMeta {
     /// Quoted `@primitive "<name>"` when that is the whole body (BT-4115,
     /// `MethodInfo::primitive`).
     primitive: Option<String>,
-    /// The integer when that literal is the whole body (BT-4363,
+    /// The scalar literal when it is the whole body (BT-4363, BT-4504,
     /// `MethodInfo::constant_value`).
-    constant_value: Option<i64>,
+    constant_value: Option<beamtalk_core::ast::ConstantValue>,
 }
 
 /// Simplified method kind for code generation.
@@ -957,8 +957,9 @@ impl MethodKindMeta {
     }
 }
 
-/// Convert an AST method definition to `MethodMeta`.
-fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
+/// Convert an AST method definition to `MethodMeta`; `class_side` selects the
+/// side's constant rule ([`MethodInfo::recorded_constant`]).
+fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition, class_side: bool) -> MethodMeta {
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
@@ -974,7 +975,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
             .collect(),
         doc: m.doc_comment.clone(),
         primitive: m.quoted_primitive_name().map(ToString::to_string),
-        constant_value: m.literal_integer_body(),
+        constant_value: MethodInfo::recorded_constant(m, class_side),
     }
 }
 
@@ -1490,9 +1491,16 @@ fn extract_class_metadata(
         );
     }
 
-    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
-    let mut class_methods: Vec<MethodMeta> =
-        class.class_methods.iter().map(method_def_to_meta).collect();
+    let mut methods: Vec<MethodMeta> = class
+        .methods
+        .iter()
+        .map(|m| method_def_to_meta(m, false))
+        .collect();
+    let mut class_methods: Vec<MethodMeta> = class
+        .class_methods
+        .iter()
+        .map(|m| method_def_to_meta(m, true))
+        .collect();
 
     let state = class
         .state
@@ -1899,7 +1907,7 @@ fn generate_builtins_rs(
          use super::super::{\n\
          \x20   AutoConstructors, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo, SuperclassTypeArg,\n\
          };\n\
-         use crate::ast::{MethodKind, SlotKind};\n\
+         use crate::ast::{ConstantValue, MethodKind, SlotKind};\n\
          use ecow::EcoString;\n\
          use std::collections::{BTreeSet, HashMap};\n\
          \n",
@@ -2458,6 +2466,23 @@ fn rust_str_lit_into(s: &str) -> String {
     format!("{}.into()", rust_str_lit(s))
 }
 
+/// The Rust expression that rebuilds `value` in `generated_builtins.rs`
+/// (BT-4504). `{:?}` of an `f64` and a `char` is a valid Rust literal of the
+/// same value (parsed literals are finite).
+fn constant_value_to_rust_expr(value: &beamtalk_core::ast::ConstantValue) -> String {
+    use beamtalk_core::ast::ConstantValue;
+    match value {
+        ConstantValue::Integer(n) => format!("ConstantValue::Integer({n})"),
+        ConstantValue::Float(f) => format!("ConstantValue::Float({f:?})"),
+        ConstantValue::String(s) => format!("ConstantValue::String({})", rust_str_lit_into(s)),
+        ConstantValue::Symbol(s) => format!("ConstantValue::Symbol({})", rust_str_lit_into(s)),
+        ConstantValue::Character(c) => format!("ConstantValue::Character({c:?})"),
+        ConstantValue::Nil => "ConstantValue::Nil".to_string(),
+        ConstantValue::True => "ConstantValue::True".to_string(),
+        ConstantValue::False => "ConstantValue::False".to_string(),
+    }
+}
+
 /// Generate a method list field (`methods` or `class_methods`).
 fn generate_method_list(
     code: &mut String,
@@ -2499,8 +2524,8 @@ fn generate_method_list(
             Some(name) => format!("Some({}.into())", rust_str_lit(name)),
             None => "None".to_string(),
         };
-        let constant_value_expr = match m.constant_value {
-            Some(value) => format!("Some({value})"),
+        let constant_value_expr = match &m.constant_value {
+            Some(value) => format!("Some({})", constant_value_to_rust_expr(value)),
             None => "None".to_string(),
         };
         let _ = writeln!(

@@ -4075,7 +4075,7 @@ impl CoreErlangGenerator {
                 class_name,
                 module_name,
                 raw_selector,
-                value,
+                &value,
                 args_doc,
                 arg_count,
             );
@@ -4116,12 +4116,17 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// The integer that `class_name`'s own class-side method `raw_selector`
-    /// is, when its body is exactly that integer literal
-    /// (`MethodInfo::constant_value`, BT-4363). Only a compile-time
-    /// candidate: the runtime key of [`Self::guarded_constant_doc`] decides
-    /// each send.
-    fn constant_class_method_value(&self, class_name: &str, raw_selector: &str) -> Option<i64> {
+    /// The literal that `class_name`'s own class-side method `raw_selector`
+    /// is, when its body is exactly that scalar literal
+    /// (`MethodInfo::constant_value`, BT-4363; every kind of
+    /// [`ConstantValue`](beamtalk_core::ast::ConstantValue) since BT-4504).
+    /// Only a compile-time candidate: the runtime key of
+    /// [`Self::guarded_constant_doc`] decides each send.
+    fn constant_class_method_value(
+        &self,
+        class_name: &str,
+        raw_selector: &str,
+    ) -> Option<beamtalk_core::ast::ConstantValue> {
         self.class_hierarchy
             .as_ref()?
             .get_class(class_name)?
@@ -4129,11 +4134,12 @@ impl CoreErlangGenerator {
             .iter()
             .find(|m| m.selector == raw_selector)?
             .constant_value
+            .clone()
     }
 
     /// BT-4363: a static send of `raw_selector` to the literal class
     /// `class_name`, whose own class-side method compiled to `module_name`
-    /// has the integer literal `value` as its whole body
+    /// has the scalar literal `value` as its whole body
     /// ([`Self::constant_class_method_value`]), answers `value` in place,
     /// behind the keyed shape of [`Self::guarded_class_direct_call_doc`]:
     ///
@@ -4163,6 +4169,13 @@ impl CoreErlangGenerator {
     /// then answers what the dynamic send answers. Sealing plays no part: the
     /// guard already proves the target (ADR 0025 amendment §3).
     ///
+    /// The key and the hit arm carry `value` as the term the method body
+    /// compiles to ([`Self::constant_value_doc`], BT-4504): a string is the
+    /// tagged `{'beamtalk_string', #{…}#}`, a symbol, `nil`, `true` or
+    /// `false` an atom, a character its code point. Map-key matching and the
+    /// runtime certification are both exact (`=:=`), so `1` never answers
+    /// for `1.0`.
+    ///
     /// `args_doc` must be variables or literals (bound by the caller, so a
     /// side-effecting argument still runs once); the hit arm ignores them.
     fn guarded_constant_doc(
@@ -4170,13 +4183,14 @@ impl CoreErlangGenerator {
         class_name: &str,
         module_name: String,
         raw_selector: &str,
-        value: i64,
+        value: &beamtalk_core::ast::ConstantValue,
         args_doc: Document<'static>,
         arg_count: usize,
     ) -> Document<'static> {
+        let value_doc = Self::constant_value_doc(value);
         let key_doc = docvec![
             "{'constant_value', ",
-            leaf::int_lit(value),
+            value_doc.clone(),
             ", ",
             leaf::atom(module_name),
             ", ",
@@ -4195,7 +4209,7 @@ impl CoreErlangGenerator {
             &class_self_var,
             args_doc,
             arg_count + 1,
-            leaf::int_lit(value),
+            value_doc,
         )
     }
 

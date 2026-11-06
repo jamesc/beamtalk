@@ -1,4 +1,4 @@
-# ADR 0145: A `^` Through `ensure:` — Actor Fields Are Read From the Cell, Only Threaded State Is Carried
+# ADR 0146: A `^` Through `ensure:` — Actor Fields Are Read From the Cell, Only Threaded State Is Carried
 
 ## Status
 Proposed (2026-11-06). Tracking: BT-4505.

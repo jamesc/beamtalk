@@ -434,11 +434,16 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: Reference | r printString]
       dynamic: [:r | r printString]
       on: Erlang erlang make_ref
+    // Open a port here rather than borrowing an ambient one: a node is not
+    // guaranteed to have any (the Windows runner has none). A UDP socket is
+    // a port on every OS and needs no external executable.
+    port := (Erlang gen_udp open: 0) value
     self
       send: #port
       typed: [:r :: Port | r printString]
       dynamic: [:r | r printString]
-      on: (Erlang erlang ports) first
+      on: port
+    Erlang gen_udp close: port
 
   // Values each built-in guard must reject.
   testBuiltinGuardMisses =>
