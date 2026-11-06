@@ -289,43 +289,60 @@ native_call(Module, FunName, Args, {Class, Selector}, Mode) when
 -doc """
 Error path of a direct inline FFI call (BT-4485).
 
-Codegen emits `call 'M':'F'(Args...)` without the proxy when the imported
-spec proves the result needs no coercion and every argument is a scalar that
-reaches the callee unchanged (the FFI type table's rule, see
-`ffi_passthrough_conformance.json`). The call keeps the proxy's error
+Codegen emits `call 'M':'F'(Args...)` without the proxy when the FFI type
+table proves the result needs no coercion and every argument is a scalar
+(statically, and checked at run time with `is_number`/`is_atom`/`is_pid`;
+see `ffi_passthrough_conformance.json`). The call keeps the proxy's error
 translation: its `try` hands every exception here, and this runs the same
-`classify_ffi_exception` policy as `direct_call/4`, `badarg` charlist retry
-included, so a direct call raises exactly the `#beamtalk_error{}` the proxied
-one would. Answers the retry's result when the retry succeeds.
+`classify_ffi_exception` policy as `direct_call/4`, so a direct call raises
+exactly the `#beamtalk_error{}` the proxied one would.
 
-`Caller` is the compiled Beamtalk module that made the call. Its frame bounds
-the callee's frames in `Stack`, as the proxy's own frame does on the proxy
-path, so only the callee's frames decide whether compiled Beamtalk code
-raised the error. The arguments cannot carry a block, so the callee runs no
-Beamtalk code of `Caller`, and no class-variable snapshot is needed before
-the retry (a retry can only re-run Erlang code).
+`Site` is `process_info(self(), current_stacktrace)` read in the calling
+function's `catch`, so its first frame is the call site. On the proxy path
+the proxy's own frame separates the callee's frames from the caller's; here
+the call-site frame does: only the frames above it decide whether compiled
+Beamtalk code raised the error. When the call site is not in `Stack` (a
+callee deeper than the stacktrace depth) every frame is the callee's, as on
+the proxy path when its frame is cut off.
+
+Scalar arguments make the `badarg` charlist retry a no-op (no binary or
+String to convert), so it never re-runs the call, and no class-variable
+snapshot is needed: `none` restores nothing.
 """.
 -spec ffi_call_raised(
-    error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), atom()
+    error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), term()
 ) -> term().
-ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Caller) when
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) when
     Mode =:= stock; Mode =:= beamtalk
 ->
-    CalleeFrames = lists:takewhile(fun(Frame) -> element(1, Frame) =/= Caller end, Stack),
     classify_ffi_exception(
         Class,
         Reason,
         Stack,
-        CalleeFrames,
+        callee_frames(Stack, Site),
         Module,
         FunName,
         Args,
         FunName,
         none,
-        fun(M, F, A, Sel, Ctx, St) ->
-            maybe_retry_badarg(M, F, A, Sel, Ctx, St, none, Mode)
-        end
+        fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, none, Mode) end
     ).
+
+-doc """
+The frames of `Stack` above the call site named by `Site`'s first frame
+(matched on module, function and arity), or all of `Stack` when the call site
+is not in it. See `ffi_call_raised/8`.
+""".
+-spec callee_frames(list(), term()) -> list().
+callee_frames(Stack, {current_stacktrace, [{M, F, A, _} | _]}) when is_integer(A) ->
+    lists:takewhile(fun(Frame) -> not is_frame_of(Frame, M, F, A) end, Stack);
+callee_frames(Stack, _Site) ->
+    Stack.
+
+-spec is_frame_of(term(), atom(), atom(), arity()) -> boolean().
+is_frame_of({M, F, A, _}, M, F, A) -> true;
+is_frame_of({M, F, Args, _}, M, F, A) when is_list(Args) -> length(Args) =:= A;
+is_frame_of(_Frame, _M, _F, _A) -> false.
 
 -doc """
 The single, unified apply path for all FFI (ADR 0101 Part 2).

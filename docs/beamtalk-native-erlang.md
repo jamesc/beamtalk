@@ -119,6 +119,17 @@ hint[ffi-nested-string]: Strings nested in this argument reach lists:member/2 as
 
 A `self delegate` method on a `native:` `Object` gets the same hint at each such declared parameter, since its arguments cross the same boundary. The hint is silent for a top-level `String` (the boundary unwraps it), for `Dynamic` or unknown element types (no warning without evidence, ADR 0100), and for Beamtalk-owned modules. A call that only stores or reshuffles its data (`lists:reverse/1`) is harmless; suppress the hint there with `@expect ffi_nested_string`, or package-wide with `ffi-nested-string = "off"` under `[diagnostics]` in `beamtalk.toml`.
 
+### Calls compiled without the proxy
+
+Most FFI calls run through `beamtalk_erlang_proxy`, which unwraps `String` arguments, coerces the result (charlists, `ok`/`error` → `Result`) and turns Erlang errors into structured ones. When the function's `-spec` in the FFI type table proves none of that changes anything, the compiler emits a plain remote call instead (BT-4485). That needs both of these:
+
+- **The result** is made only of types the proxy returns unchanged: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid`, `Dictionary`, `Block`, or a literal atom other than `ok`/`error`. A result of `atom()`, `binary()`, a list, a tuple, `term()` or `ok | {error, _}` keeps the proxy.
+- **Every argument's static type** is a scalar: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid` or `Symbol`. A `String`, collection, block or untyped argument keeps the proxy.
+
+Static types aren't checked at run time, so the direct call also checks each argument (`is_number`, `is_atom` or `is_pid`) and goes through the proxy when one fails. It raises the same structured errors: its error path hands the exception to the proxy's classifier, `badarg` retry included.
+
+Only a `-spec` extracted from a `.beam` proves a call; a hand-written stub signature never removes a coercion. The proof uses the specs the compiler saw: a project build reads OTP and dependency specs, while `beamtalk build-stdlib` and `beamtalk test` on `stdlib/` read only the runtime's own modules. When a spec change adds or removes a proof, `beamtalk build` recompiles the callers. A call the table can't prove behaves exactly as before.
+
 FFI is the right choice when:
 - You need to call a handful of Erlang functions
 - The Erlang module is stateless or manages its own state externally

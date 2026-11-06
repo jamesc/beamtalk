@@ -57,6 +57,9 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::semantic_analysis::TypeProvenance;
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
+use beamtalk_core::semantic_analysis::type_checker::{
+    FFI_ARG_RUNTIME_GUARDS, ffi_arg_passes_unchanged,
+};
 use beamtalk_core::source_analysis::Span;
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
@@ -1845,8 +1848,12 @@ impl CoreErlangGenerator {
     /// Both proofs are the FFI type table's
     /// ([`NativeTypeRegistry::proves_no_result_coercion`] and
     /// [`ffi_arg_passes_unchanged`] on each argument's checked type); this
-    /// only asks them. The call keeps the proxy's error translation: a raise
-    /// is handed, with the arguments, to
+    /// only asks them. Static types are not enforced at run time, so each
+    /// argument is also checked with the table's
+    /// [`FFI_ARG_RUNTIME_GUARDS`] and the call falls back to
+    /// `direct_call/4` when one fails. The call keeps the proxy's error
+    /// translation: a raise is handed, with the arguments and the call
+    /// site's frame (read only on that path), to
     /// `beamtalk_erlang_proxy:ffi_call_raised/8`, which runs the same
     /// classifier (and `badarg` charlist retry) as `direct_call/4`.
     /// Arguments are bound before the `try`, so a raise while evaluating one
@@ -1854,15 +1861,21 @@ impl CoreErlangGenerator {
     ///
     /// ```text
     /// let <A1> = <arg1> in
-    /// try call 'M':'F'(A1)
-    /// of <R> -> R
-    /// catch <C, E, Raw> ->
-    ///   let S = primop 'build_stacktrace'(Raw) in
-    ///   call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, 'Caller')
+    /// case <> of
+    ///   <> when is_number(A1) or is_atom(A1) or is_pid(A1) ->
+    ///     try call 'M':'F'(A1)
+    ///     of <R> -> R
+    ///     catch <C, E, Raw> ->
+    ///       let S = primop 'build_stacktrace'(Raw) in
+    ///       let Site = call 'erlang':'process_info'(self(), 'current_stacktrace') in
+    ///       call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, Site)
+    ///   <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('M', 'F', [A1], Mode)
+    /// end
     /// ```
     ///
     /// [`NativeTypeRegistry::proves_no_result_coercion`]: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proves_no_result_coercion
     /// [`ffi_arg_passes_unchanged`]: beamtalk_core::semantic_analysis::type_checker::ffi_arg_passes_unchanged
+    /// [`FFI_ARG_RUNTIME_GUARDS`]: beamtalk_core::semantic_analysis::type_checker::FFI_ARG_RUNTIME_GUARDS
     fn proved_direct_ffi_call(
         &mut self,
         module_name: &str,
@@ -1879,9 +1892,9 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         let args_proved = arguments.iter().all(|arg| {
-            self.type_map.get(arg.span()).is_some_and(
-                beamtalk_core::semantic_analysis::type_checker::ffi_arg_passes_unchanged,
-            )
+            self.type_map
+                .get(arg.span())
+                .is_some_and(ffi_arg_passes_unchanged)
         });
         if !args_proved {
             return Ok(None);
@@ -1889,6 +1902,7 @@ impl CoreErlangGenerator {
 
         let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         let mut arg_vars: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut arg_names: Vec<String> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             let var = self.fresh_temp_var("FfiArg");
             bindings.push(docvec![
@@ -1901,17 +1915,20 @@ impl CoreErlangGenerator {
             if i > 0 {
                 arg_vars.push(Document::Str(", "));
             }
-            arg_vars.push(leaf::var(var));
+            arg_vars.push(leaf::var(var.clone()));
+            arg_names.push(var);
         }
         let result_var = self.fresh_temp_var("FfiRes");
         let cls_var = self.fresh_temp_var("FfiCls");
         let err_var = self.fresh_temp_var("FfiErr");
         let stk_var = self.fresh_temp_var("FfiStk");
         let built_var = self.fresh_temp_var("FfiBuiltStk");
+        let self_var = self.fresh_temp_var("FfiSelf");
+        let site_var = self.fresh_temp_var("FfiSite");
         let module_atom = leaf::atom(module_name.to_string());
         let function_atom = leaf::atom(function_name.to_string());
-        Ok(Some(docvec![
-            Document::Vec(bindings),
+        let mode_atom = leaf::atom(super::util::ffi_coercion_mode(module_name));
+        let direct = docvec![
             "try call ",
             module_atom.clone(),
             ":",
@@ -1932,23 +1949,69 @@ impl CoreErlangGenerator {
             leaf::var(built_var.clone()),
             " = primop 'build_stacktrace'(",
             leaf::var(stk_var),
-            ") in call 'beamtalk_erlang_proxy':'ffi_call_raised'(",
+            ") in let ",
+            leaf::var(self_var.clone()),
+            " = call 'erlang':'self'() in let ",
+            leaf::var(site_var.clone()),
+            " = call 'erlang':'process_info'(",
+            leaf::var(self_var),
+            ", 'current_stacktrace') in call 'beamtalk_erlang_proxy':'ffi_call_raised'(",
             leaf::var(cls_var),
             ", ",
             leaf::var(err_var),
             ", ",
             leaf::var(built_var),
             ", ",
+            module_atom.clone(),
+            ", ",
+            function_atom.clone(),
+            ", [",
+            Document::Vec(arg_vars.clone()),
+            "], ",
+            mode_atom.clone(),
+            ", ",
+            leaf::var(site_var),
+            ")",
+        ];
+        if arg_names.is_empty() {
+            return Ok(Some(docvec![Document::Vec(bindings), direct]));
+        }
+        // Static types are not enforced at run time: check each argument with
+        // the table's runtime guards and keep the proxy for anything else.
+        let guard = arg_names
+            .iter()
+            .map(|name| {
+                FFI_ARG_RUNTIME_GUARDS
+                    .iter()
+                    .map(|bif| {
+                        docvec![
+                            "call 'erlang':",
+                            leaf::atom(*bif),
+                            "(",
+                            leaf::var(name.clone()),
+                            ")"
+                        ]
+                    })
+                    .reduce(|acc, test| docvec!["call 'erlang':'or'(", acc, ", ", test, ")"])
+                    .unwrap_or(Document::Str("'true'"))
+            })
+            .reduce(|acc, test| docvec!["call 'erlang':'and'(", acc, ", ", test, ")"])
+            .unwrap_or(Document::Str("'true'"));
+        Ok(Some(docvec![
+            Document::Vec(bindings),
+            "case <> of <> when ",
+            guard,
+            " -> ",
+            direct,
+            " <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'(",
             module_atom,
             ", ",
             function_atom,
             ", [",
             Document::Vec(arg_vars),
             "], ",
-            leaf::atom(super::util::ffi_coercion_mode(module_name)),
-            ", ",
-            leaf::atom(self.module_name.to_string()),
-            ")",
+            mode_atom,
+            ") end",
         ]))
     }
 

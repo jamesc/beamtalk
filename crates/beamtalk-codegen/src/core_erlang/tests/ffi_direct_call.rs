@@ -81,21 +81,42 @@ fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
         code.contains("call 'beamtalk_erlang_proxy':'ffi_call_raised'("),
         "a direct call keeps the proxy's error translation:\n{code}"
     );
-    // The catch variable is the raw stacktrace; the helper takes the list.
+    // The catch variable is the raw stacktrace; the helper takes the list,
+    // plus the call site's frame, read only on the error path.
     assert!(
         code.contains("primop 'build_stacktrace'(_FfiStk"),
         "the raw stacktrace is built before the hand-off:\n{code}"
     );
+    assert!(
+        code.contains("call 'erlang':'process_info'(_FfiSelf"),
+        "the call site is read in the catch:\n{code}"
+    );
     let tail = format!("'{module}', '{function}', [");
     assert!(code.contains(&tail), "expected `{tail}` in:\n{code}");
-    let mode_caller = format!("], '{mode}', 'probe')");
+    let mode_site = format!("], '{mode}', _FfiSite");
     assert!(
-        code.contains(&mode_caller),
-        "expected `{mode_caller}` in:\n{code}"
+        code.contains(&mode_site),
+        "expected `{mode_site}` in:\n{code}"
+    );
+}
+
+/// A direct call with arguments checks them at run time and falls back to
+/// the proxy for a value its static type did not promise.
+fn assert_guarded(code: &str, module: &str, function: &str) {
+    assert!(
+        code.contains("case <> of <> when "),
+        "expected a guard in:\n{code}"
+    );
+    for bif in beamtalk_core::semantic_analysis::type_checker::FFI_ARG_RUNTIME_GUARDS {
+        let test = format!("call 'erlang':'{bif}'(_FfiArg");
+        assert!(code.contains(&test), "expected `{test}` in:\n{code}");
+    }
+    let fallback = format!(
+        "<> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('{module}', '{function}', ["
     );
     assert!(
-        !code.contains("'direct_call'("),
-        "a proved call must not also go through the proxy:\n{code}"
+        code.contains(&fallback),
+        "expected `{fallback}` in:\n{code}"
     );
 }
 
@@ -122,6 +143,7 @@ fn zero_arity_scalar_result_is_direct() {
 fn scalar_arg_scalar_result_is_direct() {
     let code = compile("Erlang erlang phash2: n");
     assert_direct(&code, "erlang", "phash2", "stock");
+    assert_guarded(&code, "erlang", "phash2");
     // The argument is bound before the `try`, so a raise while evaluating it
     // is not translated.
     let bind = code.find("FfiArg");
@@ -135,7 +157,9 @@ fn scalar_arg_scalar_result_is_direct() {
 
 #[test]
 fn literal_scalar_arg_is_direct() {
-    assert_direct(&compile("Erlang erlang abs: -3"), "erlang", "abs", "stock");
+    let code = compile("Erlang erlang abs: -3");
+    assert_direct(&code, "erlang", "abs", "stock");
+    assert_guarded(&code, "erlang", "abs");
 }
 
 #[test]
@@ -198,4 +222,24 @@ fn no_registry_stays_on_proxy() {
     )
     .expect("codegen should succeed");
     assert_proxied(&code, "erlang", "phash2");
+}
+
+#[test]
+fn stub_declared_result_stays_on_proxy() {
+    // A hand-written stub may misstate the return type: it never removes a
+    // coercion, only an extracted `-spec` does.
+    let mut registry = NativeTypeRegistry::new();
+    let mut stub = sig("answer", &[], "Integer");
+    stub.provenance = TypeProvenance::Declared(beamtalk_core::source_analysis::Span::new(0, 0));
+    registry.register_module("native_mod", vec![stub]);
+    let src = "Object subclass: Probe\n  class run =>\n    Erlang native_mod answer\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("probe")
+            .with_native_type_registry(Some(std::sync::Arc::new(registry))),
+    )
+    .expect("codegen should succeed");
+    assert_proxied(&code, "native_mod", "answer");
 }
