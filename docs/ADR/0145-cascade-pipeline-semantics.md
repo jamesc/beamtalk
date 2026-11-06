@@ -941,6 +941,29 @@ it later would break code.
   typing rule; inlining it to run in the caller is a possible follow-up.
 - **Casts:** a pipeline cannot end in `!`, matching cascades.
 
+## Implementation Tracking
+
+**Epic:** BT-4511
+**Status:** Planned
+
+| Phase | Issue | Size | Blocked by |
+|---|---|---|---|
+| 1 | BT-4512: `cascade-drops-update` warning | M | — |
+| 1 | BT-4513: `setUp` lint rejects multi-`with*:` cascades | S | — |
+| 2 | BT-4514: wire check (lex `\|>`, `Pipeline` node, normalise) | M | — |
+| 2 | BT-4515: `Object >> then:` and its typing rule | S | — |
+| 3 | BT-4516: complete `\|>` parsing and errors, REPL multi-line | M | BT-4514 |
+| 3 | BT-4517: source fidelity (unparse, fmt, reflected source, editors) | M | BT-4514 |
+| 3 | BT-4518: language service support | M | BT-4514 |
+| 4 | BT-4519: docs and end-to-end REPL-protocol case | S | BT-4512, BT-4515, BT-4516, BT-4517, BT-4518 |
+
+Follow-ups outside the epic (low priority, `needs-spec`):
+
+- BT-4520: inline `then:` so it runs in the caller
+- BT-4521: multi-field functional update (Alternative F)
+- BT-4522: statement-level lint for discarded copies
+- BT-4508: cascade parts silently drop trailing tokens
+
 ## References
 - Related issues: BT-4352 (this ADR), BT-506 (canceled pipeline-chaining
   research; this ADR is its decision-record successor), BT-4508 (cascade
