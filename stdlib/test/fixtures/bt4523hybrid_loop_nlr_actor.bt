@@ -11,29 +11,59 @@ Actor subclass: Bt4523HybridLoopNlrActor
 
   countedLoopReturn =>
     k := 0
-    1 to: 5 do: [:i | self.n := i. k := i. i == 3 ifTrue: [^k]]
+    1
+      to: 5
+      do: [:i |
+        self.n := i
+        k := i
+        i == 3 ifTrue: [^k]
+      ]
     k
 
   countedLoopReturnThroughEnsure =>
     k := 0
-    [1 to: 5 do: [:i | self.n := i. k := i. i == 3 ifTrue: [^k]]] ensure: [self.seen := self.n]
+    [
+      1
+        to: 5
+        do: [:i |
+          self.n := i
+          k := i
+          i == 3 ifTrue: [^k]
+        ]
+    ] ensure: [self.seen := self.n]
     k
 
   // The loops below stay free of guarded operators (`==` is a bare BIF), the
   // shape that lowered hybrid; a loop `+` would thread the whole state anyway.
   whileLoopReturn =>
     k := 0
-    [true] whileTrue: [self.n := 4. k := 4. k == 4 ifTrue: [^k]]
+    [true]
+      whileTrue: [
+        self.n := 4
+        k := 4
+        k == 4 ifTrue: [^k]
+      ]
     k
 
   timesRepeatReturn =>
     k := 0
-    5 timesRepeat: [self.n := 7. k := 7. k == 7 ifTrue: [^k]]
+    5
+      timesRepeat: [
+        self.n := 7
+        k := 7
+        k == 7 ifTrue: [^k]
+      ]
     k
 
   countedLoopReturnBeforeWrite =>
     k := 0
-    1 to: 5 do: [:i | k := i. i == 3 ifTrue: [^k]. self.n := i]
+    1
+      to: 5
+      do: [:i |
+        k := i
+        i == 3 ifTrue: [^k]
+        self.n := i
+      ]
     k
 
   currentN => self.n

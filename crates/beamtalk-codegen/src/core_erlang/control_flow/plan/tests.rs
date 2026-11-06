@@ -617,8 +617,8 @@ fn select_hybrid_params_blocked_by_class_method() {
 
 #[test]
 fn select_hybrid_params_blocked_by_nlr() {
-    // BT-4523: a `^` stores and carries a whole `State`, which a hybrid
-    // loop's omits the fields its parameters hold.
+    // BT-4523: a `^` stores and carries a whole `State`; a hybrid loop's
+    // `State` omits the fields its parameters hold.
     let threaded = vec!["x".to_string()];
     let analysis = body_with_field_writes(&["n"]);
     let mut effects = clean_effects();

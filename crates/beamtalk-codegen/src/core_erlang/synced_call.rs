@@ -152,7 +152,8 @@ thread_local! {
 
 /// BT-4523: whether a body's `^` keeps it out of hybrid mode, as mode
 /// selection requires (ADR 0146 P0: a `^` stores and carries a whole `State`,
-/// which a hybrid loop's omits). Always `true`; a test-only fault turns it off
+/// and a hybrid loop's `State` omits the fields its parameters hold). Always
+/// `true`; a test-only fault turns it off
 /// so the `NlrThrowInHybridLoop` check can be shown to fire.
 pub(in crate::core_erlang) fn nlr_blocks_hybrid_loops() -> bool {
     #[cfg(test)]
