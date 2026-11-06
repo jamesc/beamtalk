@@ -1100,23 +1100,43 @@ impl CoreErlangGenerator {
             }
             TypedSendTarget::Builtin(_) => None,
         };
-        let direct_call = match own_arm {
-            Some(arm) => Self::own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
-            None => docvec![
-                "call ",
-                leaf::atom(module_name),
-                ":'dispatch'(",
-                leaf::atom(selector_atom.clone()),
-                ", [",
-                args_list_doc.clone(),
-                "], ",
-                leaf::var(receiver_var.clone()),
-                ")",
-            ],
+        let dispatch_call = docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.clone()),
+            ", [",
+            args_list_doc.clone(),
+            "], ",
+            leaf::var(receiver_var.clone()),
+            ")",
+        ];
+        // BT-4366: every call sits inside the type-test `case`, so each
+        // carries the send's line itself.
+        let direct_doc = match (own_arm, target) {
+            (Some(arm), _) => self.annotate_current_send_call(Self::own_arm_call_doc(
+                &selector_atom,
+                arm,
+                &receiver_var,
+                &arg_vars,
+            )),
+            // BT-4484: a sealed Value class in another module whose selector
+            // may be one of its `dispatch/3` method arms: the arm's function,
+            // behind a value-method static call key.
+            (None, TypedSendTarget::Tagged(tagged))
+                if self.cross_module_value_method(tagged, &selector_atom, arguments.len()) =>
+            {
+                let fallback = self.annotate_current_send_call(dispatch_call);
+                self.keyed_value_method_call_doc(
+                    tagged,
+                    &selector_atom,
+                    &receiver_var,
+                    &arg_vars,
+                    fallback,
+                )
+            }
+            _ => self.annotate_current_send_call(dispatch_call),
         };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
         let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
@@ -1180,6 +1200,127 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// BT-4484: whether a typed send of `selector` with `arity` arguments to
+    /// an instance of `tagged` (behind its exact class-tag guard) is a
+    /// candidate for the cross-module value-method call
+    /// ([`Self::keyed_value_method_call_doc`]): `tagged` is a sealed Value
+    /// class compiled in another module, its name is not declared by more
+    /// than one package ([`Self::is_shadowed_class`]: the runtime class may
+    /// be the other package's, and the key would never install), `selector`
+    /// is not one `dispatch/3`
+    /// answers ahead of its method arms ([`DISPATCH_PREFIX_SELECTORS`]), and
+    /// the class itself defines it with that arity, or declares the field it
+    /// gets (`x`) or copy-sets (`withX:`). Only the compile-time candidate:
+    /// the runtime key decides each send from the loaded module's own
+    /// `dispatch_arms`. A selector the class does not define (an inherited
+    /// one) is never a candidate, so no call site keeps asking the runtime
+    /// for a key it never installs.
+    ///
+    /// [`DISPATCH_PREFIX_SELECTORS`]: super::value_type_codegen::DISPATCH_PREFIX_SELECTORS
+    fn cross_module_value_method(
+        &self,
+        tagged: &TypedTaggedTarget,
+        selector: &str,
+        arity: usize,
+    ) -> bool {
+        if self.own_class_module(&tagged.class_name).is_some()
+            || self.is_shadowed_class(&tagged.class_name)
+            || super::value_type_codegen::DISPATCH_PREFIX_SELECTORS.contains(&selector)
+        {
+            return false;
+        }
+        let Some(class) = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.get_class(&tagged.class_name))
+        else {
+            return false;
+        };
+        if !(class.is_value && class.is_sealed) {
+            return false;
+        }
+        let defines = class.methods.iter().any(|m| {
+            m.selector.as_str() == selector
+                && m.arity == arity
+                && m.defined_in.as_str() == tagged.class_name
+        });
+        let field_accessor = match arity {
+            0 => class.state.iter().any(|f| f.as_str() == selector),
+            1 => class
+                .state
+                .iter()
+                .any(|f| beamtalk_core::synthetic_selectors::with_star_selector(f) == selector),
+            _ => false,
+        };
+        defines || field_accessor
+    }
+
+    /// BT-4484: the cross-module value-method call: `Module:Selector(R,
+    /// Args…)` behind the value-method static call key
+    /// `{'value_method', Module, Selector, '<Class> class'}`, else
+    /// `fallback` (the `Module:dispatch/3` call it replaces):
+    ///
+    /// ```erlang
+    /// let ValueSelf = case call 'persistent_term':'get'('W class static calls', ~{}~) of
+    ///     <~{{'value_method', 'bt@w', 'x', 'W class'} := StaticRef}~> when 'true' -> StaticRef
+    ///     <_> when 'true' ->
+    ///       call 'beamtalk_class_shadow_flags':'static_call_target'(<same key>, 'W', 'x', 1)
+    ///   end
+    /// in case ValueSelf of
+    ///   <'false'> when 'true' -> call 'bt@w':'dispatch'('x', [], R)
+    ///   <_> when 'true' -> call 'bt@w':'x'(R)
+    /// end
+    /// ```
+    ///
+    /// A value-type method function answers exactly what its `dispatch/3`
+    /// arm answers (BT-4484), so the call is the send while the loaded
+    /// module's `dispatch/3` answers the selector from that arm, which is
+    /// what the runtime certifies before installing the key
+    /// (`beamtalk_class_shadow_flags`: the class's `dispatch_arms` row, the
+    /// module the class is registered under, the export). A callee reload
+    /// erases the key, so the next send re-certifies against the new code.
+    fn keyed_value_method_call_doc(
+        &mut self,
+        tagged: &TypedTaggedTarget,
+        selector: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        fallback: Document<'static>,
+    ) -> Document<'static> {
+        let key_doc = docvec![
+            "{'value_method', ",
+            leaf::atom(tagged.module_name.clone()),
+            ", ",
+            leaf::atom(selector.to_string()),
+            ", ",
+            leaf::atom(super::util::metaclass_tag(&tagged.class_name)),
+            "}"
+        ];
+        let mut call_args: Vec<Document<'static>> = vec![leaf::var(receiver_var.to_string())];
+        call_args.extend(arg_vars.iter().map(|var| leaf::var(var.clone())));
+        let hit = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::atom(tagged.module_name.clone()),
+            ":",
+            leaf::atom(selector.to_string()),
+            "(",
+            Self::join_docs_with_commas(call_args),
+            ")",
+        ]);
+        let value_self_var = self.fresh_temp_var("ValueSelf");
+        let static_ref_var = self.fresh_temp_var("StaticRef");
+        Self::keyed_static_call_doc(
+            &tagged.class_name,
+            selector.to_string(),
+            &key_doc,
+            &value_self_var,
+            &static_ref_var,
+            arg_vars.len() + 1,
+            hit,
+            fallback,
+        )
     }
 
     /// BT-4473: the own-class `dispatch/3` method arm that answers
@@ -4175,6 +4316,37 @@ impl CoreErlangGenerator {
         let static_ref_var = self.fresh_temp_var("StaticRef");
         let selector_atom = super::selector_mangler::safe_class_method_selector(raw_selector);
         let fallback = self.generate_class_send_fallback(class_name, raw_selector, args_doc);
+        Self::keyed_static_call_doc(
+            class_name,
+            selector_atom,
+            key_doc,
+            class_self_var,
+            &static_ref_var,
+            fun_arity,
+            hit_doc,
+            fallback,
+        )
+    }
+
+    /// The one shape every keyed static call shares (BT-4316, BT-4442): read
+    /// the class's static call map, match `key_doc` in it, install it on a
+    /// miss (`beamtalk_class_shadow_flags:static_call_target/4`, asked about
+    /// `selector_atom` and `fun_arity`), then run `hit_doc` when it is
+    /// present and `fallback` when the runtime declines. Shared by the
+    /// class-side keyed sends ([`Self::keyed_static_send_doc`]) and the
+    /// cross-module value-method call
+    /// ([`Self::keyed_value_method_call_doc`], BT-4484).
+    #[allow(clippy::too_many_arguments)] // One shape: the parts are all distinct.
+    fn keyed_static_call_doc(
+        class_name: &str,
+        selector_atom: String,
+        key_doc: &Document<'static>,
+        class_self_var: &str,
+        static_ref_var: &str,
+        fun_arity: usize,
+        hit_doc: Document<'static>,
+        fallback: Document<'static>,
+    ) -> Document<'static> {
         // BT-4442: the class's one static call key (`util::static_calls_key`).
         let class_key_doc = leaf::atom(super::util::static_calls_key(class_name));
         docvec![
@@ -4185,9 +4357,9 @@ impl CoreErlangGenerator {
             ", ~{}~) of <~{",
             key_doc.clone(),
             " := ",
-            leaf::var(static_ref_var.clone()),
+            leaf::var(static_ref_var.to_string()),
             "}~> when 'true' -> ",
-            leaf::var(static_ref_var),
+            leaf::var(static_ref_var.to_string()),
             " <_> when 'true' -> ",
             "call 'beamtalk_class_shadow_flags':'static_call_target'(",
             key_doc.clone(),

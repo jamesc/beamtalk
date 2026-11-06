@@ -139,6 +139,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-4363: certified integer-literal class-side bodies.
     put_constant_class_methods/2,
     lookup_constant_class_methods/1,
+    %% BT-4484: a value type's `dispatch/3` method arms.
+    put_dispatch_arms/2,
+    lookup_dispatch_arms/1,
     lookup_direct_constructor/2,
     %% BT-4409: the per-class `new:` fact and its run-time chain walk.
     put_defines_user_class_new1/2,
@@ -259,6 +262,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% `__beamtalk_meta/0`: a reload publishes it from the new module's meta
     %% while the old code is still current (`-on_load`).
     constant_class_methods = #{} :: #{selector() => integer()},
+    %% BT-4484: `dispatch_arms` from the compiled module's `__beamtalk_meta/0`,
+    %% a value type's `dispatch/3` method arms: each selector `dispatch/3`
+    %% answers by calling `Module:Selector/Arity+1`, mapped to its argument
+    %% count. Written only by `put_dispatch_arms/2`; `#{}` for every other
+    %% class and for modules compiled before the key existed. A cross-module
+    %% value-method static call key is certified against this row, for the
+    %% same reason as `constant_class_methods`.
+    dispatch_arms = #{} :: #{selector() => arity()},
     %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
     %% the reflection state above, so `doc` answers without a `gen_server:call`
     %% into the class (which cannot answer from inside its own process, or
@@ -1401,6 +1412,45 @@ put_constant_class_methods(Name, Constants) when is_map(Constants) ->
 lookup_constant_class_methods(Name) ->
     case field(Name, #class_metadata.constant_class_methods) of
         Constants when is_map(Constants) -> Constants;
+        _ -> #{}
+    end.
+
+-doc """
+Store a value type's `dispatch/3` method arms (BT-4484).
+
+`Arms` is the `dispatch_arms` value from the class's `__beamtalk_meta/0`
+(`#{Selector => ArgCount}`); pass `#{}` to clear it. Updates the existing row
+in place; a no-op when no row exists.
+
+A change, once written, erases the class's static call keys
+(`beamtalk_class_shadow_flags:invalidate/1`): a value-method key is installed
+only while this row lists its selector with the key's argument count
+(`beamtalk_class_shadow_flags`, `static_call_ref/4`). As with
+`put_constant_class_methods/2`, the install re-reads the row under the
+class's tag lock, which the erase also takes, and a reload publishes this map
+after its own invalidations, from the new module's meta.
+""".
+-spec put_dispatch_arms(class_name(), #{selector() => arity()}) -> ok.
+put_dispatch_arms(Name, Arms) when is_map(Arms) ->
+    new(),
+    case field(Name, #class_metadata.dispatch_arms) of
+        Arms ->
+            ok;
+        _ ->
+            try
+                ets:update_element(?TABLE, Name, {#class_metadata.dispatch_arms, Arms}),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc "A value type's `dispatch/3` method arms (`#{}` when none or unknown).".
+-spec lookup_dispatch_arms(class_name()) -> #{selector() => arity()}.
+lookup_dispatch_arms(Name) ->
+    case field(Name, #class_metadata.dispatch_arms) of
+        Arms when is_map(Arms) -> Arms;
         _ -> #{}
     end.
 

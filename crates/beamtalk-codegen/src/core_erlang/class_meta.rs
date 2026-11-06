@@ -20,7 +20,7 @@ use super::gen_server::extract_package_from_module_name;
 use super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{
     ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, SlotKind, StateDeclaration,
     TypeParamDecl, declared_shape_migrations,
@@ -78,6 +78,16 @@ pub(crate) struct MetaProvenance<'a> {
     /// before a dynamic `new:` builds in the caller; an absent fact fails
     /// closed there.
     pub defines_user_class_new1: Option<bool>,
+    /// BT-4484: a value type's `dispatch/3` method arms
+    /// (`ClassContext::own_dispatch_arms`: each selector `dispatch/3` answers
+    /// by calling `Module:Selector/Arity+1`, the prefix selectors it answers
+    /// first left out), emitted as `'dispatch_arms' => ~{Selector => Arity}~`
+    /// (omitted when empty). The runtime publishes it per class and installs a
+    /// cross-module value-method static call key only for a selector it lists
+    /// (`beamtalk_class_shadow_flags`), so a reload that drops the method or
+    /// turns it into a prefix-answered one ends the direct call.
+    pub dispatch_arms:
+        Option<&'a std::collections::HashMap<String, super::value_type_codegen::OwnDispatchArm>>,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -426,6 +436,7 @@ impl CoreErlangGenerator {
             Self::meta_constant_class_methods_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
             Self::meta_direct_constructors_entry(provenance.direct_constructors),
+            Self::meta_dispatch_arms_entry(provenance.dispatch_arms),
             match provenance.defines_user_class_new1 {
                 Some(true) => Document::Str(",\n      'defines_user_class_new1' => 'true'"),
                 Some(false) => Document::Str(",\n      'defines_user_class_new1' => 'false'"),
@@ -591,6 +602,30 @@ impl CoreErlangGenerator {
         docvec![
             ",\n      'direct_constructors' => ",
             Self::meta_atom_list(ctors)
+        ]
+    }
+
+    /// BT-4484: emit `'dispatch_arms' => ~{'sel' => Arity, ...}~`, sorted by
+    /// selector ([`MetaProvenance::dispatch_arms`]). Omitted when empty.
+    fn meta_dispatch_arms_entry(
+        arms: Option<&std::collections::HashMap<String, super::value_type_codegen::OwnDispatchArm>>,
+    ) -> Document<'static> {
+        let Some(arms) = arms.filter(|arms| !arms.is_empty()) else {
+            return Document::Nil;
+        };
+        let mut sorted: Vec<(&String, usize)> = arms.iter().map(|(s, a)| (s, a.arity)).collect();
+        sorted.sort();
+        let entries = sorted.into_iter().map(|(selector, arity)| {
+            docvec![
+                leaf::atom(selector.clone()),
+                " => ",
+                leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ]
+        });
+        docvec![
+            ",\n      'dispatch_arms' => ~{",
+            join(entries, &Document::Str(", ")),
+            "}~"
         ]
     }
 

@@ -1145,6 +1145,7 @@ init({ClassName, ClassInfo}) ->
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_constructors(ClassName, Meta),
     sync_constant_class_methods(ClassName, Meta),
+    sync_dispatch_arms(ClassName, Meta),
     sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
     %% Clear any runtime class-method funs left behind by a *hard*
@@ -2754,6 +2755,25 @@ sync_constant_class_methods(ClassName, Meta) ->
     beamtalk_class_metadata:put_constant_class_methods(ClassName, Constants).
 
 -doc """
+Publish a value type's `dispatch/3` method arms (BT-4484): `dispatch_arms`
+from its `__beamtalk_meta/0`, keeping only `Selector => ArgCount` entries;
+`#{}` when absent (not a value type, a ClassBuilder class, an older module).
+A cross-module value-method static call key is certified against it.
+""".
+-spec sync_dispatch_arms(class_name(), map()) -> ok.
+sync_dispatch_arms(ClassName, Meta) ->
+    Arms =
+        case maps:get(dispatch_arms, Meta, #{}) of
+            M when is_map(M) ->
+                maps:filter(
+                    fun(K, V) -> is_atom(K) andalso is_integer(V) andalso V >= 0 end, M
+                );
+            _ ->
+                #{}
+        end,
+    beamtalk_class_metadata:put_dispatch_arms(ClassName, Arms).
+
+-doc """
 Publish the class-variable fact and the process-bound selector list (ADR 0142
 §1, BT-4299) into the unified metadata row.
 
@@ -3188,6 +3208,9 @@ apply_class_info(State, ClassInfo) ->
     %% class's static call keys on a change), so a constant-value key never
     %% certifies a literal from the old code still current during `-on_load`.
     sync_constant_class_methods(State#class_state.name, Meta),
+    %% BT-4484: likewise the value type's `dispatch/3` method arms, so a
+    %% value-method key never certifies an arm only the old code answers.
+    sync_dispatch_arms(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
     %% the reload leaves descendants' baked `direct_constructors` behind their
     %% ancestors (informational: their dynamic `new:` re-checks the chain at

@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4484: a typed send to a sealed Value class compiled in another module
+// calls the method's function directly, behind a value-method static call
+// key (`{value_method, Module, Selector, Tag}` in the class's per-class
+// static call map), with `Module:dispatch/3` as its fallback. These cases
+// warm the key through a caller compiled once, then recompile the callee
+// ALONE and check the old call site answers what a dynamic send answers:
+// a getter that becomes a method whose block holds `^` (whose function
+// answered `{Result, Self}` before BT-4484), and a method the reload drops.
+
+sealed Value subclass: VmkBox
+  field: items :: List = #()
+// => "VmkBox"
+
+Object subclass: VmkCaller
+  class itemsOf: b :: VmkBox -> Object => b items
+// => "VmkCaller"
+
+VmkCaller itemsOf: (VmkBox items: #(1, 20))
+// => [1,20]
+
+// The call site installed its value-method key.
+targets := Erlang persistent_term get: (Erlang beamtalk_class_shadow_flags static_calls_key: #'VmkBox class') with: #{}
+// => _
+
+(targets keys detect: [:k | (k at: 1) == #value_method] ifNone: [nil]) notNil
+// => true
+
+// ===========================================================================
+// THE GETTER BECOMES A METHOD WHOSE BLOCK HOLDS ^
+// ===========================================================================
+
+sealed Value subclass: VmkBox
+  field: items :: List = #()
+  items -> Object => self.items do: [:e | e > 10 ifTrue: [^#big]]. self.items
+// => "VmkBox"
+
+VmkCaller itemsOf: (VmkBox items: #(1, 20))
+// => big
+
+VmkCaller itemsOf: (VmkBox items: #(1, 2))
+// => [1,2]
+
+box := VmkBox items: #(30)
+// => _
+
+(box perform: #items) == (VmkCaller itemsOf: box)
+// => true
+
+// ===========================================================================
+// THE RELOAD DROPS THE METHOD: does_not_understand, NOT undef
+// ===========================================================================
+
+sealed Value subclass: VmkBox
+  field: stuff :: List = #()
+// => "VmkBox"
+
+[VmkCaller itemsOf: (VmkBox stuff: #(1))] on: Error do: [:e | e kind]
+// => does_not_understand
+
+[(VmkBox stuff: #(1)) perform: #items] on: Error do: [:e | e kind]
+// => does_not_understand

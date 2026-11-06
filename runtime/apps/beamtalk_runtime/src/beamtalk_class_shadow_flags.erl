@@ -184,6 +184,28 @@ erasers above; a later class-side extension or `put_class_method` of `new` is
 then answered by the fallback, whose class process runs it
 (`beamtalk_object_class`'s `{new, _}` handler).
 
+BT-4484: a typed send to an instance of a sealed Value class compiled in
+another module, behind the call site's exact class-tag guard, is keyed
+`{value_method, Module, Selector, Tag}`: its hit path calls
+`Module:Selector(Receiver, Args...)` in place of `Module:dispatch(Selector,
+Args, Receiver)`, the call site's own fallback. A value-type method function
+answers exactly what its `dispatch/3` arm answers (the arm calls it and
+answers its return), so the two are the same send while `dispatch/3`
+answers `Selector` from that arm. That is what the key certifies, instead of
+the four class-side facts above: the class is registered under `Module`
+(`beamtalk_class_metadata:lookup_module/1`) with a live process, `Tag` is
+its metaclass tag, the class's published `dispatch_arms` row lists
+`Selector` with the call's argument count, and `Module` exports
+`Selector/Arity`. The row comes from the module's `__beamtalk_meta/0`
+(compiler-written: the arms `dispatch/3` answers ahead of its default arm,
+the prefix selectors it answers first left out), published on registration
+and reload like `constant_class_methods`, so a reload that drops the method
+erases the key before new code is current. Class variables, extensions and
+runtime class-side funs play no part (the method arms of `dispatch/3`
+answer ahead of all of them), so the class's derived class-side flag is not
+required. It shares the per-class map and every eraser with the class-side
+keys.
+
 `static_call_target/4` (the call site's miss path) derives all four and, under
 the class's tag lock, records the tag in the per-tag index
 (`beamtalk_class_registry:record_static_call_tag/1`, read only by
@@ -290,7 +312,8 @@ actual transitions write (set when unset, erase when set); both are rare
 -type static_call_key() ::
     {module(), atom(), atom()}
     | {caller_safe_raise, atom(), module(), atom(), atom()}
-    | {constant_value, integer(), module(), atom(), atom()}.
+    | {constant_value, integer(), module(), atom(), atom()}
+    | {value_method, module(), atom(), atom()}.
 -export_type([kind/0, derived/0, static_call_key/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
@@ -613,7 +636,7 @@ static_call_target(Key, ClassName, Selector, Arity) ->
         #beamtalk_object{} ->
             with_tag_lock(Tag, fun() ->
                 case
-                    install_direct_flag_locked(Tag, ClassName) =:= true andalso
+                    class_side_flag_holds(Key, Tag, ClassName) andalso
                         static_call_ref(Key, ClassName, Selector, Arity)
                 of
                     false ->
@@ -623,6 +646,16 @@ static_call_target(Key, ClassName, Selector, Arity) ->
                 end
             end)
     end.
+
+%% Under the tag lock: the class-side facts a key needs beyond its own
+%% (`direct_call_ok/2`, installing the derived flag). A value-method key
+%% (BT-4484) needs none of them: the instance-side `dispatch/3` arms it
+%% certifies answer ahead of class variables, extensions and runtime funs.
+-spec class_side_flag_holds(static_call_key(), atom(), atom()) -> boolean().
+class_side_flag_holds({value_method, _, _, _}, _Tag, _ClassName) ->
+    true;
+class_side_flag_holds(_Key, Tag, ClassName) ->
+    install_direct_flag_locked(Tag, ClassName) =:= true.
 
 %% Add `Key => Ref` to the class's per-class static call map (BT-4442), under
 %% the tag lock. A target already present with this very reference is never
@@ -669,6 +702,24 @@ static_call_ref({Module, new, Tag}, ClassName, new, 0) ->
         {ok, Module} -> #beamtalk_object{class = Tag, class_mod = Module, pid = Pid};
         _ -> false
     end;
+static_call_ref({value_method, Module, Selector, Tag}, ClassName, Selector, Arity) ->
+    %% BT-4484: `Module:dispatch/3` answers `Selector` sent to an instance of
+    %% this class by calling `Module:Selector/Arity` (moduledoc).
+    Pid = beamtalk_class_registry:whereis_class(ClassName),
+    case
+        is_pid(Pid) andalso is_process_alive(Pid) andalso
+            beamtalk_class_registry:class_object_tag(ClassName) =:= Tag andalso
+            beamtalk_class_metadata:lookup_module(ClassName) =:= {ok, Module} andalso
+            maps:get(Selector, beamtalk_class_metadata:lookup_dispatch_arms(ClassName), none) =:=
+                Arity - 1 andalso
+            erlang:function_exported(Module, Selector, Arity)
+    of
+        true -> #beamtalk_object{class = Tag, class_mod = Module, pid = Pid};
+        false -> false
+    end;
+static_call_ref({value_method, _, _, _}, _ClassName, _Selector, _Arity) ->
+    %% The call site names the key's selector; any other is not this key.
+    false;
 static_call_ref(Key, ClassName, Selector, Arity) ->
     {Module, FunName, Tag} = key_target(Key),
     Pid = beamtalk_class_registry:whereis_class(ClassName),
@@ -696,6 +747,10 @@ key_target({constant_value, Value, Module, FunName, Tag}) when
     is_integer(Value), is_atom(Module), is_atom(FunName), is_atom(Tag)
 ->
     {Module, FunName, Tag};
+key_target({value_method, Module, Selector, Tag}) when
+    is_atom(Module), is_atom(Selector), is_atom(Tag)
+->
+    {Module, Selector, Tag};
 key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_atom(Tag) ->
     {Module, FunName, Tag}.
 

@@ -83,21 +83,86 @@ fn own_arm_with_non_local_return_answers_its_result() {
 }
 
 #[test]
-fn other_module_sealed_class_keeps_dispatch() {
-    // Only the unit's own class: another module's arm shape (NLR pair,
-    // method vs slot) is not known for the version that is loaded.
+fn other_module_sealed_class_calls_the_method_behind_a_value_method_key() {
+    // BT-4484: a typed send to a sealed Value class in another module calls
+    // the arm's function, behind the value-method static call key, with
+    // today's `dispatch/3` call as the fallback when the runtime declines.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: SealedWidget -> Integer =>\n",
-        "    w x\n\n",
+        "    w x\n",
+        "  bump: w :: SealedWidget -> SealedWidget =>\n",
+        "    w withX: 3\n",
+        "  total: w :: SealedWidget -> Integer =>\n",
+        "    w plus: 2\n\n",
         "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+        "  plus: n :: Integer -> Integer => x + n\n",
+    ));
+    for (selector, arity) in [("x", 1), ("withX:", 2), ("plus:", 2)] {
+        let key =
+            format!("{{'value_method', 'bt@sealed_widget', '{selector}', 'SealedWidget class'}}");
+        assert!(
+            code.contains(&format!(
+                "case call 'persistent_term':'get'('SealedWidget class static calls', ~{{}}~) of <~{{{key} := "
+            )),
+            "the send of {selector} should read its value-method key. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!(
+                "call 'beamtalk_class_shadow_flags':'static_call_target'({key}, 'SealedWidget', '{selector}', {arity})"
+            )),
+            "the miss should ask the runtime for the {selector} key. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!("call 'bt@sealed_widget':'{selector}'(")),
+            "the hit should call the method directly. Got:\n{code}"
+        );
+        assert!(
+            code.contains(&format!("call 'bt@sealed_widget':'dispatch'('{selector}'")),
+            "a decline should fall back to dispatch/3. Got:\n{code}"
+        );
+    }
+    assert!(!code.contains("apply 'x'/1("));
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn other_module_unsealed_class_keeps_dispatch() {
+    // BT-4484: only a sealed Value class gets the value-method key.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: OpenWidget -> Integer =>\n",
+        "    w x\n\n",
+        "Value subclass: OpenWidget\n",
         "  field: x :: Integer = 0\n",
     ));
     assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
-        "a send to another module's class keeps dispatch/3. Got:\n{code}"
+        code.contains("call 'bt@open_widget':'dispatch'('x'"),
+        "a send to an open class keeps dispatch/3. Got:\n{code}"
     );
-    assert!(!code.contains("apply 'x'/1("));
+    assert!(!code.contains("'value_method'"), "Got:\n{code}");
+}
+
+#[test]
+fn other_module_prefix_and_inherited_selectors_keep_dispatch() {
+    // BT-4484: a selector `dispatch/3` answers ahead of its method arms, and
+    // one the class does not define itself, are never value-method calls.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  fieldsOf: w :: SealedWidget -> Object =>\n",
+        "    w fieldNames\n",
+        "  textOf: w :: SealedWidget -> String =>\n",
+        "    w printString\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+        "  fieldNames -> Object => #()\n",
+    ));
+    assert!(!code.contains("'value_method'"), "Got:\n{code}");
+    assert!(
+        code.contains("call 'bt@sealed_widget':'dispatch'('printString'"),
+        "an inherited selector keeps dispatch/3. Got:\n{code}"
+    );
 }
 
 #[test]

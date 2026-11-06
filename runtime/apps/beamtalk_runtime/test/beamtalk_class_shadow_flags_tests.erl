@@ -446,6 +446,50 @@ start_inheriting_class(Name, Superclass) ->
     }),
     Pid.
 
+%% BT-4484: a value-type module exporting `x/1` and `'plus:'/2` (its method
+%% functions) and `dispatch/3` answering them as its method arms do.
+load_value_module(Module) ->
+    Body =
+        "x(Self) -> maps:get(x, Self).~n"
+        "'plus:'(Self, N) -> maps:get(x, Self) + N.~n"
+        "dispatch(x, [], Self) -> x(Self);~n"
+        "dispatch('plus:', [N], Self) -> 'plus:'(Self, N).~n",
+    load_module_binary(
+        Module,
+        compile_module(Module, [{x, 1}, {'plus:', 2}, {dispatch, 3}], io_lib:format(Body, []))
+    ).
+
+%% The class meta a registration of a value module publishes (BT-4484).
+value_meta(Arms) -> maps:put(dispatch_arms, Arms, ?STATIC_META).
+
+%% A Value class on `Module` whose registration publishes `Arms` (BT-4484).
+start_value_class(Name, Module, Arms) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => none,
+        module => Module,
+        class_methods => #{},
+        class_state => #{},
+        meta => value_meta(Arms)
+    }),
+    Pid.
+
+%% Reload `Name` on `Module` with `Arms`, as a recompile's `-on_load`
+%% registration does (BT-4484).
+reload_value_class(Name, Module, Arms) ->
+    {ok, _} = beamtalk_object_class:update_class(Name, #{
+        superclass => none,
+        module => Module,
+        class_methods => #{},
+        meta => value_meta(Arms)
+    }),
+    ok.
+
+value_key(Module, Selector, Name) ->
+    {value_method, Module, Selector, beamtalk_class_registry:class_object_tag(Name)}.
+
+value_target(Name, Key, Selector, Arity) ->
+    beamtalk_class_shadow_flags:static_call_target(Key, Name, Selector, Arity).
+
 with_static_class(Name, Fun) ->
     Pid = start_static_class(Name, none, #{}),
     try
@@ -1059,6 +1103,102 @@ static_call_target_test_() ->
                 Key = {constant_value, 1, Mod, class_testSelf, 'Bt4363NoMeta class'},
                 ?assertNot(target('Bt4363NoMeta', Key, testSelf)),
                 ?assertNot(key_value(Key))
+            after
+                stop_static_class(Pid)
+            end
+        end},
+        {"a value-method key installs while the class's dispatch arms list the selector",
+            fun() ->
+                %% BT-4484: the call site's own fallback is `Module:dispatch/3`,
+                %% whose arm calls `Module:Selector`; the key certifies that arm
+                %% from the published `dispatch_arms` row, the registered module
+                %% and the export.
+                Mod = bt4484_value_module,
+                Name = 'Bt4484Value',
+                load_value_module(Mod),
+                Pid = start_value_class(Name, Mod, #{x => 0, 'plus:' => 1}),
+                try
+                    X = value_key(Mod, x, Name),
+                    Plus = value_key(Mod, 'plus:', Name),
+                    ?assertMatch(#beamtalk_object{pid = Pid}, value_target(Name, X, x, 1)),
+                    ?assertMatch(#beamtalk_object{}, key_value(X)),
+                    ?assertMatch(#beamtalk_object{}, value_target(Name, Plus, 'plus:', 2)),
+                    ?assertMatch(#beamtalk_object{}, key_value(Plus)),
+                    %% The direct call and the fallback answer alike.
+                    R = #{'$beamtalk_class' => Name, x => 4},
+                    ?assertEqual(Mod:dispatch('plus:', [3], R), Mod:'plus:'(R, 3))
+                after
+                    stop_static_class(Pid)
+                end
+            end},
+        {"a value-method key declines another arity, another module, an unexported or unlisted selector",
+            fun() ->
+                Mod = bt4484_value_decline_module,
+                Name = 'Bt4484ValueDecline',
+                load_value_module(Mod),
+                %% `gone` is listed but not exported; `plus:` is exported but
+                %% not listed.
+                Pid = start_value_class(Name, Mod, #{x => 0, gone => 0}),
+                try
+                    ?assertNot(value_target(Name, value_key(Mod, x, Name), x, 2)),
+                    ?assertNot(value_target(Name, value_key(Mod, gone, Name), gone, 1)),
+                    ?assertNot(value_target(Name, value_key(Mod, 'plus:', Name), 'plus:', 2)),
+                    Other = value_key(bt4484_other_module, x, Name),
+                    ?assertNot(value_target(Name, Other, x, 1)),
+                    %% A key whose selector is not the one asked about.
+                    ?assertNot(value_target(Name, value_key(Mod, x, Name), 'plus:', 1)),
+                    ?assertNot(key_value(value_key(Mod, gone, Name))),
+                    ?assertNot(key_value(Other))
+                after
+                    stop_static_class(Pid)
+                end
+            end},
+        {"a value-method key needs no class-side direct-call flag", fun() ->
+            %% Class variables bar the class-side keys (ADR 0142 §1), but the
+            %% instance-side `dispatch/3` arms answer ahead of them.
+            Mod = bt4484_value_class_vars_module,
+            Name = 'Bt4484ValueClassVars',
+            load_value_module(Mod),
+            {ok, Pid} = beamtalk_object_class:start(Name, #{
+                superclass => none,
+                module => Mod,
+                class_methods => #{},
+                class_state => #{count => 0},
+                meta => value_meta(#{x => 0})
+            }),
+            try
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(
+                    beamtalk_class_registry:class_object_tag(Name), Name
+                )),
+                ?assertMatch(
+                    #beamtalk_object{}, value_target(Name, value_key(Mod, x, Name), x, 1)
+                )
+            after
+                stop_static_class(Pid)
+            end
+        end},
+        {"a reload or a publish that drops the arm erases the value-method key", fun() ->
+            %% A reload erases the class's keys inside the new module's
+            %% `-on_load`, while the old code, which still exports the
+            %% method, is current: the key is certified by the row the reload
+            %% publishes from the new meta, not by the loaded code.
+            Mod = bt4484_value_reload_module,
+            Name = 'Bt4484ValueReload',
+            load_value_module(Mod),
+            Pid = start_value_class(Name, Mod, #{x => 0, 'plus:' => 1}),
+            try
+                X = value_key(Mod, x, Name),
+                Plus = value_key(Mod, 'plus:', Name),
+                ?assertMatch(#beamtalk_object{}, value_target(Name, X, x, 1)),
+                ?assertMatch(#beamtalk_object{}, value_target(Name, Plus, 'plus:', 2)),
+                ok = reload_value_class(Name, Mod, #{x => 0}),
+                ?assertNot(key_value(X)),
+                ?assertNot(key_value(Plus)),
+                ?assertNot(value_target(Name, Plus, 'plus:', 2)),
+                ?assertMatch(#beamtalk_object{}, value_target(Name, X, x, 1)),
+                ok = beamtalk_class_metadata:put_dispatch_arms(Name, #{}),
+                ?assertNot(key_value(X)),
+                ?assertNot(value_target(Name, X, x, 1))
             after
                 stop_static_class(Pid)
             end
