@@ -148,8 +148,8 @@ pub(super) mod fault {
         /// only its loops and folds, the plain-arm rule before BT-4460,
         /// so a nested conditional, `ifNil:`, `and:`/`or:`, `match:` or
         /// `on:do:`/`ensure:` that writes a local of a plain arm is compiled in
-        /// place and the arm rereads its locals out of the construct's state
-        /// carrier (`ConstructLocalsRereadOpaquely`).
+        /// place and no frame rule rebinds its locals
+        /// (`ConstructLocalsNotRebound`).
         ArmLoopOrFoldSitesOnly,
         /// BT-4002: a `Letrec` loop takes its families from its body only, as
         /// before BT-4002, so the `Self` a `whileTrue:`/`whileFalse:` condition

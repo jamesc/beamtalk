@@ -53,20 +53,19 @@ impl CoreErlangGenerator {
         if self.is_tier2_value_call(value) {
             return Ok(None);
         }
-        // a control-flow-with-mutations RHS (e.g. a mutating list-op
-        // like `collect:` whose block mutates a DIFFERENT outer local than
-        // `id.name`, or a nested `ifTrue:ifFalse:`/`match:`/`on:do:` with
-        // mutations) also returns a closed `{Value, StateAcc}` 2-tuple — same
-        // shape as the Tier 2 case just above. `id.name` itself may correctly
-        // be absent from `threaded` (this assignment's own target needs no
-        // StateAcc threading), but the RHS's *other* mutated locals still do,
-        // and the plain `let core_var = <val_doc> in` below has no way to
-        // unwrap the tuple or rethread them — it would bind `core_var` to the
-        // raw tuple and silently drop every other local the RHS's block
-        // mutated. Fall back to `lower_local_var_assignment_bind`,
-        // which unwraps this exact shape and rebinds those
-        // other locals via `push_control_flow_threaded_var_rereads`'s
-        // loop-body counterpart.
+        // A control-flow-with-mutations RHS that is not a producer here (an
+        // actor list-op whose block only sends to `self`, a nested
+        // `ifTrue:ifFalse:`/`match:`/`on:do:` writing only fields) answers a
+        // closed `{Value, StateAcc}` 2-tuple — the same shape as the Tier 2
+        // case just above — which the plain `let core_var = <val_doc> in`
+        // below cannot unwrap. Fall back to `lower_local_var_assignment_bind`,
+        // whose C3b unwrap binds the value and the state.
+        //
+        // BT-4462: that fallback is an unwrap only. A construct that threads a
+        // local of this body is a producer here (below), so it never takes
+        // it; the legacy write-back that once reread such a construct's other
+        // locals out of the carrier is deleted, and C3b reports one that
+        // reaches it (`ConstructLocalsNotRebound`).
         //
         // ADR 0131 Phase 2b: not a loop or fold that is a local-threading
         // producer in this body — `threaded_expression` below splices its
