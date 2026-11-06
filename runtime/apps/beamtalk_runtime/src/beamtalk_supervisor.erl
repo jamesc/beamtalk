@@ -2115,7 +2115,8 @@ Stop the supervisor and all its children, waiting up to `Ms` milliseconds.
 
 Called from `stopWithin:` on Supervisor and DynamicSupervisor instances
 (sealed, BT-4047) via the `stopWithinResult:` FFI seam. Uses
-`gen_server:stop/3` since supervisors are OTP gen_servers.
+`beamtalk_stop:stop/3`, the `gen_server:stop/3` contract without its
+negative-wait `timeout_value` error on very short waits (BT-4494).
 
 Returns `{ok, nil}` once the supervisor has stopped; `{error, BtError}` with:
 * `kind = timeout` when the shutdown overruns the wait — the caller gets
@@ -2142,7 +2143,7 @@ stopWithin(Self, Ms) ->
                 %% reaches `with_live_supervisor/3` (`stale_handle`) and
                 %% anything else propagates, as in `stop/1`.
                 try
-                    gen_server:stop(Pid, normal, Timeout),
+                    beamtalk_stop:stop(Pid, normal, Timeout),
                     {ok, nil}
                 catch
                     exit:timeout ->
@@ -3483,7 +3484,7 @@ with_live_supervisor(Self, Selector, Fun) ->
 %% as `gen_server:call` and `proc_lib:stop` exit), or `none` for a bare reason.
 %% A target-less shape (bare `noproc`/`timeout`/`noconnection`, an `erpc`
 %% error) is assumed to be the supervisor's own: today only `gen_server:stop/1`
-%% (`stop/1`) and `gen_server:stop/3` (`stopWithin/2`, whose `timeout` exit is
+%% (`stop/1`) and `beamtalk_stop:stop/3` (`stopWithin/2`, whose `timeout` exit is
 %% caught inside its own fun) raise one inside `with_live_supervisor/3`. A
 %% `Fun` that makes its own target-less call (an `erpc` to another node, say)
 %% must catch it itself.
