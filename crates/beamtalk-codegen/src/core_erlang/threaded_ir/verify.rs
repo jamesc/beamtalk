@@ -462,21 +462,25 @@ pub(in crate::core_erlang) enum VerifyError {
     /// producer sites.
     ConstructCarrierInPlace { at: Span },
 
-    /// BT-4460 (ADR 0131 §2): a construct that threads the locals `locals`
-    /// (`threaded_locals_of` names them) reached its frame through the legacy
-    /// reread, a [`ThreadedStmt::StateCarrierReread`] after an opaque
+    /// BT-4460 / BT-4462 (ADR 0131 §2): a construct that threads the locals
+    /// `locals` (`threaded_locals_of` names them) was compiled in place, a
+    /// [`ThreadedStmt::ConstructLocalsInPlace`] after an opaque
     /// `element(2, ...)` extraction of its state carrier, instead of a
     /// [`ThreadedStmt::ConstructTuple`] and one [`ThreadedStmt::LocalRebind`]
-    /// per local. The construct was compiled in place: its writes ride in
-    /// the carrier's scratch keys, which the arm then folds into the frame's
-    /// `State` (an actor's arm-local `__local__` key leaks into the actor's
-    /// state), and no frame rule decides how each local is rebound. The repro
-    /// is an actor method's `c ifTrue: [m := 0. c ifTrue: [m := 5. 7]
-    /// ifFalse: [0]. m] ifFalse: [0]`, whose plain arm registered only loop
-    /// and fold sites, so the nested conditional was not a producer there.
-    /// Every frame registers every producer at its sites, so no reread is
-    /// legitimate; reported by [`VerifyWalk::walk_stmt`] wherever one is.
-    ConstructLocalsRereadOpaquely { locals: Vec<String>, at: Span },
+    /// per local. Its writes ride in the carrier's scratch keys, which the
+    /// frame then folds into its own `State` (an actor's arm-local
+    /// `__local__` key leaks into the actor's state), and no frame rule
+    /// rebinds the locals, so later statements read their pre-construct
+    /// values. The repro is an actor method's `c ifTrue: [m := 0. c ifTrue:
+    /// [m := 5. 7] ifFalse: [0]. m] ifFalse: [0]`, whose plain arm (before
+    /// BT-4460) registered only loop and fold sites, so the nested
+    /// conditional was not a producer there. Until BT-4462 the frame reread
+    /// each local out of the carrier (the legacy write-back); that reread is
+    /// deleted, so this finding is the only thing standing between such a
+    /// shape and a silently dropped write. Every frame registers every
+    /// producer at its sites, so no accepted program reaches it; reported by
+    /// [`VerifyWalk::walk_stmt`] wherever one is.
+    ConstructLocalsNotRebound { locals: Vec<String>, at: Span },
 
     /// BT-4461 (ADR 0131 §2, the `MethodBody (REPL)` row): a REPL frame other
     /// than the root (a conditional arm, an `on:do:`/`ensure:` block) holds
@@ -1230,7 +1234,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
-            | ThreadedStmt::StateCarrierReread { .. }
+            | ThreadedStmt::ConstructLocalsInPlace { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
@@ -1809,15 +1813,14 @@ impl VerifyWalk<'_> {
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
-            // BT-4460: a construct's locals reread out of its state carrier
-            // rather than rebound by its producer.
-            ThreadedStmt::StateCarrierReread { locals, span, .. } => {
+            // BT-4460 / BT-4462: a construct compiled in place whose locals
+            // no producer rebinds.
+            ThreadedStmt::ConstructLocalsInPlace { locals, span } => {
                 if !locals.is_empty() {
-                    self.errors
-                        .push(VerifyError::ConstructLocalsRereadOpaquely {
-                            locals: locals.clone(),
-                            at: *span,
-                        });
+                    self.errors.push(VerifyError::ConstructLocalsNotRebound {
+                        locals: locals.clone(),
+                        at: *span,
+                    });
                 }
             }
             // ADR 0137: the bracket reads `store` and binds `load` in the

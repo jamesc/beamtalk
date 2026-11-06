@@ -842,22 +842,24 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// `Statement` is only ever the `continue_arm` kind.
     Statement(Document<'static>, Span),
 
-    /// ADR 0111 Addendum 5 / ADR 0131 (BT-4460): the legacy reread of a
-    /// nested construct's threaded `locals` out of the state carrier the arm
-    /// just extracted with an opaque `element(2, ...)` `Bind`: one
-    /// `let Local = maps:get('__local__…', StateN) in` per local, rendered
-    /// verbatim from `doc` like a [`Statement`](Self::Statement). Built only by
-    /// `push_control_flow_threaded_var_rereads`, for a construct the arm
-    /// compiled in place instead of lowering as a producer (its
+    /// ADR 0131 (BT-4460, BT-4462): a nested construct that threads the
+    /// locals `locals` (`threaded_locals_of` names them) was compiled in
+    /// place, its `{Value, State}` carrier unpacked by an opaque
+    /// `element(2, ...)` `Bind`, instead of lowered as a producer (its
     /// `ConstructTuple` and one [`LocalRebind`](Self::LocalRebind) per
-    /// local). Typed rather than an opaque `Statement` so the verifier sees
-    /// that the construct's locals reach the frame without a `LocalRebind`
-    /// ([`VerifyError::ConstructLocalsRereadOpaquely`](super::verify::VerifyError::ConstructLocalsRereadOpaquely)).
-    StateCarrierReread {
-        locals: Vec<String>,
-        doc: Document<'static>,
-        span: Span,
-    },
+    /// local). Renders nothing: no frame rule rebinds those locals, so the
+    /// construct's writes to them do not reach the frame. Built only by
+    /// `construct_locals_in_place`, at the in-place unwraps of a conditional
+    /// arm (`generate_branch_arm_threaded`) and a fold body
+    /// (`lower_foldl_body_in_sites`), so the verifier reports the dropped
+    /// writes
+    /// ([`VerifyError::ConstructLocalsNotRebound`](super::verify::VerifyError::ConstructLocalsNotRebound))
+    /// instead of the code silently answering the pre-construct values.
+    /// Every frame registers every producer at its sites, so no accepted
+    /// program builds one; BT-4462 deleted the legacy reread
+    /// (`let Local = maps:get('__local__…', StateN) in`) this node used to
+    /// render.
+    ConstructLocalsInPlace { locals: Vec<String>, span: Span },
 
     /// ADR 0131 §4 (BT-3863): a fold lambda body's last statement, the
     /// accumulator `lists:foldl` hands to the next iteration and, after the

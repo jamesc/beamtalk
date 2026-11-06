@@ -1088,12 +1088,16 @@ impl CoreErlangGenerator {
                 // nested within collect:/select:/etc. are silently lost.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
-                // the vars THIS construct itself threads, read before
+                // BT-4462: the locals THIS construct threads, read before
                 // `generate_expression` below (which may push/pop scopes) so
-                // the lookup reflects this statement's own captured set.
-                let inner_threaded_vars = self
-                    .threaded_locals_of(expr)
-                    .and_then(ThreadedLocals::into_lowered);
+                // the lookup reflects this statement's own captured set. Every
+                // construct that threads a local of this body is a producer
+                // here (`local_producer_locals` / `fold_statement_threads_ahead`
+                // above), so an accepted program reaches this unwrap only with
+                // none; one that threads a local is reported
+                // (`ConstructLocalsNotRebound`) rather than reread out of the
+                // carrier, the legacy write-back BT-4462 deleted.
+                let in_place = self.construct_locals_in_place(expr, span);
                 let doc = self.generate_expression(expr)?;
                 let new_state = self.next_state_var();
                 stmts.push(ThreadedStmt::Statement(
@@ -1103,35 +1107,14 @@ impl CoreErlangGenerator {
                         " = ",
                         doc,
                         " in let ",
-                        leaf::var(new_state.clone()),
+                        leaf::var(new_state),
                         " = call 'erlang':'element'(2, ",
                         leaf::var(tuple_var.clone()),
                         ") in ",
                     ],
                     span,
                 ));
-                // a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
-                // statement here only bumps the StateAcc *version pointer* above —
-                // it does NOT rebind the specific local vars it threads. Both
-                // StateAcc (map) mode and tuple-acc mode bind each threaded local
-                // to a FIXED Core Erlang variable once per iteration (see
-                // `generate_unpack_at_iteration_start`/`generate_foldl_loop_body`),
-                // not via a live re-lookup through the state pointer — so without
-                // this, any read of the var later in the SAME block invocation
-                // (e.g. the next statement) would see the stale pre-statement
-                // value instead of what this construct just wrote. Shares
-                // `rebind_threaded_vars_from_state` with `conditionals.rs`'s
-                // `push_control_flow_threaded_var_rereads`, which does the same
-                // rebind for the `ThreadedIr`-rendered conditional-arm path.
-                // BT-4460 leaves this fold-body reread an opaque `Statement`: only
-                // the arm reread (`push_control_flow_threaded_var_rereads`) is
-                // shown unreachable and typed `StateCarrierReread`; this one
-                // goes with the legacy helpers in BT-4462.
-                if let Some(inner_vars) = inner_threaded_vars {
-                    for d in self.rebind_threaded_vars_from_state(&inner_vars, &new_state) {
-                        stmts.push(ThreadedStmt::Statement(d, span));
-                    }
-                }
+                stmts.extend(in_place);
                 if is_last {
                     match kind {
                         BodyKind::FoldlDo => {
