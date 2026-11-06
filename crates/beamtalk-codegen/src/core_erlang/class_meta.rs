@@ -557,17 +557,19 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4363: `'constant_class_methods' => ~{'protocolError' => 1, ...}~`,
-    /// each class-side selector whose body is exactly one integer literal
-    /// ([`MethodDefinition::literal_integer_body`](beamtalk_core::ast::MethodDefinition::literal_integer_body)),
-    /// mapped to that integer. A class-literal send of such a selector
-    /// answers the integer in place behind a constant-value key, which the
+    /// each class-side selector whose body is exactly one scalar literal
+    /// ([`MethodDefinition::literal_constant_body`](beamtalk_core::ast::MethodDefinition::literal_constant_body)),
+    /// mapped to the term that literal compiles to
+    /// ([`Self::constant_value_doc`]; BT-4504: integer, float, string, symbol,
+    /// character, `nil`, `true`, `false`). A class-literal send of such a
+    /// selector answers the literal in place behind a constant-value key, which the
     /// runtime installs only while the class's metadata row, published from
     /// this entry on registration and reload, maps the selector to that same
     /// value, so a reload that changes or drops the body ends the inlining. Omitted when the class has none.
     fn meta_constant_class_methods_entry(class: &ClassDefinition) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for method in &class.class_methods {
-            let Some(value) = method.literal_integer_body() else {
+            let Some(value) = method.literal_constant_body() else {
                 continue;
             };
             if !parts.is_empty() {
@@ -576,7 +578,7 @@ impl CoreErlangGenerator {
             parts.push(docvec![
                 leaf::atom(method.selector.name().to_string()),
                 " => ",
-                leaf::int_lit(value),
+                Self::constant_value_doc(&value),
             ]);
         }
         if parts.is_empty() {

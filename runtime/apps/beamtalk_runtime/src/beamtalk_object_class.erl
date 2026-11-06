@@ -2737,9 +2737,10 @@ sync_direct_constructors(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
-Publish the class's certified integer-literal class-side bodies (BT-4363):
+Publish the class's certified literal class-side bodies (BT-4363, BT-4504):
 `constant_class_methods` from its `__beamtalk_meta/0`, keeping only
-`Selector => Integer` entries; `#{}` when absent (a ClassBuilder class, an
+`Selector => constant_value()` entries
+(`beamtalk_class_metadata:is_constant_value/1`); `#{}` when absent (a ClassBuilder class, an
 older module). A constant-value static call key is certified against it.
 """.
 -spec sync_constant_class_methods(class_name(), map()) -> ok.
@@ -2747,7 +2748,12 @@ sync_constant_class_methods(ClassName, Meta) ->
     Constants =
         case maps:get(constant_class_methods, Meta, #{}) of
             M when is_map(M) ->
-                maps:filter(fun(K, V) -> is_atom(K) andalso is_integer(V) end, M);
+                maps:filter(
+                    fun(K, V) ->
+                        is_atom(K) andalso beamtalk_class_metadata:is_constant_value(V)
+                    end,
+                    M
+                );
             _ ->
                 #{}
         end,

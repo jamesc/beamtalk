@@ -156,8 +156,11 @@ keys (the same per-class map), so a `class signal:` override, a class-side
 extension, a runtime fun or a reload of the class or an ancestor takes it away.
 
 BT-4363: a class-literal send of a class-side method whose whole body is one
-integer literal (`Errors protocolError` with `class protocolError => 1`) is
-keyed `{constant_value, Value, Module, FunName, Tag}`. Its hit path answers
+scalar literal (`Errors protocolError` with `class protocolError => 1`; since
+BT-4504 any of integer, float, string, symbol, character, `nil`, `true`,
+`false`) is keyed `{constant_value, Value, Module, FunName, Tag}`, `Value`
+being the term the literal compiles to
+(`beamtalk_class_metadata:constant_value()`). Its hit path answers
 `Value` in place instead of calling `Module:FunName`. Besides the four facts
 above, the key needs the body to be exactly that literal: the class's metadata
 row maps the selector to `Value` (`constant_class_methods`, published from the
@@ -286,11 +289,11 @@ actual transitions write (set when unset, erase when set); both are rare
 %% (BT-4270).
 %% `{constant_value, Value, Module, FunName, Tag}` keys a class-literal send
 %% that answers `Value` in place while `Module:FunName`'s body is still exactly
-%% that integer literal (BT-4363).
+%% that literal (BT-4363; any scalar literal kind since BT-4504).
 -type static_call_key() ::
     {module(), atom(), atom()}
     | {caller_safe_raise, atom(), module(), atom(), atom()}
-    | {constant_value, integer(), module(), atom(), atom()}.
+    | {constant_value, beamtalk_class_metadata:constant_value(), module(), atom(), atom()}.
 -export_type([kind/0, derived/0, static_call_key/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
@@ -692,8 +695,8 @@ key_target({caller_safe_raise, Primitive, Module, FunName, Tag}) when
     is_atom(Primitive), is_atom(Module), is_atom(FunName), is_atom(Tag)
 ->
     {Module, FunName, Tag};
-key_target({constant_value, Value, Module, FunName, Tag}) when
-    is_integer(Value), is_atom(Module), is_atom(FunName), is_atom(Tag)
+key_target({constant_value, _Value, Module, FunName, Tag}) when
+    is_atom(Module), is_atom(FunName), is_atom(Tag)
 ->
     {Module, FunName, Tag};
 key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_atom(Tag) ->
@@ -719,8 +722,8 @@ key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, Module, Sele
     end;
 key_body_holds({constant_value, Value, _, _, _}, ClassName, _Module, Selector) ->
     %% BT-4363: the hit path answers `Value` without calling the method, so
-    %% the body must be exactly that integer literal, as the class's published
-    %% metadata row says (`constant_class_methods`, generated from the method
+    %% the body must be exactly that literal (any scalar kind, BT-4504), as
+    %% the class's published metadata row says (`constant_class_methods`, generated from the method
     %% source; the key's own class defines it, the owner check above holds).
     %% Read from the row, not from `Module:'__beamtalk_meta'()`: a reload
     %% erases this class's keys inside the new module's `-on_load`, while the
@@ -728,7 +731,7 @@ key_body_holds({constant_value, Value, _, _, _}, ClassName, _Module, Selector) -
     %% old literal and outlive the reload. The reload publishes the row from
     %% the new meta and erases again on a change
     %% (`beamtalk_class_metadata:put_constant_class_methods/2`). `=:=`: `1`
-    %% never certifies `1.0`.
+    %% never certifies `1.0`, nor `$a` (97) a float `97.0`.
     case maps:find(Selector, beamtalk_class_metadata:lookup_constant_class_methods(ClassName)) of
         {ok, Certified} -> Certified =:= Value;
         error -> false
