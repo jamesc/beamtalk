@@ -206,7 +206,7 @@ pub(in crate::core_erlang) const DISPATCH_PREFIX_SELECTORS: &[&str] = &[
 
 /// BT-4473: an own-class `dispatch/3` method arm, which calls its function
 /// as `Module:'selector'(Self, Arg1, …)` and answers its return as is
-/// (BT-4484: a value-type method function answers the send's result, block
+/// (BT-4503: a value-type method function answers the send's result, block
 /// `^` or not).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) struct OwnDispatchArm {
@@ -1265,7 +1265,7 @@ impl CoreErlangGenerator {
     }
 
     /// Emit a "last expression" in a value-type method body: the expression's
-    /// value, which is the method's (BT-4484: with or without a block `^`).
+    /// value, which is the method's (BT-4503: with or without a block `^`).
     pub(in crate::core_erlang) fn emit_vt_last_expr(
         &mut self,
         expr: &Expression,
@@ -1804,7 +1804,7 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4484: a value-type function body (a method's or a value-type
+    /// BT-4503: a value-type function body (a method's or a value-type
     /// extension fun's) inside its NLR boundary when `token` is set (a block
     /// of it holds a `^`), else the body as is. The boundary lowers through
     /// `ThreadedIr` as a [`ThreadedStmt::NlrCatch`] of
@@ -2969,8 +2969,7 @@ impl CoreErlangGenerator {
     /// last position, so each branch yields only its logical value (its last expression).
     ///
     /// Reached via the shared [`Self::lower_threaded_last`] transform for both the value-type
-    /// boundary (which wraps the result in `{Result, Self{N}}` when NLR is active) and the
-    /// class-method boundary (which returns it bare).
+    /// and the class-method boundary, which both return it bare.
     pub(in crate::core_erlang) fn emit_vt_conditional_case_to_var(
         &mut self,
         expr: &Expression,
@@ -4931,7 +4930,7 @@ impl CoreErlangGenerator {
     /// Generates dispatch case arms for all class-defined instance methods.
     ///
     /// Each arm calls the module-level function for that method and answers
-    /// its return (BT-4484: the function answers the send's result itself).
+    /// its return (BT-4503: the function answers the send's result itself).
     pub(super) fn generate_dispatch_method_branches(
         class: &ClassDefinition,
         mod_name: &str,

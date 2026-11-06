@@ -59,7 +59,7 @@ fn wrap_body_with_nlr_catch_value_type_mints_token_and_answers_bare_value() {
         out.contains("primop 'raw_raise'"),
         "missing raw_raise: {out}"
     );
-    // BT-4484: the ValueType catch arm answers the bare value — neither the
+    // BT-4503: the ValueType catch arm answers the bare value — neither the
     // actor-reply tuple nor a `{Value, State}` pair.
     assert!(
         !out.contains("'reply'"),

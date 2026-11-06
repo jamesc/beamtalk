@@ -1219,7 +1219,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4473: the local call of an own-class method arm's function —
-    /// `apply 'sel'/N(R, A1, …)`, which answers the send's result (BT-4484).
+    /// `apply 'sel'/N(R, A1, …)`, which answers the send's result (BT-4503).
     fn own_arm_call_doc(
         selector: &str,
         arm: super::value_type_codegen::OwnDispatchArm,

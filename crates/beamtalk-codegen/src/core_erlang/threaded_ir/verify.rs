@@ -519,20 +519,20 @@ pub(in crate::core_erlang) enum VerifyError {
     /// or arm `^` (BT-4312).
     ReplReturnWithoutBoundary { at: Span },
 
-    /// BT-4484: an [`ThreadedStmt::NlrCatch`] in a value-type or class-method
+    /// BT-4503: an [`ThreadedStmt::NlrCatch`] in a value-type or class-method
     /// scope whose catch arm answers anything but the bare value
     /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
     /// scope kind: the function an NLR boundary closes answers what its
     /// callers take as the send's result. A value-type method (or value-type
     /// extension fun) and a class method answer the bare value: `dispatch/3`'s
-    /// arm, a typed direct call of the function (own module, BT-4473, or
-    /// another module, BT-4484) and the runtime's extension apply
+    /// arm, the own-module typed direct call of the function (BT-4473) and
+    /// the runtime's extension apply
     /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
     /// as is. An actor method answers the `gen_server` reply and a REPL eval its
     /// `{Value, Bindings}` pair; those scopes are not constrained here. The
     /// repro: every value-type method with a block `^` answered `{Result,
-    /// Self}`, which only its own `dispatch/3` arm unwrapped, so a direct call
-    /// of it from another module could not be made, and a value-type
+    /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
+    /// call unwrapped, so a value-type
     /// extension with a block `^` answered the pair to the sender.
     MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
@@ -1822,7 +1822,7 @@ impl VerifyWalk<'_> {
             //
             // BT-4015: a `ConditionHandBack` is checked against its loop's
             // `condition_families` by `condition_families_not_carried`.
-            // BT-4484: the boundary of a value-type or class-method function
+            // BT-4503: the boundary of a value-type or class-method function
             // answers the bare value its callers take as the send's result.
             ThreadedStmt::NlrCatch { boundary, span, .. } => {
                 if matches!(self.scope, ScopeKind::ValueType | ScopeKind::ClassMethod)

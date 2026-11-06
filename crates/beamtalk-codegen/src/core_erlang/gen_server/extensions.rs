@@ -308,7 +308,7 @@ impl CoreErlangGenerator {
                 };
                 frame.set_current_nlr_token(None);
                 body_result.map(|body_parts| {
-                    // BT-4484: the runtime applies a value-type extension
+                    // BT-4503: the runtime applies a value-type extension
                     // fun as `fun(Args, Self) -> Result`
                     // (`beamtalk_dispatch:apply_extension_by_arity/4`), so it
                     // answers the bare value, `^` or not.

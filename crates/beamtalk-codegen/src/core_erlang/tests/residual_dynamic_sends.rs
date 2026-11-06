@@ -57,7 +57,7 @@ fn open_own_class_self_send_calls_the_arm_locally() {
 
 #[test]
 fn own_arm_with_non_local_return_answers_its_result() {
-    // BT-4484: a method whose block holds `^` answers its result itself (the
+    // BT-4503: a method whose block holds `^` answers its result itself (the
     // NLR boundary inside the function answers the bare value), so its arm
     // and the direct call both take the return as is.
     let code = codegen(concat!(
@@ -84,8 +84,8 @@ fn own_arm_with_non_local_return_answers_its_result() {
 
 #[test]
 fn other_module_sealed_class_keeps_dispatch() {
-    // Only the unit's own class: another module's arm shape (NLR pair,
-    // method vs slot) is not known for the version that is loaded.
+    // Only the unit's own class: whether another module's selector is a
+    // method or a slot read is not known for the version that is loaded.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: SealedWidget -> Integer =>\n",

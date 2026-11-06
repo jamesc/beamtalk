@@ -59,9 +59,9 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// returned alongside the result.
     ClassMethod,
     /// Value-type methods (and value-type extension funs): the catch arm
-    /// yields the bare `Value`, as the body's normal path does (BT-4484). A
+    /// yields the bare `Value`, as the body's normal path does (BT-4503). A
     /// value-type method function answers exactly what a send of it answers,
-    /// so `dispatch/3`, a typed direct call (own module or another one) and
+    /// so `dispatch/3`, the own-module typed direct call (BT-4473) and
     /// the runtime's extension apply all take its return as the send's
     /// result. A value type's `Self` is immutable to its callers, so nothing
     /// is returned beside the result.
@@ -74,7 +74,7 @@ pub(in crate::core_erlang) enum NlrBoundary {
     Repl { trace_source: Option<String> },
 }
 
-/// BT-4484: what the matching NLR catch arm of an [`NlrBoundary`] yields, as
+/// BT-4503: what the matching NLR catch arm of an [`NlrBoundary`] yields, as
 /// the function the boundary closes answers it to its caller. The one fact
 /// `ThreadedIr`'s verifier checks against the scope's calling convention
 /// (`VerifyError::MethodNlrAnswersPair`); [`nlr_arm_result`] renders it.
@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(doc.to_pretty_string(), "V");
     }
 
-    /// BT-4484: every boundary's rendered arm has the shape `arm_shape`
+    /// BT-4503: every boundary's rendered arm has the shape `arm_shape`
     /// declares — the fact the verifier checks is the one rendered.
     #[test]
     fn nlr_arm_result_matches_arm_shape() {
@@ -527,7 +527,7 @@ mod tests {
             doc.contains("'=:='(CTok0, Tok0)"),
             "catch suffix should guard with CTok0 =:= Tok0. Got:\n{doc}"
         );
-        // ValueType boundary (BT-4484): the NLR arm answers the bare value.
+        // ValueType boundary (BT-4503): the NLR arm answers the bare value.
         assert!(
             doc.contains(") -> Val0") && !doc.contains("{Val0, St0}"),
             "ValueType NLR arm must yield the bare Value. Got:\n{doc}"

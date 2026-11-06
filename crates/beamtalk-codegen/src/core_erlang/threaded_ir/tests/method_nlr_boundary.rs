@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! BT-4484: `VerifyError::MethodNlrAnswersPair` — the NLR boundary of a
+//! BT-4503: `VerifyError::MethodNlrAnswersPair` — the NLR boundary of a
 //! value-type or class-method function answers the bare value its callers
 //! take as the send's result.
 
@@ -21,7 +21,7 @@ fn nlr_catch(boundary: NlrBoundary) -> Vec<ThreadedStmt> {
 }
 
 /// Every boundary whose catch arm answers something other than the bare
-/// value: the pre-BT-4484 value-type arm answered `{Value, Self}`, which is
+/// value: the pre-BT-4503 value-type arm answered `{Value, Self}`, which is
 /// this pair shape.
 fn non_value_boundaries() -> Vec<NlrBoundary> {
     vec![

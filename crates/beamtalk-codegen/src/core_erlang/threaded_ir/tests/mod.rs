@@ -25,7 +25,7 @@
 //! - [`fold_family`] — BT-3827 `FoldFamilyNotCarried` over fold lambda bodies
 //! - [`fold_locals`] — BT-3863 `FoldLocalsNotCarried` over fold lambda bodies
 //! - [`nlr_throw`] — the `NlrThrow` node's rendering and `NlrThrowWithoutSlot`
-//! - [`method_nlr_boundary`] — BT-4484 `MethodNlrAnswersPair` over method NLR boundaries
+//! - [`method_nlr_boundary`] — BT-4503 `MethodNlrAnswersPair` over method NLR boundaries
 //! - [`synced_call`] — ADR 0137 Phase 2a `SyncedCall` rendering and verification
 //! - [`verifier_diagnostic`] — BT-3724 release-mode `internal:` warning
 
