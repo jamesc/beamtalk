@@ -1652,8 +1652,36 @@ impl CoreErlangGenerator {
         }
         names.sort();
         names.dedup();
-        names.retain(|local| self.lookup_var(local).is_some());
+        names.retain(|local| self.holds_repl_map_binding(local));
         names
+    }
+
+    /// BT-4461: whether the frame holds `local` in a Core variable that mirrors
+    /// its key in the bindings map ([`Self::repl_map_vars`]). A block
+    /// parameter is bound to a variable too, but is never a map key, so a
+    /// producer that writes one leaves it to the frame's own lowering.
+    fn holds_repl_map_binding(&self, local: &str) -> bool {
+        self.lookup_var(local)
+            .is_some_and(|var| self.repl_map_vars.contains(var))
+    }
+
+    /// BT-4461: records the variables of `prelude`'s `LocalRebind`s that step
+    /// or are held in the frame's map (`MapPut`/`MapHeld`): in the REPL they
+    /// mirror their binding's key ([`Self::repl_map_vars`]).
+    fn note_repl_map_rebinds(&mut self, prelude: &[ThreadedStmt]) {
+        if !self.is_repl_mode() {
+            return;
+        }
+        for stmt in prelude {
+            if let ThreadedStmt::LocalRebind {
+                value_var,
+                lowering: RebindLowering::MapPut { .. } | RebindLowering::MapHeld { .. },
+                ..
+            } = stmt
+            {
+                self.repl_map_vars.insert(value_var.clone());
+            }
+        }
     }
 
     /// [`Self::repl_cached_bindings_written_by`] as a REPL producer rethreads
@@ -1699,7 +1727,7 @@ impl CoreErlangGenerator {
                 self.binds_threadable_local(name)
             }),
         );
-        names.retain(|local| self.lookup_var(local).is_some());
+        names.retain(|local| self.holds_repl_map_binding(local));
         names
     }
 
@@ -1746,6 +1774,7 @@ impl CoreErlangGenerator {
             span,
             |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
         );
+        self.note_repl_map_rebinds(&prelude);
         for slot in &slots {
             self.bind_var(&slot.local, &slot.value_var);
         }
@@ -2419,7 +2448,7 @@ impl CoreErlangGenerator {
             slot: CarrierSlot::Whole,
             value_var: self.fresh_temp_var(&local),
         };
-        prelude.extend(threaded_ir::build_local_threading_prelude(
+        let rebind = threaded_ir::build_local_threading_prelude(
             &enclosing,
             &carrier,
             value_doc,
@@ -2427,7 +2456,9 @@ impl CoreErlangGenerator {
             Vec::new(),
             span,
             |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
-        ));
+        );
+        self.note_repl_map_rebinds(&rebind);
+        prelude.extend(rebind);
         // (At the REPL root a binding is read back from the bindings map, which
         // the `Put` above stepped, so it is not bound to a variable.)
         if !repl_root {
@@ -2596,6 +2627,7 @@ impl CoreErlangGenerator {
                     span,
                     |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
                 );
+                self.note_repl_map_rebinds(&prelude);
                 for slot in &slots {
                     self.bind_var(&slot.local, &slot.value_var);
                 }

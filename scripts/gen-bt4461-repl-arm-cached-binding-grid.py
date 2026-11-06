@@ -117,6 +117,25 @@ def rejected(outer, writer, position):
     return position == "assigned" or writer == "match"
 
 
+# A block parameter the frame reassigns is bound to a variable but is never a
+# key of the bindings map, so a nested writer leaves it to the frame's own
+# lowering (the adversarial review of BT-4461: hiding or re-reading one raised
+# `undefined_variable` or `badkey`). name -> (input, answer)
+PARAMETER_WRITES = {
+    # These are no-regression cells: the loop never runs, or the arm that
+    # writes the parameter is not taken. A parameter write that does run is
+    # lost (or its loop never ends) in the REPL before and after BT-4461:
+    # BT-4499.
+    "foldParamLoop": ("#(5, 6) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]", "11"),
+    "foldParamConditional": (
+        "#(1, 2) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
+        "3",
+    ),
+    "foldAccumulatorLoop": ("#(1, 2) inject: 0 into: [:acc :x | 1 to: 0 do: [:k | acc := acc + k]. acc + x]", "3"),
+    "ifNotNilParamLoop": ("7 ifNotNil: [:v | [v < 5] whileTrue: [v := v + 1]. v]", "7"),
+}
+
+
 def body_and_value(writer, position, pre):
     """The frame body for `writer` at `position`, and the frame's value and
     `m` after it, by the model."""
@@ -180,6 +199,14 @@ def main():
             "",
             "m",
             f"// => {m_after}",
+            "",
+        ]
+        count += 1
+    for name, (source, answer) in PARAMETER_WRITES.items():
+        out += [
+            f"// parameter / {name} / - / none",
+            f"r := {source}",
+            f"// => {answer}",
             "",
         ]
         count += 1

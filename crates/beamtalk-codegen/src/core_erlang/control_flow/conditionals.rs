@@ -2647,6 +2647,10 @@ impl CoreErlangGenerator {
         let target_version = self.state_version();
         let target = VersionedVar::new(VersionPrefix::State, target_version, frame);
         let op = if slot {
+            // BT-4461: the binding's variable now mirrors its map key.
+            if self.is_repl_mode() {
+                self.repl_map_vars.insert(val_var.to_string());
+            }
             BindOp::Put {
                 field: state_key,
                 value: ValueRef::Var(val_var.to_string()),

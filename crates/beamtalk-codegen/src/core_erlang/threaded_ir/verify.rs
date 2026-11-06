@@ -482,7 +482,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// than the root (a conditional arm, an `on:do:`/`ensure:` block) holds
     /// the bindings it has written in Core variables, and a construct at one
     /// of its producer sites writes `locals`, some of them, but its
-    /// [`ThreadedStmt::ConstructTuple`] does not thread them: the producer
+    /// [`ThreadedStmt::ConstructTuple`] leaves them out of `threads` (BT-4461): the producer
     /// adopted the bindings map whole (`element(2, carrier)`) and no
     /// [`ThreadedStmt::LocalRebind`] read them back out of it, so the
     /// frame's later reads answer the value from before the construct, and
