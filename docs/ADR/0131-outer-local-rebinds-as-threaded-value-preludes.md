@@ -178,6 +178,8 @@ position that works has its own hand-written rebind:
 | Nested value-type `do:` | `lower_nested_vt_do` write-back (BT-3718) |
 | `ensure:` cleanup | `rebind_threaded_vars_from_state` (BT-3718) |
 
+This table is the inventory when the ADR was written. Every rebind it names is gone: BT-4462 deleted the last of them (`push_control_flow_threaded_var_rereads` and `rebind_threaded_vars_from_state`), and the plain-`let` control-flow-with-mutations guard survives only as an unwrap (status item 2).
+
 Every row is a fix for a position someone hit (BT-912, BT-2342, BT-2349,
 BT-2358, BT-2814, BT-3162, BT-3428, BT-3492, BT-3493, BT-3718). A position
 with no row (a receiver, an argument, a binary operand, a field write's
@@ -524,7 +526,9 @@ helpers, `emit_actor_threaded_assign_rhs_stmts`'s raw-tuple path,
 `push_threaded_var_rebinds`, `push_control_flow_threaded_var_rereads`, the
 `direct_params_list_op_result` side channel, the "control-flow-with-mutations"
 guard in `try_generate_block_local_plain_let`, `lower_nested_vt_do`'s
-write-back and `rebind_threaded_vars_from_state`.
+write-back and `rebind_threaded_vars_from_state`. (Done: BT-4462 deleted the
+last two rereads; the plain-`let` guard stays as an unwrap of a construct
+that threads no local, never a reread.)
 
 **Last position does not discard, except at the method root.** A
 construct in last position of a *loop body, branch arm, Tier 2 block body

@@ -45,11 +45,12 @@ impl CoreErlangGenerator {
     }
 
     /// ADR 0131 (BT-4462): the typed marker for a nested construct `expr`
-    /// that an arm or fold body compiled in place (unpacking its
-    /// `{Value, State}` carrier with an opaque `element(2, ...)` `Bind`)
-    /// rather than lowering as a producer: a
-    /// [`ThreadedStmt::ConstructLocalsInPlace`] naming the locals it threads
-    /// (`threaded_locals_of`), or `None` when it threads none, the only
+    /// that a frame compiled in place (unpacking its `{Value, State}`
+    /// carrier with an opaque `element(2, ...)` `Bind`) rather than lowering
+    /// as a producer: a [`ThreadedStmt::ConstructLocalsInPlace`] naming the
+    /// locals it threads through the frame (`threaded_locals_of`, lowered:
+    /// a REPL loop's bindings ride the REPL map, not the frame), or `None`
+    /// when it threads none, the only
     /// in-place shape an accepted program reaches (an actor list-op that only
     /// sends to `self`, a conditional writing only fields). With a local the
     /// marker is a `VerifyError::ConstructLocalsNotRebound`, reported through

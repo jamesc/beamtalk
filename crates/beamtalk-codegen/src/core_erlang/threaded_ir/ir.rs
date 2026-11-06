@@ -850,9 +850,11 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// local). Renders nothing: no frame rule rebinds those locals, so the
     /// construct's writes to them do not reach the frame. Built only by
     /// `construct_locals_in_place`, at the in-place unwraps of a conditional
-    /// arm (`generate_branch_arm_threaded`) and a fold body
-    /// (`lower_foldl_body_in_sites`), so the verifier reports the dropped
-    /// writes
+    /// arm's statements (C6/C8/C9/C10), of an assignment's value in any body
+    /// that lowers it through `lower_local_var_assignment_bind` (C3b: loop,
+    /// fold, `whileTrue:`, exception and Tier 2 block bodies) and of a fold
+    /// body statement (`lower_foldl_body_in_sites`), so the verifier reports
+    /// the dropped writes
     /// ([`VerifyError::ConstructLocalsNotRebound`](super::verify::VerifyError::ConstructLocalsNotRebound))
     /// instead of the code silently answering the pre-construct values.
     /// Every frame registers every producer at its sites, so no accepted
