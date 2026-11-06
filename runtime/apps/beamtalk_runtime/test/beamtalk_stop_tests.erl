@@ -53,7 +53,10 @@ short_waits_time_out_cleanly_test_() ->
     {timeout, 60, fun() ->
         Outcomes = [
             begin
-                Pid = start(20),
+                %% Far longer than any wait here, so a descheduled test
+                %% process cannot see the shutdown finish first; the kill
+                %% below means the sleep costs no test time.
+                Pid = start(5000),
                 Outcome = outcome(Pid, normal, Wait),
                 exit(Pid, kill),
                 Outcome
@@ -85,7 +88,7 @@ dead_process_is_noproc_test() ->
     ?assertEqual([], stray_downs()).
 
 timed_out_stop_keeps_shutting_down_test() ->
-    Pid = start(100),
+    Pid = start(500),
     Ref = erlang:monitor(process, Pid),
     ?assertEqual({exit, timeout}, outcome(Pid, normal, 10)),
     receive
