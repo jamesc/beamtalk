@@ -172,10 +172,13 @@ TestCase subclass: ConstantClassMethodTest
 
   // Conformance: for every loaded class, each unary class-side selector its
   // published row certifies (`constant_class_methods`, what the hit arm
-  // answers) answers that very term (`=:=`) through the dynamic send, which
-  // runs the compiled method. Guards the Rust certification
+  // answers) answers that very term (`=:=`) through the dynamic send whenever
+  // the runtime would fold it, that is whenever `static_call_target/4` accepts
+  // its constant-value key. Guards the Rust certification
   // (`MethodDefinition::literal_constant_body`) against drifting from what the
-  // method's codegen actually returns.
+  // method's codegen actually returns. A selector another test has shadowed
+  // (class-side extension, ADR 0084 runtime fun) or patched is declined by the
+  // runtime and so is skipped: the fold never answers for it.
   testEveryCertifiedConstantIsWhatItsMethodAnswers =>
     checked := Beamtalk allClasses
       inject: 0
@@ -184,8 +187,19 @@ TestCase subclass: ConstantClassMethodTest
         (constants keys reject: [:sel | sel asString includesSubstring: ":"])
           inject: count
           into: [:n :sel |
-            self assert: (cls perform: sel) =:= (constants at: sel)
-            n + 1
+            key := self
+              keyOf: cls
+              value: (constants at: sel)
+              fun: ("class_" ++ sel asString) asAtom
+            folds := (Erlang beamtalk_class_shadow_flags
+              static_call_target: key
+              with: cls name
+              with: sel
+              with: 1) =/= false
+            folds ifTrue: [
+              self assert: (cls perform: sel) =:= (constants at: sel)
+            ]
+            folds ifTrue: [n + 1] ifFalse: [n]
           ]
       ]
     // At least this file's fixtures and stdlib's own constants were checked.

@@ -2025,9 +2025,7 @@ impl CoreErlangGenerator {
                 self.generate_guard_expression(expression)
             }
             Expression::Identifier(id) => match id.name.as_str() {
-                "true" => Ok(Document::Str("'true'")),
-                "false" => Ok(Document::Str("'false'")),
-                "nil" => Ok(Document::Str("'nil'")),
+                name if let Some(doc) = Self::pseudo_variable_doc(name) => Ok(doc),
                 "self" => Ok(leaf::var(self.receiver_var())),
                 _ => {
                     if let Some(var_name) = self.lookup_var(&id.name) {
