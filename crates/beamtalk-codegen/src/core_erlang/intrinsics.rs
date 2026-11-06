@@ -3393,7 +3393,8 @@ impl CoreErlangGenerator {
     /// stateful loop-condition tail — see the field's doc comment).
     ///
     /// Never fires in an actor instance method when a branch block holds a
-    /// guarded operator (see [`Self::pure_blocks_hold_guarded_operator`]): the
+    /// guarded operator or another call codegen brackets (see
+    /// [`Self::pure_blocks_hold_bracketed_call`]): the
     /// arm compiles via `generate_block_body`, whose closure frame carries
     /// the `Loop(DirectParams)` kind — and the ADR 0137 bracket machinery
     /// reads that kind as a stateless loop, so the operator's slow path
@@ -3466,7 +3467,7 @@ impl CoreErlangGenerator {
                     if let Expression::Block(block) = &arguments[0] {
                         if block.parameters.is_empty()
                             && !self.and_or_needs_mutation_threading(receiver, block)
-                            && !self.pure_blocks_hold_guarded_operator(&[block])
+                            && !self.pure_blocks_hold_bracketed_call(&[block])
                         {
                             let sel = if kw == "and:" {
                                 SoloBoolean::And
@@ -3495,7 +3496,7 @@ impl CoreErlangGenerator {
                 if let Expression::Block(block) = &arguments[0] {
                     if block.parameters.is_empty()
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                        && !self.pure_blocks_hold_bracketed_call(&[block])
                     {
                         return Some(PureBooleanShape::Solo(SoloBoolean::IfTrue, block));
                     }
@@ -3505,7 +3506,7 @@ impl CoreErlangGenerator {
                 if let Expression::Block(block) = &arguments[0] {
                     if block.parameters.is_empty()
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                        && !self.pure_blocks_hold_bracketed_call(&[block])
                     {
                         return Some(PureBooleanShape::Solo(SoloBoolean::IfFalse, block));
                     }
@@ -3521,7 +3522,7 @@ impl CoreErlangGenerator {
                             receiver,
                             &[true_block, false_block],
                         )
-                        && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
+                        && !self.pure_blocks_hold_bracketed_call(&[true_block, false_block])
                     {
                         return Some(PureBooleanShape::IfTrueIfFalse(true_block, false_block));
                     }
@@ -3534,8 +3535,9 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4070: whether pure-inline must decline `blocks` here — an actor
-    /// instance method (where calls are bracketed) with a guarded operator
-    /// in a branch. Read off [`Self::block_contains_guarded_operator`], the
+    /// instance method (where calls are bracketed) with a guarded operator,
+    /// or another call codegen brackets (BT-4524, below), in a branch.
+    /// Read off [`Self::block_contains_guarded_operator`], the
     /// same classifier the send emitter exempts, so the two cannot disagree
     /// about what an operator is; the scope is the enclosing method's (the
     /// arm's own scope starts empty — the arity gate admits no block
@@ -3548,7 +3550,7 @@ impl CoreErlangGenerator {
     /// closure frame with no `State` to store, so the conditional declines
     /// pure-inline ([`Self::expr_holds_bracketed_call`], the probe loop mode
     /// selection asks).
-    fn pure_blocks_hold_guarded_operator(&self, blocks: &[&Block]) -> bool {
+    fn pure_blocks_hold_bracketed_call(&self, blocks: &[&Block]) -> bool {
         self.synced_calls_active()
             && blocks.iter().any(|block| {
                 self.block_contains_guarded_operator(block)

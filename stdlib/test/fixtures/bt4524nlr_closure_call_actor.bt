@@ -56,4 +56,16 @@ Actor subclass: Bt4524NlrClosureCallActor
     k := cond ifTrue: [^8]
     k
 
+  // A nil test runs its block as a closure; the assignment keeps the
+  // guard-return rewrite from inlining it.
+  closureIfNil: x =>
+    self.n := 6
+    r := x ifNil: [^8]
+    r
+
+  closureIfNotNil: x =>
+    self.n := 6
+    r := x ifNotNil: [:v | ^v]
+    r
+
   currentN => self.n

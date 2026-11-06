@@ -52,3 +52,13 @@ TestCase subclass: Bt4524NlrClosureCallTest
     a := Bt4524NlrClosureCallActor spawn
     self assert: (a nonBooleanIfTrue: NonBooleanCondCalling new) equals: 8
     self assert: a currentN equals: 6
+
+  testClosureIfNilKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureIfNil: nil) equals: 8
+    self assert: a currentN equals: 6
+
+  testClosureIfNotNilKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureIfNotNil: 9) equals: 9
+    self assert: a currentN equals: 6

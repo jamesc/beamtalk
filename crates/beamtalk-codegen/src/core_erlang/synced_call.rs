@@ -147,6 +147,11 @@ thread_local! {
     /// fire.
     pub(in crate::core_erlang) static FAULT_NLR_CLOSURES_UNSTORED: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Test-only count of [`CoreErlangGenerator::classify_send`] calls
+    /// (BT-4524), so a test can show the probes classify each send a
+    /// bounded number of times rather than once per enclosing probe.
+    pub(in crate::core_erlang) static CLASSIFY_SEND_CALLS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
 }
 
 /// BT-4524 (ADR 0146 P0): whether a `^` in a block the call runs as a closure
@@ -311,6 +316,14 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
     /// before those names are in scope. Empty outside a probe.
     pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
+    /// How many [`CoreErlangGenerator::expr_holds_bracketed_call`] probes
+    /// are open. Only the outermost restores [`Self::inlined_classes`]: a
+    /// probe nested in it (a conditional's `pure_boolean_shape` reached from
+    /// the outer probe's walk) runs in the same context, so its classes stay
+    /// cached for the rest of the outer probe instead of being recomputed
+    /// once per enclosing probe (exponential in the conditionals' nesting
+    /// depth, BT-4524).
+    pub(in crate::core_erlang) probe_depth: std::cell::Cell<usize>,
     /// BT-4279: the receiver of the send each open window brackets
     /// (innermost last), by address: an emitter offers a fast path only for
     /// the send its window owns, never for a nested send it happens to
@@ -359,6 +372,7 @@ impl SyncedCallState {
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
             probe_locals: std::cell::RefCell::default(),
+            probe_depth: std::cell::Cell::new(0),
             window_receivers: Vec::new(),
             pending_fast_path: None,
             nlr_operands: std::collections::HashMap::new(),
@@ -654,6 +668,8 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         is_cast: bool,
     ) -> UserCodeCall {
+        #[cfg(test)]
+        CLASSIFY_SEND_CALLS.with(|n| n.set(n.get() + 1));
         if is_cast {
             // A cast posts to the receiver's mailbox; nothing runs here.
             return UserCodeCall::No;
@@ -2253,9 +2269,16 @@ impl CoreErlangGenerator {
     ///
     /// A probe, not a decision: it runs before the loop's body context is set
     /// up, so the per-send class [`Self::classify_inlined`] caches (for the
-    /// window, the gap note and the lowering to agree on) is left as it was.
+    /// window, the gap note and the lowering to agree on) is left as it was
+    /// once the outermost probe ends. A probe nested in another (a nested
+    /// conditional's [`Self::pure_boolean_shape`]) sees the same context, so
+    /// the classes it caches stay for the rest of the outer probe: each
+    /// conditional's class is decided once per outermost probe, not once per
+    /// enclosing probe ([`SyncedCallState::probe_depth`]).
     pub(in crate::core_erlang) fn expr_holds_bracketed_call(&self, expr: &Expression) -> bool {
-        let cached = self.synced.inlined_classes.borrow().clone();
+        let depth = self.synced.probe_depth.get();
+        let cached = (depth == 0).then(|| self.synced.inlined_classes.borrow().clone());
+        self.synced.probe_depth.set(depth + 1);
         let mut found = false;
         beamtalk_core::ast_walker::walk_sends(expr, &mut |send| {
             found = found
@@ -2264,7 +2287,10 @@ impl CoreErlangGenerator {
                     UserCodeCall::Yes | UserCodeCall::SelfViaDefaultArm
                 );
         });
-        *self.synced.inlined_classes.borrow_mut() = cached;
+        self.synced.probe_depth.set(depth);
+        if let Some(cached) = cached {
+            *self.synced.inlined_classes.borrow_mut() = cached;
+        }
         found
     }
 

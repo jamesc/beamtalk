@@ -22,7 +22,7 @@
 //! `on:do:` entry store, an inlined construct) stay clean.
 
 use super::assert_compiles_through_erlc;
-use crate::core_erlang::synced_call::FAULT_NLR_CLOSURES_UNSTORED;
+use crate::core_erlang::synced_call::{CLASSIFY_SEND_CALLS, FAULT_NLR_CLOSURES_UNSTORED};
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
@@ -65,6 +65,20 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("dynamic_conditional", "r := p > 0 ifTrue: [^p * 2]", true),
     ("pure_fallback", "r := p ifTrue: [^8]", true),
     ("pure_fallback_and", "r := p and: [^8]", true),
+    // Nil tests: the block that threads nothing is applied as a closure
+    // (`try_generate_nil_protocol`).
+    ("if_nil", "r := p ifNil: [^8]", true),
+    ("if_not_nil", "r := p ifNotNil: [:v | ^v]", true),
+    (
+        "if_nil_if_not_nil",
+        "r := p ifNil: [^8] ifNotNil: [:v | ^v]",
+        true,
+    ),
+    (
+        "if_not_nil_if_nil",
+        "r := p ifNotNil: [:v | ^v] ifNil: [^8]",
+        true,
+    ),
     // Inlined in place: the `^` stores the threaded state itself.
     ("inline_ensure", "[self.n := 1. ^2] ensure: [nil]", false),
     (
@@ -190,4 +204,35 @@ fn unstored_nlr_closure_calls_report_with_the_fix_off() {
     );
     let needing = CALLS.iter().filter(|(_, _, needs)| *needs).count();
     assert!(reported >= needing * POSITIONS.len() * PREFIXES.len());
+}
+
+/// How many times compiling an actor method whose `^` sits in conditionals
+/// nested `depth` deep classifies a send.
+fn classify_calls_at_depth(depth: usize) -> usize {
+    let mut body = "^x".to_string();
+    for k in 0..depth {
+        body = format!("a{} ifTrue: [{body}]", k % 3);
+    }
+    let src = format!(
+        "{HEADER}\n  probe: x with: a0 with: a1 with: a2 =>\n    self.n := 6.\n    {body}.\n    0\n"
+    );
+    CLASSIFY_SEND_CALLS.with(|n| n.set(0));
+    compile(&src);
+    CLASSIFY_SEND_CALLS.with(std::cell::Cell::get)
+}
+
+/// Deciding whether a `^`-holding conditional is inlined pure probes its
+/// blocks for bracketed calls, and a nested conditional's own decision probes
+/// again. A probe nested in another keeps the classes it caches for the rest
+/// of the outer probe, so each send is classified a bounded number of times
+/// per outermost probe: the count grows polynomially with the nesting depth,
+/// where discarding them made it `2^depth - 1`.
+#[test]
+fn nested_nlr_conditional_probes_stay_polynomial() {
+    let at_12 = classify_calls_at_depth(12);
+    let at_14 = classify_calls_at_depth(14);
+    assert!(
+        at_12 < 1_000 && at_14 < at_12 * 2,
+        "classify_send calls: depth 12 -> {at_12}, depth 14 -> {at_14}"
+    );
 }
