@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4484 fixture (value_type_nlr_answer_test.bt): a sealed Value whose
+// method holds a block `^` (its extension is in the test file).
+
+sealed Value subclass: NlrAnswerFinder
+  field: items :: List = #()
+
+  firstBig -> Integer | Nil =>
+    self items do: [:e | e > 10 ifTrue: [^e]]
+    nil
+
+  firstBigOrZero -> Integer => self firstBig ifNil: [0]
+
+  count -> Integer => self items size
