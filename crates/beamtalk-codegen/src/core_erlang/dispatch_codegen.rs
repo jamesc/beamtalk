@@ -1753,6 +1753,9 @@ impl CoreErlangGenerator {
                 if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
                     return Ok(None);
                 }
+                if let Some(doc) = self.proved_direct_ffi_call(module_name, function_name, &[])? {
+                    return Ok(Some(doc));
+                }
                 // Route zero-arg calls through proxy (consistent with keyword sends).
                 // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
                 let mode = super::util::ffi_coercion_mode(module_name);
@@ -1770,6 +1773,12 @@ impl CoreErlangGenerator {
             MessageSelector::Keyword(parts) => {
                 // Extract function name from first keyword (before the colon)
                 let function_name = parts[0].keyword.trim_end_matches(':');
+
+                if let Some(doc) =
+                    self.proved_direct_ffi_call(module_name, function_name, arguments)?
+                {
+                    return Ok(Some(doc));
+                }
 
                 // Process arguments individually so Block arguments can be
                 // generated as Tier 1 funs (generate_erlang_interop_block) before crossing the
@@ -1827,6 +1836,120 @@ impl CoreErlangGenerator {
                 Ok(None)
             }
         }
+    }
+
+    /// BT-4485: the direct remote call for an inline FFI send whose result the
+    /// imported spec proves needs no coercion and whose arguments are proved
+    /// to reach the callee unchanged — `None` keeps the proxy.
+    ///
+    /// Both proofs are the FFI type table's
+    /// ([`NativeTypeRegistry::proves_no_result_coercion`] and
+    /// [`ffi_arg_passes_unchanged`] on each argument's checked type); this
+    /// only asks them. The call keeps the proxy's error translation: a raise
+    /// is handed, with the arguments, to
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8`, which runs the same
+    /// classifier (and `badarg` charlist retry) as `direct_call/4`.
+    /// Arguments are bound before the `try`, so a raise while evaluating one
+    /// is not translated, as on the proxy path.
+    ///
+    /// ```text
+    /// let <A1> = <arg1> in
+    /// try call 'M':'F'(A1)
+    /// of <R> -> R
+    /// catch <C, E, Raw> ->
+    ///   let S = primop 'build_stacktrace'(Raw) in
+    ///   call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, 'Caller')
+    /// ```
+    ///
+    /// [`NativeTypeRegistry::proves_no_result_coercion`]: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proves_no_result_coercion
+    /// [`ffi_arg_passes_unchanged`]: beamtalk_core::semantic_analysis::type_checker::ffi_arg_passes_unchanged
+    fn proved_direct_ffi_call(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        let Some(registry) = self.native_type_registry.as_ref() else {
+            return Ok(None);
+        };
+        let Ok(arity) = u8::try_from(arguments.len()) else {
+            return Ok(None);
+        };
+        if !registry.proves_no_result_coercion(module_name, function_name, arity) {
+            return Ok(None);
+        }
+        let args_proved = arguments.iter().all(|arg| {
+            self.type_map.get(arg.span()).is_some_and(
+                beamtalk_core::semantic_analysis::type_checker::ffi_arg_passes_unchanged,
+            )
+        });
+        if !args_proved {
+            return Ok(None);
+        }
+
+        let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut arg_vars: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        for (i, arg) in arguments.iter().enumerate() {
+            let var = self.fresh_temp_var("FfiArg");
+            bindings.push(docvec![
+                "let ",
+                leaf::var(var.clone()),
+                " = ",
+                self.expression_doc(arg)?,
+                " in "
+            ]);
+            if i > 0 {
+                arg_vars.push(Document::Str(", "));
+            }
+            arg_vars.push(leaf::var(var));
+        }
+        let result_var = self.fresh_temp_var("FfiRes");
+        let cls_var = self.fresh_temp_var("FfiCls");
+        let err_var = self.fresh_temp_var("FfiErr");
+        let stk_var = self.fresh_temp_var("FfiStk");
+        let built_var = self.fresh_temp_var("FfiBuiltStk");
+        let module_atom = leaf::atom(module_name.to_string());
+        let function_atom = leaf::atom(function_name.to_string());
+        Ok(Some(docvec![
+            Document::Vec(bindings),
+            "try call ",
+            module_atom.clone(),
+            ":",
+            function_atom.clone(),
+            "(",
+            Document::Vec(arg_vars.clone()),
+            ") of <",
+            leaf::var(result_var.clone()),
+            "> -> ",
+            leaf::var(result_var),
+            " catch <",
+            leaf::var(cls_var.clone()),
+            ", ",
+            leaf::var(err_var.clone()),
+            ", ",
+            leaf::var(stk_var.clone()),
+            "> -> let ",
+            leaf::var(built_var.clone()),
+            " = primop 'build_stacktrace'(",
+            leaf::var(stk_var),
+            ") in call 'beamtalk_erlang_proxy':'ffi_call_raised'(",
+            leaf::var(cls_var),
+            ", ",
+            leaf::var(err_var),
+            ", ",
+            leaf::var(built_var),
+            ", ",
+            module_atom,
+            ", ",
+            function_atom,
+            ", [",
+            Document::Vec(arg_vars),
+            "], ",
+            leaf::atom(super::util::ffi_coercion_mode(module_name)),
+            ", ",
+            leaf::atom(self.module_name.to_string()),
+            ")",
+        ]))
     }
 
     /// ADR 0109: lower `File open:do:` / `File open:mode:do:` to a

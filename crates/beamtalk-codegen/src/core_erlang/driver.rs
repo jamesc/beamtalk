@@ -126,6 +126,9 @@ pub fn generate_module_with_warnings(
         generator.register_own_class_module(&class.name.name);
     }
     generator.source_path = options.source_path;
+    generator
+        .native_type_registry
+        .clone_from(&options.native_type_registry);
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
     generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);
     generator.otp_release = options.otp_release.map(EcoString::from);

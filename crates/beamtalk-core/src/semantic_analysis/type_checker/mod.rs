@@ -77,7 +77,10 @@ mod types;
 mod validation;
 pub(crate) mod well_known;
 
-pub use native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
+pub use native_type_registry::{
+    FunctionSignature, NativeTypeRegistry, ParamType, ffi_arg_passes_unchanged,
+    ffi_result_passes_unchanged,
+};
 pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
     map_type_name, parse_specs_line,

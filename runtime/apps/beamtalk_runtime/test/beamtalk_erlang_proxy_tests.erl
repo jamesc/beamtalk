@@ -1923,3 +1923,167 @@ catch_ffi_error(Fun) ->
                 Err#beamtalk_error.hint
             }
     end.
+
+%%% ============================================================================
+%%% BT-4485: direct inline FFI calls (ffi_call_raised/8)
+%%% ============================================================================
+
+%% Evaluate a fixture sample (an Erlang expression string).
+bt4485_eval(Src) ->
+    {ok, Tokens, _} = erl_scan:string(Src ++ "."),
+    {ok, Exprs} = erl_parse:parse_exprs(Tokens),
+    {value, V, _} = erl_eval:exprs(Exprs, erl_eval:new_bindings()),
+    V.
+
+bt4485_fixture() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "ffi_passthrough_conformance.json"
+    ]).
+
+%% The FFI type table (`native_type_registry.rs`) lets codegen skip the proxy
+%% for these result types: every sample must come back from
+%% `coerce_ffi_result/3` unchanged in both modes. The Rust side pins its class
+%% lists to the same fixture (`ffi_passthrough_matches_shared_fixture`).
+bt4485_result_passthrough_matches_shared_fixture_test() ->
+    #{<<"result_passthrough">> := Cases} = bt4485_fixture(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"type">> := Type, <<"samples">> := Samples}) ->
+            lists:foreach(
+                fun(Src) ->
+                    V = bt4485_eval(binary_to_list(Src)),
+                    ?assertEqual(
+                        {Type, V}, {Type, beamtalk_erlang_proxy:coerce_ffi_result(lists, V, stock)}
+                    ),
+                    ?assertEqual(
+                        {Type, V},
+                        {Type,
+                            beamtalk_erlang_proxy:coerce_ffi_result(
+                                beamtalk_logging_config, V, beamtalk
+                            )}
+                    )
+                end,
+                Samples
+            )
+        end,
+        Cases
+    ).
+
+%% Argument types codegen passes without the proxy: the proxy hands every
+%% sample to the callee unchanged, and it is a scalar (no tagged String, no
+%% binary for the charlist retry to change, no fun that could run Beamtalk code).
+bt4485_arg_passthrough_matches_shared_fixture_test() ->
+    #{<<"arg_passthrough">> := Cases} = bt4485_fixture(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"type">> := Type, <<"samples">> := Samples}) ->
+            lists:foreach(
+                fun(Src) ->
+                    V = bt4485_eval(binary_to_list(Src)),
+                    ?assert(is_atom(V) orelse is_number(V) orelse is_pid(V)),
+                    [
+                        ?assertEqual(
+                            {Type, term_to_binary(V)},
+                            {Type,
+                                beamtalk_erlang_proxy:direct_call(
+                                    erlang, term_to_binary, [V], Mode
+                                )}
+                        )
+                     || Mode <- [stock, beamtalk]
+                    ]
+                end,
+                Samples
+            )
+        end,
+        Cases
+    ).
+
+%% The shape codegen emits for a proved call: the arguments are bound, then
+%% `try M:F(Args...) catch C:E:S -> ffi_call_raised(C, E, S, M, F, Args, Mode,
+%% Caller)`.
+bt4485_direct(M, F, Args, Mode) ->
+    try
+        erlang:apply(M, F, Args)
+    catch
+        C:E:S -> beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, Mode, ?MODULE)
+    end.
+
+%% Outcome of a call, with a wrapped error reduced to its `#beamtalk_error{}`.
+%% The recorded `erlang_stacktrace` is dropped: it names the proxy's frame on
+%% the proxy path and the caller's on the direct path.
+bt4485_outcome(Fun) ->
+    try Fun() of
+        V -> {ok, V}
+    catch
+        error:#{error := #beamtalk_error{details = D} = E} when is_map(D) ->
+            {beamtalk_error, E#beamtalk_error{details = maps:remove(erlang_stacktrace, D)}};
+        error:#{error := #beamtalk_error{} = E} ->
+            {beamtalk_error, E};
+        C:R ->
+            {C, R}
+    end.
+
+%% Differential test: the direct shape and the proxied `direct_call/4` agree on
+%% results and on structured errors (`badarg`, `undef`, `function_clause`,
+%% `badarith`, the charlist retry, already-wrapped errors, exit and throw).
+bt4485_direct_matches_proxy_test_() ->
+    Cases = [
+        {erlang, abs, [-3]},
+        {erlang, phash2, [42]},
+        {erlang, max, [nil, 7]},
+        {erlang, is_process_alive, [self()]},
+        {erlang, abs, [foo]},
+        {erlang, list_to_integer, [<<"42">>]},
+        {erlang, '/', [1, 0]},
+        {erlang, no_such_function_bt4485, [1]},
+        {erlang, abs, []},
+        {no_such_module_bt4485, f, [1]},
+        {calendar, is_leap_year, [foo]},
+        {calendar, last_day_of_the_month, [2024, 13]},
+        {erlang, exit, [bye]},
+        {erlang, throw, [ball]},
+        {beamtalk_error, raise, [beamtalk_error:new(type_error, 'Probe', 'go:')]},
+        {?MODULE, explicit_undef_stub, [1]},
+        {beamtalk_process_ops, current, []}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p/~p ~p", [M, F, length(A), Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, Mode) end),
+                bt4485_outcome(fun() -> bt4485_direct(M, F, A, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
+    ].
+
+%% Only the callee's frames decide whether compiled Beamtalk code raised the
+%% error: the calling Beamtalk module's own frame (there is no proxy frame
+%% between them on the direct path) does not make an Erlang `badarg` a
+%% Beamtalk-code error.
+bt4485_caller_frame_bounds_attribution_test() ->
+    Caller = 'bt@probe@caller',
+    Own = [{erlang, abs, [foo], []}, {Caller, run, 1, []}],
+    ?assertMatch(
+        {beamtalk_error, #beamtalk_error{kind = type_error}},
+        bt4485_outcome(fun() ->
+            beamtalk_erlang_proxy:ffi_call_raised(
+                error, badarg, Own, erlang, abs, [foo], stock, Caller
+            )
+        end)
+    ),
+    %% A compiled Beamtalk module other than the caller, above it in the stack,
+    %% ran inside the callee: the error propagates unchanged, as on the proxy.
+    Inner = [{'bt@probe@other', go, 0, []}, {lists, map, 2, []}, {Caller, run, 1, []}],
+    ?assertEqual(
+        {error, badarg},
+        bt4485_outcome(fun() ->
+            beamtalk_erlang_proxy:ffi_call_raised(
+                error, badarg, Inner, erlang, abs, [foo], stock, Caller
+            )
+        end)
+    ).

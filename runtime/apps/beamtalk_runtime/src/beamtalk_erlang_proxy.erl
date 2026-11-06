@@ -45,6 +45,7 @@ See: ADR 0028 §1 (Module Proxy Pattern)
     direct_call/3,
     direct_call/4,
     dispatch/3,
+    ffi_call_raised/8,
     has_method/1,
     native_call/4,
     native_call/5,
@@ -286,6 +287,47 @@ native_call(Module, FunName, Args, {Class, Selector}, Mode) when
     apply_with_coercion(Module, FunName, Args, FunName, {Class, Selector}, Mode).
 
 -doc """
+Error path of a direct inline FFI call (BT-4485).
+
+Codegen emits `call 'M':'F'(Args...)` without the proxy when the imported
+spec proves the result needs no coercion and every argument is a scalar that
+reaches the callee unchanged (the FFI type table's rule, see
+`ffi_passthrough_conformance.json`). The call keeps the proxy's error
+translation: its `try` hands every exception here, and this runs the same
+`classify_ffi_exception` policy as `direct_call/4`, `badarg` charlist retry
+included, so a direct call raises exactly the `#beamtalk_error{}` the proxied
+one would. Answers the retry's result when the retry succeeds.
+
+`Caller` is the compiled Beamtalk module that made the call. Its frame bounds
+the callee's frames in `Stack`, as the proxy's own frame does on the proxy
+path, so only the callee's frames decide whether compiled Beamtalk code
+raised the error. The arguments cannot carry a block, so the callee runs no
+Beamtalk code of `Caller`, and no class-variable snapshot is needed before
+the retry (a retry can only re-run Erlang code).
+""".
+-spec ffi_call_raised(
+    error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), atom()
+) -> term().
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Caller) when
+    Mode =:= stock; Mode =:= beamtalk
+->
+    CalleeFrames = lists:takewhile(fun(Frame) -> element(1, Frame) =/= Caller end, Stack),
+    classify_ffi_exception(
+        Class,
+        Reason,
+        Stack,
+        CalleeFrames,
+        Module,
+        FunName,
+        Args,
+        FunName,
+        none,
+        fun(M, F, A, Sel, Ctx, St) ->
+            maybe_retry_badarg(M, F, A, Sel, Ctx, St, none, Mode)
+        end
+    ).
+
+-doc """
 The single, unified apply path for all FFI (ADR 0101 Part 2).
 
 Calls `Module:FunName(Args)`, coercing ok/error → `Result` (ADR 0076) on the
@@ -478,20 +520,59 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/6`:
     fun((atom(), atom(), list(), atom(), error_context(), list()) -> term())
 ) -> term().
 classify_ffi_exception(
-    error, #{error := #beamtalk_error{}} = Wrapped, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg
+    Class, Reason, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+) ->
+    %% On the proxy paths the proxy's own frame bounds the callee's frames, so
+    %% the whole stack is the attribution stack (`raised_in_beamtalk_code/2`
+    %% stops at `?MODULE`).
+    classify_ffi_exception(
+        Class, Reason, Stack, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+    ).
+
+-doc """
+`classify_ffi_exception/9` with a separate attribution stack: `AttrStack` is
+what `raised_in_beamtalk_code/2` walks, `Stack` is what a re-raise carries.
+`ffi_call_raised/8` passes only the callee's frames, since a direct call has
+no proxy frame between the callee and the compiled Beamtalk caller.
+""".
+-spec classify_ffi_exception(
+    error | exit | throw,
+    term(),
+    list(),
+    list(),
+    atom(),
+    atom(),
+    list(),
+    atom(),
+    error_context(),
+    fun((atom(), atom(), list(), atom(), error_context(), list()) -> term())
+) -> term().
+classify_ffi_exception(
+    error,
+    #{error := #beamtalk_error{}} = Wrapped,
+    Stack,
+    _AttrStack,
+    _M,
+    _F,
+    _Args,
+    _Sel,
+    _Ctx,
+    _OnBadarg
 ) ->
     %% Re-raise already-wrapped Beamtalk exceptions unchanged (e.g. from Beamtalk
     %% code reached via Erlang). Idempotent.
     erlang:raise(error, Wrapped, Stack);
-classify_ffi_exception(error, #beamtalk_error{} = Rec, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
+classify_ffi_exception(
+    error, #beamtalk_error{} = Rec, Stack, _AttrStack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg
+) ->
     %% A bare #beamtalk_error{} record raised by an Erlang shim is already
     %% classified — wrap into the map form *preserving its kind* (idempotent); do
     %% not reclassify it as a generic runtime_error.
     erlang:raise(error, beamtalk_exception_handler:wrap(Rec), Stack);
 classify_ffi_exception(
-    error, Reason, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+    error, Reason, Stack, AttrStack, Module, FunName, Args, OrigSelector, Context, OnBadarg
 ) ->
-    case raised_in_beamtalk_code(Module, Stack) of
+    case raised_in_beamtalk_code(Module, AttrStack) of
         true ->
             %% Raised by compiled Beamtalk code the callee ran (a block passed
             %% in, say): not an FFI fault, so it propagates exactly as it would
@@ -502,7 +583,7 @@ classify_ffi_exception(
                 Reason, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
             )
     end;
-classify_ffi_exception(Class, Reason, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
+classify_ffi_exception(Class, Reason, Stack, _AttrStack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
     %% exit:* and throw:* propagate unchanged — re-raising with the captured
     %% stacktrace is transparent, but lets a single catch own the whole policy.
     erlang:raise(Class, Reason, Stack).
