@@ -1107,30 +1107,29 @@ static_call_target_test_() ->
                 stop_static_class(Pid)
             end
         end},
-        {"a value-method key installs while the class's dispatch arms list the selector",
-            fun() ->
-                %% BT-4484: the call site's own fallback is `Module:dispatch/3`,
-                %% whose arm calls `Module:Selector`; the key certifies that arm
-                %% from the published `dispatch_arms` row, the registered module
-                %% and the export.
-                Mod = bt4484_value_module,
-                Name = 'Bt4484Value',
-                load_value_module(Mod),
-                Pid = start_value_class(Name, Mod, #{x => 0, 'plus:' => 1}),
-                try
-                    X = value_key(Mod, x, Name),
-                    Plus = value_key(Mod, 'plus:', Name),
-                    ?assertMatch(#beamtalk_object{pid = Pid}, value_target(Name, X, x, 1)),
-                    ?assertMatch(#beamtalk_object{}, key_value(X)),
-                    ?assertMatch(#beamtalk_object{}, value_target(Name, Plus, 'plus:', 2)),
-                    ?assertMatch(#beamtalk_object{}, key_value(Plus)),
-                    %% The direct call and the fallback answer alike.
-                    R = #{'$beamtalk_class' => Name, x => 4},
-                    ?assertEqual(Mod:dispatch('plus:', [3], R), Mod:'plus:'(R, 3))
-                after
-                    stop_static_class(Pid)
-                end
-            end},
+        {"a value-method key installs while the class's dispatch arms list the selector", fun() ->
+            %% BT-4484: the call site's own fallback is `Module:dispatch/3`,
+            %% whose arm calls `Module:Selector`; the key certifies that arm
+            %% from the published `dispatch_arms` row, the registered module
+            %% and the export.
+            Mod = bt4484_value_module,
+            Name = 'Bt4484Value',
+            load_value_module(Mod),
+            Pid = start_value_class(Name, Mod, #{x => 0, 'plus:' => 1}),
+            try
+                X = value_key(Mod, x, Name),
+                Plus = value_key(Mod, 'plus:', Name),
+                ?assertMatch(#beamtalk_object{pid = Pid}, value_target(Name, X, x, 1)),
+                ?assertMatch(#beamtalk_object{}, key_value(X)),
+                ?assertMatch(#beamtalk_object{}, value_target(Name, Plus, 'plus:', 2)),
+                ?assertMatch(#beamtalk_object{}, key_value(Plus)),
+                %% The direct call and the fallback answer alike.
+                R = #{'$beamtalk_class' => Name, x => 4},
+                ?assertEqual(Mod:dispatch('plus:', [3], R), Mod:'plus:'(R, 3))
+            after
+                stop_static_class(Pid)
+            end
+        end},
         {"a value-method key declines another arity, another module, an unexported or unlisted selector",
             fun() ->
                 Mod = bt4484_value_decline_module,
@@ -1167,9 +1166,11 @@ static_call_target_test_() ->
                 meta => value_meta(#{x => 0})
             }),
             try
-                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(
-                    beamtalk_class_registry:class_object_tag(Name), Name
-                )),
+                ?assertNot(
+                    beamtalk_class_shadow_flags:direct_call_ok(
+                        beamtalk_class_registry:class_object_tag(Name), Name
+                    )
+                ),
                 ?assertMatch(
                     #beamtalk_object{}, value_target(Name, value_key(Mod, x, Name), x, 1)
                 )
