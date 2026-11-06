@@ -82,7 +82,7 @@ pub(in crate::core_erlang) enum NlrBoundary {
 pub(in crate::core_erlang) enum NlrArmShape {
     /// The bare `Value`: what a send answers.
     Value,
-    /// The gen_server reply `{'reply', Value, State}`.
+    /// The `gen_server` reply `{'reply', Value, State}`.
     Reply,
     /// A `{Result, State}` pair: the REPL eval's `{Value, Bindings}` (or its
     /// trace-mode `{[{Source, Value}], Bindings}`).

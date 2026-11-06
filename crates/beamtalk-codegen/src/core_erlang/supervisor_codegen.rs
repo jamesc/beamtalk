@@ -212,7 +212,7 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
         }
 
-        let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
+        let method_branches = Self::generate_dispatch_method_branches(class, &mod_name);
         docs.push(docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
             "    case Selector of\n",

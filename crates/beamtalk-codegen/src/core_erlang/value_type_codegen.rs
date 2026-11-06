@@ -4536,7 +4536,7 @@ impl CoreErlangGenerator {
         };
 
         // Route each class-defined method to its individual function
-        let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
+        let method_branches = Self::generate_dispatch_method_branches(class, &mod_name);
 
         // Check whether this class has a catch-all DNU handler.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
@@ -4892,7 +4892,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Option<AutoSlotMethods> {
         let auto = compute_auto_slot_methods(class);
-        let arms = self.own_dispatch_arms(class, auto.as_ref());
+        let arms = Self::own_dispatch_arms(class, auto.as_ref());
         self.class_context_mut().own_dispatch_arms = arms;
         auto
     }
@@ -4904,7 +4904,6 @@ impl CoreErlangGenerator {
     /// answers first ([`DISPATCH_PREFIX_SELECTORS`]) is left out, and a
     /// selector defined twice keeps its first arm, as the `case` does.
     fn own_dispatch_arms(
-        &self,
         class: &ClassDefinition,
         auto: Option<&AutoSlotMethods>,
     ) -> std::collections::HashMap<String, OwnDispatchArm> {
@@ -4934,7 +4933,6 @@ impl CoreErlangGenerator {
     /// Each arm calls the module-level function for that method and answers
     /// its return (BT-4484: the function answers the send's result itself).
     pub(super) fn generate_dispatch_method_branches(
-        &self,
         class: &ClassDefinition,
         mod_name: &str,
     ) -> Vec<Document<'static>> {
