@@ -446,12 +446,11 @@ pub struct CoreErlangGenerator {
     /// the stdlib (BT-3951). Baked into `__beamtalk_meta/0` as
     /// `overrides_species_construction`.
     pub(in crate::core_erlang) own_overrides_species_construction: bool,
-    /// BT-4475: whether the class being compiled's own explicit class-side
-    /// `new:` runs in the caller
-    /// (`ClassHierarchy::explicit_class_new1_runs_in_caller`). Baked into
-    /// `__beamtalk_meta/0` by leaving `new:` out of
+    /// BT-4475: where a `new:` sent to the class being compiled runs
+    /// (`ClassHierarchy::explicit_class_new1_runs_in_caller`). `InCaller` is
+    /// baked into `__beamtalk_meta/0` by leaving `new:` out of
     /// `process_bound_class_selectors`.
-    pub(in crate::core_erlang) own_in_caller_class_new1: bool,
+    pub(in crate::core_erlang) own_class_new1_routing: super::class_meta::ClassNew1Routing,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -687,7 +686,7 @@ impl CoreErlangGenerator {
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,
             own_overrides_species_construction: false,
-            own_in_caller_class_new1: false,
+            own_class_new1_routing: super::class_meta::ClassNew1Routing::ClassProcess,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
