@@ -694,10 +694,10 @@ motivating example with no new syntax; collection chains of *unary*
 messages already read left-to-right without parentheses. This is the
 strongest rival to the full proposal and the right answer if the
 in-repo frequency of deep keyword chains (see Context § Current state:
-low) is taken as representative. Not chosen as the recommendation only
-because F does not cover keyword-heavy collection pipelines
-(`select:` → `collect:` → `inject:into:`) — the case BT-506 was opened
-for — but the maintainer may reasonably prefer it (open question 1).
+low) is taken as representative. Not taken (§ Resolved): F does not
+cover keyword-heavy collection pipelines (`select:` → `collect:` →
+`inject:into:`), which is the case BT-506 was opened for, and the
+maintainer wants `|>` for Elixir and Gleam users.
 
 ### H. Formatter-only: lay out nested chains one send per line
 Teach `beamtalk fmt` to break a left-nested keyword chain into one send per
