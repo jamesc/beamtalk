@@ -4947,7 +4947,7 @@ fn test_explicit_forwarding_class_new1_is_not_process_bound() {
     let full = "'process_bound_class_selectors' => ['new', 'new:', ";
     let without = "'process_bound_class_selectors' => ['new', 'startLink', ";
     let code = codegen_source(
-        "Object subclass: Bag2\n\n  class withAll: xs => xs\n\n  class new: xs => self withAll: xs\n",
+        "Object subclass: Bag2\n\n  class withAll: xs => (Erlang lists) reverse: xs\n\n  class new: xs => self withAll: xs\n",
     );
     assert!(
         code.contains(without) && !code.contains(full),

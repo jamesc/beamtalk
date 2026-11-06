@@ -360,8 +360,10 @@ end
   rule (`ClassHierarchy::explicit_class_constructor_builds_in_caller`) covers
   a class's own class-side `new:` whose body is one plain FFI forward (literal
   or parameter arguments, not a table row) or a send to `self` of one of the
-  class's own in-caller class methods (`class new: elements => self withAll:
-  elements`). A non-map `new:` has no direct constructor, and the class
+  class's own in-caller class methods whose own body is such an FFI forward or
+  its selector primitive (`class new: elements => self withAll: elements`,
+  `class withAll: list => @primitive`): the target's body is checked, one hop
+  only. A non-map `new:` has no direct constructor, and the class
   process's `{new, [Arg]}` handler only called that class method, so codegen
   leaves `new:` out of the class's published process-bound selectors and the
   send runs the method in the caller through `in_caller_owner/2`, behind the

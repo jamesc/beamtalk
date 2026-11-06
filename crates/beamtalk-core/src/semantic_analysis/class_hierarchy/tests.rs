@@ -4420,7 +4420,7 @@ fn bt4475_explicit_new1_verdict(source: &str) -> bool {
 fn explicit_class_new1_forward_to_own_in_caller_method_runs_in_caller() {
     // The `List new:` shape (stdlib/src/list.bt).
     assert!(bt4475_explicit_new1_verdict(
-        "Object subclass: Bag2\n  class withAll: xs => xs\n  class new: xs => self withAll: xs\n"
+        "Object subclass: Bag2\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
     ));
     // An FFI forward of the parameter, outside the process-sensitive table.
     assert!(bt4475_explicit_new1_verdict(
@@ -4452,19 +4452,37 @@ fn explicit_class_new1_needing_the_class_process_stays_there() {
     ));
     // A non-parameter, non-literal argument may read anything.
     assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  class withAll: xs => xs\n  class new: xs => self withAll: self name\n"
+        "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: self name\n"
     ));
     // Class variables in the chain keep the class process for `new:` too.
     assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => xs\n  class new: xs => self withAll: xs\n"
+        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
     ));
     // An instance-side `new:` of the same name fails closed.
     assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  new: x => x\n  class withAll: xs => xs\n  class new: xs => self withAll: xs\n"
+        "Object subclass: Tag\n  new: x => x\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
+    ));
+    // The forward target's own body is checked (one hop): a target that is
+    // `self delegate` on a `native:` class, a process-sensitive FFI call, a
+    // body reading anything, or itself a forward keeps the class process.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Q native: my_counter\n  class make: n => self delegate\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => (Erlang ets) new: n options: #()\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => self basicNew\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => n\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class a: n => (Erlang lists) reverse: n\n  class make: n => self a: n\n  class new: n => self make: n\n"
     ));
     // Two statements are not a plain forward.
     assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  class withAll: xs => xs\n  class new: xs =>\n    self withAll: xs.\n    self withAll: xs\n"
+        "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs =>\n    self withAll: xs.\n    self withAll: xs\n"
     ));
 }
 

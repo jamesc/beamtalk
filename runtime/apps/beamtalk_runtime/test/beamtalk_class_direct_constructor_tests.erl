@@ -18,6 +18,7 @@ Keyword constructors are ordinary class methods: the in-caller path of ADR
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %% Logger handler callback for the BT-4126 stale-verdict warning tests.
 -export([log/2]).
@@ -820,6 +821,22 @@ explicit_class_new1_test_() ->
                     Pid = beamtalk_class_registry:whereis_class('AtomicCounter'),
                     ?assertEqual(decline, beamtalk_class_dispatch:in_caller_owner(Pid, 'new:'))
                 end},
+                %% The in-caller path raises what the forwarded method raises,
+                %% exactly as the class process's `{new, [Arg]}` handler did.
+                {"new: with a bad argument answers or raises exactly what withAll: does", fun() ->
+                    Outcomes = [
+                        {Class, outcome(Class, 'new:', [42]), outcome(Class, 'withAll:', [42])}
+                     || Class <- ['List', 'Set', 'Array', 'Tuple']
+                    ],
+                    [
+                        ?assertEqual({Class, WithAll}, {Class, New})
+                     || {Class, New, WithAll} <- Outcomes
+                    ],
+                    %% At least one of them raises, so the error path is covered.
+                    ?assert(
+                        lists:any(fun({_, New, _}) -> element(1, New) =/= returned end, Outcomes)
+                    )
+                end},
                 %% A class-side `new:` extension shadows the in-caller method: the
                 %% send reaches the class process, which answers the extension.
                 {"a class-side new: extension on List is honoured by the class process", fun() ->
@@ -844,6 +861,16 @@ explicit_class_new1_test_() ->
                     ?assertEqual([1], beamtalk_class_dispatch:class_send(Pid, 'new:', [[1]]))
                 end}
             ]}.
+
+%% What a class-side send answers, or the class and kind of what it raises.
+outcome(Class, Selector, Args) ->
+    Pid = beamtalk_class_registry:whereis_class(Class),
+    try beamtalk_class_dispatch:class_send(Pid, Selector, Args) of
+        V -> {returned, V}
+    catch
+        Kind:#{error := #beamtalk_error{kind = ErrKind}} -> {Kind, ErrKind};
+        Kind:Reason -> {Kind, Reason}
+    end.
 
 assert_new1_in_caller(Class, Module, Check) ->
     {module, Module} = code:ensure_loaded(Module),

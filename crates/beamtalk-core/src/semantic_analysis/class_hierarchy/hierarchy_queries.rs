@@ -752,15 +752,18 @@ impl ClassHierarchy {
     ///   those keep the class process, which owns what they create. FFI
     ///   outside that table is not recognised, exactly as for the lints, and
     ///   runs in the caller like any other in-caller class method;
-    /// - (`new:` only) a send to `self` of one of the class's own class
-    ///   methods that already runs in the caller
-    ///   ([`Self::is_direct_call_eligible`]: not process-bound, no class
-    ///   variables in the chain), with literal or parameter arguments: the
-    ///   `List class new: elements => self withAll: elements` shape. A send
-    ///   of that method from any caller already runs it there, so forwarding
-    ///   to it needs nothing the class process owns. `new` cannot forward to
-    ///   `self`: its direct path is the `new/0` delegate, whose `self` is
-    ///   `undefined`;
+    /// - (`new:` only) a send to `self`, with literal or parameter
+    ///   arguments, of one of the class's own class methods that already runs
+    ///   in the caller ([`Self::is_direct_call_eligible`]: not process-bound,
+    ///   no class variables in the chain) and whose own body passes this test
+    ///   one level down: a plain FFI forward as above, or its own selector
+    ///   primitive (`class withAll: list => @primitive`, the target of the
+    ///   `List class new: elements => self withAll: elements` shape). The
+    ///   target's body is checked, not just its routing: a target that is
+    ///   `self delegate` or a process-sensitive FFI call would hand what it
+    ///   creates to the caller exactly as a direct one would. A forward to a
+    ///   forward is not recognised. `new` cannot forward to `self`: its
+    ///   direct path is the `new/0` delegate, whose `self` is `undefined`;
     ///
     /// so it reads no class variable and nothing from the class process's
     /// dictionary (`basicNew` does, which is why `self basicNew` is never
@@ -813,6 +816,13 @@ impl ClassHierarchy {
         let [stmt] = method.body.as_slice() else {
             return false;
         };
+        if plain_ffi_forward(method, &stmt.expression, keyword) {
+            return true;
+        }
+        // `new:` only: `self <sel> <args>`, `<sel>` one of the class's own
+        // in-caller class methods whose own body passes the same test one
+        // level down (a plain FFI forward, or its selector primitive). Never
+        // further: a forward to a forward is not recognised.
         let Expression::MessageSend {
             receiver,
             selector: sent,
@@ -822,24 +832,22 @@ impl ClassHierarchy {
         else {
             return false;
         };
-        let plain_argument = |arg: &Expression| match arg {
-            Expression::Literal(..) => true,
-            Expression::Identifier(id) => {
-                keyword && method.parameters.iter().any(|p| p.name.name == id.name)
-            }
-            _ => false,
-        };
-        if !arguments.iter().all(plain_argument) {
-            return false;
-        }
-        if let Some(module) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
-            return !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
-                module, sent,
-            );
-        }
+        let sent = sent.name();
         keyword
             && matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-            && self.is_direct_call_eligible(class_name, &sent.name())
+            && arguments
+                .iter()
+                .all(|arg| plain_argument(method, arg, keyword))
+            && self.is_direct_call_eligible(class_name, &sent)
+            && primary(&class.class_methods, &sent).is_some_and(|target| {
+                matches!(target.body.as_slice(), [only] if
+                plain_ffi_forward(target, &only.expression, true)
+                || matches!(&only.expression, Expression::Primitive {
+                    is_inferred: true,
+                    is_intrinsic: false,
+                    ..
+                }))
+            })
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
@@ -1469,4 +1477,46 @@ pub(super) enum KeywordDecision {
     /// The class side already holds the selector (a user method or an
     /// earlier synthesis): not derivable, so no anchor.
     Ambiguous,
+}
+
+/// An argument of a constructor forward that reads nothing: a literal, or
+/// (when `params_ok`, for `new:`) one of `method`'s own parameters
+/// (`ClassHierarchy::explicit_class_constructor_builds_in_caller`).
+fn plain_argument(
+    method: &crate::ast::MethodDefinition,
+    arg: &crate::ast::Expression,
+    params_ok: bool,
+) -> bool {
+    match arg {
+        crate::ast::Expression::Literal(..) => true,
+        crate::ast::Expression::Identifier(id) => {
+            params_ok && method.parameters.iter().any(|p| p.name.name == id.name)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `expr`, the whole body of `method`, is a direct `(Erlang mod) fn`
+/// call with plain arguments ([`plain_argument`]) that is not a row of the
+/// curated process-sensitive class-method FFI table
+/// (`ClassHierarchy::explicit_class_constructor_builds_in_caller`).
+fn plain_ffi_forward(
+    method: &crate::ast::MethodDefinition,
+    expr: &crate::ast::Expression,
+    params_ok: bool,
+) -> bool {
+    let crate::ast::Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    else {
+        return false;
+    };
+    crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
+        !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(module, selector)
+    }) && arguments
+        .iter()
+        .all(|arg| plain_argument(method, arg, params_ok))
 }
