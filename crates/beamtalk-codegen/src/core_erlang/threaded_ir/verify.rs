@@ -660,7 +660,8 @@ pub(in crate::core_erlang) enum VerifyError {
     /// so hands its uses outward. A `^` inside a nested loop or fold that
     /// threads a whole `State` (`StateAcc`) records nothing here; mode
     /// selection keeps such a body out of hybrid mode instead, because
-    /// `facts::block_has_nlr` looks inside nested blocks. A hybrid loop holds every field it writes in a fun parameter
+    /// `facts::block_has_nlr` looks inside nested blocks. A hybrid loop holds
+    /// every field it writes in a fun parameter
     /// (`_NField`), so the `State` in scope is the loop-entry map; the `^`
     /// stores that map to the cell and carries it in its throw, dropping
     /// every write the loop made so far (`1 to: 5 do: [:i | self.n := i.
