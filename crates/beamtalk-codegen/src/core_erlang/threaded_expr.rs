@@ -29,8 +29,7 @@
 //!   conditionals alike) and the class-method `try_generate_class_method_threaded_last`.
 //! * **Boundary (per-context adapter, the only thing that varies).** A
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
-//!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
-//!   bare-`Result` shape, or the Actor
+//!   the value-type and class-method bare-`Result` shape, or the Actor
 //!   `{'reply', Reply, NewState}` `gen_server` reply shape. This mirrors the
 //!   [`NlrBoundary`](super::NlrBoundary) precedent.
 //!

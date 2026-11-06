@@ -2969,8 +2969,7 @@ impl CoreErlangGenerator {
     /// last position, so each branch yields only its logical value (its last expression).
     ///
     /// Reached via the shared [`Self::lower_threaded_last`] transform for both the value-type
-    /// boundary (which wraps the result in `{Result, Self{N}}` when NLR is active) and the
-    /// class-method boundary (which returns it bare).
+    /// and the class-method boundary, which both return it bare.
     pub(in crate::core_erlang) fn emit_vt_conditional_case_to_var(
         &mut self,
         expr: &Expression,

@@ -195,8 +195,10 @@ answers `Selector` from that arm. That is what the key certifies, instead of
 the four class-side facts above: the class is registered under `Module`
 (`beamtalk_class_metadata:lookup_module/1`) with a live process, `Tag` is
 its metaclass tag, the class's published `dispatch_arms` row lists
-`Selector` with the call's argument count, and `Module` exports
-`Selector/Arity`. The row comes from the module's `__beamtalk_meta/0`
+`Selector` with the call's argument count, `Module` exports
+`Selector/Arity`, and the code of `Module` current at install lists the same
+arm in its own `__beamtalk_meta/0` (a module compiled before BT-4484, whose
+method with a block `^` answered a `{Result, Self}` pair, carries none). The row comes from the module's `__beamtalk_meta/0`
 (compiler-written: the arms `dispatch/3` answers ahead of its default arm,
 the prefix selectors it answers first left out), published on registration
 and reload like `constant_class_methods`, so a reload that drops the method
@@ -712,7 +714,8 @@ static_call_ref({value_method, Module, Selector, Tag}, ClassName, Selector, Arit
             beamtalk_class_metadata:lookup_module(ClassName) =:= {ok, Module} andalso
             maps:get(Selector, beamtalk_class_metadata:lookup_dispatch_arms(ClassName), none) =:=
                 Arity - 1 andalso
-            erlang:function_exported(Module, Selector, Arity)
+            erlang:function_exported(Module, Selector, Arity) andalso
+            loaded_code_lists_arm(Module, Selector, Arity - 1)
     of
         true -> #beamtalk_object{class = Tag, class_mod = Module, pid = Pid};
         false -> false
@@ -735,6 +738,23 @@ static_call_ref(Key, ClassName, Selector, Arity) ->
             end;
         _ ->
             false
+    end.
+
+%% BT-4484: whether the code of `Module` current now lists `Selector` with
+%% `ArgCount` among its own `dispatch_arms`. The published row is the new
+%% code's truth during a reload's `-on_load`, but the code current then is
+%% still the old one: a module compiled before BT-4484 carries no
+%% `dispatch_arms` and may answer a `{Result, Self}` pair from a method with
+%% a block `^`, so it is never certified. A module that lists the arm answers
+%% the send's result from that function.
+-spec loaded_code_lists_arm(module(), atom(), arity()) -> boolean().
+loaded_code_lists_arm(Module, Selector, ArgCount) ->
+    %% bt-catcher-audit: not-applicable-no-block - a generated __beamtalk_meta/0 getter
+    try Module:'__beamtalk_meta'() of
+        #{dispatch_arms := #{Selector := ArgCount}} -> true;
+        _ -> false
+    catch
+        error:undef -> false
     end.
 
 %% The function a key names, and the tag of the class its call site sends to.

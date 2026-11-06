@@ -447,16 +447,27 @@ start_inheriting_class(Name, Superclass) ->
     Pid.
 
 %% BT-4484: a value-type module exporting `x/1` and `'plus:'/2` (its method
-%% functions) and `dispatch/3` answering them as its method arms do.
+%% functions) and `dispatch/3` answering them as its method arms do. Its own
+%% `__beamtalk_meta/0` lists both arms, as the compiler writes them.
 load_value_module(Module) ->
-    Body =
+    load_value_module(Module, #{dispatch_arms => #{x => 0, 'plus:' => 1}}).
+
+%% The same module whose own `__beamtalk_meta/0` is `Meta` (`#{}`: a module
+%% compiled before BT-4484, which carries no `dispatch_arms`).
+load_value_module(Module, Meta) ->
+    Body = io_lib:format(
         "x(Self) -> maps:get(x, Self).~n"
         "'plus:'(Self, N) -> maps:get(x, Self) + N.~n"
         "dispatch(x, [], Self) -> x(Self);~n"
-        "dispatch('plus:', [N], Self) -> 'plus:'(Self, N).~n",
+        "dispatch('plus:', [N], Self) -> 'plus:'(Self, N).~n"
+        "'__beamtalk_meta'() -> ~p.~n",
+        [maps:put(class_var_abi, ?BT_CLASS_VAR_ABI, Meta)]
+    ),
     load_module_binary(
         Module,
-        compile_module(Module, [{x, 1}, {'plus:', 2}, {dispatch, 3}], io_lib:format(Body, []))
+        compile_module(
+            Module, [{x, 1}, {'plus:', 2}, {dispatch, 3}, {'__beamtalk_meta', 0}], Body
+        )
     ).
 
 %% The class meta a registration of a value module publishes (BT-4484).
@@ -1152,6 +1163,28 @@ static_call_target_test_() ->
                     stop_static_class(Pid)
                 end
             end},
+        {"a value-method key declines code whose own meta lists no arm", fun() ->
+            %% A reload publishes the new arms while the OLD code is still
+            %% current (`-on_load`). Code compiled before BT-4484 carries no
+            %% `dispatch_arms` (and its method with a block `^` answered a
+            %% `{Result, Self}` pair), so it is never certified, whatever the
+            %% published row says.
+            Mod = bt4484_value_old_module,
+            Name = 'Bt4484ValueOld',
+            load_value_module(Mod, #{}),
+            Pid = start_value_class(Name, Mod, #{x => 0, 'plus:' => 1}),
+            try
+                ?assertNot(value_target(Name, value_key(Mod, x, Name), x, 1)),
+                ?assertNot(key_value(value_key(Mod, x, Name))),
+                %% Once the code that lists the arm is current, it installs.
+                load_value_module(Mod),
+                ?assertMatch(
+                    #beamtalk_object{}, value_target(Name, value_key(Mod, x, Name), x, 1)
+                )
+            after
+                stop_static_class(Pid)
+            end
+        end},
         {"a value-method key needs no class-side direct-call flag", fun() ->
             %% Class variables bar the class-side keys (ADR 0142 §1), but the
             %% instance-side `dispatch/3` arms answer ahead of them.

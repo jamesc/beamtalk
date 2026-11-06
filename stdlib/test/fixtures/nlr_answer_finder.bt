@@ -14,3 +14,8 @@ sealed Value subclass: NlrAnswerFinder
   firstBigOrZero -> Integer => self firstBig ifNil: [0]
 
   count -> Integer => self items size
+
+  // A two-argument method whose block holds `^`.
+  firstBetween: lo :: Integer and: hi :: Integer -> Integer | Nil =>
+    self items do: [:e | (e >= lo and: [e <= hi]) ifTrue: [^e]]
+    nil
