@@ -5,10 +5,9 @@ Proposed (2026-11-06). Tracking: BT-4505.
 
 Builds on ADR 0041 (state-carrying `^`), ADR 0111 (the `ThreadedIr`
 verifier), ADR 0130 (class variables in place), ADR 0137 (the actor-state
-cell) and ADR 0142 (where class methods run). **Amends ADR 0133** (§4 below:
-`on:do:`/`ensure:` are in place only when both operands are block literals).
-If accepted it replaces the BT-4429 foreign relay and the BT-4448 owner stamp,
-and decides BT-4430 and BT-4459. It depends on three existing bugs being fixed
+cell) and ADR 0142 (where class methods run). BT-4430 is decided by a
+separate amendment to ADR 0133 (§4). If accepted it replaces the BT-4429 foreign relay and the BT-4448 owner stamp,
+and decides BT-4459. It depends on three existing bugs being fixed
 (BT-4523, BT-4524, BT-4525; §1 P0 and R3).
 
 ## Context
@@ -256,27 +255,13 @@ That deletes, once the boundary reads the cell:
 detects a conflict between two writers of the same actor; it is not an
 ownership test and stays.
 
-### 4. BT-4430: amends ADR 0133
+### 4. BT-4430: decided separately
 
-ADR 0133's Decision counts a block literal as in place when it is the direct
-argument of a control construct, and lists `ensure:` and `on:do:` among them.
-`b ensure: [t := 9]` meets that wording, but codegen runs the whole send as a
-closure when either operand is a block value (`generate_ensure`,
-`exception_handling.rs:1166-1178`, `block_facts::inlined_exception_blocks`),
-so the literal half escapes with it. BT-4430 made the analyser reject the
-write. This ADR makes that the rule and amends ADR 0133: **`on:do:` and
-`ensure:` are in place only when both operands are block literals.**
-
-Threading the literal half anyway would make "in place" depend on the other
-operand and would need every exception-producer predicate to handle one
-literal arm. The rewrite is one wrapper (`[b value] ensure: [t := 9]`), and the
-error says so. A `^` and reads in such a block are unaffected; actor field
-writes are accepted (stored state, §1).
-
-This decision is independent of the `^` model in §1-§3 and could be accepted
-separately. On acceptance, ADR 0133's Decision gets an amendment note and
-`docs/beamtalk-language-features.md` § What Works and What Doesn't states it as
-settled.
+BT-4430's rejection of a local write in a half-literal `on:do:`/`ensure:`
+(`b ensure: [t := 9]`) is made the rule by an amendment to ADR 0133 (`on:do:`
+and `ensure:` are in place only when both operands are block literals), in its
+own PR so it can be accepted independently of this ADR. A `^` and reads in such
+a block are unaffected; actor field writes are accepted (stored state, §1).
 
 ### 5. BT-4459: covered by the model
 
@@ -427,7 +412,7 @@ relays a `^` across processes); its semantics here are a choice, not prior art.
 **Thread the half-literal `ensure:` (BT-4430 as a gap).**
 - *Newcomer:* "`b ensure: [t := 9]` looks like it should work."
 - Against it: it needs one-arm variants of every exception producer; the
-  wrapper is one token away.
+  wrapper is one token away. Decided in the ADR 0133 amendment (§4).
 
 **Tension.** R2 (an intermediate actor drops its cleanup's writes) is
 Erlang-correct but surprises a Smalltalker, and it is the opposite of class
@@ -516,8 +501,6 @@ no check lands failing.
 3. **Corpus.** Add the REPL scope, the "who throws" axis and the "how the
    closure is called" axis to `ensure_relay_corpus.rs`; add the untested rows
    of §7. ~M.
-4. **ADR 0133 amendment** (§4), independent of 0-3: amendment note in ADR 0133
-   and the language-features line. ~S.
 
 Components: codegen (`nlr.rs`, `threaded_ir/{ir,verify,emit}.rs`,
 `exception_handling.rs`, `synced_call.rs`, `threading_analysis.rs`, loop
@@ -562,6 +545,6 @@ recompiled.
 
 ## References
 - Related issues: BT-4505, BT-4312, BT-4424, BT-4429, BT-4430, BT-4433, BT-4448, BT-4459, BT-4122, BT-4503, BT-3582, BT-4523, BT-4524, BT-4525
-- Related ADRs: ADR 0041, ADR 0111, ADR 0130, ADR 0131, ADR 0133 (amended), ADR 0137, ADR 0142
+- Related ADRs: ADR 0041, ADR 0111, ADR 0130, ADR 0131, ADR 0133 (amended separately for BT-4430), ADR 0137, ADR 0142
 - Documentation: `docs/development/actor-state-cell.md` § 5, `docs/development/debugging.md` § ThreadedIr verifier (`EnsureCleanupLostOnNlr`), `docs/beamtalk-language-features.md` § What Works and What Doesn't
 - External: Pharo `BlockCannotReturn`; Ruby `LocalJumpError` and `ensure`
