@@ -588,6 +588,24 @@ fn post_process_package_artifacts(
     Ok(())
 }
 
+/// Fold the FFI type table's direct-call proofs (BT-4485,
+/// `NativeTypeRegistry::proved_no_coercion_keys`) into the stub-inputs hash
+/// that keys incremental builds. Empty when nothing is proved, so a project
+/// without FFI specs keeps its cache keys.
+fn fold_direct_ffi_proofs(
+    stub_inputs_hash: String,
+    registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> String {
+    let proofs = registry
+        .map(beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proved_no_coercion_keys)
+        .unwrap_or_default();
+    if proofs.is_empty() {
+        return stub_inputs_hash;
+    }
+    let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
+    crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -621,22 +639,4 @@ mod otp_window_tests {
         let msg = otp_out_of_window_warning(Some(window.max_major + 1)).expect("should warn");
         assert!(msg.contains("outside the supported window"), "{msg}");
     }
-}
-
-/// Fold the FFI type table's direct-call proofs (BT-4485,
-/// `NativeTypeRegistry::proved_no_coercion_keys`) into the stub-inputs hash
-/// that keys incremental builds. Empty when nothing is proved, so a project
-/// without FFI specs keeps its cache keys.
-fn fold_direct_ffi_proofs(
-    stub_inputs_hash: String,
-    registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-) -> String {
-    let proofs = registry
-        .map(|r| r.proved_no_coercion_keys())
-        .unwrap_or_default();
-    if proofs.is_empty() {
-        return stub_inputs_hash;
-    }
-    let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
-    crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
 }
