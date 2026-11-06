@@ -1,13 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4484: a value-type method function answers exactly what a send of it
+// BT-4503: a value-type method function answers exactly what a send of it
 // answers, block `^` or not. A method or extension whose block holds `^`
 // answered `{Result, Self}`, which only its own `dispatch/3` arm unwrapped;
 // a value-type extension with a block `^` leaked that pair to the sender.
-// The typed sends below are to classes in other modules, so they also cover
-// the guarded direct call (`Module:sel/N+1`) a typed send to a sealed Value
-// in another module compiles to.
+// The typed sends below go to a class in another module (its `dispatch/3`).
 
 TestCase subclass: ValueTypeNlrAnswerTest
 
@@ -22,6 +20,19 @@ TestCase subclass: ValueTypeNlrAnswerTest
     self assert: (self firstBigOrZeroOf: (NlrAnswerFinder items: #(2))) equals: 0
     self assert: (self countOf: (NlrAnswerFinder items: #(1, 2, 3))) equals: 3
     self assert: (self itemsOf: ((NlrAnswerFinder items: #()) withItems: #(7))) equals: #(7)
+    self assert: (self itemsOf: (self replaced: (NlrAnswerFinder items: #(1)) by: #(8, 9))) equals: #(8, 9)
+    self
+      assert: (self
+        between: (NlrAnswerFinder items: #(1, 5, 9))
+        lo: 4
+        hi: 8)
+      equals: 5
+    self
+      assert: (self
+        between: (NlrAnswerFinder items: #(1))
+        lo: 4
+        hi: 8)
+      equals: nil
 
   testDynamicSendAnswersItsValue =>
     self assert: ((NlrAnswerFinder items: #(1, 11)) perform: #firstBig) equals: 11
@@ -38,6 +49,12 @@ TestCase subclass: ValueTypeNlrAnswerTest
   countOf: f :: NlrAnswerFinder -> Integer => f count
 
   itemsOf: f :: NlrAnswerFinder -> List => f items
+
+  replaced: f :: NlrAnswerFinder by: xs :: List -> NlrAnswerFinder =>
+    f withItems: xs
+
+  between: f :: NlrAnswerFinder lo: lo :: Integer hi: hi :: Integer -> Integer | Nil =>
+    f firstBetween: lo and: hi
 
   extFirstBigOf: f :: NlrAnswerFinder -> Integer | Nil => f extFirstBig
 
