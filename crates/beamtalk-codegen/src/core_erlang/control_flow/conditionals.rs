@@ -1798,6 +1798,10 @@ impl CoreErlangGenerator {
         bracketed: bool,
     ) -> Result<Document<'static>> {
         let at = blocks.first().map(|b| b.span).unwrap_or_default();
+        // The send's `^`-holding arms are checked as closures whichever path
+        // lowered the conditional (the mutation path never reaches
+        // `note_send`): uncovered, each is an `UnbracketedNlrClosure`.
+        self.note_nlr_blocks(blocks.iter().copied(), selector_atom);
         let prestore = if bracketed {
             None
         } else {

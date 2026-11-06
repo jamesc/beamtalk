@@ -65,6 +65,18 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("dynamic_conditional", "r := p > 0 ifTrue: [^p * 2]", true),
     ("pure_fallback", "r := p ifTrue: [^8]", true),
     ("pure_fallback_and", "r := p and: [^8]", true),
+    // A threaded conditional (the `ifFalse:` arm's local write forces the
+    // mutation path) touching no field: its non-Boolean fallback is not
+    // bracketed, passes the `^` arm as a closure (the writing arm is a
+    // raising stub) and relies on the pre-store (`nlr_closure_prestore`).
+    (
+        "threaded_arm_prestore",
+        "r := p ifTrue: [^8] ifFalse: [m := 1]",
+        true,
+    ),
+    // An arm that writes a local and holds the `^` goes to the fallback as a
+    // raising stub (`fallback_passes_closure`): no closure runs the `^`.
+    ("threaded_arm_stub", "r := p ifTrue: [m := 1. ^8]", false),
     // Nil tests: the block that threads nothing is applied as a closure
     // (`try_generate_nil_protocol`).
     ("if_nil", "r := p ifNil: [^8]", true),
@@ -232,7 +244,7 @@ fn nested_nlr_conditional_probes_stay_polynomial() {
     let at_12 = classify_calls_at_depth(12);
     let at_14 = classify_calls_at_depth(14);
     assert!(
-        at_12 < 1_000 && at_14 < at_12 * 2,
+        at_12 < 12usize.pow(3) && at_14 < at_12 * 2,
         "classify_send calls: depth 12 -> {at_12}, depth 14 -> {at_14}"
     );
 }

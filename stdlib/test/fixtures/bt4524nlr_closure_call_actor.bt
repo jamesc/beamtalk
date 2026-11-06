@@ -68,4 +68,12 @@ Actor subclass: Bt4524NlrClosureCallActor
     r := x ifNotNil: [:v | ^v]
     r
 
+  // A guarded operator (`*`) in the arm keeps the conditional from inlining
+  // pure, so it is a dynamic send running the arm as a closure; the send is
+  // bracketed (`classify_inlined`), and the `^` carries the stored state.
+  closureGuardedOpIfTrue: p =>
+    self.n := 6
+    r := p > 0 ifTrue: [^p * 2]
+    r
+
   currentN => self.n

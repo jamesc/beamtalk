@@ -979,13 +979,36 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) {
-        for operand in std::iter::once(receiver).chain(arguments) {
-            if let Expression::Block(block) = operand
-                && beamtalk_core::semantic_analysis::facts::block_has_nlr(block)
-            {
+        let blocks =
+            std::iter::once(receiver)
+                .chain(arguments)
+                .filter_map(|operand| match operand {
+                    Expression::Block(block) => Some(block),
+                    _ => None,
+                });
+        self.note_nlr_blocks(blocks, selector.name().as_str());
+    }
+
+    /// BT-4524: records the `^`-holding blocks among `blocks`, which a send
+    /// of `selector` outside every bracket window may run as closures
+    /// ([`SyncedCallState::nlr_operands`]). [`Self::note_nlr_operands`] calls
+    /// it for an unbracketed generic send; a conditional's non-Boolean
+    /// fallback send ([`Self::boolean_fallback_send`]) calls it for its
+    /// arms, since a conditional lowered on the mutation path is never a
+    /// generic send ([`Self::note_send`] does not see it).
+    pub(in crate::core_erlang) fn note_nlr_blocks<'b>(
+        &mut self,
+        blocks: impl IntoIterator<Item = &'b beamtalk_core::ast::Block>,
+        selector: &str,
+    ) {
+        if !self.synced_calls_active() || self.in_cell_closure() || self.synced.window_depth > 0 {
+            return;
+        }
+        for block in blocks {
+            if beamtalk_core::semantic_analysis::facts::block_has_nlr(block) {
                 self.synced
                     .nlr_operands
-                    .insert(block.span, selector.name().to_string());
+                    .insert(block.span, selector.to_string());
             }
         }
     }

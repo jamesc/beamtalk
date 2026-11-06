@@ -62,3 +62,8 @@ TestCase subclass: Bt4524NlrClosureCallTest
     a := Bt4524NlrClosureCallActor spawn
     self assert: (a closureIfNotNil: 9) equals: 9
     self assert: a currentN equals: 6
+
+  testClosureGuardedOpIfTrueKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureGuardedOpIfTrue: 4) equals: 8
+    self assert: a currentN equals: 6
