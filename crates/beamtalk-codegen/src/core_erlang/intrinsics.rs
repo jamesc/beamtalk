@@ -170,6 +170,17 @@ fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> Docu
     }
 }
 
+/// The shape [`CoreErlangGenerator::pure_boolean_shape`] lowers a boolean
+/// conditional as, inline with a non-Boolean fallback send.
+pub(in crate::core_erlang) enum PureBooleanShape<'a> {
+    /// `ifTrue:`, `ifFalse:`, `and:`, `or:` with one literal block.
+    Solo(SoloBoolean, &'a Block),
+    /// `R not`.
+    Not,
+    /// `ifTrue:ifFalse:` with two literal blocks.
+    IfTrueIfFalse(&'a Block, &'a Block),
+}
+
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
     ///
@@ -3396,19 +3407,52 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        let Some(shape) = self.pure_boolean_shape(receiver, selector, arguments) else {
+            return Ok(None);
+        };
+        let doc = match shape {
+            PureBooleanShape::Solo(sel, block) => {
+                self.generate_solo_boolean_pure(sel, receiver, block)?
+            }
+            PureBooleanShape::Not => self.generate_pure_boolean_case(
+                receiver,
+                "not",
+                PureArm::Answer(SoloAnswer::Literal(false)),
+                PureArm::Answer(SoloAnswer::Literal(true)),
+                &[],
+            )?,
+            PureBooleanShape::IfTrueIfFalse(true_block, false_block) => {
+                self.generate_if_true_if_false_pure(receiver, true_block, false_block)?
+            }
+        };
+        Ok(Some(doc))
+    }
+
+    /// The gates of [`Self::try_generate_pure_boolean_conditional`]: the shape
+    /// it lowers `receiver selector arguments` as, or `None` when it declines
+    /// (the send then takes the mutation path or dynamic dispatch). The one
+    /// decision the lowering and the bracket classifier read (BT-4524:
+    /// `classify_inlined` brackets a conditional this declines whose blocks
+    /// hold a `^` and thread nothing, because it runs them as closures).
+    pub(in crate::core_erlang) fn pure_boolean_shape<'a>(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &'a [Expression],
+    ) -> Option<PureBooleanShape<'a>> {
         // A stateful loop-condition tail keeps today's dynamic dispatch:
         // its value splices into the `{Bool, StateAcc[, Self]}` hand-back
         // tuple, where a bare `case` breaks erlc's `beam_clean`
         // (`undefined_label`) in complex nestings (corpus run70/run139).
         if self.decline_pure_boolean_inline {
-            return Ok(None);
+            return None;
         }
         // A `self`/`super`/class receiver keeps today's dispatch (see the
         // doc comment). Parens are transparent here — this is a receiver
         // classification, not the block-argument shape match below.
         match receiver.unwrap_parens() {
-            Expression::Super(_) | Expression::ClassReference { .. } => return Ok(None),
-            recv if super::expr_shape::is_self_identifier(recv) => return Ok(None),
+            Expression::Super(_) | Expression::ClassReference { .. } => return None,
+            recv if super::expr_shape::is_self_identifier(recv) => return None,
             _ => {}
         }
 
@@ -3429,8 +3473,7 @@ impl CoreErlangGenerator {
                             } else {
                                 SoloBoolean::Or
                             };
-                            let doc = self.generate_solo_boolean_pure(sel, receiver, block)?;
-                            return Ok(Some(doc));
+                            return Some(PureBooleanShape::Solo(sel, block));
                         }
                     }
                 }
@@ -3443,13 +3486,7 @@ impl CoreErlangGenerator {
         // other receiver takes the wildcard arm's ordinary send.
         if let MessageSelector::Unary(name) = selector {
             if name.as_str() == "not" && arguments.is_empty() {
-                return Ok(Some(self.generate_pure_boolean_case(
-                    receiver,
-                    "not",
-                    PureArm::Answer(SoloAnswer::Literal(false)),
-                    PureArm::Answer(SoloAnswer::Literal(true)),
-                    &[],
-                )?));
+                return Some(PureBooleanShape::Not);
             }
         }
 
@@ -3460,11 +3497,7 @@ impl CoreErlangGenerator {
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
-                        return Ok(Some(self.generate_solo_boolean_pure(
-                            SoloBoolean::IfTrue,
-                            receiver,
-                            block,
-                        )?));
+                        return Some(PureBooleanShape::Solo(SoloBoolean::IfTrue, block));
                     }
                 }
             }
@@ -3474,11 +3507,7 @@ impl CoreErlangGenerator {
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
                         && !self.pure_blocks_hold_guarded_operator(&[block])
                     {
-                        return Ok(Some(self.generate_solo_boolean_pure(
-                            SoloBoolean::IfFalse,
-                            receiver,
-                            block,
-                        )?));
+                        return Some(PureBooleanShape::Solo(SoloBoolean::IfFalse, block));
                     }
                 }
             }
@@ -3494,18 +3523,14 @@ impl CoreErlangGenerator {
                         )
                         && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
                     {
-                        return Ok(Some(self.generate_if_true_if_false_pure(
-                            receiver,
-                            true_block,
-                            false_block,
-                        )?));
+                        return Some(PureBooleanShape::IfTrueIfFalse(true_block, false_block));
                     }
                 }
             }
             _ => {}
         }
 
-        Ok(None)
+        None
     }
 
     /// BT-4070: whether pure-inline must decline `blocks` here — an actor
@@ -3515,11 +3540,23 @@ impl CoreErlangGenerator {
     /// about what an operator is; the scope is the enclosing method's (the
     /// arm's own scope starts empty — the arity gate admits no block
     /// parameters — so lookups resolve identically when the arm lowers).
+    ///
+    /// BT-4524: the same holds for a call codegen brackets that the block
+    /// analysis does not see as user code (a loop, an evaluated block or a
+    /// closure `ensure:` running a block that holds a `^`,
+    /// `classify_loop`/`classify_inlined`): it too would sit in that
+    /// closure frame with no `State` to store, so the conditional declines
+    /// pure-inline ([`Self::expr_holds_bracketed_call`], the probe loop mode
+    /// selection asks).
     fn pure_blocks_hold_guarded_operator(&self, blocks: &[&Block]) -> bool {
         self.synced_calls_active()
-            && blocks
-                .iter()
-                .any(|block| self.block_contains_guarded_operator(block))
+            && blocks.iter().any(|block| {
+                self.block_contains_guarded_operator(block)
+                    || block
+                        .body
+                        .iter()
+                        .any(|s| self.expr_holds_bracketed_call(&s.expression))
+            })
     }
 
     /// Whether a nil-testing conditional (`ifNil:`, `ifNotNil:`, the two-arm

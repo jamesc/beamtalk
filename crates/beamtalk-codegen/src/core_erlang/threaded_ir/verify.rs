@@ -610,6 +610,26 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-4524 (ADR 0146 P0, the `SyncedCall` rule for a `^`): a block
+    /// literal holding a `^` of this scope was compiled as an actor closure
+    /// for a call (`selector`) that stores nothing to the cell first: the
+    /// send was classified `UserCodeCall::No` outside every bracket window,
+    /// and no conditional-fallback pre-store or `on:do:` entry store covers
+    /// it. The closure's `^` carries the cell (`nlr_state`), which then holds
+    /// an older version than the method's `State`, so the method's earlier
+    /// field writes are lost (`self.n := 6. [^2] ensure: [nil]` left `n` at
+    /// 0; so did `timesRepeat:`, `to:do:`, `whileTrue:`, `[^2] value` and a
+    /// non-Boolean receiver's `ifTrue:`). The invariant: a call that may run
+    /// a block holding a `^` of the current scope stores the threaded state
+    /// first. Recorded by the send emitter (`note_send`, the operands) and
+    /// checked where the block becomes a closure (`with_actor_closure`), so
+    /// an operand the lowering inlines is never a finding.
+    UnbracketedNlrClosure {
+        selector: String,
+        region: UserCodeRegion,
+        at: Span,
+    },
+
     /// BT-4121 (ADR 0137): the dispatching branch of a guarded operator
     /// (`selector`, e.g. `+`) in an actor instance method compiled in a loop
     /// that holds no whole `State` (direct-params, hybrid or tuple-accumulator

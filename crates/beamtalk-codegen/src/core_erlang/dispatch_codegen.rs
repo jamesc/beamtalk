@@ -1543,13 +1543,35 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let mut seq = self.sequence_call(&all_exprs, "Disp")?;
+        // BT-4524 (ADR 0146 P0): a send no bracket covers (a conditional the
+        // compiler did not inline, say) that passes a block holding a `^`
+        // stores the state an inline `^` here would store, right before the
+        // call, so the closure's throw (which carries the cell) carries it.
+        let nlr_blocks: Vec<&beamtalk_core::ast::Block> = all_exprs
+            .iter()
+            .filter_map(|e| match e {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        let at = receiver.span();
+        let unbracketed = self.synced.window_depth == 0;
+        let covered = unbracketed && self.nlr_closure_prestore_applies(&nlr_blocks);
+        let mut seq =
+            self.with_nlr_closure_cover(covered, |this| this.sequence_call(&all_exprs, "Disp"))?;
         let actual_receiver = seq.next();
 
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
         let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
+        let call_doc = match covered
+            .then(|| self.nlr_closure_prestore(&nlr_blocks, at))
+            .flatten()
+        {
+            Some(prestore) => docvec![prestore, call_doc],
+            None => call_doc,
+        };
 
         Ok(seq.close(self, call_doc, "DispRes"))
     }

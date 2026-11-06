@@ -219,6 +219,11 @@ impl CoreErlangGenerator {
         if !self.cell_closures_apply() {
             return build_fun(self);
         }
+        if self.actor_closure.is_none() {
+            // BT-4524: a method-level closure holding a `^` must be run by a
+            // call that stored the method's state first.
+            self.check_nlr_closure(at);
+        }
         if let Some(outer) = self.actor_closure.clone() {
             let capture = self.fresh_temp_var("ASCapture");
             let inner = ActorClosure::new(capture.clone());

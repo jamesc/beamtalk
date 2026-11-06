@@ -570,6 +570,29 @@ impl CoreErlangGenerator {
             || (self.is_repl_mode() && self.repl_blocks_write_bindings(&[block]))
     }
 
+    /// Whether an `on:do:`/`ensure:` with operands `receiver` and `other` is
+    /// lowered in place with its state threaded, rather than as closures: a
+    /// block literal operand needs exception threading and both operands are
+    /// block literals (BT-4430's `inlined_exception_blocks`, the one inlining
+    /// rule the analyser's Phase 0 check reads). The one decision
+    /// [`Self::generate_on_do`], [`Self::generate_ensure`] and the bracket
+    /// classifier (`classify_inlined`, BT-4524) read.
+    pub(in crate::core_erlang) fn exception_construct_inlines(
+        &self,
+        receiver: &Expression,
+        other: &Expression,
+    ) -> bool {
+        let needs = |e: &Expression| match e {
+            Expression::Block(b) => self.block_needs_exception_threading(b),
+            _ => false,
+        };
+        (needs(receiver) || needs(other))
+            && beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                receiver, other,
+            )
+            .is_some()
+    }
+
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
     /// object and passes to handler block.
     ///
@@ -583,32 +606,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let handler_takes_arg = Self::validate_on_do_blocks(receiver, handler)?;
 
-        // Check both blocks for field/state mutations
-        let receiver_needs = if let Expression::Block(b) = receiver {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-        let handler_needs = if let Expression::Block(b) = handler {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-
-        if receiver_needs || handler_needs {
-            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
-            if let Some((recv_block, handler_block)) =
+        if self.exception_construct_inlines(receiver, handler)
+            && let Some((recv_block, handler_block)) =
                 beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
                     receiver, handler,
                 )
-            {
-                return self.generate_on_do_with_mutations(
-                    recv_block,
-                    ex_class,
-                    handler_block,
-                    false,
-                );
-            }
+        {
+            return self.generate_on_do_with_mutations(recv_block, ex_class, handler_block, false);
         }
 
         // Simple case: no mutations, use closure-based approach
@@ -619,10 +623,16 @@ impl CoreErlangGenerator {
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
-        // Capture expression outputs (ADR 0018 bridge pattern)
-        let receiver_code = self.expression_doc(receiver)?;
+        // Capture expression outputs (ADR 0018 bridge pattern). BT-4524: the
+        // catch boundary stores the pre-region `State` on entry
+        // (`CellBoundary::PreState`) wherever the cell protocol applies, so a
+        // `^` in either closure carries the method's state: covered.
+        let covered = self.synced_calls_active();
+        let receiver_code =
+            self.with_nlr_closure_cover(covered, |this| this.expression_doc(receiver))?;
         let ex_class_code = self.on_do_filter_doc(ex_class)?;
-        let handler_code = self.expression_doc(handler)?;
+        let handler_code =
+            self.with_nlr_closure_cover(covered, |this| this.expression_doc(handler))?;
 
         let handler_apply =
             self.make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
@@ -1154,27 +1164,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         Self::validate_ensure_cleanup(cleanup)?;
 
-        // Check both blocks for field/state mutations
-        let receiver_needs = if let Expression::Block(b) = receiver {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-        let cleanup_needs = if let Expression::Block(b) = cleanup {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-
-        if receiver_needs || cleanup_needs {
-            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
-            if let Some((recv_block, cleanup_block)) =
+        if self.exception_construct_inlines(receiver, cleanup)
+            && let Some((recv_block, cleanup_block)) =
                 beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
                     receiver, cleanup,
                 )
-            {
-                return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
-            }
+        {
+            return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
         }
 
         // Simple case: no mutations
