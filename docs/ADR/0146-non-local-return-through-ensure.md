@@ -404,10 +404,26 @@ relays a `^` across processes); its semantics here are a choice, not prior art.
   my stack is a bug."
 - *Language designer:* "It deletes route 5, R2, the stamp and the whole
   BT-4459 class, and matches `actor_state_unreachable` for writes."
-- Against it: BT-3582 made the cross-process relay work on purpose, and
-  callers rely on `^` out of a block passed to another actor (early exit from
-  a remote iteration). Removing it is a breaking change; this ADR's model
-  makes it correct instead. It stays available if route 5 keeps producing bugs.
+- *Measured (2026-11-06, BT-4505).* A run-time trace of every
+  cross-process `$bt_nlr` relay (`sync_call` re-throw and the class-process
+  `nlr_relay` points) over the beamtalk BUnit suite (10,219 tests), the stdlib
+  tests, Buccaneer (826 tests plus a bench smoke run over h1, h2 and
+  WebSocket), Catalina, beamtalk-http and hpack found **20 relays, all in tests
+  written for this feature** (BT-3022, BT-3032/ADR 0110, BT-4448, the
+  class-variable semantics matrix) and **none in the packages**. A static scan
+  of all 497 `^`-in-block sites found no application code that passes a
+  `^`-block to an actor or to a class method that runs in its class process.
+- Against it: the one real dependency is the stdlib `Collection` protocol.
+  `includes:`, `detect:`, `detect:ifNone:`, `anySatisfy:`, `allSatisfy:` and
+  `anyOne` (`stdlib/src/collection.bt`) are `self do: [... ^ ...]`, and List
+  `indexOf:` is similar. For a user collection whose `do:` runs in an actor or
+  a class process (BT-3022's class-driven collection), they work only because a
+  `^` crosses the process. Making an away `^` an error would break them and
+  need an early-exit protocol for user collections that does not use `^`,
+  plus changes to about 20 BUnit tests and the runtime EUnit relay tests. This
+  ADR's model makes route 5 correct at the cost of one `refresh/2` per `^`, so
+  it keeps the feature. The error stays available as the fallback if route 5
+  keeps producing bugs.
 
 **Thread the half-literal `ensure:` (BT-4430 as a gap).**
 - *Newcomer:* "`b ensure: [t := 9]` looks like it should work."
@@ -443,7 +459,9 @@ away `super_send/5` check still needs the fields. Could follow once the stamp
 is gone.
 
 ### Make an away closure's `^` an error
-See Steelman. Rejected as a breaking change; kept as the fallback.
+See Steelman. No real code uses route 5 today (measured), but the stdlib
+`Collection` protocol depends on it for user collections whose `do:` hops
+processes. Rejected; kept as the fallback.
 
 ### Make the cell authoritative for value types and the REPL too
 Rejected: they have no store; adding one is a runtime mechanism for state
