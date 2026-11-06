@@ -11,17 +11,15 @@ use super::*;
 
 #[test]
 fn test_generate_literal_integer() {
-    let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Integer(42);
-    let doc = generator.generate_literal(&lit).unwrap();
+    let doc = CoreErlangGenerator::literal_doc(&lit);
     assert_eq!(doc.to_pretty_string(), "42");
 }
 
 #[test]
 fn test_generate_literal_float() {
-    let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Float(2.5);
-    let doc = generator.generate_literal(&lit).unwrap();
+    let doc = CoreErlangGenerator::literal_doc(&lit);
     assert_eq!(doc.to_pretty_string(), "2.5");
 }
 
@@ -29,25 +27,22 @@ fn test_generate_literal_float() {
 fn test_generate_literal_float_whole_number() {
     // Whole-number floats must retain decimal point in Core Erlang
     // so that Erlang distinguishes them from integers (5.0 ≠ 5).
-    let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Float(5.0);
-    let doc = generator.generate_literal(&lit).unwrap();
+    let doc = CoreErlangGenerator::literal_doc(&lit);
     assert_eq!(doc.to_pretty_string(), "5.0");
 }
 
 #[test]
 fn test_generate_literal_symbol() {
-    let generator = CoreErlangGenerator::new("test");
     let lit = Literal::Symbol("ok".into());
-    let doc = generator.generate_literal(&lit).unwrap();
+    let doc = CoreErlangGenerator::literal_doc(&lit);
     assert_eq!(doc.to_pretty_string(), "'ok'");
 }
 
 #[test]
 fn test_generate_literal_string() {
-    let generator = CoreErlangGenerator::new("test");
     let lit = Literal::String("hello".into());
-    let doc = generator.generate_literal(&lit).unwrap();
+    let doc = CoreErlangGenerator::literal_doc(&lit);
     // BT-4170: tagged `{'beamtalk_string', #{segment, ...}#}` — each
     // segment is #<charcode>(8,1,'integer',['unsigned'|['big']])
     assert_eq!(

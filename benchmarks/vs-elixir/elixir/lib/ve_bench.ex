@@ -32,6 +32,11 @@ defmodule VeBench do
 
   alias VeBench.{Area, Counter, Helpers, Math, Point, Sub}
 
+  # Named constants as module attributes (rows 3k-3m).
+  @protocol_error 1
+  @name "protocol error"
+  @tag :protocol_error
+
   # === Fixtures ===
 
   def point, do: %Point{x: 1, y: 2}
@@ -69,6 +74,15 @@ defmodule VeBench do
 
   defbench(:remote_call, _, do: Math.double(21))
   defbench(:dyn_remote_call, mod, do: mod.double(21))
+
+  # Rows 3k-3m: a named constant as a remote call, and as a module attribute
+  # (inlined at compile time, what a folded constant send aims for).
+  defbench(:remote_const_int, _, do: Math.protocol_error())
+  defbench(:remote_const_string, _, do: Math.name())
+  defbench(:remote_const_atom, _, do: Math.tag())
+  defbench(:module_attr_int, _, do: @protocol_error)
+  defbench(:module_attr_string, _, do: @name)
+  defbench(:module_attr_atom, _, do: @tag)
 
   # === 4. Dynamic dispatch ===
 

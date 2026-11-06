@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4504: class-side methods whose whole body is one scalar literal of each
+// kind past integers. See constant_class_method_test.bt.
+
+Object subclass: Bt4504ConstKinds
+
+  class real -> Float => 1.5
+
+  class text -> String => "hi"
+
+  class symbolic -> Symbol => #one
+
+  class letter => $a
+
+  class none => nil
+
+  class yes -> Boolean => true
+
+  class no -> Boolean => false

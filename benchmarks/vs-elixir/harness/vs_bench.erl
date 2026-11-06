@@ -97,6 +97,12 @@ rows() ->
             'shadowedClassMethod:', none, [{remote_call, none}]},
         {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
             shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
+        {"3k", dispatch, "integer class-side constant: Errs protocolError / Mod.const()", 200000,
+            'intConstant:', none, [{remote_const_int, none}, {module_attr_int, none}]},
+        {"3l", dispatch, "string class-side constant: Errs name / Mod.const()", 200000,
+            'stringConstant:', none, [{remote_const_string, none}, {module_attr_string, none}]},
+        {"3m", dispatch, "symbol class-side constant: Errs tag / Mod.const()", 200000,
+            'symbolConstant:', none, [{remote_const_atom, none}, {module_attr_atom, none}]},
         {"4a", dispatch, "untyped receiver: o x / o.x", 200000, 'dynGetter:o:', point, [
             {getter_dot, point}
         ]},
@@ -540,6 +546,11 @@ compiles_to("3i") ->
     "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
 compiles_to("3j") ->
     "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
+compiles_to("3k") ->
+    "folded constant: one persistent_term:get of the class's static call key, its {constant_value, 1, Mod, Fun, Tag} key matched in the map, then the literal 1 in place (BT-4363)";
+compiles_to("3l") ->
+    "folded constant, as 3k: the key and the hit arm carry the tagged {'beamtalk_string', <<...>>} term (BT-4504)";
+compiles_to("3m") -> "folded constant, as 3k: the key and the hit arm carry the atom (BT-4504)";
 compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";

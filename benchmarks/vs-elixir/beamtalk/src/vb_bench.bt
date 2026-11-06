@@ -128,6 +128,23 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := VbOpenMath double: 21]
     last
 
+  // A class-side constant (BT-4363 integer, BT-4504 string and symbol): the
+  // send answers the literal in place behind its constant-value key.
+  class intConstant: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VbConstants protocolError]
+    last
+
+  class stringConstant: n :: Integer -> String =>
+    last := ""
+    n timesRepeat: [last := VbConstants name]
+    last
+
+  class symbolConstant: n :: Integer -> Symbol =>
+    last := #none
+    n timesRepeat: [last := VbConstants tag]
+    last
+
   // ADR 0142 baselines (BT-4298, epic BT-4297): a dynamic class send from a
   // variable (BT-4300 moves it into the caller), an inherited class method
   // on a stateless subclass, and a class with class state (stays in its
