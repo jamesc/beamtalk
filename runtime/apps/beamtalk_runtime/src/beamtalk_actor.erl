@@ -2384,7 +2384,8 @@ kill_and_wait(ActorPid) ->
 BT-3967: stop `ActorPid` with `Reason`, shared by `stop`, `stopWith:` and
 `stopWith:timeout:` on both the sync and async send paths.
 
-From another process this is `gen_server:stop(ActorPid, Reason, Timeout)`;
+From another process this is `beamtalk_stop:stop(ActorPid, Reason, Timeout)`
+(the `gen_server:stop/3` contract, BT-4494);
 an already-dead actor counts as stopped (idempotent `stop`). From inside the
 actor's own process — `self stopWith:` from a method, or an aliased self —
 `gen_server:stop/3` would fail with `calling_self`, so the stop is deferred
@@ -2392,7 +2393,7 @@ instead: request_deferred_stop/1 records it and the enclosing gen_server
 callback returns `{stop, Reason, ...}` once the current dispatch finishes
 (see apply_pending_actions/1).
 
-Returns `ok`, or `{exit, ExitReason}` when `gen_server:stop/3` itself
+Returns `ok`, or `{exit, ExitReason}` when the stop itself
 exited (timeout, or the actor died with some other reason first).
 """.
 -spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
@@ -2413,7 +2414,9 @@ stop_actor(ActorPid, Reason, Timeout) ->
 
 -spec stop_external(pid(), term(), timeout()) -> ok | {exit, term()}.
 stop_external(ActorPid, Reason, Timeout) ->
-    try gen_server:stop(ActorPid, Reason, Timeout) of
+    %% Not gen_server:stop/3: it raises error:timeout_value when the stop
+    %% reply lands at a very short deadline (BT-4494).
+    try beamtalk_stop:stop(ActorPid, Reason, Timeout) of
         ok -> ok
     catch
         exit:noproc ->

@@ -7,6 +7,7 @@
 // Fixtures: stdlib/test/fixtures/stop_with_server.bt
 //           stdlib/test/fixtures/stop_with_transient_actor.bt
 //           stdlib/test/fixtures/stop_with_transient_sup.bt
+//           stdlib/test/fixtures/bt3965slow_stopper.bt (BT-4494)
 
 TestCase subclass: ActorStopWithTest
 
@@ -111,6 +112,20 @@ TestCase subclass: ActorStopWithTest
     server := StopWithServer spawnWith: #{#tableName => #stopWithTimeout}
     self assert: (server stopWith: #shutdown timeout: 1000) equals: #ok
     self assert: (table at: #reason) equals: #shutdown
+    table delete
+
+  // BT-4494: with a 1 ms wait the actor's stop reply lands at or past the
+  // deadline, where OTP's gen_server:stop/3 raised error:timeout_value. It
+  // must be the same actor_dead error as any other timed-out stop, and the
+  // actor still finishes stopping in the background.
+  testExternalStopWithOneMsTimeoutTimesOut =>
+    table := Ets new: #stopWithOneMs type: #set
+    // Bt3965SlowStopper's terminate: sleeps ~200 ms.
+    actor := Bt3965SlowStopper spawnWith: #{#tableName => #stopWithOneMs}
+    self should: [actor stopWith: #shutdown timeout: 1] raise: #actor_dead
+    50 timesRepeat: [actor isAlive ifTrue: [Timer sleep: 20]]
+    self deny: actor isAlive
+    self assert: (table at: #terminated) equals: #shutdown
     table delete
 
   testStopWithTimeoutRejectsBadTimeout =>
