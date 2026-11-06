@@ -74,7 +74,7 @@ use super::threaded_ir::{
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
-use beamtalk_core::ast::Expression;
+use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
 /// ADR 0131 Phase 2 (BT-3748 review): test-only fault injection into the
@@ -223,6 +223,11 @@ pub(super) mod fault {
         /// skips binding them again), so the frame reads the pre-construct
         /// local (`RebindNotVisible`).
         EvaluatedBlockRebindsScoped,
+        /// BT-4461: a REPL producer adopts the bindings map whole and
+        /// rethreads none of the bindings its frame holds in Core variables,
+        /// as before BT-4461, so the frame reads the value from before the
+        /// construct (`ReplCachedBindingStale`).
+        ReplCachedBindingsNotRethreaded,
     }
 
     thread_local! {
@@ -1108,9 +1113,19 @@ impl CoreErlangGenerator {
     /// `is_tier2_value_call`) read, so a statement is lowered by the same
     /// producer as an operand and never through the legacy Tier 2 inline-block
     /// tuple.
+    ///
+    /// BT-4461: in the REPL, one at a registered REPL producer site (a REPL
+    /// arm's or a loop or fold body's) is a producer too, the REPL's one rule
+    /// ([`Self::local_producer_locals`]): lowered as the legacy Tier 2 call in
+    /// a loop or fold body, it adopted the bindings map but left the bindings
+    /// the body holds in variables stale (`ReplCachedBindingStale`).
     pub(super) fn evaluated_block_is_producer(&self, expr: &Expression) -> bool {
         self.block_value_producer_in_frame(expr)
             || self.actor_evaluated_block_producer_parts(expr).is_some()
+            || (self.is_repl_mode()
+                && beamtalk_core::semantic_analysis::block_facts::literal_block_value_arm(expr)
+                    .is_some()
+                && self.local_producer_locals(expr).is_some())
     }
 
     /// The kind of method body being lowered, `None` outside a class,
@@ -1536,12 +1551,31 @@ impl CoreErlangGenerator {
     /// (BT-3823) a REPL arm, whose `StateAcc` is the bindings map itself
     /// ([`Self::with_repl_arm_producer_sites`]), so the adoption is the same
     /// there: element 2 is the arm's next `StateAcc`.
+    ///
+    /// BT-4461: a REPL frame other than the root also holds the bindings it
+    /// has written in Core variables (`m := 1` in an arm binds `m` to the
+    /// assigned value), and AST-directed code reads a bound name from its
+    /// variable rather than from the map. The invariant, in every REPL frame:
+    /// a binding the frame holds in a variable and the construct writes
+    /// ([`Self::repl_cached_bindings_written_by`]) is read out of the map the
+    /// construct threads inside it, and out of the adopted map after it. So the
+    /// construct compiles with those variables dropped (its loop condition and
+    /// body read the binding from their own `StateAcc`), its `ConstructTuple`
+    /// threads them, and one `LocalRebind` each (§2's `StateAcc` cell, held in
+    /// the adopted map) binds them anew. Before, the frame kept reading the
+    /// value from before the construct (`c ifTrue: [m := 1. c ifTrue: [m := 5]
+    /// ifFalse: [nil]. m] ifFalse: [0]` answered 1; a `[m < 5] whileTrue:
+    /// [m := m + 1]` after `m := 1` in an arm never ended), which
+    /// `VerifyError::ReplCachedBindingStale` reports. At the root no binding is
+    /// held in a variable, so nothing changes there.
     fn lower_repl_construct_tuple(
         &mut self,
         expr: &Expression,
         frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
         let span = expr.span();
+        let cached = self.repl_producer_cached_bindings(expr);
+        let dropped = self.drop_cached_repl_bindings(&cached);
         let enclosing = self.repl_loop_mutated();
         self.set_repl_loop_mutated(false);
         let source_version = self.state_version();
@@ -1552,6 +1586,11 @@ impl CoreErlangGenerator {
         let yields_tuple = self.repl_loop_mutated();
         self.set_repl_loop_mutated(enclosing);
         if !yields_tuple {
+            // No bindings map comes back, so the frame's map and the variables
+            // it held are unchanged.
+            for (local, var) in &dropped {
+                self.bind_var(local, var);
+            }
             return Ok((Vec::new(), ValueRef::Doc(doc)));
         }
         // BT-3823 review: recorded only once the carrier exists, so an
@@ -1578,16 +1617,139 @@ impl CoreErlangGenerator {
             ]
         };
         let _ = self.next_state_var();
-        let prelude = vec![
-            threaded_ir::build_construct_tuple(carrier.clone(), doc, Vec::new(), span),
-            ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
-                span,
-            },
-        ];
+        let adopt = ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
+            span,
+        };
+        let prelude =
+            self.repl_adoption_prelude(&carrier, doc, &cached, vec![adopt], frame, span)?;
         Ok((prelude, ValueRef::Doc(element(1, &carrier))))
+    }
+
+    /// BT-4461: the bindings a REPL construct `expr` writes (the REPL's one
+    /// producer rule, `repl_producer_writes`, for every family `match:`
+    /// included, with [`Self::threaded_locals_of`]'s set) that the frame
+    /// lowering it holds in a Core variable. Empty at the REPL root, which reads
+    /// every binding from the bindings map, and outside the REPL. Read just
+    /// before `expr` is lowered, by its producer
+    /// ([`Self::lower_repl_construct_tuple`], and a REPL `match:`'s) and by the
+    /// REPL frame's producer site check ([`Self::repl_frame_producer_sites`]),
+    /// so the two agree.
+    pub(super) fn repl_cached_bindings_written_by(&self, expr: &Expression) -> Vec<String> {
+        if !self.is_repl_mode() {
+            return Vec::new();
+        }
+        let mut names =
+            beamtalk_core::semantic_analysis::block_facts::repl_producer_writes(expr, &|name| {
+                self.binds_threadable_local(name)
+            })
+            .map(Self::write_names)
+            .unwrap_or_default();
+        if let Some(set) = self.threaded_locals_of(expr) {
+            names.extend(set.names);
+        }
+        names.sort();
+        names.dedup();
+        names.retain(|local| self.lookup_var(local).is_some());
+        names
+    }
+
+    /// [`Self::repl_cached_bindings_written_by`] as a REPL producer rethreads
+    /// them: none under the test-only fault `ReplCachedBindingsNotRethreaded`,
+    /// while the frame's site check still reads them.
+    pub(super) fn repl_producer_cached_bindings(&self, expr: &Expression) -> Vec<String> {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::ReplCachedBindingsNotRethreaded) {
+            return Vec::new();
+        }
+        self.repl_cached_bindings_written_by(expr)
+    }
+
+    /// BT-4461: hides the frame's Core variables for `cached`
+    /// ([`Self::repl_cached_bindings_written_by`]) before their construct is
+    /// compiled, so the construct reads them out of the map it threads (a loop
+    /// condition and body see the loop's own writes). Answers each hidden
+    /// `(binding, variable)`, for a construct that hands no map back to bind
+    /// again.
+    pub(super) fn drop_cached_repl_bindings(&mut self, cached: &[String]) -> Vec<(String, String)> {
+        cached
+            .iter()
+            .filter_map(|local| self.hide_var(local).map(|var| (local.clone(), var)))
+            .collect()
+    }
+
+    /// BT-4461: [`Self::repl_producer_cached_bindings`] for an inline
+    /// conditional producer handed its blocks rather than its send: the
+    /// bindings the blocks write (the [`Self::threaded_locals_of`] kernel,
+    /// `threaded_block_writes`) that the frame holds in a variable. Read once
+    /// the construct is compiled, which leaves the frame's scope as it found
+    /// it.
+    pub(super) fn repl_producer_cached_bindings_of_blocks(&self, blocks: &[&Block]) -> Vec<String> {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::ReplCachedBindingsNotRethreaded) {
+            return Vec::new();
+        }
+        if !self.is_repl_mode() || blocks.is_empty() {
+            return Vec::new();
+        }
+        let mut names = Self::write_names(
+            beamtalk_core::semantic_analysis::block_facts::threaded_block_writes(blocks, &|name| {
+                self.binds_threadable_local(name)
+            }),
+        );
+        names.retain(|local| self.lookup_var(local).is_some());
+        names
+    }
+
+    /// BT-4461: the prelude of a REPL producer that adopts the bindings map
+    /// whole: the construct tuple bound to `carrier`, threading `cached`, the
+    /// adoption `adopt` (the `State` `Bind` of `element(2, carrier)`) and one
+    /// `LocalRebind` per cached binding, which the frame then reads. Every
+    /// binding is a member of a REPL frame's map
+    /// (`RebindFrame::with_repl_binding`), so each rebind is §2's `StateAcc`
+    /// cell, held in the map just adopted (`MapHeld`). The one lowering of
+    /// [`Self::lower_repl_construct_tuple`] and a REPL `match:`.
+    pub(super) fn repl_adoption_prelude(
+        &mut self,
+        carrier: &str,
+        doc: Document<'static>,
+        cached: &[String],
+        adopt: Vec<ThreadedStmt>,
+        frame: FrameId,
+        span: Span,
+    ) -> Result<Vec<ThreadedStmt>> {
+        let enclosing = if cached.is_empty() {
+            RebindFrame::implicit_root()
+        } else {
+            cached
+                .iter()
+                .fold(self.rebind_frame_of(frame)?, |f, local| {
+                    f.with_repl_binding(local)
+                })
+        };
+        let slots: Vec<ThreadedLocalSlot> = cached
+            .iter()
+            .map(|local| ThreadedLocalSlot {
+                local: local.clone(),
+                slot: CarrierSlot::Key(self.local_scratch_key(local)),
+                value_var: self.fresh_temp_var(local),
+            })
+            .collect();
+        let prelude = threaded_ir::build_local_threading_prelude(
+            &enclosing,
+            carrier,
+            doc,
+            &slots,
+            adopt,
+            span,
+            |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
+        );
+        for slot in &slots {
+            self.bind_var(&slot.local, &slot.value_var);
+        }
+        Ok(prelude)
     }
 
     /// ADR 0131 Phase 2d (BT-3795): compiles `target`, an expression of the
@@ -1992,6 +2154,45 @@ impl CoreErlangGenerator {
             return Vec::new();
         }
         self.producer_sites_of(self.body_producer_site_exprs(stmt, fold, arm))
+    }
+
+    /// BT-4461: [`Self::frame_producer_sites`] for a statement of a REPL frame
+    /// (a REPL arm, [`Self::with_repl_arm_producer_sites`]): each of its
+    /// `repl_arm_producer_sites` that writes a binding the frame holds in a
+    /// Core variable, as `(site span, those bindings)`
+    /// ([`Self::repl_cached_bindings_written_by`]). The producer there must
+    /// thread each of them ([`threaded_ir::verify_repl_producer_sites_threaded`]).
+    /// Empty outside the REPL.
+    pub(super) fn repl_frame_producer_sites(&self, stmt: &Expression) -> Vec<(Span, Vec<String>)> {
+        if !self.is_repl_mode() {
+            return Vec::new();
+        }
+        beamtalk_core::semantic_analysis::block_facts::repl_arm_producer_sites(stmt)
+            .into_iter()
+            .filter(|site| self.local_producer_locals(site).is_some())
+            .filter_map(|site| {
+                let cached = self.repl_cached_bindings_written_by(site);
+                // A paren-wrapped site's span holds its construct's.
+                (!cached.is_empty()).then(|| (site.span(), cached))
+            })
+            .collect()
+    }
+
+    /// Reports [`threaded_ir::verify_repl_producer_sites_threaded`] over a REPL
+    /// frame's lowered statements `stmts` and the `sites` its statements
+    /// registered ([`Self::repl_frame_producer_sites`]).
+    pub(super) fn check_repl_frame_producer_sites(
+        &mut self,
+        stmts: &[ThreadedStmt],
+        sites: &[(Span, Vec<String>)],
+        span: Span,
+    ) {
+        let errors = threaded_ir::verify_repl_producer_sites_threaded(stmts, sites);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "REPL frame's producer leaving a binding the frame holds in a variable stale",
+            span,
+        );
     }
 
     /// The `(site span, locals)` of each of `sites` that

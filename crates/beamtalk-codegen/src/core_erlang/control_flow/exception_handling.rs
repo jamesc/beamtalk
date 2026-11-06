@@ -2253,8 +2253,15 @@ impl CoreErlangGenerator {
         // runtime value; lowering one as a statement would emit `let _ =  in`.
         // `collect_body_exprs` is the canonical directive filter.
         let body_exprs = super::super::util::collect_body_exprs(&body.body);
+        // BT-4461: a REPL arm's producer sites that write a binding the arm
+        // holds in a variable (`repl_frame_producer_sites`), read before each
+        // statement is lowered and checked once the arm is built.
+        let mut repl_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> = Vec::new();
         for (i, &expr) in body_exprs.iter().enumerate() {
             let span = expr.span();
+            if arm.is_none() {
+                repl_sites.extend(self.repl_frame_producer_sites(expr));
+            }
             if i > 0 {
                 // Rule 2: the literal space `generate_exception_body_with_threading_inner`
                 // has always inserted between source-level statements —
@@ -2472,6 +2479,7 @@ impl CoreErlangGenerator {
             "`on:do:`/`ensure:` arm",
             body.span,
         );
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, body.span);
         let (doc, _) = self.render_branch_arm(stmts, frame, final_state_version, body.span, arm);
         Ok(ExceptionArm {
             doc,

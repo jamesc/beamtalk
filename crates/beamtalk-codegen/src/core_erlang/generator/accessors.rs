@@ -602,6 +602,12 @@ impl CoreErlangGenerator {
         self.var_context.lookup(name)
     }
 
+    /// Hides `name` in the current scope (until the scope is popped or `name`
+    /// is bound again), answering the Core Erlang variable it was bound to.
+    pub(in crate::core_erlang) fn hide_var(&mut self, name: &str) -> Option<String> {
+        self.var_context.hide(name)
+    }
+
     /// Binds an identifier to a Core Erlang variable name in the current scope.
     // widened from `pub(crate)` — `beamtalk-repl` binds
     // `__bindings__`/workspace variable names before generating a REPL body.

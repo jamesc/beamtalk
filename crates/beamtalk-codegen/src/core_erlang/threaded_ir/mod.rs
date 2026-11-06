@@ -111,7 +111,8 @@ pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
 pub(super) use verify::{
     ClassMethodDefect, SequencedSibling, StaleReadDefect, StateReadSite, StateRestoreDefect,
     VerifyError, verify_bind_frames, verify_fold_family_carried, verify_fold_locals_carried,
-    verify_producer_sites_threaded, verify_sibling_reads, verify_tuple_acc_state_reads,
+    verify_producer_sites_threaded, verify_repl_producer_sites_threaded, verify_sibling_reads,
+    verify_tuple_acc_state_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name

@@ -977,6 +977,25 @@ impl CoreErlangGenerator {
             Vec::new()
         };
         let family_binds = self.extract_state_family(&carrier, frame, span);
+        // BT-4461: in the REPL the construct adopts the bindings map whole; the
+        // bindings its frame holds in variables that it writes are read back
+        // out of that map (`repl_adoption_prelude`).
+        let cached = if rebinds_locals {
+            Vec::new()
+        } else {
+            self.repl_producer_cached_bindings_of_blocks(arms)
+        };
+        if !cached.is_empty() {
+            let prelude = self.repl_adoption_prelude(
+                &carrier,
+                tuple_doc,
+                &cached,
+                family_binds,
+                frame,
+                span,
+            )?;
+            return Ok(ThreadedValue { prelude, value });
+        }
         if !rebinds_locals {
             let mut prelude = vec![ThreadedStmt::Statement(
                 docvec!["let ", leaf::var(carrier.clone()), " = ", tuple_doc, " in "],
@@ -2053,6 +2072,28 @@ impl CoreErlangGenerator {
             if root_producer && !self.is_repl_mode() {
                 return Ok(Some(self.generate_match_producer(value, arms, span, tail)?));
             }
+            // BT-4461: a REPL `match:` adopts the bindings map whole, like the
+            // REPL's other producers, so the bindings its frame holds in
+            // variables that it writes are read out of that map
+            // (`repl_adoption_prelude`).
+            let cached = self.repl_producer_cached_bindings(expr);
+            if !cached.is_empty() {
+                let frame = self.current_frame();
+                let _ = self.drop_cached_repl_bindings(&cached);
+                let tuple_doc = self.generate_match(value, arms)?;
+                let carrier = self.fresh_temp_var("CF");
+                let adopt = self.extract_state_family(&carrier, frame, span);
+                let prelude =
+                    self.repl_adoption_prelude(&carrier, tuple_doc, &cached, adopt, frame, span)?;
+                return Ok(Some(ThreadedValue {
+                    prelude,
+                    value: ValueRef::Doc(docvec![
+                        "call 'erlang':'element'(1, ",
+                        leaf::var(carrier),
+                        ")",
+                    ]),
+                }));
+            }
             let frame = self.current_frame();
             let tuple_doc = self.generate_match(value, arms)?;
             return Ok(Some(
@@ -2800,6 +2841,9 @@ impl CoreErlangGenerator {
         // lowered arm once it is built: the rule a Tier 2 block body and the
         // loop and fold bodies apply to their own statements (BT-3939).
         let mut producer_sites: Vec<(Span, Vec<String>)> = Vec::new();
+        // BT-4461: a REPL arm's producer sites that write a binding the arm
+        // holds in a variable, checked the same way once the arm is built.
+        let mut repl_sites: Vec<(Span, Vec<String>)> = Vec::new();
 
         for (i, expr) in body.iter().enumerate() {
             // BT-3838: a NON-last arm statement's value is discarded, so `(s)` is exactly `s`
@@ -2811,6 +2855,8 @@ impl CoreErlangGenerator {
             };
             if arm.is_some() {
                 producer_sites.extend(self.frame_producer_sites(expr, false, true));
+            } else {
+                repl_sites.extend(self.repl_frame_producer_sites(expr));
             }
             // Classified with the shared classifier just before the statement
             // is lowered, so a local bound earlier in this arm is live when a
@@ -3687,6 +3733,7 @@ impl CoreErlangGenerator {
             "a conditional, match: or handler arm's producer must be lowered as a producer",
             block.span,
         );
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, block.span);
 
         // C13 — the arm closer: {<result>, <final_state>}.
         let final_version = self.state_version();
@@ -3717,7 +3764,11 @@ impl CoreErlangGenerator {
     /// [`ThreadedStmt::StateCarrierReread`], which the verifier reports
     /// wherever it carries a local (`ConstructLocalsRereadOpaquely`), so
     /// `just verify-threaded-ir` and the BT-4460 grid assert it is
-    /// unreachable. The helper and its callers go with BT-4462.
+    /// unreachable. BT-4461: no REPL input reaches it either: a REPL arm
+    /// registers its statements' `repl_arm_producer_sites`, so a nested
+    /// construct writing a binding lowers through the REPL producer, and
+    /// `repl_cached_binding_corpus.rs` compiles every REPL frame of the BT-4461
+    /// grid with the verifier on. The helper and its callers go with BT-4462.
     fn push_control_flow_threaded_var_rereads(
         &mut self,
         source_expr: &Expression,
