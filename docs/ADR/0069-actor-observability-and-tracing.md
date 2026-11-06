@@ -22,6 +22,7 @@ A new stdlib class, `Telemetry` (`stdlib/src/telemetry.bt`), is a sealed, statel
 | `attach: id to: eventName do: [:event :measurements :metadata \| ...]` | `Result(Nil, Error)`; a duplicate id answers `Result error:` with kind `handler_exists`. |
 | `attach: id toAll: eventNames do: [...]` | The `telemetry:attach_many/4` form. |
 | `detach: id` | Idempotent; answers `nil`. |
+| `hasHandlers: eventPrefix` | Whether `telemetry:list_handlers/1` is non-empty for the prefix, so an emitter can skip span work nobody listens to (added by BT-4480). |
 
 - **One spelling for event names:** a non-empty List of Symbols, which is the atom list `telemetry` expects. There is no dotted-Symbol shorthand. Anything else raises a `type_error` naming the argument.
 - **Measurements and metadata pass through unchanged.** A Beamtalk Dictionary with Symbol keys already is the atom-keyed map `telemetry` expects. Measurements must have Symbol keys (checked once per call, without copying); metadata keys and values of any kind pass straight through, so Erlang and Elixir handlers see the same terms they would from Erlang code.
