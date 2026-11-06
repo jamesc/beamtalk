@@ -528,7 +528,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// arm, a typed direct call of the function (own module, BT-4473, or
     /// another module, BT-4484) and the runtime's extension apply
     /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
-    /// as is. An actor method answers the gen_server reply and a REPL eval its
+    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
     /// `{Value, Bindings}` pair; those scopes are not constrained here. The
     /// repro: every value-type method with a block `^` answered `{Result,
     /// Self}`, which only its own `dispatch/3` arm unwrapped, so a direct call
