@@ -25,6 +25,7 @@ fn clean_effects() -> BodyEffects {
         has_cf_mutations: false,
         has_conditional_threaded_writes: false,
         last_is_destructure: false,
+        has_nlr: false,
     }
 }
 
@@ -612,6 +613,34 @@ fn select_hybrid_params_blocked_by_class_method() {
         &effects,
         &generator
     ));
+}
+
+#[test]
+fn select_hybrid_params_blocked_by_nlr() {
+    // BT-4523: a `^` stores and carries a whole `State`, which a hybrid
+    // loop's omits the fields its parameters hold.
+    let threaded = vec!["x".to_string()];
+    let analysis = body_with_field_writes(&["n"]);
+    let mut effects = clean_effects();
+    effects.has_nlr = true;
+    assert!(!ThreadingPlan::select_hybrid_params(
+        true,
+        &threaded,
+        CodeGenContext::Actor,
+        false,
+        &analysis,
+        &effects,
+        &plain_generator()
+    ));
+    let reason = ThreadingPlan::determine_fallback_reason(
+        false,
+        true,
+        &threaded,
+        CodeGenContext::Actor,
+        &analysis,
+        &effects,
+    );
+    assert!(matches!(reason, StateAccFallbackReason::NonLocalReturn));
 }
 
 // ─── determine_fallback_reason tests ────────────────────────────────────────

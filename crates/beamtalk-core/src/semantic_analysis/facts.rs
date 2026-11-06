@@ -355,8 +355,12 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
     }
 }
 
-/// Returns `true` if the block body contains a `^` (Return) expression anywhere inside it.
-fn block_has_nlr(block: &Block) -> bool {
+/// Returns `true` if the block body contains a `^` (Return) expression anywhere inside it,
+/// nested blocks included: running the block may end the enclosing method (or REPL eval).
+/// The one recognizer codegen's loop-mode selection (BT-4523) and call bracketing (BT-4524)
+/// ask, besides [`body_has_block_nlr`].
+#[must_use]
+pub fn block_has_nlr(block: &Block) -> bool {
     block
         .body
         .iter()

@@ -655,6 +655,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// inside an actor closure goes through the cell view and records nothing.
     FieldWriteInBracketedLoop { at: Span },
 
+    /// BT-4523 (ADR 0146 P0): a `^` was lowered in the body or condition of a
+    /// hybrid-params loop (or a loop nested in one that hands its uses
+    /// outward). A hybrid loop holds every field it writes in a fun parameter
+    /// (`_NField`), so the `State` in scope is the loop-entry map; the `^`
+    /// stores that map to the cell and carries it in its throw, dropping
+    /// every write the loop made so far (`1 to: 5 do: [:i | self.n := i.
+    /// i == 3 ifTrue: [^i]]` answered 3 and left `n` at 0). The invariant,
+    /// for every loop mode: a `^` in a loop body stores and carries a state
+    /// that includes every field written so far. `StateAcc` threads the whole
+    /// `State`; direct-params and tuple-accumulator bodies write no field
+    /// (mode selection, checked by `FieldWriteInBracketedLoop`); a hybrid body
+    /// therefore admits no `^`. The `^`'s state read is recorded on the
+    /// innermost loop marker (`actor_state_read_source`,
+    /// `StateReadSite::NlrThrowState`), and each hybrid lowering checks its
+    /// marker before checkout.
+    NlrThrowInHybridLoop { at: Span },
+
     /// BT-4180 (ADR 0137 §4b): an actor-state read source emitted inside a
     /// **bracketed region** (the body and condition of a stateless loop
     /// whose checkout bracketed guarded operators, plus everything lowered
