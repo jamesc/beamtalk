@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4484: a value-type method function answers exactly what a send of it
+// answers, block `^` or not. A method or extension whose block holds `^`
+// answered `{Result, Self}`, which only its own `dispatch/3` arm unwrapped;
+// a value-type extension with a block `^` leaked that pair to the sender.
+// The typed sends below are to classes in other modules, so they also cover
+// the guarded direct call (`Module:sel/N+1`) a typed send to a sealed Value
+// in another module compiles to.
+
+TestCase subclass: ValueTypeNlrAnswerTest
+
+  testMethodWithBlockReturnAnswersItsValue =>
+    f := NlrAnswerFinder items: #(1, 20, 3)
+    self assert: f firstBig equals: 20
+    self assert: (NlrAnswerFinder items: #(1, 2)) firstBig equals: nil
+
+  testTypedCrossModuleSendAnswersItsValue =>
+    self assert: (self firstBigOf: (NlrAnswerFinder items: #(5, 30))) equals: 30
+    self assert: (self firstBigOf: (NlrAnswerFinder items: #())) equals: nil
+    self assert: (self firstBigOrZeroOf: (NlrAnswerFinder items: #(2))) equals: 0
+    self assert: (self countOf: (NlrAnswerFinder items: #(1, 2, 3))) equals: 3
+    self assert: (self itemsOf: ((NlrAnswerFinder items: #()) withItems: #(7))) equals: #(7)
+
+  testDynamicSendAnswersItsValue =>
+    self assert: ((NlrAnswerFinder items: #(1, 11)) perform: #firstBig) equals: 11
+
+  testValueTypeExtensionWithBlockReturnAnswersItsValue =>
+    self assert: (NlrAnswerFinder items: #(4, 40)) extFirstBig equals: 40
+    self assert: (NlrAnswerFinder items: #(4)) extFirstBig equals: nil
+    self assert: (self extFirstBigOf: (NlrAnswerFinder items: #(50))) equals: 50
+
+  firstBigOf: f :: NlrAnswerFinder -> Integer | Nil => f firstBig
+
+  firstBigOrZeroOf: f :: NlrAnswerFinder -> Integer => f firstBigOrZero
+
+  countOf: f :: NlrAnswerFinder -> Integer => f count
+
+  itemsOf: f :: NlrAnswerFinder -> List => f items
+
+  extFirstBigOf: f :: NlrAnswerFinder -> Integer | Nil => f extFirstBig
+
+// A value-type extension whose block holds `^`.
+NlrAnswerFinder >> extFirstBig -> Integer | Nil =>
+  self items do: [:e | e > 10 ifTrue: [^e]]
+  nil

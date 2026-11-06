@@ -25,10 +25,8 @@ use beamtalk_core::source_analysis::Span;
 ///
 /// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by
 /// its `format_try_prefix`/`format_catch_suffix` methods — the single place
-/// the try/catch scaffolding is built, shared by
-/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] and
-/// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`] so neither
-/// hand-rolls its own copy of the template.
+/// the try/catch scaffolding is built, by
+/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] for every boundary.
 #[allow(clippy::struct_field_names)]
 pub(in crate::core_erlang) struct NlrCatchVars {
     pub token_var: String,
@@ -60,8 +58,13 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// live in the class process's dictionary (ADR 0130 §3), so nothing is
     /// returned alongside the result.
     ClassMethod,
-    /// Value-type methods: the catch arm yields `{Value, State}` so the normal and
-    /// NLR-catch paths produce the same `{Result, Self{N}}` shape.
+    /// Value-type methods (and value-type extension funs): the catch arm
+    /// yields the bare `Value`, as the body's normal path does (BT-4484). A
+    /// value-type method function answers exactly what a send of it answers,
+    /// so `dispatch/3`, a typed direct call (own module or another one) and
+    /// the runtime's extension apply all take its return as the send's
+    /// result. A value type's `Self` is immutable to its callers, so nothing
+    /// is returned beside the result.
     ValueType,
     /// BT-4288: a REPL eval (`repl_nlr`). The throw's state is the workspace
     /// bindings map at the `^`, so the catch arm yields the eval's own
@@ -69,6 +72,32 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// source text) `{[{<<Source>>, Value}], Bindings}`, one step for the
     /// input the `^` ended.
     Repl { trace_source: Option<String> },
+}
+
+/// BT-4484: what the matching NLR catch arm of an [`NlrBoundary`] yields, as
+/// the function the boundary closes answers it to its caller. The one fact
+/// `ThreadedIr`'s verifier checks against the scope's calling convention
+/// (`VerifyError::MethodNlrAnswersPair`); [`nlr_arm_result`] renders it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrArmShape {
+    /// The bare `Value`: what a send answers.
+    Value,
+    /// The gen_server reply `{'reply', Value, State}`.
+    Reply,
+    /// A `{Result, State}` pair: the REPL eval's `{Value, Bindings}` (or its
+    /// trace-mode `{[{Source, Value}], Bindings}`).
+    ValueStatePair,
+}
+
+impl NlrBoundary {
+    /// What this boundary's matching catch arm yields ([`NlrArmShape`]).
+    pub(in crate::core_erlang) fn arm_shape(&self) -> NlrArmShape {
+        match self {
+            NlrBoundary::ActorReply => NlrArmShape::Reply,
+            NlrBoundary::ClassMethod | NlrBoundary::ValueType => NlrArmShape::Value,
+            NlrBoundary::Repl { .. } => NlrArmShape::ValueStatePair,
+        }
+    }
 }
 
 /// Builds the Document the matching NLR catch arm yields for `boundary`.
@@ -89,7 +118,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Doc
             leaf::var(state_var.to_string()),
             "}",
         ],
-        NlrBoundary::ClassMethod => leaf::var(val_var.to_string()),
+        NlrBoundary::ClassMethod | NlrBoundary::ValueType => leaf::var(val_var.to_string()),
         NlrBoundary::Repl {
             trace_source: Some(source),
         } => docvec![
@@ -101,7 +130,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Doc
             leaf::var(state_var.to_string()),
             "}",
         ],
-        NlrBoundary::ValueType | NlrBoundary::Repl { trace_source: None } => docvec![
+        NlrBoundary::Repl { trace_source: None } => docvec![
             "{",
             leaf::var(val_var.to_string()),
             ", ",
@@ -321,10 +350,8 @@ impl CoreErlangGenerator {
 
     /// The single boundary-parameterised NLR try/catch wrapper.
     ///
-    /// Shares its try/catch scaffolding — via [`NlrCatchVars::format_try_prefix`]
-    /// and [`NlrCatchVars::format_catch_suffix`] — with
-    /// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`]'s callers,
-    /// so the make-token/`try`/`of`/`catch` the 4-tuple
+    /// Builds its try/catch scaffolding with [`NlrCatchVars::format_try_prefix`]
+    /// and [`NlrCatchVars::format_catch_suffix`], so the make-token/`try`/`of`/`catch` the 4-tuple
     /// `{'$bt_nlr', Token, Value, State}` throw template is written exactly
     /// once; only the matching arm's result Document varies, which
     /// `boundary` selects via [`nlr_arm_result`].
@@ -352,20 +379,6 @@ impl CoreErlangGenerator {
             body_doc,
             vars.format_catch_suffix(boundary),
         ]
-    }
-
-    /// Wraps a value type method body with NLR (non-local return) try/catch.
-    ///
-    /// Value type NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}`
-    /// and catches it to return `{Value, State}`. Returns the allocated
-    /// [`NlrCatchVars`] so the caller can emit `format_try_prefix()`, the
-    /// body, and `format_catch_suffix(&NlrBoundary::ValueType)` around its own
-    /// surrounding `fun` scaffolding.
-    pub(in crate::core_erlang) fn wrap_value_type_body_with_nlr_catch(
-        &mut self,
-        token_var: &str,
-    ) -> NlrCatchVars {
-        self.alloc_nlr_catch_vars(token_var)
     }
 
     /// BT-4312: the token of the scope being lowered: a method's (bound when a
@@ -427,9 +440,33 @@ mod tests {
     }
 
     #[test]
-    fn nlr_arm_result_value_type_yields_value_state_tuple() {
+    fn nlr_arm_result_value_type_yields_bare_value() {
         let doc = nlr_arm_result("V", "S", &NlrBoundary::ValueType);
-        assert_eq!(doc.to_pretty_string(), "{V, S}");
+        assert_eq!(doc.to_pretty_string(), "V");
+    }
+
+    /// BT-4484: every boundary's rendered arm has the shape `arm_shape`
+    /// declares — the fact the verifier checks is the one rendered.
+    #[test]
+    fn nlr_arm_result_matches_arm_shape() {
+        for boundary in [
+            NlrBoundary::ActorReply,
+            NlrBoundary::ClassMethod,
+            NlrBoundary::ValueType,
+            NlrBoundary::Repl { trace_source: None },
+            NlrBoundary::Repl {
+                trace_source: Some("x".to_string()),
+            },
+        ] {
+            let doc = nlr_arm_result("V", "S", &boundary).to_pretty_string();
+            let shape = match doc.as_str() {
+                "V" => NlrArmShape::Value,
+                d if d.starts_with("{'reply', ") => NlrArmShape::Reply,
+                d if d.starts_with('{') && d.ends_with(", S}") => NlrArmShape::ValueStatePair,
+                other => panic!("unexpected arm {other} for {boundary:?}"),
+            };
+            assert_eq!(shape, boundary.arm_shape(), "{boundary:?}");
+        }
     }
 
     fn make_test_vars() -> NlrCatchVars {
@@ -476,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    fn format_catch_suffix_nlr_arm_yields_value_state_pair() {
+    fn format_catch_suffix_value_type_nlr_arm_yields_bare_value() {
         let doc = make_test_vars()
             .format_catch_suffix(&NlrBoundary::ValueType)
             .to_pretty_string();
@@ -490,10 +527,10 @@ mod tests {
             doc.contains("'=:='(CTok0, Tok0)"),
             "catch suffix should guard with CTok0 =:= Tok0. Got:\n{doc}"
         );
-        // ValueType boundary: NLR arm returns {Value, State}.
+        // ValueType boundary (BT-4484): the NLR arm answers the bare value.
         assert!(
-            doc.contains("{Val0, St0}"),
-            "ValueType NLR arm must yield {{Value, State}} pair. Got:\n{doc}"
+            doc.contains(") -> Val0") && !doc.contains("{Val0, St0}"),
+            "ValueType NLR arm must yield the bare Value. Got:\n{doc}"
         );
     }
 

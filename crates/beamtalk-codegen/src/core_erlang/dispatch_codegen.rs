@@ -1101,7 +1101,7 @@ impl CoreErlangGenerator {
             TypedSendTarget::Builtin(_) => None,
         };
         let direct_call = match own_arm {
-            Some(arm) => self.own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
+            Some(arm) => Self::own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
             None => docvec![
                 "call ",
                 leaf::atom(module_name),
@@ -1194,8 +1194,8 @@ impl CoreErlangGenerator {
     /// which answers the selector from that arm before its default arm — so
     /// no extension or superclass is consulted, and nothing installed later
     /// can change that. The function is called locally, so caller and callee
-    /// are always the same module version and the arm shape (the NLR pair)
-    /// this unit compiled against is the one it calls. One difference from
+    /// are always the same module version and the arm this unit compiled
+    /// against is the one it calls. One difference from
     /// `dispatch/3`, whose arms are remote calls: code still running in the
     /// old version after a reload (a long loop, an old block) keeps calling
     /// the old method, where `dispatch/3` would have reached the new one.
@@ -1219,10 +1219,8 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4473: the local call of an own-class method arm's function —
-    /// `apply 'sel'/N(R, A1, …)`, with a `{Result, State}` pair unwrapped as
-    /// the arm unwraps it.
+    /// `apply 'sel'/N(R, A1, …)`, which answers the send's result (BT-4484).
     fn own_arm_call_doc(
-        &mut self,
         selector: &str,
         arm: super::value_type_codegen::OwnDispatchArm,
         receiver_var: &str,
@@ -1230,28 +1228,12 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let mut call_args: Vec<Document<'static>> = vec![leaf::var(receiver_var.to_string())];
         call_args.extend(arg_vars.iter().map(|var| leaf::var(var.clone())));
-        let call = docvec![
+        docvec![
             "apply ",
             leaf::fname(selector.to_string(), arm.arity + 1),
             "(",
             Self::join_docs_with_commas(call_args),
             ")",
-        ];
-        if !arm.nlr_pair {
-            return call;
-        }
-        let result = self.fresh_temp_var("OwnArmR");
-        let state = self.fresh_temp_var("OwnArmS");
-        docvec![
-            "case ",
-            call,
-            " of <{",
-            leaf::var(result.clone()),
-            ", ",
-            leaf::var(state),
-            "}> when 'true' -> ",
-            leaf::var(result),
-            " end",
         ]
     }
 
