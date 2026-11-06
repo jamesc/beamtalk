@@ -785,6 +785,88 @@ explicit_class_new_test_() ->
         ]
     ]}.
 
+%% BT-4475: a stdlib class whose own explicit `class new:` forwards to one of
+%% its own in-caller class methods (`self withAll: elements`) publishes no
+%% `new:` among its process-bound selectors, so `X new: aList` runs that
+%% class method in the caller and the class process sees no message at all.
+explicit_class_new1_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end,
+        [
+            {atom_to_list(Class) ++ " new: makes no call into its class process", fun() ->
+                assert_new1_in_caller(Class, Module, Check)
+            end}
+         || {Class, Module, Check} <- [
+                {'List', 'bt@stdlib@list', fun(R) -> R =:= [1, 2] end},
+                {'Tuple', 'bt@stdlib@tuple', fun(R) -> R =:= {1, 2} end},
+                {'Set', 'bt@stdlib@set', fun(R) ->
+                    beamtalk_primitive:class_of(R) =:= 'Set' andalso
+                        beamtalk_primitive:send(R, size, []) =:= 2
+                end},
+                {'Array', 'bt@stdlib@array', fun(R) ->
+                    beamtalk_primitive:class_of(R) =:= 'Array' andalso
+                        beamtalk_primitive:send(R, size, []) =:= 2
+                end}
+            ]
+        ] ++
+            [
+                %% `AtomicCounter new:` is `self delegate` creating a named ETS
+                %% table owned by whichever process runs it: it keeps the class
+                %% process (`explicit_class_constructor_builds_in_caller`).
+                {"AtomicCounter new: keeps its class process", fun() ->
+                    {module, _} = code:ensure_loaded('bt@stdlib@atomic_counter'),
+                    {ok, Bound} =
+                        beamtalk_class_metadata:lookup_process_bound_selectors('AtomicCounter'),
+                    ?assert(lists:member('new:', Bound)),
+                    Pid = beamtalk_class_registry:whereis_class('AtomicCounter'),
+                    ?assertEqual(decline, beamtalk_class_dispatch:in_caller_owner(Pid, 'new:'))
+                end},
+                %% A class-side `new:` extension shadows the in-caller method: the
+                %% send reaches the class process, which answers the extension.
+                {"a class-side new: extension on List is honoured by the class process", fun() ->
+                    {module, _} = code:ensure_loaded('bt@stdlib@list'),
+                    Pid = beamtalk_class_registry:whereis_class('List'),
+                    Tag = beamtalk_class_registry:class_object_tag('List'),
+                    ok = beamtalk_extensions:register(
+                        Tag, 'new:', fun(_Args, _ClassSelf) -> from_extension end, test
+                    ),
+                    ok = sys:statistics(Pid, true),
+                    try
+                        ?assertEqual(decline, beamtalk_class_dispatch:in_caller_owner(Pid, 'new:')),
+                        Before = messages_in(Pid),
+                        ?assertEqual(
+                            from_extension, beamtalk_class_dispatch:class_send(Pid, 'new:', [[1]])
+                        ),
+                        ?assert(messages_in(Pid) > Before)
+                    after
+                        sys:statistics(Pid, false),
+                        beamtalk_extensions:unregister('List', 'new:', true)
+                    end,
+                    ?assertEqual([1], beamtalk_class_dispatch:class_send(Pid, 'new:', [[1]]))
+                end}
+            ]}.
+
+assert_new1_in_caller(Class, Module, Check) ->
+    {module, Module} = code:ensure_loaded(Module),
+    {ok, Bound} = beamtalk_class_metadata:lookup_process_bound_selectors(Class),
+    ?assertNot(lists:member('new:', Bound)),
+    Pid = beamtalk_class_registry:whereis_class(Class),
+    ?assertMatch(
+        {owner, Class, _, Module, Class, Module, 'class_new:'},
+        beamtalk_class_dispatch:in_caller_owner(Pid, 'new:')
+    ),
+    ok = sys:statistics(Pid, true),
+    try
+        Before = messages_in(Pid),
+        Results = [
+            beamtalk_class_dispatch:class_send(Pid, 'new:', [[1, 2]])
+         || _ <- lists:seq(1, 100)
+        ],
+        ?assertEqual(Before, messages_in(Pid)),
+        ?assert(lists:all(Check, Results))
+    after
+        sys:statistics(Pid, false)
+    end.
+
 assert_new_in_caller(Class, Module, Check) ->
     {module, Module} = code:ensure_loaded(Module),
     ?assertEqual([new], beamtalk_class_metadata:lookup_direct_constructors(Class)),

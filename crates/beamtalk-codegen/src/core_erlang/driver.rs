@@ -502,6 +502,7 @@ impl CoreErlangGenerator {
                 self.overrides_collection_selector_for(hierarchy, class);
             self.own_overrides_species_construction =
                 self.overrides_species_construction_for(hierarchy, class);
+            self.own_in_caller_class_new1 = hierarchy.explicit_class_new1_runs_in_caller(class);
         }
     }
 

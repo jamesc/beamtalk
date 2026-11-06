@@ -696,45 +696,101 @@ impl ClassHierarchy {
 
     /// BT-4464: whether `class`'s own explicit class-side `new` may build in
     /// the caller, the explicit-constructor counterpart of the synthesized
-    /// `new0` verdict of [`Self::direct_constructors`].
+    /// `new0` verdict of [`Self::direct_constructors`]: the `new` case of
+    /// [`Self::explicit_class_constructor_builds_in_caller`].
     ///
     /// A class that defines `class new => <body>` (and no instance-side
     /// `new`) compiles a `new/0` that delegates to the body
     /// (`generate_delegating_new` in codegen: `class_new('undefined')`), and
     /// the class process's `{new, []}` handler only ever calls that `new/0`.
-    /// So the class process adds nothing but a serialisation point whenever
-    /// the body does not need it: the body is a single statement that is
-    ///
-    /// - `self delegate` on a `native:` class (lowered to
-    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module), or
-    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
-    ///   and which is not a row of the curated class-method FFI table read by
-    ///   the `class-process-ffi` / `class-method-process-resource` lints
-    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
-    ///   those keep the class process, which owns what they create. FFI
-    ///   outside that table is not recognised, exactly as for the lints,
-    ///   and runs in the caller like any other in-caller class method,
-    ///
-    /// so it reads no `self`, no class variable and nothing from the class
-    /// process's dictionary (`basicNew` does, which is why a body sending to
-    /// `self` is never eligible). The class must also be concrete, compile as
-    /// a non-actor, have a fully known surface and no class variables in its
-    /// chain. Like the synthesized verdict this only makes the class eligible
-    /// to *try* the direct path: codegen bakes it into `direct_constructors`
-    /// and every direct `new` is guarded at run time (BT-4409,
-    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`), so a class-side
-    /// extension or ADR 0084 runtime fun of `new` still reaches the class
-    /// process. As for any in-caller class method (ADR 0142), a resource the
-    /// FFI creates belongs to the caller.
+    /// Codegen bakes the verdict into `direct_constructors` and every direct
+    /// `new` is guarded at run time (BT-4409,
+    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`).
     #[must_use]
     pub fn explicit_class_new_builds_in_caller(&self, class: &ClassDefinition) -> bool {
-        fn primary_new(
-            methods: &[crate::ast::MethodDefinition],
-        ) -> Option<&crate::ast::MethodDefinition> {
+        self.explicit_class_constructor_builds_in_caller(class, "new")
+    }
+
+    /// BT-4475: whether `class`'s own explicit class-side `new:` may run in
+    /// the caller as an ordinary class method: the `new:` case of
+    /// [`Self::explicit_class_constructor_builds_in_caller`].
+    ///
+    /// `new:` with a non-map argument has no direct constructor
+    /// (`Module:new/1` is the synthesized map initialiser), and the class
+    /// process's `{new, [Arg]}` handler only calls the class method `new:`
+    /// (`has_class_new_in_chain`). So codegen drops `new:` from this class's
+    /// published `process_bound_class_selectors`, and a `new:` send takes the
+    /// ADR 0142 in-caller path (`beamtalk_class_dispatch:in_caller_owner/2`)
+    /// with the real class reference as `self`, behind the same run-time
+    /// guard (`beamtalk_class_shadow_flags:direct_call_ok/2`) as every
+    /// in-caller class method. The published list only ever speaks for the
+    /// receiving class: a subclass inheriting this `new:` publishes its own,
+    /// complete list and keeps the class process.
+    #[must_use]
+    pub fn explicit_class_new1_runs_in_caller(&self, class: &ClassDefinition) -> bool {
+        self.explicit_class_constructor_builds_in_caller(class, "new:")
+    }
+
+    /// The one rule behind [`Self::explicit_class_new_builds_in_caller`]
+    /// (`new`, BT-4464) and [`Self::explicit_class_new1_runs_in_caller`]
+    /// (`new:`, BT-4475): whether `class`'s own explicit class-side
+    /// `selector` needs nothing from the class process. Both selectors are
+    /// process-bound (ADR 0142 rule 3), yet the class process adds nothing
+    /// but a serialisation point whenever the body does not need it: the body
+    /// is a single statement that is
+    ///
+    /// - (`new` only) `self delegate` on a `native:` class (lowered to
+    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module). Not
+    ///   for `new:`: no `new:` delegate qualifies today, and the one in the
+    ///   stdlib (`AtomicCounter new:`) creates a named ETS table owned by
+    ///   whichever process runs it, which must stay the class process;
+    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
+    ///   (or, for `new:`, the method's own parameter) and which is not a row
+    ///   of the curated class-method FFI table read by the
+    ///   `class-process-ffi` / `class-method-process-resource` lints
+    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
+    ///   those keep the class process, which owns what they create. FFI
+    ///   outside that table is not recognised, exactly as for the lints, and
+    ///   runs in the caller like any other in-caller class method;
+    /// - (`new:` only) a send to `self` of one of the class's own class
+    ///   methods that already runs in the caller
+    ///   ([`Self::is_direct_call_eligible`]: not process-bound, no class
+    ///   variables in the chain), with literal or parameter arguments: the
+    ///   `List class new: elements => self withAll: elements` shape. A send
+    ///   of that method from any caller already runs it there, so forwarding
+    ///   to it needs nothing the class process owns. `new` cannot forward to
+    ///   `self`: its direct path is the `new/0` delegate, whose `self` is
+    ///   `undefined`;
+    ///
+    /// so it reads no class variable and nothing from the class process's
+    /// dictionary (`basicNew` does, which is why `self basicNew` is never
+    /// eligible). The class must also be concrete, compile as a non-actor,
+    /// have a fully known surface, no instance-side method of the same
+    /// selector and no class variables in its chain. This only makes the
+    /// class eligible to *try* the in-caller path: a class-side extension or
+    /// ADR 0084 runtime fun of the selector still reaches the class process
+    /// through the run-time guard. As for any in-caller class method
+    /// (ADR 0142), a resource the body creates belongs to the caller.
+    #[must_use]
+    pub fn explicit_class_constructor_builds_in_caller(
+        &self,
+        class: &ClassDefinition,
+        selector: &str,
+    ) -> bool {
+        use crate::ast::Expression;
+        fn primary<'m>(
+            methods: &'m [crate::ast::MethodDefinition],
+            selector: &str,
+        ) -> Option<&'m crate::ast::MethodDefinition> {
             methods
                 .iter()
-                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "new")
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
         }
+        let keyword = match selector {
+            "new" => false,
+            "new:" => true,
+            _ => return false,
+        };
         let class_name = class.name.name.as_str();
         if class.is_abstract
             || self.compiles_as_actor(class)
@@ -745,35 +801,45 @@ impl ClassHierarchy {
         {
             return false;
         }
-        if primary_new(&class.methods).is_some() {
+        if primary(&class.methods, selector).is_some() {
             return false;
         }
-        let Some(new_method) = primary_new(&class.class_methods) else {
+        let Some(method) = primary(&class.class_methods, selector) else {
             return false;
         };
-        if class.backing_module.is_some() && new_method.is_self_delegate() {
+        if !keyword && class.backing_module.is_some() && method.is_self_delegate() {
             return true;
         }
-        let [stmt] = new_method.body.as_slice() else {
+        let [stmt] = method.body.as_slice() else {
             return false;
         };
-        match &stmt.expression {
-            crate::ast::Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } => {
-                crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
-                    !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
-                        module, selector,
-                    )
-                }) && arguments
-                    .iter()
-                    .all(|arg| matches!(arg, crate::ast::Expression::Literal(..)))
+        let Expression::MessageSend {
+            receiver,
+            selector: sent,
+            arguments,
+            ..
+        } = &stmt.expression
+        else {
+            return false;
+        };
+        let plain_argument = |arg: &Expression| match arg {
+            Expression::Literal(..) => true,
+            Expression::Identifier(id) => {
+                keyword && method.parameters.iter().any(|p| p.name.name == id.name)
             }
             _ => false,
+        };
+        if !arguments.iter().all(plain_argument) {
+            return false;
         }
+        if let Some(module) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
+            return !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
+                module, sent,
+            );
+        }
+        keyword
+            && matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            && self.is_direct_call_eligible(class_name, &sent.name())
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
