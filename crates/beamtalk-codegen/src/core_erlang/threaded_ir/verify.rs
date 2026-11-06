@@ -13,7 +13,8 @@
 
 use std::collections::HashMap;
 
-use super::super::{CodeGenContext, CoreErlangGenerator};
+use super::super::nlr::NlrArmShape;
+use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
     EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
@@ -517,6 +518,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// loop or fold whose body held a `^` (BT-4288) and every non-final root
     /// or arm `^` (BT-4312).
     ReplReturnWithoutBoundary { at: Span },
+
+    /// BT-4503: an [`ThreadedStmt::NlrCatch`] in a value-type or class-method
+    /// scope whose catch arm answers anything but the bare value
+    /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
+    /// scope kind: the function an NLR boundary closes answers what its
+    /// callers take as the send's result. A value-type method (or value-type
+    /// extension fun) and a class method answer the bare value: `dispatch/3`'s
+    /// arm, the own-module typed direct call of the function (BT-4473) and
+    /// the runtime's extension apply
+    /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
+    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
+    /// `{Value, Bindings}` pair; those scopes are not constrained here. The
+    /// repro: every value-type method with a block `^` answered `{Result,
+    /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
+    /// call unwrapped, so a value-type
+    /// extension with a block `^` answered the pair to the sender.
+    MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
     /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
     /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
@@ -1789,8 +1807,9 @@ impl VerifyWalk<'_> {
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
-            // Opaque by design: `NlrCatch` has no body field (`render`
-            // treats the rest of the slice as its body); a `Statement` is
+            // Opaque by design: a `NlrCatch` has no body field (`render`
+            // treats the rest of the slice as its body, walked as siblings);
+            // a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
             //
@@ -1803,8 +1822,19 @@ impl VerifyWalk<'_> {
             //
             // BT-4015: a `ConditionHandBack` is checked against its loop's
             // `condition_families` by `condition_families_not_carried`.
-            ThreadedStmt::NlrCatch { .. }
-            | ThreadedStmt::Statement(..)
+            // BT-4503: the boundary of a value-type or class-method function
+            // answers the bare value its callers take as the send's result.
+            ThreadedStmt::NlrCatch { boundary, span, .. } => {
+                if matches!(self.scope, ScopeKind::ValueType | ScopeKind::ClassMethod)
+                    && boundary.arm_shape() != NlrArmShape::Value
+                {
+                    self.errors.push(VerifyError::MethodNlrAnswersPair {
+                        boundary: boundary.clone(),
+                        at: *span,
+                    });
+                }
+            }
+            ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }

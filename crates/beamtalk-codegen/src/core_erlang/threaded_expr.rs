@@ -29,8 +29,7 @@
 //!   conditionals alike) and the class-method `try_generate_class_method_threaded_last`.
 //! * **Boundary (per-context adapter, the only thing that varies).** A
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
-//!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
-//!   bare-`Result` shape, or the Actor
+//!   the value-type and class-method bare-`Result` shape, or the Actor
 //!   `{'reply', Reply, NewState}` `gen_server` reply shape. This mirrors the
 //!   [`NlrBoundary`](super::NlrBoundary) precedent.
 //!
@@ -380,9 +379,9 @@ pub(super) enum ThreadingPosition {
 /// per context — exactly mirroring the [`NlrBoundary`](super::NlrBoundary) seam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ThreadingBoundary {
-    /// Value-type methods: the tail yields `{Result, Self{N}}` when a non-local return
-    /// is active (so the normal and NLR-catch paths share a shape), or bare `Result`.
-    ValueType { has_nlr: bool },
+    /// Value-type methods: the tail yields the bare `Result`, with or without a
+    /// non-local return (BT-4503: the NLR boundary answers the bare value too).
+    ValueType,
     /// Class methods: the tail yields the bare `Result`. Class variables are written
     /// in place in the class process (ADR 0130 §3), so nothing is returned beside the
     /// result.
@@ -765,17 +764,7 @@ impl CoreErlangGenerator {
                     "}",
                 ]
             }
-            ThreadingBoundary::ValueType { has_nlr: true } => {
-                let final_self = self.current_self_var();
-                docvec![
-                    "    {",
-                    leaf::var(result_var.to_string()),
-                    ", ",
-                    leaf::var(final_self),
-                    "}\n",
-                ]
-            }
-            ThreadingBoundary::ValueType { has_nlr: false } => {
+            ThreadingBoundary::ValueType => {
                 docvec!["    ", leaf::var(result_var.to_string()), "\n"]
             }
             ThreadingBoundary::ClassMethod => leaf::var(result_var.to_string()),
