@@ -167,7 +167,7 @@ This settles ADR 0042's three questions:
 statement-expr := keyword-expr                         // a plain send
                 | keyword-expr ( ';'  message )+       // cascade (unchanged)
                 | keyword-expr ( '|>' message )+       // pipeline (new)
-message        := unary | binary | keyword             // a send without its receiver
+message        := unary | keyword                      // a send without its receiver
 ```
 
 A `;` after a pipeline stage, or a `|>` after a cascade message, is the
@@ -217,8 +217,13 @@ REPL:
 **Precedence and layout.**
 
 - `|>` binds looser than keyword messages, like `;`. Each stage is a complete
-  unary, binary or keyword message whose receiver is the previous stage's
-  value; a keyword stage's arguments end at the next `|>`.
+  unary or keyword message whose receiver is the previous stage's value; a
+  keyword stage's arguments end at the next `|>`.
+- **No binary stages.** `x |> + 1` is a parse error with the help
+  "parenthesise the left side: `(…) + 1`". Unary binds tighter than
+  binary, so `a foo + 1` already chains; a binary stage would only help
+  after a keyword stage (`a at: k |> + 1`), which reads worse than
+  `(a at: k) + 1`. This can be relaxed later without breaking code.
 - The first segment is an ordinary expression (`recv m1`, or just `recv`):
   `st |> withX: 1` is legal and equals `st withX: 1`.
 - A line that **starts** with `|>` continues the expression above, by the
@@ -234,22 +239,26 @@ REPL:
   parenthesise the part you mean"*. Both readings are plausible, and the
   rare code that wants both is clearer with explicit parentheses
   (`(a m1 |> m2) m3; m4`) or temp locals.
-- **Where a pipeline may appear.** Exactly where a cascade may appear
-  today: the parse sites that call `parse_cascade` (a statement, an
-  assignment's right-hand side, a `^` value, the inside of parentheses —
-  and so a block body's statements). Everywhere else needs parentheses,
-  exactly as a cascade does: keyword arguments (parsed at binary level, so
-  `x at: k put: (v withA: 1 |> withB: 2)`), and the eight sites that call
-  `parse_keyword_message` directly — string interpolation, the three
-  `match:` arm-body sites, and map, list, array and tuple literal elements.
-  String interpolation is the one Elixir users will hit first
-  (`"{x foo |> bar}"`); its parse error says to write
-  `"{(x foo |> bar)}"`. In particular a `match:` arm body is parsed
-  below the cascade level and `;` there is the arm separator, so
-  `[1 -> a withX: 1 |> withY: 2; _ -> b]` is a parse error pointing at
-  `|>` with the help "parenthesise the arm body"; the mixing rule never
-  sees the arm separator. (Whether arm bodies should accept a bare
-  pipeline is open question 7.)
+- **Where a pipeline may appear: anywhere a full keyword expression
+  parses.** That is every `parse_cascade` site (a statement, an
+  assignment's right-hand side, a `^` value, the inside of parentheses,
+  and so a block body's statements), plus the eight sites that call
+  `parse_keyword_message` directly:
+  - string interpolation: `"total: {orders select: [...] |> sum}"`,
+    where Elixir users will try it first;
+  - the three `match:` arm-body sites:
+    `[1 -> a withX: 1 |> withY: 2; _ -> b]`;
+  - map, list, array and tuple literal elements:
+    `#(a foo |> bar, b)`.
+
+  `|>` is its own token, so it never collides with the arm separator `;`,
+  the element separator `,` or the list cons `|`. The `;`/`|>` mixing
+  rule applies only where `;` would otherwise start a cascade; in an arm
+  body `;` still ends the arm. The one place that still needs parentheses
+  is a **keyword argument**, which is parsed at binary level for every
+  keyword message: `x at: k put: (v withA: 1 |> withB: 2)`. Without them,
+  `|>` ends the argument and pipes the whole `at:put:` send, the same as
+  for any keyword message.
 - **Casts.** A pipeline cannot end in `!`, just as a cascade cannot
   today. `!` is a statement terminator that marks the statement's send as
   a cast only when the statement is a plain `MessageSend`
@@ -291,8 +300,8 @@ The function name (`Enum.map`) becomes a selector on the value
 (`collect:`); the module disappears because the value's class decides
 which method runs. There is no capture syntax (Elixir's `&`, Gleam's `_`)
 for putting the value anywhere but the receiver; when it must be an
-argument (`Logger info: x`), use a temp local or the nested form (an
-`in:`-style escape hatch is open question 9). The language-features
+argument (`Logger info: x`), use `then:` (below), a temp local or the
+nested form. The language-features
 guide gets this table, and the parse error for a non-message stage
 (`x |> 10`) points at it.
 
@@ -309,7 +318,33 @@ p withX: 5 |>
 p withX: 5 |> 10
 // error: expected a message after `|>` (found a literal) — `|>` sends a
 //        message to the previous result; it does not apply a function
+
+d at: #k |> + 1
+// error: a pipeline stage cannot be a binary message; write `(d at: #k) + 1`
 ```
+
+**`then:` for the value-as-argument case.** Elixir's `&` and Gleam's `_`
+can put the piped value anywhere; `|>` only makes it the receiver. For the
+other cases, `Object` gains one sealed method, named after Elixir's
+`Kernel.then/2`:
+
+```beamtalk
+/// Answer the result of evaluating aBlock with the receiver.
+sealed then: aBlock :: Block => aBlock value: self
+```
+
+```beamtalk
+average := orders collect: [:o | o amount]
+  |> then: [:xs | xs sum / xs size]
+```
+
+It is an ordinary message, so it works without `|>` too (`x then: [...]`)
+and needs no compiler support. Its signature follows `Object >> ifNotNil:`
+(`notNilBlock :: Block => notNilBlock value: self`), which leaves the
+block bare for the same reason (BT-2834). Pharo spells the same method
+`in:`. The
+Elixir name is chosen for this ADR's audience, and nothing in the stdlib
+defines `then:` today.
 
 A stage the previous result does not understand raises
 `does_not_understand` exactly as the nested form would, and the type checker
@@ -641,7 +676,8 @@ and the `yourself` idiom.
 
 ### E. Library-level chaining
 `Object >> then: aBlock` or a DNU-forwarding `asPipe` proxy. Rejected as the
-primary answer (see Steelman). Nothing stops a library from adding `then:`.
+primary answer (see Steelman). `then:` is adopted as a complement to `|>`
+for the value-as-argument case (§ Decision); the proxy is not.
 
 ### F. Multi-field functional update
 A single message that sets several fields at once (e.g. a generated
@@ -649,8 +685,8 @@ A single message that sets several fields at once (e.g. a generated
 `withWebsock: … respState: …`). It would serve the motivating example
 directly — arguably better than any chain, because it allocates one copy —
 but only for field updates of a single value; it does nothing for
-collection pipelines or non-`with*:` messages. Complementary, out of scope;
-listed as an open question.
+collection pipelines or non-`with*:` messages. Complementary and out of
+scope: it becomes a separate, low-priority issue (§ Resolved).
 
 ### G. Warning plus multi-field update, no new operator
 Accept part 3 and Alternative F, reject part 2. This fixes the trap and the
@@ -753,11 +789,14 @@ Sketch for `/plan-adr` once accepted; sizes are rough.
    `source_analysis/lexer.rs`; `|>` stages at every `parse_cascade` site in
    `parser/expressions.rs`, with stages parsed by `parse_cascade_message`;
    the `;`/`|>` mixing error; the "cast in expression" error for a
-   pipeline ending in `!`; the "parenthesise" error at
-   `parse_keyword_message`-only sites (string interpolation and `match:`
-   arm bodies included); line-continuation for a leading `|>`; `PipeGt` in
-   `is_input_complete`'s trailing-incomplete tokens. Parser tests for each,
-   plus a `tests/repl-protocol/cases/` case for multi-line REPL input.
+   pipeline ending in `!`; `|>` stages at the eight
+   `parse_keyword_message` sites (string interpolation, `match:` arm
+   bodies, collection literals), with `;` keeping its arm-separator
+   meaning in arms; the binary-stage error; line-continuation for a leading
+   `|>`; `PipeGt` in `is_input_complete`'s trailing-incomplete tokens.
+   Parser tests for each, plus a `tests/repl-protocol/cases/` case for
+   multi-line REPL input. `Object >> then:` in `stdlib/src/object.bt`, with
+   a BUnit test.
 4. **Source fidelity (M)** — `unparse`, `beamtalk fmt` layout (one stage
    per line when broken), the pipeline record/restore for
    `as_written_method_source` and the REPL `ClassBuilder` path (round-trip
@@ -809,39 +848,41 @@ hit as a warning first.
 
 ## Open Questions (for the maintainer)
 
-1. **Accept all three parts, or a subset?** Part 3 (warning + `setUp` lint
-   fix) is valuable even if `|>` is rejected. Given how rarely deep chains
-   occur in this repo, Alternative G (warning + multi-field update, no
-   operator) is a defensible smaller answer.
-2. **Token.** Settled (2026-11-05): `|>`, so Elixir and Gleam users
-   recognise it. Cuis's `::` was the pure-Smalltalk alternative and is
-   ruled out by the annotation clash.
-3. **Mixing `;` and `|>`.** Proposed: parse error without parentheses.
-   Alternative: allow `a m1 |> m2; m3` with `;` binding tighter (cascade on
-   the pipeline's last stage's receiver), as Cuis does with `::` and `;`.
-4. **Binary stages.** Proposed: allowed for uniformity (`x |> + 1`), since
-   the rewrite is trivial; could instead be restricted to unary and keyword
-   stages for readability.
-5. **Warning breadth.** Proposed: only non-final messages that answer
-   `Self` or the target's class/superclass. Could widen to any discarded non-`nil` result on a
-   value target (catches more, more false positives on value methods with
-   side effects such as logging).
-6. **Multi-field update (Alternative F).** Left undecided; worth a separate
-   issue if `with*:` chains remain the dominant use of `|>`.
-7. **`match:` arm bodies.** Proposed: a bare pipeline in an arm body is a
-   parse error asking for parentheses (arm bodies are parsed below the
-   cascade level and `;` separates arms). Alternative: let arm bodies
-   accept `|>` stages (no `;` ambiguity, since `|>` is distinct).
-   The same choice applies to string interpolation (`"{x foo |> bar}"`),
-   where Elixir users will try it first.
-8. **Error vs warning.** Should the certain case (synthesized `with*:` on a
-   known `Value`) be a compile error (Alternative I)?
-9. **Value-as-argument escape hatch.** Elixir's `&` and Gleam's `_` place
-   the piped value anywhere; Beamtalk's `|>` only makes it the receiver.
-   Should Pharo's `Object >> in: aBlock` ship alongside `|>`
-   (`x foo |> in: [:v | Logger info: v]`), or is a temp local enough?
-10. **Pipeline casts.** Proposed: a pipeline cannot end in `!`, matching
-    cascades. Allow it on the final stage later if asked for?
+1. **Scope.** Recommended: accept all three parts and ship part 3 (the
+   warning and the `setUp` lint fix) first, since it fixes a live bug and
+   does not depend on `|>`. Alternative G (the warning plus a multi-field
+   update, with no operator) remains the smaller answer if the operator's
+   tooling cost (§ AST representation) is judged too high for how rarely
+   deep chains occur in this repo.
+2. **`then:` vs `in:`.** Recommended: `then:`, Elixir's name, for this
+   ADR's audience. Pharo's `in:` is the Smalltalk name. Add it as an alias
+   only if Smalltalk users ask.
+
+### Resolved (2026-11-06)
+
+Each of these was an open question in an earlier draft. Where the
+decision is the stricter choice, loosening it later is cheap; tightening
+it later would break code.
+
+- **Token:** `|>`, so Elixir and Gleam users recognise it. Cuis's `::` is
+  ruled out by the type-annotation clash.
+- **Mixing `;` and `|>`:** a parse error without parentheses. Both
+  readings are plausible, and code that needs both is rare.
+- **Binary stages:** not allowed (§ Precedence and layout). Unary already
+  chains through binary; the error suggests parentheses.
+- **Warning breadth:** narrow. It flags only a dropped updated copy (a
+  method defined on a value class answering `Self` or that class). A
+  general "discarded result" lint is a separate follow-up.
+- **Multi-field update (Alternative F):** a separate, low-priority issue,
+  independent of this ADR.
+- **`match:` arms, string interpolation and collection literals:** accept
+  a bare `|>`. The rule is "anywhere a full keyword expression parses";
+  only keyword arguments need parentheses.
+- **Error vs warning for a certain drop (Alternative I):** a warning for
+  now. It can be promoted to an error later if the warning is ignored.
+- **Value-as-argument escape hatch:** ship `Object >> then: aBlock` with
+  the operator.
+- **Casts:** a pipeline cannot end in `!`, matching cascades.
 
 ## References
 - Related issues: BT-4352 (this ADR), BT-506 (canceled pipeline-chaining
