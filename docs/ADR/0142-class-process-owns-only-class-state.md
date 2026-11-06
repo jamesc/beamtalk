@@ -356,6 +356,22 @@ end
   is all the `{new, []}` handler would run, so the guarded direct call is the
   same call minus the hop. `Reference`, `Random`, `Queue` and `Announcer` take
   it; a body that sends to `self` (`self basicNew`) does not.
+- **Amended (BT-4475, 2026-11-06): explicit forwarding `new:`.** The same
+  rule (`ClassHierarchy::explicit_class_constructor_builds_in_caller`) covers
+  a class's own class-side `new:` whose body is one plain FFI forward (literal
+  or parameter arguments, not a table row) or a send to `self` of one of the
+  class's own in-caller class methods whose own body is such an FFI forward or
+  its selector primitive (`class new: elements => self withAll: elements`,
+  `class withAll: list => @primitive`): the target's body is checked, one hop
+  only. A non-map `new:` has no direct constructor, and the class
+  process's `{new, [Arg]}` handler only called that class method, so codegen
+  leaves `new:` out of the class's published process-bound selectors and the
+  send runs the method in the caller through `in_caller_owner/2`, behind the
+  same `direct_call_ok/2` guard. The list speaks only for the receiving
+  class: a subclass inheriting the `new:` keeps its full list. `List`, `Set`,
+  `Array` and `Tuple` take it; `AtomicCounter new:` (`self delegate` creating
+  a named ETS table owned by the running process) does not, so `new:` never
+  accepts `self delegate`.
 
 **Amended (BT-4317, 2026-11-04): a class literal always denotes that
 class.** Inside a class method of `Base`, an explicit own-class send `Base

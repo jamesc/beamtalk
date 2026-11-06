@@ -54,7 +54,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% ADR 0142 (BT-4300): the in-caller class-send path is one call into the
 %% compiled method, plus the guard and memo reads; its helpers are inlined so
 %% the hop costs no extra reductions.
--compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7]}).
+-compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7, send_in_caller_or/4]}).
 %% ADR 0142 §2 (BT-4300): a class method the caller may run itself: the
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
@@ -135,22 +135,26 @@ class_send_plain(ClassPid, 'new', []) ->
                 unwrap_class_call(gen_server:call(P, {new, []}))
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Map]) when is_map(Map) ->
-    %% same for `new:` with a map argument, via `Module:new/1`.
-    %% A non-map argument keeps the unguarded clause below, whose gen_server
-    %% path reproduces the legacy fallbacks (see `lookup_direct_constructor/3`).
-    case lookup_direct_constructor(ClassPid, 'new:', [Map]) of
+class_send_plain(ClassPid, 'new:', [Arg]) ->
+    %% same for `new:` with a map argument, via `Module:new/1`. A non-map
+    %% argument never builds directly (see `lookup_direct_constructor/3`).
+    %% BT-4475: either way, a class whose own explicit class-side `new:` needs
+    %% nothing from its class process (codegen leaves `new:` out of its
+    %% published process-bound selectors) runs that class method in the
+    %% caller, exactly as the `{new, [Arg]}` handler would have called it
+    %% there (`has_class_new_in_chain`), behind the same guard as every
+    %% in-caller class method. Anything else keeps the gen_server path, which
+    %% reproduces the legacy fallbacks.
+    case lookup_direct_constructor(ClassPid, 'new:', [Arg]) of
         {ok, Module} ->
-            erlang:apply(Module, new, [Map]);
+            erlang:apply(Module, new, [Arg]);
         error ->
-            class_send_with_recovery(ClassPid, 'new:', fun(P) ->
-                unwrap_class_call(gen_server:call(P, {new, [Map]}))
+            send_in_caller_or(ClassPid, 'new:', [Arg], fun() ->
+                class_send_with_recovery(ClassPid, 'new:', fun(P) ->
+                    unwrap_class_call(gen_server:call(P, {new, [Arg]}))
+                end)
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Map]) ->
-    class_send_with_recovery(ClassPid, 'new:', fun(P) ->
-        unwrap_class_call(gen_server:call(P, {new, [Map]}))
-    end);
 class_send_plain(ClassPid, spawn, []) ->
     class_send_with_recovery(ClassPid, spawn, fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, []}))
@@ -192,6 +196,15 @@ class_send_plain(ClassPid, Selector, Args) ->
     %% that is not process-bound) runs in the caller. Checked
     %% before the self-call guard: an in-caller call has no gen_server to
     %% deadlock on, so a block re-entering its class answers.
+    send_in_caller_or(ClassPid, Selector, Args, fun() ->
+        class_send_via_process(ClassPid, Selector, Args)
+    end).
+
+%% Run `Selector` in the caller when `in_caller_owner/2` names its owner
+%% (ADR 0142 §2-§3), else `Otherwise()`: the one in-caller step of both the
+%% general class-method clause and the `new:` clause (BT-4475).
+-spec send_in_caller_or(pid(), selector(), list(), fun(() -> term())) -> term().
+send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
     case in_caller_owner(ClassPid, Selector) of
         {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
             ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
@@ -199,7 +212,7 @@ class_send_plain(ClassPid, Selector, Args) ->
                 ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
             );
         decline ->
-            class_send_via_process(ClassPid, Selector, Args)
+            Otherwise()
     end.
 
 %% Today's routing for a send the caller may not run itself (ADR 0142 §2).

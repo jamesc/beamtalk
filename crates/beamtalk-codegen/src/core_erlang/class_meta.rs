@@ -78,6 +78,22 @@ pub(crate) struct MetaProvenance<'a> {
     /// before a dynamic `new:` builds in the caller; an absent fact fails
     /// closed there.
     pub defines_user_class_new1: Option<bool>,
+    /// BT-4475: where this class's `new:` runs; [`ClassNew1Routing::InCaller`]
+    /// leaves `new:` out of its published `process_bound_class_selectors`.
+    pub class_new1_routing: ClassNew1Routing,
+}
+
+/// BT-4475: where a `new:` sent to the class runs. `InCaller` when the
+/// class's own explicit class-side `new:` needs nothing from the class process
+/// (`ClassHierarchy::explicit_class_new1_runs_in_caller`): a `new:` send then
+/// takes the ADR 0142 in-caller path. The default keeps `new:` process-bound.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ClassNew1Routing {
+    /// `new:` is process-bound (ADR 0142 rule 3).
+    #[default]
+    ClassProcess,
+    /// `new:` runs in the caller as an ordinary class method.
+    InCaller,
 }
 
 /// Representation of a type in runtime meta (`method_info` `return_type` / `param_types`).
@@ -421,7 +437,7 @@ impl CoreErlangGenerator {
             shape_migrations_doc,
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
-            Self::meta_process_bound_class_selectors_entry(),
+            Self::meta_process_bound_class_selectors_entry(provenance.class_new1_routing),
             Self::meta_caller_safe_class_primitives_entry(class),
             Self::meta_constant_class_methods_entry(class),
             Self::meta_stdlib_trait_methods_entry(provenance.stdlib_trait_methods),
@@ -481,13 +497,18 @@ impl CoreErlangGenerator {
 
     /// ADR 0142 §1 rule 3 (BT-4299): `'process_bound_class_selectors' =>
     /// ['new', ...]`, including its leading separator — the class-side
-    /// selectors that keep their class-process routing, from the one Rust
-    /// list ([`ClassInfo::process_bound_class_selectors`]). Always emitted,
-    /// so the runtime never keeps its own copy and can tell an older module
-    /// (key absent) from a current one.
-    fn meta_process_bound_class_selectors_entry() -> Document<'static> {
+    /// selectors that keep this class's class-process routing, from the one
+    /// Rust list ([`ClassInfo::process_bound_class_selectors`]). Always
+    /// emitted, so the runtime never keeps its own copy and can tell an older
+    /// module (key absent) from a current one. BT-4475: `new:` is left out
+    /// when the class's own explicit `new:` runs in the caller
+    /// ([`ClassNew1Routing::InCaller`]).
+    fn meta_process_bound_class_selectors_entry(
+        class_new1_routing: ClassNew1Routing,
+    ) -> Document<'static> {
         let selectors: Vec<String> = ClassInfo::process_bound_class_selectors()
             .iter()
+            .filter(|s| !(class_new1_routing == ClassNew1Routing::InCaller && **s == "new:"))
             .map(|s| (*s).to_string())
             .collect();
         docvec![

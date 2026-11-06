@@ -502,6 +502,11 @@ impl CoreErlangGenerator {
                 self.overrides_collection_selector_for(hierarchy, class);
             self.own_overrides_species_construction =
                 self.overrides_species_construction_for(hierarchy, class);
+            self.own_class_new1_routing = if hierarchy.explicit_class_new1_runs_in_caller(class) {
+                super::class_meta::ClassNew1Routing::InCaller
+            } else {
+                super::class_meta::ClassNew1Routing::ClassProcess
+            };
         }
     }
 

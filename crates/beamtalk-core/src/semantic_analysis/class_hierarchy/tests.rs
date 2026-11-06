@@ -4404,3 +4404,116 @@ fn explicit_class_new_stdlib_audit() {
         );
     }
 }
+
+/// BT-4475: `ClassHierarchy::explicit_class_new1_runs_in_caller` over the
+/// first class of `source`.
+fn bt4475_explicit_new1_verdict(source: &str) -> bool {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module)
+        .0
+        .expect("fixture hierarchy should build");
+    h.explicit_class_new1_runs_in_caller(&module.classes[0])
+}
+
+#[test]
+fn explicit_class_new1_forward_to_own_in_caller_method_runs_in_caller() {
+    // The `List new:` shape (stdlib/src/list.bt).
+    assert!(bt4475_explicit_new1_verdict(
+        "Object subclass: Bag2\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
+    ));
+    // An FFI forward of the parameter, outside the process-sensitive table.
+    assert!(bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class new: xs => (Erlang lists) reverse: xs\n"
+    ));
+}
+
+#[test]
+fn explicit_class_new1_needing_the_class_process_stays_there() {
+    // `self delegate` is opaque for `new:` (`AtomicCounter new:` makes an
+    // ETS table owned by the running process).
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Q native: my_counter\n  class new: n => self delegate\n"
+    ));
+    // A process-sensitive FFI row keeps the class process.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class new: n => (Erlang ets) new: n options: #()\n"
+    ));
+    // `self error:` is not one of the class's own class methods.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class new: _ => self error: \"no\"\n"
+    ));
+    // Forwarding to a process-bound selector, or to `basicNew`.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class spawnWith: xs => xs\n  class new: xs => self spawnWith: xs\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class new: xs => self basicNew\n"
+    ));
+    // A non-parameter, non-literal argument may read anything.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: self name\n"
+    ));
+    // Class variables in the chain keep the class process for `new:` too.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
+    ));
+    // An instance-side `new:` of the same name fails closed.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  new: x => x\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
+    ));
+    // The forward target's own body is checked (one hop): a target that is
+    // `self delegate` on a `native:` class, a process-sensitive FFI call, a
+    // body reading anything, or itself a forward keeps the class process.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Q native: my_counter\n  class make: n => self delegate\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => (Erlang ets) new: n options: #()\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => self basicNew\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class make: n => n\n  class new: n => self make: n\n"
+    ));
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class a: n => (Erlang lists) reverse: n\n  class make: n => self a: n\n  class new: n => self make: n\n"
+    ));
+    // Two statements are not a plain forward.
+    assert!(!bt4475_explicit_new1_verdict(
+        "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs =>\n    self withAll: xs.\n    self withAll: xs\n"
+    ));
+}
+
+/// The stdlib `new:` bodies BT-4475 audited: pinned by parsing their real
+/// sources, so a body change that leaves (or enters) the rule is caught here.
+#[test]
+fn explicit_class_new1_stdlib_audit() {
+    for (file, expected) in [
+        ("list.bt", true),
+        ("set.bt", true),
+        ("array.bt", true),
+        ("tuple.bt", true),
+        // `self delegate` making a process-owned named ETS table.
+        ("atomic_counter.bt", false),
+        // Bodies that only raise (`self error: ...`).
+        ("date_time.bt", false),
+        ("regex.bt", false),
+        ("uuid.bt", false),
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../stdlib/src")
+            .join(file);
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let tokens = crate::source_analysis::lex_with_eof(&source);
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::with_builtins();
+        assert_eq!(
+            h.explicit_class_new1_runs_in_caller(&module.classes[0]),
+            expected,
+            "{file}"
+        );
+    }
+}
