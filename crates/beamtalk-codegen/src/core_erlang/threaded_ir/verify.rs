@@ -656,8 +656,11 @@ pub(in crate::core_erlang) enum VerifyError {
     FieldWriteInBracketedLoop { at: Span },
 
     /// BT-4523 (ADR 0146 P0): a `^` was lowered in the body or condition of a
-    /// hybrid-params loop (or a loop nested in one that hands its uses
-    /// outward). A hybrid loop holds every field it writes in a fun parameter
+    /// hybrid-params loop, or of a nested loop that holds no whole `State` and
+    /// so hands its uses outward. A `^` inside a nested loop or fold that
+    /// threads a whole `State` (`StateAcc`) records nothing here; mode
+    /// selection keeps such a body out of hybrid mode instead, because
+    /// `facts::block_has_nlr` looks inside nested blocks. A hybrid loop holds every field it writes in a fun parameter
     /// (`_NField`), so the `State` in scope is the loop-entry map; the `^`
     /// stores that map to the cell and carries it in its throw, dropping
     /// every write the loop made so far (`1 to: 5 do: [:i | self.n := i.
