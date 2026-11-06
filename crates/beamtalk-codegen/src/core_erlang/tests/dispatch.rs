@@ -4938,6 +4938,29 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
     );
 }
 
+/// BT-4475: an explicit class-side `new:` forwarding to one of the class's
+/// own in-caller class methods leaves `new:` out of the class's published
+/// `process_bound_class_selectors`, so a `new:` send takes the ADR 0142
+/// in-caller path; any other `new:` keeps the full list.
+#[test]
+fn test_explicit_forwarding_class_new1_is_not_process_bound() {
+    let full = "'process_bound_class_selectors' => ['new', 'new:', ";
+    let without = "'process_bound_class_selectors' => ['new', 'startLink', ";
+    let code = codegen_source(
+        "Object subclass: Bag2\n\n  class withAll: xs => (Erlang lists) reverse: xs\n\n  class new: xs => self withAll: xs\n",
+    );
+    assert!(
+        code.contains(without) && !code.contains(full),
+        "a forwarding `new:` is not process-bound. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+    let basic = codegen_source("Object subclass: Tag\n\n  class new: xs => self basicNew\n");
+    assert!(
+        basic.contains(full),
+        "`self basicNew` keeps `new:` process-bound. Got:\n{basic}"
+    );
+}
+
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
     // actor classes have no constructor anchor, so no key is
