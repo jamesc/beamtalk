@@ -848,15 +848,8 @@ hit as a warning first.
 
 ## Open Questions (for the maintainer)
 
-1. **Scope.** Recommended: accept all three parts and ship part 3 (the
-   warning and the `setUp` lint fix) first, since it fixes a live bug and
-   does not depend on `|>`. Alternative G (the warning plus a multi-field
-   update, with no operator) remains the smaller answer if the operator's
-   tooling cost (§ AST representation) is judged too high for how rarely
-   deep chains occur in this repo.
-2. **`then:` vs `in:`.** Recommended: `then:`, Elixir's name, for this
-   ADR's audience. Pharo's `in:` is the Smalltalk name. Add it as an alias
-   only if Smalltalk users ask.
+None remain. Every question raised in earlier drafts was settled with the
+maintainer on 2026-11-06 and is recorded below.
 
 ### Resolved (2026-11-06)
 
@@ -864,6 +857,11 @@ Each of these was an open question in an earlier draft. Where the
 decision is the stricter choice, loosening it later is cheap; tightening
 it later would break code.
 
+- **Scope:** all three parts. Part 3 (the warning and the `setUp` lint
+  fix) ships first, because it fixes a live bug and does not depend on
+  `|>`. Alternative G (no operator) is not taken.
+- **`then:` vs `in:`:** `then:`, Elixir's name, for this ADR's audience.
+  Pharo's `in:` is not added.
 - **Token:** `|>`, so Elixir and Gleam users recognise it. Cuis's `::` is
   ruled out by the type-annotation clash.
 - **Mixing `;` and `|>`:** a parse error without parentheses. Both
