@@ -1086,57 +1086,13 @@ impl CoreErlangGenerator {
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
 
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-        };
-        // BT-4473: a send to an instance of this unit's own class whose
-        // selector one of its `dispatch/3` method arms answers calls that
-        // arm's function directly; every other tagged target, and every
-        // built-in route, calls `dispatch/3`.
-        let own_arm = match target {
-            TypedSendTarget::Tagged(tagged) => {
-                self.own_dispatch_arm(&tagged.class_name, &selector_atom, arguments.len())
-            }
-            TypedSendTarget::Builtin(_) => None,
-        };
-        let dispatch_call = docvec![
-            "call ",
-            leaf::atom(module_name),
-            ":'dispatch'(",
-            leaf::atom(selector_atom.clone()),
-            ", [",
+        let direct_doc = self.typed_direct_call_doc(
+            target,
+            &selector_atom,
+            &receiver_var,
+            &arg_vars,
             args_list_doc.clone(),
-            "], ",
-            leaf::var(receiver_var.clone()),
-            ")",
-        ];
-        // BT-4366: every call sits inside the type-test `case`, so each
-        // carries the send's line itself.
-        let direct_doc = match (own_arm, target) {
-            (Some(arm), _) => self.annotate_current_send_call(Self::own_arm_call_doc(
-                &selector_atom,
-                arm,
-                &receiver_var,
-                &arg_vars,
-            )),
-            // BT-4484: a sealed Value class in another module whose selector
-            // may be one of its `dispatch/3` method arms: the arm's function,
-            // behind a value-method static call key.
-            (None, TypedSendTarget::Tagged(tagged))
-                if self.cross_module_value_method(tagged, &selector_atom, arguments.len()) =>
-            {
-                let fallback = self.annotate_current_send_call(dispatch_call);
-                self.keyed_value_method_call_doc(
-                    tagged,
-                    &selector_atom,
-                    &receiver_var,
-                    &arg_vars,
-                    fallback,
-                )
-            }
-            _ => self.annotate_current_send_call(dispatch_call),
-        };
+        );
         let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.clone()),
@@ -1200,6 +1156,71 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// The call [`Self::generate_typed_guarded_send`] makes once its guard
+    /// holds: the own-class arm's function (BT-4473), another module's
+    /// sealed Value method behind its value-method key (BT-4484), or the
+    /// target's `dispatch/3`.
+    fn typed_direct_call_doc(
+        &mut self,
+        target: &TypedSendTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        args_list_doc: Document<'static>,
+    ) -> Document<'static> {
+        let module_name = match target {
+            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
+            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
+        };
+        // BT-4473: a send to an instance of this unit's own class whose
+        // selector one of its `dispatch/3` method arms answers calls that
+        // arm's function directly; every other tagged target, and every
+        // built-in route, calls `dispatch/3`.
+        let own_arm = match target {
+            TypedSendTarget::Tagged(tagged) => {
+                self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len())
+            }
+            TypedSendTarget::Builtin(_) => None,
+        };
+        let dispatch_call = docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc,
+            "], ",
+            leaf::var(receiver_var.to_string()),
+            ")",
+        ];
+        // BT-4366: every call sits inside the type-test `case`, so each
+        // carries the send's line itself.
+        match (own_arm, target) {
+            (Some(arm), _) => self.annotate_current_send_call(Self::own_arm_call_doc(
+                selector_atom,
+                arm,
+                receiver_var,
+                arg_vars,
+            )),
+            // BT-4484: a sealed Value class in another module whose selector
+            // may be one of its `dispatch/3` method arms: the arm's function,
+            // behind a value-method static call key.
+            (None, TypedSendTarget::Tagged(tagged))
+                if self.cross_module_value_method(tagged, selector_atom, arg_vars.len()) =>
+            {
+                let fallback = self.annotate_current_send_call(dispatch_call);
+                self.keyed_value_method_call_doc(
+                    tagged,
+                    selector_atom,
+                    receiver_var,
+                    arg_vars,
+                    fallback,
+                )
+            }
+            _ => self.annotate_current_send_call(dispatch_call),
+        }
     }
 
     /// BT-4484: whether a typed send of `selector` with `arity` arguments to
