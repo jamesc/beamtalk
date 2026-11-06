@@ -22,3 +22,15 @@ TestCase subclass: ActorAliasedSelfSendTest
   testAliasedFieldAtPut => self assert: self.a aliasedFieldAtPut equals: 42
 
   testAliasedUserMethod => self assert: self.a aliasedUserMethod equals: 0
+
+  // BT-4525: a `^` through the compiled self-send answers the method and keeps
+  // the callee's write.
+  testDirectSelfSendNonLocalReturn =>
+    self assert: self.a directNonLocalReturn equals: 3
+    self assert: self.a getValue equals: 5
+
+  // BT-4525: the aliased form re-throws the `^` unchanged, so it behaves like
+  // the direct form instead of raising a raw `$bt_nlr` error.
+  testAliasedSelfSendNonLocalReturn =>
+    self assert: self.a aliasedNonLocalReturn equals: 3
+    self assert: self.a getValue equals: 5

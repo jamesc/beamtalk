@@ -352,6 +352,8 @@ handle_getValue([], State) ->
 -export([dispatch/3]).
 -ifdef(TEST).
 -export([intrinsic_selector/1, request_continuation/4]).
+%% BT-4525: the self-dispatch unwrap, driven directly on a `$bt_nlr` result.
+-export([unwrap_dispatch_result/1]).
 -endif.
 
 %% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
@@ -2102,10 +2104,19 @@ self_dispatch(Selector, Args) ->
 -doc """
 Unwrap a dispatch result, update pdict state, and return the value.
 Used by self_dispatch/2 to avoid repeating the put/error pattern.
+
+A `^` that unwound the callee (`safe_dispatch` answers `{error, Nlr,
+EntryState}`) is re-thrown unchanged, with no store to the cell (ADR 0146 R3,
+BT-4525): the cell already holds the callee's writes (every compiled method
+stores before a call that may run the block), and storing `EntryState` would
+rewind it; turning the throw into an error would stop the owner's method
+boundary from catching it.
 """.
 -spec unwrap_dispatch_result(
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}
 ) -> term().
+unwrap_dispatch_result({error, Nlr, _EntryState}) when ?IS_NLR(Nlr) ->
+    throw(Nlr);
 unwrap_dispatch_result(DispatchResult) ->
     case beamtalk_actor_state:adapt(DispatchResult) of
         {reply, Result} ->
