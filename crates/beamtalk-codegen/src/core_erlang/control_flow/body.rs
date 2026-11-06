@@ -536,11 +536,15 @@ impl CoreErlangGenerator {
         // BT-4014: the producer sites of this frame's statements, checked
         // against the lowered body (`ProducerSiteNotThreaded`).
         let mut producer_sites = Vec::new();
+        // BT-4461: in the REPL, the sites that write a binding the body holds
+        // in a variable (`ReplCachedBindingStale`).
+        let mut repl_sites = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
             producer_sites.extend(self.frame_producer_sites(expr, false, false));
+            repl_sites.extend(self.repl_frame_producer_sites(expr));
 
             // A nested loop/fold statement whose own body threads a
             // value-type `Self` mutation must be rejected ahead of every
@@ -598,6 +602,7 @@ impl CoreErlangGenerator {
             }
         }
         self.verify_frame_producer_sites(&stmts, &producer_sites, filtered_body);
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, Self::body_span(filtered_body));
         Ok(stmts)
     }
 
@@ -809,6 +814,9 @@ impl CoreErlangGenerator {
         // gate-split fault registers no sites (the check it exercises is
         // `FoldLocalsNotCarried`).
         let mut producer_sites = Vec::new();
+        // BT-4461: in the REPL, the sites that write a binding the body holds
+        // in a variable (`ReplCachedBindingStale`).
+        let mut repl_sites = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
@@ -816,6 +824,7 @@ impl CoreErlangGenerator {
             if !gate_split {
                 producer_sites.extend(self.frame_producer_sites(expr, true, false));
             }
+            repl_sites.extend(self.repl_frame_producer_sites(expr));
 
             // `expr` is a top-level statement of THIS loop/fold's own body. A
             // nested Letrec loop whose own body threads a value-type `Self`
@@ -1708,6 +1717,7 @@ impl CoreErlangGenerator {
         }
 
         self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, Self::body_span(&filtered_body));
         Ok(stmts)
     }
 
@@ -1724,13 +1734,19 @@ impl CoreErlangGenerator {
         body: &[&Expression],
     ) {
         let errors = super::super::threaded_ir::verify_producer_sites_threaded(stmts, sites);
-        let at = body.first().map_or_else(Default::default, |e| e.span());
+        let at = Self::body_span(body);
         self.report_threaded_ir_verify_errors(
             &errors,
             "loop or fold body's local-threading producer whose rebinds are not spliced into \
              the body",
             at,
         );
+    }
+
+    /// The span a loop or fold body's verifier findings are reported at: its
+    /// first statement's.
+    fn body_span(body: &[&Expression]) -> beamtalk_core::source_analysis::Span {
+        body.first().map_or_else(Default::default, |e| e.span())
     }
 
     // ── Body finalizer helpers (called from lower_foldl_body) ────────────────

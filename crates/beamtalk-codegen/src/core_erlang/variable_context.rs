@@ -112,10 +112,24 @@ impl VariableContext {
         // Search from innermost to outermost scope
         for scope in self.scopes.iter().rev() {
             if let Some(var_name) = scope.get(name) {
-                return Some(var_name);
+                // An empty name is a hidden binding (`hide`).
+                return (!var_name.is_empty()).then_some(var_name);
             }
         }
         None
+    }
+
+    /// Hides `name` in the current scope: until the scope is popped or
+    /// `name` is bound again, [`Self::lookup`] answers `None` for it. Answers
+    /// the variable it was bound to. BT-4461: a REPL frame hides its variable
+    /// for a binding a nested producer writes, so the producer reads the
+    /// binding out of the map it threads; the enclosing frames keep theirs.
+    pub(super) fn hide(&mut self, name: &str) -> Option<String> {
+        let previous = self.lookup(name).cloned()?;
+        if let Some(current_scope) = self.scopes.last_mut() {
+            current_scope.insert(name.to_string(), String::new());
+        }
+        Some(previous)
     }
 
     /// Binds a Beamtalk identifier to a Core Erlang variable in the current scope.
