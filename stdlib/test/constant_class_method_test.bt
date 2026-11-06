@@ -27,6 +27,21 @@ TestCase subclass: ConstantClassMethodTest
   // The class held as a Dynamic value: sends to it compile to `class_send`.
   lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
 
+  // Whether the runtime folds `cls`'s unary class-side constant `sel`
+  // answering `value`: `static_call_target/4` accepts its constant-value key
+  // (and installs it). The function name comes from the runtime's own
+  // `class_method_fun_name/1`, the one rule codegen shares.
+  folds: sel :: Symbol of: cls value: value -> Boolean =>
+    key := self
+      keyOf: cls
+      value: value
+      fun: (Erlang beamtalk_class_dispatch class_method_fun_name: sel)
+    (Erlang beamtalk_class_shadow_flags
+      static_call_target: key
+      with: cls name
+      with: sel
+      with: 1) =/= false
+
   // The constant-value key of `cls`'s class-side `fun` answering `value`.
   keyOf: cls value: value fun: fun :: Symbol =>
     Erlang erlang list_to_tuple: #(#constant_value, value, (Erlang erlang element: 3 of: cls), fun, (Erlang erlang element: 2 of: cls))
@@ -187,20 +202,28 @@ TestCase subclass: ConstantClassMethodTest
         (constants keys reject: [:sel | sel asString includesSubstring: ":"])
           inject: count
           into: [:n :sel |
-            key := self
-              keyOf: cls
-              value: (constants at: sel)
-              fun: ("class_" ++ sel asString) asAtom
-            folds := (Erlang beamtalk_class_shadow_flags
-              static_call_target: key
-              with: cls name
-              with: sel
-              with: 1) =/= false
-            folds ifTrue: [
-              self assert: (cls perform: sel) =:= (constants at: sel)
-            ]
-            folds ifTrue: [n + 1] ifFalse: [n]
+            (self
+              folds: sel
+              of: cls
+              value: (constants at: sel))
+              ifTrue: [
+                self assert: (cls perform: sel) =:= (constants at: sel)
+                n + 1
+              ]
+              ifFalse: [n]
           ]
       ]
     // At least this file's fixtures and stdlib's own constants were checked.
     self assert: checked >= 13
+    // No literal kind is skipped: every constant of the kinds fixture, which no
+    // test shadows, folds and so was checked above.
+    kinds := Erlang beamtalk_class_metadata lookup_constant_class_methods: #Bt4504ConstKinds
+    self assert: kinds size equals: 7
+    kinds keys
+      do: [:sel |
+        self
+          assert: (self
+            folds: sel
+            of: Bt4504ConstKinds
+            value: (kinds at: sel))
+      ]
