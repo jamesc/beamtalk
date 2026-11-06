@@ -509,6 +509,11 @@ pub struct CoreErlangGenerator {
     /// unit-test-only paths); `recv_type` degrades safely to `dynamic` in
     /// that case, matching the runtime live-patch path's precedent.
     pub(in crate::core_erlang) type_map: beamtalk_core::semantic_analysis::TypeMap,
+    /// The FFI type registry (ADR 0075) the checker used, when the driver had
+    /// one. Inline FFI lowering asks it whether a call needs the proxy's
+    /// coercion (BT-4485); `None` keeps every call on the proxy.
+    pub(in crate::core_erlang) native_type_registry:
+        Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
     /// keys of methods whose `return_type` was set by the return-type
     /// writeback pass (`apply_return_type_writeback_from_map`) rather than
     /// typed by the user — the same map used to build `module`/`module_owned`
@@ -704,6 +709,7 @@ impl CoreErlangGenerator {
             otp_release: None,
             alias_registry: beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::new(),
             type_map: beamtalk_core::semantic_analysis::TypeMap::new(),
+            native_type_registry: None,
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
