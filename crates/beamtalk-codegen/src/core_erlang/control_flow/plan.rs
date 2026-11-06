@@ -9,7 +9,7 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::synced_call::field_writes_block_stateless_loops;
+use super::super::synced_call::{field_writes_block_stateless_loops, nlr_blocks_hybrid_loops};
 use super::super::threaded_ir::{
     ClassMethodDefect, FrameId, RebindFrame, RebindFrameKind, StateAccFallbackReason,
     ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
@@ -251,6 +251,11 @@ struct BodyEffects {
     has_conditional_threaded_writes: bool,
     /// Last expression in body is a `DestructureAssignment`.
     last_is_destructure: bool,
+    /// BT-4523: the body or condition holds a `^` (nested blocks included,
+    /// `facts::block_has_nlr`). A hybrid loop keeps the fields it
+    /// writes in parameters, so its `State` omits them; a `^` stores and
+    /// carries a `State`, so such a body is never hybrid.
+    has_nlr: bool,
 }
 
 /// Whether a `whileTrue:`/`whileFalse:` `condition` expression has state
@@ -420,6 +425,12 @@ impl BodyEffects {
         let has_guarded_operator = generator.block_contains_guarded_operator(body)
             || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));
 
+        let has_nlr = beamtalk_core::semantic_analysis::facts::block_has_nlr(body)
+            || condition.is_some_and(|c| {
+                matches!(c, Expression::Block(cond)
+                    if beamtalk_core::semantic_analysis::facts::block_has_nlr(cond))
+            });
+
         Self {
             cond_has_state_effects,
             body_has_synced_sends,
@@ -430,6 +441,7 @@ impl BodyEffects {
             has_cf_mutations,
             has_conditional_threaded_writes,
             last_is_destructure,
+            has_nlr,
         }
     }
 }
@@ -986,6 +998,10 @@ impl ThreadingPlan {
             // fields, which a hybrid loop holds in parameters that advance
             // past the entry `State` — unbracketable, so thread instead.
             && !effects.has_guarded_operator
+            // BT-4523: a `^` stores and carries a whole `State` (ADR 0146
+            // P0); a hybrid loop's `State` omits the fields its parameters
+            // hold, so the throw would drop every write the loop made.
+            && !(effects.has_nlr && nlr_blocks_hybrid_loops())
     }
 
     /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
@@ -1043,6 +1059,10 @@ impl ThreadingPlan {
             // BT-4121: a hybrid body with a guarded operator falls back to
             // `StateAcc` (a hybrid loop cannot bracket its slow path).
             StateAccFallbackReason::GuardedOperator
+        } else if effects.has_nlr && !body_analysis.field_writes.is_empty() {
+            // BT-4523: a hybrid body with a `^` threads `StateAcc` (the
+            // throw stores and carries a whole `State`).
+            StateAccFallbackReason::NonLocalReturn
         } else if effects.last_is_destructure {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {

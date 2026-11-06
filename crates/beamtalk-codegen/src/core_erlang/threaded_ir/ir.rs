@@ -71,6 +71,10 @@ pub(in crate::core_erlang) enum StateAccFallbackReason {
     /// A call that may run user code in the body or condition, bracketed with
     /// a `State` store/reload (ADR 0137, BT-4269).
     SyncedUserCodeCall,
+    /// A `^` in a body that writes fields (BT-4523): a hybrid loop holds
+    /// those writes in parameters its `State` omits, and a `^` stores and
+    /// carries that `State`, so the loop threads `StateAcc`.
+    NonLocalReturn,
 }
 
 impl std::fmt::Display for StateAccFallbackReason {
@@ -102,6 +106,9 @@ impl std::fmt::Display for StateAccFallbackReason {
             }
             Self::SyncedUserCodeCall => {
                 write!(f, "call that may run user code in loop body or condition")
+            }
+            Self::NonLocalReturn => {
+                write!(f, "`^` in a field-writing loop body or condition")
             }
         }
     }
