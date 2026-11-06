@@ -240,10 +240,7 @@ pub(in crate::core_erlang) fn render(
             // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
-            //
-            // BT-4460: the legacy reread renders like a `Statement`; its
-            // `locals` are for the verifier.
-            ThreadedStmt::Statement(doc, _) | ThreadedStmt::StateCarrierReread { doc, .. } => {
+            ThreadedStmt::Statement(doc, _) => {
                 docs.push(doc.clone());
             }
             // BT-3863: the fold accumulator renders like a `Statement`; its
@@ -314,7 +311,9 @@ pub(in crate::core_erlang) fn render(
             )),
             // ADR 0131 §2: the method root's one legitimate drop. The
             // consumer reads `element(1, carrier)` itself; nothing to bind.
-            ThreadedStmt::DiscardLocals { .. } => {}
+            // BT-4462: a construct compiled in place renders nothing either;
+            // its `locals` are for the verifier (`ConstructLocalsNotRebound`).
+            ThreadedStmt::DiscardLocals { .. } | ThreadedStmt::ConstructLocalsInPlace { .. } => {}
             // ADR 0131 §2: frame nodes. Each `LocalRebind` in `body` already
             // carries the lowering its enclosing frame chose, so a frame
             // renders straight-line like any other sequence (an `NlrCatch`

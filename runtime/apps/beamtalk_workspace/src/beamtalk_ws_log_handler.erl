@@ -218,19 +218,8 @@ format_event(#{level := Level, msg := Msg, meta := Meta}) ->
     maybe_put(pid, format_pid(Meta), M4).
 
 -spec format_time(map()) -> binary().
-format_time(#{time := Timestamp}) ->
-    Micros = Timestamp rem 1000000,
-    Millis = Micros div 1000,
-    Seconds = Timestamp div 1000000,
-    {{Y, Mo, D}, {H, Mi, S}} = calendar:system_time_to_universal_time(Seconds, second),
-    iolist_to_binary(
-        io_lib:format(
-            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
-            [Y, Mo, D, H, Mi, S, Millis]
-        )
-    );
-format_time(_) ->
-    <<"unknown">>.
+format_time(Meta) ->
+    beamtalk_log_format:format_time(Meta).
 
 -spec format_msg(term(), map()) -> binary().
 format_msg({string, Msg}, _Meta) ->
@@ -289,10 +278,8 @@ format_mfa(_) ->
     undefined.
 
 -spec format_pid(map()) -> binary() | undefined.
-format_pid(#{pid := Pid}) when is_pid(Pid) ->
-    list_to_binary(pid_to_list(Pid));
-format_pid(_) ->
-    undefined.
+format_pid(Meta) ->
+    beamtalk_log_format:format_pid(Meta).
 
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->

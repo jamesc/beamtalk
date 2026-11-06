@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shared state-threading utilities used across loop/fold/conditional codegen:
-//! the `__local__` state-map key convention and rebinding threaded locals from
-//! a `StateAcc` map. Which locals a loop threads is
+//! the `__local__` state-map key convention and the typed marker for a
+//! construct compiled in place (`construct_locals_in_place`). Which locals a loop threads is
 //! `threading_analysis.rs`'s `threaded_locals_of` (ADR 0131, BT-3746).
 //!
 //! **DDD Context:** Compilation — Code Generation
@@ -12,8 +12,10 @@
 
 use super::super::CoreErlangGenerator;
 use super::super::threaded_ir::LOCAL_STATE_KEY_PREFIX;
-use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use super::super::threaded_ir::ThreadedStmt;
+use super::super::threading_analysis::ThreadedLocals;
+use beamtalk_core::ast::Expression;
+use beamtalk_core::source_analysis::Span;
 
 impl CoreErlangGenerator {
     /// Returns the state map key for a local variable.
@@ -31,8 +33,7 @@ impl CoreErlangGenerator {
     /// (BT-4424), and [`Self::local_state_key`] everywhere else. Every seed,
     /// write and read back of a scratch slot keys by it (the seed,
     /// `seed_scratch_locals`; a write, `lower_local_var_assignment_bind`; a
-    /// read, `construct_rebind_prelude` and
-    /// [`Self::rebind_threaded_vars_from_state`]), so a REPL read never asks
+    /// read, `construct_rebind_prelude`), so a REPL read never asks
     /// for a key nothing wrote (`badkey`) or for a seed the arm's writes left
     /// stale.
     pub(in crate::core_erlang) fn local_scratch_key(&self, var_name: &str) -> String {
@@ -43,43 +44,28 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// ADR 0111 Addendum 5 (rebind idiom): rebinds
-    /// each of `vars` — a nested control-flow construct's threaded
-    /// `__local__` captured vars — from `state_var`, returning one `let V =
-    /// maps:get(...) in` `Document` per var and updating each var's own
-    /// Core Erlang binding via `bind_var` so later code (in whatever form
-    /// the caller assembles) sees the rebound value rather than the stale
-    /// pre-statement one.
-    ///
-    /// Shared leaf helper for two call sites that both need this same
-    /// rebind after unpacking a nested construct's `{Result, NewState}`
-    /// result, differing only in how they wrap the returned `Document`s:
-    /// `conditionals.rs`'s `push_control_flow_threaded_var_rereads` (the
-    /// `ThreadedIr`-rendered conditional-arm path, wraps as one
-    /// `ThreadedStmt::Statement`) and `body.rs`'s
-    /// `lower_foldl_body` (the foldl loop-body path,
-    /// pushes directly onto its `stmts` vec).
-    pub(super) fn rebind_threaded_vars_from_state(
+    /// ADR 0131 (BT-4462): the typed marker for a nested construct `expr`
+    /// that a frame compiled in place (unpacking its `{Value, State}`
+    /// carrier with an opaque `element(2, ...)` `Bind`) rather than lowering
+    /// as a producer: a [`ThreadedStmt::ConstructLocalsInPlace`] naming the
+    /// locals it threads through the frame (`threaded_locals_of`, lowered:
+    /// a REPL loop's bindings ride the REPL map, not the frame), or `None`
+    /// when it threads none, the only
+    /// in-place shape an accepted program reaches (an actor list-op that only
+    /// sends to `self`, a conditional writing only fields). With a local the
+    /// marker is a `VerifyError::ConstructLocalsNotRebound`, reported through
+    /// the frame's `report_threaded_ir_verify_errors`: the construct should
+    /// have been a producer at its frame's sites, and nothing rereads its
+    /// locals out of the carrier any more (BT-4462 deleted that legacy
+    /// write-back).
+    pub(super) fn construct_locals_in_place(
         &mut self,
-        vars: &[String],
-        state_var: &str,
-    ) -> Vec<Document<'static>> {
-        let mut docs = Vec::new();
-        for var in vars {
-            let core_var = self
-                .lookup_var(var)
-                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-            docs.push(docvec![
-                "let ",
-                leaf::var(core_var.clone()),
-                " = call 'maps':'get'(",
-                leaf::atom(self.local_scratch_key(var)),
-                ", ",
-                leaf::var(state_var.to_string()),
-                ") in ",
-            ]);
-            self.bind_var(var, &core_var);
-        }
-        docs
+        expr: &Expression,
+        span: Span,
+    ) -> Option<ThreadedStmt> {
+        let locals = self
+            .threaded_locals_of(expr)
+            .and_then(ThreadedLocals::into_lowered)?;
+        (!locals.is_empty()).then_some(ThreadedStmt::ConstructLocalsInPlace { locals, span })
     }
 }

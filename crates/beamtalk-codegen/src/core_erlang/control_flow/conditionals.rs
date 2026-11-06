@@ -68,7 +68,6 @@ use super::LocalWrite;
 use super::StateAccFallbackReason;
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -2547,7 +2546,7 @@ impl CoreErlangGenerator {
                 span,
             );
             self.bind_var(&id.name, &val_var);
-            self.push_control_flow_threaded_var_rereads(value, span, stmts);
+            stmts.extend(self.construct_locals_in_place(value, span));
             return Ok(val_var);
         }
 
@@ -2720,7 +2719,7 @@ impl CoreErlangGenerator {
     /// carrier became the operand's value (`ConstructCarrierInPlace`); and a
     /// nested construct writing an arm-local was compiled in place and its
     /// locals reread out of its state carrier
-    /// (`ConstructLocalsRereadOpaquely`), which in an actor left the
+    /// (`ConstructLocalsNotRebound`), which in an actor left the
     /// arm-local's scratch key in the actor's state and crashed a loop in a
     /// nested `on:do:`/`ensure:` body (`invalid argument`).
     ///
@@ -3192,7 +3191,7 @@ impl CoreErlangGenerator {
                                 },
                                 span,
                             });
-                            self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
+                            stmts.extend(self.construct_locals_in_place(value, span));
                             if is_last {
                                 last_result = Some(ValueRef::Var(val_var));
                             }
@@ -3357,11 +3356,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        self.push_control_flow_threaded_var_rereads(
-                            &arguments[1],
-                            span,
-                            &mut stmts,
-                        );
+                        stmts.extend(self.construct_locals_in_place(&arguments[1], span));
                         if is_last {
                             last_result = Some(ValueRef::Var(val_var));
                         }
@@ -3437,7 +3432,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
+                        stmts.extend(self.construct_locals_in_place(value, span));
                         // BT-4439: each name is written to the arm's slot.
                         let _ = self.lower_destructure_bind_from_var(
                             pattern,
@@ -3543,13 +3538,11 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        // BT-4460: unreachable with a non-empty set in a method
-                        // arm (every arm registers a nested construct writing
-                        // an arm-local as a producer, lowered above); the
-                        // verifier reports a reread that carries a local
-                        // (`ConstructLocalsRereadOpaquely`). Removed with the
-                        // helper by BT-4462.
-                        self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
+                        // BT-4460 / BT-4462: a construct reaching here threads
+                        // no local (every arm registers a nested construct
+                        // writing an arm-local as a producer, lowered above);
+                        // one that does is `ConstructLocalsNotRebound`.
+                        stmts.extend(self.construct_locals_in_place(expr, span));
                     }
                 }
                 // C11 — a Tier 2 `value(:...)` call on a stored
@@ -3751,52 +3744,6 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
         Ok(self.render_branch_arm(stmts, frame, final_version, block.span, arm))
-    }
-
-    /// ADR 0111 Addendum 5 (rebind idiom, shared by C6/C8/
-    /// C9/C10): rebinds each of a nested control-flow construct's threaded
-    /// `__local__` captured vars from the just-produced state, appending
-    /// one `Statement` (or none, if there are no threaded vars) to `stmts`.
-    /// A rebind read is never itself a version mutation (Rule 1) — always a
-    /// `Statement`, never a `Bind`.
-    ///
-    /// ADR 0131 Phase 3c (BT-3822): reached only from an arm that compiled a
-    /// nested construct writing a local *of that arm* in place instead of
-    /// lowering it as a producer. Since BT-4460 every arm frame, a plain arm
-    /// included (`generate_plain_arm`), registers that construct as a
-    /// producer, so a method arm never gets here: the reread is a
-    /// [`ThreadedStmt::StateCarrierReread`], which the verifier reports
-    /// wherever it carries a local (`ConstructLocalsRereadOpaquely`), so
-    /// `just verify-threaded-ir` and the BT-4460 grid assert it is
-    /// unreachable. BT-4461: no REPL input reaches it either: a REPL arm
-    /// registers its statements' `repl_arm_producer_sites`, so a nested
-    /// construct writing a binding lowers through the REPL producer, and
-    /// `repl_cached_binding_corpus.rs` compiles every REPL frame of the BT-4461
-    /// grid with the verifier on. The helper and its callers go with BT-4462.
-    fn push_control_flow_threaded_var_rereads(
-        &mut self,
-        source_expr: &Expression,
-        span: Span,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) {
-        let Some(threaded_vars) = self
-            .threaded_locals_of(source_expr)
-            .and_then(ThreadedLocals::into_lowered)
-        else {
-            return;
-        };
-        let new_state_name = self.current_state_var();
-        let re_reads = self.rebind_threaded_vars_from_state(&threaded_vars, &new_state_name);
-        if !re_reads.is_empty() {
-            // BT-4460: typed, so the verifier reports the construct whose
-            // locals reached the arm without a `LocalRebind`
-            // (`ConstructLocalsRereadOpaquely`).
-            stmts.push(ThreadedStmt::StateCarrierReread {
-                locals: threaded_vars,
-                doc: Document::Vec(re_reads),
-                span,
-            });
-        }
     }
 
     /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/`Statement`

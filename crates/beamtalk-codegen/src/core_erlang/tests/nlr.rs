@@ -42,37 +42,31 @@ fn wrap_body_with_nlr_catch_actor_reply_catch_arm_contains_reply_atom() {
 }
 
 #[test]
-fn wrap_value_type_body_with_nlr_catch_try_prefix_contains_make_ref_and_try() {
+fn wrap_body_with_nlr_catch_value_type_mints_token_and_answers_bare_value() {
     let mut generator = CoreErlangGenerator::new("nlr_test");
     let token = generator.fresh_temp_var("NlrToken");
-    let vars = generator.wrap_value_type_body_with_nlr_catch(&token);
-    let prefix = vars.format_try_prefix().to_pretty_string();
-    assert!(
-        prefix.contains("'erlang':'make_ref'()"),
-        "prefix missing make_ref: {prefix}"
-    );
-    assert!(prefix.contains("try"), "prefix missing try: {prefix}");
-}
-
-#[test]
-fn wrap_value_type_body_with_nlr_catch_suffix_contains_nlr_tag_and_raw_raise() {
-    let mut generator = CoreErlangGenerator::new("nlr_test");
-    let token = generator.fresh_temp_var("NlrToken");
-    let vars = generator.wrap_value_type_body_with_nlr_catch(&token);
-    let suffix = vars
-        .format_catch_suffix(&NlrBoundary::ValueType)
+    let body = leaf::var("Body".to_string());
+    let out = generator
+        .wrap_body_with_nlr_catch(body, &token, &NlrBoundary::ValueType)
         .to_pretty_string();
     assert!(
-        suffix.contains("'$bt_nlr'"),
-        "suffix missing bt_nlr: {suffix}"
+        out.contains("'erlang':'make_ref'()"),
+        "missing make_ref: {out}"
+    );
+    assert!(out.contains("try"), "missing try: {out}");
+    assert!(out.contains("'$bt_nlr'"), "missing bt_nlr: {out}");
+    assert!(
+        out.contains("primop 'raw_raise'"),
+        "missing raw_raise: {out}"
+    );
+    // BT-4503: the ValueType catch arm answers the bare value — neither the
+    // actor-reply tuple nor a `{Value, State}` pair.
+    assert!(
+        !out.contains("'reply'"),
+        "should not contain actor-reply: {out}"
     );
     assert!(
-        suffix.contains("primop 'raw_raise'"),
-        "suffix missing raw_raise: {suffix}"
-    );
-    // ValueType catch arm yields {Value, State} — never the actor-reply tuple
-    assert!(
-        !suffix.contains("'reply'"),
-        "should not contain actor-reply: {suffix}"
+        !out.contains("{_NlrVal") && !out.contains("{NlrVal"),
+        "should not answer a pair: {out}"
     );
 }

@@ -56,9 +56,10 @@ fn open_own_class_self_send_calls_the_arm_locally() {
 }
 
 #[test]
-fn own_arm_with_non_local_return_is_unwrapped() {
-    // A method whose block holds `^` answers `{Result, State}`; its arm
-    // unwraps the pair, and so must the direct call.
+fn own_arm_with_non_local_return_answers_its_result() {
+    // BT-4503: a method whose block holds `^` answers its result itself (the
+    // NLR boundary inside the function answers the bare value), so its arm
+    // and the direct call both take the return as is.
     let code = codegen(concat!(
         "sealed Value subclass: Finder\n",
         "  field: items :: List(Integer) = #()\n",
@@ -67,23 +68,24 @@ fn own_arm_with_non_local_return_is_unwrapped() {
         "    nil\n",
         "  firstBigOrZero -> Integer => self firstBig ifNil: [0]\n",
     ));
+    let call = code
+        .find("apply 'firstBig'/1(")
+        .unwrap_or_else(|| panic!("the own arm should be called locally. Got:\n{code}"));
     assert!(
-        code.contains("apply 'firstBig'/1("),
-        "the own arm should be called locally. Got:\n{code}"
+        !code[..call].ends_with("case "),
+        "the direct call answers the send's result, no unwrap. Got:\n{code}"
     );
-    let call = code.find("apply 'firstBig'/1(").expect("checked above");
-    let before = &code[..call];
     assert!(
-        before.ends_with("case "),
-        "an NLR arm's call must be unwrapped by a case. Got:\n{code}"
+        code.contains("<'firstBig'> when 'true' ->\n            call 'test':'firstBig'(Self)\n"),
+        "the dispatch/3 arm answers the function's return. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
 }
 
 #[test]
 fn other_module_sealed_class_keeps_dispatch() {
-    // Only the unit's own class: another module's arm shape (NLR pair,
-    // method vs slot) is not known for the version that is loaded.
+    // Only the unit's own class: whether another module's selector is a
+    // method or a slot read is not known for the version that is loaded.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: SealedWidget -> Integer =>\n",

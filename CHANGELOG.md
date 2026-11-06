@@ -4,6 +4,20 @@
 
 ### Language
 
+- **`P class` types — the class object of a class conforming to protocol `P` (ADR 0144, BT-4435)** — `field: factory :: Sortable class` declares a slot that holds any class whose instances conform to `Sortable`. `C class <: P class` iff `C conformsTo: P`. A send to a `P class` value resolves against `P`'s class-side requirements. Documented in [Classes as strategies: `P class`](beamtalk-language-features.md#classes-as-strategies-p-class-adr-0144) (#4832).
+- **Type: list-literal elements are checked against `List(E)` parameters (BT-4385)** — `#(1, "hi")` passed to a parameter typed `List(Integer)` now warns for each element that does not conform to `E`. The check applies to Array and Tuple literals in argument position; the literal itself is unchanged at run time (#4869).
+- **Type: method return values are checked against `C class` / `P class` return annotations (BT-4440)** — a method whose declared return type is a class-side metatype (`-> Integer class`, `-> Sortable class`) now warns when its body answers a value that does not conform. The check also fires on implicit `self` returns in class methods that declare a `P class` return (#4860).
+- **Type: return-type refinement is checked in `P class <: Q class` subtyping (BT-4441)** — a send to a `P class`-typed receiver now resolves against `P`'s class-side requirements, and a block passed to such a send receives a class-side block context so nested sends type-check against the protocol (#4868).
+- **Type: block `value:` arguments are checked against annotated block parameter types (BT-4444)** — `[:x :: Integer | x + 1] value: "hi"` now warns that the argument does not match the declared parameter type. The check covers `value:`, `value:value:`, and `valueWithArguments:` (#4854).
+- **Type: class objects in a union RHS are judged structurally so `P class` names can't collide (BT-4445)** — `Integer class | String class` in a union type is now kept as two distinct metatypes instead of collapsing when both classes share a protocol name (#4852).
+- **Fix: `perform: #hash` no longer loops forever (BT-4432)** — `Object>>hash` was defined as a `self delegate` stub with no backing implementation, so `perform: #hash` on an object whose class did not override `hash` re-entered the same `self delegate` indefinitely. `Object>>hash` now returns the object's Erlang `phash2` value (#4858).
+- **Fix: an Erlang FFI call as the receiver of a state-threading conditional in an actor no longer fails to compile (BT-4451)** — `(Erlang mod fn: arg) ifTrue: [self.x := 1] ifFalse: [0]` in an actor method raised "pre-sequenced sub-expression never substituted" at codegen time. The FFI call is now correctly sequenced before the conditional (#4865).
+- **Fix: a REPL destructuring assignment in a loop body keeps its write to a workspace binding (BT-4439)** — `#(1, 2) do: [:x | {a, b} := {x, x + 1}]` at the REPL used to drop the writes to `a` and `b` after the loop. Destructuring assignments in loop bodies are now threaded back to the workspace (#4856).
+- **Reject a local write in an `on:do:`/`ensure:` block that codegen does not inline (BT-4430)** — a local-variable write inside an `on:do:` or `ensure:` block reached through `perform:` or another indirect path that codegen cannot inline is now a compile error (`LocalWriteInNonInlinedBlock`) instead of silently dropping the write at run time (#4844).
+- **A loop-body `ensure:` whose cleanup writes a binding the loop also writes is a compile error (BT-4424)** — `n timesRepeat: [[...] ensure: [t := t + 1]]` where `t` is also written by the loop body now reports `LocalRebindModeMismatch` instead of silently choosing one writer (#4833).
+- **Spawn family on a non-spawnable class raises one structured `#not_spawnable` error (BT-4443)** — `Value spawn`, `Value startLink`, and the other spawn-family selectors sent to a Value or Object class now raise a structured `#not_spawnable` error with a hint, instead of a variety of raw match failures depending on the route (#4874).
+- **Shadowed spawn-family runtime module lookup raises a structured error for a different class kind (BT-4404)** — when a class name is shadowed and the runtime module lookup finds a class of a different kind (e.g. a Value when an Actor is expected), it now raises a structured `#class_kind_mismatch` error instead of a raw `function_clause` (#4836).
+- **Actor self-sends are exempt from the sendability check (BT-4447)** — an actor method sending a message to `self` (`self foo: bar`) no longer checks whether `bar` is sendable, since the message stays in the same process. This removes a false warning on closures and other non-sendable values passed to the actor's own methods (#4840).
 - **Fix: a `^` block run by another actor of the same class keeps its own actor's state through a `perform:`ed `ensure:` (BT-4448)** — when actor A handed `[^1]` to actor B of the same class and B ran it with `perform: #ensure: withArguments:`, A's method could answer B's state (with B's cleanup write) as A's new state whenever the two actors' fields were equal. The relay now tells the actors apart by identity, so A keeps its own state.
 - **Fix: an `ensure:` sent with `perform:` keeps its cleanup's actor field writes when a `^` unwinds through it (BT-4429)** — in an actor method, `c := [self.n := 9]. [^1] perform: #ensure: withArguments: #(c)` answered 1 but left `n` unchanged. `Block>>ensure:` reached dynamically now resumes the `^` with the actor state its cleanup left, as an `ensure:` compiled in place has done since BT-4312.
 - **Fix: a hot-patched `class signal:` is honoured by class-literal signal sends compiled before it (BT-4270)** — `MyError signal: m` raised in the caller through `Exception`'s signal primitive whenever, at compile time, the send resolved to it (BT-4115), so an override added later by reload, a class-side extension or a runtime class-method fun was silently skipped until the caller was recompiled. The caller-side raise now sits behind a run-time key (ADR 0142 §2) that holds only while the send still resolves to that compiled primitive; otherwise the send is the ordinary class send and the override runs. A raise costs about the same as before (row 8b: 89 reductions, 86 before).
@@ -304,6 +318,15 @@
 
 ### Runtime
 
+- Forwarding class `new:` constructors run in the caller instead of the class process, reducing spawn overhead by one gen_server round-trip (BT-4475, #4879)
+- Explicit FFI-forward class `new` constructors run in the caller, matching the `new:` change above (BT-4464, #4864)
+- Static call keys consolidated to one `persistent_term` key per class, so a base-class write erases at most 2 keys per class instead of one per selector (BT-4442, #4867)
+- Integer-literal class-side methods inlined behind a constant-value key — a class method whose body is a single integer literal compiles to a `persistent_term` read, skipping the call entirely (BT-4363, #4875)
+- Typed `Tuple at:` meets the 1a send-reduction target; built-in-typed sends now record their reduction costs in the benchmark suite (BT-4397, #4863)
+- Value-type inherited sends take the memoised direct-dispatch verdict from BT-4280, removing a per-send `maps:get` (BT-4260, #4835)
+- The BT-4099 constructor fast path is guarded by the ADR 0142 run-time guard, so a hot-patched constructor override is honoured (BT-4409, #4838)
+- Indirect Value subclasses anchored for direct construction — `MySub new:` on a value type whose parent is not a built-in now takes the guarded direct path (BT-4132, #4845)
+- `ensure:` relay hardening: typed `private_scratch`, indirect cell-write corpus cells, cfg-gate `SiteState`, explicit `SelfVt` seeding (BT-4433, #4846)
 - **Fix: Logger sends unwrap tagged Strings before reaching OTP logger (BT-4321)** — `Logger error: "boom"` and other Logger sends that passed a tagged Beamtalk String to OTP logger produced `FORMAT ERROR` in log output. String metadata keys and values also reached handlers as raw tagged tuples. Strings are now unwrapped before the OTP logger call (#4799).
 - `isKindOf:` lowers to a direct `objectIsKindOf/2` intrinsic call, dropping the FFI proxy hop (BT-4410, #4818)
 - Built-in class literals (`String`, `Integer`, …) carry their compile-time module, saving a runtime module lookup on `isKindOf:` and class-reference sends (BT-4411, #4819)
@@ -357,6 +380,14 @@
 
 ### Internal
 
+- ADR 0131: lower a nested inline construct in an actor plain arm through `ThreadedIr` — a conditional or evaluated block nested in an actor `match:` plain arm is now lowered as a `ThreadedIr` node instead of a special-case code path (BT-4460, #4877)
+- Codegen: compile the remaining guard-style `^` shapes as direct returns — comparisons and other guard-safe expressions under a `^` in an inlined conditional now emit a direct return instead of a throw/catch pair (BT-4452, #4876)
+- Codegen: guard-style `^` in inlined conditionals as direct returns — extends the BT-4452 optimisation to `^` in `ifTrue:`/`ifFalse:` arms (BT-4415, #4843)
+- Buccaneer (direct dispatch) request path: own-class direct arms, `isKindOf:` and `not` without dispatch — own-class sends in conditional arms, `isKindOf:` tests and `not` are now resolved at compile time (BT-4473, #4871)
+- Unified FFI arity data: one curated OTP export table for `arity_mismatch` diagnostics and LSP completions, replacing duplicated tables (BT-4371, #4859)
+- Share the send-line rule; single-source loop fn names; tighten loop-annotation tests (BT-4405, #4837)
+- `refactor(codegen)`: drop unused `ModuleName::class`; pin `dispatch/3` target module (#4851)
+- `refactor(codegen)`: fix `ModuleName` double-prefix for Beamtalk-prefixed classes (#4768)
 - Compiler-port alias memo keyed on mtime and file length, eliminating stale cache hits when a file is rewritten with the same inode (BT-4365, #4807)
 - Eliminate duplicated loop bodies in codegen tests and MCP lint (#4798)
 - **A `match:` compiles to Core that grows linearly with its arms (BT-4141)**: Array, Type and binary arms used to embed a full copy of every later arm at each of their miss sites. A `match:` with N such arms (for example tuple-wrapped binary dispatch, `{#ok, <<71, 69, 84, 32, rest/binary>>}`) therefore emitted about 2^N copies of its trailing arms. Each such arm now binds the rest of the chain once, as a `letrec` label that erlc lifts to a local function, and applies it at every miss site. The `Binary`, `Tuple` and `Boolean` type tests also emit their arm body once. Behaviour is unchanged.
@@ -402,6 +433,14 @@
 
 ### Tooling
 
+- LSP signature help surfaces Options docs while typing — when a send takes an Options dictionary, the signature-help popup now shows the Options parameter names, types and doc comments (BT-4345, #4866)
+- Cockpit editor hover tooltip renders Options docs as Markdown — hovering an Options method in the Cockpit editor now shows its docs formatted with Markdown instead of raw text (BT-4344, #4862)
+- Cockpit editor hover resolves keyword selectors so Options methods hover — a keyword selector like `foo:bar:` now resolves to the correct Options method for hover docs (BT-4343, #4853)
+- LSP `P class` signature help and completions — sends to a `P class`-typed receiver now show class-side protocol provisions in completions and signature help (BT-4450, #4850; BT-4436, #4842)
+- `beamtalk test` fails fast on duplicate test class names in scope — if two test files define a class with the same name, the runner now reports the conflict and exits instead of silently running only one (BT-4350, #4873)
+- `beamtalk test` pre-loads package `src/` and dependency protocols, reducing false-positive `Unresolved class` warnings in test files (BT-4446, #4839)
+- Fix: incremental build cache now invalidates on `stubs/` changes — editing or adding a stub file no longer leaves the build cache stale (BT-4393, #4872)
+- REPL warnings keep the diagnostic hint as a structured field, so consumers (LSP, MCP, JSON output) can access the hint programmatically (BT-4449, #4855)
 - **Desktop broker: fronts pick their own port (BT-4398)** — the broker used to choose a front's port by binding `127.0.0.1:0`, closing it and passing the number on, so another process (or a second front spawned at the same moment) could take the port before the front bound it; a conflict was only noticed if it made the front exit, and a foreign server on the port could answer the readiness probe. The front is now started with `PORT=0` and `BT_ATTACH_PORT_FILE`, binds a free port itself and writes the port it got to that file (`BtAttach.PortReport`); the broker waits for the file and probes that port. `spawn_front_with_port_retry`/`SpawnAttemptConfig` are replaced by `launch_front`/`LaunchConfig`, `port::find_free_port`/`allocate_port_with_retry` and `BrokerError::PortsExhausted` are gone, and a front that dies during boot is reported at once as `FrontExitedBeforeReportingPort` (no retry, no 5 s grace period per attempt).
 - **Fix: dependencies compile with the package's FFI type registry (BT-4225, BT-4136)** — a dependency build now receives the FFI type specs from OTP and from its own prior dependencies only (not the root package's), so a clean build and a rebuild produce identical diagnostics. The OTP spec extraction is done once per resolution instead of once per dependency. (#4690, #4700)
 - Fix: `beamtalk fmt` no longer splices a comment that sits directly before a standalone method (`Foo class >> bar => …`) into the method below it — the comment stays above its target (BT-4253, #4651)
@@ -442,6 +481,7 @@
 
 ### Standard Library
 
+- **`Telemetry hasHandlers:` checks whether any handler is attached to an event prefix (BT-4480)** — `Telemetry hasHandlers: #(#myapp, #cache)` answers `true` if any handler (Beamtalk, Erlang or Elixir) is attached to an event whose name starts with the given prefix, like Elixir libraries' `:telemetry.list_handlers/1` check. An emitter can use it to skip building timestamps and metadata when nobody listens. Documented in [Application Telemetry Events](beamtalk-language-features.md#application-telemetry-events-adr-0069-amendment) (#4878).
 - Fix: `SystemNavigation` per-class queries (`implementorsOf:`, `sendersOf:`, etc.) tolerate removed classes instead of returning raw Symbol tags or crashing mid-walk (BT-4111, #4801)
 - Fix: `SystemNavigation` extension walks (`sendersOf:`, `referencesTo:`, `methodsMatching:`, etc.) drop removed-class entries instead of reporting a raw Symbol (BT-4418, #4810)
 - **`File open:mode:` / `File open:mode:do:` take a `FileMode`** — the `mode` parameter narrows from `Symbol` to the new `FileMode` type alias (`#read | #write | #append | #readWrite`). Literal callers are unaffected; a typed caller that forwards a `Symbol`-typed variable now gets a type warning (a build failure under `--warnings-as-errors`) and needs to narrow the argument to `FileMode` (BT-4382, #4775).

@@ -281,11 +281,240 @@ impl NativeTypeRegistry {
         }
         drift
     }
+
+    /// Whether the spec of `module:function/arity` proves that an inline FFI
+    /// call to it needs no result coercion (BT-4485).
+    ///
+    /// True when the return type extracted from the function's `-spec` is
+    /// made only of types that `beamtalk_erlang_proxy:coerce_ffi_result/3`
+    /// passes through unchanged in both coercion modes
+    /// ([`ffi_result_passes_unchanged`]). Unknown functions (no spec) are not
+    /// proved, and neither are hand-written stub signatures: a stub that
+    /// misstates a return type may cost a wrong warning, never a dropped
+    /// coercion.
+    #[must_use]
+    pub fn proves_no_result_coercion(&self, module: &str, function: &str, arity: u8) -> bool {
+        self.lookup(module, function, arity).is_some_and(|sig| {
+            sig.provenance == TypeProvenance::Extracted
+                && ffi_result_passes_unchanged(&sig.return_type)
+        })
+    }
+
+    /// Sorted `module:function/arity` keys of every function
+    /// [`Self::proves_no_result_coercion`] holds for. Generated code depends
+    /// on exactly this set, so `beamtalk build` folds it into each file's
+    /// incremental cache key: a spec change that adds or removes a proof
+    /// recompiles the callers.
+    #[must_use]
+    pub fn proved_no_coercion_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .modules
+            .iter()
+            .flat_map(|(module, fns)| {
+                fns.iter()
+                    .filter(|sig| self.proves_no_result_coercion(module, &sig.name, sig.arity))
+                    .map(move |sig| format!("{module}:{}/{}", sig.name, sig.arity))
+            })
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+}
+
+// ── FFI coercion proofs (BT-4485) ──────────────────────────────────────────
+//
+// The one place that decides when an inline `Erlang module fn: …` call may
+// skip `beamtalk_erlang_proxy:direct_call/4` and be emitted as a direct remote
+// call. Codegen asks these and never re-derives the rule. Both lists are
+// pinned to the runtime by the shared fixture
+// `runtime/apps/beamtalk_runtime/test/fixtures/ffi_passthrough_conformance.json`:
+// the Erlang side (`beamtalk_erlang_proxy_tests`) checks every sample value
+// really crosses the proxy unchanged, the Rust side (tests below) checks these
+// lists match the fixture.
+
+/// Classes whose values are scalars: never a tagged `String`, never a list,
+/// tuple or map, and never a fun or anything holding one.
+const FFI_SCALAR_CLASSES: &[&str] = &[
+    "Integer",
+    "Float",
+    "Number",
+    "Boolean",
+    "True",
+    "False",
+    "UndefinedObject",
+    "Nil",
+    "Pid",
+];
+
+/// Extra classes a *result* may have: their values are not scalars, but
+/// `coerce_ffi_result/3` returns them unchanged (maps and funs).
+const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block"];
+
+/// Extra classes an *argument* may have. `Symbol` is an atom; as a result it
+/// is not proved, because `atom()` includes `ok` and `error`, which the proxy
+/// coerces to a `Result`.
+const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol"];
+
+/// The runtime check that backs [`ffi_arg_passes_unchanged`]: a value that
+/// passes one of these `erlang` guard BIFs is a number, atom or pid, so it is
+/// never a tagged `String`, a binary or a fun. Static types are not enforced at
+/// run time (gradual typing), so a direct call also checks each argument with
+/// these and falls back to the proxy when one fails.
+pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
+
+/// Every member of `ty` (a single type or a union) satisfies `member_ok`.
+fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. } => member_ok(class_name),
+        InferredType::Union { members, .. } => members.iter().all(|m| all_members(m, member_ok)),
+        _ => false,
+    }
+}
+
+/// A result of type `ty` passes through `coerce_ffi_result/3` unchanged in
+/// both coercion modes: no list (charlist coercion), no `String`/`Binary`, no
+/// tuple or `Result` (`{ok, _}`/`{error, _}` coercion), no atom that may be
+/// `ok`/`error`, and no `Dynamic`/`Object`.
+#[must_use]
+pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
+    all_members(ty, &|name| {
+        if let Some(atom) = name.strip_prefix('#') {
+            return atom != "ok" && atom != "error";
+        }
+        FFI_SCALAR_CLASSES.contains(&name) || FFI_RESULT_EXTRA_CLASSES.contains(&name)
+    })
+}
+
+/// An argument of static type `ty` reaches the callee unchanged and cannot
+/// carry Beamtalk code: never a tagged `String` (the proxy's stock-mode unwrap
+/// would change it) and never a fun or a container that may hold one (a block
+/// run by the callee would change how a raised error is classified). The
+/// `badarg` charlist retry is a no-op for these too: no binaries.
+#[must_use]
+pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
+    all_members(ty, &|name| {
+        name.starts_with('#')
+            || FFI_SCALAR_CLASSES.contains(&name)
+            || FFI_ARG_EXTRA_CLASSES.contains(&name)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BT-4485: the FFI pass-through rule matches the shared fixture the
+    /// runtime's `beamtalk_erlang_proxy_tests` checks sample values against.
+    /// The class lists must be exactly the fixture's types (no type accepted
+    /// here without runtime samples), and every `not_proven` type is rejected.
+    #[test]
+    fn ffi_passthrough_matches_shared_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_runtime/test/fixtures/ffi_passthrough_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
+        let types = |key: &str| -> Vec<String> {
+            fixture[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("fixture key {key}"))
+                .iter()
+                .map(|v| {
+                    v.get("type")
+                        .unwrap_or(v)
+                        .as_str()
+                        .expect("type name")
+                        .to_string()
+                })
+                .collect()
+        };
+        let ty = |name: &str| InferredType::known(name);
+
+        let result_ok = types("result_passthrough");
+        let arg_ok = types("arg_passthrough");
+        for name in &result_ok {
+            assert!(ffi_result_passes_unchanged(&ty(name)), "result {name}");
+        }
+        for name in types("result_not_proven") {
+            assert!(!ffi_result_passes_unchanged(&ty(&name)), "result {name}");
+        }
+        for name in &arg_ok {
+            assert!(ffi_arg_passes_unchanged(&ty(name)), "arg {name}");
+        }
+        for name in types("arg_not_proven") {
+            assert!(!ffi_arg_passes_unchanged(&ty(&name)), "arg {name}");
+        }
+        let guards: Vec<String> = fixture["arg_runtime_guards"]
+            .as_array()
+            .expect("arg_runtime_guards")
+            .iter()
+            .map(|v| v.as_str().expect("guard name").to_string())
+            .collect();
+        assert_eq!(
+            guards, FFI_ARG_RUNTIME_GUARDS,
+            "runtime guards match the fixture"
+        );
+        // Every class the rule names has runtime samples in the fixture.
+        for class in FFI_SCALAR_CLASSES.iter().chain(FFI_RESULT_EXTRA_CLASSES) {
+            assert!(
+                result_ok.iter().any(|t| t == class),
+                "no result samples for {class}"
+            );
+        }
+        for class in FFI_SCALAR_CLASSES.iter().chain(FFI_ARG_EXTRA_CLASSES) {
+            assert!(
+                arg_ok.iter().any(|t| t == class),
+                "no arg samples for {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn ffi_passthrough_unions_need_every_member() {
+        let int_or_nil = InferredType::simple_union(&["Integer", "UndefinedObject"]);
+        assert!(ffi_result_passes_unchanged(&int_or_nil));
+        assert!(ffi_arg_passes_unchanged(&int_or_nil));
+        let int_or_string = InferredType::simple_union(&["Integer", "String"]);
+        assert!(!ffi_result_passes_unchanged(&int_or_string));
+        assert!(!ffi_arg_passes_unchanged(&int_or_string));
+        let ok_or_other = InferredType::simple_union(&["#ok", "#other"]);
+        assert!(!ffi_result_passes_unchanged(&ok_or_other));
+        assert!(ffi_arg_passes_unchanged(&ok_or_other));
+    }
+
+    #[test]
+    fn proves_no_result_coercion_reads_the_spec() {
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "erlang",
+            vec![
+                extracted_sig("monotonic_time", 0, vec![], InferredType::known("Integer")),
+                extracted_sig(
+                    "get",
+                    1,
+                    vec![],
+                    InferredType::Dynamic(DynamicReason::DynamicSpec),
+                ),
+            ],
+        );
+        assert!(registry.proves_no_result_coercion("erlang", "monotonic_time", 0));
+        assert!(!registry.proves_no_result_coercion("erlang", "get", 1));
+        assert!(!registry.proves_no_result_coercion("erlang", "monotonic_time", 1));
+        assert!(!registry.proves_no_result_coercion("lists", "reverse", 1));
+        assert_eq!(
+            registry.proved_no_coercion_keys(),
+            vec!["erlang:monotonic_time/0"]
+        );
+
+        // A hand-written stub never removes a coercion.
+        let mut stubbed = NativeTypeRegistry::new();
+        let mut stub = extracted_sig("answer", 0, vec![], InferredType::known("Integer"));
+        stub.provenance = TypeProvenance::Declared(crate::span::Span::new(0, 0));
+        stubbed.register_module("native_mod", vec![stub]);
+        assert!(!stubbed.proves_no_result_coercion("native_mod", "answer", 0));
+        assert!(stubbed.proved_no_coercion_keys().is_empty());
+    }
 
     fn extracted_sig(
         name: &str,

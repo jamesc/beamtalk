@@ -228,6 +228,10 @@ fn execute_build_passes(
         &dep_ctx.resolved_deps,
         Some(OutputFormat::Text),
     );
+    // BT-4485: inline FFI calls the FFI type table proves need no coercion
+    // compile to direct calls, so the set of proved functions shapes the
+    // generated code: fold it into every file's cache key with the stub inputs.
+    let stub_inputs_hash = fold_direct_ffi_proofs(stub_inputs_hash, native_type_registry.as_ref());
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
@@ -582,6 +586,24 @@ fn post_process_package_artifacts(
     );
 
     Ok(())
+}
+
+/// Fold the FFI type table's direct-call proofs (BT-4485,
+/// `NativeTypeRegistry::proved_no_coercion_keys`) into the stub-inputs hash
+/// that keys incremental builds. Empty when nothing is proved, so a project
+/// without FFI specs keeps its cache keys.
+fn fold_direct_ffi_proofs(
+    stub_inputs_hash: String,
+    registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> String {
+    let proofs = registry
+        .map(beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proved_no_coercion_keys)
+        .unwrap_or_default();
+    if proofs.is_empty() {
+        return stub_inputs_hash;
+    }
+    let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
+    crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
 }
 
 #[cfg(test)]

@@ -13,7 +13,8 @@
 
 use std::collections::HashMap;
 
-use super::super::{CodeGenContext, CoreErlangGenerator};
+use super::super::nlr::NlrArmShape;
+use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
     EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
@@ -462,21 +463,25 @@ pub(in crate::core_erlang) enum VerifyError {
     /// producer sites.
     ConstructCarrierInPlace { at: Span },
 
-    /// BT-4460 (ADR 0131 §2): a construct that threads the locals `locals`
-    /// (`threaded_locals_of` names them) reached its frame through the legacy
-    /// reread, a [`ThreadedStmt::StateCarrierReread`] after an opaque
+    /// BT-4460 / BT-4462 (ADR 0131 §2): a construct that threads the locals
+    /// `locals` (`threaded_locals_of` names them) was compiled in place, a
+    /// [`ThreadedStmt::ConstructLocalsInPlace`] after an opaque
     /// `element(2, ...)` extraction of its state carrier, instead of a
     /// [`ThreadedStmt::ConstructTuple`] and one [`ThreadedStmt::LocalRebind`]
-    /// per local. The construct was compiled in place: its writes ride in
-    /// the carrier's scratch keys, which the arm then folds into the frame's
-    /// `State` (an actor's arm-local `__local__` key leaks into the actor's
-    /// state), and no frame rule decides how each local is rebound. The repro
-    /// is an actor method's `c ifTrue: [m := 0. c ifTrue: [m := 5. 7]
-    /// ifFalse: [0]. m] ifFalse: [0]`, whose plain arm registered only loop
-    /// and fold sites, so the nested conditional was not a producer there.
-    /// Every frame registers every producer at its sites, so no reread is
-    /// legitimate; reported by [`VerifyWalk::walk_stmt`] wherever one is.
-    ConstructLocalsRereadOpaquely { locals: Vec<String>, at: Span },
+    /// per local. Its writes ride in the carrier's scratch keys, which the
+    /// frame then folds into its own `State` (an actor's arm-local
+    /// `__local__` key leaks into the actor's state), and no frame rule
+    /// rebinds the locals, so later statements read their pre-construct
+    /// values. The repro is an actor method's `c ifTrue: [m := 0. c ifTrue:
+    /// [m := 5. 7] ifFalse: [0]. m] ifFalse: [0]`, whose plain arm (before
+    /// BT-4460) registered only loop and fold sites, so the nested
+    /// conditional was not a producer there. Until BT-4462 the frame reread
+    /// each local out of the carrier (the legacy write-back); that reread is
+    /// deleted, so this finding is the only thing standing between such a
+    /// shape and a silently dropped write. Every frame registers every
+    /// producer at its sites, so no accepted program reaches it; reported by
+    /// [`VerifyWalk::walk_stmt`] wherever one is.
+    ConstructLocalsNotRebound { locals: Vec<String>, at: Span },
 
     /// BT-4461 (ADR 0131 §2, the `MethodBody (REPL)` row): a REPL frame other
     /// than the root (a conditional arm, an `on:do:`/`ensure:` block) holds
@@ -517,6 +522,23 @@ pub(in crate::core_erlang) enum VerifyError {
     /// loop or fold whose body held a `^` (BT-4288) and every non-final root
     /// or arm `^` (BT-4312).
     ReplReturnWithoutBoundary { at: Span },
+
+    /// BT-4503: an [`ThreadedStmt::NlrCatch`] in a value-type or class-method
+    /// scope whose catch arm answers anything but the bare value
+    /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
+    /// scope kind: the function an NLR boundary closes answers what its
+    /// callers take as the send's result. A value-type method (or value-type
+    /// extension fun) and a class method answer the bare value: `dispatch/3`'s
+    /// arm, the own-module typed direct call of the function (BT-4473) and
+    /// the runtime's extension apply
+    /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
+    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
+    /// `{Value, Bindings}` pair; those scopes are not constrained here. The
+    /// repro: every value-type method with a block `^` answered `{Result,
+    /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
+    /// call unwrapped, so a value-type
+    /// extension with a block `^` answered the pair to the sender.
+    MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
     /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
     /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
@@ -1230,7 +1252,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
-            | ThreadedStmt::StateCarrierReread { .. }
+            | ThreadedStmt::ConstructLocalsInPlace { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
@@ -1789,8 +1811,9 @@ impl VerifyWalk<'_> {
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
-            // Opaque by design: `NlrCatch` has no body field (`render`
-            // treats the rest of the slice as its body); a `Statement` is
+            // Opaque by design: a `NlrCatch` has no body field (`render`
+            // treats the rest of the slice as its body, walked as siblings);
+            // a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
             //
@@ -1803,21 +1826,31 @@ impl VerifyWalk<'_> {
             //
             // BT-4015: a `ConditionHandBack` is checked against its loop's
             // `condition_families` by `condition_families_not_carried`.
-            ThreadedStmt::NlrCatch { .. }
-            | ThreadedStmt::Statement(..)
+            // BT-4503: the boundary of a value-type or class-method function
+            // answers the bare value its callers take as the send's result.
+            ThreadedStmt::NlrCatch { boundary, span, .. } => {
+                if matches!(self.scope, ScopeKind::ValueType | ScopeKind::ClassMethod)
+                    && boundary.arm_shape() != NlrArmShape::Value
+                {
+                    self.errors.push(VerifyError::MethodNlrAnswersPair {
+                        boundary: boundary.clone(),
+                        at: *span,
+                    });
+                }
+            }
+            ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
-            // BT-4460: a construct's locals reread out of its state carrier
-            // rather than rebound by its producer.
-            ThreadedStmt::StateCarrierReread { locals, span, .. } => {
+            // BT-4460 / BT-4462: a construct compiled in place whose locals
+            // no producer rebinds.
+            ThreadedStmt::ConstructLocalsInPlace { locals, span } => {
                 if !locals.is_empty() {
-                    self.errors
-                        .push(VerifyError::ConstructLocalsRereadOpaquely {
-                            locals: locals.clone(),
-                            at: *span,
-                        });
+                    self.errors.push(VerifyError::ConstructLocalsNotRebound {
+                        locals: locals.clone(),
+                        at: *span,
+                    });
                 }
             }
             // ADR 0137: the bracket reads `store` and binds `load` in the
