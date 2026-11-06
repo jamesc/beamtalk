@@ -688,6 +688,29 @@ No codegen, `ThreadedIr`, or runtime changes are expected. If the wire
 check (phase 2) needs one, the normalise-to-nested-sends design has failed
 and the ADR should be revisited before phases 3–6.
 
+## Migration Path
+
+Nothing breaks: every existing program compiles and runs with the same
+meaning, and `|>` was not previously valid syntax. Two changes do surface
+*new diagnostics* on code that compiles cleanly today, and each lands with
+the fix-up in the same PR:
+
+- **`cascade-drops-update`** fires on existing cascades whose target is a
+  value and whose non-final message answers an updated copy. For each hit,
+  either the cascade is a latent bug (rewrite it with `|>`, nesting or temp
+  locals) or the fan-out is intended (add `@expect cascade_drops_update`).
+  Phase 1 lists the stdlib and test-corpus hits up front, such as the
+  `0 max: 1; max: (…)` codegen fixtures, which are intended.
+- **The `setUp` lint** stops accepting a `setUp` that ends in a `self`
+  cascade with more than one `with*:` message. Every such `setUp` is
+  already broken (all but the last field are dropped, as verified above);
+  the fix is `self withA: 1 |> withB: 2`, or the nested form if `|>` has
+  not shipped yet.
+
+Projects that build with `--warnings-as-errors` see both as failures until
+they fix or suppress the hits; a build without that flag lists every
+hit as a warning first.
+
 ## Open Questions (for the maintainer)
 
 1. **Accept all three parts, or a subset?** Part 3 (warning + `setUp` lint
