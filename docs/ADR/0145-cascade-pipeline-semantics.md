@@ -216,14 +216,25 @@ REPL:
 
 **Precedence and layout.**
 
-- `|>` binds looser than keyword messages, like `;`. Each stage is a complete
-  unary or keyword message whose receiver is the previous stage's value; a
-  keyword stage's arguments end at the next `|>`.
-- **No binary stages.** `x |> + 1` is a parse error with the help
-  "parenthesise the left side: `(…) + 1`". Unary binds tighter than
-  binary, so `a foo + 1` already chains; a binary stage would only help
-  after a keyword stage (`a at: k |> + 1`), which reads worse than
-  `(a at: k) + 1`. This can be relaxed later without breaking code.
+- `|>` binds looser than keyword messages, like `;`. **A stage is
+  everything up to the next `|>` (or the end of the expression), parsed as
+  an ordinary keyword expression whose receiver is the previous stage's
+  value**: `stage := unary-message+ binary-tail? keyword-message? |
+  keyword-message`. So `|> keys sorted` sends `keys` and then `sorted`,
+  `|> foo at: 1` sends `foo` and then `at: 1` to that result, and
+  `|> size + 1` adds 1 to the size. Each is exactly what the same text
+  means with the previous value written in front of it. This differs
+  deliberately from a cascade part, which is a single message: today
+  `x foo; size reversed` parses `reversed` as a separate statement on the
+  same line (verified; BT-4508), and pipelines must not
+  copy that trap.
+- **No stage may start with a binary message.** `x |> + 1` is a parse
+  error with the help "parenthesise the left side: `(…) + 1`". Unary
+  binds tighter than binary, so `a foo + 1` already chains; a stage that
+  starts with a binary operator would only help after a keyword stage
+  (`a at: k |> + 1`), which reads worse than `(a at: k) + 1`. A binary
+  message *after* a stage's unary messages (`|> size + 1`) is fine. This
+  can be relaxed later without breaking code.
 - The first segment is an ordinary expression (`recv m1`, or just `recv`):
   `st |> withX: 1` is legal and equals `st withX: 1`.
 - A line that **starts** with `|>` continues the expression above, by the
@@ -248,8 +259,9 @@ REPL:
     where Elixir users will try it first;
   - the three `match:` arm-body sites:
     `[1 -> a withX: 1 |> withY: 2; _ -> b]`;
-  - map, list, array and tuple literal elements:
-    `#(a foo |> bar, b)`.
+  - map values and list, array and tuple literal elements:
+    `#(a foo |> bar, b)` (map keys are not parsed at keyword level and
+    keep needing parentheses).
 
   `|>` is its own token, so it never collides with the arm separator `;`,
   the element separator `,` or the list cons `|`. The `;`/`|>` mixing
@@ -320,17 +332,21 @@ p withX: 5 |> 10
 //        message to the previous result; it does not apply a function
 
 d at: #k |> + 1
-// error: a pipeline stage cannot be a binary message; write `(d at: #k) + 1`
+// error: a pipeline stage cannot start with a binary message;
+//        write `(d at: #k) + 1`
+
+x |> keys sorted
+// fine: `(x keys) sorted`; a stage is a whole message chain, not one message
 ```
 
 **`then:` for the value-as-argument case.** Elixir's `&` and Gleam's `_`
 can put the piped value anywhere; `|>` only makes it the receiver. For the
-other cases, `Object` gains one sealed method, named after Elixir's
+other cases, `Object` gains one method, named after Elixir's
 `Kernel.then/2`:
 
 ```beamtalk
 /// Answer the result of evaluating aBlock with the receiver.
-sealed then: aBlock :: Block => aBlock value: self
+then: aBlock :: Block => aBlock value: self
 ```
 
 ```beamtalk
@@ -338,23 +354,49 @@ average := orders collect: [:o | o amount]
   |> then: [:xs | xs sum / xs size]
 ```
 
-It is an ordinary message, so it works without `|>` too (`x then: [...]`)
-and needs no compiler support. Its signature follows `Object >> ifNotNil:`
+It is an ordinary message, so it works without `|>` too (`x then: [...]`).
+Its declared signature follows `Object >> ifNotNil:`
 (`notNilBlock :: Block => notNilBlock value: self`), which leaves the
 block bare for the same reason (BT-2834). Pharo spells the same method
-`in:`. The
-Elixir name is chosen for this ADR's audience, and nothing in the stdlib
-defines `then:` today.
+`in:`; the Elixir name is chosen for this ADR's audience. Nothing in the
+stdlib, the runtime or a current ADR defines `then:` today. (ADR 0034's
+Future `then:` is superseded.) It is deliberately **not** `sealed`, so a
+user class that already defines `then:`, such as a promise type, keeps
+compiling and overrides it.
+
+Unlike `ifNotNil:`, `then:` is not inlined by the compiler. That has
+three consequences, which the docs state:
+
+- **Types.** The type checker gets one rule, modelled on
+  `infer_args_for_if_not_nil`: a literal block's parameter is typed as
+  the receiver's type, and `then:` answers the block's result type. Without
+  it, `xs` in `then: [:xs | …]` would be `Dynamic` and the rest of the
+  pipeline would lose types and completion.
+- **Captured locals.** A literal block that assigns a captured local is
+  an escaping stateful block (ADR 0133), the same compile error as for any
+  block passed to an ordinary method. Use a temp local instead.
+- **Actors and class methods.** `then:` is a message, so on an actor
+  receiver the block runs in the actor's process. A block that sends back
+  to the calling actor deadlocks (`deadlock_detected`). On a class
+  receiver whose class has class variables, it runs in the class process
+  (ADR 0142). Elixir's `then` always runs in the caller. To get that,
+  bind the value to a temp local. Inlining a literal-block `then:` so it
+  runs in the caller for every receiver, as `ifNotNil:` does, would need
+  its own `ThreadedIr` treatment for blocks that write locals. It is a
+  possible follow-up, not part of this ADR.
 
 A stage the previous result does not understand raises
 `does_not_understand` exactly as the nested form would, and the type checker
 reports it at the stage's span (it sees an ordinary send).
 
 **AST representation.** The parser produces a new
-`Expression::Pipeline { head, stages: Vec<CascadeMessage>, span }` node.
-Stages are parsed with the existing `parse_cascade_message`, which already
-carries the `should_stop_keyword_continuation` guard that stops a final
-keyword stage from swallowing the next method header.
+`Expression::Pipeline { head, stages, span }` node. Each stage is a chain
+of messages with an implicit receiver, per the stage grammar above, so
+`parse_cascade_message` (one message only) cannot be reused as is. The
+stage parser is the keyword-expression parser with the receiver supplied.
+It keeps the `should_stop_keyword_continuation` guard that stops a final
+keyword stage from swallowing the next method header, and it rejects a
+stage that starts with `BinarySelector`, `Arrow` or `GtGt`.
 
 The send-operand normalisation pass (`crates/beamtalk-core/src/ast/normalize.rs`,
 BT-4059) rewrites each `Pipeline` into the left-nested `MessageSend`s it
@@ -598,10 +640,17 @@ the `|>` operator is the part that removes the reason people reach for `;`.
 
 - 🎩 **Smalltalk purist**: "Message passing all the way down — no grammar
   change, just a method on `Object`."
-- 🎨 **Language designer**: "Composable, first-class, overridable."
+- 🎨 **Language designer**: "Composable, first-class, and an ordinary
+  method a class can override."
 
-Why it loses: `st then: [:s | s withA: 1] then: [:s | s withB: 2]` is longer
-than the nesting it replaces; a DNU-forwarding proxy (`st asPipe withA: 1;
+Why it loses as the primary answer: `(st then: [:s | s withA: 1]) then:
+[:s | s withB: 2]` is longer than the nesting it replaces and needs the
+parentheses, because without them it is one `then:then:` send. That
+same hazard means a `then:` written after a keyword message without `|>`
+(`xs inject: 0 into: […] then: […]`) is swallowed into
+`inject:into:then:`. With `|>` in front, the stage boundary prevents this,
+which is one more reason `then:` is adopted as a `|>` companion
+(§ Decision) rather than a substitute; a DNU-forwarding proxy (`st asPipe withA: 1;
 withB: 2; value`) is slow, hides the real receiver from the type checker and
 LSP, and relies on `;` meaning something else on the proxy.
 
@@ -612,7 +661,8 @@ LSP, and relies on `;` meaning something else on the proxy.
   deciding factor is question 2: only syntax-directed rules (A, C, D) are
   meaning-stable under gradual typing.
 - Purists may accept the warning (part 3) but not the operator (part 2).
-  The parts are separable so the maintainer can take one without the other.
+  The parts were kept separable for that reason. The maintainer took all
+  three, with part 3 first (§ Resolved).
 
 ## Alternatives Considered
 
@@ -795,8 +845,14 @@ Sketch for `/plan-adr` once accepted; sizes are rough.
    meaning in arms; the binary-stage error; line-continuation for a leading
    `|>`; `PipeGt` in `is_input_complete`'s trailing-incomplete tokens.
    Parser tests for each, plus a `tests/repl-protocol/cases/` case for
-   multi-line REPL input. `Object >> then:` in `stdlib/src/object.bt`, with
-   a BUnit test.
+   multi-line REPL input. The stage parser is the keyword-expression
+   parser with an implicit receiver (not `parse_cascade_message`), with
+   tests that `|> keys sorted` and `|> foo at: 1` stay one stage and that
+   a stage starting with `BinarySelector`/`Arrow`/`GtGt` is rejected.
+   `Object >> then:` in `stdlib/src/object.bt` (not sealed), with BUnit
+   tests on value, actor and class receivers, plus the type-checker rule
+   that types a literal block's parameter as the receiver (next to
+   `infer_args_for_if_not_nil`).
 4. **Source fidelity (M)** — `unparse`, `beamtalk fmt` layout (one stage
    per line when broken), the pipeline record/restore for
    `as_written_method_source` and the REPL `ClassBuilder` path (round-trip
@@ -826,7 +882,9 @@ and the ADR should be revisited before phases 3–6.
 ## Migration Path
 
 Nothing breaks: every existing program compiles and runs with the same
-meaning, and `|>` was not previously valid syntax. Two changes do surface
+meaning, and `|>` was not previously valid syntax. `Object >> then:` is
+not sealed, so a user class that already defines `then:` keeps its own
+method. Two changes do surface
 *new diagnostics* on code that compiles cleanly today, and each lands with
 the fix-up in the same PR:
 
@@ -879,12 +937,14 @@ it later would break code.
 - **Error vs warning for a certain drop (Alternative I):** a warning for
   now. It can be promoted to an error later if the warning is ignored.
 - **Value-as-argument escape hatch:** ship `Object >> then: aBlock` with
-  the operator.
+  the operator. It is an ordinary, overridable, non-inlined method with a
+  typing rule; inlining it to run in the caller is a possible follow-up.
 - **Casts:** a pipeline cannot end in `!`, matching cascades.
 
 ## References
 - Related issues: BT-4352 (this ADR), BT-506 (canceled pipeline-chaining
-  research; this ADR is its decision-record successor)
+  research; this ADR is its decision-record successor), BT-4508 (cascade
+  parts silently drop trailing tokens; the trap pipeline stages avoid)
 - Related ADRs: ADR 0042 § Cascade Semantics (deferred this question),
   ADR 0039 (Syntax Pragmatism vs Smalltalk — cascades kept),
   ADR 0038 (ClassBuilder as Actor so cascades fan out), ADR 0067 (three
