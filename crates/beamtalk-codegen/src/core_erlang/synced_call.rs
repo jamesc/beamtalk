@@ -152,6 +152,13 @@ thread_local! {
     /// bounded number of times rather than once per enclosing probe.
     pub(in crate::core_erlang) static CLASSIFY_SEND_CALLS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+    /// Test-only fault (BT-4523): mode selection ignores a body's `^`, so a
+    /// body with a field write and a `^` is lowered hybrid, as before the
+    /// fix. The hybrid lowerings' `NlrThrowInHybridLoop` check
+    /// ([`CoreErlangGenerator::checkout_hybrid_loop`]) can then be shown to
+    /// fire on it.
+    pub(in crate::core_erlang) static FAULT_HYBRID_ADMITS_NLR: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
 }
 
 /// BT-4524 (ADR 0146 P0): whether a `^` in a block the call runs as a closure
@@ -161,6 +168,19 @@ thread_local! {
 pub(in crate::core_erlang) fn nlr_closures_store_first() -> bool {
     #[cfg(test)]
     if FAULT_NLR_CLOSURES_UNSTORED.with(std::cell::Cell::get) {
+        return false;
+    }
+    true
+}
+
+/// BT-4523: whether a body's `^` keeps it out of hybrid mode, as mode
+/// selection requires (ADR 0146 P0: a `^` stores and carries a whole `State`,
+/// and a hybrid loop's `State` omits the fields its parameters hold). Always
+/// `true`; a test-only fault turns it off
+/// so the `NlrThrowInHybridLoop` check can be shown to fire.
+pub(in crate::core_erlang) fn nlr_blocks_hybrid_loops() -> bool {
+    #[cfg(test)]
+    if FAULT_HYBRID_ADMITS_NLR.with(std::cell::Cell::get) {
         return false;
     }
     true
@@ -1870,6 +1890,34 @@ impl CoreErlangGenerator {
             outer.state_uses.extend(state_uses);
         }
         checkout
+    }
+
+    /// BT-4523: pops and checks out the marker of a hybrid-params loop
+    /// ([`Self::checkout_guarded_op_loop`] with `hybrid`), answering a
+    /// [`VerifyError::NlrThrowInHybridLoop`] for every `^` whose carried state
+    /// was read while the marker was innermost (or handed to it by a nested
+    /// loop that did not bracket): a hybrid loop's `State` omits the fields
+    /// its parameters hold, so that `^` would store and carry a state missing
+    /// the loop's writes. The caller reports them with its `ConditionalLoop`'s
+    /// own verifier findings.
+    pub(in crate::core_erlang) fn checkout_hybrid_loop(&mut self, at: Span) -> Vec<VerifyError> {
+        let marker = self.pop_guarded_op_loop();
+        let errors = marker
+            .state_uses
+            .iter()
+            .filter(|u| {
+                matches!(
+                    u.kind,
+                    StaleStateUseKind::Read {
+                        site: StateReadSite::NlrThrowState,
+                        ..
+                    }
+                )
+            })
+            .map(|u| VerifyError::NlrThrowInHybridLoop { at: u.at })
+            .collect();
+        self.checkout_guarded_op_loop(marker, true, at);
+        errors
     }
 
     /// BT-4179: notes a use of the threaded `State` variable `var` at `at` on

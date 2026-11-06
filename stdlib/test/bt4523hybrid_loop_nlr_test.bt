@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4523: a `^` in a loop body stores and carries the state including every
+// field the loop wrote so far (ADR 0146 P0). The loop used to hold its field
+// writes in parameters and throw the loop-entry state, so the method answered
+// correctly but the actor kept its old field, and an enclosing `ensure:`
+// cleanup saw it too. Fixture: fixtures/bt4523hybrid_loop_nlr_actor.bt.
+
+TestCase subclass: Bt4523HybridLoopNlrTest
+
+  testCountedLoopReturnKeepsTheFieldWrite =>
+    a := Bt4523HybridLoopNlrActor spawn
+    self assert: a countedLoopReturn equals: 3
+    self assert: a currentN equals: 3
+
+  testEnsureCleanupSeesTheLoopsFieldWrite =>
+    a := Bt4523HybridLoopNlrActor spawn
+    self assert: a countedLoopReturnThroughEnsure equals: 3
+    self assert: a currentSeen equals: 3
+    self assert: a currentN equals: 3
+
+  testWhileLoopReturnKeepsTheFieldWrite =>
+    a := Bt4523HybridLoopNlrActor spawn
+    self assert: a whileLoopReturn equals: 4
+    self assert: a currentN equals: 4
+
+  testTimesRepeatReturnKeepsTheFieldWrite =>
+    a := Bt4523HybridLoopNlrActor spawn
+    self assert: a timesRepeatReturn equals: 7
+    self assert: a currentN equals: 7
+
+  testReturnBeforeTheWriteKeepsEarlierIterationsWrites =>
+    a := Bt4523HybridLoopNlrActor spawn
+    self assert: a countedLoopReturnBeforeWrite equals: 3
+    self assert: a currentN equals: 2

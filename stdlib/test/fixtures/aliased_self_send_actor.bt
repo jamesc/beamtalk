@@ -30,3 +30,19 @@ Actor subclass: AliasedSelfSendActor
 
   // Read the current x value
   getValue => self.x
+
+  // Run a block after writing x, so a `^` in it must keep the write
+  run: aBlock =>
+    self.x := 5
+    aBlock value
+
+  // BT-4525: a `^` in a block run through the compiled self-send
+  directNonLocalReturn =>
+    self run: [^3]
+    99
+
+  // BT-4525: the same through an aliased self-send (Layer 1 self_dispatch)
+  aliasedNonLocalReturn =>
+    other := self
+    other run: [^3]
+    99

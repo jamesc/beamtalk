@@ -326,6 +326,7 @@ mod gen_server;
 mod guard_returns;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
+mod hybrid_loop_nlr_corpus;
 mod inline_block_local_in_loop_corpus;
 mod late_reconcile_conformance;
 mod local_assignment_producer;
