@@ -1,7 +1,7 @@
 # ADR 0145: Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `|>` Pipeline
 
 ## Status
-Proposed (2026-11-05)
+Accepted (2026-11-06); proposed 2026-11-05.
 
 Decision record for the "Cascade Semantics" question that ADR 0042 deferred
 (to a planned "ADR 0044" that was never written — 0044 became
@@ -816,7 +816,7 @@ promoted later.
 
 ## Implementation
 
-Sketch for `/plan-adr` once accepted; sizes are rough.
+Phases for `/plan-adr`; sizes are rough.
 
 1. **Warning only (S/M)** — `cascade-drops-update` in the type checker
    beside `infer_cascade`, using its resolved target type and the
