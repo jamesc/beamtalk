@@ -34,8 +34,7 @@
 //! This module handles the common pre-order-visitor pattern.
 
 use crate::ast::{
-    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, Pattern,
-    StringSegment,
+    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, Pattern, StringSegment,
 };
 
 // ── Module-level iterators ────────────────────────────────────────────────────
