@@ -1,7 +1,7 @@
 # ADR 0146: A `^` Commits the Actor's Cell, Not a Copy
 
 ## Status
-Proposed (2026-11-06). Tracking: BT-4505.
+Accepted (2026-11-07); proposed 2026-11-06. Tracking: BT-4505.
 
 Builds on ADR 0041 (state-carrying `^`), ADR 0137 (the actor-state cell) and
 ADR 0142 (where class methods run). Decides BT-4459. BT-4430, which came up
@@ -169,6 +169,12 @@ cleanup from the BT-4524 fix.
 No source changes. The two behaviour changes described under User Impact go in
 the release notes. Libraries compiled by an older compiler keep working for one
 release and must be recompiled after that.
+
+## Implementation Tracking
+
+**Epic:** BT-4533
+**Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp)
+**Status:** Planned
 
 ## References
 - Issues: BT-4505, BT-4459, BT-4448, BT-4429, BT-4312, BT-4523, BT-4524, BT-4525, BT-4532, BT-3582
