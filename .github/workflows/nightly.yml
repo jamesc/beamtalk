@@ -94,6 +94,9 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
+      - name: Install cargo-nextest
+        uses: ./.github/actions/install-nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -185,6 +188,9 @@ jobs:
 
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Install cargo-nextest
+        uses: ./.github/actions/install-nextest
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -377,6 +383,9 @@ jobs:
   # ─── Publish nightly release ────────────────────────────────────────
   publish-nightly:
     needs: [check-activity, macos, macos-x86_64, windows, linux]
+    # A workflow_dispatch on a branch (e.g. to time a CI change) builds and
+    # tests but must not replace the `nightly` release, which says it is from main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       # persist-credentials kept: the step below pushes a tag delete (`git push origin :refs/tags/nightly`).

@@ -1293,16 +1293,19 @@ _test-rust CRATE SKIP_FILTERSET="" SKIP_CARGO_ARGS="":
     @echo "✅ Rust tests complete"
 
 # Bench smoke (BT-3886): every criterion bench binary once, in test mode
-# (`cargo test --benches` runs each benchmark function a single time, as the
+# (`cargo test --bench '*'` runs each benchmark function a single time, as the
 # old `cargo test --all-targets` did). It is what caught BT-3868's Windows
 # main-thread stack overflow, so nightly.yml runs it on its macOS/Windows
-# matrix; it is ~5 minutes of serial wall time (`benches/build_bench.rs`
+# matrix; it is ~1-2 minutes of serial wall time (`benches/build_bench.rs`
 # cold-builds the stdlib), which is why it is not part of `test-rust`.
+# `--bench '*'`, not `--benches`: `--benches` selects every target with
+# `bench = true`, which a lib target is by default, so it re-ran every crate's
+# unit tests serially, corpus tier included (~21 of the step's ~22 minutes).
 # nextest cannot run these: it lists a `harness = false` binary with
 # `--list`, and build_bench builds the stdlib before it parses arguments.
 test-benches-smoke:
-    @echo "🧪 Running criterion benches in test mode (bench smoke, ~5 min)..."
-    cargo test --benches --quiet
+    @echo "🧪 Running criterion benches in test mode (bench smoke)..."
+    cargo test --bench '*' --quiet
     @echo "✅ Bench smoke complete"
 
 # Run REPL protocol tests (slow - full pipeline, ~50s)

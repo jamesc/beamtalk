@@ -299,14 +299,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
-      # Prebuilt cargo-nextest from nextest's own CDN (see ci-platforms.yml's `platform-check` job).
       - name: Install cargo-nextest
-        run: |
-          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-          mkdir -p "$bin"
-          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-            "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
-          cargo nextest --version
+        uses: ./.github/actions/install-nextest
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -368,12 +362,7 @@ jobs:
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Install cargo-nextest
-        run: |
-          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-          mkdir -p "$bin"
-          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-            "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
-          cargo nextest --version
+        uses: ./.github/actions/install-nextest
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -1225,16 +1214,10 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # Prebuilt cargo-nextest from nextest's own CDN (see the test-rust
-      # job): coverage-rust-cobertura's fast-tier pass runs through
+      # coverage-rust-cobertura's fast-tier pass runs through
       # `cargo llvm-cov nextest -E 'not (corpus_tests)'`, which needs it.
       - name: Install cargo-nextest
-        run: |
-          bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-          mkdir -p "$bin"
-          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-            "https://get.nexte.st/0.9.148/linux" | tar -xz -C "$bin"
-          cargo nextest --version
+        uses: ./.github/actions/install-nextest
 
       # Lean pre-build (no `cargo build --all-targets`): the Rust suites run
       # instrumented under llvm-cov, and the spawned BEAM nodes only need the

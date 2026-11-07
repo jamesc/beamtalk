@@ -1,0 +1,34 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Prebuilt, pinned cargo-nextest from nextest's own CDN, the same source
+# scripts/setup-cloud.sh uses: nextest refuses a source build without
+# --locked, and this needs no GitHub release API. `just test-rust` runs the
+# Rust tests through it (one scheduler across every test binary, see the
+# Justfile); without it, `_test-rust` falls back to a serial `cargo test
+# --all-targets` that also runs the corpus tier and the bench smoke. Shared by
+# ci.yml, ci-platforms.yml and nightly.yml; the caller installs Rust first.
+
+name: Install cargo-nextest
+description: Install a pinned prebuilt cargo-nextest into CARGO_HOME/bin
+
+runs:
+  using: composite
+  steps:
+    - name: Install cargo-nextest
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux) platform=linux ;;
+          macOS) platform=mac ;;
+          Windows) platform=windows-tar ;;
+        esac
+        cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+        # On Windows CARGO_HOME is a native path (C:\Users\...); Git Bash's tar
+        # needs the POSIX spelling.
+        if [ "${{ runner.os }}" = "Windows" ]; then cargo_home="$(cygpath -u "$cargo_home")"; fi
+        bin="$cargo_home/bin"
+        mkdir -p "$bin"
+        curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+          "https://get.nexte.st/0.9.148/${platform}" | tar -xz -C "$bin"
+        cargo nextest --version
