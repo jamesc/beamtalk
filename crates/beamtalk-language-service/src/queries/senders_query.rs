@@ -177,6 +177,9 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
     }
 }
 
+/// Collect line numbers of message sends inside a [`Pattern`] by walking it
+/// with [`walk_pattern`] and delegating each embedded expression to
+/// [`collect_send_lines`].
 fn collect_pattern_send_lines(
     pattern: &Pattern,
     selector_name: &str,
