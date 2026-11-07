@@ -286,7 +286,7 @@ handle_getValue([], State) ->
 %% stuck local one, rather than hanging indefinitely (erpc's own default).
 %% `?BT_REMOTE_CALL_TIMEOUT` itself now lives in beamtalk.hrl — shared with
 %% `beamtalk_node`/`beamtalk_node_monitor` (Phase 4) rather than a second
-%% literal (CLAUDE.md "No duplicate implementations").
+%% literal (AGENTS.md "No duplicate implementations").
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
@@ -397,7 +397,7 @@ handle_getValue([], State) ->
 %% recognition/decode helpers shared by this module's own handle_call/3 and
 %% handle_cast/2 clauses AND every compiled actor's generated
 %% handle_call/3 / handle_cast/2 (crates/beamtalk-codegen/.../gen_server/
-%% callbacks.rs) — the one place that logic lives (CLAUDE.md "No duplicate
+%% callbacks.rs) — the one place that logic lives (AGENTS.md "No duplicate
 %% implementations"). encode_reply_for/3 and
 %% maybe_reclassify_compiled_dispatch_error/2 close the same gap on the
 %% reply/error side for generated dispatch.
@@ -3650,7 +3650,7 @@ maybe_reject_future(FuturePid, Reason) ->
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
 `'\$beamtalk_wire'` envelope whose leading version this node does not
 recognise (ADR 0126 §5.1) — request direction, via the shared
-`beamtalk_wire:wire_version_unsupported_error/4` (CLAUDE.md "No duplicate
+`beamtalk_wire:wire_version_unsupported_error/4` (AGENTS.md "No duplicate
 implementations"; `beamtalk_future:decode_wire_reply/1` builds the
 reply-direction counterpart through the same constructor).
 """.
@@ -3660,7 +3660,7 @@ wire_version_unsupported_error(Selector, SentVersion) ->
 
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` call envelope (ADR 0126 §5.1) —
-the single place this decode/version-check logic lives (CLAUDE.md "No
+the single place this decode/version-check logic lives (AGENTS.md "No
 duplicate implementations"), called both by this module's own
 `handle_call/3` wire clause and by every compiled actor's generated
 `handle_call/3` (`crates/beamtalk-codegen/src/core_erlang/gen_server/
@@ -4438,7 +4438,7 @@ error (`generate_safe_dispatch`'s catch, `{Type, Reason, Stacktrace}`) as
 stale-block shape `maybe_remote_code_mismatch/3` already identifies for the
 hand-written `__methods__` dispatch path (`wrap_method_error/6`, ADR 0126
 §5.5) — reuses that one check rather than re-deriving the same badfun/undef
-identification a second time for generated dispatch (CLAUDE.md "No
+identification a second time for generated dispatch (AGENTS.md "No
 duplicate implementations"). `Args` is the dispatched method's own argument
 list, exactly as `wrap_method_error/6` receives it.
 
@@ -4833,7 +4833,7 @@ Spawn an actor under a cluster-globally registered name (arity 3, ADR 0126
 OTP `global` (`safe_spawn_named(global, ...)`) instead of the local process
 registry. Same reserved-name blocklist, same `#beamtalk_error{}` shapes —
 `spawn_named_scoped/4` is the single shared implementation behind both this
-and `'spawnAs'/3` (CLAUDE.md "No duplicate implementations").
+and `'spawnAs'/3` (AGENTS.md "No duplicate implementations").
 """.
 -spec 'spawnAsGlobal'(term(), term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAsGlobal'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
@@ -5874,7 +5874,7 @@ remote_spawn_with_target(ClassName, NameOrUndefined, WireInitArgs) ->
 
 -doc """
 Shared connect-policy-check + `erpc:call/5` + catch-mapping for
-`remote_spawn/4` and `remote_spawn_with/5` (CLAUDE.md "No duplicate
+`remote_spawn/4` and `remote_spawn_with/5` (AGENTS.md "No duplicate
 implementations") — the two differ only in which target function `erpc`
 invokes on the remote node and what, if anything, is computed (and may
 itself fail, e.g. `remote_spawn_with/5`'s wire-encode) as that target

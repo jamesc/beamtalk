@@ -38,7 +38,7 @@ export type ClassDocumentResult =
  * `navigateToStateVar` in extension.ts) and every hover/doc-comment tooltip
  * lookup (`WorkspaceTreeDataProvider._resolveClassDocument` in
  * workspaceTreeView.ts) goes through this instead of each reimplementing it
- * (see CLAUDE.md's no-duplicate-implementations rule).
+ * (see AGENTS.md's no-duplicate-implementations rule).
  */
 export async function resolveClassDocument(
   classInfo: ClassInfo,

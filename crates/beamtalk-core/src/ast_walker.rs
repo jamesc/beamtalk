@@ -101,7 +101,7 @@ pub fn expression_contains_block(expr: &Expression) -> bool {
 /// walk to find a `self.field :=` write buried in a loop-body statement's
 /// nested block, and re-deriving a second exhaustive `Expression` match there
 /// is exactly the "silent-miss on a new variant" duplication this module
-/// exists to prevent (CLAUDE.md's no-duplicate-implementations rule).
+/// exists to prevent (AGENTS.md's no-duplicate-implementations rule).
 pub fn walk_expression<F>(expr: &Expression, f: &mut F)
 where
     F: FnMut(&Expression),
@@ -205,7 +205,7 @@ where
 ///
 /// Kept in exact variant-for-variant lockstep with [`walk_expression`] — a
 /// new `Expression` variant must be added to both, or a pass relying on
-/// either silently stops seeing it (CLAUDE.md's no-duplicate-implementations
+/// either silently stops seeing it (AGENTS.md's no-duplicate-implementations
 /// rule: this is the one walk both the read-only and mutating passes share,
 /// not two independently-maintained traversals).
 pub fn walk_expression_mut<F>(expr: &mut Expression, f: &mut F)

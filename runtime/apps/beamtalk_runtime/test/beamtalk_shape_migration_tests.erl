@@ -35,7 +35,7 @@ suite happens to register it first.
 -export([apply_meta_override/1]).
 
 %% Reused by beamtalk_dist_wire_tests (BT-3601, ADR 0126 Phase 3b) for its
-%% own two-node "migrate forward across the wire" test, per CLAUDE.md's
+%% own two-node "migrate forward across the wire" test, per AGENTS.md's
 %% no-duplicate-implementation rule: build_delegate_proxy/3 is the one place
 %% that already knows how to stub a compiled `.bt` class's exports (here,
 %% `shape_version`/`shape_migrations` meta) without tripping meck's
@@ -668,7 +668,7 @@ with_shape_chain_cart_meta(ShapeVersion, Migrations, Fun) ->
 %%
 %% Used in place of `meck:new(RealMod, [passthrough])`: `.bt` classes
 %% compile straight to Core Erlang via
-%% `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never
+%% `compile:forms(..., [from_core | Opts])` (AGENTS.md), which never
 %% produces a real `raw_abstract_v1` abstract-code chunk — the `.beam` still
 %% carries the chunk (so meck's `abstract_code/1` doesn't throw
 %% `no_abstract_code`), but with an empty forms list. meck's

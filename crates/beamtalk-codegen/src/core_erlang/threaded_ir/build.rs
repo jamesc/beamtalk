@@ -154,7 +154,7 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// node before verifying — `control_flow::body::generate_foldl_loop_body`'s
 /// merged `Threaded` node, whose body lives at its own non-`ROOT` frame, not
 /// a flat method-level fixture — can reuse the identical technique instead
-/// of re-deriving it at a hardcoded [`FrameId::ROOT`] (CLAUDE.md's
+/// of re-deriving it at a hardcoded [`FrameId::ROOT`] (AGENTS.md's
 /// no-duplicate-implementations rule). `verify_body_with_opaque_version_gaps`
 /// itself is unchanged in behavior: `frame: FrameId::ROOT` reproduces
 /// exactly what it always built inline.
@@ -231,7 +231,7 @@ fn backfill_opaque_version_gap(
 /// [`backfill_opaque_version_gap`] and [`verify_simple_bind`] both need to
 /// give [`VerifyWalk::check_use`]'s frame-flow rule a producing `Bind` for
 /// version history a fixture can't otherwise see (one shared loop, per
-/// CLAUDE.md's no-duplicate-implementations rule).
+/// AGENTS.md's no-duplicate-implementations rule).
 fn backfill_version_chain(
     prefix: &VersionPrefix,
     frame: FrameId,

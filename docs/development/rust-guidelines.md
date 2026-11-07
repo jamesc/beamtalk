@@ -371,7 +371,7 @@ Comments explain what the code cannot say for itself: the contract, the invarian
 * **Link ADRs, never reproduce them.** `See ADR 0111 § The verifier` is right. Restating the ADR's rationale, options, or addenda in a module doc is wrong: the copy drifts, and the ADR stays the record.
 * **Never narrate the code.** `// increment the counter` above `counter += 1` is noise. If the code needs a comment to be understood, first try renaming or restructuring so it does not.
 * **Keep it short.** A doc comment on a function is a sentence or a short paragraph. A module doc is a screenful at most: what the module owns, its main entry points, and the one or two invariants that matter. Anything longer is a sign the module needs a design doc or a split.
-* **"Mirrors" is a bug report.** A comment saying one implementation mirrors or must stay in sync with another means there should be one implementation and a conformance test. Do not write the comment; extract the shared leaf module (see CLAUDE.md § No duplicate implementations).
+* **"Mirrors" is a bug report.** A comment saying one implementation mirrors or must stay in sync with another means there should be one implementation and a conformance test. Do not write the comment; extract the shared leaf module (see AGENTS.md § No duplicate implementations).
 
 ## Compiler-Specific Patterns
 

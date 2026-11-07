@@ -10,7 +10,7 @@
 //! `'with_selector'` → `'with_hint'` three-step chain is the one way every
 //! structured runtime error (DNU, arity/type mismatch, instantiation error,
 //! immutable-value write, stateful-block-dispatch guard, ...) gets built —
-//! see CLAUDE.md § Structured errors. Before this module existed, each call
+//! see AGENTS.md § Structured errors. Before this module existed, each call
 //! site hand-wrote the same three `let`s, in whatever `Document`-building
 //! idiom (plain literal strings, or `nest`/`line` pretty-printing) its own
 //! function already used.

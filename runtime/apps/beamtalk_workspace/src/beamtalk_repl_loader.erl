@@ -2901,7 +2901,7 @@ splice_out_span(Source, Span) ->
     splice_replace(Source, Span, <<>>).
 
 %% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
-%% surrounding text. Shared leaf primitive (CLAUDE.md's no-duplicate-
+%% surrounding text. Shared leaf primitive (AGENTS.md's no-duplicate-
 %% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
 %% and `rewrite_sites/2`'s per-site splice (ADR 0114).
 -spec splice_replace(binary(), rewrite_span(), binary()) -> binary().

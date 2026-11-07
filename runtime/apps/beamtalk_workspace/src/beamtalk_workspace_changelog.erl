@@ -1433,7 +1433,7 @@ own per-site ref, rather than the OWNING ENTRY's top-level `source_ref`/
 the ChangeEntry schema doc's `source_ref`/`sites` rows). `beamtalk_workspace_
 flush`'s multi-site rename-class splice needs to read a specific site's ref
 directly, so this takes the raw `binary() | undefined` ref rather than an
-`entry()` — reuses `read_source_file/1` verbatim (CLAUDE.md's no-duplicate-
+`entry()` — reuses `read_source_file/1` verbatim (AGENTS.md's no-duplicate-
 implementations rule) rather than re-deriving the `sources/` path lookup.
 
 Returns `{error, no_source}` for `undefined` — mirroring `read_source_body/1`'s

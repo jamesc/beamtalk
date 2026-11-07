@@ -1207,7 +1207,7 @@ them, in source order — the same recognition rules
 `beamtalk_core::source_analysis::categorize_methods_in_source' locks down
 for every surface (see that module's doc). This is the bridge that lets
 Erlang surfaces reach it without a second, drift-prone implementation of
-the divider grammar (CLAUDE.md's "No duplicate implementations" rule):
+the divider grammar (AGENTS.md's "No duplicate implementations" rule):
 `beamtalk_interface:format_class_help/2' (REPL/MCP `:help'/`docs')
 and the Cockpit System Browser's grouped method view + `save-section'.
 

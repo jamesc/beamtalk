@@ -265,7 +265,7 @@ struct BodyEffects {
 /// a condition-only mutation must route a trivially-pure body to the
 /// mutation-threading path too — see `generate_while_true`/
 /// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
-/// own gate, per CLAUDE.md's no-duplicate-implementations rule.
+/// own gate, per AGENTS.md's no-duplicate-implementations rule.
 ///
 /// A class method threads no family at all (ADR 0130 §3: a class-variable
 /// write is an in-place `put` and a self-send rebinds nothing), so nothing

@@ -1615,7 +1615,7 @@ fn _stub() -> () {
                    |---|---|---|---|---|---|\n\
                    | `myop` | -- | -- | -- | `textDocument/references` / \
                    `callHierarchy/incomingCalls` / `callHierarchy/outgoingCalls` | foo |\n";
-        // No /tmp hardcoding (CLAUDE.md): use the OS temp dir + a
+        // No /tmp hardcoding (AGENTS.md): use the OS temp dir + a
         // process-unique name so concurrent CI shards don't collide. This
         // crate has no dep on beamtalk-core::test_helpers, so we roll our
         // own minimal helper here.

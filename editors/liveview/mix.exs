@@ -1,7 +1,7 @@
 defmodule BtAttach.MixProject do
   use Mix.Project
 
-  # Single source of truth: the repo-root VERSION file (CLAUDE.md "Versioning &
+  # Single source of truth: the repo-root VERSION file (AGENTS.md "Versioning &
   # Releases"). The LiveView IDE ships on its own release lane (BT-2512) but
   # tracks the same version as the eval/Transcript surface it attaches to
   # (BT-2394 spike, BT-2514), so it is read here at compile time rather than

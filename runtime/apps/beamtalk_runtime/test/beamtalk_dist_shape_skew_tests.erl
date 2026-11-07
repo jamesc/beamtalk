@@ -22,7 +22,7 @@ whichever side the scenario needs skewed — at a
 `beamtalk_shape_migration_tests:build_delegate_proxy/3` stub (the same
 technique `beamtalk_dist_wire_tests.erl`'s `install_meta_stub/2` uses for
 wire-*decode* testing, reused rather than a second forms-and-compile copy —
-CLAUDE.md's no-duplicate-implementations rule) whose `'__beamtalk_meta'/0`
+AGENTS.md's no-duplicate-implementations rule) whose `'__beamtalk_meta'/0`
 reports a different `shape_version`. Unlike that helper's own stub name
 (`bt_..._meta_stub`, no `@`), every stub built here keeps the `bt@` prefix
 `beamtalk_module_activation:is_user_class_module/1` requires — the stub

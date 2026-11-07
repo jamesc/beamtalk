@@ -12,7 +12,7 @@ for `compile:forms/2`.
 Extracted from `beamtalk_behaviour_intrinsics_tests`'s own `parse_forms/1`,
 once `beamtalk_shape_migration_tests` needed the identical helper — same
 "copied once, extracted on the second use" precedent `beamtalk_test_corpus`'s
-own moduledoc documents (CLAUDE.md's no-duplicate-implementations rule).
+own moduledoc documents (AGENTS.md's no-duplicate-implementations rule).
 """.
 
 -export([parse_forms/1]).

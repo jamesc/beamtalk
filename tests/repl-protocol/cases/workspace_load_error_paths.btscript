@@ -70,7 +70,7 @@ v2 value
 // COMPILE ERROR — a structured error, not a crash or a silent no-op
 //
 // The broken source is written to a fresh temp file at runtime (`File
-// tempDirectory`, per CLAUDE.md's cross-platform temp-path rule) rather than
+// tempDirectory`, per AGENTS.md's cross-platform temp-path rule) rather than
 // committed as a static `.bt` fixture, so the deliberately-invalid syntax
 // never trips the project's `fmt-check-beamtalk` parser over
 // tests/repl-protocol/fixtures/.

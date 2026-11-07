@@ -51,7 +51,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
   `browse_*`/`senders`/`implementors`/… ops or the RBAC gates they ride
-  (CLAUDE.md no-duplicate-implementations), and reuses `BtAttachWeb.ClassTree`
+  (AGENTS.md no-duplicate-implementations), and reuses `BtAttachWeb.ClassTree`
   directly for the Hierarchy walk rather than duplicating it.
 
   State (`:browser_view`, `:browser_side`, `:browser_source`,
@@ -1073,7 +1073,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # (content/meta/clauses); a no-op when the pane is closed (assign is `nil`)
   # or absent. Shared so `MethodEditor`'s `dismiss_native_error` and this
   # module's `dismiss_alias_error` can't drift on the clear-one-field
-  # contract — see CLAUDE.md's no-duplicate-implementations rule. Public:
+  # contract — see AGENTS.md's no-duplicate-implementations rule. Public:
   # `MethodEditor` (which already aliases this module) calls it directly.
   def dismiss_pane_error(socket, key) when is_atom(key) do
     case socket.assigns[key] do

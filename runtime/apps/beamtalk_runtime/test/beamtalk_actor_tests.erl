@@ -2455,7 +2455,7 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
 -doc """
 Collect log events until we find one matching `ExpectedMsg` whose metadata
 carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
-`log/2`-handler test in this module (CLAUDE.md's no-duplicate-implementations
+`log/2`-handler test in this module (AGENTS.md's no-duplicate-implementations
 rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
 """.
 collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// BUnit test that round-trips a file through `File tempDirectory` —
-/// exercises the cross-platform temp-path policy from CLAUDE.md inside
+/// exercises the cross-platform temp-path policy from AGENTS.md inside
 /// the test-runner parity fixture (BT-2080).
 TestCase subclass: TempDirRunnerTest
 

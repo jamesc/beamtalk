@@ -1529,6 +1529,6 @@ loaded_modules_dropped_when_module_not_loaded_test() ->
         _ = file:delete(MetaFile)
     end.
 
-%% Cross-platform absolute temp dir (CLAUDE.md: never hardcode /tmp in tests).
+%% Cross-platform absolute temp dir (AGENTS.md: never hardcode /tmp in tests).
 temp_dir_meta() ->
     unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

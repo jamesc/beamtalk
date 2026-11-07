@@ -3597,7 +3597,7 @@ impl CoreErlangGenerator {
     /// numbering (`unbound variable 'State1'` from `core_lint` on a fixture
     /// combining `((self recordOnce: x) and: [true]) ifTrue:ifFalse:` with a
     /// mutation-threaded `and:`/`or:`). The two decisions must
-    /// agree on exactly the same predicate — CLAUDE.md's
+    /// agree on exactly the same predicate — AGENTS.md's
     /// no-duplicate-implementations rule — so `compile_conditional_receiver`
     /// special-cases this shape itself using this same gate.
     pub(in crate::core_erlang) fn and_or_needs_mutation_threading(

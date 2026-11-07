@@ -308,7 +308,7 @@ pub(crate) fn write_atomic(
 /// process, and it asks for that via `BEAMTALK_CORE_SNAPSHOT_DIR` — sharing
 /// this one resolver rather than each of the three call sites growing its
 /// own copy of the "check the env var, else make a tempdir" branch
-/// (CLAUDE.md's no-duplicate-implementations rule).
+/// (AGENTS.md's no-duplicate-implementations rule).
 ///
 /// The same harness can also ask for *snapshot-only* mode via
 /// `BEAMTALK_CORE_SNAPSHOT_ONLY=1` (BT-3887): it only ever reads the

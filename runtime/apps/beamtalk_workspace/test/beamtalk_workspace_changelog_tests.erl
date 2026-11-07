@@ -1661,7 +1661,7 @@ fresh_workspace() ->
 restore_home(false) -> os:unsetenv("HOME");
 restore_home(OldHome) -> os:putenv("HOME", OldHome).
 
-%% Cross-platform absolute temp dir (CLAUDE.md: never hardcode /tmp in tests).
+%% Cross-platform absolute temp dir (AGENTS.md: never hardcode /tmp in tests).
 temp_dir() ->
     unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
 

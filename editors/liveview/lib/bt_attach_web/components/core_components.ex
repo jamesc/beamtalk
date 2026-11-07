@@ -676,7 +676,7 @@ defmodule BtAttachWeb.CoreComponents do
   # extracted panes (e.g. `BtAttachWeb.Live.Inspector`, BT-3291) — moved here
   # (rather than kept as a private component on the LiveView) so an extracted
   # pane module can render it too without a back-reference to the god module
-  # (CLAUDE.md's shared-leaf-module rule). Each notice carries a
+  # (AGENTS.md's shared-leaf-module rule). Each notice carries a
   # keyboard-accessible `×` dismiss control, wired by the *caller* via
   # `dismiss_attrs` — a map of `phx-*` attributes (e.g. `%{"phx-click" =>
   # "dismiss_notice", "phx-value-key" => "git_error"}`) so top-level scalar

@@ -18,7 +18,7 @@ use crate::core_erlang::util;
 /// `threaded_ir::RenderCtx::resolve_prefix` (ADR 0111 §Addendum, "Renderer
 /// design sketch": "prefix rendering is a function of (counter, loop
 /// context), decided at Document-construction time, not stored in the
-/// IR" — CLAUDE.md's no-duplicate-implementations rule pins that decision
+/// IR" — AGENTS.md's no-duplicate-implementations rule pins that decision
 /// to exactly one place instead of leaving the live-generator and
 /// `ThreadedIr`-renderer paths to duplicate/drift it independently).
 ///
@@ -80,7 +80,7 @@ impl CoreErlangGenerator {
     /// `CodeGenContext::Actor` — the one place both call sites
     /// (`generate_field_access` and the `Identifier` fallback in
     /// `expressions.rs`) resolve it, so they can't independently drift
-    /// (CLAUDE.md: no duplicate "mirrors" implementations).
+    /// (AGENTS.md: no duplicate "mirrors" implementations).
     ///
     /// Identical to [`Self::current_state_var`] except inside a frame that
     /// binds no whole `State` and captured

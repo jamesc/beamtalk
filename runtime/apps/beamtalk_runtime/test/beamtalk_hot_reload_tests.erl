@@ -442,7 +442,7 @@ test_field_migration_initialize_class_no_telemetry() ->
 %%
 %% `meck:new('bt@counter', [passthrough])` cannot be used here (or on any
 %% other `bt@...` module): `.bt` classes compile straight to Core Erlang via
-%% `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never
+%% `compile:forms(..., [from_core | Opts])` (AGENTS.md), which never
 %% produces a real `raw_abstract_v1` abstract-code chunk — the `.beam` still
 %% carries the chunk, but with an empty forms list. meck's
 %% `backup_original/4` reads it unconditionally (regardless of the

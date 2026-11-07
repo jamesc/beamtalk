@@ -184,7 +184,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% (`beamtalk_workspace_shape_store`) and the build-time, disk-derived
 %% flattener (`beamtalk_release_shapes`, ADR 0125 §2.2) produce, so a
 %% conformance test can assert their outputs are structurally identical for
-%% the same class (CLAUDE.md's no-duplicate-implementations rule — this is
+%% the same class (AGENTS.md's no-duplicate-implementations rule — this is
 %% the shared leaf both apps depend on, `beamtalk_workspace` -> `beamtalk_runtime`).
 -type field_shape() :: #{binary() => {DeclaredType :: binary(), Kind :: binary()}}.
 -export_type([field_shape/0]).
@@ -824,7 +824,7 @@ so a caller that wants the flattened whole merges the result with its own
 map itself (`maps:merge(AncestorMap, OwnMap)`).
 
 This is the one ancestor walk-and-merge primitive every per-class-level-map
-flattener in this codebase shares (CLAUDE.md's no-duplicate-implementations
+flattener in this codebase shares (AGENTS.md's no-duplicate-implementations
 rule): `beamtalk_workspace_shape_store`'s live, ETS-backed `field_types`/
 `field_kinds` flattening and `beamtalk_release_shapes`'s build-time,
 disk-derived flattening (ADR 0125 §2.2/§3.4) both call this with a different
@@ -1021,7 +1021,7 @@ Zip a flattened `field_types` map with its matching `field_kinds` map into a
 dynamic/ClassBuilder-built level) defaults to `eager`. This is the shared
 leaf both `beamtalk_workspace_shape_store:normalize_shape/2` (live) and
 `beamtalk_release_shapes` (build-time, ADR 0125 §2.2/§3.4, BT-3574)
-delegate to, rather than each keeping its own copy of this zip (CLAUDE.md's
+delegate to, rather than each keeping its own copy of this zip (AGENTS.md's
 no-duplicate-implementations rule) — see `field_type_to_binary/1`/
 `field_kind_to_binary/1`, this function's two per-value normalisers.
 """.

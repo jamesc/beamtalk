@@ -170,7 +170,7 @@ impl CoreErlangGenerator {
     /// One interpolation segment's `let`-chain prefix (value →
     /// `displayString` dispatch → `display_string`) and its binary-part
     /// reference — the two pieces every consumer needs, kept in one place
-    /// per CLAUDE.md's no-duplicate-implementations rule:
+    /// per AGENTS.md's no-duplicate-implementations rule:
     /// [`Self::generate_string_interpolation`]'s all-inline compile
     /// (`value_doc` from a fresh `self.expression_doc(expr)`) and
     /// [`Self::threaded_string_interpolation`]'s threaded one (`value_doc`
@@ -417,7 +417,7 @@ impl CoreErlangGenerator {
                             // `current_field_read_state_var` already applies
                             // the StateAcc-in-loop-body/hybrid-State*/BT-3562
                             // direct-params-capture rules — see its own doc
-                            // comment (CLAUDE.md: no duplicate "mirrors" of
+                            // comment (AGENTS.md: no duplicate "mirrors" of
                             // that same rule here).
                             self.actor_state_read_var(StateReadSite::ImplicitFieldRead, id.span)
                         }
@@ -625,7 +625,7 @@ impl CoreErlangGenerator {
     /// `call 'beamtalk_error':'raise'(...)` for the `'error'` (absent-key)
     /// arm of [`Self::generate_late_field_read`]. Reuses the shared
     /// `beamtalk_error:'new'` → `'with_selector'` → `'with_hint'` chain
-    /// (`errors.rs`) rather than hand-rolling it, per CLAUDE.md's
+    /// (`errors.rs`) rather than hand-rolling it, per AGENTS.md's
     /// no-duplicate-implementations rule.
     fn generate_uninitialized_state_raise(
         &mut self,
@@ -950,7 +950,7 @@ impl CoreErlangGenerator {
     /// `pub(super)`: also reused by `dispatch_codegen.rs`'s
     /// `generate_field_assignment_open` plain-`State` branch, the sibling
     /// "open" (non-last-position) mint site — same check, same reasoning, no
-    /// reason to hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
+    /// reason to hand-roll a second copy (AGENTS.md's no-duplicate-implementations rule).
     pub(super) fn check_simple_field_bind_invariant(
         &mut self,
         prefix: super::threaded_ir::VersionPrefix,

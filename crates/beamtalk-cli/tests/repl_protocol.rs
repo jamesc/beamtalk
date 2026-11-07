@@ -425,7 +425,7 @@ impl ProcessManager {
     /// (`e2e_distribution_tests`) so `Counter` can be loaded there too (a
     /// remote spawn resolves its class by name on the *target* node, ADR
     /// 0126 §3) — reusing this exact startup path rather than a second,
-    /// narrower one (CLAUDE.md "No duplicate implementations"), since a
+    /// narrower one (AGENTS.md "No duplicate implementations"), since a
     /// two-node distribution test needs a real second REPL-capable
     /// workspace, not just a bare `beamtalk_runtime` node.
     ///
@@ -2552,7 +2552,7 @@ fn node_name_from_print_string(rendered: &str) -> String {
 ///
 /// Boots a genuine **second**, independent workspace node
 /// (`ProcessManager::start_named`, reusing the exact same startup path
-/// `ProcessManager::start` does — CLAUDE.md "No duplicate implementations")
+/// `ProcessManager::start` does — AGENTS.md "No duplicate implementations")
 /// alongside the usual e2e fixture, connects to it directly to pre-load
 /// `Counter` there (a remote spawn resolves its class *by name on the
 /// target node*, ADR 0126 §3 — `spawnOn:` would otherwise answer

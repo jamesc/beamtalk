@@ -160,7 +160,7 @@
 %% remote spawn/lookup (`beamtalk_actor`), `Node>>shapeManifest`, and
 %% `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison
 %% (Phase 4) all share this single source of truth rather than each pinning
-%% its own literal (CLAUDE.md "No duplicate implementations").
+%% its own literal (AGENTS.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
 %% BT-3992: how long a starter (`spawn`, a supervisor starting an actor
@@ -199,7 +199,7 @@
 %% might intercept a `throw` (class-side self-sends, instance-side extension
 %% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
 %% relay rather than report them. Single source of truth for the shape check
-%% across the runtime and stdlib apps — per CLAUDE.md's no-duplicate-
+%% across the runtime and stdlib apps — per AGENTS.md's no-duplicate-
 %% implementation rule, a future NLR shape change only needs to land here.
 %% `just lint-nlr-tuple-matches` (scripts/ci/lint-nlr-tuple-matches.sh)
 %% rejects hand-rolled `{'$bt_nlr', ...}` patterns elsewhere in runtime

@@ -58,7 +58,7 @@ enum PreludeProbe {
 /// (e.g. `"State"`, `"State1"`, `"StateAcc2"`, `"Self3"`).
 ///
 /// Uses [`std::fmt::Write`] on a pre-allocated buffer rather than `format!()`
-/// to comply with CLAUDE.md: "NEVER use `format!()` to produce Core Erlang
+/// to comply with AGENTS.md: "NEVER use `format!()` to produce Core Erlang
 /// fragments."  See also: `variable_context::VariableContext::fresh_var` which
 /// uses the same `write!` pattern.
 ///
@@ -185,7 +185,7 @@ pub(super) fn collect_body_exprs(body: &[ExpressionStatement]) -> Vec<&Expressio
 ///
 /// Split out into this shared leaf module — it
 /// has no generator-state dependency, and is used by three separate
-/// `core_erlang` submodules (CLAUDE.md's no-duplicate-implementations rule).
+/// `core_erlang` submodules (AGENTS.md's no-duplicate-implementations rule).
 pub(super) fn index_lit(n: usize) -> Document<'static> {
     int_lit(i64::try_from(n).unwrap_or(i64::MAX))
 }
@@ -204,7 +204,7 @@ pub(super) fn index_lit(n: usize) -> Document<'static> {
 ///
 /// Shared by every state-literal emitter across `core_erlang` (instance-side
 /// `init/1` in `gen_server::state`, and the class-side `classState` map in
-/// `class_registry`/`gen_server::native_facade`) per CLAUDE.md's no-
+/// `class_registry`/`gen_server::native_facade`) per AGENTS.md's no-
 /// duplicate-implementations rule — this is the one place that decides
 /// "does this slot's key appear at all", so those four loops can't drift out
 /// of sync on the rule.

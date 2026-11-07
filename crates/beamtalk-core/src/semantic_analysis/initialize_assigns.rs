@@ -12,7 +12,7 @@
 //! assigns it. This is a **must-analysis** (intersection over branches/
 //! completions) — the opposite of [`crate::semantic_analysis::block_facts::BlockMutationAnalysis::field_writes`],
 //! a *may*-analysis (union) used for state-threading, which this module does
-//! not reuse (CLAUDE.md's no-duplicate-implementations rule doesn't apply
+//! not reuse (AGENTS.md's no-duplicate-implementations rule doesn't apply
 //! here: the two answer genuinely different questions over the same syntax).
 //!
 //! **Rules** (ADR 0124 §6):
@@ -96,14 +96,14 @@ pub fn analyze_initialize_assigns(body: &[ExpressionStatement]) -> BTreeSet<EcoS
 /// Scans **every** method (not just `initialize`) since the dynamic write
 /// could happen from a helper called during or after `initialize`'s own
 /// body. Callers pass instance methods only — a class-side method runs in
-/// the class's own `gen_server` process (CLAUDE.md § Blocks into class
+/// the class's own `gen_server` process (AGENTS.md § Blocks into class
 /// methods), not the spawned instance's, so a class-side `self
 /// fieldAt:put:` cannot write an *instance* slot and must not be scanned
 /// here.
 ///
 /// Reuses [`walk_expression`] (descends into nested blocks, cascades and
 /// match arms) rather than a second hand-rolled recursive `Expression`
-/// match (CLAUDE.md's no-duplicate-implementations rule) — unlike this
+/// match (AGENTS.md's no-duplicate-implementations rule) — unlike this
 /// module's own [`analyze_expr`] walk, which threads assignment-set state
 /// through the traversal and can't reuse a stateless visitor. A cascade's
 /// second-and-later messages (`self fieldAt: #a put: 1; fieldAt: #b put:
@@ -309,7 +309,7 @@ fn analyze_cascade(
 /// used by both [`analyze_message_send`]'s fallback (for an ordinary send's
 /// `arguments`) and [`analyze_cascade`] (for every cascaded message's
 /// arguments, flattened into one sequence) — a single implementation
-/// rather than two copies of the same logic (CLAUDE.md's
+/// rather than two copies of the same logic (AGENTS.md's
 /// no-duplicate-implementations rule).
 ///
 /// The receiver runs inline UNLESS it is itself a bare block literal (e.g.

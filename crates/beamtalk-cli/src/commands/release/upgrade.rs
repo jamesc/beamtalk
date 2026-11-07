@@ -221,7 +221,7 @@ fn find_release_version_dir(prev_root: &Utf8Path) -> Result<(String, Utf8PathBuf
     // "most recent" generation once any segment reaches two digits — the
     // exact bug `crate::commands::deps::registry::compare_versions` exists
     // to avoid (its own `test_compare_versions_numeric_not_lexicographic`),
-    // reused here rather than re-deriving it (CLAUDE.md's
+    // reused here rather than re-deriving it (AGENTS.md's
     // no-duplicate-implementations rule).
     candidates.sort_by(|a, b| crate::commands::deps::registry::compare_versions(&a.0, &b.0));
     candidates.pop().ok_or_else(|| {

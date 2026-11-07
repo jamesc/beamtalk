@@ -10,7 +10,7 @@ defmodule BtAttachWeb.Live.FacadeError do
 
   Extracted as a shared leaf module (BT-3291) so `BtAttachWeb.WorkspaceLive`
   and its extracted panes (e.g. `BtAttachWeb.Live.Inspector`) render the same
-  facade-error copy rather than each keeping its own (CLAUDE.md's
+  facade-error copy rather than each keeping its own (AGENTS.md's
   no-duplicate-implementations rule).
   """
 

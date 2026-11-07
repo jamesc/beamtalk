@@ -11,7 +11,7 @@
 // "still usable on a later turn" step below.
 
 // ===========================================================================
-// SET UP A UNIQUE TEMP PATH (never hardcode /tmp — CLAUDE.md).
+// SET UP A UNIQUE TEMP PATH (never hardcode /tmp — AGENTS.md).
 // ===========================================================================
 
 _tmpDir := File tempDirectory
