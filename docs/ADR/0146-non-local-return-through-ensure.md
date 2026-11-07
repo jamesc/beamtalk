@@ -54,6 +54,11 @@ throw.** The cell is the one place an actor's fields live. A `^` no longer
 carries the fields as state of record, and nothing on the way back has to patch
 them.
 
+This adds no new storage. The cell is the one ADR 0137 already introduced: a
+single process-dictionary entry that exists only while an actor callback runs.
+The commit reads it once. The only stored data this ADR changes is the BT-4448
+owner stamp written into state maps, which goes away.
+
 What still travels in the throw is state that has nowhere else to live: the
 REPL's bindings, a value type's `self`, and the compiler's temporary locals. An
 `ensure:` cleanup that writes those still has to pass its result on, as it does
