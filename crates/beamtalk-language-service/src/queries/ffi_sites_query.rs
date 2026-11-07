@@ -59,6 +59,7 @@
 
 use super::selector_span;
 use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Pattern, StringSegment};
+use beamtalk_core::ast_walker::walk_pattern;
 use beamtalk_core::semantic_analysis::validators::{erlang_arity, erlang_function_name};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
@@ -317,52 +318,9 @@ fn collect_pattern_ffi_sites(
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    match pattern {
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_ffi_sites(&segment.value, target, source, lines);
-                if let Some(size) = &segment.size {
-                    collect_ffi_sites(size, target, source, lines);
-                }
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_ffi_sites(element, target, source, lines);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_ffi_sites(element, target, source, lines);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_ffi_sites(rest_pattern, target, source, lines);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_ffi_sites(element, target, source, lines);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_ffi_sites(tail_pattern, target, source, lines);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_ffi_sites(&pair.value, target, source, lines);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_selector, inner) in keywords {
-                collect_pattern_ffi_sites(inner, target, source, lines);
-            }
-        }
-        Pattern::Wildcard(..)
-        | Pattern::Literal(..)
-        | Pattern::Variable(..)
-        | Pattern::Nil(..)
-        | Pattern::Type { .. } => {}
-    }
+    walk_pattern(pattern, &mut |expr| {
+        collect_ffi_sites(expr, target, source, lines);
+    });
 }
 
 #[cfg(test)]

@@ -51,6 +51,7 @@
 use super::selector_span;
 use beamtalk_core::announce_selectors::is_announce_selector;
 use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
+use beamtalk_core::ast_walker::walk_pattern;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -267,52 +268,9 @@ fn collect_announce_sites(expr: &Expression, source: &str, hits: &mut Vec<Announ
 /// binary-segment size expression defensively so loosening the parser later does
 /// not silently regress this query.
 fn collect_pattern_announce_sites(pattern: &Pattern, source: &str, hits: &mut Vec<AnnounceHit>) {
-    match pattern {
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_announce_sites(&segment.value, source, hits);
-                if let Some(size) = &segment.size {
-                    collect_announce_sites(size, source, hits);
-                }
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_announce_sites(element, source, hits);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_announce_sites(element, source, hits);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_announce_sites(rest_pattern, source, hits);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_announce_sites(element, source, hits);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_announce_sites(tail_pattern, source, hits);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_announce_sites(&pair.value, source, hits);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_selector, inner) in keywords {
-                collect_pattern_announce_sites(inner, source, hits);
-            }
-        }
-        Pattern::Wildcard(..)
-        | Pattern::Literal(..)
-        | Pattern::Variable(..)
-        | Pattern::Nil(..)
-        | Pattern::Type { .. } => {}
-    }
+    walk_pattern(pattern, &mut |expr| {
+        collect_announce_sites(expr, source, hits);
+    });
 }
 
 /// Determine the line number to report for an emission. Uses the span of the
