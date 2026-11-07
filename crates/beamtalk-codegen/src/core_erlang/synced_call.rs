@@ -141,6 +141,17 @@ pub(in crate::core_erlang) fn field_writes_block_stateless_loops() -> bool {
 
 #[cfg(test)]
 thread_local! {
+    /// Test-only fault (BT-4524): a `^` in a block run as a closure does not
+    /// make its call store first (no bracket, no fallback pre-store), as
+    /// before the fix, so the `UnbracketedNlrClosure` rule can be shown to
+    /// fire.
+    pub(in crate::core_erlang) static FAULT_NLR_CLOSURES_UNSTORED: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    /// Test-only count of [`CoreErlangGenerator::classify_send`] calls
+    /// (BT-4524), so a test can show the probes classify each send a
+    /// bounded number of times rather than once per enclosing probe.
+    pub(in crate::core_erlang) static CLASSIFY_SEND_CALLS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
     /// Test-only fault (BT-4523): mode selection ignores a body's `^`, so a
     /// body with a field write and a `^` is lowered hybrid, as before the
     /// fix. The hybrid lowerings' `NlrThrowInHybridLoop` check
@@ -148,6 +159,18 @@ thread_local! {
     /// fire on it.
     pub(in crate::core_erlang) static FAULT_HYBRID_ADMITS_NLR: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+}
+
+/// BT-4524 (ADR 0146 P0): whether a `^` in a block the call runs as a closure
+/// makes the call store the threaded state first (a bracketed call, or a
+/// conditional fallback's pre-store). Always `true`; a test-only fault turns
+/// it off so the `UnbracketedNlrClosure` rule can be shown to fire.
+pub(in crate::core_erlang) fn nlr_closures_store_first() -> bool {
+    #[cfg(test)]
+    if FAULT_NLR_CLOSURES_UNSTORED.with(std::cell::Cell::get) {
+        return false;
+    }
+    true
 }
 
 /// BT-4523: whether a body's `^` keeps it out of hybrid mode, as mode
@@ -161,6 +184,12 @@ pub(in crate::core_erlang) fn nlr_blocks_hybrid_loops() -> bool {
         return false;
     }
     true
+}
+
+/// BT-4524: whether running `block` may end the current scope with a `^`
+/// (nested blocks included), so the call that runs it must store first.
+pub(in crate::core_erlang) fn block_returns_from_scope(block: &beamtalk_core::ast::Block) -> bool {
+    nlr_closures_store_first() && beamtalk_core::semantic_analysis::facts::block_has_nlr(block)
 }
 
 #[cfg(test)]
@@ -307,6 +336,14 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
     /// before those names are in scope. Empty outside a probe.
     pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
+    /// How many [`CoreErlangGenerator::expr_holds_bracketed_call`] probes
+    /// are open. Only the outermost restores [`Self::inlined_classes`]: a
+    /// probe nested in it (a conditional's `pure_boolean_shape` reached from
+    /// the outer probe's walk) runs in the same context, so its classes stay
+    /// cached for the rest of the outer probe instead of being recomputed
+    /// once per enclosing probe (exponential in the conditionals' nesting
+    /// depth, BT-4524).
+    pub(in crate::core_erlang) probe_depth: std::cell::Cell<usize>,
     /// BT-4279: the receiver of the send each open window brackets
     /// (innermost last), by address: an emitter offers a fast path only for
     /// the send its window owns, never for a nested send it happens to
@@ -317,6 +354,20 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// attach to the bracket it builds: the fast path and the call without
     /// its operand bindings.
     pub(in crate::core_erlang) pending_fast_path: Option<(usize, PendingFastPath)>,
+    /// BT-4524: the block-literal operands holding a `^` of sends compiled
+    /// outside every window and classified [`UserCodeCall::No`], by block
+    /// span, with the send's selector. A block among them that is then
+    /// compiled as a closure ([`CoreErlangGenerator::with_actor_closure`])
+    /// with no cover runs with a stale cell, and is a
+    /// [`VerifyError::UnbracketedNlrClosure`].
+    pub(in crate::core_erlang) nlr_operands: std::collections::HashMap<Span, String>,
+    /// BT-4524: how many lowerings that store the threaded state before the
+    /// call that runs their closures enclose the code being compiled
+    /// ([`CoreErlangGenerator::with_nlr_closure_cover`]).
+    pub(in crate::core_erlang) nlr_cover: usize,
+    /// BT-4524: `^`-holding closures compiled with no store before the call
+    /// that runs them, reported as [`VerifyError::UnbracketedNlrClosure`].
+    pub(in crate::core_erlang) nlr_closure_gaps: Vec<UnbracketedSend>,
 }
 
 /// BT-4279: a fast path offered by a guarded send's emitter
@@ -341,8 +392,12 @@ impl SyncedCallState {
             guarded_op_loops: std::cell::RefCell::default(),
             inlined_classes: std::cell::RefCell::default(),
             probe_locals: std::cell::RefCell::default(),
+            probe_depth: std::cell::Cell::new(0),
             window_receivers: Vec::new(),
             pending_fast_path: None,
+            nlr_operands: std::collections::HashMap::new(),
+            nlr_cover: 0,
+            nlr_closure_gaps: Vec::new(),
         }
     }
 }
@@ -633,6 +688,8 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         is_cast: bool,
     ) -> UserCodeCall {
+        #[cfg(test)]
+        CLASSIFY_SEND_CALLS.with(|n| n.set(n.get() + 1));
         if is_cast {
             // A cast posts to the receiver's mailbox; nothing runs here.
             return UserCodeCall::No;
@@ -654,7 +711,7 @@ impl CoreErlangGenerator {
         }
         match send_user_code(receiver, selector, arguments) {
             SendUserCode::Never => UserCodeCall::No,
-            SendUserCode::Inlined => self.classify_inlined(selector, arguments),
+            SendUserCode::Inlined => self.classify_inlined(receiver, selector, arguments),
             SendUserCode::MayRun => UserCodeCall::Yes,
             // A fold the block analysis threads is lowered in place (its
             // statements are bracketed where they are compiled); one it does
@@ -704,9 +761,25 @@ impl CoreErlangGenerator {
     /// writes the cell, so the send is bracketed.
     fn classify_inlined(
         &self,
+        receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> UserCodeCall {
+        // BT-4524 (ADR 0146 P0): an `ensure:` whose blocks thread nothing runs
+        // them as closures (`generate_ensure`); one holding a `^` carries the
+        // cell in its throw, so the call is bracketed. (`on:do:`'s closure
+        // path stores the pre-region `State` on entry itself,
+        // `CellBoundary::PreState`.)
+        if selector.name() == "ensure:"
+            && let [cleanup] = arguments
+            && !self.exception_construct_inlines(receiver, cleanup)
+            && [receiver, cleanup].into_iter().any(|e| match e {
+                Expression::Block(block) => block_returns_from_scope(block),
+                _ => false,
+            })
+        {
+            return UserCodeCall::Yes;
+        }
         if !beamtalk_core::state_threading_selectors::is_conditional_selector(
             selector.name().as_str(),
         ) {
@@ -719,7 +792,14 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
-        if !blocks.iter().any(|block| Self::block_sends_to_super(block)) {
+        let sends_to_super = blocks.iter().any(|block| Self::block_sends_to_super(block));
+        // BT-4524 (ADR 0146 P0): a conditional that threads nothing and is
+        // not inlined pure (`pure_boolean_shape`) runs its blocks as closures
+        // (a dynamic send); one holding a `^` carries the cell in its throw,
+        // so the send is bracketed. The inline lowerings' non-Boolean
+        // fallback sends store for themselves (`boolean_fallback_send`).
+        let returns = blocks.iter().any(|block| block_returns_from_scope(block));
+        if !sends_to_super && !returns {
             return UserCodeCall::No;
         }
         // Decided once per send: whether the conditional threads can change as
@@ -731,8 +811,14 @@ impl CoreErlangGenerator {
         }
         let class = if self.conditional_blocks_need_threading(&blocks) {
             UserCodeCall::No
-        } else {
+        } else if sends_to_super
+            || self
+                .pure_boolean_shape(receiver, selector, arguments)
+                .is_none()
+        {
             UserCodeCall::Yes
+        } else {
+            UserCodeCall::No
         };
         self.synced.inlined_classes.borrow_mut().insert(key, class);
         class
@@ -781,7 +867,11 @@ impl CoreErlangGenerator {
             // that touches this actor's fields, so a closure holding one is
             // bracketed like a closure that touches the state syntactically.
             // Read off the same classifier the send emitter exempts.
-            self.block_touches_actor_state(block) || self.block_contains_guarded_operator(block)
+            // BT-4524 (ADR 0146 P0): a closure holding a `^` carries the cell
+            // in its throw, so the cell must hold the method's state first.
+            self.block_touches_actor_state(block)
+                || self.block_contains_guarded_operator(block)
+                || block_returns_from_scope(block)
         }) {
             UserCodeCall::Yes
         } else {
@@ -853,6 +943,9 @@ impl CoreErlangGenerator {
             return;
         }
         let class = self.classify_send(receiver, selector, arguments, is_cast);
+        if class == UserCodeCall::No && !is_cast && self.synced.window_depth == 0 {
+            self.note_nlr_operands(receiver, selector, arguments);
+        }
         if matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend) {
             return;
         }
@@ -872,6 +965,129 @@ impl CoreErlangGenerator {
             return;
         }
         self.record_gap(selector.name().to_string(), at);
+    }
+
+    /// BT-4524: records the block-literal operands of an unbracketed send
+    /// (class [`UserCodeCall::No`], outside every window) that hold a `^`
+    /// ([`SyncedCallState::nlr_operands`]). Independent of the classifier's
+    /// `^` rule: what decides a finding is whether the lowering then compiles
+    /// such a block as a closure ([`Self::check_nlr_closure`]). A cast runs
+    /// nothing here and records nothing.
+    fn note_nlr_operands(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) {
+        let blocks =
+            std::iter::once(receiver)
+                .chain(arguments)
+                .filter_map(|operand| match operand {
+                    Expression::Block(block) => Some(block),
+                    _ => None,
+                });
+        self.note_nlr_blocks(blocks, selector.name().as_str());
+    }
+
+    /// BT-4524: records the `^`-holding blocks among `blocks`, which a send
+    /// of `selector` outside every bracket window may run as closures
+    /// ([`SyncedCallState::nlr_operands`]). [`Self::note_nlr_operands`] calls
+    /// it for an unbracketed generic send; a conditional's non-Boolean
+    /// fallback send ([`Self::boolean_fallback_send`]) calls it for its
+    /// arms, since a conditional lowered on the mutation path is never a
+    /// generic send ([`Self::note_send`] does not see it).
+    pub(in crate::core_erlang) fn note_nlr_blocks<'b>(
+        &mut self,
+        blocks: impl IntoIterator<Item = &'b beamtalk_core::ast::Block>,
+        selector: &str,
+    ) {
+        if !self.synced_calls_active() || self.in_cell_closure() || self.synced.window_depth > 0 {
+            return;
+        }
+        for block in blocks {
+            if beamtalk_core::semantic_analysis::facts::block_has_nlr(block) {
+                self.synced
+                    .nlr_operands
+                    .insert(block.span, selector.to_string());
+            }
+        }
+    }
+
+    /// BT-4524: runs `f` (which compiles the closures of a call that stores
+    /// the threaded state before it runs them) as covered: a `^`-holding
+    /// operand compiled as a closure inside is not a finding. The callers are
+    /// the conditional fallback's pre-store or bracket and `on:do:`'s
+    /// closure path (whose catch boundary stores the pre-region `State` on
+    /// entry).
+    pub(in crate::core_erlang) fn with_nlr_closure_cover<T>(
+        &mut self,
+        covered: bool,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if covered {
+            self.synced.nlr_cover += 1;
+        }
+        let out = f(self);
+        if covered {
+            self.synced.nlr_cover -= 1;
+        }
+        out
+    }
+
+    /// BT-4524: the `SyncedCall` rule for a `^` (ADR 0146 P0). The block at
+    /// `at` is being compiled as an actor closure at method level; when it is
+    /// a `^`-holding operand of an unbracketed send
+    /// ([`Self::note_nlr_operands`]) and no store covers the call that runs
+    /// it, the closure's `^` would carry a cell older than the method's
+    /// `State`: a [`VerifyError::UnbracketedNlrClosure`].
+    pub(in crate::core_erlang) fn check_nlr_closure(&mut self, at: Span) {
+        let Some(selector) = self.synced.nlr_operands.remove(&at) else {
+            return;
+        };
+        if self.synced.window_depth > 0 || self.synced.nlr_cover > 0 {
+            return;
+        }
+        let gap = self.make_unbracketed_send(selector, at);
+        self.synced.nlr_closure_gaps.push(gap);
+    }
+
+    /// BT-4524: whether [`Self::nlr_closure_prestore`] stores for `blocks`:
+    /// one holds a `^` and the cell protocol applies (an actor instance
+    /// method, outside an actor closure).
+    pub(in crate::core_erlang) fn nlr_closure_prestore_applies(
+        &self,
+        blocks: &[&beamtalk_core::ast::Block],
+    ) -> bool {
+        self.synced_calls_active()
+            && !self.in_cell_closure()
+            && blocks.iter().any(|block| block_returns_from_scope(block))
+    }
+
+    /// BT-4524: the store a call that runs `blocks` as closures makes first
+    /// when one of them holds a `^` (ADR 0146 P0), for a call no bracket
+    /// covers (a conditional's non-Boolean fallback send): the state an
+    /// inline `^` here would store (`StateReadSite::NlrThrowState`), so the
+    /// closure's throw, which carries the cell, carries it. `None` when no
+    /// block holds a `^` or the cell protocol does not apply; `Some(Nil)` when
+    /// the cell is already the source (a bracketed region).
+    pub(in crate::core_erlang) fn nlr_closure_prestore(
+        &self,
+        blocks: &[&beamtalk_core::ast::Block],
+        at: Span,
+    ) -> Option<Document<'static>> {
+        if !self.nlr_closure_prestore_applies(blocks) {
+            return None;
+        }
+        Some(
+            match self.actor_state_source(StateReadSite::NlrThrowState, at) {
+                ActorStateSource::Cell => Document::Nil,
+                ActorStateSource::Var(var) => docvec![
+                    "let _ = ",
+                    super::threaded_ir::cell_put_call(leaf::var(var)),
+                    " in ",
+                ],
+            },
+        )
     }
 
     /// In count-only test mode, accepts a verifier finding instead of failing
@@ -1091,6 +1307,40 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4524: reports the `^`-holding closures recorded while compiling the
+    /// module ([`SyncedCallState::nlr_closure_gaps`]) as
+    /// [`VerifyError::UnbracketedNlrClosure`] (or, in count-only test mode,
+    /// logs them for the probe), and forgets the module's operand records.
+    fn finish_nlr_closure_gaps(&mut self, module_span: Span) {
+        let gaps = std::mem::take(&mut self.synced.nlr_closure_gaps);
+        self.synced.nlr_operands.clear();
+        #[cfg(test)]
+        if COUNT_ONLY.with(std::cell::Cell::get) {
+            SITE_LOG.with(|log| {
+                log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
+                    site: g.site.site.clone(),
+                    chain: g.site.chain.clone(),
+                    selector: format!("nlr-closure {}", g.selector),
+                    region: g.region,
+                }));
+            });
+            return;
+        }
+        let errors: Vec<VerifyError> = gaps
+            .iter()
+            .map(|g| VerifyError::UnbracketedNlrClosure {
+                selector: g.selector.clone(),
+                region: g.region,
+                at: g.at,
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "block holding a `^` run as a closure by a call that stores nothing first",
+            module_span,
+        );
+    }
+
     /// Reports the gaps recorded while compiling the module as verifier
     /// findings (or, in count-only test mode, logs them for the probe).
     pub(in crate::core_erlang) fn finish_synced_calls(&mut self, module_span: Span) {
@@ -1101,6 +1351,7 @@ impl CoreErlangGenerator {
         let guarded_op_gaps = std::mem::take(&mut self.synced.guarded_op_gaps);
         let tier2_stateacc_gaps = std::mem::take(&mut self.synced.tier2_stateacc_gaps);
         let stale_state_gaps = std::mem::take(&mut self.synced.stale_state_gaps);
+        self.finish_nlr_closure_gaps(module_span);
         #[cfg(test)]
         if COUNT_ONLY.with(std::cell::Cell::get) {
             SITE_LOG.with(|log| {
@@ -2089,9 +2340,16 @@ impl CoreErlangGenerator {
     ///
     /// A probe, not a decision: it runs before the loop's body context is set
     /// up, so the per-send class [`Self::classify_inlined`] caches (for the
-    /// window, the gap note and the lowering to agree on) is left as it was.
+    /// window, the gap note and the lowering to agree on) is left as it was
+    /// once the outermost probe ends. A probe nested in another (a nested
+    /// conditional's [`Self::pure_boolean_shape`]) sees the same context, so
+    /// the classes it caches stay for the rest of the outer probe: each
+    /// conditional's class is decided once per outermost probe, not once per
+    /// enclosing probe ([`SyncedCallState::probe_depth`]).
     pub(in crate::core_erlang) fn expr_holds_bracketed_call(&self, expr: &Expression) -> bool {
-        let cached = self.synced.inlined_classes.borrow().clone();
+        let depth = self.synced.probe_depth.get();
+        let cached = (depth == 0).then(|| self.synced.inlined_classes.borrow().clone());
+        self.synced.probe_depth.set(depth + 1);
         let mut found = false;
         beamtalk_core::ast_walker::walk_sends(expr, &mut |send| {
             found = found
@@ -2100,7 +2358,10 @@ impl CoreErlangGenerator {
                     UserCodeCall::Yes | UserCodeCall::SelfViaDefaultArm
                 );
         });
-        *self.synced.inlined_classes.borrow_mut() = cached;
+        self.synced.probe_depth.set(depth);
+        if let Some(cached) = cached {
+            *self.synced.inlined_classes.borrow_mut() = cached;
+        }
         found
     }
 

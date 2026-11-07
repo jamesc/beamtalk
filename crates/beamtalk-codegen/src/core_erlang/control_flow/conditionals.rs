@@ -1739,7 +1739,7 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
         let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
-        let fallback = self.boolean_fallback_send(&cond_var, selector_atom, blocks)?;
+        let fallback = self.boolean_fallback_send(&cond_var, selector_atom, blocks, false)?;
         let no_match_var = self.fresh_temp_var("CondNoMatch");
 
         Ok(docvec![
@@ -1783,22 +1783,48 @@ impl CoreErlangGenerator {
     /// reported, and `add_codegen_warning` does not dedup, while
     /// lowering-specific findings are kept (see
     /// `dedup_append_codegen_warnings`).
+    ///
+    /// BT-4524 (ADR 0146 P0): a block holding a `^` that goes as a closure
+    /// carries the cell in its throw, so the send stores first: `bracketed`
+    /// when the caller wraps it in a `SyncedCall`
+    /// ([`Self::mutation_boolean_fallback_clause`]), else a pre-store of the
+    /// state an inline `^` here would store
+    /// ([`CoreErlangGenerator::nlr_closure_prestore`]).
     pub(in crate::core_erlang) fn boolean_fallback_send(
         &mut self,
         cond_var: &str,
         selector_atom: &str,
         blocks: &[&Block],
+        bracketed: bool,
     ) -> Result<Document<'static>> {
+        let at = blocks.first().map(|b| b.span).unwrap_or_default();
+        // The send's `^`-holding arms are checked as closures whichever path
+        // lowered the conditional (the mutation path never reaches
+        // `note_send`): uncovered, each is an `UnbracketedNlrClosure`.
+        self.note_nlr_blocks(blocks.iter().copied(), selector_atom);
+        let prestore = if bracketed {
+            None
+        } else {
+            self.nlr_closure_prestore(blocks, at)
+        };
+        let covered = bracketed || prestore.is_some();
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let warn_len = self.codegen_warnings.len();
-        let closures: Result<Vec<_>> = blocks
-            .iter()
-            .map(|block| self.fallback_block_doc(block, selector_atom))
-            .collect();
+        let closures: Result<Vec<_>> = self.with_nlr_closure_cover(covered, |this| {
+            blocks
+                .iter()
+                .map(|block| this.fallback_block_doc(block, selector_atom))
+                .collect()
+        });
         self.decline_pure_boolean_inline = prev;
         let new_warnings = self.codegen_warnings.split_off(warn_len);
         self.dedup_append_codegen_warnings(new_warnings);
-        Ok(self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?))
+        let send =
+            self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?);
+        Ok(match prestore {
+            Some(prestore) => docvec![prestore, send],
+            None => send,
+        })
     }
 
     /// BT-4244: one block argument of [`Self::boolean_fallback_send`]: the
@@ -1884,15 +1910,17 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         base_state: &str,
     ) -> Result<Document<'static>> {
-        let send = self.boolean_fallback_send(cond_var, selector_atom, blocks)?;
-        let span = blocks.first().map(|b| b.span).unwrap_or_default();
-        let no_match_var = self.fresh_temp_var("CondNoMatch");
         // Bracket only when a block passed as a real closure touches the
-        // actor's state: a stub touches nothing.
+        // actor's state: a stub touches nothing. Decided before the send is
+        // compiled, so a `^` in a bracketed closure needs no pre-store of its
+        // own (BT-4524).
         let brackets = self.conditional_fallback_brackets()
             && blocks.iter().any(|block| {
                 self.fallback_passes_closure(block) && self.block_touches_actor_state(block)
             });
+        let send = self.boolean_fallback_send(cond_var, selector_atom, blocks, brackets)?;
+        let span = blocks.first().map(|b| b.span).unwrap_or_default();
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
         let body = if brackets {
             let bracket = self.bracket_conditional_fallback(send, base_state, span);
             let tuple = self.conditional_baseline_tuple(leaf::var(bracket.result), &bracket.state);

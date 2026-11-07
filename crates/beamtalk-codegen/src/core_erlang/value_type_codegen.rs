@@ -3034,7 +3034,7 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
-        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks)?;
+        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks, false)?;
         let no_match_var = self.fresh_temp_var("CondNoMatch");
         body_parts.push(docvec![
             "    let ",
@@ -4073,7 +4073,7 @@ impl CoreErlangGenerator {
         all_mutations: &[String],
         capture_value: bool,
     ) -> Result<VtBranchPieces> {
-        let send = self.boolean_fallback_send(cond_var, selector_name, blocks)?;
+        let send = self.boolean_fallback_send(cond_var, selector_name, blocks, false)?;
         let (preamble, value) = if capture_value {
             (Vec::new(), Some(send))
         } else {

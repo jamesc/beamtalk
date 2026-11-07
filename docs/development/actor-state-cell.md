@@ -103,7 +103,14 @@ includes the `on:do:` handler and `ensure:` cleanup runners, `Result tryDo:`
 and `protect/1`, the `beamtalk_collection` fold helpers, sort comparators,
 `Timer`, and collection primitives such as `includes:` that send `=` to
 elements. A send to another actor is bracketed too, because the compiler can
-rarely prove the receiver is not `self`.
+rarely prove the receiver is not `self`. A call that runs a block holding a `^` of
+the method as a closure (a `timesRepeat:`, `to:do:` or `whileTrue:` that
+carries nothing, `[^2] value`, a closure `ensure:`) is bracketed as well, even
+when the block touches nothing else of the actor's: the closure's `^` carries
+the cell, so the cell must hold the method's `State` first (ADR 0146 P0,
+BT-4524). A call no bracket covers (a conditional's non-Boolean fallback
+send, a conditional the compiler does not inline) stores that `State` just
+before it instead.
 
 Three kinds of call need no bracket. A construct the compiler lowers in place
 (`ifTrue:`, an inlined `do:`, `whileTrue:`, …) is not a call. An intrinsic or
