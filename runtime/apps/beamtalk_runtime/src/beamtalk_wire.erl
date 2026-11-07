@@ -108,7 +108,7 @@ decode(Term) ->
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
 `'\$beamtalk_wire'`/`'\$beamtalk_wire_reply'` envelope whose leading version
 this node does not recognise (ADR 0126 §5.1) — the one place this error
-shape is built (CLAUDE.md "No duplicate implementations"), called both by
+shape is built (AGENTS.md "No duplicate implementations"), called both by
 `beamtalk_actor`'s call/cast wire-tag dispatch (request direction, `Class =
 unknown`, the message's own `Selector`) and by `beamtalk_future`'s
 `decode_wire_reply/1` (reply direction, `Class = 'Future'`, no `Selector`,

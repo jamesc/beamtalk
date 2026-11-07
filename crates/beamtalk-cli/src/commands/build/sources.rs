@@ -60,7 +60,7 @@ pub fn collect_formattable_files_from_dir(dir: &Utf8Path) -> Result<Vec<Utf8Path
 /// `to_module_name` conversion delegate to
 /// `beamtalk_core::semantic_analysis::relative_module_segments` — the one
 /// implementation of "how a file path becomes module-name segments" shared
-/// with the new `ClassModuleRegistry`'s Pass-1 construction (CLAUDE.md's "No
+/// with the new `ClassModuleRegistry`'s Pass-1 construction (AGENTS.md's "No
 /// duplicate implementations" rule) — rather than re-implementing the loop
 /// here.
 pub(crate) fn compute_relative_module(

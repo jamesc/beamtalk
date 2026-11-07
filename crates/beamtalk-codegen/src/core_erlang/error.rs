@@ -235,7 +235,7 @@ impl CodeGenError {
     /// of this error — `validate_stored_closure` (the generic stored/opaque
     /// block path, BT-2792) and `reject_unthreadable_value_self_field_write` (the
     /// value-type-write-inside-a-loop-body path) — so the two can't drift
-    /// (CLAUDE.md's no-duplicate-implementations rule).
+    /// (AGENTS.md's no-duplicate-implementations rule).
     pub(super) fn field_assignment_in_unsupported_block(field: &str, location: String) -> Self {
         let mut chars = field.chars();
         let field_capitalized = chars

@@ -10,7 +10,7 @@ defmodule BtAttachWeb.Live.RequestContext do
   Extracted as a shared leaf module (BT-3291) so `BtAttachWeb.WorkspaceLive`
   and its extracted panes (e.g. `BtAttachWeb.Live.Inspector`) build the same
   context from a socket's assigns rather than each keeping its own copy
-  (CLAUDE.md's no-duplicate-implementations rule).
+  (AGENTS.md's no-duplicate-implementations rule).
   """
 
   @type t :: %{user: term(), role: atom()}

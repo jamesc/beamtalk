@@ -24,7 +24,7 @@
 //! # Design Rules
 //!
 //! - All output goes through the [`Document`] API — **never** `format!()` or
-//!   string concatenation (CLAUDE.md / ADR 0018).
+//!   string concatenation (AGENTS.md / ADR 0018).
 //! - Text leaves derived from AST data (identifiers, literal values, comments,
 //!   etc.) are constructed through the intent-carrying [`leaf`] helpers. After
 //!   ADR 0089 Phase 3 removed the open `Document::String` escape hatch, [`leaf`]
@@ -330,7 +330,7 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
 /// parser for a real method definition, but reachable for a
 /// hand-constructed/synthesized one) degrades to the bare operator rather
 /// than panicking, matching protocol signatures' existing behaviour and
-/// CLAUDE.md's "never panic on user input" rule.
+/// AGENTS.md's "never panic on user input" rule.
 fn unparse_selector_and_params(
     selector: &MessageSelector,
     parameters: &[ParameterDefinition],

@@ -65,7 +65,7 @@ TestCase subclass: HasClearFieldTest
     // The reflective `fieldAt:` path (`beamtalk_reflection:read_field/2`)
     // must raise the same shape of hint the direct `self.slot` read does
     // (`late_field_read_test.bt`'s `testReadBeforeAssignHintMentionsFieldAndType`)
-    // — the CLAUDE.md no-duplicate-implementations rule requires this
+    // — the AGENTS.md no-duplicate-implementations rule requires this
     // "matches the direct read" claim to be test-enforced, not just a
     // doc comment.
     self.a launch: 42

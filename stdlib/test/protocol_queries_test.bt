@@ -122,7 +122,7 @@ TestCase subclass: ProtocolQueriesTest
     self assert: users size equals: 0
 
   testSystemNavigationUsersOfSharesProtocolImplementation =>
-    // No duplicate implementation (CLAUDE.md): SystemNavigation delegates
+    // No duplicate implementation (AGENTS.md): SystemNavigation delegates
     // to Protocol usersOf: rather than re-querying the registry.
     fromProtocol := Protocol usersOf: #Displayable
     fromNavigation := SystemNavigation usersOf: #Displayable

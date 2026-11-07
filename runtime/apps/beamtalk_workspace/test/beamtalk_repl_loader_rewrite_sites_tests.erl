@@ -710,7 +710,7 @@ validate_sites_validation_failure(#{counter_path := CounterPath, sub_counter_pat
 %% Shared site-builder for "rename increment -> incrementBy across all 4
 %% sites" — the exact rename `rewrite_sites_success_test_` above
 %% also builds inline; extracted here rather than copied a further time
-%% (CLAUDE.md's no-duplicate-implementations rule) since both new test cases
+%% (AGENTS.md's no-duplicate-implementations rule) since both new test cases
 %% below need it.
 %%====================================================================
 

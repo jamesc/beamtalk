@@ -44,7 +44,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     check_init_args/5,
     %% ADR 0123 §3: shared with beamtalk_shape_migration's reconcile step —
     %% a Value class has no init/1, so its declared-field defaults are
-    %% derived from new/0 instead (CLAUDE.md: no duplicate implementations).
+    %% derived from new/0 instead (AGENTS.md: no duplicate implementations).
     ancestor_compiled_defaults/1
 ]).
 
@@ -783,7 +783,7 @@ do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Select
             %% restart mechanism. For *this* call site, the caller is
             %% normally a class method body executing `self spawnAs:`/
             %% `self spawnWith:as:` inside the class's own gen_server
-            %% process (per CLAUDE.md's "Blocks into class methods" rule) —
+            %% process (per AGENTS.md's "Blocks into class methods" rule) —
             %% not a supervisor, so the link must not survive: a later kill
             %% of the actor must not take the class process down with it.
             %% BT-3992: the link is severed inside the start, before this

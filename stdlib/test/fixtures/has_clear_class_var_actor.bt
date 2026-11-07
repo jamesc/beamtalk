@@ -19,7 +19,7 @@ typed Actor subclass: HasClearClassVarActor
   // `Dynamic` rather than the reflection selector's own declared `Object`
   // return type — a pre-existing type-checker gap (reproduced with `self
   // respondsTo:` too), not something ADR 0124 B4 introduces, so
-  // acknowledged here rather than fixed (CLAUDE.md scope control).
+  // acknowledged here rather than fixed (AGENTS.md scope control).
   @expect type
   class hasCurrent -> Boolean => self hasField: #current
 

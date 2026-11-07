@@ -1205,7 +1205,7 @@ fn collect_pattern_bindings(
 ///
 /// `pub(crate)`: also used by [`crate::semantic_analysis::initialize_assigns`]'s
 /// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
-/// may-analysis already answers, imported rather than redefined (CLAUDE.md's
+/// may-analysis already answers, imported rather than redefined (AGENTS.md's
 /// no-duplicate-implementations rule).
 /// Whether `expr` (parentheses looked through) is `self` or `super`: the
 /// receivers whose sends run the object's own methods.

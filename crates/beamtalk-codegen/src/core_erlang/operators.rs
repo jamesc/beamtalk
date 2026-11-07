@@ -249,7 +249,7 @@ impl CoreErlangGenerator {
             // of emitting it unguarded.
             self.number_coercion_bare_path(op, erlang_op, left_code, right_code)
         } else {
-            // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
+            // AGENTS.md: Core Erlang fragments MUST use Document/docvec!, never
             // format!(). erlang_op is one of the static literals in the match
             // arms above, so Document::Str is safe.
             docvec![
@@ -824,7 +824,7 @@ impl CoreErlangGenerator {
             ]
         } else {
             // Runtime dispatch: check is_list at runtime.
-            // CLAUDE.md: built entirely with Document/docvec!, no format!().
+            // AGENTS.md: built entirely with Document/docvec!, no format!().
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
             docvec![

@@ -199,7 +199,7 @@ pub enum ClassModuleRegistryError {
 /// conversion at the heart of `beamtalk-cli`'s `build::compute_relative_module`
 /// so package-mode Pass-1 construction and any other caller share exactly
 /// one implementation of "how a file path becomes module-name segments"
-/// (CLAUDE.md's "No duplicate implementations" rule) — `compute_relative_module`
+/// (AGENTS.md's "No duplicate implementations" rule) — `compute_relative_module`
 /// itself now delegates here instead of re-implementing the loop.
 ///
 /// Returns one segment per path component with the extension stripped from
@@ -292,7 +292,7 @@ pub fn validate_stdlib_module_name(
 /// Skipping that would silently reintroduce the stale-name bug shape this
 /// registry exists to prevent. See ADR 0119's Open Questions for the full
 /// discussion; no such caching exists yet, so no invalidation hook exists
-/// yet either (CLAUDE.md: don't add handling for scenarios that can't
+/// yet either (AGENTS.md: don't add handling for scenarios that can't
 /// currently happen).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassModuleRegistry {

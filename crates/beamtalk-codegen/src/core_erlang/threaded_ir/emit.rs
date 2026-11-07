@@ -22,7 +22,7 @@ use beamtalk_cerl_doc::{Document, join, leaf};
 /// Loop-context flags captured/restored around rendering a nested
 /// [`ThreadedStmt::Threaded`] body — see [`RenderCtx::with_loop_context`].
 /// Mirrors `CoreErlangGenerator::in_loop_body`/`in_hybrid_loop` exactly (a
-/// third, boolean-pair copy would be a duplication CLAUDE.md's
+/// third, boolean-pair copy would be a duplication AGENTS.md's
 /// no-duplicate-implementations rule forbids; this type only names the pair
 /// [`RenderCtx`] threads, it never becomes a second source of truth for
 /// their values — [`RenderCtx::with_loop_context`] always reads/writes them
@@ -45,7 +45,7 @@ struct LoopContextFlags {
 /// Chosen because it lets NLR-catch rendering reuse
 /// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
 /// function every real NLR try/catch in the codebase already goes through
-/// — instead of re-deriving its scaffolding a second time (CLAUDE.md: "A
+/// — instead of re-deriving its scaffolding a second time (AGENTS.md: "A
 /// rule crossing the Rust/Erlang boundary needs a shared conformance
 /// fixture or code generation, not a comment"; the same logic applies
 /// within Rust here — reuse beats a parallel copy that could drift). The
@@ -985,7 +985,7 @@ struct ConditionalLoopHeader<'a> {
 /// skeleton (`header: None`) and [`ConditionalLoop`](ThreadedStmt::ConditionalLoop)'s
 /// real condition/case-split skeleton (`header: Some(ConditionalLoopHeader { .. })`,
 /// ADR 0118 phase 3) share one implementation instead of two
-/// near-duplicates (CLAUDE.md's no-duplicate-implementations rule applies
+/// near-duplicates (AGENTS.md's no-duplicate-implementations rule applies
 /// within this file, not just across the Rust/Erlang boundary).
 ///
 /// `fn_name` is already resolved by the caller — the bare shape mints it via
@@ -1493,7 +1493,7 @@ mod cell_helper_conformance {
     /// in one place (`actor_state_helper::ALL`), which the one emitter
     /// references, so the list cannot drift from what is actually emitted.
     /// All `-export` blocks in the module are collected, so a helper moved
-    /// to a second block is still found (CLAUDE.md). Edit the Erlang module
+    /// to a second block is still found (AGENTS.md). Edit the Erlang module
     /// (the owner) when this fails.
     #[test]
     fn the_runtime_exports_every_emitted_cell_helper() {

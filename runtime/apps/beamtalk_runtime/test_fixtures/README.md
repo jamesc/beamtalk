@@ -131,7 +131,7 @@ construct that reaches it).
 the code path used when a test class is run outside a gen_server
 `handle_call` (i.e. NOT via `execute_tests/5`'s `FlatMethods` map). That path
 used to call `Module:module_info(exports)` directly, which always raises
-`undef` on a genuinely Beamtalk-compiled (`bt@...`) module (CLAUDE.md: Core
+`undef` on a genuinely Beamtalk-compiled (`bt@...`) module (AGENTS.md: Core
 Erlang codegen goes through `compile:forms(..., [from_core | Opts])`, which
 never runs the `sys_pre_expand` pass that injects `module_info/0,1`).
 Hand-written `.erl` stubs like `runtime/apps/beamtalk_stdlib/test/bt@tc_stub.erl`

@@ -1099,7 +1099,7 @@ impl ClassHierarchy {
 
     /// Shared superclass-chain walk behind [`Self::state_field_type`],
     /// [`Self::state_field_kind`], [`Self::class_variable_kind`] and
-    /// [`Self::class_variable_type`] (CLAUDE.md "No duplicate
+    /// [`Self::class_variable_type`] (AGENTS.md "No duplicate
     /// implementations": these four used to each hand-roll the identical
     /// `visited`/`current` cycle-guarded loop below).
     ///

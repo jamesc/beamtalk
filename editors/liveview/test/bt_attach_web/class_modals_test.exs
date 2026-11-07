@@ -25,7 +25,7 @@ defmodule BtAttachWeb.Live.ClassModalsTest do
   # `BtAttachWeb.StubClientOverrides` fills in every callback the module below
   # does not define with a delegate to `StubWorkspaceClient`, so each of these
   # models exactly one degraded server response instead of restating the
-  # whole stub surface (CLAUDE.md no-duplicate-implementations) — the same
+  # whole stub surface (AGENTS.md no-duplicate-implementations) — the same
   # pattern `MethodEditorTest`/`WorkspaceLivePanesTest` use.
 
   # `eval` fails with the structured 4-tuple shape (`{:error, reason, output,

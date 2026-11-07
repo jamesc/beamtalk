@@ -58,7 +58,7 @@ defmodule BtAttachWeb.Live.MethodEditor do
   Every workspace read/write goes through `BtAttach.Facade.dispatch/3` (ADR
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
-  `save`/`eval`/`browse_*` ops or the RBAC gates they ride (CLAUDE.md
+  `save`/`eval`/`browse_*` ops or the RBAC gates they ride (AGENTS.md
   no-duplicate-implementations).
 
   State (`:tabs`, `:active_tab`, `:editor_rev`, `:doc_expanded`,

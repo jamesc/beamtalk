@@ -620,7 +620,7 @@ delivery path must call this instead of `is_process_alive/1` directly.
 Delegates to `beamtalk_pid:is_alive/1` (ADR 0126 §7.3), the shared leaf
 module extracted from this exact guard so `beamtalk_actor.erl`'s six
 `is_process_alive/1` call sites route through the same logic instead of a
-second copy (CLAUDE.md "No duplicate implementations").
+second copy (AGENTS.md "No duplicate implementations").
 """.
 -spec subscriber_alive(pid()) -> boolean().
 subscriber_alive(SubscriberPid) ->

@@ -118,7 +118,7 @@ impl FieldWriteSite {
     /// `if matches!(context, CodeGenContext::ValueType) { .. } else { .. }`
     /// copies (`expressions.rs`'s `generate_field_assignment`,
     /// `dispatch_codegen.rs`'s `generate_field_assignment_open`, and this
-    /// module's own `lower_field_assignment_bind`) — CLAUDE.md's
+    /// module's own `lower_field_assignment_bind`) — AGENTS.md's
     /// no-duplicate-implementations rule applied to the very axis this
     /// issue unifies.
     pub(in crate::core_erlang) fn for_context(context: CodeGenContext) -> Self {
@@ -673,7 +673,7 @@ impl CoreErlangGenerator {
     /// `State`/`StateAcc` stays in scope inside the `case`), and `value` is the receiver's own
     /// boolean/nil value to test. Shared by all the `generate_*_with_mutations`
     /// generators below (previously each hand-duplicated this exact match —
-    /// CLAUDE.md's no-duplicate-implementations rule). `frame` is the
+    /// AGENTS.md's no-duplicate-implementations rule). `frame` is the
     /// caller's own current frame ([`CoreErlangGenerator::current_frame`]),
     /// tagging every real `Bind` this prelude carries with the SAME frame
     /// identity the caller's own `case` construct uses.

@@ -12,7 +12,7 @@ No `peer`-based test existed anywhere in `runtime/` before this — every
 later phase of ADR 0126 (and BT-3569's own peer-booted wire check, if it
 lands first) needs a way to stand up a genuinely distributed second node
 and tear it down reliably, so this is the one shared place that logic
-lives (CLAUDE.md "No duplicate implementations").
+lives (AGENTS.md "No duplicate implementations").
 
 ## Usage
 

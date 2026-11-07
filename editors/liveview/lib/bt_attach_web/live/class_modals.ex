@@ -40,7 +40,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   Every workspace read/write goes through `BtAttach.Facade.dispatch/3` (ADR
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
-  `new_class`/`evaluate` ops or the RBAC gates they ride (CLAUDE.md
+  `new_class`/`evaluate` ops or the RBAC gates they ride (AGENTS.md
   no-duplicate-implementations). Every mutation is submitted through the same
   generic `evaluate`/`new_class` ops the REPL meta-commands and MCP tools
   use — there is no dedicated workspace-side "remove"/"rename" op to

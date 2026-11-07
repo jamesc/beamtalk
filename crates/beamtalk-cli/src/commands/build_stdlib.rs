@@ -886,7 +886,7 @@ struct ClassMeta {
 /// Sort class metadata by class name — every generated-artifact writer
 /// (`generate_builtins_rs`, `generate_erlang_builtins_hrl`) needs the same
 /// deterministic ordering so the checked-in `.rs`/`.hrl` files are stable
-/// across regenerations. Single implementation per CLAUDE.md's
+/// across regenerations. Single implementation per AGENTS.md's
 /// "No duplicate implementations" rule.
 fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMeta> {
     let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
@@ -1820,7 +1820,7 @@ const GENERATED_SUPERVISOR_CONFIG_HRL_PATH: &str =
 /// hardcoded `GENERATED_*_PATH` constant internally — is also what makes this
 /// unit-testable: real call sites still pass the hardcoded constants, but
 /// tests can point `dest` at a temp file instead of risking a write into the
-/// real checked-in generated files (see CLAUDE.md's "Generated files" rule).
+/// real checked-in generated files (see AGENTS.md's "Generated files" rule).
 fn write_generated_file_if_changed(dest: &Utf8Path, content: &str) -> Result<()> {
     let needs_write = match fs::read_to_string(dest) {
         Ok(existing) => existing != content,
@@ -2029,7 +2029,7 @@ fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
 /// Generate `beamtalk_class_vars_keys.hrl` from codegen's `class_var_keys` leaf
 /// (ADR 0130 §2): the class-variable process-dictionary key shape the inlined
 /// reads and writes codegen emits and `beamtalk_class_vars.erl` must agree on,
-/// rendered from one Rust source instead of copied (CLAUDE.md shared-fixture rule).
+/// rendered from one Rust source instead of copied (AGENTS.md shared-fixture rule).
 fn generate_class_vars_keys_hrl() -> Result<()> {
     let dest = Utf8PathBuf::from(GENERATED_CLASS_VARS_KEYS_HRL_PATH);
     write_generated_file_if_changed(
@@ -4376,7 +4376,7 @@ mod tests {
     // `generate_builtins_rs`/`generate_erlang_builtins_hrl` themselves still
     // write to the real hardcoded `GENERATED_BUILTINS_PATH`/
     // `GENERATED_BUILTINS_HRL_PATH` constants and aren't unit-tested directly
-    // (per CLAUDE.md's "Generated files" rule; their orchestration is covered
+    // (per AGENTS.md's "Generated files" rule; their orchestration is covered
     // separately). This shared helper is
     // where the "only write if changed" and write-error branches actually
     // live, and it takes `dest` as a parameter, so tests exercise it against

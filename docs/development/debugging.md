@@ -403,7 +403,7 @@ compile and how — exactly the kind of diff `just core-diff` (below) exists
 to catch — so it stayed out of scope; `body_threaded_families` carries
 `#[allow(dead_code)]` in production builds for the same reason. This is a
 documented, differential-tested design decision, not leftover duplication:
-CLAUDE.md's no-duplicate-implementations rule is satisfied by the
+AGENTS.md's no-duplicate-implementations rule is satisfied by the
 differential test enforcing the invariant, not by deleting one of the two
 formulas.
 

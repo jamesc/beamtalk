@@ -764,7 +764,7 @@ receive_include_compiler_warning(Timeout) ->
 %% Shared substring-matching wait, parameterised by the needle — one
 %% implementation for every boot-warning test in this suite (ADR 0125 §1.5's
 %% include-compiler warning and §1.6's non-loopback-bind warning below),
-%% not a second near-identical copy per warning (CLAUDE.md's
+%% not a second near-identical copy per warning (AGENTS.md's
 %% no-duplicate-implementations rule).
 receive_log_message_containing(Needle, Timeout) ->
     receive

@@ -192,7 +192,7 @@ pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
 /// `built_at` is informational, so second precision is plenty and no timezone
 /// crate is needed. `pub(crate)` (not private) so `release::provenance`'s
 /// own `built_at` field can reuse this instead of a second copy of the same
-/// no-timezone-crate algorithm (CLAUDE.md's no-duplicate-implementations rule).
+/// no-timezone-crate algorithm (AGENTS.md's no-duplicate-implementations rule).
 //
 // `secs / 86_400` is the post-epoch day count: it stays well within `i64`
 // (millions of years), so the `u64 → i64` cast cannot wrap.

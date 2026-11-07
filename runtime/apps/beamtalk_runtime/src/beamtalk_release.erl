@@ -42,7 +42,7 @@ filtered to the project/dependency set with
 `bt@stdlib@*`-exclusion predicate `find_bt_modules_in_dir/1` uses when
 staging `shapes.json`, so a live `shapeManifest` and the release's own
 `shapes.json` can never structurally disagree about which classes are
-"the project's" (CLAUDE.md's no-duplicate-implementations rule).
+"the project's" (AGENTS.md's no-duplicate-implementations rule).
 """.
 
 -export([info/0, shape_manifest/0, shapeManifest/0]).

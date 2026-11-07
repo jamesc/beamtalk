@@ -21,7 +21,7 @@
 // no separate `tests/e2e/cases/` tree exists in this repo (the e2e convention
 // is `tests/repl-protocol/cases/*.btscript`, run via `just test-repl-protocol`);
 // it already existed from BT-3186 and is extended here rather than duplicated,
-// per CLAUDE.md's no-duplicate-implementations rule.
+// per AGENTS.md's no-duplicate-implementations rule.
 
 // ===========================================================================
 // INSTANCE-SIDE REMOVAL — re-exposes the inherited method, no restart needed
@@ -116,7 +116,7 @@ RemSelParent includesSelector: #greet
 // removeSelector:ifAbsent:'s AbsentBlock execution context (ADR 0112 §
 // Error behaviour on absent selector) — verified, not assumed.
 //
-// CLAUDE.md's "a block passed into a class method runs inside that class's
+// AGENTS.md's "a block passed into a class method runs inside that class's
 // own gen_server process, so messaging the same class back raises
 // dispatch_error" rule applies to a block argument received by a class
 // method that is itself dispatched *through* that gen_server

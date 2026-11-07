@@ -54,7 +54,7 @@ use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 /// need the same "skip if unclassifiable, skip if every member is
 /// compatible, otherwise report the incompatible members" decision from a
 /// raw `classify_union_members` call, kept as one implementation rather
-/// than two independently re-derived copies (CLAUDE.md § No duplicate
+/// than two independently re-derived copies (AGENTS.md § No duplicate
 /// implementations). Diagnostic
 /// *message* text still differs per call site (an FFI signature vs. a
 /// declared Beamtalk method), so only the classification — not the

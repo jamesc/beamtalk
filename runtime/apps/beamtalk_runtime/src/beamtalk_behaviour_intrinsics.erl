@@ -145,7 +145,7 @@ that the Behaviour/Class libraries can rely on.
     %% `beamtalk_workspace` already depends on `beamtalk_runtime` at compile
     %% time, so no `erlang:apply/3` indirection is needed here, unlike the
     %% reverse direction this module's other cross-app calls use) rather
-    %% than duplicating its whereis/stop/purge sequence (CLAUDE.md's
+    %% than duplicating its whereis/stop/purge sequence (AGENTS.md's
     %% no-duplicate-implementations rule).
     install_class_rename/3
 ]).
@@ -1577,7 +1577,7 @@ funs; see `block.bt`) — called directly here, exactly as
 `beamtalk_actor.erl`'s `onExit:` callback calls its own block argument.
 
 Unlike a block argument received by a *locally-defined* class method (which
-runs inside that class's own gen_server call, per CLAUDE.md's "Blocks into
+runs inside that class's own gen_server call, per AGENTS.md's "Blocks into
 class methods" rule), this primitive — like every `Behaviour` tower
 primitive — is itself reached via the Class -> Behaviour chain-walk
 fallthrough (`beamtalk_dispatch:lookup/5`) when sent to a class object,

@@ -134,7 +134,7 @@ Workspace changes isEmpty
 // STEP 3 — SET UP A REAL SOURCE FILE FOR THE FLUSH PATH
 // ===========================================================================
 
-// File operations use File tempDirectory (per CLAUDE.md cross-platform rule).
+// File operations use File tempDirectory (per AGENTS.md cross-platform rule).
 _tmpDir := File tempDirectory
 // => _
 

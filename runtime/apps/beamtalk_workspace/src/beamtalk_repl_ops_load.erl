@@ -1593,7 +1593,7 @@ package-qualified module atom `bt@<pkg>@<relative@path>` via the shared
 `relative_module_segments` leaf the CLI's own `build_class_module_index`
 (`build.rs`) uses — so this index and a `beamtalk build` of the same project can
 never diverge on either class extraction or module-name casing (see
-CLAUDE.md's "No duplicate implementations" rule). The package name is read from
+AGENTS.md's "No duplicate implementations" rule). The package name is read from
 `PackageName` argument (never re-parsed from `beamtalk.toml` here; see
 `resolve_package_name/2`).
 

@@ -990,7 +990,7 @@ pub(in crate::core_erlang) enum StateRestoreDefect {
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
 /// variant. Returns an empty `Vec` when `ir` is well-formed.
 ///
-/// **Failure behavior** (per ADR 0111 §The verifier / CLAUDE.md error-recovery
+/// **Failure behavior** (per ADR 0111 §The verifier / AGENTS.md error-recovery
 /// rules): this function never panics — callers in debug/CI treat a non-empty
 /// result as a hard failure; release callers must degrade a non-empty result
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
@@ -2332,7 +2332,7 @@ impl CoreErlangGenerator {
     }
 
     /// Shared failure-reporting path for every `ThreadedIr` production
-    /// invariant check (ADR 0111 §The verifier / CLAUDE.md's "never panic
+    /// invariant check (ADR 0111 §The verifier / AGENTS.md's "never panic
     /// on user input" rule): hard-fails in debug/CI via `debug_assert!`,
     /// exactly as the deleted `debug_assert!`s this migration's checks
     /// replace did; in release builds (where `debug_assert!` is compiled
@@ -2342,7 +2342,7 @@ impl CoreErlangGenerator {
     /// invariant check in `control_flow`, `expressions.rs`,
     /// `dispatch_codegen.rs`, and `gen_server/methods.rs` — each consolidated
     /// onto this one helper instead of an independently-added copy
-    /// (CLAUDE.md's no-duplicate-implementations rule).
+    /// (AGENTS.md's no-duplicate-implementations rule).
     ///
     /// Moved here (out of `control_flow/mod.rs`) together with
     /// [`StateAccFallbackReason`] to remove a `threaded_ir → control_flow`

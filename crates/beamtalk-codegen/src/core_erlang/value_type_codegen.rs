@@ -1312,7 +1312,7 @@ impl CoreErlangGenerator {
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
     /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
-    /// independently drift on which family maps to which rebind (CLAUDE.md's
+    /// independently drift on which family maps to which rebind (AGENTS.md's
     /// no-duplicate-implementations rule).
     ///
     /// `families` is the caller's own [`ThreadedFamilies`] answer for the

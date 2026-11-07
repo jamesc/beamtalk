@@ -120,7 +120,7 @@ pub fn run(
         // exhaustiveness statically, so a catch-all arm is required. Kept as
         // a real user-facing error rather than `unreachable!()` so a future
         // refactor of the guards above degrades to a diagnostic instead of a
-        // panic on user argv (CLAUDE.md: "Never panic/unwrap() on user input").
+        // panic on user argv (AGENTS.md: "Never panic/unwrap() on user input").
         (class_name, selector) => Err(miette!(
             "Invalid arguments to `beamtalk run`: class_or_dot={class_name:?}, selector={selector:?}\n\
              Usage: beamtalk run <ClassName> <selector> [args...]\n\

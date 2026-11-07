@@ -636,7 +636,7 @@ containing "not available" or "timed out"), `?LOG_WARNING' otherwise (e.g. a
 parse failure on a specific method's source).
 
 Includes `domain => [beamtalk, stdlib]' metadata on every log call per project
-convention (CLAUDE.md).
+convention (AGENTS.md).
 """.
 -spec log_compiler_diagnostics([map()], atom()) -> ok.
 log_compiler_diagnostics(Diagnostics, Selector) ->
