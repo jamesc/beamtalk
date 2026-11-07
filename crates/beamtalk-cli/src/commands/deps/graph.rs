@@ -574,7 +574,7 @@ mod tests {
             DepNode {
                 name: "pkg_c".to_string(),
                 version: "0.1.0".to_string(),
-                root: Utf8PathBuf::from("/tmp/c"),
+                root: Utf8PathBuf::from("test-fixtures/pkg_c"),
                 deps: vec![],
                 source_description: "path: ../pkg_c".to_string(),
             },
@@ -584,7 +584,7 @@ mod tests {
             DepNode {
                 name: "pkg_b".to_string(),
                 version: "0.1.0".to_string(),
-                root: Utf8PathBuf::from("/tmp/b"),
+                root: Utf8PathBuf::from("test-fixtures/pkg_b"),
                 deps: vec!["pkg_c".to_string()],
                 source_description: "path: ../pkg_b".to_string(),
             },
@@ -603,7 +603,7 @@ mod tests {
             DepNode {
                 name: "d".to_string(),
                 version: "0.1.0".to_string(),
-                root: Utf8PathBuf::from("/tmp/d"),
+                root: Utf8PathBuf::from("test-fixtures/d"),
                 deps: vec![],
                 source_description: "path: ../d".to_string(),
             },
@@ -613,7 +613,7 @@ mod tests {
             DepNode {
                 name: "b".to_string(),
                 version: "0.1.0".to_string(),
-                root: Utf8PathBuf::from("/tmp/b"),
+                root: Utf8PathBuf::from("test-fixtures/b"),
                 deps: vec!["d".to_string()],
                 source_description: "path: ../b".to_string(),
             },
@@ -623,7 +623,7 @@ mod tests {
             DepNode {
                 name: "c".to_string(),
                 version: "0.1.0".to_string(),
-                root: Utf8PathBuf::from("/tmp/c"),
+                root: Utf8PathBuf::from("test-fixtures/c"),
                 deps: vec!["d".to_string()],
                 source_description: "path: ../c".to_string(),
             },
