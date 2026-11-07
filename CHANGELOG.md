@@ -318,6 +318,13 @@
 
 ### Runtime
 
+- Inline FFI calls skip the proxy when the Erlang spec proves coercion is a no-op — when a function's `-spec` shows the result and arguments need no unwrapping or coercion, the compiler emits a direct remote call instead of routing through `beamtalk_erlang_proxy`. An `erlang:phash2/1` call drops from 134 ns / 14 reductions to 13 ns / 1 reduction (BT-4485, #4882)
+- Class-side constant folding widened to every scalar literal kind — string, symbol, float, boolean, character and `nil` class-side method bodies are now inlined behind a constant-value key, not just integers (BT-4504, #4888)
+- **Fix: `^` in a field-writing loop now keeps the loop's field writes (BT-4523)** — a `^` inside a hybrid-params loop body stored the loop-entry state instead of the state with fields written so far; an `ensure:` cleanup also saw the stale values. Hybrid mode is now excluded when the body holds a `^`, so the loop threads the full state (#4894)
+- **Fix: aliased self-send re-throws `^` unchanged instead of rewinding the cell (BT-4525)** — `other := self. other run: [^3]` in an actor method failed with a raw NLR error and rewound the callee's field writes. The self-dispatch path now re-throws the NLR term unchanged and stores nothing (#4893)
+- **Fix: bounded actor/supervisor stops never raise `timeout_value` (BT-4494)** — `stopWithin:` and `Actor stopWith:timeout:` could raise `error:timeout_value` on short timeouts in OTP 28.5, because `proc_lib:stop/3` can compute a negative remaining wait. A new shared `beamtalk_stop:stop/3` clamps the remaining wait at zero and removes the monitor on every path (#4891)
+- **Fix: value-type extension `^` no longer leaks a `{Result, Self}` pair (BT-4503)** — a value-type extension with a block `^` returned the internal pair instead of the bare value. Value-type method functions and extension funs now answer their plain result on both paths (#4883)
+- **Fix: REPL nested constructs no longer read stale bindings (BT-4461)** — a nested conditional or loop in a REPL frame used the binding's original Core variable instead of re-reading the map, so inner writes were lost. REPL producers now rethread every cached binding their frame holds (#4880)
 - Forwarding class `new:` constructors run in the caller instead of the class process, reducing spawn overhead by one gen_server round-trip (BT-4475, #4879)
 - Explicit FFI-forward class `new` constructors run in the caller, matching the `new:` change above (BT-4464, #4864)
 - Static call keys consolidated to one `persistent_term` key per class, so a base-class write erases at most 2 keys per class instead of one per selector (BT-4442, #4867)
@@ -380,6 +387,8 @@
 
 ### Internal
 
+- ADR 0131: delete the legacy reread helpers and their dead callers — `push_control_flow_threaded_var_rereads` and `rebind_threaded_vars_from_state` are removed; a construct compiled in place is now a typed `ConstructLocalsInPlace` marker verified by `ConstructLocalsNotRebound` (BT-4462, #4887)
+- Extract shared log-format helpers into `beamtalk_log_format` — `format_time/1` and `format_pid/1` were byte-identical between `beamtalk_json_formatter` and `beamtalk_ws_log_handler`; both now delegate to the shared leaf module (#4884)
 - ADR 0131: lower a nested inline construct in an actor plain arm through `ThreadedIr` — a conditional or evaluated block nested in an actor `match:` plain arm is now lowered as a `ThreadedIr` node instead of a special-case code path (BT-4460, #4877)
 - Codegen: compile the remaining guard-style `^` shapes as direct returns — comparisons and other guard-safe expressions under a `^` in an inlined conditional now emit a direct return instead of a throw/catch pair (BT-4452, #4876)
 - Codegen: guard-style `^` in inlined conditionals as direct returns — extends the BT-4452 optimisation to `^` in `ifTrue:`/`ifFalse:` arms (BT-4415, #4843)
