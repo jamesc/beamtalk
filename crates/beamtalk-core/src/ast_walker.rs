@@ -34,7 +34,7 @@
 //! This module handles the common pre-order-visitor pattern.
 
 use crate::ast::{
-    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, StringSegment,
+    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, Pattern, StringSegment,
 };
 
 // ── Module-level iterators ────────────────────────────────────────────────────
@@ -304,6 +304,71 @@ where
         | Expression::ExpectDirective { .. }
         | Expression::Error { .. }
         | Expression::Spread { .. } => {}
+    }
+}
+
+// ── Pattern walker ───────────────────────────────────────────────────────────
+
+/// Recursively walks a [`Pattern`] tree, calling `f` on every [`Expression`]
+/// embedded in it.
+///
+/// Today the only expression slot in `Pattern` is `BinarySegment::size`.  The
+/// walker is defensive: it traverses all container variants (Tuple, Array,
+/// List, Map, Constructor, Binary) so that future grammar extensions that add
+/// expression slots elsewhere do not silently regress any pass built on this
+/// function.
+///
+/// `pub` (not `pub(crate)`): `beamtalk-language-service` query passes call
+/// this from their own crate and cannot use `pub(crate)`.
+pub fn walk_pattern<F>(pattern: &Pattern, f: &mut F)
+where
+    F: FnMut(&Expression),
+{
+    match pattern {
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                walk_pattern(&segment.value, f);
+                if let Some(size) = &segment.size {
+                    f(size);
+                }
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+            if let Some(rest_pattern) = rest {
+                walk_pattern(rest_pattern, f);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+            if let Some(tail_pattern) = tail {
+                walk_pattern(tail_pattern, f);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                walk_pattern(&pair.value, f);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_selector, inner) in keywords {
+                walk_pattern(inner, f);
+            }
+        }
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 
