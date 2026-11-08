@@ -99,7 +99,7 @@ sealed typed Object subclass: Tls
   /// defensive), while on OTP 25+ the getter itself raises when the OS
   /// trust store is missing or unreadable. Either way the raw OTP reason
   /// is kept (BT-4236).
-  class sealed systemCacerts -> List(Object) =>
+  class internal sealed systemCacerts -> List(Object) =>
     // Untyped stock-OTP FFI (no spec for cacerts_get/0): intentionally
     // Dynamic; the entry's presence is pinned by TlsTest.
     @expect type
@@ -113,7 +113,7 @@ sealed typed Object subclass: Tls
   /// The SNI value for a DNS-name `host`, nil for an IP literal (either
   /// family: SNI must not carry an IP). A charlist: OTP `ssl` rejects a
   /// Binary `server_name_indication`.
-  class sealed sniOf: host :: String -> List(Integer) | Nil =>
+  class internal sealed sniOf: host :: String -> List(Integer) | Nil =>
     // Untyped stock-OTP FFI (no spec for parse_address/1): intentionally
     // Dynamic; only isOk is read, and both outcomes are pinned by TlsTest.
     @expect type
