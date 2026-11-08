@@ -18,5 +18,11 @@ categories = ["development-tools"]
 name = "beamtalk_build"
 path = "src/lib.rs"
 
+[dependencies]
+# why: shared leaf for the FNV-1a 64-bit hash used by emit_spec_mapping_stamp —
+# beamtalk-cerl-doc has zero transitive dependencies so this adds nothing to
+# the build-script compile graph (architecture-principles.md §6).
+beamtalk-cerl-doc.workspace = true
+
 [lints]
 workspace = true

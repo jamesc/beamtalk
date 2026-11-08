@@ -2112,7 +2112,7 @@ dynamically-assembled selector) can exceed Erlang's 255-byte atom limit even
 though no *compile-time* selector ever does — `list_to_atom` on the raw
 `"class_" ++ Selector` string would then crash with `system_limit` instead of
 producing a name. This mirrors the compile-time guard in the Rust codegen's
-`safe_class_method_fn_name` (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`)
+`safe_class_method_fn_name` (`crates/beamtalk-codegen/src/core_erlang/selector_mangler.rs`)
 byte-for-byte — same 255-byte threshold on `"class_" ++ Selector`, same
 FNV-1a 64-bit hash, same `"class_kw_<16-hex-digits>"` naming scheme — so a
 selector that is long at compile time and the *same* selector text
@@ -2134,9 +2134,9 @@ class_method_fun_name(Selector) ->
     end.
 
 %% Deterministic FNV-1a 64-bit hash — bit-for-bit identical to the Rust
-%% `fnv1a_64` in `selector_mangler.rs` (same offset basis, same prime,
-%% same 64-bit wraparound). No external dependency; ~20 lines is not worth
-%% pulling in a hashing library for.
+%% `fnv1a_64` in `crates/beamtalk-cerl-doc/src/hash.rs` (same offset basis,
+%% same prime, same 64-bit wraparound). No external dependency; ~20 lines is
+%% not worth pulling in a hashing library for.
 -spec fnv1a_64(binary()) -> non_neg_integer().
 fnv1a_64(Data) when is_binary(Data) ->
     fnv1a_64(Data, 16#cbf29ce484222325).

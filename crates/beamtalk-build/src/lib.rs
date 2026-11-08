@@ -24,6 +24,7 @@
 //! }
 //! ```
 
+use beamtalk_cerl_doc::hash::fnv1a_64;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -147,40 +148,4 @@ pub fn emit_spec_mapping_stamp(workspace_root: &Path) {
 
     let hash = fnv1a_64(&content);
     println!("cargo:rustc-env=BEAMTALK_SPEC_MAPPING_STAMP={hash:016x}");
-}
-
-/// FNV-1a 64-bit hash. Not cryptographic — used only as a cheap, deterministic
-/// content fingerprint so the type-mapping stamp doesn't depend on the
-/// standard library's hasher (which offers no cross-version stability
-/// guarantee) or an external hashing crate.
-fn fnv1a_64(data: &[u8]) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = FNV_OFFSET_BASIS;
-    for &byte in data {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
-}
-
-#[cfg(test)]
-mod fnv_tests {
-    use super::fnv1a_64;
-
-    #[test]
-    fn deterministic_for_same_input() {
-        assert_eq!(fnv1a_64(b"hello world"), fnv1a_64(b"hello world"));
-    }
-
-    #[test]
-    fn differs_for_different_input() {
-        assert_ne!(fnv1a_64(b"hello world"), fnv1a_64(b"hello worlds"));
-    }
-
-    #[test]
-    fn matches_known_fnv1a_64_vector() {
-        // Standard FNV-1a 64-bit test vector for the empty string.
-        assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
-    }
 }
