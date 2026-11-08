@@ -122,6 +122,7 @@
     'Time',
     'TimeoutProxy',
     'Timer',
+    'Tls',
     'Tracing',
     'Transcript',
     'TranscriptStream',

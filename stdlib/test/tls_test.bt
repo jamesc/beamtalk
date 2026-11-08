@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for the Tls client-options builder (BT-4551): secure-default
+// verify_peer options, the explicit #verify_none opt-out mint keeps, SNI as
+// a charlist omitted for IP literals, and ALPN offered as Binaries.
+
+TestCase subclass: TlsTest
+
+  // ===== Helpers =====
+
+  // The value of the `name` option in an `ssl:connect` option list, or nil
+  // when absent (bare atoms like #binary carry no value).
+  option: name in: opts =>
+    hit := opts detect: [:each |
+      (each isKindOf: Tuple) and: [(each at: 1) =:= name]
+    ] ifNone: [nil]
+    hit isNil ifTrue: [^nil]
+    hit at: 2
+
+  // ===== Secure default (verify_peer) =====
+  testDefaultIsVerifyPeer =>
+    opts := Tls clientOptions: "example.com" alpn: #("h2")
+    self assert: (self option: #verify in: opts) equals: #verify_peer
+
+  testVerifyPeerCarriesSystemCacerts =>
+    certs := self option: #cacerts in: (Tls clientOptions: "example.com" alpn: #("h2"))
+    self assert: (certs isKindOf: List) equals: true
+
+  testVerifyPeerChecksHttpsHostname =>
+    check := self option: #customize_hostname_check in: (Tls clientOptions: "example.com" alpn: #("h2"))
+    self assert: (check isKindOf: List) equals: true
+    self assert: (check size) equals: 1
+    self assert: ((check at: 1) at: 1) equals: #match_fun
+
+  // ===== SNI =====
+  testDnsNameGetsCharlistSni =>
+    sni := self option: #server_name_indication in: (Tls clientOptions: "example.com" alpn: #("h2"))
+    self assert: sni equals: "example.com" asCharlist
+
+  testIpv4LiteralOmitsSni =>
+    opts := Tls clientOptions: "127.0.0.1" alpn: #("http/1.1")
+    self assert: (self option: #server_name_indication in: opts) equals: nil
+
+  testIpv6LiteralOmitsSni =>
+    opts := Tls clientOptions: "::1" alpn: #("http/1.1")
+    self assert: (self option: #server_name_indication in: opts) equals: nil
+
+  // ===== ALPN =====
+  testAlpnOfferedAsBinaries =>
+    protos := self option: #alpn_advertised_protocols in: (Tls clientOptions: "example.com" alpn: #("h2", "http/1.1"))
+    self assert: protos equals: #((Binary fromIolist: "h2"), (Binary fromIolist: "http/1.1"))
+
+  // ===== Explicit #verify_none (mint's unchanged default) =====
+  testVerifyNoneKeepsNoCaMaterial =>
+    opts := Tls
+      clientOptions: "example.com"
+      alpn: #("h2")
+      verify: #verify_none
+    self assert: (self option: #verify in: opts) equals: #verify_none
+    self assert: (self option: #cacerts in: opts) equals: nil
+    self assert: (self option: #customize_hostname_check in: opts) equals: nil
+
+  testVerifyNoneKeepsDnsSni =>
+    opts := Tls
+      clientOptions: "example.com"
+      alpn: #("h2")
+      verify: #verify_none
+    self assert: (self option: #server_name_indication in: opts) equals: "example.com" asCharlist
+
+  // `#bogus` is statically rejected by the `TlsVerify` alias; `@expect`
+  // keeps that diagnostic from failing the build so the runtime guard
+  // (for dynamic sends) can be exercised too.
+  testUnknownVerifyRaises =>
+    @expect type
+    self
+      should: [
+        Tls
+          clientOptions: "example.com"
+          alpn: #("h2")
+          verify: #bogus
+      ]
+      raise: #signal

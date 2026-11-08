@@ -129,6 +129,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Time"
             | "TimeoutProxy"
             | "Timer"
+            | "Tls"
             | "Tracing"
             | "Transcript"
             | "TranscriptStream"
@@ -5374,6 +5375,45 @@ fn class_info_Timer() -> ClassInfo {
 #[allow(clippy::too_many_lines)] // auto-generated: one literal per method
 #[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
+fn class_info_Tls() -> ClassInfo {
+    ClassInfo {
+            name: "Tls".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "clientOptions:alpn:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Tls".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Object")])), param_types: vec![Some(DeclaredType::simple("String")), Some(DeclaredType::generic("List", vec![DeclaredType::simple("String")]))], doc: Some("Secure-default client options for `host` offering `protos` over ALPN:\n`verify_peer` against the system CAs, the HTTPS hostname check, and\nSNI as a charlist (omitted for IP literals).\n\n## Examples\n```beamtalk\n(Tls clientOptions: \"example.com\" alpn: #(\"h2\")) size\n// => 8\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "clientOptions:alpn:verify:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Tls".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Object")])), param_types: vec![Some(DeclaredType::simple("String")), Some(DeclaredType::generic("List", vec![DeclaredType::simple("String")])), Some(DeclaredType::simple("TlsVerify"))], doc: Some("Same, with an explicit verify policy: `#verify_peer` verifies against\nthe system CAs (the secure default above); `#verify_none` skips\nverification and all CA material, keeping mint's current default and\ntest setup working — the opt-out is loud by being explicit. Anything\nelse raises an `Error`. `host` takes the unbracketed form (`::1`,\nnever `[::1]`): brackets fail the IP-literal test and would be sent\nas SNI, which must not carry an IP.\n\n## Examples\n```beamtalk\n(Tls clientOptions: \"example.com\" alpn: #(\"h2\") verify: #verify_none) size\n// => 6\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "systemCacerts".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Tls".into(), is_sealed: true, is_internal: true, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Object")])), param_types: vec![], doc: Some("The system CA certificates for `verify_peer`: `public_key:cacerts_get/0`\npassed through untouched, whatever shape the running OTP returns. A\nfailure answers an `Error`: pre-OTP-25 raises `does_not_understand`\n(no such function — the toolchain floor is OTP 27, so that path is\ndefensive), while on OTP 25+ the getter itself raises when the OS\ntrust store is missing or unreadable. The raw OTP reason is kept\nfor the trust-store failure (BT-4236); the `does_not_understand`\nrecord carries no reason term.".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "sniOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Tls".into(), is_sealed: true, is_internal: true, spawns_block: false, return_type: Some(DeclaredType::union(vec![DeclaredType::generic("List", vec![DeclaredType::simple("Integer")]), DeclaredType::simple("Nil")])), param_types: vec![Some(DeclaredType::simple("String"))], doc: Some("The SNI value for a DNS-name `host`, nil for an IP literal (either\nfamily: SNI must not carry an IP). A charlist: OTP `ssl` rejects a\nBinary `server_name_indication`.".into()), origin: None, primitive: None, constant_value: None },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
 fn class_info_Tracing() -> ClassInfo {
     ClassInfo {
             name: "Tracing".into(),
@@ -5940,6 +5980,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("Time".into(), class_info_Time());
     classes.insert("TimeoutProxy".into(), class_info_TimeoutProxy());
     classes.insert("Timer".into(), class_info_Timer());
+    classes.insert("Tls".into(), class_info_Tls());
     classes.insert("Tracing".into(), class_info_Tracing());
     classes.insert("Transcript".into(), class_info_Transcript());
     classes.insert("TranscriptStream".into(), class_info_TranscriptStream());
@@ -5976,6 +6017,7 @@ pub(super) fn generated_stdlib_alias_sources() -> Vec<&'static str> {
         "type SupervisorChildStatus = #running | #restarting | #stopped",
         "type TimeUnit = #second | #millisecond | #microsecond | #nanosecond | #native",
         "type Timeout = Integer | #infinity",
+        "type TlsVerify = #verify_peer | #verify_none",
     ]
 }
 

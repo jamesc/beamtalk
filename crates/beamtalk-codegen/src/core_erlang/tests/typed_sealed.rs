@@ -1149,6 +1149,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "TestRunner",
     "Time",
     "Timer",
+    "Tls",
     "Tracing",
     "Transcript",
     "Uuid",
