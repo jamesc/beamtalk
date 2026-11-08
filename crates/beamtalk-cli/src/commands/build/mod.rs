@@ -25,7 +25,7 @@ use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::beam_compiler::{ClassHierarchyContext, CompileContext};
 
@@ -62,11 +62,11 @@ pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_
 pub(crate) use sources::{
     compile_file, compile_to_beam, compute_file_module_pairs, compute_relative_module,
 };
+pub(crate) use stubs::{ResolvedTypeRegistry, extract_type_specs, resolve_package_type_registry};
 #[cfg(test)]
 pub(crate) use stubs::{
     StubLayer, distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
 };
-pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
 // every build-stage helper as if this were still one flat file). None of
@@ -304,6 +304,21 @@ fn execute_build_passes(
         .map(|m| m.diagnostics.clone())
         .unwrap_or_default();
 
+    // BT-4550: a broken `stubs/` file yields error-severity diagnostics
+    // (stub files are parsed too) — fail the build on those instead of
+    // merely counting them in the summary while exiting 0. A wrong stub
+    // silently skews FFI typing for every file. Warning-severity stub
+    // diagnostics (e.g. drift warnings) still pass, via the shared gate
+    // `beamtalk check` uses.
+    if crate::beam_compiler::diagnostics_are_errors(
+        &stub_diagnostics,
+        options,
+        &diagnostics_overrides,
+    ) {
+        error!("Build failed for stub declarations");
+        miette::bail!("build failed: stub declarations contain errors");
+    }
+
     let registry_ref = if index.dep_registry.is_empty() {
         None
     } else {
@@ -471,7 +486,7 @@ fn execute_build_passes(
 /// same check into a build-blocking error (`release::check_otp_window`).
 /// Silent when the OTP major cannot be probed (fails open, matching the
 /// provenance stamp's own probe-failure handling).
-fn warn_if_otp_out_of_window() {
+pub(crate) fn warn_if_otp_out_of_window() {
     if let Some(msg) = otp_out_of_window_warning(current_otp_major()) {
         eprintln!("warning: {msg}");
     }

@@ -923,31 +923,74 @@ pub fn compile_source(
     .map(|_diags| ())
 }
 
-/// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
+/// Whether `diagnostics` fail the build/check gate: any error-severity
+/// diagnostic, or — under `warnings_as_errors` — any warning/hint.
 ///
-/// ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
-/// [`PrimitiveBindingTable`] for pragma-driven dispatch.
+/// Deprecation-category warnings and structural validation warnings
+/// (`UnresolvedClass`, `UnresolvedFfi`, `ArityMismatch`) are excluded from
+/// warnings-as-errors because they can produce false positives when compiling
+/// single files that reference classes, FFI modules, or arities defined in
+/// other compilation units.
 ///
-/// # Errors
+/// ADR 0100 Rule 3: that exclusion is itself the Rule 1 default
+/// for those categories — an explicit `[diagnostics]` table entry for one
+/// of them is a deliberate, package-level opt back in to promotion, so it
+/// wins over the exclusion (per the "explicit table value wins over the
+/// exclusion" precedence note).
 ///
-/// Returns an error if reading, parsing, or code generation fails,
-/// or if any diagnostic has error severity.
-#[allow(clippy::too_many_lines)]
-#[instrument(skip_all, fields(path = %source_path, module = module_name))]
-pub(crate) fn compile_source_with_bindings(
-    source_path: &Utf8Path,
-    module_name: &str,
-    core_output: &Utf8Path,
+/// Shared by [`compile_source_with_bindings`] (`beamtalk build`) and `beamtalk
+/// check` so both surfaces fail on exactly the same diagnostics.
+pub(crate) fn diagnostics_are_errors(
+    diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
     options: &beamtalk_core::CompilerOptions,
-    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
+    diagnostics_overrides: &crate::commands::manifest::DiagnosticsTable,
+) -> bool {
+    diagnostics.iter().any(|d| {
+        d.severity == beamtalk_core::source_analysis::Severity::Error
+            || (options.warnings_as_errors
+                && matches!(
+                    d.severity,
+                    beamtalk_core::source_analysis::Severity::Warning
+                        | beamtalk_core::source_analysis::Severity::Hint
+                )
+                && (!matches!(
+                    d.category,
+                    Some(
+                        beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
+                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
+                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
+                            | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
+                    )
+                ) || d
+                    .category
+                    .is_some_and(|c| diagnostics_overrides.contains_key(&c))))
+    })
+}
+
+/// Run lexing, parsing, `@primitive` validation, and the unified
+/// semantic-analysis diagnostic pipeline for one source file, printing any
+/// diagnostics.
+///
+/// This is the analysis front-half of [`compile_source_with_bindings`],
+/// extracted so `beamtalk check` runs byte-identical checker diagnostics
+/// without emitting bytecode: `build` feeds the returned `Module` +
+/// `AnalysisResult` into Core Erlang codegen, while `check` stops here.
+/// `cached_ast` reuses Pass 1's pre-parsed source + `Module` when available,
+/// exactly as the build path does.
+pub(crate) fn analyse_source_with_bindings(
+    source_path: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
     ctx: &CompileContext<'_>,
     cached_ast: Option<crate::commands::build::CachedAst>,
-) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
-    debug!("Compiling module '{}' with bindings", module_name);
-
+) -> Result<(
+    String,
+    beamtalk_core::ast::Module,
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+    beamtalk_core::semantic_analysis::AnalysisResult,
+)> {
     // Reuse pre-parsed source + AST from Pass 1 when available,
     // otherwise read and parse from disk (single-file mode, REPL, etc.).
-    let (source, mut module, mut diagnostics) = if let Some(cached) = cached_ast {
+    let (source, module, mut diagnostics) = if let Some(cached) = cached_ast {
         debug!("Using cached AST from Pass 1 for '{}'", source_path);
         // Reuse parse diagnostics from Pass 1 so syntax errors are still reported.
         (cached.source, cached.module, cached.diagnostics)
@@ -1033,43 +1076,10 @@ pub(crate) fn compile_source_with_bindings(
         &mut diagnostics,
     );
 
-    // Check for errors (and optionally treat warnings/hints as errors).
-    // Deprecation-category warnings and structural validation warnings
-    // (UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
-    // warnings-as-errors because they can produce false positives when compiling
-    // single files that reference classes, FFI modules, or arities defined in
-    // other compilation units.
-    //
-    // ADR 0100 Rule 3: that exclusion is itself the Rule 1 default
-    // for those categories — an explicit `[diagnostics]` table entry for one
-    // of them is a deliberate, package-level opt back in to promotion, so it
-    // wins over the exclusion (per the "explicit table value wins over the
-    // exclusion" precedence note).
-    let has_errors = diagnostics.iter().any(|d| {
-        d.severity == beamtalk_core::source_analysis::Severity::Error
-            || (options.warnings_as_errors
-                && matches!(
-                    d.severity,
-                    beamtalk_core::source_analysis::Severity::Warning
-                        | beamtalk_core::source_analysis::Severity::Hint
-                )
-                && (!matches!(
-                    d.category,
-                    Some(
-                        beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
-                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
-                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
-                            | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
-                    )
-                ) || d
-                    .category
-                    .is_some_and(|c| ctx.diagnostics_overrides.contains_key(&c))))
-    });
-
     if !diagnostics.is_empty() {
         debug!(
             diagnostic_count = diagnostics.len(),
-            "Found diagnostics during compilation"
+            "Found diagnostics during analysis"
         );
         crate::diagnostic::print_diagnostics_text(
             &diagnostics,
@@ -1084,16 +1094,48 @@ pub(crate) fn compile_source_with_bindings(
         );
     }
 
-    if has_errors {
+    debug!("Parsed successfully: {}", source_path);
+
+    Ok((source, module, diagnostics, analysis_result))
+}
+
+/// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
+///
+/// ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
+/// [`PrimitiveBindingTable`] for pragma-driven dispatch.
+///
+/// # Errors
+///
+/// Returns an error if reading, parsing, or code generation fails,
+/// or if any diagnostic has error severity.
+#[allow(clippy::too_many_lines)]
+#[instrument(skip_all, fields(path = %source_path, module = module_name))]
+pub(crate) fn compile_source_with_bindings(
+    source_path: &Utf8Path,
+    module_name: &str,
+    core_output: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+    bindings: &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable,
+    ctx: &CompileContext<'_>,
+    cached_ast: Option<crate::commands::build::CachedAst>,
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    debug!("Compiling module '{}' with bindings", module_name);
+
+    // Analysis (lex/parse, `@primitive` validation, semantic analysis +
+    // post-analysis passes, `@expect` suppression, diagnostic printing) is
+    // shared with `beamtalk check` — see [`analyse_source_with_bindings`].
+    let (source, mut module, diagnostics, analysis_result) =
+        analyse_source_with_bindings(source_path, options, ctx, cached_ast)?;
+
+    // Fail on the same diagnostics `beamtalk check` fails on — see
+    // [`diagnostics_are_errors`]. Diagnostics were already printed by
+    // [`analyse_source_with_bindings`].
+    if diagnostics_are_errors(&diagnostics, options, &ctx.diagnostics_overrides) {
         error!("Compilation failed for '{}'", source_path);
         miette::bail!("Failed to compile '{source_path}'");
     }
 
-    debug!("Parsed successfully: {}", source_path);
-
     // Save diagnostics for the caller to build a summary.
-    // `diagnostics` is no longer needed after this point — the printing loop above
-    // borrowed them by reference and the error check already bailed if needed.
     let mut returned_diags = diagnostics;
 
     // Generate Core Erlang (with source text for CompiledMethod introspection, and bindings)
