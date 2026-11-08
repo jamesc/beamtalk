@@ -9,9 +9,17 @@
 //! ([`crate::beam_compiler::analyse_source_with_bindings`]) as `beamtalk
 //! build`, so annotation/type errors surface with identical diagnostics —
 //! then stops before Core Erlang codegen. In particular it never writes
-//! `.core`/`.beam` files, never compiles native Erlang sources, never runs
-//! the post-codegen verifier, and never produces OTP packaging artifacts
-//! (`.app` file, corpus files).
+//! `.core`/`.beam` files, never compiles the package's own native Erlang
+//! sources, never runs the post-codegen verifier, and never produces OTP
+//! packaging artifacts (`.app` file, corpus files).
+//!
+//! Dependency resolution is shared with `build` (stale dependencies are
+//! built for their metadata, exactly as a build would do), and the reused
+//! environment setup creates the otherwise-empty build directory. FFI and
+//! native-module checks see only already-built artifacts, so a passing
+//! check does not guarantee `beamtalk build` succeeds.
+//!
+//! **DDD Context:** Compilation (CLI surface for the semantic checker).
 
 use camino::Utf8Path;
 use miette::Result;
@@ -58,8 +66,10 @@ pub fn run_check(path: &str) -> Result<()> {
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
-    // Fresh Pass 1 (`force = true`): check analyses every file from scratch
-    // instead of replaying cached diagnostics for unchanged files.
+    // Fresh Pass 1 (`force = true`) and no diagnostics-cache replay: check
+    // is specified as an always-cold full gate, so it deliberately bypasses
+    // the incremental machinery (`provenance_requires_rebuild`,
+    // diagnostics-cache replay) — every file is analysed from scratch.
     let index = build_class_index(&env, &dep_ctx, options, true)?;
 
     // Same Pass 2 context as `build`: project-known Erlang modules for the
@@ -127,6 +137,15 @@ pub fn run_check(path: &str) -> Result<()> {
         provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
     };
 
+    // A broken `stubs/` file yields error-severity diagnostics (stub files
+    // are parsed too) — fail on those instead of merely counting them in
+    // the summary as `build` does. A wrong stub silently skews FFI typing
+    // for every file, so a checker gate must not exit 0 here.
+    let stub_failed =
+        diagnostics_are_errors(&stub_diagnostics, options, &check_ctx.diagnostics_overrides);
+    if stub_failed {
+        error!("Check failed for stub declarations");
+    }
     // Seed with stubs/ diagnostics (skipped signatures, version drift),
     // as `build` does.
     let mut all_check_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
@@ -143,12 +162,13 @@ pub fn run_check(path: &str) -> Result<()> {
                 Ok(analysed) => analysed,
                 Err(e) => {
                     // I/O failure (parse problems are diagnostics, not
-                    // errors): flush held provision diagnostics before
-                    // propagating, as `build` does.
-                    check_ctx
-                        .provision_sink
-                        .flush(&check_ctx.hierarchy.pre_loaded_protocol_sources, options);
-                    return Err(e);
+                    // errors): record the file as failed and keep checking
+                    // the rest, so one unreadable file doesn't hide the
+                    // whole package's error surface. The provision sink
+                    // flushes at the end of the loop regardless.
+                    error!("Failed to check '{file}': {e:#}");
+                    failed_files += 1;
+                    continue;
                 }
             };
         if diagnostics_are_errors(&file_diags, options, &check_ctx.diagnostics_overrides) {
@@ -174,6 +194,9 @@ pub fn run_check(path: &str) -> Result<()> {
         eprintln!("{diagnostic_summary}");
     }
 
+    if stub_failed {
+        miette::bail!("check failed: stub declarations contain errors");
+    }
     if failed_files > 0 {
         miette::bail!(
             "check failed: {failed_files} of {} file(s) contain errors",
@@ -191,38 +214,23 @@ mod tests {
     use camino::Utf8PathBuf;
     use tempfile::TempDir;
 
-    fn write_test_file(path: &Utf8Path, content: &str) {
-        std::fs::write(path, content).unwrap();
-    }
-
     fn test_project_with(filename: &str, content: &str) -> (TempDir, Utf8PathBuf) {
         let temp = TempDir::new().unwrap();
         let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let src = project.join("src");
         std::fs::create_dir_all(&src).unwrap();
-        write_test_file(&src.join(filename), content);
+        std::fs::write(src.join(filename), content).unwrap();
         (temp, project)
     }
 
-    /// Recursively collect files with the given extensions under `dir`.
+    /// Files with the given extensions anywhere under `dir`, via the shared
+    /// [`beamtalk_core::file_walker::FileWalker`] (recursive, ignores no
+    /// paths — build outputs under ignored `_build/` must be visible too).
     fn files_with_extensions(dir: &Utf8Path, extensions: &[&str]) -> Vec<Utf8PathBuf> {
-        let mut found = Vec::new();
-        let mut stack = vec![dir.to_path_buf()];
-        while let Some(current) = stack.pop() {
-            let entries = std::fs::read_dir(&current).unwrap();
-            for entry in entries {
-                let path = Utf8PathBuf::from_path_buf(entry.unwrap().path()).unwrap();
-                if path.is_dir() {
-                    stack.push(path);
-                } else if path
-                    .extension()
-                    .is_some_and(|ext| extensions.contains(&ext))
-                {
-                    found.push(path);
-                }
-            }
-        }
-        found
+        beamtalk_core::file_walker::FileWalker::new()
+            .extensions(extensions)
+            .walk(dir)
+            .unwrap()
     }
 
     #[test]
@@ -286,6 +294,124 @@ mod tests {
         assert!(
             result.is_err(),
             "build analysis should fail on the same fixture"
+        );
+    }
+
+    #[test]
+    fn check_manifest_package_exercises_pass1_cached_asts() {
+        // A manifest-backed two-file package: Pass 1 runs (unlike
+        // manifest-less checks) and feeds cached ASTs plus cross-file
+        // `ClassInfo` into every file's analysis, so the inherited
+        // `getValue` send resolves instead of reporting DNU.
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(
+            project.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("counter.bt"),
+            "Actor subclass: Counter\n  state: count = 0\n  getValue => self.count\n  increment => self.count := self.count + 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            src.join("inheriting_counter.bt"),
+            "Counter subclass: InheritingCounter\n  getDoubled => self getValue * 2\n",
+        )
+        .unwrap();
+
+        run_check(project.as_str()).expect("check should succeed with cross-file knowledge");
+
+        let emitted = files_with_extensions(&project, &["core", "beam"]);
+        assert!(
+            emitted.is_empty(),
+            "check must not emit bytecode, found: {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn check_hint_does_not_fail() {
+        // A DNU hint is not error-severity: check reports it but succeeds,
+        // exactly like `build` without `--warnings-as-errors`.
+        let (_temp, project) = test_project_with("main.bt", "\"hello\" frobnicate");
+
+        run_check(project.as_str()).expect("check should succeed on hint-only diagnostics");
+    }
+
+    #[test]
+    fn check_reports_every_failing_file() {
+        // Unlike `build` (which stops at the first failing file), one check
+        // run reports the whole error surface: both bad files are counted.
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("bad1.bt"), "test := [1 + ].").unwrap();
+        std::fs::write(src.join("bad2.bt"), "main := [nosuchvar].").unwrap();
+
+        let err = run_check(project.as_str()).expect_err("check should fail");
+        assert!(
+            format!("{err:?}").contains("2 of 2 file(s) contain errors"),
+            "unexpected error: {err:?}"
+        );
+
+        // `build` fails on the same package too (at the first bad file, so
+        // no escript is needed).
+        let result = crate::commands::build::build(
+            project.as_str(),
+            &beamtalk_core::CompilerOptions::default(),
+            true,
+        );
+        assert!(result.is_err(), "build should fail on the same package");
+    }
+
+    #[test]
+    fn check_single_file_path() {
+        // `beamtalk check path/to/file.bt` checks just that file.
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("main.bt");
+        std::fs::write(&file, "main := [42].").unwrap();
+
+        run_check(file.as_str()).expect("check should succeed on a valid single file");
+
+        let emitted = files_with_extensions(&project, &["core", "beam"]);
+        assert!(
+            emitted.is_empty(),
+            "check must not emit bytecode, found: {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn check_broken_stub_file_fails() {
+        // A syntax-broken `stubs/` file yields error-severity diagnostics:
+        // check must fail rather than exit 0 with errors in its summary.
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(project.join("stubs")).unwrap();
+        std::fs::write(
+            project.join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(src.join("main.bt"), "main := [42].").unwrap();
+        std::fs::write(
+            project.join("stubs").join("lists.bt"),
+            "class Foo { @@@@invalid syntax }",
+        )
+        .unwrap();
+
+        let err = run_check(project.as_str()).expect_err("check should fail on broken stub");
+        assert!(
+            format!("{err:?}").contains("stub declarations contain errors"),
+            "unexpected error: {err:?}"
         );
     }
 }

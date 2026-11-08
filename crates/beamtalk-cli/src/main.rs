@@ -243,9 +243,13 @@ enum Command {
     /// resolution, and visibility checks — and fails on the same error
     /// diagnostics `beamtalk build` emits for those phases.
     ///
-    /// Does not emit bytecode: no `.core`/`.beam` files are written, native
-    /// Erlang sources are not compiled, the post-codegen verifier does not
-    /// run, and no OTP packaging (`.app` file, corpus) is produced.
+    /// Runs build's setup (environment, dependency resolution, analysis).
+    /// Does not emit bytecode: no `.core`/`.beam` files are written, the
+    /// package's own native Erlang sources are not compiled, the
+    /// post-codegen verifier does not run, and no OTP packaging (`.app`
+    /// file, corpus) is produced. FFI and native-module checks see only
+    /// already-built artifacts, and a passing check does not guarantee
+    /// `beamtalk build` succeeds.
     Check {
         /// Source file or directory to check
         #[arg(default_value = ".")]
