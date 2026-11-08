@@ -33,6 +33,7 @@
 
 pub mod binary;
 pub mod escape;
+pub mod hash;
 pub mod leaf;
 
 /// Indentation width used throughout Core Erlang generation.

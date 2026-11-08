@@ -29,6 +29,8 @@
 //! the job of the `leaf::atom` (from `beamtalk_cerl_doc`) typed-leaf helper (ADR 0089), which
 //! escapes and wraps the name so no raw `'…'` fragment is built by hand.
 
+use beamtalk_cerl_doc::hash::fnv1a_64;
+
 /// Maximum length for an Erlang/Core Erlang atom (hard VM limit).
 const MAX_ATOM_LEN: usize = 255;
 
@@ -142,16 +144,6 @@ pub fn dispatch_fn_name(selector: &str) -> String {
         let hash = fnv1a_64(selector.as_bytes());
         format!("{DISPATCH_PREFIX}kw_{hash:016x}")
     }
-}
-
-/// Deterministic FNV-1a 64-bit hash (no external dependency).
-fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &byte in data {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
 }
 
 #[cfg(test)]
