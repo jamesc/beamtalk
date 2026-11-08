@@ -441,3 +441,31 @@ fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
     assert!(registry.lookup("shared_mod", "a_thing", 1).is_some());
     assert!(registry.lookup("shared_mod", "b_thing", 1).is_some());
 }
+
+#[test]
+fn test_build_fails_on_broken_stub_file() {
+    // BT-4550: a syntax-broken `stubs/` file yields error-severity
+    // diagnostics — the build must fail instead of exiting 0 with errors
+    // in its summary.
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let src_path = project_path.join("src");
+    write_test_file(&src_path.join("main.bt"), "main := [42].");
+    write_test_file(
+        &project_path.join("beamtalk.toml"),
+        "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+    );
+    let stubs_path = project_path.join("stubs");
+    fs::create_dir_all(&stubs_path).unwrap();
+    write_test_file(
+        &stubs_path.join("lists.bt"),
+        "class Foo { @@@@invalid syntax }",
+    );
+
+    let err = build(project_path.as_str(), &default_options(), true)
+        .expect_err("build should fail on broken stub file");
+    assert!(
+        format!("{err:?}").contains("stub declarations contain errors"),
+        "unexpected error: {err:?}"
+    );
+}

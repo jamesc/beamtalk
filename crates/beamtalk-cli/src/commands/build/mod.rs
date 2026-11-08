@@ -25,7 +25,7 @@ use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::beam_compiler::{ClassHierarchyContext, CompileContext};
 
@@ -303,6 +303,21 @@ fn execute_build_passes(
         .as_ref()
         .map(|m| m.diagnostics.clone())
         .unwrap_or_default();
+
+    // BT-4550: a broken `stubs/` file yields error-severity diagnostics
+    // (stub files are parsed too) — fail the build on those instead of
+    // merely counting them in the summary while exiting 0. A wrong stub
+    // silently skews FFI typing for every file. Warning-severity stub
+    // diagnostics (e.g. drift warnings) still pass, via the shared gate
+    // `beamtalk check` uses.
+    if crate::beam_compiler::diagnostics_are_errors(
+        &stub_diagnostics,
+        options,
+        &diagnostics_overrides,
+    ) {
+        error!("Build failed for stub declarations");
+        miette::bail!("build failed: stub declarations contain errors");
+    }
 
     let registry_ref = if index.dep_registry.is_empty() {
         None
