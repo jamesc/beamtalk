@@ -494,6 +494,7 @@
 
 ### Standard Library
 
+- **`Tls`: secure-default TLS client options builder (BT-4551)** — `Tls clientOptions: host alpn: protos` assembles the `ssl:connect` option list with `verify_peer` against the system CAs, the HTTPS hostname check, SNI as a charlist (omitted for IP literals), and ALPN offered as Binaries; `clientOptions:alpn:verify:` takes an explicit `#verify_peer` / `#verify_none` policy (anything else raises). CA lookup uses `public_key:cacerts_get/0` (OTP 25+; older OTPs raise a structured error naming the floor). This retires the hand-rolled `tlsOptionsFor:` incantations in downstream HTTP clients.
 - **`Telemetry hasHandlers:` checks whether any handler is attached to an event prefix (BT-4480)** — `Telemetry hasHandlers: #(#myapp, #cache)` answers `true` if any handler (Beamtalk, Erlang or Elixir) is attached to an event whose name starts with the given prefix, like Elixir libraries' `:telemetry.list_handlers/1` check. An emitter can use it to skip building timestamps and metadata when nobody listens. Documented in [Application Telemetry Events](beamtalk-language-features.md#application-telemetry-events-adr-0069-amendment) (#4878).
 - Fix: `SystemNavigation` per-class queries (`implementorsOf:`, `sendersOf:`, etc.) tolerate removed classes instead of returning raw Symbol tags or crashing mid-walk (BT-4111, #4801)
 - Fix: `SystemNavigation` extension walks (`sendersOf:`, `referencesTo:`, `methodsMatching:`, etc.) drop removed-class entries instead of reporting a raw Symbol (BT-4418, #4810)

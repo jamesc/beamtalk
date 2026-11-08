@@ -1047,6 +1047,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Time` | `Object` | `time.bt` | Time operations |
 | `TimeoutProxy` | `Object` | `timeout_proxy.bt` | Timeout wrapper |
 | `Timer` | `Object` | `timer.bt` | Timer operations |
+| `Tls` | `Object` | `tls.bt` | Secure-default TLS client options builder (BT-4551) |
 | `Tracing` | `Object` | `tracing.bt` | Actor observability |
 | `Transcript` | `Object` | `transcript.bt` | Class-side facade: the REPL's shared log; Logger elsewhere (ADR 0129 §5) |
 | `TranscriptStream` | `Actor` | `transcript_stream.bt` | Workspace-internal transcript buffer and subscribers behind `Transcript` |
