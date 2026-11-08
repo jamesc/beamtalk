@@ -10,3 +10,8 @@ generator and `unparse`'s Beamtalk-source pretty-printer) depending on the other
 the shared-leaf-module pattern from
 [`docs/development/architecture-principles.md`](../../docs/development/architecture-principles.md) §6.
 See [ADR 0117](../../docs/ADR/0117-beamtalk-core-crate-split.md), Decision step 4.
+
+Also provides a `hash` module with a `fnv1a_64` FNV-1a 64-bit hash shared by
+`beamtalk-codegen` (long-selector atom mangling) and `beamtalk-build` (spec-mapping
+stamp). It lives here because this crate is the only zero-dependency shared leaf below
+both consumers.
