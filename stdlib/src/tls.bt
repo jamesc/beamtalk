@@ -15,9 +15,10 @@ type TlsVerify = #verify_peer | #verify_none
 ///
 /// The builder owns the OTP-version compat so clients stop re-deriving it:
 /// CA lookup uses `public_key:cacerts_get/0` (OTP 25+ and a readable OS
-/// trust store); a failure raises a structured `Error` keeping the raw OTP
-/// reason instead of a bare `does_not_understand`. The toolchain floor is
-/// OTP 27 (`otp-support.toml`), so the pre-25 path is defensive. Building the list needs
+/// trust store); a failure raises a structured `Error` instead of a bare
+/// `does_not_understand`, keeping the raw OTP reason for a trust-store
+/// failure. The toolchain floor is OTP 27 (`otp-support.toml`), so the
+/// pre-25 path is defensive. Building the list needs
 /// no started applications; starting `ssl` stays with the connecting code,
 /// exactly as before.
 ///
@@ -97,8 +98,9 @@ sealed typed Object subclass: Tls
   /// failure answers an `Error`: pre-OTP-25 raises `does_not_understand`
   /// (no such function — the toolchain floor is OTP 27, so that path is
   /// defensive), while on OTP 25+ the getter itself raises when the OS
-  /// trust store is missing or unreadable. Either way the raw OTP reason
-  /// is kept (BT-4236).
+  /// trust store is missing or unreadable. The raw OTP reason is kept
+  /// for the trust-store failure (BT-4236); the `does_not_understand`
+  /// record carries no reason term.
   class internal sealed systemCacerts -> List(Object) =>
     // Untyped stock-OTP FFI (no spec for cacerts_get/0): intentionally
     // Dynamic; the entry's presence is pinned by TlsTest.
