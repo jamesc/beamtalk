@@ -62,11 +62,11 @@ pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_
 pub(crate) use sources::{
     compile_file, compile_to_beam, compute_file_module_pairs, compute_relative_module,
 };
+pub(crate) use stubs::{ResolvedTypeRegistry, extract_type_specs, resolve_package_type_registry};
 #[cfg(test)]
 pub(crate) use stubs::{
     StubLayer, distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
 };
-pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
 // every build-stage helper as if this were still one flat file). None of
@@ -471,7 +471,7 @@ fn execute_build_passes(
 /// same check into a build-blocking error (`release::check_otp_window`).
 /// Silent when the OTP major cannot be probed (fails open, matching the
 /// provenance stamp's own probe-failure handling).
-fn warn_if_otp_out_of_window() {
+pub(crate) fn warn_if_otp_out_of_window() {
     if let Some(msg) = otp_out_of_window_warning(current_otp_major()) {
         eprintln!("warning: {msg}");
     }

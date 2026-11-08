@@ -1,0 +1,291 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! `beamtalk check` — run the semantic checker over a package without emitting
+//! bytecode.
+//!
+//! This command runs the same Pass 1 class/protocol/alias index construction
+//! and the same per-file analysis pipeline
+//! ([`crate::beam_compiler::analyse_source_with_bindings`]) as `beamtalk
+//! build`, so annotation/type errors surface with identical diagnostics —
+//! then stops before Core Erlang codegen. In particular it never writes
+//! `.core`/`.beam` files, never compiles native Erlang sources, never runs
+//! the post-codegen verifier, and never produces OTP packaging artifacts
+//! (`.app` file, corpus files).
+
+use camino::Utf8Path;
+use miette::Result;
+use tracing::{debug, error, info, instrument};
+
+use crate::beam_compiler::{
+    ClassHierarchyContext, CompileContext, analyse_source_with_bindings, diagnostics_are_errors,
+};
+use crate::commands::OutputFormat;
+use crate::commands::build::{
+    ResolvedTypeRegistry, build_class_index, compute_file_module_pairs, extract_type_specs,
+    package_identity, resolve_and_validate_dependencies, resolve_package_type_registry,
+    setup_build_environment, warn_if_otp_out_of_window,
+};
+
+/// Check Beamtalk source files for errors without emitting bytecode.
+///
+/// Runs Pass 1 indexing plus the full semantic-analysis diagnostic pipeline
+/// over every discovered source file (always a fresh full check — no
+/// incremental cache), prints each file's diagnostics exactly as `build`
+/// would, and fails when any file contains error-severity diagnostics.
+#[allow(clippy::too_many_lines)] // orchestration function mirroring `build`'s phases — split adds indirection, not clarity
+#[instrument(skip_all, fields(path = %path))]
+pub fn run_check(path: &str) -> Result<()> {
+    info!("Starting check");
+
+    warn_if_otp_out_of_window();
+
+    let env = setup_build_environment(path)?;
+
+    // Same `CompilerOptions` shaping as `build`: a package directory check
+    // walks every project source file (Pass 1) before any per-file analysis
+    // runs (Pass 2), so the injected cross-file knowledge is
+    // project-complete. See `build` for the full rationale of each line.
+    let mut options = beamtalk_core::CompilerOptions::default();
+    let scope =
+        crate::commands::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
+    options.has_package_dependencies = scope.has_package_dependencies;
+    if Utf8Path::new(path).is_dir() {
+        options.knowledge_scope = scope.knowledge_scope;
+    }
+    options.current_package =
+        package_identity(env.pkg_manifest(), options.stdlib_mode).map(str::to_owned);
+    let options = &options;
+
+    let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
+    // Fresh Pass 1 (`force = true`): check analyses every file from scratch
+    // instead of replaying cached diagnostics for unchanged files.
+    let index = build_class_index(&env, &dep_ctx, options, true)?;
+
+    // Same Pass 2 context as `build`: project-known Erlang modules for the
+    // `unresolved_ffi` check, plus the ADR 0075 FFI type registry (read from
+    // existing `.beam` files/caches — never compiled here).
+    let pass2_options = beamtalk_core::CompilerOptions {
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(
+            &env.project_root,
+        ),
+        ..options.clone()
+    };
+    let options = &pass2_options;
+
+    let auto_extract_registry = extract_type_specs(
+        &env.layout,
+        env.pkg_manifest().is_some(),
+        options.stdlib_mode,
+    );
+    let ResolvedTypeRegistry {
+        registry: native_type_registry,
+        diagnostics: stub_diagnostics,
+        ..
+    } = resolve_package_type_registry(
+        &env.project_root,
+        auto_extract_registry,
+        &dep_ctx.resolved_deps,
+        Some(OutputFormat::Text),
+    );
+    let native_type_registry = native_type_registry.map(std::sync::Arc::new);
+
+    let file_module_pairs = compute_file_module_pairs(&env)?;
+
+    let strict_deps = env
+        .full_manifest
+        .as_ref()
+        .is_some_and(|m| m.package.strict_deps);
+    let diagnostics_overrides = env
+        .full_manifest
+        .as_ref()
+        .map(|m| m.diagnostics.clone())
+        .unwrap_or_default();
+
+    let registry_ref = if index.dep_registry.is_empty() {
+        None
+    } else {
+        Some(&index.dep_registry)
+    };
+    let check_ctx = CompileContext {
+        hierarchy: ClassHierarchyContext {
+            class_module_index: index.class_module_index.clone(),
+            class_superclass_index: index.class_superclass_index.clone(),
+            pre_loaded_classes: index.all_class_infos.clone(),
+            pre_loaded_protocols: index.all_protocol_infos.clone(),
+            pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
+            pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
+            pre_loaded_aliases: index.all_alias_infos.clone(),
+            extension_index: index.extension_index.clone(),
+        },
+        dep_registry: registry_ref,
+        strict_deps,
+        native_type_registry,
+        diagnostics_overrides,
+        // ADR 0127 §3: a provision shared by several users is reported once,
+        // against its protocol's file, after every file has been checked.
+        provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
+    };
+
+    // Seed with stubs/ diagnostics (skipped signatures, version drift),
+    // as `build` does.
+    let mut all_check_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
+    let mut cached_asts = index.cached_asts;
+    let mut failed_files = 0usize;
+
+    // Unlike `build` (which stops at the first failing file), check analyses
+    // every file so one run reports the whole error surface.
+    for (file, _, _) in &file_module_pairs {
+        debug!("Checking {file}");
+        let cached = cached_asts.remove(file);
+        let (_source, _module, file_diags, _analysis) =
+            match analyse_source_with_bindings(file, options, &check_ctx, cached) {
+                Ok(analysed) => analysed,
+                Err(e) => {
+                    // I/O failure (parse problems are diagnostics, not
+                    // errors): flush held provision diagnostics before
+                    // propagating, as `build` does.
+                    check_ctx
+                        .provision_sink
+                        .flush(&check_ctx.hierarchy.pre_loaded_protocol_sources, options);
+                    return Err(e);
+                }
+            };
+        if diagnostics_are_errors(&file_diags, options, &check_ctx.diagnostics_overrides) {
+            error!("Check failed for '{file}'");
+            failed_files += 1;
+        }
+        all_check_diags.extend(file_diags);
+    }
+
+    check_ctx
+        .provision_sink
+        .flush(&check_ctx.hierarchy.pre_loaded_protocol_sources, options);
+
+    let all_check_diags = crate::diagnostic::dedupe_provision_diagnostics(all_check_diags);
+    let diagnostic_summary = beamtalk_core::source_analysis::DiagnosticSummary::from_diagnostics(
+        &all_check_diags,
+        file_module_pairs.len(),
+    );
+
+    // Print diagnostic summary at end of the check, matching `build`.
+    if !options.suppress_warnings && !diagnostic_summary.is_empty() {
+        eprintln!();
+        eprintln!("{diagnostic_summary}");
+    }
+
+    if failed_files > 0 {
+        miette::bail!(
+            "check failed: {failed_files} of {} file(s) contain errors",
+            file_module_pairs.len()
+        );
+    }
+
+    eprintln!("Checked {} file(s) — no errors", file_module_pairs.len());
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use camino::Utf8PathBuf;
+    use tempfile::TempDir;
+
+    fn write_test_file(path: &Utf8Path, content: &str) {
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn test_project_with(filename: &str, content: &str) -> (TempDir, Utf8PathBuf) {
+        let temp = TempDir::new().unwrap();
+        let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = project.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        write_test_file(&src.join(filename), content);
+        (temp, project)
+    }
+
+    /// Recursively collect files with the given extensions under `dir`.
+    fn files_with_extensions(dir: &Utf8Path, extensions: &[&str]) -> Vec<Utf8PathBuf> {
+        let mut found = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(current) = stack.pop() {
+            let entries = std::fs::read_dir(&current).unwrap();
+            for entry in entries {
+                let path = Utf8PathBuf::from_path_buf(entry.unwrap().path()).unwrap();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|ext| extensions.contains(&ext))
+                {
+                    found.push(path);
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn check_valid_project_succeeds_without_emitting_bytecode() {
+        let (_temp, project) = test_project_with("main.bt", "main := [42].");
+
+        run_check(project.as_str()).expect("check should succeed on valid sources");
+
+        // No bytecode artifacts (`.core`/`.beam`) anywhere under the project.
+        let emitted = files_with_extensions(&project, &["core", "beam"]);
+        assert!(
+            emitted.is_empty(),
+            "check must not emit bytecode, found: {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn check_syntax_error_fails_like_build() {
+        let (_temp, project) = test_project_with("main.bt", "test := [1 + ].");
+
+        let err = run_check(project.as_str()).expect_err("check should fail on syntax error");
+        assert!(
+            format!("{err:?}").contains("check failed"),
+            "unexpected error: {err:?}"
+        );
+
+        // Build's analysis fails on the same fixture (before any BEAM stage,
+        // so no escript is needed).
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = crate::beam_compiler::compile_source(
+            &project.join("src").join("main.bt"),
+            "main",
+            &project.join("main.core"),
+            &options,
+        );
+        assert!(
+            result.is_err(),
+            "build analysis should fail on the same fixture"
+        );
+    }
+
+    #[test]
+    fn check_type_error_fails_like_build() {
+        // Undefined variable: an error-severity checker diagnostic, not a
+        // parse error.
+        let (_temp, project) = test_project_with("main.bt", "main := [nosuchvar].");
+
+        let err = run_check(project.as_str()).expect_err("check should fail on type error");
+        assert!(
+            format!("{err:?}").contains("check failed"),
+            "unexpected error: {err:?}"
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = crate::beam_compiler::compile_source(
+            &project.join("src").join("main.bt"),
+            "main",
+            &project.join("main.core"),
+            &options,
+        );
+        assert!(
+            result.is_err(),
+            "build analysis should fail on the same fixture"
+        );
+    }
+}

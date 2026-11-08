@@ -237,6 +237,15 @@ enum Command {
     },
 
     /// Check source files for errors without compiling
+    ///
+    /// Runs lexing, parsing, and the full semantic checker — type inference,
+    /// annotation and `@expect` handling, cross-file alias/protocol
+    /// resolution, and visibility checks — and fails on the same error
+    /// diagnostics `beamtalk build` emits for those phases.
+    ///
+    /// Does not emit bytecode: no `.core`/`.beam` files are written, native
+    /// Erlang sources are not compiled, the post-codegen verifier does not
+    /// run, and no OTP packaging (`.app` file, corpus) is produced.
     Check {
         /// Source file or directory to check
         #[arg(default_value = ".")]
@@ -719,11 +728,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             confirm_network,
             &log_level,
         ),
-        Command::Check { path } => {
-            println!("Checking: {path}");
-            println!("(Not yet implemented)");
-            Ok(())
-        }
+        Command::Check { path } => commands::check::run_check(&path),
         Command::Fmt { paths, check } => {
             if check {
                 miette::bail!(
@@ -915,13 +920,30 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_check_prints_placeholder_and_succeeds() {
-        // `beamtalk check` is a stub that always succeeds — exercises the
-        // dispatch arm without touching the filesystem.
-        let result = dispatch_command(Command::Check {
-            path: ".".to_string(),
-        });
-        assert!(result.is_ok());
+    fn dispatch_check_on_missing_path_errors() {
+        // `beamtalk check` runs the real checker: a nonexistent path fails
+        // during source discovery without touching anything else.
+        let err = dispatch_command(Command::Check {
+            path: "/nonexistent-beamtalk-check-path".to_string(),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "got: {err}");
+    }
+
+    #[test]
+    fn check_help_documents_scope() {
+        // BT-4543: `beamtalk check --help` must document what check does
+        // and does not verify.
+        let err = Cli::try_parse_from(["beamtalk", "check", "--help"]).unwrap_err();
+        let help = err.to_string();
+        assert!(
+            help.contains("same error"),
+            "help should promise build-identical diagnostics, got:\n{help}"
+        );
+        assert!(
+            help.contains("Does not emit bytecode"),
+            "help should state its no-emission scope, got:\n{help}"
+        );
     }
 
     // --- Cli argument parsing ---

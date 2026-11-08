@@ -40,6 +40,7 @@ pub(crate) mod build_cache;
 pub use beamtalk_cli::build_layout;
 pub(crate) mod build_stamp;
 pub mod build_stdlib;
+pub mod check;
 pub mod clean;
 pub mod deps;
 pub mod doc;
