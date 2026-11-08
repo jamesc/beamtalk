@@ -68,7 +68,11 @@ TestCase subclass: TlsTest
       verify: #verify_none
     self assert: (self option: #server_name_indication in: opts) equals: "example.com" asCharlist
 
+  // `#bogus` is statically rejected by the `TlsVerify` alias; `@expect`
+  // keeps that diagnostic from failing the build so the runtime guard
+  // (for dynamic sends) can be exercised too.
   testUnknownVerifyRaises =>
+    @expect type
     self
       should: [
         Tls
