@@ -321,6 +321,7 @@
 - Inline FFI calls skip the proxy when the Erlang spec proves coercion is a no-op — when a function's `-spec` shows the result and arguments need no unwrapping or coercion, the compiler emits a direct remote call instead of routing through `beamtalk_erlang_proxy`. An `erlang:phash2/1` call drops from 134 ns / 14 reductions to 13 ns / 1 reduction (BT-4485, #4882)
 - Class-side constant folding widened to every scalar literal kind — string, symbol, float, boolean, character and `nil` class-side method bodies are now inlined behind a constant-value key, not just integers (BT-4504, #4888)
 - **Fix: `^` in a field-writing loop now keeps the loop's field writes (BT-4523)** — a `^` inside a hybrid-params loop body stored the loop-entry state instead of the state with fields written so far; an `ensure:` cleanup also saw the stale values. Hybrid mode is now excluded when the body holds a `^`, so the loop threads the full state (#4894)
+- **Fix: a call that runs a `^` block as a closure stores the method's state first (BT-4524)** — a closure's `^` carries the actor-state cell, but calls classified `UserCodeCall::No` stored nothing before running the closure, so earlier field writes were lost: `self.n := 6. [^2] ensure: [nil]` left `n` at 0, as did closure `timesRepeat:`/`to:do:`/`whileTrue:`, `[^5] value` and a non-inlined conditional. Such calls are now bracketed or pre-stored (ADR 0146 P0). New verifier error `UnbracketedNlrClosure` (#4895)
 - **Fix: aliased self-send re-throws `^` unchanged instead of rewinding the cell (BT-4525)** — `other := self. other run: [^3]` in an actor method failed with a raw NLR error and rewound the callee's field writes. The self-dispatch path now re-throws the NLR term unchanged and stores nothing (#4893)
 - **Fix: bounded actor/supervisor stops never raise `timeout_value` (BT-4494)** — `stopWithin:` and `Actor stopWith:timeout:` could raise `error:timeout_value` on short timeouts in OTP 28.5, because `proc_lib:stop/3` can compute a negative remaining wait. A new shared `beamtalk_stop:stop/3` clamps the remaining wait at zero and removes the monitor on every path (#4891)
 - **Fix: value-type extension `^` no longer leaks a `{Result, Self}` pair (BT-4503)** — a value-type extension with a block `^` returned the internal pair instead of the bare value. Value-type method functions and extension funs now answer their plain result on both paths (#4883)
@@ -387,6 +388,8 @@
 
 ### Internal
 
+- Extract `walk_pattern` into `ast_walker`, eliminating 4 identical Pattern traversals in `beamtalk-language-service` query files (#4897)
+- Standardize on `AGENTS.md` as the single source of agent instructions; `CLAUDE.md` deleted and all live references updated (#4902)
 - ADR 0131: delete the legacy reread helpers and their dead callers — `push_control_flow_threaded_var_rereads` and `rebind_threaded_vars_from_state` are removed; a construct compiled in place is now a typed `ConstructLocalsInPlace` marker verified by `ConstructLocalsNotRebound` (BT-4462, #4887)
 - Extract shared log-format helpers into `beamtalk_log_format` — `format_time/1` and `format_pid/1` were byte-identical between `beamtalk_json_formatter` and `beamtalk_ws_log_handler`; both now delegate to the shared leaf module (#4884)
 - ADR 0131: lower a nested inline construct in an actor plain arm through `ThreadedIr` — a conditional or evaluated block nested in an actor `match:` plain arm is now lowered as a `ThreadedIr` node instead of a special-case code path (BT-4460, #4877)
@@ -442,6 +445,7 @@
 
 ### Tooling
 
+- **Fix: `beamtalk type-coverage` now expands type aliases (BT-4537)** — expressions flowing from an alias-typed annotation (e.g. `input :: TextOrBytes`) were counted as uncovered because the command ran a separate `infer_types` pass with no alias registry. It now uses the alias-aware type map from `analyse_full`, matching `build`/`lint` behavior (#4901)
 - LSP signature help surfaces Options docs while typing — when a send takes an Options dictionary, the signature-help popup now shows the Options parameter names, types and doc comments (BT-4345, #4866)
 - Cockpit editor hover tooltip renders Options docs as Markdown — hovering an Options method in the Cockpit editor now shows its docs formatted with Markdown instead of raw text (BT-4344, #4862)
 - Cockpit editor hover resolves keyword selectors so Options methods hover — a keyword selector like `foo:bar:` now resolves to the correct Options method for hover docs (BT-4343, #4853)
