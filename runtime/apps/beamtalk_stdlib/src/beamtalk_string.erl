@@ -57,6 +57,7 @@ see the `BT-4173` clauses); anything else raises `type_error` via
     from_code_points/1,
     from_iolist/1
 ]).
+-export([parse_integer/2]).
 
 %% Instance methods — URL encoding (explicit `(Erlang beamtalk_string) sel:
 %% self` FFI dispatch, not @primitive — see docs/beamtalk-native-erlang.md
@@ -556,6 +557,62 @@ is_alpha({beamtalk_string, _} = Str) ->
 is_alpha(Bin) when is_binary(Bin) -> is_alpha({beamtalk_string, Bin});
 is_alpha(Str) ->
     raise_not_string('isAlpha', Str).
+
+-doc """
+Parse text as an integer in the given radix (BT-4544).
+
+Backs `Integer parse:radix:` — the fallible, `Result`-based counterpart to
+`String>>asInteger`/`asIntegerRadix:`. Accepts a `String` or a bare `Binary`
+(both spell the same bytes); anything else raises `type_error`.
+
+Radix must be between 2 and 36 (`invalid_argument` otherwise — a caller bug,
+not a parse failure). Digits above 9 are case-insensitive and a leading
+`-`/`+` sign is accepted (`binary_to_integer/2` semantics). Empty input and
+bad digits answer `Result error:` with a `parse_error` carrying a hint
+(`empty integer`, `not a base-N integer`).
+""".
+-spec parse_integer(t() | binary(), integer()) -> beamtalk_result:t().
+parse_integer({beamtalk_string, Bin}, Base) when is_binary(Bin) ->
+    parse_integer(Bin, Base);
+parse_integer(Bin, Base) when is_binary(Bin), is_integer(Base) ->
+    case Base >= 2 andalso Base =< 36 of
+        false ->
+            Error0 = beamtalk_error:new(invalid_argument, 'Integer'),
+            Error1 = beamtalk_error:with_selector(Error0, 'parse:radix:'),
+            Error2 = beamtalk_error:with_details(Error1, #{got => Base}),
+            Error3 = beamtalk_error:with_hint(
+                Error2, <<"Radix must be between 2 and 36">>
+            ),
+            beamtalk_error:raise(Error3);
+        true when byte_size(Bin) =:= 0 ->
+            parse_radix_error(<<"empty integer">>);
+        true ->
+            try binary_to_integer(Bin, Base) of
+                Int ->
+                    beamtalk_result:from_tagged_tuple({ok, Int})
+            catch
+                error:badarg ->
+                    parse_radix_error(
+                        <<"not a base-", (integer_to_binary(Base))/binary, " integer">>
+                    )
+            end
+    end;
+parse_integer(_Text, Base) when not is_integer(Base) ->
+    beamtalk_error:raise_type_error(
+        'Integer', 'parse:radix:', <<"Radix must be an Integer between 2 and 36">>
+    );
+parse_integer(_Text, _Base) ->
+    beamtalk_error:raise_type_error(
+        'Integer', 'parse:radix:', <<"Text must be a String or Binary">>
+    ).
+
+-doc "Wrap `Hint` in the `parse_error` `Result error:` `parse:radix:` answers.".
+-spec parse_radix_error(binary()) -> beamtalk_result:t().
+parse_radix_error(Hint) ->
+    Error0 = beamtalk_error:new(parse_error, 'Integer'),
+    Error1 = beamtalk_error:with_selector(Error0, 'parse:radix:'),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    beamtalk_result:from_tagged_tuple({error, Error2}).
 
 -doc "Create a single-character UTF-8 String from a Unicode code point.".
 -spec from_code_point(integer()) -> t().

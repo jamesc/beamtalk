@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4544: radix-aware integer parsing (`String>>asIntegerRadix:`,
+// `Integer parse:radix:`) and the canonical `Binary empty` spelling.
+
+TestCase subclass: IntegerParseTest
+
+  // --- String>>asIntegerRadix: (raising) ---
+  testAsIntegerRadixDecimal =>
+    self assert: ("42" asIntegerRadix: 10) equals: 42
+    self assert: ("-42" asIntegerRadix: 10) equals: -42
+    self assert: ("+42" asIntegerRadix: 10) equals: 42
+
+  testAsIntegerRadixHex =>
+    self assert: ("ff" asIntegerRadix: 16) equals: 255
+    self assert: ("FF" asIntegerRadix: 16) equals: 255
+    self assert: ("-ff" asIntegerRadix: 16) equals: -255
+
+  testAsIntegerRadixBinaryAndOctal =>
+    self assert: ("101" asIntegerRadix: 2) equals: 5
+    self assert: ("777" asIntegerRadix: 8) equals: 511
+
+  testAsIntegerRadixBase36 =>
+    self assert: ("z" asIntegerRadix: 36) equals: 35
+    self assert: ("10" asIntegerRadix: 36) equals: 36
+
+  testAsIntegerRadixRaisesOnEmpty =>
+    self should: ["" asIntegerRadix: 10] raise: #badarg
+
+  testAsIntegerRadixRaisesOnBadDigits =>
+    self should: ["zz" asIntegerRadix: 16] raise: #badarg
+    self should: ["2" asIntegerRadix: 2] raise: #badarg
+
+  testAsIntegerRadixRaisesOnBadRadix =>
+    self should: ["42" asIntegerRadix: 1] raise: #badarg
+    self should: ["42" asIntegerRadix: 37] raise: #badarg
+
+  // --- Integer parse:radix: (Result-based, String or Binary input) ---
+  testParseRadixOk =>
+    value := self assertOk: (Integer parse: "ff" radix: 16)
+    self assert: value equals: 255
+
+  testParseRadixDecimal =>
+    value := self assertOk: (Integer parse: "42" radix: 10)
+    self assert: value equals: 42
+
+  testParseRadixBinaryAndBase36 =>
+    self assert: (Integer parse: "101" radix: 2) unwrap equals: 5
+    self assert: (Integer parse: "z" radix: 36) unwrap equals: 35
+
+  testParseRadixAcceptsBinaryInput =>
+    bin := Binary fromBytes: #(102, 102)
+    value := self assertOk: (Integer parse: bin radix: 16)
+    self assert: value equals: 255
+
+  testParseRadixEmptyIsError =>
+    result := Integer parse: "" radix: 10
+    self assert: result isError
+    self assert: (result error kind) equals: #parse_error
+
+  testParseRadixBadDigitsIsError =>
+    result := Integer parse: "zz" radix: 16
+    self assert: result isError
+    self deny: result isOk
+    self assert: (result error kind) equals: #parse_error
+
+  testParseRadixUnwrapRaises =>
+    result := Integer parse: "zz" radix: 16
+    self should: [result unwrap] raise: #parse_error
+
+  testParseRadixInvalidRadixRaises =>
+    self should: [Integer parse: "42" radix: 1] raise: #invalid_argument
+    self should: [Integer parse: "42" radix: 37] raise: #invalid_argument
+
+  testParseRadixTypeErrorOnNonText =>
+    @expect type
+    self should: [Integer parse: 42 radix: 10] raise: #type_error
+
+  // --- Binary empty ---
+  testBinaryEmpty =>
+    self assert: Binary empty size equals: 0
+    self assert: Binary empty toBytes equals: #()
+    self assert: Binary empty equals: (Binary fromBytes: #())
+    self assert: Binary empty class equals: Binary
