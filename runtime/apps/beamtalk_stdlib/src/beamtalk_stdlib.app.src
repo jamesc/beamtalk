@@ -112,6 +112,7 @@
             #{name => 'Time', module => 'bt@stdlib@time', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TimeoutProxy', module => 'bt@stdlib@timeout_proxy', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
             #{name => 'Timer', module => 'bt@stdlib@timer', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Tls', module => 'bt@stdlib@tls', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Tracing', module => 'bt@stdlib@tracing', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Transcript', module => 'bt@stdlib@transcript', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TranscriptStream', module => 'bt@stdlib@transcript_stream', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
