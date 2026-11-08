@@ -19,6 +19,28 @@
 /// ```
 sealed typed Number subclass: Integer
 
+  // === Class-side parsing ===
+
+  /// Parse `text` as an integer in base `base` (class method) — the
+  /// fallible, `Result`-based counterpart to `String>>asIntegerRadix:`.
+  ///
+  /// Accepts a `String` or a `Binary` (both spell the same bytes).
+  /// Returns `Result ok: int` on success, `Result error:` with a
+  /// `parse_error` on empty input (`empty integer` hint) or bad digits
+  /// (`not a base-N integer` hint). A radix outside 2..36 raises
+  /// `invalid_argument` — a caller bug, not a parse failure.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Integer parse: "ff" radix: 16) unwrap   // => 255
+  /// (Integer parse: "101" radix: 2) unwrap    // => 5
+  /// (Integer parse: "42" radix: 10) unwrap    // => 42
+  /// (Integer parse: "zz" radix: 16) isError   // => true
+  /// (Integer parse: "" radix: 10) isError     // => true
+  /// ```
+  class sealed parse: text :: Binary radix: base :: Integer -> Result(Integer, Error) =>
+    @primitive
+
   // === Arithmetic ===
 
   /// Add an integer to the receiver.
