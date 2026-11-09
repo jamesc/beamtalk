@@ -494,25 +494,24 @@ fn nested_keyword_blocks_unparse_linear_in_depth() {
         (out, calls)
     };
     // Every level adds the same expressions (`x ifTrue: [...]`, `x`, the
-    // block), each unparsed once, so
-    // the per-level cost is constant. Checked at small depths first so a
+    // block), each unparsed once, so the per-level cost is constant. Checked at small depths first so a
     // regression fails here instead of running for minutes at d=20.
-    let (_, calls_0) = calls_for(0);
-    let (_, calls_6) = calls_for(6);
-    let (_, calls_12) = calls_for(12);
+    let (_, base_calls) = calls_for(0);
+    let (_, six_deep_calls) = calls_for(6);
+    let (_, twelve_deep_calls) = calls_for(12);
     assert_eq!(
-        calls_12 - calls_6,
-        calls_6 - calls_0,
+        twelve_deep_calls - six_deep_calls,
+        six_deep_calls - base_calls,
         "unparse_expression calls must grow linearly with nesting depth \
-         (d=0: {calls_0}, d=6: {calls_6}, d=12: {calls_12})"
+         (d=0: {base_calls}, d=6: {six_deep_calls}, d=12: {twelve_deep_calls})"
     );
-    let per_level = (calls_6 - calls_0) / 6;
+    let per_level = (six_deep_calls - base_calls) / 6;
     assert!(
         per_level <= 10,
         "{per_level} unparse_expression calls per level"
     );
-    let (out_20, calls_20) = calls_for(20);
-    assert_eq!(calls_20, calls_0 + 20 * per_level);
+    let (out_20, twenty_deep_calls) = calls_for(20);
+    assert_eq!(twenty_deep_calls, base_calls + 20 * per_level);
     // The output is canonical and re-parses to the same text.
     assert_eq!(unparse_module(&parse_source(&out_20)), out_20);
 }
