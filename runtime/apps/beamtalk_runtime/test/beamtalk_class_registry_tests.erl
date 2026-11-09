@@ -1105,7 +1105,18 @@ restart_class_recovery_test_() ->
                 ?assert(is_pid(NewPid)),
                 ?assertNotEqual(OldPid, NewPid),
                 %% Should be registered again
-                ?assertEqual(NewPid, beamtalk_class_registry:whereis_class('RestartTest1888'))
+                ?assertEqual(NewPid, beamtalk_class_registry:whereis_class('RestartTest1888')),
+                %% BT-4552: the dead incarnation still names its class, so a
+                %% class object holding OldPid recovers instead of raising
+                %% `Class 'unknown' not found`.
+                ?assertEqual(
+                    {ok, 'RestartTest1888'},
+                    beamtalk_class_registry:class_name_for_pid(OldPid)
+                ),
+                ?assertEqual(
+                    {ok, 'RestartTest1888'},
+                    beamtalk_class_registry:class_name_for_pid(NewPid)
+                )
             end}
         ]}.
 

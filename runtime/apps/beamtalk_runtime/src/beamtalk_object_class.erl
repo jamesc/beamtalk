@@ -1992,7 +1992,8 @@ terminate(_Reason, #class_state{name = ClassName}) ->
             _:_ -> ok
         end),
     %% Clean up pid reverse index. Only cleaned on graceful shutdown —
-    %% on crash, the entry intentionally survives for auto-restart recovery.
+    %% on crash, the entry intentionally survives for auto-restart recovery,
+    %% including after the restart (BT-4552, `restart_class/1`).
     _ =
         (try
             ets:delete(beamtalk_class_pids, self())

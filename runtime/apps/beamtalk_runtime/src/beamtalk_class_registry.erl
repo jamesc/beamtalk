@@ -1347,15 +1347,16 @@ restart_class(ClassName) ->
                 superclass => Superclass,
                 meta => Meta
             },
-            %% Clean up stale pid entries for this class before restarting.
-            %% On crash, terminate doesn't run, so old {DeadPid, ClassName} entries
-            %% linger. Remove them so they don't accumulate on repeated crashes.
-            _ =
-                (try
-                    ets:match_delete(beamtalk_class_pids, {'_', ClassName})
-                catch
-                    _:_ -> ok
-                end),
+            %% BT-4552: the dead incarnation's `{DeadPid, ClassName}` reverse-index
+            %% row is kept, never deleted here. A class object is a value: any
+            %% holder of the dead pid (a variable, an `allClasses` walk taken
+            %% just before the crash) recovers through
+            %% `beamtalk_class_dispatch:handle_class_crash_recovery/3`, which can
+            %% only name the class from this row. Deleting it on restart (the
+            %% eager `beamtalk_class_monitor` restart runs immediately on the
+            %% crash) turned every such send into
+            %% `Class 'unknown' not found`. The cost is one small row per crash,
+            %% which the monitor's per-class restart budget keeps rare.
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(
