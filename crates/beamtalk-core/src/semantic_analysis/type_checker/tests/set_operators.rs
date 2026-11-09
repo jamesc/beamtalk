@@ -1249,3 +1249,69 @@ fn intersect_intersection_with_disjoint_class_reduces_to_never() {
     );
     assert_eq!(right, InferredType::Never);
 }
+
+// ── BT-4510: a bare generic name admits every instantiation ─────────────
+
+/// `Result(String, Error)`.
+fn result_of_string_error() -> InferredType {
+    InferredType::known_with_args(
+        "Result",
+        vec![InferredType::known("String"), InferredType::known("Error")],
+    )
+}
+
+#[test]
+fn intersect_parameterized_with_bare_same_class_keeps_the_instantiation() {
+    // A type pattern `r :: Result` names no type args; against a
+    // `Result(String, Error)` scrutinee it must keep the instantiation, not
+    // treat the two as disjoint (they were typed `Never`).
+    let h = hierarchy();
+    let parameterized = result_of_string_error();
+    let bare = InferredType::known("Result");
+    for hierarchy in [None, Some(&h)] {
+        assert_eq!(
+            InferredType::intersect(&parameterized, &bare, prov(), hierarchy, None),
+            parameterized
+        );
+        assert_eq!(
+            InferredType::intersect(&bare, &parameterized, prov(), hierarchy, None),
+            parameterized
+        );
+    }
+}
+
+#[test]
+fn intersect_distinct_instantiations_stay_disjoint() {
+    // Invariant type args: two different instantiations are still disjoint.
+    assert_eq!(
+        InferredType::intersect(
+            &list_of(InferredType::known("Integer")),
+            &list_of(InferredType::known("String")),
+            prov(),
+            Some(&hierarchy()),
+            None
+        ),
+        InferredType::Never
+    );
+}
+
+#[test]
+fn difference_parameterized_minus_bare_same_class_is_never() {
+    let h = hierarchy();
+    let bare = InferredType::known("Result");
+    assert_eq!(
+        InferredType::difference(&result_of_string_error(), &bare, prov(), Some(&h)),
+        InferredType::Never
+    );
+    // In a union, only the matching class's member goes.
+    let t = InferredType::union_of(&[result_of_string_error(), InferredType::known("Integer")]);
+    assert_eq!(
+        InferredType::difference(&t, &bare, prov(), Some(&h)),
+        InferredType::known("Integer")
+    );
+    // The converse is not representable: no-op.
+    assert_eq!(
+        InferredType::difference(&bare, &result_of_string_error(), prov(), Some(&h)),
+        bare
+    );
+}

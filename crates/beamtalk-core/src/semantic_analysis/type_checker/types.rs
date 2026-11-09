@@ -1387,6 +1387,14 @@ impl InferredType {
             }
             // `T ∩ T = T` (exact structural equality, generics included).
             _ if a == b => a.clone(),
+            // A bare generic class name denotes every instantiation of the
+            // class (a type pattern or `isKindOf:` cannot name type args), so
+            // it is the identity on any instantiation of the same class:
+            // `Result(String, Error) ∩ Result = Result(String, Error)`, in
+            // both orders (BT-4510: the `r :: Result ->` arm of a match on a
+            // `Result(String, Error)` was typed `Never`).
+            _ if Self::bare_instantiation_of(b, a) => a.clone(),
+            _ if Self::bare_instantiation_of(a, b) => b.clone(),
             // Class ∩ protocol / protocol ∩ protocol (ADR 0102 §1/§3):
             // the irreducible intersection. Must be checked before the nominal
             // arm below — a protocol name is never a hierarchy entry, so
@@ -1574,6 +1582,12 @@ impl InferredType {
             }
             // `T \ T = Never` (exact structural equality, generics included).
             _ if a == b => Self::Never,
+            // Subtracting a bare generic class name removes every
+            // instantiation of it: `Result(String, Error) \ Result = Never`
+            // (the residual after an unguarded `r :: Result ->` arm, BT-4510).
+            // The converse (`Result \ Result(String, Error)`) is not
+            // representable and falls through to the no-op below.
+            _ if Self::bare_instantiation_of(b, a) => Self::Never,
             // Nominal-class base case (ADR 0102 §5): with a hierarchy,
             // two distinct-named, non-singleton nominal classes relate via
             // subtyping — a proper subclass subtraction is irreducible
@@ -1605,6 +1619,20 @@ impl InferredType {
             // opaque to `Negation`).
             _ => a.clone(),
         }
+    }
+
+    /// Whether `bare` is a generic class named without type arguments and
+    /// `other` is a parameterized instantiation of the same class
+    /// (`Result` and `Result(String, Error)`): the bare name admits every
+    /// instantiation, so it is a supertype of `other` (BT-4510).
+    fn bare_instantiation_of(bare: &Self, other: &Self) -> bool {
+        matches!(
+            (bare, other),
+            (
+                Self::Known { class_name: bn, type_args: bargs, .. },
+                Self::Known { class_name: on, type_args: oargs, .. },
+            ) if bn == on && bargs.is_empty() && !oargs.is_empty()
+        )
     }
 
     /// Returns `true` if `ty` is the `Object` root class — the top type for

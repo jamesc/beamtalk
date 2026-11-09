@@ -751,7 +751,7 @@ impl CoreErlangGenerator {
     /// only at the point a user-written annotation naming an alias is
     /// expanded (ADR 0108), so it is a declared type under another name.
     /// `Extracted` (`-spec`-derived) stays untrusted.
-    fn trusted_static_class(
+    pub(in crate::core_erlang) fn trusted_static_class(
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
@@ -972,9 +972,11 @@ impl CoreErlangGenerator {
     /// send. A selector the row's dynamic path answers elsewhere (`Pid`'s
     /// future protocol, `String`'s shared byte-level selectors — the
     /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
-    /// selector on those rows is routed. Rows whose test spans two routes
-    /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
-    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
+    /// selector on those rows is routed. A row whose test spans two routes
+    /// (`Binary`: a bare binary or the `String` tag) gets both, guarded one
+    /// after the other (BT-4510). Rows that carry a `dynamic_only` reason
+    /// (`Boolean`, `Bitstring`, `Character`, the records, the proxy) stay
+    /// dynamic. A
     /// stdlib built-in's module can be neither removed nor redefined into
     /// another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
@@ -1085,62 +1087,7 @@ impl CoreErlangGenerator {
             .iter()
             .map(|_| self.fresh_temp_var("TTaggedArg"))
             .collect();
-        let args_list_doc = Self::join_docs_with_commas(
-            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
-        );
-
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-        };
-        // BT-4473: a send to an instance of this unit's own class whose
-        // selector one of its `dispatch/3` method arms answers calls that
-        // arm's function directly; every other tagged target, and every
-        // built-in route, calls `dispatch/3`.
-        let own_arm = match target {
-            TypedSendTarget::Tagged(tagged) => {
-                self.own_dispatch_arm(&tagged.class_name, &selector_atom, arguments.len())
-            }
-            TypedSendTarget::Builtin(_) => None,
-        };
-        let direct_call = match own_arm {
-            Some(arm) => Self::own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
-            None => docvec![
-                "call ",
-                leaf::atom(module_name),
-                ":'dispatch'(",
-                leaf::atom(selector_atom.clone()),
-                ", [",
-                args_list_doc.clone(),
-                "], ",
-                leaf::var(receiver_var.clone()),
-                ")",
-            ],
-        };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
-        let fallback_doc = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(receiver_var.clone()),
-            ", ",
-            leaf::atom(selector_atom.clone()),
-            ", [",
-            args_list_doc,
-            "])",
-        ]);
-
-        let case_doc = match target {
-            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
-                &receiver_var,
-                &tagged.class_name,
-                direct_doc,
-                fallback_doc,
-            ),
-            TypedSendTarget::Builtin(route) => {
-                self.render_send_guard(route.guard, &receiver_var, direct_doc, &fallback_doc)
-            }
-        };
+        let case_doc = self.guarded_send_on_vars(target, &selector_atom, &receiver_var, &arg_vars);
 
         // BT-4279: a unary send that may be an auto-generated slot getter of a
         // tagged Value class. Its fast path reads the slot with no bracket
@@ -1183,6 +1130,103 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// BT-4069, BT-4294, BT-4510: the guarded direct call of `selector_atom`
+    /// to the value bound to `receiver_var`, with `arg_vars` as arguments,
+    /// for a [`TypedSendTarget`]: the target's guard (a class tag, or a
+    /// built-in's representation test, then its `String`-tag half if any)
+    /// around the direct call, and the dynamic send in every miss arm. Shared
+    /// by [`Self::generate_typed_guarded_send`] and the sends the compiler
+    /// makes itself on an already-bound value (a string interpolation
+    /// segment's `displayString`).
+    pub(in crate::core_erlang) fn guarded_send_on_vars(
+        &mut self,
+        target: &TypedSendTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+    ) -> Document<'static> {
+        let args_list_doc = Self::join_docs_with_commas(
+            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
+        );
+        let module_name = match target {
+            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
+            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
+        };
+        // BT-4473: a send to an instance of this unit's own class whose
+        // selector one of its `dispatch/3` method arms answers calls that
+        // arm's function directly; every other tagged target, and every
+        // built-in route, calls `dispatch/3`.
+        let own_arm = match target {
+            TypedSendTarget::Tagged(tagged) => {
+                self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len())
+            }
+            TypedSendTarget::Builtin(_) => None,
+        };
+        let direct_call = match own_arm {
+            Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
+            None => docvec![
+                "call ",
+                leaf::atom(module_name),
+                ":'dispatch'(",
+                leaf::atom(selector_atom.to_string()),
+                ", [",
+                args_list_doc.clone(),
+                "], ",
+                leaf::var(receiver_var.to_string()),
+                ")",
+            ],
+        };
+        // BT-4366: both calls sit inside the type-test `case`, so each carries
+        // the send's line itself.
+        let direct_doc = self.annotate_current_send_call(direct_call);
+        let fallback_doc = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(receiver_var.to_string()),
+            ", ",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "])",
+        ]);
+
+        match target {
+            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
+                receiver_var,
+                &tagged.class_name,
+                direct_doc,
+                fallback_doc,
+            ),
+            TypedSendTarget::Builtin(route) => {
+                // BT-4510: a `Binary` receiver that is a `String` at run time
+                // misses the bare-binary guard and tries the `String` route
+                // before the dynamic send.
+                let miss_doc = match route.string_tag_route {
+                    Some(string_route) => {
+                        let string_call = self.annotate_current_send_call(docvec![
+                            "call ",
+                            leaf::atom(string_route.target_module),
+                            ":'dispatch'(",
+                            leaf::atom(selector_atom.to_string()),
+                            ", [",
+                            args_list_doc.clone(),
+                            "], ",
+                            leaf::var(receiver_var.to_string()),
+                            ")",
+                        ]);
+                        self.render_send_guard(
+                            string_route.guard,
+                            receiver_var,
+                            string_call,
+                            &fallback_doc,
+                        )
+                    }
+                    None => fallback_doc,
+                };
+                self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
+            }
+        }
     }
 
     /// BT-4473: the own-class `dispatch/3` method arm that answers
