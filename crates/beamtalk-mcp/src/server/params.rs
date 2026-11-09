@@ -179,7 +179,7 @@ pub struct LintParams {
     pub path: Option<String>,
     /// Mirror CLI `beamtalk lint --warnings-as-errors` (BT-4336).
     #[schemars(
-        description = "Fail (is_error) exactly where `beamtalk lint --warnings-as-errors` does: on lint-severity diagnostics, and on the type/DNU/error diagnostics a REPL load-project rejects. Defaults to false (fail only on errors)."
+        description = "Apply the `beamtalk lint --warnings-as-errors` gate: fail (is_error) on lint-severity diagnostics and on the type/DNU/error diagnostics a REPL load-project rejects. Defaults to false (fail only on errors)."
     )]
     pub warnings_as_errors: Option<bool>,
 }

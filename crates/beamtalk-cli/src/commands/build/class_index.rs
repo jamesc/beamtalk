@@ -290,13 +290,16 @@ pub(crate) fn build_class_index(
             env.source_root.as_deref(),
             pkg,
         );
-        // BT-4336: hashed after flattening, over exactly what Pass 2 hands
-        // `analyse_full` as pre-loaded context, so any cross-file signature
-        // change re-checks every file instead of replaying stale diagnostics.
+        // BT-4336: hashed after flattening, over the cross-file context Pass 2
+        // hands `analyse_full` (pre-loaded classes, protocols, aliases and
+        // standalone extensions; the project-known Erlang modules are folded
+        // in by `execute_build_passes`), so any cross-file signature change
+        // re-checks every file instead of replaying stale diagnostics.
         analysis_surface_hash = crate::commands::util::analysis_surface_hash(
             &all_class_infos,
             &all_protocol_infos,
             &all_alias_infos,
+            &extension_index,
         );
     }
 

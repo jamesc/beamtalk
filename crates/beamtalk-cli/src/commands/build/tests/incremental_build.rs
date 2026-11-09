@@ -951,3 +951,52 @@ fn test_incremental_rebuilds_unchanged_caller_when_provision_renamed() {
         "must settle once surfaces stop changing: {changed:?}"
     );
 }
+
+/// BT-4336: a byte-identical caller of a standalone extension method in
+/// another file must be rebuilt (and so re-type-checked) when the
+/// extension's signature changes or the extension is removed — the
+/// extension index is part of the analysis surface, not just `ClassInfo`.
+/// A body-only edit of the extension keeps the caller cached.
+#[test]
+fn test_incremental_rebuilds_unchanged_caller_when_extension_signature_changes() {
+    let temp = TempDir::new().unwrap();
+    let project = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let src = project.join("src");
+    fs::create_dir_all(&src).unwrap();
+    write_test_file(
+        &project.join("beamtalk.toml"),
+        "[package]\nname = \"test_pkg\"\nversion = \"0.1.0\"\n",
+    );
+    let ext = src.join("shout.bt");
+    write_test_file(&ext, "String >> shout -> Integer => 1\n");
+    write_test_file(
+        &src.join("caller.bt"),
+        "Object subclass: Caller\n  loud -> Integer => \"x\" shout\n",
+    );
+
+    let (changed, _) = detect_and_record(&project);
+    assert_eq!(changed, ["caller.bt", "shout.bt"]);
+
+    write_test_file(&ext, "String >> shout -> Integer => 2\n");
+    let (changed, unchanged) = detect_and_record(&project);
+    assert_eq!(
+        changed,
+        ["shout.bt"],
+        "a body-only edit must not rebuild the caller"
+    );
+    assert_eq!(unchanged, ["caller.bt"]);
+
+    write_test_file(&ext, "String >> shout -> String => \"2\"\n");
+    let (changed, _) = detect_and_record(&project);
+    assert!(
+        changed.contains(&"caller.bt".to_string()),
+        "an extension signature change must rebuild the unchanged caller: {changed:?}"
+    );
+
+    write_test_file(&ext, "// no extensions left\n");
+    let (changed, _) = detect_and_record(&project);
+    assert!(
+        changed.contains(&"caller.bt".to_string()),
+        "removing the extension must rebuild the unchanged caller: {changed:?}"
+    );
+}

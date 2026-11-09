@@ -143,15 +143,20 @@ same scope as `build`.
   to your own project's CI to get the REPL verdict there. The MCP `lint`
   tool applies the same table and takes the same gate as an optional
   `warnings_as_errors` flag, classified by the same shared rule
-  (`diagnostics_policy::is_live_recheck_failure`; BT-4336).
+  (`diagnostics_policy::is_live_recheck_failure`; BT-4336). MCP's analysis
+  pipeline is still separate (no cross-file extensions, pre-loaded
+  aliases/protocols, project-complete scope or `.erl` linting), so on
+  packages that rely on those its verdict can differ from the CLI's
+  (BT-4585).
 - `beamtalk build` re-checks a byte-identical file when a signature it
   type-checks against changes elsewhere (BT-4336): every pre-loaded class
   (project and dependency, trait provisions flattened in), protocol and
-  type alias is hashed into each file's incremental cache key, so a
+  type alias, plus every standalone extension method and the project-known
+  Erlang modules, is hashed into each file's incremental cache key, so a
   dependent is recompiled — and its diagnostics recomputed — rather than
   replayed from the cache against the old signature. Doc-comment edits and
   line shifts leave the hash alone; any signature change rebuilds the whole
-  package.
+  package (per-file edges: BT-4586).
 
 Intentionally surface-specific behaviour (not parity bugs):
 

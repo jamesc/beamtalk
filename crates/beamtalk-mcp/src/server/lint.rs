@@ -49,9 +49,13 @@ pub(crate) struct LintResult {
 
 impl LintResult {
     /// Whether the `lint` tool reports failure (`is_error`). Without
-    /// `warnings_as_errors` only `errors` fail it; with it, it fails exactly
-    /// where CLI `beamtalk lint --warnings-as-errors` does — on Lint-severity
-    /// diagnostics or the live-recheck set — plus file-level errors (BT-4336).
+    /// `warnings_as_errors` only `errors` fail it; with it, it applies CLI
+    /// `beamtalk lint --warnings-as-errors`' gate — Lint-severity diagnostics
+    /// or the live-recheck set — plus file-level errors (BT-4336). The gate
+    /// rule is shared, but this crate's analysis pipeline is its own: it
+    /// does not yet pass the CLI's cross-file extensions, pre-loaded
+    /// aliases/protocols or project-complete knowledge scope, and does not
+    /// lint `.erl` files, so the diagnostics it gates can differ (BT-4585).
     pub(crate) fn fails(&self, warnings_as_errors: bool) -> bool {
         !self.errors.is_empty()
             || (warnings_as_errors && (self.lint_failures > 0 || self.live_recheck_failures > 0))

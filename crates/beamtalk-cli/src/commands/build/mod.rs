@@ -266,7 +266,10 @@ fn execute_build_passes(
         &BuildGraphEdges {
             file_protocol_uses,
             protocol_hashes,
-            analysis_surface_hash: index.analysis_surface_hash.clone(),
+            analysis_surface_hash: fold_known_erlang_modules(
+                index.analysis_surface_hash.clone(),
+                &options.known_erlang_modules,
+            ),
             stub_inputs_hash,
         },
     );
@@ -619,6 +622,25 @@ fn fold_direct_ffi_proofs(
     }
     let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
     crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
+}
+
+/// Fold the project-known Erlang modules (BT-4022) into the analysis
+/// surface hash (BT-4336): the `unresolved_ffi` check reads them, so adding
+/// or removing a `native/*.erl` module or a hex dependency's module
+/// re-checks every file instead of replaying a stale (or missing) warning.
+/// An empty set leaves the hash untouched.
+fn fold_known_erlang_modules(
+    analysis_surface_hash: String,
+    known_erlang_modules: &std::collections::HashSet<String>,
+) -> String {
+    if known_erlang_modules.is_empty() {
+        return analysis_surface_hash;
+    }
+    let mut modules: Vec<&str> = known_erlang_modules.iter().map(String::as_str).collect();
+    modules.sort_unstable();
+    crate::commands::util::sha256_hex(
+        format!("{analysis_surface_hash}\nerlang:{}", modules.join(",")).as_bytes(),
+    )
 }
 
 #[cfg(test)]
