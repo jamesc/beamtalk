@@ -933,7 +933,7 @@ impl TypeChecker {
         // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
         // `validation.rs`'s job.
         if let Some(fact) =
-            Self::detect_dynamic_in_typed_class(ty, self.typed_class_context.as_ref())
+            Self::detect_dynamic_in_typed_class(expr, ty, self.typed_class_context.as_ref())
         {
             self.emit_dynamic_in_typed_class(&fact, expr.span());
         }
@@ -953,6 +953,7 @@ impl TypeChecker {
     /// that already has one), and not `DynamicBranch` (a branch join whose
     /// `Dynamic` arm already warned at its own source, BT-4207).
     fn detect_dynamic_in_typed_class(
+        expr: &Expression,
         ty: &InferredType,
         typed_class_context: Option<&EcoString>,
     ) -> Option<DynamicInTypedClass> {
@@ -971,9 +972,16 @@ impl TypeChecker {
         }
         let class_name = typed_class_context?.clone();
         let description = reason.description()?;
+        let unresolved_selector = match (reason, expr) {
+            (DynamicReason::UnresolvedSelector, Expression::MessageSend { selector, .. }) => {
+                Some(selector.name())
+            }
+            _ => None,
+        };
         Some(DynamicInTypedClass {
             class_name,
             description,
+            unresolved_selector,
         })
     }
 
