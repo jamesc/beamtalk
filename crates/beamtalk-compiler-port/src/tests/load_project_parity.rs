@@ -799,3 +799,195 @@ fn project_batch_verifies_scope_once_per_batch() {
         "batch 2 re-verifies and sees the narrowed alias"
     );
 }
+
+/// `diagnostics` request shaped like an editor buffer for `source_path`
+/// (BT-4325): the buffer text plus the file it edits, no `project_batch`.
+fn editor_diagnostics_request(source: &str, source_path: Option<&std::path::Path>) -> Map {
+    let mut request = Map::from([
+        (atom("command"), atom("diagnostics")),
+        (atom("source"), binary(source)),
+        (atom("mode"), binary("expression")),
+    ]);
+    if let Some(path) = source_path {
+        request
+            .map
+            .insert(atom("source_path"), binary(path.to_string_lossy().as_ref()));
+    }
+    request
+}
+
+/// Every `(severity, message)` a `diagnostics` response carries, sorted.
+fn editor_diagnostics(response: &Term) -> Vec<(String, String)> {
+    let Some(list) = response_diagnostics(response) else {
+        panic!("Expected diagnostics list: {response:?}");
+    };
+    let mut entries: Vec<(String, String)> = list
+        .elements
+        .iter()
+        .map(|diag| {
+            let Term::Map(dm) = diag else {
+                panic!("Expected diagnostic map, got {diag:?}");
+            };
+            let field = |key| {
+                map_get(dm, key)
+                    .and_then(term_to_string)
+                    .unwrap_or_default()
+            };
+            (field("severity"), field("message"))
+        })
+        .collect();
+    entries.sort();
+    entries
+}
+
+/// The editor's view of a file, split the way `compile` splits it: error
+/// messages (which fail a load) and every other message (which `compile`
+/// returns as warnings).
+fn editor_errors_and_warnings(response: &Term) -> (Vec<String>, Vec<String>) {
+    let (errors, warnings): (Vec<_>, Vec<_>) = editor_diagnostics(response)
+        .into_iter()
+        .partition(|(severity, _)| severity == "error");
+    let messages = |entries: Vec<(String, String)>| {
+        let mut messages: Vec<String> = entries.into_iter().map(|(_, m)| m).collect();
+        messages.sort();
+        messages
+    };
+    (messages(errors), messages(warnings))
+}
+
+/// BT-4325 AC 1 + 4: the editor's `diagnostics/3` for a project file reports
+/// exactly what a `load_project` `compile` of the same file reports — same
+/// errors (under the project's own `[diagnostics]` table), same warnings
+/// (none of the spurious alias/FFI ones a scope-less check produces) — for
+/// every file of the shared BT-4322 fixture.
+#[test]
+fn editor_diagnostics_agree_with_load_compile() {
+    let (dir, _state_path) = write_parity_project();
+    for name in ["parity_config.bt", "parity_state.bt", "parity_bad.bt"] {
+        let path = dir.path().join("src").join(name);
+        let source = fs::read_to_string(&path).expect("read fixture file");
+
+        let load = handle_compile(&load_like_compile_request(&source, &path));
+        let (load_errors, load_warnings) = if response_status(&load).as_deref() == Some("ok") {
+            let mut warnings = response_warning_messages(&load);
+            warnings.sort();
+            (Vec::new(), warnings)
+        } else {
+            let mut errors = error_diagnostic_messages(&load);
+            errors.sort();
+            (errors, Vec::new())
+        };
+
+        let editor = handle_diagnostics(&editor_diagnostics_request(&source, Some(&path)));
+        assert_eq!(
+            response_status(&editor).as_deref(),
+            Some("ok"),
+            "{editor:?}"
+        );
+        let (editor_errors, editor_warnings) = editor_errors_and_warnings(&editor);
+
+        assert_eq!(
+            editor_errors, load_errors,
+            "{name}: editor errors must match what load_project fails on"
+        );
+        if load_errors.is_empty() {
+            assert_eq!(
+                editor_warnings, load_warnings,
+                "{name}: editor warnings must match load_project's"
+            );
+        }
+    }
+
+    // The fixture exercises both outcomes: one file the project's table
+    // fails, one whose aliases/FFI resolve cleanly only with project scope.
+    let bad_path = dir.path().join("src/parity_bad.bt");
+    let bad = fs::read_to_string(&bad_path).expect("read fixture bad file");
+    let (errors, _) = editor_errors_and_warnings(&handle_diagnostics(&editor_diagnostics_request(
+        &bad,
+        Some(&bad_path),
+    )));
+    assert!(
+        errors.iter().any(|m| m.contains("declared as Integer")),
+        "the project's type = \"error\" must apply in the editor: {errors:?}"
+    );
+}
+
+/// BT-4325: a `diagnostics/3` request with no `source_path` (a scratch
+/// buffer) keeps the legacy scope — the cross-file alias and the FFI spec
+/// are not in scope, and the port cwd's table (none here) leaves the
+/// resulting type findings as non-errors.
+#[test]
+fn editor_diagnostics_without_path_keep_legacy_scope() {
+    let (_dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+
+    let (errors, warnings) = editor_errors_and_warnings(&handle_diagnostics(
+        &editor_diagnostics_request(&source, None),
+    ));
+    assert!(errors.is_empty(), "no project table, no errors: {errors:?}");
+    assert!(
+        warnings.iter().any(|w| w.contains("declared as Scheme")),
+        "a scope-less check must not see the project alias: {warnings:?}"
+    );
+}
+
+/// BT-4325 AC 3: an inline class typed at the REPL keeps the legacy scope
+/// even when the request names a project file — REPL input belongs to no
+/// file's project, so the project's `type = "error"` table must not fail
+/// it, and the project's aliases are not in scope.
+#[test]
+fn repl_inline_class_ignores_source_path_project() {
+    let (_dir, state_path) = write_parity_project();
+    let source = fs::read_to_string(&state_path).expect("read fixture state file");
+    let mut request = compile_expression_request(&source);
+    request.map.insert(
+        atom("source_path"),
+        binary(state_path.to_string_lossy().as_ref()),
+    );
+
+    let response = handle_compile_expression(&request);
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "REPL inline class must not take the project's error table: {response:?}"
+    );
+    let warnings = response_warning_messages(&response);
+    assert!(
+        warnings.iter().any(|w| w.contains("declared as Scheme")),
+        "REPL inline class must not see project aliases: {warnings:?}"
+    );
+}
+
+/// BT-4325: an unsaved editor buffer declares its file's aliases itself —
+/// the saved copy's must not stay in scope. Here the buffer for
+/// `parity_config.bt` deletes `type Scheme` but still uses it: the editor
+/// must already report what `load_project` reports once that buffer is
+/// saved, not stay clean on the strength of the stale on-disk declaration.
+#[test]
+fn unsaved_buffer_alias_deletion_matches_load_after_save() {
+    let (dir, _state_path) = write_parity_project();
+    let config_path = dir.path().join("src/parity_config.bt");
+    let buffer = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: ParityConfig\n\
+         \x20 field: s :: Scheme = #http\n";
+
+    let (editor_errors, _) = editor_errors_and_warnings(&handle_diagnostics(
+        &editor_diagnostics_request(buffer, Some(&config_path)),
+    ));
+    assert!(
+        editor_errors.iter().any(|m| m.contains("Scheme")),
+        "the saved copy's deleted alias must not stay in scope: {editor_errors:?}"
+    );
+
+    fs::write(&config_path, buffer).expect("save the buffer");
+    let load = handle_compile(&load_like_compile_request(buffer, &config_path));
+    assert_eq!(response_status(&load).as_deref(), Some("error"), "{load:?}");
+    let mut load_errors = error_diagnostic_messages(&load);
+    load_errors.sort();
+    assert_eq!(
+        editor_errors, load_errors,
+        "editor (before save) and load (after save) must agree"
+    );
+}

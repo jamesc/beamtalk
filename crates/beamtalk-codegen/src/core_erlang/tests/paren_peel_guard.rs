@@ -142,6 +142,12 @@ const CEILINGS: &[(&str, usize)] = &[
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
     ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
+    // BT-4257: `is_raw_binary`, read on assignment values and send operands
+    // alike.
+    (
+        "beamtalk-core/src/semantic_analysis/type_checker/binary_string_compare.rs",
+        1,
+    ),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (
@@ -196,11 +202,10 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
         3,
     ),
-    // Shared predicates over statements, assignment values and receivers, and
-    // the cascade's folded first send.
+    // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",
-        9,
+        7,
     ),
     // Constructs judged in any position (`expr` itself), the `Parenthesized`
     // arm, statements, cascade receivers (`nlr_cause`'s `check_send`, a

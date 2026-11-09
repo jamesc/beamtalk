@@ -586,6 +586,11 @@ dict at: #name put: "hello"
 Transcript show: "Hello"; cr; show: "World"
 ```
 
+Each cascade part after a `;` is exactly one message. A further message on the
+same line, as in `x foo; size reversed`, is a parse error rather than a send to
+`size`'s result: write `(x size) reversed`, or put the next statement on a new
+line ([BT-4508](https://linear.app/beamtalk/issue/BT-4508)).
+
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
@@ -1375,7 +1380,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. It re-raises the stacktrace captured when the exception was caught, with each frame's argument values reduced to its arity, as `e stackTrace` shows them. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
-**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. (A class-side extension on an *ancestor* of the receiving class is not seen, by this shortcut or by the ordinary class send: [BT-4307](https://linear.app/beamtalk/issue/BT-4307).) `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
+**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. A class-side extension of `signal:` on an *ancestor* of the receiving class counts as that ancestor's method, so it takes the ordinary class send too, and runs with the receiving class as `self` (BT-4307). `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
 
 ```beamtalk
 [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
@@ -2024,6 +2029,7 @@ Each `Dynamic` type carries a reason explaining why the type could not be determ
 | dynamic receiver | Receiver is Dynamic, so message send result is Dynamic | Fix the receiver's type first |
 | ambiguous control flow | Control flow produces incompatible types | Add type annotations to branches |
 | untyped FFI | Erlang FFI call with no spec or all-Dynamic spec | Add `-spec` to the Erlang module |
+| unresolved selector | The receiver's class is known but no visible method answers the selector, and an unseen dependency extension might still define it (when the checker can prove the method is absent it reports does-not-understand instead, and the result is not warned on again) | Check the selector spelling; use `@expect type` if a dependency's extension defines it |
 | *(none)* | Fallback — no specific reason available | Shown as plain `Dynamic` |
 
 #### LSP Hover
@@ -5867,6 +5873,17 @@ String >> shoutIt => super printString uppercase ++ "!"
 String class >> banner => "=== String ==="
 ```
 
+A class-side extension is inherited the way a class method is: at each class
+up the chain, its class-side extensions are checked before its own class
+methods, so `Sub banner` answers an extension registered on `Base class`, with
+`Sub` as `self`, and an extension on `Base class` shadows a compiled class
+method of `Base` for `Sub` too (unless `Sub` itself defines the method). An
+outside send, a dynamic send, a class-side `self` send, `super`,
+`respondsTo:` and protocol conformance all agree (BT-4307). Two exceptions
+remain: `performLocally:withArguments:` applies compiled class methods only, and
+the instance-creation sends `new` and `new:` do not yet see an ancestor's
+class-side extension of them ([BT-4588](https://linear.app/beamtalk/issue/BT-4588)).
+
 ---
 
 ## Workspace and Reflection API
@@ -7651,6 +7668,33 @@ happen to be valid UTF-8, and a String literal answers a String. The runtime
 never sniffs bytes to decide — `class` answers the construction type, and
 dispatch follows the class.
 
+**A String never equals a Binary, even with the same bytes.** `"abc" ==
+(Binary fromBytes: #(97, 98, 99))` is `false` (in either order, and for
+`=:=`), their hashes differ, a `Dictionary` keyed by `"abc"` does not find the
+Binary, and a `Set` holds both. Convert first: `aBinary asString` (validated,
+answers a Result) or `asStringUnchecked`. Because the mismatch fails quietly —
+bytes from Erlang looked up in a String-keyed Dictionary just come back
+absent — the compiler gives a `binary-string-compare` hint (BT-4257) when a
+value that is provably a raw Binary meets a `String`-typed value in `==`,
+`/=`, `=:=` or `=/=`, as the key of a `Dictionary(String, V)` `at:`,
+`at:ifAbsent:`, `at:put:`, `includesKey:` or `removeKey:`, or as the argument
+of a `Set(String)` `includes:` or `add:`:
+
+```
+hint[binary-string-compare]: a Binary never equals a String, even with the same bytes
+  = help: convert the Binary first with `asString` (validated, answers a Result) or `asStringUnchecked`
+```
+
+"Provably a raw Binary" means built by a Binary-only producer — `Binary
+fromBytes:`/`fromIolist:`/`withAll:`/`serialize:`/`empty`, a `Digest` hash,
+`<<...>>`, or `concat:`/`part:size:` of one of those — or a local last
+assigned from one. A value merely *typed* `Binary` (a parameter, a field, a
+method result) may be a String (String is a subclass of Binary), so it never
+triggers the hint, and neither does `Dynamic`. For the same reason a
+`Dictionary(Binary, V)` probed with a String is not reported. Suppress the
+hint with `@expect binary_string_compare`, or package-wide with
+`binary-string-compare = "off"` under `[diagnostics]` in `beamtalk.toml`.
+
 ```beamtalk
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
@@ -8636,7 +8680,17 @@ setUp =>
   self   // <- carries both field mutations forward
 ```
 
-`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send, or a `with*:` cascade.
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send (or a nested chain of them), or a cascade on `self` whose only `with<Field>:` message is its last.
+
+A cascade on `self` with more than one `with<Field>:` message is also reported (BT-4513, [ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). A cascade sends every message to the original receiver, so on a value each `with*:` returns its own copy and the cascade's value is the last message's result alone — every `with*:` before the last is silently dropped. Nest the sends instead, so each one applies to the previous result:
+
+```beamtalk
+// Wrong — `self withCounter: 1; withDb: 2` keeps only `db`; `counter` stays at its default
+setUp => self withCounter: 1; withDb: 2
+
+// Right — each send receives the copy the previous one returned
+setUp => (self withCounter: 1) withDb: 2
+```
 
 Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative to `self.field := value` — each `with*:` call itself returns the fully updated self, so the chain's own last call already carries every field set through. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies, and `beamtalk lint` (BT-3391/BT-3395) warns for both forms.
 

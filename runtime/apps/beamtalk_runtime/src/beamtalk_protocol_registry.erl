@@ -124,6 +124,9 @@ uniquely generated per reload. Bumped on:
 - live method patches — `beamtalk_object_class`'s `{put_method, ...}` and
   `{put_class_method, ...}` handlers (hot-patch / `classRemoveSelector` on a
   local method routes through `update_class`, already covered above)
+- class-side extension writes — `beamtalk_extensions:register/5` /
+  `unregister/3` for a class-object tag (an extension is inherited by every
+  descendant's class side, BT-4307)
 - class removal — `beamtalk_class_lifecycle:class_removed/2` calls
   `unregister_protocol/1` unconditionally, which flushes regardless of
   whether the removed class's module defined any protocols itself
@@ -986,68 +989,16 @@ all_required_class_methods(Info) ->
     ClassMethods ++ FilteredParent.
 
 -doc """
-Check if a class has a class-side method (walks hierarchy + extensions).
-
-Walks the superclass chain checking each class's local class methods map.
-Falls back to the extensions ETS table for class-side extensions registered
-via `Class class >> selector` (keyed as `{'ClassName class', Selector}`).
-This mirrors the actual class-side dispatch path.
+Does `ClassName`'s class side understand `Selector`? The class-side dispatch
+lookup's own answer (`beamtalk_class_dispatch:class_understands_class_selector/2`:
+class-side extensions on the class or any ancestor, local and inherited class
+methods, runtime-installed class-method funs), so conformance agrees with
+`respondsTo:` and with what a send would find (BT-4307). Reads ETS and
+`persistent_term` only, never a class process (BT-3826).
 """.
 -spec class_has_class_method(atom(), atom()) -> boolean().
 class_has_class_method(ClassName, Selector) ->
-    case class_has_class_method_in_chain(ClassName, Selector) of
-        true ->
-            true;
-        false ->
-            %% Check extensions ETS table for class-side extensions.
-            %% Class-side extensions use the metaclass tag atom (e.g. 'Integer class')
-            %% as the class key in the extensions registry.
-            MetaclassTag = beamtalk_class_registry:class_object_tag(ClassName),
-            check_class_extension(MetaclassTag, Selector)
-    end.
-
--doc """
-Walk the superclass chain checking local class-method selectors.
-
-Reads each level from the unified class metadata (`lookup_methods/1`,
-`lookup_superclass/1`), never from the class process (BT-3826):
-`conforming_classes/1` and `conforms_to/2` run inside class handlers, and a
-`gen_server:call` per level deadlocks two busy classes against each other.
-
-Caveat (same as `beamtalk_object_class:module_name_safe/1`): a class process
-killed with an untrappable `kill` skips `terminate/2`, so its metadata row
-survives until the auto-restart cleans it; until then it is treated as still
-defining its methods.
-""".
--spec class_has_class_method_in_chain(atom(), atom()) -> boolean().
-class_has_class_method_in_chain(none, _Selector) ->
-    false;
-class_has_class_method_in_chain(ClassName, Selector) ->
-    case beamtalk_class_metadata:lookup_methods(ClassName) of
-        not_found ->
-            false;
-        {ok, _Module, ClassMethods} ->
-            lists:member(Selector, ClassMethods) orelse
-                case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                    not_found -> false;
-                    {ok, SuperName} -> class_has_class_method_in_chain(SuperName, Selector)
-                end
-    end.
-
--doc """
-Safe extension registry lookup for class-side methods.
-
-Guards against the ETS table not existing (e.g., during early bootstrap).
-""".
--spec check_class_extension(atom(), atom()) -> boolean().
-check_class_extension(MetaclassTag, Selector) ->
-    try
-        beamtalk_extensions:has(MetaclassTag, Selector)
-    catch
-        error:badarg ->
-            %% ETS table doesn't exist yet (early bootstrap)
-            false
-    end.
+    beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector).
 
 %%% ============================================================================
 %%% Protocol Class Object Creation (ADR 0068)

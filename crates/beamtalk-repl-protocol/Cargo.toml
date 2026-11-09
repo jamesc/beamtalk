@@ -53,8 +53,9 @@ default = []
 ## `beamtalk-repl-protocol = { workspace = true, features = ["test"] }` to the
 ## dependent crate's `[dev-dependencies]` section to enable this.
 test = ["test-ports", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
-## Expose `test_ports` (the shared `closed_port()` helper, BT-4382) without
-## the async WS double's `tokio` dependency, for synchronous crates' tests.
+## Expose `test_ports` (the shared `closed_port()` helper, BT-4382) and
+## `test_versions` (version-lock fixtures, BT-4329) without the async WS
+## double's `tokio` dependency, for synchronous crates' tests.
 test-ports = []
 
 [lints]

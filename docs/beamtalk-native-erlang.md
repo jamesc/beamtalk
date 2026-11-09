@@ -557,7 +557,7 @@ oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation"
 jose = "~> 1.11"
 ```
 
-Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit (`{ref, Sha}`) until `beamtalk deps update` clears the native locks. Changing the URL or the `branch`/`tag`/`rev` also drops the locked SHA.
+Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit until `beamtalk deps update` clears the native locks — a branch that moves on is not followed until then. Changing the URL or the `branch`/`tag`/`rev` in `beamtalk.toml` re-resolves on the next build.
 
 ### rebar3 Overrides
 
@@ -602,7 +602,7 @@ Object subclass: FastJson
 
 ### Dependency Resolution
 
-All native dependencies across the entire Beamtalk dependency graph are resolved together. `beamtalk build` collects `[native.dependencies]` from every transitive package and passes them to a single rebar3 invocation. Resolved versions are pinned in `beamtalk.lock` for reproducible builds.
+All native dependencies across the entire Beamtalk dependency graph are resolved together. `beamtalk build` collects `[native.dependencies]` from every transitive package and passes them to a single rebar3 invocation. Resolved versions — including transitive dependencies — are pinned in `beamtalk.lock` for reproducible builds, also on a fresh clone. Changing a dependency's constraint (so the locked version no longer satisfies it) or git source in `beamtalk.toml` re-resolves that dependency on the next build; other direct dependencies stay pinned, while transitive ones re-resolve. `beamtalk deps update` re-resolves everything, and `beamtalk deps update <name>` re-resolves one native package.
 
 This top-level resolution is required by BEAM's flat module namespace — only one version of any module can be loaded at a time. Each native dependency name goes into `rebar.config` once: the root package's declaration wins, then the first dependency that declares it. If another package declares the same name differently (a different hex constraint, or git in one package and hex in another), `beamtalk build` keeps the first declaration and prints a warning naming both packages. `[native.overrides]` aggregate the same way, so a library's overrides also apply when an application depends on it.
 

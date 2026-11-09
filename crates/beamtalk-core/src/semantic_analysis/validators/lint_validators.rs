@@ -15,10 +15,13 @@ use crate::ast::{
     BinarySegment, Expression, Identifier, MessageSelector, Module, TypeAnnotation,
     WellKnownSelector,
 };
-use crate::ast_walker::{walk_expression, walk_module};
+use crate::ast_walker::{
+    SendRef, cascade_sends, cascade_shared_receiver, walk_expression, walk_module,
+};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{InferredType, TypeMap};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use ecow::EcoString;
 use std::collections::HashMap;
 
 // ── Redundant assignment ──────────────────────────────────────────────────────
@@ -540,8 +543,14 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
 ///   with<Field>: ...` send at all — there's nothing to drop.
 /// - The last statement is a bare `self`, another `self.field := value`
 ///   assignment, a `self with<Field>: value` send, or a cascade on `self`
-///   ending in a `with<Field>:` message — all reliably yield the fully
-///   updated self already.
+///   whose *only* `with<Field>:` message is its last — all reliably yield the
+///   fully updated self already.
+///
+/// A trailing cascade on `self` with **more than one** `with<Field>:` message
+/// (`self withA: 1; withB: 2`) gets its own, more specific diagnostic: every
+/// cascade message goes to the *original* receiver, so each `with*:` returns
+/// its own copy and only the last one survives as the cascade's value (ADR
+/// 0145). The fix is the nested form `(self withA: 1) withB: 2`.
 pub(crate) fn check_testcase_setup_drops_field_assignments(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -633,12 +642,13 @@ fn is_self_with_field_send(expr: &Expression) -> bool {
 /// Returns `true` if `expr` reliably evaluates to the fully updated `self`
 /// — a bare `self`, a `self.field := value` assignment, a `with<Field>:`
 /// send (recursively, so a chain of them also qualifies), or a `with*:`
-/// cascade whose *last* message is a `with<Field>:` send. This is the
+/// cascade whose *last* message is its only `with<Field>:` send. This is the
 /// shared "self-producing" predicate: a `with<Field>:` send's receiver must
 /// satisfy it (chaining), and so must the trailing statement
 /// `check_setup_body_returns_self` requires — both need to know what the
-/// expression actually *evaluates to*, so a cascade is checked by its last
-/// message only (ADR 0067), unlike the presence-only
+/// expression actually *evaluates to*, so a cascade is judged by its value
+/// (its last message, ADR 0067; any earlier `with*:` is dropped, ADR 0145),
+/// unlike the presence-only
 /// [`is_self_with_field_cascade`] used for detecting *that* a mutation
 /// happened anywhere in the body.
 fn is_self_producing(expr: &Expression) -> bool {
@@ -648,68 +658,95 @@ fn is_self_producing(expr: &Expression) -> bool {
         || cascade_value_is_self_producing(expr)
 }
 
-/// Returns the cascade's common receiver — the receiver of the message
-/// embedded in the `Cascade` node's own `receiver` field, which the parser
-/// always fills with the cascade's first message send (see
-/// `ast_walker::tests::walk_cascade_visits_receiver_and_message_arguments`).
-/// `None` for the (grammatically unreachable in practice) case where that
-/// field isn't itself a message send.
-fn cascade_common_receiver(receiver: &Expression) -> Option<&Expression> {
-    match receiver.unwrap_parens() {
-        Expression::MessageSend { receiver, .. } => Some(receiver.as_ref()),
-        _ => None,
+/// The `with<Field>:` shape of a cascade whose shared receiver is
+/// self-producing — see [`self_with_star_cascade`].
+struct SelfWithStarCascade {
+    /// The `with<Field>:` selectors among *all* the cascade's messages
+    /// (the folded first one included), in source order.
+    with_star_selectors: Vec<EcoString>,
+    /// Whether the cascade's *last* message is a `with<Field>:` send, i.e.
+    /// whether the cascade's value is a `with<Field>:` result at all.
+    ends_in_with_star: bool,
+    /// Whether the shared receiver is the bare `self` (rather than a
+    /// `with*:` chain), which the suggested nested form starts from.
+    receiver_is_bare_self: bool,
+}
+
+/// Returns `true` if a send is a `with<Field>:` copy-setter send.
+fn is_with_star_send(send: &SendRef<'_>) -> bool {
+    send.arguments.len() == 1 && is_with_star_selector(send.selector)
+}
+
+/// For a cascade whose shared receiver is self-producing (literal `self`, or
+/// itself a `with<Field>:` send/chain — recursively, via
+/// [`is_self_producing`]), describes its `with<Field>:` messages. `None` when
+/// `expr` is not such a cascade. Expands the cascade with the shared
+/// [`cascade_sends`], so the first message — which the parser folds into
+/// the `Cascade` node's own `receiver` — counts like every later one.
+///
+/// Every message of a cascade is sent to the same, original receiver, so on
+/// a value type each `with<Field>:` returns its own independent copy: only
+/// the cascade's *last* message's result is its value (ADR 0067, ADR 0145).
+/// Two or more `with<Field>:` sends in one cascade therefore always drop
+/// every one but the last.
+fn self_with_star_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
+    let cascade = expr.unwrap_parens();
+    let Expression::Cascade { receiver, .. } = cascade else {
+        return None;
+    };
+    let shared_receiver = cascade_shared_receiver(receiver);
+    if !is_self_producing(shared_receiver) {
+        return None;
     }
+    let mut with_star_selectors = Vec::new();
+    let mut ends_in_with_star = false;
+    for send in cascade_sends(cascade) {
+        ends_in_with_star = is_with_star_send(&send);
+        if ends_in_with_star {
+            with_star_selectors.push(send.selector.name());
+        }
+    }
+    Some(SelfWithStarCascade {
+        with_star_selectors,
+        ends_in_with_star,
+        receiver_is_bare_self: is_bare_self(shared_receiver),
+    })
 }
 
-/// Returns `true` if `expr` is a cascade whose common receiver is
-/// self-producing (literal `self`, or itself a `with<Field>:` send/chain —
-/// recursively, via [`is_self_producing`]) and *at least one* of its
-/// messages is a `with<Field>:` send — e.g. `self withCounter: 1; withDb:
-/// 2`, or a cascade with an unrelated message mixed in. Presence-only: this
-/// answers "did a field mutation happen anywhere in this cascade", which is
-/// what [`contains_self_reconstructing_send`] needs to decide whether
-/// `setUp` has anything to drop at all. It does NOT tell you whether the
-/// cascade's own *value* is self — for that (whether this expression, in
-/// trailing position, actually carries the mutation forward), use
-/// [`cascade_value_is_self_producing`], which requires the *last* message to
-/// be the `with<Field>:` send (ADR 0067: a cascade evaluates to its last
-/// message's result) — the distinction a 3+-message cascade like `self
-/// withCounter: 1; withDb: 2; log: "ready"` depends on: this function
-/// answers "true" (a mutation happened), but the cascade's value is `log:`'s
-/// result, not self, so `cascade_value_is_self_producing` must answer
-/// "false" for the same expression.
+/// Returns `true` if `expr` is a cascade whose shared receiver is
+/// self-producing and *at least one* of its messages is a `with<Field>:`
+/// send — e.g. `self withCounter: 1; withDb: 2`, or a cascade with an
+/// unrelated message mixed in. Presence-only: this answers "did a field
+/// mutation happen anywhere in this cascade", which is what
+/// [`contains_self_reconstructing_send`] needs to decide whether `setUp` has
+/// anything to drop at all. It does NOT tell you whether the cascade's own
+/// *value* is self — for that, use [`cascade_value_is_self_producing`].
 fn is_self_with_field_cascade(expr: &Expression) -> bool {
-    let Expression::Cascade {
-        receiver, messages, ..
-    } = expr.unwrap_parens()
-    else {
-        return false;
-    };
-    cascade_common_receiver(receiver).is_some_and(is_self_producing)
-        && messages
-            .iter()
-            .any(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
+    self_with_star_cascade(expr).is_some_and(|c| !c.with_star_selectors.is_empty())
 }
 
-/// Returns `true` if `expr` is a cascade whose common receiver is
-/// self-producing AND whose *last* message is a `with<Field>:` send — the
-/// only shape of cascade that actually evaluates to the fully updated self
-/// (ADR 0067: a cascade's value is its last message's result). Used by
-/// [`is_self_producing`] wherever the code needs to know what an expression
-/// evaluates to (a chained receiver, or `setUp`'s trailing statement) —
-/// never for mere presence detection, where [`is_self_with_field_cascade`]
-/// applies instead.
+/// Returns `true` if `expr` is a cascade whose shared receiver is
+/// self-producing, whose *last* message is a `with<Field>:` send, and which
+/// contains no other `with<Field>:` send — the only shape of cascade that
+/// actually evaluates to the fully updated self. A cascade's value is its
+/// last message's result (ADR 0067), and every message goes to the original
+/// receiver, so an earlier `with*:` in the same cascade is dropped (ADR 0145):
+/// `self withA: 1; withB: 2` evaluates to `self withB: 2`, losing `a` (see
+/// [`multi_with_star_self_cascade`]). Used by [`is_self_producing`]
+/// wherever the code needs to know what an expression evaluates to (a
+/// chained receiver, or `setUp`'s trailing statement) — never for mere
+/// presence detection, where [`is_self_with_field_cascade`] applies instead.
 fn cascade_value_is_self_producing(expr: &Expression) -> bool {
-    let Expression::Cascade {
-        receiver, messages, ..
-    } = expr.unwrap_parens()
-    else {
-        return false;
-    };
-    cascade_common_receiver(receiver).is_some_and(is_self_producing)
-        && messages
-            .last()
-            .is_some_and(|msg| msg.arguments.len() == 1 && is_with_star_selector(&msg.selector))
+    self_with_star_cascade(expr)
+        .is_some_and(|c| c.ends_in_with_star && c.with_star_selectors.len() == 1)
+}
+
+/// Returns the cascade description when `expr` is a cascade on a
+/// self-producing receiver that ends in a `with<Field>:` message but holds
+/// more than one of them — `self withA: 1; withB: 2`, where every `with*:`
+/// but the last is dropped. `None` for every other expression.
+fn multi_with_star_self_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
+    self_with_star_cascade(expr).filter(|c| c.ends_in_with_star && c.with_star_selectors.len() > 1)
 }
 
 /// Returns `true` if `expr` contains a self-reconstructing send anywhere in
@@ -749,6 +786,14 @@ fn check_setup_body_returns_self(
         return;
     }
     let last_expr = last_stmt.expression.unwrap_parens();
+    if let Some(cascade) = multi_with_star_self_cascade(last_expr) {
+        diagnostics.push(setup_cascade_drops_with_star_diagnostic(
+            last_expr.span(),
+            cascade.receiver_is_bare_self,
+            &cascade.with_star_selectors,
+        ));
+        return;
+    }
     if is_self_producing(last_expr) || is_local_holding_updated_self(body, last_expr) {
         return;
     }
@@ -813,9 +858,57 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
     .with_hint(
         "End `setUp` with a bare `self` — or make the last statement a \
          `self.field := value` assignment, a `self with<Field>: value` \
-         send, or a `with<Field>:` cascade — or a local bound once to such a \
-         send — so the updated fields carry forward",
+         send (nest several as `(self withA: 1) withB: 2`) — or a local \
+         bound once to such a send — so the updated fields carry forward",
     )
+    .with_category(DiagnosticCategory::Lint)
+}
+
+/// Builds the diagnostic for a `setUp` that ends in a cascade on `self` with
+/// more than one `with<Field>:` message (ADR 0145). `selectors` are the
+/// cascade's `with<Field>:` selectors in source order (at least two); the
+/// hint spells out the nested form built from them, starting from `self`
+/// when that is the cascade's receiver and from `…` (the receiver chain)
+/// otherwise.
+fn setup_cascade_drops_with_star_diagnostic(
+    span: Span,
+    receiver_is_bare_self: bool,
+    selectors: &[EcoString],
+) -> Diagnostic {
+    let Some((last, dropped)) = selectors.split_last() else {
+        return setup_drops_field_assignments_diagnostic(span);
+    };
+    let dropped_list = dropped
+        .iter()
+        .map(|sel| format!("`{sel}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let receiver = if receiver_is_bare_self { "self" } else { "…" };
+    let nested = selectors
+        .iter()
+        .enumerate()
+        .fold(String::new(), |acc, (index, sel)| {
+            if index == 0 {
+                format!("{receiver} {sel} …")
+            } else {
+                format!("({acc}) {sel} …")
+            }
+        });
+    Diagnostic::warning(
+        format!(
+            "`setUp` ends in a cascade of {count} `with<Field>:` messages, \
+             but a cascade sends every message to the same original receiver \
+             — each `with*:` returns its own copy and only the last one \
+             (`{last}`) is returned, so every `with*:` before it \
+             ({dropped_list}) is silently dropped for the test method",
+            count = selectors.len(),
+        ),
+        span,
+    )
+    .with_hint(format!(
+        "Nest the sends so each applies to the previous result: `{nested}` \
+         (e.g. `(self withA: 1) withB: 2`)"
+    ))
     .with_category(DiagnosticCategory::Lint)
 }
 
@@ -1795,32 +1888,169 @@ mod tests {
         );
     }
 
-    /// A `with*:` cascade (`self withCounter: 1; withDb: 2`) as the sole
-    /// statement — ADR 0067's documented chained-setter idiom. The cascade's
-    /// own value is its last message's result, so this threads the full
-    /// self forward. No warning.
+    /// The verified ADR 0145 case: a cascade of two `with*:` messages to
+    /// `self` as the sole statement. Every cascade message goes to the
+    /// original `self`, so the cascade's value is `self withDb: 2` alone and
+    /// `counter` is dropped (a probe on `main` ran the tests with `counter`
+    /// at its default). Warns with the cascade-specific message, naming the
+    /// dropped selector, and the hint suggests the nested form.
     #[test]
-    fn setup_with_field_cascade_no_warn() {
+    fn setup_two_with_field_cascade_drops_first_warns() {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
-                   TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = 0\n  field: db = nil\n\
                    \n  setUp =>\n    self withCounter: 1; withDb: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 warning for a two-with*: cascade, got: {diagnostics:?}"
+        );
+        let diag = &diagnostics[0];
+        assert_eq!(diag.severity, Severity::Warning);
+        assert_eq!(diag.category, Some(DiagnosticCategory::Lint));
+        assert!(
+            diag.message.contains("cascade")
+                && diag.message.contains("(`withCounter:`)")
+                && diag.message.contains("silently dropped"),
+            "Expected the message to name the dropped `withCounter:`, got: {}",
+            diag.message
+        );
+        let hint = diag.hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("(self withCounter: …) withDb: …")
+                && hint.contains("(self withA: 1) withB: 2"),
+            "Expected the hint to suggest the nested form, got: {hint}"
+        );
+        assert!(!hint.contains("|>"), "Hint must not mention `|>`: {hint}");
+    }
+
+    /// Three `with*:` messages in one cascade: the message lists both
+    /// dropped selectors and the hint nests all three.
+    #[test]
+    fn setup_three_with_field_cascade_warns_naming_all_dropped() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
+                   \n  setUp =>\n    self withA: 1; withB: 2; withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        let diag = &diagnostics[0];
+        assert!(
+            diag.message.contains("3 `with<Field>:` messages")
+                && diag.message.contains("(`withA:`, `withB:`)")
+                && diag.message.contains("(`withC:`)"),
+            "got: {}",
+            diag.message
+        );
+        assert!(
+            diag.hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("((self withA: …) withB: …) withC: …"),
+            "got: {:?}",
+            diag.hint
+        );
+    }
+
+    /// Two `with*:` messages separated by an unrelated cascade message, the
+    /// last being a `with*:` — the first is still dropped. Warns.
+    #[test]
+    fn setup_with_field_cascade_with_interleaved_message_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+                   \n  setUp =>\n    self withA: 1; reset; withB: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        assert!(
+            diagnostics[0].message.contains("(`withA:`)"),
+            "got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// A cascade on a `with*:` chain receiver: `(self withA: 1) withB: 2;
+    /// withC: 3` sends `withB:` and `withC:` to `self withA: 1`, so `b` is
+    /// dropped. Warns.
+    #[test]
+    fn setup_with_field_cascade_on_chain_receiver_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
+                   \n  setUp =>\n    (self withA: 1) withB: 2; withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        assert!(
+            diagnostics[0].message.contains("(`withB:`)"),
+            "got: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0]
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("`(… withB: …) withC: …`"),
+            "Expected the nested form to start from the receiver chain, got: {:?}",
+            diagnostics[0].hint
+        );
+    }
+
+    /// A multi-`with*:` cascade used as the receiver of a further `with*:`
+    /// send is not self-producing either (it already lost a field), so a
+    /// `setUp` ending in that chain still warns.
+    #[test]
+    fn setup_with_field_send_on_multi_with_cascade_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
+                   \n  setUp =>\n    (self withA: 1; withB: 2) withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+    }
+
+    /// A cascade on `self` with exactly one `with*:` message, and that
+    /// message last, still evaluates to the updated self — no warning.
+    #[test]
+    fn setup_single_with_field_cascade_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: DbTest\n  field: db = nil\n\
+                   \n  setUp =>\n    self reset; withDb: 2";
         let (module, hierarchy) = build_module_and_hierarchy(src);
         let mut diagnostics = Vec::new();
         check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "Expected no warnings for a with*: cascade as the trailing statement, got: {diagnostics:?}"
+            "Expected no warnings for a single-with*: cascade ending setUp, got: {diagnostics:?}"
         );
     }
 
-    /// The same `with*:` cascade, but followed by an unrelated trailing
+    /// The nested form the hint suggests — no warning.
+    #[test]
+    fn setup_nested_with_field_form_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: CounterDbTest\n  field: counter = 0\n  field: db = nil\n\
+                   \n  setUp =>\n    (self withCounter: 1) withDb: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// A single-`with*:` cascade, but followed by an unrelated trailing
     /// statement — warns, since the cascade's self-preserving value is
     /// discarded once something follows it.
     #[test]
     fn setup_with_field_cascade_then_unrelated_statement_warns() {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
                    TestCase subclass: CounterDbTest\n  field: counter = nil\n  field: db = nil\n\
-                   \n  setUp =>\n    self withCounter: 1; withDb: 2.\n    Transcript show: \"ready\"";
+                   \n  setUp =>\n    self reset; withDb: 2.\n    Transcript show: \"ready\"";
         let (module, hierarchy) = build_module_and_hierarchy(src);
         let mut diagnostics = Vec::new();
         check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);

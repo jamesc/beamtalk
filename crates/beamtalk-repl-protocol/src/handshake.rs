@@ -426,7 +426,7 @@ mod tests {
             vec![serde_json::json!({
                 "id": id,
                 "status": ["done"],
-                "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
+                "versions": crate::test_versions::stale_versions(),
             })]
         });
         let err = result.unwrap_err();

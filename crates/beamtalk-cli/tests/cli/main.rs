@@ -29,6 +29,7 @@ mod cli_doctor;
 mod cli_fmt;
 mod cli_lint;
 mod cli_logs;
+mod cli_native_deps;
 mod cli_new;
 mod cli_otp_matrix;
 mod cli_release;
