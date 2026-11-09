@@ -15,7 +15,7 @@
 //! It also hosts the `cascade-drops-update` warning (ADR 0145 § 3,
 //! BT-4512): on a value receiver, a non-final cascade message that answers
 //! an updated copy has that copy thrown away, because the next message goes
-//! to the original receiver. See [`TypeChecker::check_cascade_drops_update`].
+//! to the original receiver. See [`cascade_drops_update`].
 
 use crate::ast::{CascadeMessage, Expression, MessageSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
