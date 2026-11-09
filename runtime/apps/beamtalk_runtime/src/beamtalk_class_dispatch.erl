@@ -74,7 +74,21 @@ message protocol ({Selector, Args}) to the class process message format.
 Unwraps {ok, Value} / {error, Error} results for seamless integration.
 """.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
-class_send(undefined, Selector, _Args) ->
+class_send(ClassPid, Selector, Args) ->
+    class_send(ClassPid, Selector, Args, default).
+
+-doc """
+`class_send/3` with an explicit bound on the wait for the class process
+(BT-4556): when the send of a class method goes through the class gen_server
+(ADR 0142 declined to run it in the caller), `Timeout` replaces the default
+`class_method_call` timeout (`class_method_call_timeout/1`: 60 s, 5 min for
+test execution); `default` keeps it. A send that runs in the caller has no
+wait to bound, so `Timeout` does not apply to it; neither does it apply to the
+instantiation and supervisor-start selectors (`new`, `new:`, `spawn`,
+`spawnWith:`, `supervise`, ...), which keep their own routes.
+""".
+-spec class_send(pid() | undefined, atom(), list(), call_timeout()) -> term().
+class_send(undefined, Selector, _Args, _Timeout) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
 %% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
@@ -82,7 +96,7 @@ class_send(undefined, Selector, _Args) ->
 %% `beamtalk_supervisor:class_start/4`, never in the class gen_server (which
 %% would queue every other send to the class behind the start and deadlock
 %% any child that messages the class while it starts).
-class_send(ClassPid, Selector, Args) when
+class_send(ClassPid, Selector, Args, Timeout) when
     is_pid(ClassPid),
     (Selector =:= supervise orelse Selector =:= spawn orelse Selector =:= 'spawnWith:' orelse
         Selector =:= 'spawnAs:' orelse Selector =:= 'spawnWith:as:')
@@ -91,31 +105,8 @@ class_send(ClassPid, Selector, Args) when
         {ok, ClassName, Module} ->
             beamtalk_supervisor:class_start(ClassName, Module, Selector, Args);
         error ->
-            class_send_plain(ClassPid, Selector, Args, default)
+            class_send_plain(ClassPid, Selector, Args, Timeout)
     end;
-class_send(ClassPid, Selector, Args) ->
-    class_send_plain(ClassPid, Selector, Args, default).
-
--doc """
-`class_send/3` with an explicit bound on the wait for the class process
-(BT-4556): when the send of a class method goes through the class gen_server
-(ADR 0142 declined to run it in the caller), `Timeout` replaces the default
-`class_method_call` timeout (`class_method_call_timeout/1`: 60 s, 5 min for
-test execution). A send that runs in the caller has no wait to bound, so
-`Timeout` does not apply to it; neither does it apply to the instantiation and
-supervisor-start selectors (`new`, `new:`, `spawn`, `spawnWith:`, `supervise`,
-...), which keep their own routes.
-""".
--spec class_send(pid() | undefined, atom(), list(), timeout()) -> term().
-class_send(ClassPid, Selector, Args, _Timeout) when
-    not is_pid(ClassPid);
-    Selector =:= supervise;
-    Selector =:= spawn;
-    Selector =:= 'spawnWith:';
-    Selector =:= 'spawnAs:';
-    Selector =:= 'spawnWith:as:'
-->
-    class_send(ClassPid, Selector, Args);
 class_send(ClassPid, Selector, Args, Timeout) ->
     class_send_plain(ClassPid, Selector, Args, Timeout).
 
