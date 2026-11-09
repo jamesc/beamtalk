@@ -43,6 +43,7 @@ pub mod build_stdlib;
 pub mod check;
 pub mod clean;
 pub mod deps;
+pub(crate) mod dir_lock;
 pub mod doc;
 pub(crate) mod doc_tests;
 pub mod doctor;

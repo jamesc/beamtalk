@@ -206,3 +206,49 @@ fn transitive_native_git_dep_pinned_on_fresh_build() {
     build(project);
     assert_eq!(checked_out_version(project, "bar"), "bar1");
 }
+
+/// Changing one dependency re-resolves only that one: an unchanged direct
+/// dependency stays on its locked commit even though its branch moved on.
+/// Removing a dependency removes its checkout, so it leaves the code path.
+#[test]
+fn changing_one_native_dep_keeps_others_pinned() {
+    let repos = tempfile::tempdir().expect("tempdir");
+    let foo = make_app_repo(repos.path(), "foo", "foo1", "");
+    git(&foo, &["checkout", "-q", "-b", "next"]);
+    commit_version(&foo, "foo", "foo-next");
+    git(&foo, &["checkout", "-q", "main"]);
+    let baz = make_app_repo(repos.path(), "baz", "baz1", "");
+
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    let foo_dep = |branch: &str| {
+        format!(
+            "foo = {{ git = \"{}\", branch = \"{branch}\" }}",
+            file_url(&foo)
+        )
+    };
+    let baz_dep = format!(
+        "baz = {{ git = \"{}\", branch = \"main\" }}",
+        file_url(&baz)
+    );
+
+    write_manifest(project, &format!("{}\n{baz_dep}", foo_dep("main")));
+    build(project);
+    assert_eq!(checked_out_version(project, "baz"), "baz1");
+
+    // baz's main moves on; switching foo's branch must not drag baz along.
+    commit_version(&baz, "baz", "baz2");
+    write_manifest(project, &format!("{}\n{baz_dep}", foo_dep("next")));
+    build(project);
+    assert_eq!(checked_out_version(project, "foo"), "foo-next");
+    assert_eq!(checked_out_version(project, "baz"), "baz1");
+
+    // Dropping baz removes its checkout and its lock entry.
+    write_manifest(project, &foo_dep("next"));
+    build(project);
+    assert!(
+        !project.join("_build/dev/native/default/lib/baz").exists(),
+        "removed dependency's checkout must be deleted"
+    );
+    assert!(!lockfile(project).contains("name = \"baz\""));
+}

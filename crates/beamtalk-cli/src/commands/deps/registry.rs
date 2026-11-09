@@ -65,14 +65,13 @@
 //! index.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use fs2::FileExt;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::commands::build_layout::BuildLayout;
 use crate::commands::manifest::RegistryConfig;
@@ -423,45 +422,9 @@ fn cache_key(url: &str) -> String {
 }
 
 /// Acquire the exclusive advisory lock covering `cache_root`'s clone,
-/// refresh, and swap.
-///
-/// Returns the locked file; the lock releases when it drops. Hold it for no
-/// longer than the clone/refresh/swap sequence — it blocks every other
-/// beamtalk process trying to touch the same cache.
-///
-/// # Errors
-///
-/// Returns an error if `cache_root` cannot be created, or the lock file
-/// cannot be opened or locked.
+/// refresh, and swap. Hold it for no longer than that sequence.
 fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
-    std::fs::create_dir_all(cache_root)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to create registry cache directory '{cache_root}'"))?;
-
-    let lock_path = cache_root.join(".lock");
-    let lockfile = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to open registry lock file '{lock_path}'"))?;
-
-    // A blocking `lock_exclusive()` gives no indication *why* the process
-    // appears to hang if another beamtalk process is stuck holding the lock
-    // (e.g. a `git clone` against an unreachable host). Try non-blocking
-    // first so the common uncontended case pays no extra cost; only log
-    // when there's actually something to wait for.
-    if let Err(e) = lockfile.try_lock_exclusive() {
-        debug!(error = %e, "registry cache lock contended, waiting: {lock_path}");
-        warn!("Waiting for registry cache lock '{lock_path}' held by another beamtalk process...");
-        lockfile
-            .lock_exclusive()
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to acquire registry lock '{lock_path}'"))?;
-    }
-
-    Ok(lockfile)
+    crate::commands::dir_lock::lock_dir(cache_root, "registry cache")
 }
 
 /// Clone or refresh the git registry index into its cache directory

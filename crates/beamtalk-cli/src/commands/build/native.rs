@@ -475,53 +475,79 @@ fn rebar_dep_entry(dep: &NativeDependency) -> String {
     }
 }
 
-/// Whether `beamtalk.lock`'s native entries still describe what the manifest
-/// asks for: every direct dependency has an entry of the same kind, resolved
-/// from the same constraint (hex) or URL and tag/branch/rev (git).
-///
-/// A hex entry with no recorded constraint (written before constraints were
-/// recorded) is accepted, so upgrading beamtalk does not silently re-resolve
-/// an existing project.
-pub(crate) fn native_lock_is_current(
+/// Whether a direct dependency's `beamtalk.lock` entry still satisfies the
+/// manifest: a hex version within the constraint, or a git commit resolved
+/// from the same URL and tag/branch/rev.
+fn lock_entry_is_current(dep: &NativeDependency, lock: Option<&NativePackageLock>) -> bool {
+    match (&dep.source, lock.map(|lock| &lock.source)) {
+        (
+            NativeSource::Hex { constraint },
+            Some(NativeLockSource::Hex {
+                package, version, ..
+            }),
+        ) => package == &dep.name && manifest::hex_constraint_matches(constraint, version),
+        (
+            NativeSource::Git { url, reference },
+            Some(NativeLockSource::Git {
+                url: locked_url,
+                reference: Some(locked_reference),
+                ..
+            }),
+        ) => url == locked_url && reference == locked_reference,
+        _ => false,
+    }
+}
+
+/// How `beamtalk.lock` relates to the manifest's native dependencies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NativeLockState {
+    /// Every direct dependency's entry is current and no locked direct
+    /// dependency has been removed: pin everything.
+    Current,
+    /// Some direct dependencies changed, were added or removed. Only the
+    /// named direct dependencies are still current and stay pinned;
+    /// everything else (including all transitive dependencies) re-resolves.
+    Partial(Vec<String>),
+}
+
+/// Classify `beamtalk.lock`'s native entries against the manifest.
+pub(crate) fn native_lock_state(
     native_deps: &NativeDependencyMap,
     locks: &std::collections::BTreeMap<String, NativePackageLock>,
-) -> bool {
-    native_deps.values().all(|dep| {
-        match (&dep.source, locks.get(&dep.name).map(|lock| &lock.source)) {
-            (
-                NativeSource::Hex { constraint },
-                Some(NativeLockSource::Hex {
-                    constraint: locked, ..
-                }),
-            ) => locked.as_ref().is_none_or(|locked| locked == constraint),
-            (
-                NativeSource::Git { url, reference },
-                Some(NativeLockSource::Git {
-                    url: locked_url,
-                    reference: Some(locked_reference),
-                    ..
-                }),
-            ) => url == locked_url && reference == locked_reference,
-            _ => false,
-        }
-    })
+) -> NativeLockState {
+    let kept: Vec<String> = native_deps
+        .values()
+        .filter(|dep| lock_entry_is_current(dep, locks.get(&dep.name)))
+        .map(|dep| dep.name.clone())
+        .collect();
+    let removed_direct = locks
+        .values()
+        .any(|lock| lock.level == Some(0) && !native_deps.contains_key(&lock.name));
+    if kept.len() == native_deps.len() && !removed_direct {
+        NativeLockState::Current
+    } else {
+        NativeLockState::Partial(kept)
+    }
 }
 
 /// Make rebar3's own lock state match `beamtalk.lock` before `rebar3 compile`.
 ///
 /// rebar3 never re-fetches an existing checkout because `rebar.config`
-/// changed — only `rebar.lock` moves it. So:
+/// changed — only a `rebar.lock` entry moves one — and it keeps checkouts
+/// and lock entries for dependencies nothing needs any more. So:
 ///
-/// - **Lock current** ([`native_lock_is_current`]): write `rebar.lock` from
+/// - **Current** ([`native_lock_state`]): write `rebar.lock` from all of
 ///   `beamtalk.lock`, pinning every locked package (direct and transitive),
 ///   including on a fresh checkout.
-/// - **Lock stale, missing or `force_resolve`** (a manifest source changed,
-///   or `beamtalk deps update` cleared the native locks): delete
-///   `rebar.lock` and the dependency checkouts so rebar3 resolves afresh
-///   from `rebar.config`. Deleting `rebar.lock` alone would leave the old
-///   checkouts in place.
+/// - **Partial** (a direct dependency's constraint or git source changed, or
+///   one was added or removed): pin only the still-current direct
+///   dependencies, and delete every other checkout so rebar3 resolves it
+///   afresh from `rebar.config`. Transitive dependencies re-resolve too —
+///   `beamtalk.lock` does not record which direct dependency needs them.
+/// - **No lock / `force_resolve`** (`beamtalk deps update` clears the native
+///   locks): the same with nothing pinned.
 ///
-/// Returns whether the build re-resolves.
+/// Returns whether the build re-resolves anything.
 pub(crate) fn prepare_rebar_lock(
     layout: &BuildLayout,
     native_deps: &NativeDependencyMap,
@@ -530,54 +556,83 @@ pub(crate) fn prepare_rebar_lock(
 ) -> Result<bool> {
     use crate::commands::deps::lockfile::render_rebar_lock;
 
+    let empty = std::collections::BTreeMap::new();
+    let locks = locks.filter(|_| !force_resolve).unwrap_or(&empty);
     let rebar_lock = layout.native_dir().join("rebar.lock");
-    let current =
-        locks.filter(|locks| !force_resolve && native_lock_is_current(native_deps, locks));
+    let is_direct = |name: &str| native_deps.contains_key(name);
 
-    if let Some(locks) = current {
-        info!("Using pinned native package versions from beamtalk.lock");
-        let content = render_rebar_lock(locks.values(), &|name| native_deps.contains_key(name));
-        fs::write(&rebar_lock, content)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to write rebar.lock at '{rebar_lock}'"))?;
-        return Ok(false);
-    }
+    let kept = match native_lock_state(native_deps, locks) {
+        NativeLockState::Current => {
+            info!("Using pinned native package versions from beamtalk.lock");
+            write_rebar_lock(&rebar_lock, &render_rebar_lock(locks.values(), &is_direct))?;
+            return Ok(false);
+        }
+        NativeLockState::Partial(kept) => kept,
+    };
 
-    info!("Native dependencies changed or unlocked — re-resolving via rebar3");
-    if rebar_lock.exists() {
-        fs::remove_file(&rebar_lock)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to remove stale rebar.lock '{rebar_lock}'"))?;
-    }
+    info!(
+        pinned = ?kept,
+        "Native dependencies changed or unlocked — re-resolving the rest via rebar3"
+    );
+    // Kept entries are direct dependencies: pin them at level 0.
+    let pinned = kept
+        .iter()
+        .filter_map(|name| locks.get(name))
+        .map(|lock| lock.clone().at_level(0));
+    let pinned: Vec<NativePackageLock> = pinned.collect();
+    write_rebar_lock(&rebar_lock, &render_rebar_lock(&pinned, &is_direct))?;
+
+    // Delete every checkout that is not pinned, so rebar3 fetches it afresh
+    // (or not at all, once nothing needs it).
     let lib_dir = layout.rebar_lib_dir();
     if lib_dir.exists() {
-        fs::remove_dir_all(&lib_dir)
+        let entries = fs::read_dir(&lib_dir)
             .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to remove stale native deps '{lib_dir}'"))?;
+            .wrap_err_with(|| format!("Failed to read native deps directory '{lib_dir}'"))?;
+        for entry in entries.flatten() {
+            let keep = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| kept.iter().any(|k| k == name));
+            if !keep {
+                let path = entry.path();
+                let removed = if path.is_dir() {
+                    fs::remove_dir_all(&path)
+                } else {
+                    fs::remove_file(&path)
+                };
+                removed.into_diagnostic().wrap_err_with(|| {
+                    format!("Failed to remove stale native dep '{}'", path.display())
+                })?;
+            }
+        }
     }
     Ok(true)
 }
 
-/// Record which manifest source each direct dependency's lock entry was
-/// resolved from — rebar.lock only knows the version or commit. Lets
-/// [`native_lock_is_current`] spot a later constraint or branch/tag change.
-fn record_manifest_source(pkg: &mut NativePackageLock, native_deps: &NativeDependencyMap) {
-    let manifest_source = native_deps.get(&pkg.name).map(|dep| &dep.source);
-    match (&mut pkg.source, manifest_source) {
-        (
-            NativeLockSource::Hex { constraint, .. },
-            Some(NativeSource::Hex {
-                constraint: manifest_constraint,
-            }),
-        ) => *constraint = Some(manifest_constraint.clone()),
-        (
-            NativeLockSource::Git { url, reference, .. },
-            Some(NativeSource::Git {
-                url: manifest_url,
-                reference: manifest_reference,
-            }),
-        ) if url == manifest_url => *reference = Some(manifest_reference.clone()),
-        _ => {}
+fn write_rebar_lock(path: &Utf8Path, content: &str) -> Result<()> {
+    fs::write(path, content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write rebar.lock at '{path}'"))
+}
+
+/// Record which git reference each direct git dependency's lock entry was
+/// resolved from — rebar.lock only knows the commit. Lets
+/// [`native_lock_state`] spot a later branch/tag/rev change.
+fn record_manifest_reference(pkg: &mut NativePackageLock, native_deps: &NativeDependencyMap) {
+    if let (
+        NativeLockSource::Git { url, reference, .. },
+        Some(NativeSource::Git {
+            url: manifest_url,
+            reference: manifest_reference,
+        }),
+    ) = (
+        &mut pkg.source,
+        native_deps.get(&pkg.name).map(|dep| &dep.source),
+    ) {
+        if url == manifest_url {
+            *reference = Some(manifest_reference.clone());
+        }
     }
 }
 
@@ -678,6 +733,13 @@ fn compile_with_rebar3(
 
     let rebar3 = rebar3_path()?;
 
+    // Serialise native builds of this project: preparing the lock deletes
+    // checkouts another build (CLI alongside the LSP, say) may be compiling.
+    let _native_build_lock = crate::commands::dir_lock::lock_dir(
+        &BuildLayout::new(project_root).native_dir(),
+        "native build",
+    )?;
+
     let existing_lock = Lockfile::read(project_root)?;
 
     // Generate the rebar.config in _build/dev/native/
@@ -742,7 +804,7 @@ fn compile_with_rebar3(
         // Replace all native entries with the freshly resolved set
         lockfile.clear_native_packages();
         for mut pkg in resolved_native {
-            record_manifest_source(&mut pkg, native_deps);
+            record_manifest_reference(&mut pkg, native_deps);
             info!(
                 name = %pkg.name,
                 source = ?pkg.source,
