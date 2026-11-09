@@ -837,8 +837,7 @@ Phases for `/plan-adr`; sizes are rough.
    lands.
 3. **Lexer + parser (M)** — `TokenKind::PipeGt` (adjacent `|>` only) in
    `source_analysis/lexer.rs`; `|>` stages at every `parse_cascade` site in
-   `parser/expressions.rs`, with stages parsed by `parse_cascade_message`;
-   the `;`/`|>` mixing error; the "cast in expression" error for a
+   `parser/expressions.rs`; the `;`/`|>` mixing error; the "cast in expression" error for a
    pipeline ending in `!`; `|>` stages at the eight
    `parse_keyword_message` sites (string interpolation, `match:` arm
    bodies, collection literals), with `;` keeping its arm-separator
