@@ -109,8 +109,9 @@ only readable *correct* alternative is a run of temp locals.
   `setUp` that ends in "a cascade on `self` ending in a `with<Field>:`
   message" as one that "reliably yields the fully updated self". Because
   `TestCase` is a `Value subclass:`, a `setUp` ending
-  `self withA: 1; withB: 2` keeps only `withB:` — the lint currently
-  blesses exactly the trap this ADR is about.
+  `self withA: 1; withB: 2` keeps only `withB:`. So when this ADR was
+  written, the lint blessed exactly the trap this ADR is about. BT-4513
+  fixed that.
 - **Usage.** In `stdlib/src` and `stdlib/test`, cascades target actors
   (`self.bus subscribe: …; notify: …`), `ClassBuilder`, `Ets` tables and
   `Transcript`; a handful of codegen-regression fixtures cascade on an
@@ -587,8 +588,12 @@ its result). Catching discarded copies at statement level is a separate,
 broader lint and is out of scope here; it is listed as a follow-up.
 The same change corrects `check_testcase_setup_drops_field_assignments`:
 a `setUp` ending in a `self with*:` cascade with **more than one** `with*:`
-message is no longer accepted as self-producing (it drops all but the last);
-its help text suggests the `|>` form.
+message is no longer accepted as self-producing (it drops all but the last).
+`cascade-drops-update` already reports that shape at each dropped message,
+so the `setUp` lint adds no second warning of its own. It still warns when
+the type checker cannot prove every drop, for example when a dropped
+`with*:` is a hand-written method with no `-> Self` annotation (BT-4573).
+Until `|>` ships, its help suggests the nested form.
 
 ### What stays valid regardless
 
@@ -989,7 +994,10 @@ settled on 2026-11-06.
   records the `|>` sends on the owning definition for re-sugaring. There is
   no `Expression::Pipeline` variant (§ AST representation).
 - **Stage spans.** Hand-nested spans, unique by test (§ Spans).
-- **`then:` ordering.** Blocked by BT-4514.
+- **`then:` ordering.** `then:` ships after `|>` (BT-4515 is blocked by
+  BT-4514). Without `|>`, a `then:` written after a keyword message merges
+  into it (`xs inject: 0 into: […] then: […]` is one `inject:into:then:`
+  send), so shipping `then:` first would invite that mistake.
 
 ### Resolved (2026-11-06)
 
@@ -1026,7 +1034,9 @@ it later would break code.
 ## Implementation Tracking
 
 **Epic:** BT-4511
-**Status:** Planned
+**Status:** In progress. Phase 1 shipped on 2026-11-09: BT-4512
+(jamesc/beamtalk#4920) and BT-4513 (jamesc/beamtalk#4919), plus the
+follow-up BT-4573 that removes their duplicate `setUp` warning.
 
 | Phase | Issue | Size | Blocked by |
 |---|---|---|---|
