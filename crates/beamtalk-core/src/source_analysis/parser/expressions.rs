@@ -568,6 +568,8 @@ impl Parser {
             }
         }
 
+        self.report_trailing_cascade_messages();
+
         let last_span = messages.last().map_or(receiver.span(), |m| m.span);
         let span = receiver.span().merge(last_span);
 
@@ -576,6 +578,63 @@ impl Parser {
             messages,
             span,
         }
+    }
+
+    /// Reports message tokens left on the same line after the last cascade
+    /// part (BT-4508).
+    ///
+    /// A cascade part is exactly one message, so in `x foo; size reversed`
+    /// the `reversed` cannot continue the `size` part. Without this check it
+    /// would silently start a new statement and the program would mean
+    /// something else. A message token on a *new* line is left alone: it
+    /// starts the next statement as usual.
+    ///
+    /// The trailing chain is consumed (unary, binary and keyword messages on
+    /// the same line) so that it does not produce follow-up diagnostics as a
+    /// stray statement.
+    fn report_trailing_cascade_messages(&mut self) {
+        let is_message_start = |kind: &TokenKind| {
+            matches!(
+                kind,
+                TokenKind::Identifier(_)
+                    | TokenKind::Keyword(_)
+                    | TokenKind::BinarySelector(_)
+                    | TokenKind::Arrow
+                    | TokenKind::GtGt
+            )
+        };
+        if self.current_token().has_leading_newline() || !is_message_start(self.current_kind()) {
+            return;
+        }
+
+        let start = self.current_token().span();
+        let mut end = start;
+        while !self.current_token().has_leading_newline() {
+            match self.current_kind() {
+                TokenKind::Identifier(_) => end = self.advance().span(),
+                TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
+                    self.advance();
+                    end = self.parse_unary_message().span();
+                }
+                TokenKind::Keyword(_) => {
+                    self.advance();
+                    end = self.parse_binary_message().span();
+                }
+                _ => break,
+            }
+        }
+
+        self.diagnostics.push(
+            Diagnostic::error(
+                "A cascade part is a single message; this message would not be sent to the \
+                 result of the cascade part before it",
+                start.merge(end),
+            )
+            .with_hint(
+                "parenthesise the chain, as in `(x size) reversed`, or start a new statement \
+                 on a new line",
+            ),
+        );
     }
 
     /// Parses a single message in a cascade.

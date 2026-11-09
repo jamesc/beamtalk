@@ -586,6 +586,11 @@ dict at: #name put: "hello"
 Transcript show: "Hello"; cr; show: "World"
 ```
 
+Each cascade part after a `;` is exactly one message. A further message on the
+same line, as in `x foo; size reversed`, is a parse error rather than a send to
+`size`'s result: write `(x size) reversed`, or put the next statement on a new
+line ([BT-4508](https://linear.app/beamtalk/issue/BT-4508)).
+
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
