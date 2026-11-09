@@ -3732,6 +3732,53 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
     assert_eq!(checked, 72);
 }
 
+/// BT-4313: the unary `[c] whileTrue` / `[c] whileFalse` is canonicalised to
+/// `[c] whileTrue: []` (`ast::normalize::desugar_unary_loops`), so its
+/// condition write gets exactly the keyword loop's verdict: threaded where the
+/// condition has a state effect outside a class method, rejected otherwise.
+/// Before, the unary form was accepted everywhere and its write dropped.
+#[test]
+fn unary_while_condition_write_has_the_keyword_loop_verdict() {
+    type Wrap = fn(&str) -> String;
+    let contexts: [(&str, Wrap); 3] = [
+        ("class", in_class),
+        ("value", in_value),
+        ("actor", in_actor),
+    ];
+    let selectors = [("whileTrue", "t < 3"), ("whileFalse", "t >= 3")];
+    let conditions = [
+        ("t := t + 1. {c}", false),
+        ("t := t + 1. self check: t. {c}", true),
+        ("t := t + 1. self.n := t. {c}", true),
+    ];
+    let mut checked = 0;
+    for (ctx_name, wrap) in contexts {
+        for (selector, cmp) in selectors {
+            for (cond_shape, effects) in conditions {
+                let cond = cond_shape.replace("{c}", cmp);
+                let verdict = |send: &str| {
+                    let source = wrap(&format!("[{cond}] {send}\nt"));
+                    let diags = adr0131_diagnostics(&source);
+                    of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel).is_empty()
+                };
+                let unary = verdict(selector);
+                assert_eq!(
+                    unary,
+                    verdict(&format!("{selector}: []")),
+                    "{ctx_name} [{cond}] {selector}"
+                );
+                assert_eq!(
+                    unary,
+                    ctx_name != "class" && effects,
+                    "{ctx_name} [{cond}] {selector}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 18);
+}
+
 /// BT-3782: a condition that only reads outer locals, and a loop body that
 /// writes them, stay accepted in every context.
 #[test]

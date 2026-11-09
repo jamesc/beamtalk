@@ -569,8 +569,8 @@ pub struct CoreErlangGenerator {
 }
 
 /// `method`'s reflected source: its text as written, with the operand
-/// parentheses `peeled` recorded removing in `scope` put back (BT-4059).
-/// Equal to `unparse_method(method)` when nothing was recorded.
+/// parentheses `peeled` recorded removing in `scope` (BT-4059) and the
+/// canonicalised unary loops (BT-4313) put back.
 ///
 /// The one place reflected method source is produced from codegen's
 /// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
@@ -580,9 +580,6 @@ pub(in crate::core_erlang) fn as_written_method_source(
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
     scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
-    if peeled.is_empty() {
-        return beamtalk_core::unparse::unparse_method(method);
-    }
     let mut written = method.clone();
     beamtalk_core::ast::normalize::restore_operand_parens_in_scope(&mut written, peeled, scope);
     beamtalk_core::unparse::unparse_method(&written)

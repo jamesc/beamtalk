@@ -25,7 +25,7 @@ use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
 use beamtalk_core::ast::normalize::{
-    PeeledParens, expr_has_parenthesised_operand, peel_operand_parens_expr_recording,
+    PeeledParens, expr_needs_normalising, peel_operand_parens_expr_recording,
 };
 use beamtalk_core::ast::{Expression, Pattern};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
@@ -47,7 +47,7 @@ use std::borrow::Cow;
 /// parentheses as written.
 fn peeled(expressions: &[Expression]) -> (Cow<'_, [Expression]>, PeeledParens) {
     let mut record = PeeledParens::default();
-    if expressions.iter().any(expr_has_parenthesised_operand) {
+    if expressions.iter().any(expr_needs_normalising) {
         let mut owned = expressions.to_vec();
         for expression in &mut owned {
             peel_operand_parens_expr_recording(expression, &mut record);

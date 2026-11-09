@@ -3084,6 +3084,7 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
 | `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
+| `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[count := count + 1. count < 10] whileTrue` | ✅ |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
 | `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
 | `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
@@ -8402,7 +8403,7 @@ new => @intrinsic basicNew
 hash => @intrinsic hash
 ```
 
-The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
+The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `unaryWhileTrue`, `unaryWhileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
 **`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/actor.bt`.
 
