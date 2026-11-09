@@ -78,6 +78,9 @@ const SET_ELEMENT_SELECTORS: &[&str] = &["includes:", "add:"];
 /// Whether `expr`'s value is provably a raw `Binary` — never a `String` —
 /// by construction (see the module doc). `is_raw_local` answers the
 /// flow fact for a bare local name.
+///
+/// Read on assignment values (which keep their parentheses) as well as on
+/// send operands, hence the peel.
 pub(super) fn is_raw_binary(expr: &Expression, is_raw_local: &dyn Fn(&str) -> bool) -> bool {
     match expr.unwrap_parens() {
         Expression::Identifier(ident) => is_raw_local(&ident.name),
@@ -88,7 +91,8 @@ pub(super) fn is_raw_binary(expr: &Expression, is_raw_local: &dyn Fn(&str) -> bo
             receiver, selector, ..
         } => {
             let selector_name = selector.name();
-            match receiver.unwrap_parens() {
+            // A send receiver is already peeled (BT-4059).
+            match receiver.as_ref() {
                 Expression::ClassReference {
                     name,
                     package: None,
