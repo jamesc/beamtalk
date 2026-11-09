@@ -1792,6 +1792,11 @@ impl CoreErlangGenerator {
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
                 let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+                // BT-4296: the arguments land in a list, which erlc evaluates
+                // last-first, so every argument before the last one that may
+                // run code is bound to a temp in source order.
+                let arg_exprs: Vec<&Expression> = arguments.iter().collect();
+                let racing_last = Self::last_racing_operand(&arg_exprs);
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -1809,6 +1814,13 @@ impl CoreErlangGenerator {
                             " in "
                         ]);
                         arg_parts.push(leaf::var(wrapper_var));
+                    } else if racing_last.is_some_and(|last| i < last)
+                        && !Self::is_trivial_subexpr(arg)
+                    {
+                        let doc = self.expression_doc(arg)?;
+                        let (binding, var) = self.bind_subexpr_to_temp("ErlArg", doc);
+                        preamble_docs.push(binding);
+                        arg_parts.push(leaf::var(var));
                     } else {
                         arg_parts.push(self.expression_doc(arg)?);
                     }
@@ -3597,13 +3609,15 @@ impl CoreErlangGenerator {
         }
 
         let class_name = self.class_name();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         // value/primitive-context funs (`fun(Args, Self) -> Result`)
         // have no `State` binding, so `super` must not reference one. Route to
         // `super_value/4`, which walks the same chain and returns a plain value.
+        // BT-4296: its arguments are sequenced (`thread_args`) so the argument
+        // list evaluates them in source order.
         if self.context == CodeGenContext::ValueType {
-            return Ok(docvec![
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let call_doc = docvec![
                 "call 'beamtalk_dispatch':'super_value'(",
                 leaf::atom(selector_atom),
                 ", [",
@@ -3611,8 +3625,11 @@ impl CoreErlangGenerator {
                 "], Self, ",
                 leaf::atom(class_name),
                 ")",
-            ]);
+            ];
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
+
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at

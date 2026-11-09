@@ -16,6 +16,8 @@
 use super::{assert_compiles_through_erlc, codegen};
 
 const SRC: &str = "Value subclass: Probe
+  field: x = 0
+  field: y = 0
   arrayOf: a => #[a bump, a n]
   listOf: a => #(a bump, a n)
   listTailOf: a => #(a bump | a rest)
@@ -23,6 +25,10 @@ const SRC: &str = "Value subclass: Probe
   mapOf: a => #{#first => a bump, #second => a n}
   argsOf: a with: h => h pair: a bump with: a n
   oneSend: a => #[a bump, 1, #x]
+  fieldReads => self.x + self.y
+  cascadeOf: a with: h => h yourself; pair: a bump with: a n
+  ffiOf: a => Erlang lists seq: a bump with: a n
+  superOf: a => super pair: a bump with: a n
   class arrayOf: a => #[a bump, a n]
 ";
 
@@ -74,6 +80,34 @@ fn bt4296_collection_literal_elements_bind_in_source_order() {
 fn bt4296_runtime_dispatch_arguments_bind_in_source_order() {
     let code = codegen(SRC);
     assert_first_bound_before(&code, "argsOf:with:", "'pair:with:', [", "bump", "n");
+}
+
+#[test]
+fn bt4296_cascade_ffi_and_super_arguments_bind_in_source_order() {
+    let code = codegen(SRC);
+    // A cascade hoists every argument once any is hoisted (all or nothing).
+    let cascade = method_body(&code, "cascadeOf:with:");
+    let (before, inside) = cascade.split_at(cascade.find("'pair:with:', [").expect("send"));
+    let (bump, n) = (before.find("'bump', [])"), before.find("'n', [])"));
+    assert!(
+        bump.zip(n).is_some_and(|(b, n)| b < n) && !inside.contains("'bump', [])"),
+        "cascade arguments should be bound in source order:\n{cascade}"
+    );
+    assert_first_bound_before(&code, "ffiOf:", "'seq', [", "bump", "n");
+    assert_first_bound_before(&code, "superOf:", "'super_value'(", "bump", "n");
+    assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn bt4296_field_reads_do_not_race() {
+    // A field read runs no code, so `self.x + self.y` needs no temp — the
+    // BT-4279 fast path relies on an empty operand prelude.
+    let code = codegen(SRC);
+    let body = method_body(&code, "fieldReads");
+    assert!(
+        !body.contains("_BinOp@"),
+        "no operand temp expected:\n{body}"
+    );
 }
 
 #[test]

@@ -62,6 +62,27 @@ TestCase subclass: EvalOrderTest
     a := EvalOrderActor spawn
     self assert: "{a bump} {a n}" equals: "1 1"
 
+  testMapLiteralKeys =>
+    a := EvalOrderActor spawn
+    self assert: #{
+      (a bump) => #first,
+      ((a n) + 10) => #second
+    } equals: #{1 => #first, 11 => #second}
+
+  testCascadeArguments =>
+    a := EvalOrderActor spawn
+    v := EvalOrderValue new
+    self assert: (v yourself; pair: a bump with: a n) equals: #[1, 1]
+
+  testErlangCallArguments =>
+    a := EvalOrderActor spawn
+    // lists:seq(1, 1) is [1]; out of order it would be lists:seq(1, 0), [].
+    self assert: (Erlang lists seq: a bump with: a n) equals: #(1)
+
+  testValueTypeSuperArguments =>
+    a := EvalOrderActor spawn
+    self assert: (EvalOrderValueChild new superArgsOf: a) equals: #[1, 1]
+
   testBinaryOperands =>
     a := EvalOrderActor spawn
     self assert: a bump - a n equals: 0

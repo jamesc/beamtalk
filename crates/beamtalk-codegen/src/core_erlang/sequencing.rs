@@ -498,19 +498,27 @@ impl CoreErlangGenerator {
         Ok((prelude, docs))
     }
 
-    /// BT-4296: the index of the last non-trivial operand of `exprs` when two
-    /// or more are non-trivial — the operand [`Self::thread_subexprs`] must
-    /// hoist up to so the operands evaluate in source order whatever order
-    /// the enclosing Core Erlang construct evaluates them in. `None` when at
-    /// most one operand is non-trivial.
-    fn last_racing_operand(exprs: &[&Expression]) -> Option<usize> {
-        let mut non_trivial = exprs
+    /// BT-4296: the index of the last operand of `exprs` that may run code
+    /// (anything but a trivial operand or a field read) when two or more may —
+    /// the operand a sequencer must hoist up to so the operands evaluate in
+    /// source order whatever order the enclosing Core Erlang construct
+    /// evaluates them in (a list cell or a map literal evaluates its last
+    /// operand first). `None` when at most one operand may run code: it has
+    /// nothing to race with. A field read runs nothing, and a sibling that
+    /// writes the field needs a prelude, which `subexpr_needs_prelude` already
+    /// sequences; exempting it keeps `self.a + self.b` free of temps (the
+    /// BT-4279 fast path needs an empty operand prelude).
+    pub(super) fn last_racing_operand(exprs: &[&Expression]) -> Option<usize> {
+        let mut racing = exprs
             .iter()
             .enumerate()
-            .filter(|(_, e)| !Self::is_trivial_subexpr(e.unwrap_parens()))
+            .filter(|(_, e)| {
+                let inner = e.unwrap_parens();
+                !Self::is_trivial_subexpr(inner) && !matches!(inner, Expression::FieldAccess { .. })
+            })
             .map(|(i, _)| i);
-        let first = non_trivial.next()?;
-        Some(non_trivial.last().unwrap_or(first)).filter(|last| *last != first)
+        racing.next()?;
+        racing.next_back()
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns
