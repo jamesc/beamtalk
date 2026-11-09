@@ -32,6 +32,8 @@ enum SuperUse {
     FieldAccess,
     /// Anywhere else: `(super) foo`, `x := super`, `^ super`, an argument.
     Value,
+    /// The receiver of a cast: `super foo!` (BT-4318).
+    CastReceiver,
 }
 
 /// Name resolution domain service.
@@ -240,6 +242,18 @@ impl NameResolver {
         }
         let hint = match kind {
             SuperUse::Receiver => return,
+            // BT-4318: a cast posts to a mailbox, but `super` names no process:
+            // it runs the parent class's method in this one, synchronously.
+            SuperUse::CastReceiver => {
+                self.diagnostics.push(
+                    Diagnostic::error("a cast (`!`) cannot be sent to `super`", span).with_hint(
+                        "`super` runs the parent class's method here, synchronously: \
+                         send it without `!` (`super foo`), or cast to `self` \
+                         (`self foo!`) to post it to this actor's mailbox",
+                    ),
+                );
+                return;
+            }
             SuperUse::FieldAccess => {
                 "Fields are read and written through `self`, e.g. `self.count`"
             }
@@ -310,12 +324,18 @@ impl NameResolver {
             MessageSend {
                 receiver,
                 arguments,
+                is_cast,
                 ..
             } => {
                 // BT-4258: the receiver of a send is the one place `super` means
                 // something (it picks where the method lookup starts).
                 if let Super(span) = receiver.as_ref() {
-                    self.resolve_super(*span, SuperUse::Receiver);
+                    let kind = if *is_cast {
+                        SuperUse::CastReceiver
+                    } else {
+                        SuperUse::Receiver
+                    };
+                    self.resolve_super(*span, kind);
                 } else {
                     self.resolve_expression(receiver);
                 }

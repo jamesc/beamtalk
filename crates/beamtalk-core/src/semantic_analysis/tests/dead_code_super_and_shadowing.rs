@@ -498,6 +498,52 @@ fn super_used_as_a_value_is_an_error() {
     }
 }
 
+/// BT-4318: a cast to `super` is reported, not left to codegen (which raised
+/// `'super' must be used with a message send`, or compiled a non-last one as a
+/// synchronous call), on both sides of an actor or value class.
+#[test]
+fn a_cast_to_super_is_an_error() {
+    for kind in ["Actor", "Object"] {
+        for class_side in [false, true] {
+            for body in [
+                "super printString!",
+                "\n    super printString!\n    1",
+                "super at: 1 put: 2!",
+            ] {
+                let side = if class_side { "class " } else { "" };
+                let src = format!("{kind} subclass: Probe\n  {side}run => {body}");
+                let errors: Vec<Diagnostic> = analyse(&parse_module(&src))
+                    .diagnostics
+                    .into_iter()
+                    .filter(|d| d.message.contains("cannot be sent to `super`"))
+                    .collect();
+                assert_eq!(
+                    errors.len(),
+                    1,
+                    "{kind} (class side: {class_side}) `{body}`: {errors:?}"
+                );
+                assert_eq!(errors[0].severity, Severity::Error);
+                assert!(
+                    errors[0]
+                        .hint
+                        .as_deref()
+                        .is_some_and(|h| h.contains("self foo!")),
+                    "{errors:?}"
+                );
+            }
+        }
+    }
+    // A synchronous `super` send stays clean.
+    assert!(
+        analyse(&parse_module(
+            "Actor subclass: Probe\n  run => super printString"
+        ))
+        .diagnostics
+        .iter()
+        .all(|d| !d.message.contains("`super`")),
+    );
+}
+
 #[test]
 fn super_value_error_points_at_super_with_a_hint() {
     let src = "Object subclass: Probe\n  run => (super) printString";

@@ -611,7 +611,11 @@ collection element, `super.count` (fields are read through `self`), and a
 cascade on `super` (`super a; b`; send each message to `super` separately). To
 use the receiver itself as a value, write `self`
 ([BT-4251](https://linear.app/beamtalk/issue/BT-4251),
-[BT-4258](https://linear.app/beamtalk/issue/BT-4258)).
+[BT-4258](https://linear.app/beamtalk/issue/BT-4258)). A cast to `super`
+(`super foo!`) is a compile error too: `super` runs the parent class's method
+in the current process, synchronously, so there is no mailbox to post to. Send
+it without `!`, or cast to `self` (`self foo!`)
+([BT-4318](https://linear.app/beamtalk/issue/BT-4318)).
 
 ### Splitting a Message Send Across Lines
 
