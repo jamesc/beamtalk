@@ -17,7 +17,7 @@ type TlsVerify = #verify_peer | #verify_none
 /// CA lookup uses `public_key:cacerts_get/0` (OTP 25+ and a readable OS
 /// trust store); a failure raises a structured `Error` instead of a bare
 /// `does_not_understand`, keeping the raw OTP reason for a trust-store
-/// failure. The toolchain floor is OTP 27 (`otp-support.toml`), so the
+/// failure. The toolchain floor (`otp-support.toml`) is above OTP 25, so the
 /// pre-25 path is defensive. Building the list needs
 /// no started applications; starting `ssl` stays with the connecting code,
 /// exactly as before.
@@ -96,7 +96,7 @@ sealed typed Object subclass: Tls
   /// The system CA certificates for `verify_peer`: `public_key:cacerts_get/0`
   /// passed through untouched, whatever shape the running OTP returns. A
   /// failure answers an `Error`: pre-OTP-25 raises `does_not_understand`
-  /// (no such function — the toolchain floor is OTP 27, so that path is
+  /// (no such function — the toolchain floor is above OTP 25, so that path is
   /// defensive), while on OTP 25+ the getter itself raises when the OS
   /// trust store is missing or unreadable. The raw OTP reason is kept
   /// for the trust-store failure (BT-4236); the `does_not_understand`

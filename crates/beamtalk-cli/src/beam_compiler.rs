@@ -271,6 +271,7 @@ impl BeamCompiler {
         // Start BEAM node with beamtalk_build_worker
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
         // -boot no_dot_erlang: skips .erlang config file
+        crate::commands::build_stamp::require_supported_otp()?;
         debug!("Spawning BEAM node with beamtalk_build_worker");
         let mut child = spawn_build_worker_node(&pa_args)
             .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;

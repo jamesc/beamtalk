@@ -113,6 +113,7 @@ struct BuildPassesResult {
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
 
+    crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
     let env = setup_build_environment(path)?;

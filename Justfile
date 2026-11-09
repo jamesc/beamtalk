@@ -763,7 +763,7 @@ check-surface-drift:
     @cargo run -p beamtalk-surface-drift --quiet
 
 # Print the declared OTP support window (ADR 0125 §3.1, otp-support.toml)
-# as a JSON array of majors, e.g. ["27","28"]. Consumed by ci.yml's
+# as a JSON array of majors, e.g. ["28","29"]. Consumed by ci.yml's
 # matrix.otp so the workflow never hardcodes the window itself; a drift
 # test (crates/beamtalk-cli/tests/cli/cli_otp_matrix.rs) asserts this output
 # equals the declared window.

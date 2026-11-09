@@ -99,11 +99,9 @@ fn check_erl() -> CheckResult {
     match get_otp_version() {
         Some(version_str) => {
             match beamtalk_cli::otp_support::major_from_version_str(&version_str) {
-                Some(major) if major < window.min_major => CheckResult::Fail(format!(
-                    "Erlang/OTP {version_str} ({erl_path}) — version {major} is too old, need \
-                 {}",
-                    window.display_range()
-                )),
+                Some(major) if major < window.min_major => {
+                    CheckResult::Fail(unsupported_otp_detail(major, &version_str, &erl_path))
+                }
                 Some(major) if major > window.max_major => CheckResult::Warn(format!(
                     "Erlang/OTP {version_str} ({erl_path}) — version {major} is newer than the \
                  tested window ({}) and is untested",
@@ -119,6 +117,15 @@ fn check_erl() -> CheckResult {
             "erl found ({erl_path}) but could not determine OTP version"
         )),
     }
+}
+
+/// The `check_erl` failure line for an OTP major below the window's floor:
+/// the shared [`beamtalk_cli::otp_support::below_floor_message`] (the same
+/// text every BEAM-booting command fails fast with), plus where `erl` is.
+fn unsupported_otp_detail(major: u32, version_str: &str, erl_path: &str) -> String {
+    let msg = beamtalk_cli::otp_support::below_floor_message(major)
+        .unwrap_or_else(|| format!("Erlang/OTP {major} is unsupported"));
+    format!("{msg} — found {version_str} at {erl_path}")
 }
 
 /// Check that `erlc` is on PATH.
@@ -322,5 +329,20 @@ mod tests {
     #[test]
     fn count_beam_files_nonexistent_dir() {
         assert_eq!(count_beam_files(Path::new("/nonexistent/path")), 0);
+    }
+
+    /// BT-4605: OTP below the window's floor reports "unsupported, need N+"
+    /// (the toolchain's `.beam` files cannot load there), not a range.
+    #[test]
+    fn unsupported_otp_detail_names_the_floor() {
+        let floor = beamtalk_cli::otp_support::window().min_major;
+        let below = floor - 1;
+        let msg = unsupported_otp_detail(below, &below.to_string(), "/usr/bin/erl");
+        assert!(
+            msg.starts_with(&format!("Erlang/OTP {below} is unsupported")),
+            "got: {msg}"
+        );
+        assert!(msg.contains(&format!("needs OTP {floor}+")), "got: {msg}");
+        assert!(msg.contains("/usr/bin/erl"), "got: {msg}");
     }
 }

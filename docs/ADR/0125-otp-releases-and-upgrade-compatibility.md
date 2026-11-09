@@ -995,6 +995,30 @@ A test asserts the generated CI matrix equals the declared window, so the
 "three consumers" cannot drift — the invariant is enforced, not commented
 (`CLAUDE.md`: never a "keep in sync" comment without a test).
 
+**The toolchain's own artifacts are built on `min-major`** (BT-4605). The
+release, nightly and edge workflows all install the OTP pinned by
+`.tool-versions`, and that pin is a `min-major` release. By §3.2 a `.beam`
+file loads on the release that built it and later ones, never earlier ones,
+so building on the bottom of the window is what makes one artifact run on
+the whole window; building on `max-major` would ship bytecode that crashes
+at boot on every older supported major. A unit test
+(`otp_support::tests::tool_versions_erlang_pin_is_min_major`) fails if the
+`.tool-versions` major and `min-major` disagree, so moving the window moves
+the pin in the same change. We chose the pin over having the release jobs
+read `min-major` themselves: the pin is already what every job and every
+contributor's `mise`/`asdf` installs, and one enforced number beats a second
+lookup path. Per-major artifacts are unnecessary.
+
+Below the window is therefore not "untested" but a guaranteed boot crash,
+so it fails fast everywhere: `beamtalk doctor` reports `Erlang/OTP 27 is
+unsupported — Beamtalk needs OTP 28+`, and every command that boots a node
+on the toolchain's code (`build`, `check`, the build worker, the workspace
+node behind `repl`/`run`) stops with the same line before starting `erl`.
+Above the window stays a warning.
+
+**History.** The window was 27–28 when this ADR was accepted. OTP 29 moved
+it to 28–29 (BT-4605); dropping 27 was recorded as a release note.
+
 #### 3.2 BEAM files, ERTS, and what a release is valid on
 
 OTP's documented guarantee (System Principles § Compatibility): *"Compiled
