@@ -156,8 +156,8 @@ sudo apt install erlang
 **Version manager (any platform):** [asdf](https://asdf-vm.com/) with [asdf-erlang](https://github.com/asdf-vm/asdf-erlang):
 ```bash
 asdf plugin add erlang
-asdf install erlang 27.0
-asdf global erlang 27.0
+asdf install erlang 29.0
+asdf global erlang 29.0
 ```
 </details>
 

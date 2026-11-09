@@ -189,6 +189,10 @@ impl BeamCompiler {
             backend,
         );
 
+        // ADR 0125 §3.1: both backends boot `erl` on the toolchain's `.beam`
+        // files, which do not load below the support window's floor.
+        crate::commands::build_stamp::require_supported_otp()?;
+
         // Ensure output directory exists before dispatching to either backend.
         std::fs::create_dir_all(&self.output_dir)
             .into_diagnostic()
@@ -271,7 +275,6 @@ impl BeamCompiler {
         // Start BEAM node with beamtalk_build_worker
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
         // -boot no_dot_erlang: skips .erlang config file
-        crate::commands::build_stamp::require_supported_otp()?;
         debug!("Spawning BEAM node with beamtalk_build_worker");
         let mut child = spawn_build_worker_node(&pa_args)
             .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;
