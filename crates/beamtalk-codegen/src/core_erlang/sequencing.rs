@@ -445,7 +445,7 @@ impl CoreErlangGenerator {
         let frame = self.current_frame();
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let needs_prelude = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e));
-        let Some(k) = needs_prelude.max(Self::last_racing_operand(exprs)) else {
+        let Some(k) = needs_prelude.max(self.last_racing_operand(exprs)) else {
             let mut docs = Vec::with_capacity(exprs.len());
             for e in exprs {
                 docs.push(self.expression_doc(e)?);
@@ -499,22 +499,29 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4296: the index of the last operand of `exprs` that may run code
-    /// (anything but a trivial operand or a field read) when two or more may —
-    /// the operand a sequencer must hoist up to so the operands evaluate in
-    /// source order whatever order the enclosing Core Erlang construct
-    /// evaluates them in (a list cell or a map literal evaluates its last
-    /// operand first). `None` when at most one operand may run code: it has
-    /// nothing to race with. A field read runs nothing, and a sibling that
-    /// writes the field needs a prelude, which `subexpr_needs_prelude` already
-    /// sequences; exempting it keeps `self.a + self.b` free of temps (the
-    /// BT-4279 fast path needs an empty operand prelude).
-    pub(super) fn last_racing_operand(exprs: &[&Expression]) -> Option<usize> {
+    /// or observe code a sibling runs (anything but a trivial operand or a
+    /// stable field read) when two or more may — the operand a sequencer must
+    /// hoist up to so the operands evaluate in source order whatever order
+    /// the enclosing Core Erlang construct evaluates them in (a list cell or a
+    /// map literal evaluates its last operand first). `None` when at most one
+    /// operand may: it has nothing to race with.
+    ///
+    /// A field read is stable outside an actor closure: it reads a `State` or
+    /// `Self` version, and a sibling that writes the field is a prelude
+    /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
+    /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty
+    /// operand prelude). Inside an actor closure (ADR 0137 §3) a field read is
+    /// a live cell lookup that a sibling `blk value` writing the field through
+    /// the cell changes, so there it races like any send.
+    pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
+        let stable_field_reads = !self.in_cell_closure();
         let mut racing = exprs
             .iter()
             .enumerate()
             .filter(|(_, e)| {
                 let inner = e.unwrap_parens();
-                !Self::is_trivial_subexpr(inner) && !matches!(inner, Expression::FieldAccess { .. })
+                !Self::is_trivial_subexpr(inner)
+                    && !(stable_field_reads && matches!(inner, Expression::FieldAccess { .. }))
             })
             .map(|(i, _)| i);
         racing.next()?;

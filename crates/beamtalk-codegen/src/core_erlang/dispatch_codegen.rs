@@ -1796,7 +1796,7 @@ impl CoreErlangGenerator {
                 // last-first, so every argument before the last one that may
                 // run code is bound to a temp in source order.
                 let arg_exprs: Vec<&Expression> = arguments.iter().collect();
-                let racing_last = Self::last_racing_operand(&arg_exprs);
+                let racing_last = self.last_racing_operand(&arg_exprs);
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -3629,21 +3629,23 @@ impl CoreErlangGenerator {
             return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
-        let args_doc = self.capture_argument_list_doc(arguments)?;
-
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at
-        // home), stores its answer back, and answers its value.
-        if self.in_cell_closure() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        // home), stores its answer back, and answers its value. A block or loop
+        // body threads no `State` for a `super` send either (BT-3995): it runs
+        // against the cell, which the enclosing call brackets
+        // (`classify_super_send`), and answers its value. Sends there are not
+        // sync-bracketed, so the arguments are sequenced (`thread_args`) to
+        // evaluate in source order (BT-4296).
+        if self.in_cell_closure() || self.super_send_uses_cell() {
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let call_doc = self.cell_super_send_doc(&selector_atom, &class_name, args_doc);
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
-        // ADR 0137 §3: a block or loop body threads no `State` for a `super` send
-        // (BT-3995): it runs against the cell, which the enclosing call brackets
-        // (`classify_super_send`), and answers its value.
-        if self.super_send_uses_cell() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
-        }
+        // A method-body `super` send's sending arguments are sync sites, already
+        // sequenced by the enclosing `sequence_children` and read back here.
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let current_state = self.current_state_var();
         let doc = docvec![

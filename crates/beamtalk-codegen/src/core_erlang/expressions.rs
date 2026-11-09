@@ -1286,7 +1286,7 @@ impl CoreErlangGenerator {
             beamtalk_core::ast::Expression::span,
         );
         let exprs: Vec<&Expression> = arguments.iter().collect();
-        let racing = Self::last_racing_operand(&exprs).is_some();
+        let racing = self.last_racing_operand(&exprs).is_some();
         Ok(self.hoist_cascade_splits(splits, docs, span, racing))
     }
 

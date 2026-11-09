@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: the actor closure (ADR 0137 cell) column of
+// stdlib/test/eval_order_test.bt. Inside a block an actor's sends are not
+// sync-bracketed and a field read is a live cell lookup, so the operands of
+// one literal or argument list must still evaluate in source order.
+
+EvalOrderActor subclass: EvalOrderActorChild
+
+  // A method-body `super` send: its sending arguments are sync sites.
+  superArgsOf: a => super pair: a bump with: a n
+
+  // A `super` send inside a block runs against the cell.
+  blockSuperArgsOf: a => (#(1) collect: [:_i | super pair: a bump with: a n]) first
+
+  // A field read before a block that writes the field through the cell:
+  // in source order the read sees the old value.
+  blockFieldThenWrite =>
+    self.n := 0
+    bump := [
+      self.n := self.n + 1
+      self.n
+    ]
+    (#(1) collect: [:_i | #[self.n, bump value]]) first

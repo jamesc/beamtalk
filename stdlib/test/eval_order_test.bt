@@ -8,7 +8,8 @@
 // TestCase's own (value-type) methods, class methods
 // (stdlib/test/fixtures/eval_order_class.bt), Value methods
 // (stdlib/test/fixtures/eval_order_value.bt) and actor methods
-// (stdlib/test/fixtures/eval_order_actor.bt).
+// (stdlib/test/fixtures/eval_order_actor.bt, and eval_order_actor_child.bt
+// for `super` and actor-closure cases).
 
 TestCase subclass: EvalOrderTest
 
@@ -121,3 +122,11 @@ TestCase subclass: EvalOrderTest
     }
     self assert: (host argsOf: EvalOrderActor spawn) equals: #[1, 1]
     self assert: (host binaryOf: EvalOrderActor spawn) equals: 0
+
+  testActorSuperArguments =>
+    child := EvalOrderActorChild spawn
+    self assert: (child superArgsOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (child blockSuperArgsOf: EvalOrderActor spawn) equals: #[1, 1]
+
+  testActorClosureFieldReadBeforeWrite =>
+    self assert: EvalOrderActorChild spawn blockFieldThenWrite equals: #[0, 1]
