@@ -3391,10 +3391,9 @@ impl CoreErlangGenerator {
             && super::super::control_flow::condition_has_state_effects(
                 self,
                 receiver,
-                match arguments.first() {
-                    Some(Expression::Block(body)) => Some(body),
-                    _ => None,
-                },
+                arguments
+                    .first()
+                    .and_then(beamtalk_core::semantic_analysis::block_facts::while_body_block),
             )
         {
             return true;
