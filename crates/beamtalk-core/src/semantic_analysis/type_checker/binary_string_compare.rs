@@ -28,6 +28,9 @@
 //!   fact on [`TypeEnv`](super::TypeEnv), like ADR 0126's known-remote
 //!   fact: any later write to the local clears it, and it does not
 //!   propagate through fields, parameters, collections or method returns).
+//!   A local that any block literal in the body writes is never marked:
+//!   blocks run in a child environment and may run at any later point, so
+//!   their writes cannot clear the fact ([`block_written_locals`]).
 //!
 //! The String side must have the static type `String` exactly; `String` is
 //! sealed, so that is a real String. `Dynamic`, unions and anything else
@@ -37,7 +40,11 @@
 //! probed with a String — is never reported: the declared element type
 //! `Binary` may hold Strings, so the lookup may legitimately hit.
 
-use crate::ast::{Expression, MessageSelector};
+use std::collections::HashSet;
+
+use ecow::EcoString;
+
+use crate::ast::{Expression, ExpressionStatement, MessageSelector};
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -110,6 +117,26 @@ pub(super) fn is_raw_binary(expr: &Expression, is_raw_local: &dyn Fn(&str) -> bo
         }
         _ => false,
     }
+}
+
+/// The locals written by any block literal in `body`, at any depth — the
+/// one ADR 0131 outer-write walk (`block_facts::outer_local_writes`) run on
+/// every block. Treating every name as possibly outer over-approximates,
+/// which only ever silences the hint.
+pub(super) fn block_written_locals(body: &[ExpressionStatement]) -> HashSet<EcoString> {
+    let mut names = HashSet::new();
+    for stmt in body {
+        crate::ast_walker::walk_expression(&stmt.expression, &mut |expr| {
+            if let Expression::Block(block) = expr {
+                names.extend(
+                    crate::semantic_analysis::block_facts::outer_local_writes(block, &|_| true)
+                        .into_iter()
+                        .map(|write| write.name),
+                );
+            }
+        });
+    }
+    names
 }
 
 /// Whether `ty` is exactly the class named `class`.

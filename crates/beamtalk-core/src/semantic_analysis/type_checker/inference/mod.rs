@@ -232,6 +232,8 @@ impl TypeChecker {
         }
 
         // Check top-level expressions last — method return types are now available.
+        self.block_written_locals =
+            super::binary_string_compare::block_written_locals(&module.expressions);
         self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
     }
 
@@ -395,6 +397,8 @@ impl TypeChecker {
             &mut ctx,
         );
         self.stash_return_position_block_pushdown(method);
+        self.block_written_locals =
+            super::binary_string_compare::block_written_locals(&method.body);
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
         // BT-4235: on the value-type body path a trailing `self.x := v` answers
         // the updated `self` (BT-833), with or without statement-level

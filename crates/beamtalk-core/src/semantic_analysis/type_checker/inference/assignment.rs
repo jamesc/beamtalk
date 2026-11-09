@@ -345,6 +345,9 @@ impl TypeChecker {
         // raw-Binary fact (`x := x concat: y` reads it).
         let value_is_raw_binary =
             binary_string_compare::is_raw_binary(value, &|name| env.is_raw_binary_local(name));
+        // A local some block writes may change behind the flow fact's back.
+        let target_written_by_block = matches!(target, Expression::Identifier(ident)
+            if self.block_written_locals.contains(&ident.name));
 
         match target {
             Expression::Identifier(ident) => {
@@ -372,7 +375,7 @@ impl TypeChecker {
                     None => env.clear_known_remote(&key),
                 }
                 // BT-4257: the write above cleared any raw-Binary fact.
-                if value_is_raw_binary {
+                if value_is_raw_binary && !target_written_by_block {
                     env.mark_raw_binary(key);
                 }
             }

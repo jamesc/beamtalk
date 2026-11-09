@@ -178,6 +178,31 @@ fn reassigned_local_loses_the_fact() {
 }
 
 #[test]
+fn local_written_by_a_block_is_never_raw() {
+    // The block runs in a child environment, so its write cannot clear the
+    // flow fact; any block write disqualifies the local.
+    assert_no_hint(&probe_with(
+        "s :: String flag: f :: Boolean",
+        "b := Binary fromBytes: #(97)\n    f ifTrue: [b := s]\n    b == s",
+    ));
+    assert_no_hint(&probe(
+        "b := Binary fromBytes: #(97)\n    #(1, 2) do: [:i | b := s]\n    b == s",
+    ));
+    assert_no_hint(&probe(
+        "blk := [b := s]\n    b := Binary fromBytes: #(97)\n    blk value\n    b == s",
+    ));
+}
+
+#[test]
+fn block_local_of_the_same_name_does_not_leak_out() {
+    // A block's own parameter `b` is not the method local; the hint inside
+    // the block is about the parameter, which is a String, so nothing fires.
+    assert_no_hint(&probe(
+        "b := Binary fromBytes: #(97)\n    #(\"x\") do: [:b | b == s]",
+    ));
+}
+
+#[test]
 fn local_bound_from_a_declared_binary_is_not_raw() {
     assert_no_hint(&probe_with(
         "x :: Binary with: s :: String",

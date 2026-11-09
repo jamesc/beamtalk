@@ -539,6 +539,11 @@ pub struct TypeChecker {
     /// (`sendability_validators.rs`'s block-argument check) consults this
     /// persisted table instead — see `known_remote::classify`'s doc.
     pub(super) known_remote_spans: HashMap<Span, known_remote::KnownRemote>,
+    /// BT-4257: the locals some block literal in the body being checked
+    /// (a method body, or the module's top-level statements) writes. A block
+    /// may run at any later point, so such a local is never treated as a
+    /// raw `Binary` — see [`binary_string_compare::block_written_locals`].
+    pub(super) block_written_locals: std::collections::HashSet<EcoString>,
 }
 
 impl TypeChecker {
@@ -557,6 +562,7 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
             block_param_pushdown: HashMap::new(),
         }
     }
@@ -579,6 +585,7 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
             block_param_pushdown: HashMap::new(),
         }
     }
