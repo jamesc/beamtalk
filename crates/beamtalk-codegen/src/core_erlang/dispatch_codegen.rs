@@ -1556,6 +1556,10 @@ impl CoreErlangGenerator {
             .collect();
         // BT-4532: emitted as a store-only `SyncedCall` around the call, and
         // covering only those block literals (`with_nlr_closure_cover`).
+        // Whether it stores is decided before the operands compile (the
+        // cover depends on it); what it stores is read after them, where the
+        // store is emitted, since an operand may step `State` (a
+        // field-writing self-send) and the store must carry that step.
         let at = receiver.span();
         let prestore = if self.synced.window_depth == 0 {
             self.nlr_closure_prestore(&nlr_blocks, at)

@@ -21,6 +21,16 @@ TestCase subclass: Bt4532BlockOperandTest
     self assert: a viaVariable equals: 2
     self assert: a currentX equals: 7
 
+  testOperandWriteBeforeNlrBlockIsKept =>
+    a := Bt4532BlockOperandActor spawn
+    self assert: (a stepThenIfTrue: true) equals: 8
+    self assert: a currentX equals: 9
+
+  testOperandWriteBeforeNonBooleanFallbackIsKept =>
+    a := Bt4532BlockOperandActor spawn
+    self assert: (a stepThenIfTrue: NonBooleanCondCalling new) equals: 8
+    self assert: a currentX equals: 9
+
   testBlockVariableInLoopKeepsTheWrite =>
     a := Bt4532BlockOperandActor spawn
     self assert: a viaVariableInLoop equals: 3

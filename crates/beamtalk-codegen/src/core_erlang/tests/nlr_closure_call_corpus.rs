@@ -36,6 +36,8 @@ use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const HEADER: &str = "Actor subclass: NlrClosureCallProbe
   state: n = 0
+
+  flip: v => self.n := 9. v
 ";
 
 /// How the block holding the `^` is called, and whether the fix is what
@@ -120,6 +122,19 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("param_if_true", "r := q ifTrue: blk", true),
     // A send to an unknown receiver brackets whatever it is passed.
     ("param_unknown_receiver", "p at: 1 ifAbsent: blk", false),
+    // BT-4532: an operand that steps `State` (a field-writing self-send)
+    // ahead of the `^` block. Whatever stores for the `^` reads the state
+    // after the operands are threaded, so the store carries the step.
+    (
+        "state_step_operand_send",
+        "r := p foo: (self flip: p) bar: [^8]",
+        false,
+    ),
+    (
+        "state_step_conditional",
+        "r := (self flip: p) ifTrue: [^8]",
+        true,
+    ),
 ];
 
 /// Where the call sits.

@@ -35,4 +35,14 @@ Actor subclass: Bt4532BlockOperandActor
     1 to: 3 do: [:i | blk value]
     0
 
+  // An operand that writes a field ahead of the `^` block: the state stored
+  // for the `^` is the one after the operand ran.
+  flip: v =>
+    self.x := 9
+    v
+
+  stepThenIfTrue: cond =>
+    k := (self flip: cond) ifTrue: [^8]
+    k
+
   currentX => self.x

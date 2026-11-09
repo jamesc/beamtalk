@@ -373,10 +373,12 @@ pub(in crate::core_erlang) struct SyncedCallState {
 /// BT-4524/BT-4532: a pre-store decided for a call that runs a `^`-holding
 /// block as a closure ([`CoreErlangGenerator::nlr_closure_prestore`]),
 /// emitted around the call by
-/// [`CoreErlangGenerator::nlr_closure_prestored_call`].
-#[derive(Debug)]
+/// [`CoreErlangGenerator::nlr_closure_prestored_call`]. It holds only the
+/// decision: what is stored is read where the store is emitted, after the
+/// call's operands are threaded, so an operand that steps `State` cannot
+/// leave the store stale.
+#[derive(Debug, Clone, Copy)]
 pub(in crate::core_erlang) struct NlrPrestore {
-    source: ActorStateSource,
     at: Span,
 }
 
@@ -1110,22 +1112,19 @@ impl CoreErlangGenerator {
     /// before it runs `blocks` as closures, when one of them holds a `^`
     /// (ADR 0146 P0): the state an inline `^` here would store
     /// (`StateReadSite::NlrThrowState`), so the closure's throw, which
-    /// carries the cell, carries it. Decided before the closures compile
-    /// (their cover depends on it) and emitted around the call by
-    /// [`Self::nlr_closure_prestored_call`]. `None` when no block holds a `^`
-    /// or the cell protocol does not apply.
+    /// carries the cell, carries it. Emitted around the call by
+    /// [`Self::nlr_closure_prestored_call`], which reads the state to store
+    /// there, after every operand of the call has been threaded: an operand
+    /// may step `State` (a field-writing self-send), and the store must
+    /// carry that step. `None` when no block holds a `^` or the cell protocol
+    /// does not apply.
     pub(in crate::core_erlang) fn nlr_closure_prestore(
         &self,
         blocks: &[&beamtalk_core::ast::Block],
         at: Span,
     ) -> Option<NlrPrestore> {
-        if !self.nlr_closure_prestore_applies(blocks) {
-            return None;
-        }
-        Some(NlrPrestore {
-            source: self.actor_state_source(StateReadSite::NlrThrowState, at),
-            at,
-        })
+        self.nlr_closure_prestore_applies(blocks)
+            .then_some(NlrPrestore { at })
     }
 
     /// BT-4532: `call` preceded by `prestore`'s store, built as the
@@ -1133,8 +1132,9 @@ impl CoreErlangGenerator {
     /// that only returns writes nothing the method has to read back) and
     /// verified like every other bracket. The node is a self-contained
     /// slice, like [`Self::bracket_conditional_fallback`]'s: its gensym store
-    /// renders verbatim from the root frame. Where the cell is already the source (a
-    /// bracketed region) there is nothing to store and `call` is unchanged.
+    /// renders verbatim from the root frame. Where the cell is already the
+    /// source (a bracketed region) there is nothing to store and `call` is
+    /// unchanged.
     ///
     /// The store runs on every execution of the call, not only when a
     /// closure's `^` fires: whether the callee runs the closure, and whether
@@ -1149,7 +1149,10 @@ impl CoreErlangGenerator {
         prestore: NlrPrestore,
         call: Document<'static>,
     ) -> Document<'static> {
-        let ActorStateSource::Var(var) = prestore.source else {
+        // Read here, where the store is emitted (see `NlrPrestore`).
+        let ActorStateSource::Var(var) =
+            self.actor_state_source(StateReadSite::NlrThrowState, prestore.at)
+        else {
             return call;
         };
         let node = ThreadedStmt::SyncedCall {
