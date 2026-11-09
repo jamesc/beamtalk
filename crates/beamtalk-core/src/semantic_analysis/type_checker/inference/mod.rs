@@ -972,10 +972,16 @@ impl TypeChecker {
         }
         let class_name = typed_class_context?.clone();
         let description = reason.description()?;
+        // `UnresolvedSelector` warns once, at the send that owns the
+        // selector. A wrapper — `(…)`, `x := …`, or a cascade, whose type is
+        // its first send's (post-processed on its own by `infer_cascade`) —
+        // passes that send's type through and must not repeat the warning
+        // without the selector (BT-4526).
         let unresolved_selector = match (reason, expr) {
             (DynamicReason::UnresolvedSelector, Expression::MessageSend { selector, .. }) => {
                 Some(selector.name())
             }
+            (DynamicReason::UnresolvedSelector, _) => return None,
             _ => None,
         };
         Some(DynamicInTypedClass {

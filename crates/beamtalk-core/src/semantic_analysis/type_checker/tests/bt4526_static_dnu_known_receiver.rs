@@ -179,3 +179,52 @@ fn dynamic_receiver_still_infers_dynamic_without_dnu() {
         "got: {diags:#?}"
     );
 }
+
+#[test]
+fn wrapped_unresolved_send_warns_once_naming_the_selector() {
+    // A parenthesized or assigned send passes the send's `Dynamic` through;
+    // only the send itself warns, so the wrapper must not add a second,
+    // selector-less warning with the old "add a type annotation" hint.
+    for body in [
+        "(HPACK validateHeader: name value: name)",
+        "h := HPACK validateHeader: name value: name",
+    ] {
+        let source = format!(
+            "sealed Object subclass: HPACK
+typed Object subclass: Stream
+  check: name :: String -> Nil =>
+    {body}
+    nil
+"
+        );
+        let diags = diagnostics(&source, true);
+        assert_eq!(diags.len(), 1, "{body}: {diags:#?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("(unresolved selector 'validateHeader:value:')"),
+            "{body}: {diags:#?}"
+        );
+    }
+}
+
+#[test]
+fn cascade_on_unresolved_send_warns_once_naming_the_selector() {
+    // A cascade's type is its first send's, which `infer_cascade`
+    // post-processes on its own; the cascade node must not repeat it.
+    let source = "sealed Object subclass: HPACK
+  class encode: x :: Integer -> Integer => x
+typed Object subclass: Stream
+  check: name :: String -> Nil =>
+    HPACK validateHeader: name value: name; encode: 1
+    nil
+";
+    let diags = diagnostics(source, true);
+    assert_eq!(diags.len(), 1, "got: {diags:#?}");
+    assert!(
+        diags[0]
+            .message
+            .contains("(unresolved selector 'validateHeader:value:')"),
+        "got: {diags:#?}"
+    );
+}
