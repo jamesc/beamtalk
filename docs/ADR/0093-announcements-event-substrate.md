@@ -710,7 +710,7 @@ events), **package** (re-scoped), **docs/tests**. No parser/codegen changes.
 ## Implementation Tracking
 
 **Epic:** [BT-2438](https://linear.app/beamtalk/issue/BT-2438) — Announcements: Typed Event Substrate (ADR 0093)
-**Status:** Implemented (Layers 1–2 + system events + introspection + docs/e2e; Layer 3 package = BT-2193, optional, separate track)
+**Status:** Implemented (Layers 1–2 + system events + introspection + docs/e2e; Layer 3 package `beamtalk-announcements` ships `RecordingAnnouncer` + the telemetry bridge (BT-2193); hardened distributed delivery is BT-4600)
 
 | Phase | Issue | Scope |
 |---|---|---|
