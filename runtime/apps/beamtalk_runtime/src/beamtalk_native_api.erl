@@ -36,8 +36,10 @@ A class-side send runs **in the caller** (the native code's own process, with
 no class-process hop and no timeout) when ADR 0142's rules hold: neither the
 class nor any ancestor declares class variables, nothing shadows the class
 method (no class-side extension, no runtime-installed method), and the
-selector is not process-bound (`new`, `spawn`, ...). `runs_in_caller/2`
-answers the question for a given class and selector.
+selector is not process-bound (`new`, `spawn`, ...). The answer can change
+at run time (loading a class-side extension, or redefining the class with
+class variables), so a caller that must not time out passes a `send/4`
+timeout either way.
 
 Otherwise the class method runs **in the class's process**, and the caller
 waits for it. With `send/3` the wait is bounded by the default class-method
@@ -71,7 +73,6 @@ See `docs/beamtalk-native-erlang.md` § Calling Beamtalk from native code.
     send/3,
     send/4,
     class_named/1,
-    runs_in_caller/2,
     string_from_binary/1,
     string_to_binary/1,
     result_from_tuple/1,
@@ -104,7 +105,7 @@ send(Receiver, Selector, Args) when is_atom(Selector), is_list(Args) ->
 
 `Timeout` (milliseconds or `infinity`) bounds the wait for an actor's answer,
 and for a class method that runs in its class's process. A class method that
-runs in the caller (`runs_in_caller/2`) and a send to a value have nothing to
+runs in the caller and a send to a value have nothing to
 wait for, so `Timeout` does not limit them. Running out of `Timeout` raises a
 structured `timeout` error. Delegates to `beamtalk_message_dispatch:send/4`.
 """.
@@ -139,25 +140,6 @@ class_named(ClassName) when is_atom(ClassName) ->
         ClassObject ->
             {ok, ClassObject}
     end.
-
--doc """
-True when a send of `Selector` to the class object `Class` runs the class
-method in the caller, false when it runs in the class's process (ADR 0142).
-
-The answer holds at the time of the call: loading a class-side extension, or
-redefining the class with class variables, changes it. Delegates to
-`beamtalk_class_dispatch:in_caller_owner/2`, the rule the send itself uses.
-""".
--spec runs_in_caller(object(), atom()) -> boolean().
-runs_in_caller(#beamtalk_object{pid = ClassPid} = Class, Selector) when
-    is_pid(ClassPid), is_atom(Selector)
-->
-    case beamtalk_class_registry:is_class_object(Class) of
-        true -> beamtalk_class_dispatch:in_caller_owner(ClassPid, Selector) =/= decline;
-        false -> false
-    end;
-runs_in_caller(_NotAClass, _Selector) ->
-    false.
 
 %%% ====================================================================
 %%% Strings

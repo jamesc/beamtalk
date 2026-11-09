@@ -370,7 +370,6 @@ Native code sometimes has to call back into Beamtalk: an Erlang library takes a 
 | `send(Receiver, Selector, Args)` | Send a message to any Beamtalk object (an instance, an actor or a class object) and return the result. Raises what the method raises. |
 | `send(Receiver, Selector, Args, Timeout)` | The same, with a bound on the wait for another process (see below). |
 | `class_named(Name)` | `{ok, Class}` for a loaded class, or `{error, #beamtalk_error{kind = class_not_found}}`. |
-| `runs_in_caller(Class, Selector)` | `true` when a class-side send of `Selector` runs in the caller, `false` when it runs in the class process. |
 | `string_from_binary(Bin)` / `string_to_binary(Str)` | Convert between UTF-8 binaries and Beamtalk `String`s. |
 | `result_from_tuple(Tuple)` / `result_to_tuple(Result)` | Convert between `{ok, V} \| {error, R}` and Beamtalk `Result`s. |
 
@@ -432,7 +431,7 @@ A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 01
 
 Otherwise the class method runs **in the class's process** and the caller waits for the answer. `send/3` waits up to the default class-method call timeout, 60 seconds. For a method that may take longer, use `send/4`: its `Timeout` (milliseconds or `infinity`) replaces the default. Running out of it raises a structured `timeout` error (`#beamtalk_error{kind = timeout}`). `send/4`'s `Timeout` also bounds the wait for an actor instance's answer. It does not limit a send that runs in the caller, or a send to a value: there is no other process to wait for.
 
-`runs_in_caller/2` tells you which path a class-side send takes. The answer can change: loading a class-side extension, or redefining the class with class variables, moves its class methods into the class process. If a long call must not time out, pass a `send/4` timeout either way.
+Which path a send takes can change at run time: loading a class-side extension, or redefining the class with class variables, moves its class methods into the class process. If a long call must not time out, pass a `send/4` timeout either way.
 
 ### Values at the boundary
 

@@ -1262,9 +1262,17 @@ not answer within `Timeout` milliseconds (BT-4556).
 """.
 -spec raise_class_timeout(pid(), selector(), timeout()) -> no_return().
 raise_class_timeout(ClassPid, Selector, Timeout) ->
+    %% The registry's pid index only: `class_name_safe/1` falls back to a
+    %% `gen_server:call` into the class process, which has just shown it is
+    %% busy.
+    ClassName =
+        case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+            {ok, Name} -> Name;
+            not_found -> unknown
+        end,
     Error = beamtalk_error:new(
         timeout,
-        beamtalk_object_class:class_name_safe(ClassPid),
+        ClassName,
         Selector,
         <<"The class method may legitimately take longer: send it with a longer timeout">>
     ),

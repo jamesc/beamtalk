@@ -858,7 +858,6 @@ Package native Erlang code (`native/`, ADR 0072) that calls back into Beamtalk g
 | `send/3` | `beamtalk_message_dispatch:send/3` |
 | `send/4` | `beamtalk_message_dispatch:send/4` (a class object's timeout reaches `beamtalk_class_dispatch:class_send/4`) |
 | `class_named/1` | `beamtalk_class_registry:resolve_class_object/1` |
-| `runs_in_caller/2` | `beamtalk_class_dispatch:in_caller_owner/2` (ADR 0142) |
 | `string_from_binary/1` | `beamtalk_primitive:is_utf8/1` + `beamtalk_primitive:string_from_binary/1` |
 | `string_to_binary/1` | `beamtalk_primitive:string_to_binary/1` |
 | `result_from_tuple/1` | `beamtalk_result:from_tagged_tuple/1` |

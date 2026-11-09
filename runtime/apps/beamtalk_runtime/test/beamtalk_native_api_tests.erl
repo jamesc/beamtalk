@@ -126,7 +126,6 @@ native_api_test_() ->
         end},
         {"a class with no class variables runs its class method in the caller", fun() ->
             with_class('Bt4556Stateless', #{}, fun(Class, _Pid) ->
-                ?assert(?API:runs_in_caller(Class, testSelf)),
                 ?assertEqual(self(), ?API:send(Class, testSelf, [])),
                 ?assertEqual({with_arg, 7}, ?API:send(Class, 'testWith:', [7])),
                 %% The method's `self` is the class object the caller holds.
@@ -135,7 +134,6 @@ native_api_test_() ->
         end},
         {"a class with class variables runs its class method in the class process", fun() ->
             with_class('Bt4556Stateful', #{count => 0}, fun(Class, Pid) ->
-                ?assertNot(?API:runs_in_caller(Class, testSelf)),
                 ?assertEqual(Pid, ?API:send(Class, testSelf, [])),
                 ?assertEqual({with_arg, 7}, ?API:send(Class, 'testWith:', [7]))
             end)
@@ -153,8 +151,5 @@ native_api_test_() ->
             with_class('Bt4556Fast', #{}, fun(Class, _Pid) ->
                 ?assertEqual(self(), ?API:send(Class, 'testSleep:', [100], 10))
             end)
-        end},
-        {"runs_in_caller is false for a value that is not a class", fun() ->
-            ?assertNot(?API:runs_in_caller(42, testSelf))
         end}
     ]}.
