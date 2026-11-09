@@ -1,7 +1,7 @@
 # ADR 0145: Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `|>` Pipeline
 
 ## Status
-Accepted (2026-11-06); proposed 2026-11-05.
+Accepted (2026-11-06); proposed 2026-11-05; amended 2026-11-09 (review: stage spans; the parser desugars `|>`, with a re-sugaring side table).
 
 Decision record for the "Cascade Semantics" question that ADR 0042 deferred
 (to a planned "ADR 0044" that was never written — 0044 became
@@ -279,7 +279,7 @@ REPL:
   result to a local, then cast to it on the next line". (`a m1! |> m2`
   ends the statement at `!`, so its error lands on `|>` as "a statement
   cannot start with `|>`".) Allowing a cast on the final stage would need
-  every terminator site taught about `Pipeline` and would make pipelines
+  every terminator site taught about pipelines and would make pipelines
   and cascades differ; it can be revisited if asked for.
 - `|>` is not a binary selector and cannot be defined as a method. `|`
   is not a binary-selector character (it always lexes as
@@ -360,7 +360,12 @@ Its declared signature follows `Object >> ifNotNil:`
 block bare for the same reason (BT-2834). Pharo spells the same method
 `in:`; the Elixir name is chosen for this ADR's audience. Nothing in the
 stdlib, the runtime or a current ADR defines `then:` today. (ADR 0034's
-Future `then:` is superseded.) It is deliberately **not** `sealed`, so a
+Future `then:` is superseded.) Forwarding proxies that rely on
+`doesNotUnderstand:` (`TimeoutProxy`, the `TransparentProxy` example) would
+answer `then:` themselves rather than forward it. BT-4515 either forwards
+it explicitly in those proxies or documents the behaviour. `then:` ships
+after `|>` (blocked by BT-4514): on its own, `then:` written after a
+keyword message merges into it (see Option E). It is deliberately **not** `sealed`, so a
 user class that already defines `then:`, such as a promise type, keeps
 compiling and overrides it.
 
@@ -389,67 +394,115 @@ A stage the previous result does not understand raises
 `does_not_understand` exactly as the nested form would, and the type checker
 reports it at the stage's span (it sees an ordinary send).
 
-**AST representation.** The parser produces a new
-`Expression::Pipeline { head, stages, span }` node. Each stage is a chain
-of messages with an implicit receiver, per the stage grammar above, so
-`parse_cascade_message` (one message only) cannot be reused as is. The
-stage parser is the keyword-expression parser with the receiver supplied.
-It keeps the `should_stop_keyword_continuation` guard that stops a final
-keyword stage from swallowing the next method header, and it rejects a
-stage that starts with `BinarySelector`, `Arrow` or `GtGt`.
+**AST representation (decided 2026-11-09): the parser desugars, and a
+side table restores the source as written.** No `Expression::Pipeline`
+variant exists. The parser builds each pipeline directly as the
+left-nested `MessageSend`s it means, and the tree is identical to the one
+the hand-nested form `((recv m1) m2) m3` produces.
+- **The stage parser.** It is the keyword-expression parser with the
+  receiver supplied, so `parse_cascade_message`, which parses one message
+  only, cannot be reused.
+- **Guards it keeps.** It keeps the `should_stop_keyword_continuation`
+  guard, which stops a final keyword stage from swallowing the next method
+  header.
+- **Stages it rejects.** It rejects a stage that starts with
+  `BinarySelector`, `Arrow` or `GtGt`.
+- **Parser-only errors.** The `;`/`|>` mixing error and the other pipeline
+  errors are parser errors, raised before the tree exists.
 
-The send-operand normalisation pass (`crates/beamtalk-core/src/ast/normalize.rs`,
-BT-4059) rewrites each `Pipeline` into the left-nested `MessageSend`s it
-means, keeping every stage's span. That pass already runs wherever analysis
-and codegen take a module (`analyse_full`, the codegen driver, the REPL
-codegen entries) and behind `normalised()` for the type checker, the lint
-runner and the other analysis readers. After it, name resolution, type
-inference, the ADR 0131 recognisers, the `ThreadedIr` lowering and codegen
-see plain message sends and need no new arm. This is what keeps `|>` free
-of state-threading risk: after normalisation a pipeline *is* the nested
-send the compiler already lowers. The existing `assert_operands_normalised`
-guard (`normalize.rs`, called by the codegen driver) is extended to reject
-a surviving `Pipeline`.
+Alongside the tree, the parser records which sends were written with
+`|>`: the span of each send whose message followed a `|>` token. The
+record is carried on the definition that owns the code (the
+`MethodDefinition`, and the `Module` for top-level and REPL expressions),
+not passed as a separate argument. So every `unparse_method` or
+`unparse_module` call sees it without a caller having to remember to
+pass it. Spans are unique (§ Spans), and normalisation and cloning keep
+them, so the record still matches after the operand-paren peel.
 
-Normalisation is not free here, for three reasons the implementation must
-handle:
+Consequences of this design:
 
-1. **Gating.** Today every caller skips the pass when a module has no
-   parentheses to peel (`normalised()`, `analyse_full`, the codegen
-   driver's two entries, the REPL). Those parentheses-only checks become
-   one shared `needs_normalisation` predicate that also answers yes for a
-   pipeline. Otherwise a module whose only sugar is `|>` reaches codegen
-   unnormalised.
-2. **Reflected source.** `as_written_method_source` (codegen
-   `generator/mod.rs`) and the REPL's `ClassBuilder` path rebuild a method's
-   text by unparsing the *normalised* tree and restoring the peeled
-   parentheses recorded in `PeeledParens`. Unless normalisation also
-   records each desugared pipeline and the restore step re-sugars it,
-   `(MyClass >> #sel) source` shows nested sends, and the workspace, which
-   compares that text with the file on disk, reports every method that
-   uses `|>` as modified. The record/restore pair therefore gains a
-   pipeline entry, with a round-trip test in
-   `unparse/tests/canonical_source.rs`.
-3. **Raw-tree consumers.** The formatter, the `unnecessary_parens` lint
-   and the LSP's position-based features (definition, hover, completion
-   and signature help locate the node under the cursor on the raw tree
-   and peel locally with `canonical_operand`) never see the normalised
-   tree. Each needs a `Pipeline` arm. Position features also need to
-   rebuild a stage's synthesised receiver span to look it up in the type
-   map. Eleven language-service files match on `Expression::Cascade`
-   today; that is the size of the set to audit.
+1. **Analysis, codegen and most tooling see ordinary sends.** This covers:
+   - name resolution, type inference, the ADR 0131 recognisers,
+     `ThreadedIr` and codegen;
+   - the LSP's position features (definition, hover, signature help);
+   - the senders, references, announce-sites and field-accesses queries;
+   - `@expect` collection and the lints.
 
-A defaulted marker field on `MessageSend` (a `SendForm`) or a parser side
-table of stage spans would avoid the new variant. They were rejected
-because the marker touches the ~480 `MessageSend` construction sites and
-splits the `(a m1) m2` and `a m1 |> m2` shapes in every pass that peels
-parentheses. The side table makes every raw-tree consumer re-derive
-pipeline structure from spans. Points 1–3 apply to any of the three
-designs.
+   None of them gains an arm, and none can silently skip a pipeline,
+   because nothing exists to skip. This is what keeps `|>` free of
+   state-threading risk: from the parser onward, a pipeline *is* the
+   nested send the compiler already lowers. The normalisation pass, its
+   `has_parenthesised_operand` gate and `assert_operands_normalised` are
+   unchanged.
+2. **Re-sugaring is the only new consumer work.** It is needed in three
+   places:
+   - `unparse`, used by `beamtalk fmt`;
+   - `as_written_method_source` (codegen `generator/mod.rs`);
+   - the REPL `ClassBuilder` path.
 
-**Diagnostics.** A diagnostic on a pipeline stage is reported at the
-synthesised send's span, which is the stage as written (`|> withY: 10`),
-so it already points at the right place. Wording is not specialised. A
+   The last two rebuild a method's text from the normalised tree, then
+   restore the parentheses recorded in `PeeledParens`. They must also
+   print `|>` before each recorded send. Otherwise `(MyClass >> #sel)
+   source` shows nested sends, and the workspace, which compares that
+   text with the file on disk, reports the method as modified.
+   - **The cost of this design.** A re-sugaring path that ignores the
+     record prints the equivalent nested form instead of failing to
+     compile.
+   - **Mitigation.** The record lives on the definition, so the usual
+     unparse entry points get it automatically. A round-trip corpus test
+     (`unparse/tests/canonical_source.rs`) requires parse → fmt and
+     parse → reflected source to reproduce every pipeline fixture byte for
+     byte. The fixtures include comments between stages and pipelines in
+     blocks, `match:` arms, string interpolation and collection literals.
+3. **Token-level tooling.** Two things work on tokens, not the AST:
+   - Completion right after `|>`: the language service sees a `PipeGt`
+     token before the cursor and completes against the type of the
+     expression that ends there.
+   - The editor grammars and the liveview highlighter: they lex `|>` as
+     one token.
+
+**Comments between stages.** A multi-line pipeline invites a trailing
+`// …` on a stage. Comments currently attach only at statement level, and
+the workspace compares reflected source with the file on disk. So fmt and
+the reflected-source restore must keep a comment between stages, or every
+method that has one is reported as modified. BT-4514 decides where such a
+comment attaches; the round-trip corpus above covers it.
+
+**Rejected: an `Expression::Pipeline` variant desugared in
+normalisation.** This was the original design. It gives the formatter the
+pipeline's structure directly, and the compiler forces every match site to
+decide what to do with a pipeline. Its costs:
+- a `Pipeline` arm across the raw-tree consumers: 42 non-test files match
+  on `Expression::Cascade`, and catch-all `_ =>` arms would skip the new
+  variant silently;
+- a broader normalisation gate at five call sites;
+- span reconstruction in every position-based LSP feature;
+- handling `Pipeline` in the queries that parse reflected source.
+
+All of that protects the few re-sugaring paths, which the round-trip test
+protects more cheaply. A defaulted `SendForm` marker field on
+`MessageSend` was rejected too, because it touches the ~480 `MessageSend`
+construction sites.
+
+**Spans (amended 2026-11-09).** Each synthesised send gets the span the
+hand-nested form would give it: from the start of its receiver (the
+pipeline head) to the end of its message, `receiver.span().merge(…)` as in
+`parse_keyword_message`. It does **not** get just the stage as written.
+Span-keyed analysis facts depend on this: `dispatch_kinds` and
+`state_effects` (`semantic_analysis/facts.rs`) and the type map.
+- If sends took the stage span, a stage of several messages
+  (`|> keys sorted`) would produce two sends with the same span. BT-4122
+  hit this class of aliasing for block profiles.
+- An outer send's span would then no longer contain its receiver's span,
+  which every node-at-position lookup assumes.
+
+The wire check adds a test that every span in a desugared pipeline is
+unique and contains its receiver's span.
+
+**Diagnostics.** A diagnostic on a pipeline stage is reported at that
+stage's message span. That is the message's own selector-and-arguments
+span inside the synthesised send, so `withY: 10`, not the whole chain. It
+points at the right place without special wording. A
 message that says "the receiver of this send" means the previous stage's
 value, and the span shows which one.
 
@@ -489,6 +542,21 @@ warning[cascade-drops-update]: the result of `withX:` is discarded
 Part 3 ships before part 2 and does not depend on it. Until `|>` exists,
 or if it is rejected, the help suggests the nested form
 (`(p withX: 5) withY: 10`) instead.
+
+Two cases the rule above leaves open (added 2026-11-09):
+- **Union-typed targets (ADR 0102).** The warning fires only if every
+  member of the union is a value kind. The simplest conforming
+  implementation does not fire on unions at all.
+- **Protocol-provided methods** (e.g. `Comparable >> max: -> Self`).
+  `Integer max:` must warn, so the implementation decides how "defining
+  class" reads for a method that a protocol supplies, and records that
+  choice in BT-4512.
+
+**REPL limitation.** REPL bindings carry names, not types, so in the
+REPL `p withX: 5; withY: 10` has a `Dynamic` target and does **not** warn.
+The REPL transcript in part 2 shows the result, not a diagnostic. A
+type-free trigger (two or more synthesised `with*:` selectors in one
+cascade) would cover that case. It is a possible follow-up.
 
 It does **not** fire on `Dynamic` targets, actors, `Object` instances,
 non-final messages answering some other type (`printString`, `size`), or
@@ -579,15 +647,15 @@ debugging and stack traces are unchanged.
 **Production operator.** No runtime change: same BEAM code as hand-nested
 sends, no new dispatch, no hot-reload implications.
 
-**Tooling developer.** Analysis-backed features (type inference,
-senders/references queries, lints that run behind `normalised()`) see an
-ordinary nested send. Position-based LSP features (hover, definition,
-completion, signature help) read the raw tree and need a `Pipeline` arm
-that rebuilds each stage's receiver span for type-map lookup. So do the
-formatter, folding and selection ranges, and syntax highlighters.
-Completion after `|>` offers the previous stage's selectors. The formatter
-needs one layout rule (one stage per line when broken). This is the bulk
-of the operator's cost (§ AST representation).
+**Tooling developer.** The parser desugars `|>`, so every AST consumer
+sees an ordinary nested send. That includes type inference, lints, hover,
+definition, signature help, and the senders and references queries. Only
+the re-sugaring paths need new work: `unparse`/fmt, reflected method source
+and the REPL `ClassBuilder` path. They read the per-definition record of
+`|>` sends. Completion after `|>` is token-driven and offers the previous
+stage's selectors. Editor grammars lex `|>` as one token. The formatter
+needs one layout rule (one stage per line when broken). Re-sugaring is the
+bulk of the operator's tooling cost (§ AST representation).
 
 ## Steelman Analysis
 
@@ -787,12 +855,11 @@ promoted later.
   cascades still drop updates silently.
 - Pipelines hide intermediate values from the debugger in the same way
   nesting does; temps remain better for step-debugging.
-- A new AST variant: every raw-tree consumer (parser, unparse, fmt,
-  `ast_walker`, `unnecessary_parens`, and the LSP's position-based
-  features, about eleven language-service files) needs a `Pipeline` arm.
-  Normalisation needs a broader gate and a re-sugaring record so reflected
-  source keeps `|>`. Those are tooling costs, not codegen costs, but they
-  are most of the operator's implementation work.
+- The tree no longer records how a send was written. A re-sugaring path
+  (unparse, fmt, reflected source) that ignores the per-definition `|>`
+  record prints the equivalent nested form instead of failing to compile.
+  The round-trip corpus test is the guard. Most of the operator's
+  implementation work is this re-sugaring and the parser.
 - Diagnostics on desugared stages use generic send wording ("the receiver
   of this send") at the stage's span, rather than pipeline-specific
   phrasing.
@@ -827,18 +894,23 @@ Phases for `/plan-adr`; sizes are rough.
    `check_testcase_setup_drops_field_assignments`'s multi-`with*:` cascade
    acceptance; make `cascade_candidate` skip runs the warning would flag.
    Independent of the operator; ships first.
-2. **Wire check (S)** — before the full parser work: lex `|>`, parse a
-   single-stage pipeline at statement level into `Expression::Pipeline`,
-   desugar it in `ast/normalize.rs` behind the shared `needs_normalisation`
-   gate, and run one BUnit test end-to-end (value, actor and `Dynamic`
-   receivers) plus `just verify-threaded-ir`. Also check that
-   `(Cls >> #sel) source` round-trips the `|>`. This proves both the "no
-   codegen change" assumption and the re-sugaring design before the rest
-   lands.
+2. **Wire check (S/M).** This comes before the full parser work.
+   - Lex `|>`.
+   - Parse a pipeline at statement level directly into nested
+     `MessageSend`s, with hand-nested spans.
+   - Record the `|>` sends on the owning `MethodDefinition` / `Module`.
+   - Teach `unparse` and `as_written_method_source` to re-sugar.
+   - Tests:
+     - one end-to-end BUnit test on value, actor and `Dynamic` receivers;
+     - `just verify-threaded-ir`;
+     - a span-uniqueness test;
+     - a check that `(Cls >> #sel) source` and fmt round-trip the `|>`.
+
+   This proves the "no codegen change" assumption and the re-sugaring
+   design before the rest lands.
 3. **Lexer + parser (M)** — `TokenKind::PipeGt` (adjacent `|>` only) in
    `source_analysis/lexer.rs`; `|>` stages at every `parse_cascade` site in
-   `parser/expressions.rs`, with stages parsed by `parse_cascade_message`;
-   the `;`/`|>` mixing error; the "cast in expression" error for a
+   `parser/expressions.rs`; the `;`/`|>` mixing error; the "cast in expression" error for a
    pipeline ending in `!`; `|>` stages at the eight
    `parse_keyword_message` sites (string interpolation, `match:` arm
    bodies, collection literals), with `;` keeping its arm-separator
@@ -853,18 +925,19 @@ Phases for `/plan-adr`; sizes are rough.
    tests on value, actor and class receivers, plus the type-checker rule
    that types a literal block's parameter as the receiver (next to
    `infer_args_for_if_not_nil`).
-4. **Source fidelity (M)** — `unparse`, `beamtalk fmt` layout (one stage
-   per line when broken), the pipeline record/restore for
-   `as_written_method_source` and the REPL `ClassBuilder` path (round-trip
-   test in `unparse/tests/canonical_source.rs`), `ast_walker`,
-   `unnecessary_parens`, and the editor grammars under `editors/`
-   (including the liveview highlighter, which treats `|` as a binary
-   character today).
-5. **Language service (M)** — a `Pipeline` arm in the position-based
-   features that read the raw tree (definition, hover, completion,
-   signature help: the ~11 files that match `Expression::Cascade`),
-   rebuilding each stage's receiver span for type-map lookup; completion
-   after `|>` against the previous stage's type.
+4. **Source fidelity (M).**
+   - `beamtalk fmt` layout: one stage per line when broken.
+   - Re-sugaring on the REPL `ClassBuilder` path.
+   - Comments between stages.
+   - The full round-trip corpus in `unparse/tests/canonical_source.rs`:
+     blocks, `match:` arms, string interpolation, collection literals and
+     comments.
+   - The editor grammars under `editors/`, including the liveview
+     highlighter, which treats `|` as a binary character today.
+5. **Language service (S)** — completion after a `PipeGt` token against
+   the type of the expression before it. Tests show that hover,
+   definition and signature help on a stage already work, because they
+   see the nested sends; no new arms are expected.
 6. **Docs & tests (S)** — `docs/beamtalk-language-features.md`
    (Cascades + new Pipelines section), `docs/beamtalk-syntax-rationale.md`
    (new departure row), BUnit tests in `stdlib/test/` for values, actors and
@@ -876,7 +949,7 @@ Phases for `/plan-adr`; sizes are rough.
    must show `|>` as written.
 
 No codegen, `ThreadedIr`, or runtime changes are expected. If the wire
-check (phase 2) needs one, the normalise-to-nested-sends design has failed
+check (phase 2) needs one, the desugar-to-nested-sends design has failed
 and the ADR should be revisited before phases 3–6.
 
 ## Migration Path
@@ -906,8 +979,17 @@ hit as a warning first.
 
 ## Open Questions (for the maintainer)
 
-None remain. Every question raised in earlier drafts was settled with the
-maintainer on 2026-11-06 and is recorded below.
+None remain. The 2026-11-09 review reopened the AST design, and the
+maintainer settled it the same day (below). Every earlier question was
+settled on 2026-11-06.
+
+### Resolved (2026-11-09)
+
+- **AST design for `|>`.** The parser desugars `|>` into nested sends and
+  records the `|>` sends on the owning definition for re-sugaring. There is
+  no `Expression::Pipeline` variant (§ AST representation).
+- **Stage spans.** Hand-nested spans, unique by test (§ Spans).
+- **`then:` ordering.** Blocked by BT-4514.
 
 ### Resolved (2026-11-06)
 
@@ -950,11 +1032,11 @@ it later would break code.
 |---|---|---|---|
 | 1 | BT-4512: `cascade-drops-update` warning | M | — |
 | 1 | BT-4513: `setUp` lint rejects multi-`with*:` cascades | S | — |
-| 2 | BT-4514: wire check (lex `\|>`, `Pipeline` node, normalise) | M | — |
-| 2 | BT-4515: `Object >> then:` and its typing rule | S | — |
+| 2 | BT-4514: wire check (lex `\|>`, parser desugar, re-sugaring record) | M | — |
+| 2 | BT-4515: `Object >> then:` and its typing rule | S | BT-4514 |
 | 3 | BT-4516: complete `\|>` parsing and errors, REPL multi-line | M | BT-4514 |
 | 3 | BT-4517: source fidelity (unparse, fmt, reflected source, editors) | M | BT-4514 |
-| 3 | BT-4518: language service support | M | BT-4514 |
+| 3 | BT-4518: completion after `\|>` | S | BT-4514 |
 | 4 | BT-4519: docs and end-to-end REPL-protocol case | S | BT-4512, BT-4515, BT-4516, BT-4517, BT-4518 |
 
 Follow-ups outside the epic (low priority, `needs-spec`):
