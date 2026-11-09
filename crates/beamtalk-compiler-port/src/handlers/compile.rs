@@ -67,7 +67,9 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     let batch = map_get(request, "project_batch").and_then(term_to_string);
     let scope =
         crate::project_context::RequestScope::for_source(scope_path.as_deref(), batch.as_deref());
-    let pre_loaded_aliases = scope.aliases(session_aliases);
+    // A file compile's source is its whole file: it declares the file's own
+    // aliases, so the on-disk copy's are not pre-loaded on top (BT-4325).
+    let pre_loaded_aliases = scope.whole_file_aliases(session_aliases);
     // ADR 0127 §10a / BT-3593: the live-reload fan-out recompiles a
     // protocol's users from their own files, one `compile` request per file
     // — each such request carries the just-edited protocol's full source

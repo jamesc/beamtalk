@@ -957,3 +957,37 @@ fn repl_inline_class_ignores_source_path_project() {
         "REPL inline class must not see project aliases: {warnings:?}"
     );
 }
+
+/// BT-4325: an unsaved editor buffer declares its file's aliases itself —
+/// the saved copy's must not stay in scope. Here the buffer for
+/// `parity_config.bt` deletes `type Scheme` but still uses it: the editor
+/// must already report what `load_project` reports once that buffer is
+/// saved, not stay clean on the strength of the stale on-disk declaration.
+#[test]
+fn unsaved_buffer_alias_deletion_matches_load_after_save() {
+    let (dir, _state_path) = write_parity_project();
+    let config_path = dir.path().join("src/parity_config.bt");
+    let buffer = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Value subclass: ParityConfig\n\
+         \x20 field: s :: Scheme = #http\n";
+
+    let (editor_errors, _) = editor_errors_and_warnings(&handle_diagnostics(
+        &editor_diagnostics_request(buffer, Some(&config_path)),
+    ));
+    assert!(
+        editor_errors.iter().any(|m| m.contains("Scheme")),
+        "the saved copy's deleted alias must not stay in scope: {editor_errors:?}"
+    );
+
+    fs::write(&config_path, buffer).expect("save the buffer");
+    let load = handle_compile(&load_like_compile_request(buffer, &config_path));
+    assert_eq!(response_status(&load).as_deref(), Some("error"), "{load:?}");
+    let mut load_errors = error_diagnostic_messages(&load);
+    load_errors.sort();
+    assert_eq!(
+        editor_errors, load_errors,
+        "editor (before save) and load (after save) must agree"
+    );
+}

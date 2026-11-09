@@ -71,6 +71,8 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         source_path.as_deref().filter(|_| !stdlib_mode),
         None,
     );
+    // A patch carries only its class, not the file's `type` declarations,
+    // so the file's own on-disk aliases stay in scope.
     let pre_loaded_aliases = scope.aliases(session_aliases);
 
     // 1. Parse the bare method body directly — no `Class >>`, no normalize.

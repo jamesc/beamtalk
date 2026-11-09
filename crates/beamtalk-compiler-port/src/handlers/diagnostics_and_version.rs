@@ -82,8 +82,10 @@ pub(crate) fn handle_diagnostics(request: &Map) -> Term {
         // redefinition, defeating the whole point of re-checking it.
         let session_aliases = extract_known_type_aliases(request);
         // Keystroke path: no `project_batch`, so each request re-verifies
-        // the memoized scope's fingerprints (stats only — the alias scan
-        // and registry load re-run only when a fingerprint changed).
+        // the memoized scope (re-reads the manifest, walks and stats the
+        // project's inputs); the alias re-parse and registry load re-run
+        // only when a fingerprint changed. The buffer is its whole file, so
+        // the saved copy's own aliases give way to the buffer's.
         let source_path = map_get(request, "source_path").and_then(term_to_string);
         let scope = RequestScope::for_source(source_path.as_deref(), None);
         let (diagnostics, analysis) =
@@ -96,7 +98,7 @@ pub(crate) fn handle_diagnostics(request: &Map) -> Term {
                 // Diagnostics-only: no codegen follows, so no flattened
                 // output a missing cross-file protocol AST could corrupt.
                 Vec::new(),
-                scope.aliases(session_aliases),
+                scope.whole_file_aliases(session_aliases),
                 scope.diagnostics_table(),
                 scope.analysis_project(),
             );

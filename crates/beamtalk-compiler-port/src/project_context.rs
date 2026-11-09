@@ -96,7 +96,19 @@ pub(crate) struct FileProjectContext {
     pub analysis_project: ProjectAnalysisContext,
     /// Cross-file aliases: the project's own first, then each resolved
     /// dependency's, mirroring the build's merge order.
-    pub aliases: Vec<AliasInfo>,
+    pub aliases: Vec<ProjectAlias>,
+}
+
+/// One project or dependency `type` alias, with the file declaring it — so
+/// a request whose own source *is* that file (an editor buffer, possibly
+/// unsaved) can drop the on-disk copy's aliases in favour of its own
+/// (BT-4325).
+#[derive(Clone)]
+pub(crate) struct ProjectAlias {
+    /// The declaring file, as the project source walk produced it.
+    pub file: PathBuf,
+    /// The alias itself, stamped with its package.
+    pub info: AliasInfo,
 }
 
 /// Merge session-carried aliases with a project's: a name the session
@@ -105,7 +117,10 @@ pub(crate) struct FileProjectContext {
 /// reported as a hard alias/alias collision the moment the project
 /// reloads, breaking the redefine-in-session flow that works today.
 /// Everything else appends project-first, mirroring the build's order.
-fn merge_aliases(session_aliases: Vec<AliasInfo>, project_aliases: &[AliasInfo]) -> Vec<AliasInfo> {
+fn merge_aliases<'a>(
+    session_aliases: Vec<AliasInfo>,
+    project_aliases: impl Iterator<Item = &'a AliasInfo>,
+) -> Vec<AliasInfo> {
     let session_names: HashSet<String> = session_aliases
         .iter()
         .map(|info| info.name.to_string())
@@ -113,7 +128,6 @@ fn merge_aliases(session_aliases: Vec<AliasInfo>, project_aliases: &[AliasInfo])
     let mut merged = session_aliases;
     merged.extend(
         project_aliases
-            .iter()
             .filter(|info| !session_names.contains(info.name.as_str()))
             .cloned(),
     );
@@ -130,6 +144,9 @@ fn merge_aliases(session_aliases: Vec<AliasInfo>, project_aliases: &[AliasInfo])
 pub(crate) struct RequestScope {
     project: Option<FileProjectContext>,
     legacy_project: ProjectAnalysisContext,
+    /// The request's own file, canonicalized — `None` without a path or
+    /// when the file does not exist on disk (an unsaved new buffer).
+    own_file: Option<PathBuf>,
 }
 
 impl RequestScope {
@@ -141,6 +158,7 @@ impl RequestScope {
         Self {
             project: source_path.and_then(|path| project_context_for_source(path, batch)),
             legacy_project: ProjectAnalysisContext::default(),
+            own_file: source_path.and_then(|path| std::fs::canonicalize(path).ok()),
         }
     }
 
@@ -161,11 +179,39 @@ impl RequestScope {
         }
     }
 
-    /// The request's session aliases merged with the project's
-    /// ([`merge_aliases`]: session wins, then project-first).
+    /// The request's session aliases merged with every project alias
+    /// ([`merge_aliases`]: session wins, then project-first). For a request
+    /// whose source is only *part* of its file (a `compile_method` patch
+    /// carries the class, not the file's `type` declarations), so the
+    /// file's own on-disk aliases must stay in scope.
     pub(crate) fn aliases(&self, session_aliases: Vec<AliasInfo>) -> Vec<AliasInfo> {
         match &self.project {
-            Some(project) => merge_aliases(session_aliases, &project.aliases),
+            Some(project) => merge_aliases(
+                session_aliases,
+                project.aliases.iter().map(|alias| &alias.info),
+            ),
+            None => session_aliases,
+        }
+    }
+
+    /// [`Self::aliases`] for a request whose source is its *whole* file
+    /// (`compile`, an editor buffer for `diagnostics`): the on-disk copy's
+    /// own aliases are dropped, since the request's source declares the
+    /// file's aliases itself. Otherwise an alias deleted or renamed in an
+    /// unsaved buffer would stay in scope from the saved copy, and the
+    /// editor would accept code `load_project` rejects once saved
+    /// (BT-4325). For a `load_project` compile the source *is* the saved
+    /// file, so this is the same scope the build gives it.
+    pub(crate) fn whole_file_aliases(&self, session_aliases: Vec<AliasInfo>) -> Vec<AliasInfo> {
+        match &self.project {
+            Some(project) => merge_aliases(
+                session_aliases,
+                project
+                    .aliases
+                    .iter()
+                    .filter(|alias| self.own_file.as_deref() != Some(alias.file.as_path()))
+                    .map(|alias| &alias.info),
+            ),
             None => session_aliases,
         }
     }
@@ -270,7 +316,7 @@ fn project_source_files(root: &Utf8Path) -> Vec<Utf8PathBuf> {
 /// by the build's own
 /// [`extract_package_alias_infos`](AliasRegistry::extract_package_alias_infos).
 /// Unreadable files are skipped, like the build's scan.
-fn extract_aliases(files: &[Utf8PathBuf], package: &str) -> Vec<AliasInfo> {
+fn extract_aliases(files: &[Utf8PathBuf], package: &str) -> Vec<ProjectAlias> {
     let mut aliases = Vec::new();
     for file in files {
         let Ok(source) = std::fs::read_to_string(file.as_std_path()) else {
@@ -278,10 +324,14 @@ fn extract_aliases(files: &[Utf8PathBuf], package: &str) -> Vec<AliasInfo> {
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-        aliases.extend(AliasRegistry::extract_package_alias_infos(
-            &module,
-            Some(package),
-        ));
+        aliases.extend(
+            AliasRegistry::extract_package_alias_infos(&module, Some(package))
+                .into_iter()
+                .map(|info| ProjectAlias {
+                    file: file.as_std_path().to_path_buf(),
+                    info,
+                }),
+        );
     }
     aliases
 }
