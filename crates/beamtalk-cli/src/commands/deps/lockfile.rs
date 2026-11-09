@@ -308,7 +308,6 @@ impl Lockfile {
     }
 
     /// Look up a native (hex) package lock entry by name.
-    #[allow(dead_code)] // Used by tests; will be called by deps list (ADR 0072 Phase 3+)
     pub fn get_native(&self, name: &str) -> Option<&NativePackageLock> {
         self.native_packages.get(name)
     }

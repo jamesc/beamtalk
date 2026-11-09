@@ -620,6 +620,21 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
 /// rebar3 keeps an existing checkout that no `rebar.lock` entry moves.
 /// Returns `false` if no native package of that name is locked.
 fn unlock_native_package(project_root: &Utf8Path, name: &str) -> Result<bool> {
+    let is_locked = |lockfile: &Option<Lockfile>| {
+        lockfile
+            .as_ref()
+            .is_some_and(|l| l.get_native(name).is_some())
+    };
+    // Cheap check first, so an unknown name never creates `_build/`.
+    if !is_locked(&Lockfile::read(project_root)?) {
+        return Ok(false);
+    }
+
+    let layout = crate::commands::build_layout::BuildLayout::new(project_root);
+    // Same lock a build's native step holds while it rewrites `beamtalk.lock`
+    // and touches the checkouts; read the lockfile again under it.
+    let _native_build_lock =
+        crate::commands::dir_lock::lock_dir(&layout.native_dir(), "native build")?;
     let Some(mut lockfile) = Lockfile::read(project_root)? else {
         return Ok(false);
     };
@@ -627,10 +642,6 @@ fn unlock_native_package(project_root: &Utf8Path, name: &str) -> Result<bool> {
         return Ok(false);
     }
 
-    let layout = crate::commands::build_layout::BuildLayout::new(project_root);
-    // Same lock a build's native step holds while it touches the checkouts.
-    let _native_build_lock =
-        crate::commands::dir_lock::lock_dir(&layout.native_dir(), "native build")?;
     let checkout = layout.rebar_lib_dir().join(name);
     if checkout.exists() {
         std::fs::remove_dir_all(&checkout)
