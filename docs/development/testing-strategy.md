@@ -101,7 +101,7 @@ top-level `test_coverage` options. The `liveview` CI job runs `mix test
 --cover` directly, so PRs get the threshold enforced as a real gate; a
 separate `coverage` job in `liveview.yml` (push-to-`main` only) publishes
 the `elixir-coverage.json` badge, through the same
-`scripts/ci/publish-coverage-badge.sh` that `ci.yml`'s `publish-coverage`
+`scripts/ci/publish-coverage-badge.sh` that `coverage.yml`'s `publish-coverage`
 job uses for the Rust and Erlang badges (measured by its `coverage-rust`
 and `coverage-erlang` legs).
 
@@ -168,14 +168,17 @@ Coverage reports are saved to:
 
 **CI Integration:**
 
-`ci.yml` measures coverage in two parallel legs, `coverage-rust` and
-`coverage-erlang`. They run on every push to `main`, on a manual
-`workflow_dispatch` of the CI workflow, and on any PR touching the `Justfile`
-(home of the `coverage-*` recipes) or `ci.yml` itself, so a coverage-recipe
-change is exercised before it merges. Each leg writes its report to the
-GitHub Actions job summary and uploads it as an artifact.
+The Nightly Coverage workflow (`coverage.yml`) measures coverage in two
+parallel legs, `coverage-rust` and `coverage-erlang`. It runs once a day on
+`main` (05:00 UTC), not on every PR or merge: re-running both suites
+instrumented costs about 43 runner-minutes, which competed with PR jobs for
+runners (BT-4609). A failed leg is triaged like a red `main` by
+`ci-triage.yml`. To exercise a coverage-recipe change before it merges,
+dispatch the workflow on the branch: `gh workflow run coverage.yml --ref
+<branch>`. Each leg writes its report to the GitHub Actions job summary and
+uploads it as an artifact.
 
-On a push to `main`, `publish-coverage` then updates the Rust and Erlang
+On a run of `main`, `publish-coverage` then updates the Rust and Erlang
 badges on the `badges` branch from whatever report each leg produced — even
 when a leg failed its threshold, in which case its badge goes red. A leg
 that produced no report at all leaves its badge unchanged. The failed leg
@@ -184,7 +187,7 @@ job, not the badge, is what fails the run.
 **Coverage Thresholds:**
 
 The line-coverage floors are defined once, as `RUST_LINE_COVERAGE_MIN` and
-`ERLANG_LINE_COVERAGE_MIN` in `ci.yml`'s workflow `env`.
+`ERLANG_LINE_COVERAGE_MIN` in `coverage.yml`'s workflow `env`.
 
 | Metric | Minimum | Target | Action if Below Minimum |
 |--------|---------|--------|------------------------|

@@ -135,7 +135,7 @@ ci-changed:
     if matches_any "${PARITY_PATTERNS[@]}"; then
       just test-parity
     else
-      echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
+      echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-integration job still runs it)"
     fi
 
     # The Rust corpus tier (`test-corpus`, ~10 min on 4 cores) runs only when

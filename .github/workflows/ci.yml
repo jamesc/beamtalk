@@ -5,8 +5,8 @@ name: CI
 
 # docs/learning/** is put back after '!docs/**' (a later pattern overrides an
 # earlier one): its fixtures and chapters feed corpus.json (check-corpus) and
-# the test-learn job (BT-3927), so a learning-guide-only change must still
-# run CI. docs/beamtalk-language-features.md is put back too: its code blocks
+# test-integration's test-learn step (BT-3927), so a learning-guide-only
+# change must still run CI. docs/beamtalk-language-features.md is put back too: its code blocks
 # also feed corpus.json (BT-4554). ci-docs-only.yml excludes both for the same
 # reason; build-corpus's docs_corpus_sources_trigger_full_ci test enforces it.
 on:
@@ -24,9 +24,7 @@ on:
       - '!.devcontainer/**'
   # Manual run (Actions tab or `gh workflow run ci.yml --ref <branch>`): the
   # `changes` job treats any non-PR event like a push to main, so a dispatch
-  # runs the full Linux suite *including* both coverage legs (BT-4379) —
-  # the way to exercise a coverage-recipe change before it merges. Badges
-  # are only ever published from a push to main.
+  # runs the full Linux suite. Coverage is coverage.yml's (nightly, BT-4609).
   workflow_dispatch:
   pull_request:
     branches: [main]
@@ -55,11 +53,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Line-coverage floors, read by the coverage legs (which fail below them)
-  # and by publish-coverage (which paints a below-floor badge red). One
-  # definition so the gate and the badge colour can't disagree.
-  RUST_LINE_COVERAGE_MIN: '70'
-  ERLANG_LINE_COVERAGE_MIN: '50'
 
 jobs:
   # ─── Path decisions, computed once (BT-4209) ───────────────────────────
@@ -91,14 +84,11 @@ jobs:
       codegen: ${{ steps.filter.outputs.codegen }}
       # The core-diff snapshot pipelines changed: core-diff-modes has work.
       core_diff_modes: ${{ steps.filter.outputs.core_diff_modes }}
-      # docs/learning/ or the doctest pipeline changed: test-learn has work.
+      # docs/learning/ or the doctest pipeline changed: test-integration
+      # runs its test-learn step.
       learn: ${{ steps.filter.outputs.learn }}
       # runtime/ changed: test-dialyzer runs the (slow) `just dialyzer` step.
       runtime: ${{ steps.filter.outputs.runtime }}
-      # The Justfile (home of the coverage-* recipes) or this workflow
-      # changed: the coverage legs run on the PR too (BT-4379), so a broken
-      # coverage recipe fails before merge instead of on main.
-      coverage: ${{ steps.filter.outputs.coverage }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,7 +105,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in corpus codegen core_diff_modes learn runtime coverage; do echo "$k=true"; done
+              for k in corpus codegen core_diff_modes learn runtime; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -160,8 +150,6 @@ jobs:
 
           runtime=$(flag matches 'runtime/*')
 
-          coverage=$(flag matches Justfile .github/workflows/ci.yml)
-
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
@@ -177,7 +165,6 @@ jobs:
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
             echo "runtime=$runtime"
-            echo "coverage=$coverage"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -187,6 +174,14 @@ jobs:
   # same job. Splitting them lets each run in parallel on its own runner, so a
   # typical PR's wall-clock is the slowest job, not their sum. macOS and
   # Windows are ci-platforms.yml's opt-in `platform-check` job.
+  #
+  # Rust cache policy (BT-4609): every job that runs the dev-profile
+  # `just build` shares one rust-cache entry (`shared-key: linux-test`), and
+  # every rust-cache in this workflow saves only from main. A cache saved
+  # from a PR is scoped to that PR's ref, so per-job keys saved per PR
+  # multiplied into dozens of near-identical entries that pushed the repo
+  # past the Actions cache cap and evicted the caches builds rely on. PR
+  # runs restore main's entries.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -222,6 +217,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
@@ -311,6 +307,7 @@ jobs:
         with:
           shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache Erlang/rebar3 artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
@@ -373,6 +370,7 @@ jobs:
         with:
           shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Rust corpus tier (state-threading agreement and corpus proofs)
         run: just test-corpus count:${{ matrix.shard }}/2
@@ -434,7 +432,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check corpus.json is up to date
         run: just check-corpus
@@ -489,7 +489,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # BT-3887: the base-side snapshot is a pure function of the PR's base
       # SHA (`just core-diff-base-snapshot` builds it from a worktree of that
@@ -615,7 +617,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Compare snapshot-only and full .core output
         run: just core-diff-modes
@@ -652,6 +656,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # A PR gets only the newest OTP in the window (`last` after the numeric
       # sort); a push to main gets the full window. See the comment above
@@ -679,8 +684,8 @@ jobs:
   # (post-merge); a pull request runs only the newest OTP in it (BT-4209), to
   # keep the PR fan-out small. The nightly workflow does not cover the older
   # OTPs (it runs the single .tool-versions OTP on macOS/Windows), so main is
-  # where an older-OTP regression is caught. test-integration/test-parity stay pinned
-  # to `.tool-versions`'s single OTP: they exercise the workspace/REPL/MCP
+  # where an older-OTP regression is caught. test-integration stays pinned
+  # to `.tool-versions`'s single OTP: its suites exercise the workspace/REPL/MCP
   # wire protocol, not OTP-version-sensitive compiled output.
 
   test-beam:
@@ -736,7 +741,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: just build
@@ -822,7 +829,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: just build
@@ -908,7 +917,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
         run: just build
@@ -920,64 +931,25 @@ jobs:
         if: github.event_name != 'pull_request'
         run: just dialyzer-specs
 
-  # ─── Learning-guide doctests (BT-3927) ─────────────────────────────────
-  # `just test-learn` compiles every docs/learning/ fixture and runs the
-  # chapters' ```beamtalk blocks. It used to run nowhere in CI, so a fixture
-  # that stopped compiling (ch12validation_error.bt against the file/class
-  # name rule) went unnoticed. On a PR it runs only when the diff touches
-  # docs/learning/, this workflow, the Justfile, or the doctest pipeline
-  # itself (test-docs wrapper generation and test-class discovery, the BUnit
-  # result entries, the FAIL/RESULTS: reporter and its parser); on a push
-  # to main it always runs, so a compiler change that breaks the guide still
-  # surfaces there.
-  test-learn:
-    needs: changes
-    if: needs.changes.outputs.learn == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      - name: Test learning guide (docs/learning/)
-        run: just test-learn
-
+  # ─── Workspace, REPL-protocol, parity and learning-guide tests ────────
+  # One job, one `just build`, for every suite that needs the built stdlib
+  # on `.tool-versions`'s OTP. test-parity and test-learn used to be jobs of
+  # their own, each paying a ~4 min build and a runner slot (BT-4609); PR
+  # wall-clock is dominated by waiting for a free runner, so one job running
+  # them back to back finishes sooner than three queued ones. Every suite
+  # after the build runs even when an earlier one failed (`!cancelled()`
+  # plus a successful build), so one red suite never hides another's verdict.
+  #
+  # Learning-guide doctests (BT-3927): `just test-learn` compiles every
+  # docs/learning/ fixture and runs the chapters' ```beamtalk blocks. On a
+  # PR it runs only when the diff touches docs/learning/, this workflow, the
+  # Justfile, or the doctest pipeline itself (the `learn` path gate); on a
+  # push to main it always runs, so a compiler change that breaks the guide
+  # still surfaces there.
   test-integration:
+    needs: changes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1013,19 +985,33 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
+          shared-key: linux-test
           key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
+        id: build
         run: just build
 
       - name: Test workspace integration
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test-integration
 
       - name: Test MCP server integration
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test-mcp
 
       - name: Test REPL protocol (full pipeline)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: just test-repl-protocol
+
+      - name: Test parity (REPL / MCP / CLI / LSP)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: just test-parity
+
+      - name: Test learning guide (docs/learning/)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && needs.changes.outputs.learn == 'true' }}
+        run: just test-learn
 
       # On any failure, surface epmd state + the most recent workspace startup
       # logs. The recurring "REPL did not report port" flake (BT-1599 and its
@@ -1041,61 +1027,6 @@ jobs:
           # (e.g. "Session creation failed"). The "port accepting TCP but WS health
           # check failed" flake (BT-2532) leaves startup.log empty — the real cause
           # is in workspace.log — so dump both.
-          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
-            echo "=== $f ==="
-            cat "$f"
-          done
-
-  test-parity:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      - name: Build
-        run: just build
-
-      - name: Test parity (REPL / MCP / CLI / LSP)
-        run: just test-parity
-
-      - name: Dump workspace startup logs
-        if: failure()
-        run: |
-          epmd -names || true
           for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
             echo "=== $f ==="
             cat "$f"
@@ -1138,417 +1069,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: install-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Smoke test install (clean checkout)
         run: just test-install
-
-  # ─── Coverage (Rust + Erlang), split in two parallel jobs ─────────────
-  # Was one 45-minute job: dev build + instrumented build + Rust passes +
-  # Erlang suites, sequentially (~41 min, repeatedly timing out on main).
-  # The halves are independent — each builds what it needs and collects its
-  # own coverdata on its own runner — so they run side by side and the wall
-  # clock is the slower leg, not the sum (an artifact handoff between the
-  # legs would serialize them again: download-artifact has no wait/retry):
-  # - coverage-rust: instrumented build + `just coverage-rust-cobertura`
-  #   (fast tier via nextest, then the serialized e2e/ignored suites).
-  # - coverage-erlang: `just coverage-all` (eunit + E2E + stdlib + BUnit
-  #   with cover), collecting its own E2E coverdata via `coverage-e2e`.
-  # - publish-coverage: on a push to main, publishes each leg's badge from
-  #   whatever report that leg produced — even when the leg failed its
-  #   threshold (the badge goes red) — so a miss never freezes the badges
-  #   at the last passing value. The failed leg job stays the signal.
-  # The legs also run on workflow_dispatch and on PRs touching the Justfile
-  # or this workflow (the `coverage` path gate), so recipe changes are
-  # exercised before merge (BT-4379).
-  # Pass 1 excludes the corpus_tests slow tier (see Justfile's
-  # _coverage-rust-run-tests): that tier already runs sharded in
-  # test-corpus on every main push, and re-running it instrumented here
-  # cost ~17 min alone.
-  coverage-rust:
-    needs: changes
-    if: needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-latest
-    # Measured ~22 min (instrumented build ~10, fast tier ~6.5, serialized
-    # e2e ~5); 40 leaves headroom for cold caches.
-    timeout-minutes: 40
-    permissions:
-      contents: read
-    outputs:
-      rust_coverage: ${{ steps.rust_thresholds.outputs.rust_coverage }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@789fcf404486ad49a9a91ceb1acfb43caac96664 # cargo-llvm-cov
-        with:
-          tool: cargo-llvm-cov
-
-      # coverage-rust-cobertura's fast-tier pass runs through
-      # `cargo llvm-cov nextest -E 'not (corpus_tests)'`, which needs it.
-      - name: Install cargo-nextest
-        uses: ./.github/actions/install-nextest
-
-      # Lean pre-build (no `cargo build --all-targets`): the Rust suites run
-      # instrumented under llvm-cov, and the spawned BEAM nodes only need the
-      # stdlib .beam files — see `coverage-build` in the Justfile.
-      - name: Build coverage prerequisites
-        run: just coverage-build
-
-      - name: Generate Rust coverage (Cobertura format for action)
-        # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
-        # the Justfile) so the badge reflects product-code coverage.
-        run: just coverage-rust-cobertura
-
-      - name: Dump workspace startup logs
-        # coverage-rust-cobertura's --ignored pass spawns real REPL/BEAM
-        # nodes too (the parity drivers + beamtalk-mcp's REPL-spawning
-        # tests), same as test-parity above.
-        if: failure()
-        run: |
-          epmd -names || true
-          # startup.log holds VM boot / -eval crash output; workspace.log holds the
-          # OTP logger stream where beamtalk_ws_handler writes session/auth failures
-          # (e.g. "Session creation failed"). The "port accepting TCP but WS health
-          # check failed" flake (BT-2532) leaves startup.log empty — the real cause
-          # is in workspace.log — so dump both.
-          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
-            echo "=== $f ==="
-            cat "$f"
-          done
-
-      - name: Rust Coverage Summary
-        id: rust_coverage
-        continue-on-error: true
-        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
-        with:
-          filename: coverage.cobertura.xml
-          badge: true
-          format: markdown
-          output: both
-          hide_complexity: true
-
-      - name: Preserve Rust Coverage Report
-        run: |
-          if [ -f code-coverage-results.md ]; then
-            mv code-coverage-results.md rust-coverage-results.md
-          fi
-
-      - name: Upload Rust Coverage Reports
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: rust-coverage-reports
-          path: |
-            rust-coverage-results.md
-            coverage.cobertura.xml
-          retention-days: 30
-
-      - name: Add Rust Coverage to Job Summary
-        run: |
-          echo "### Rust Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f rust-coverage-results.md ]; then
-            cat rust-coverage-results.md >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "![Coverage](${{ steps.rust_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ WARNING: Rust coverage report not generated" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Check Coverage Thresholds
-        id: rust_thresholds
-        continue-on-error: true
-        run: |
-          # Extract Rust line coverage percentage from CodeCoverageSummary output
-          # The action outputs to rust-coverage-results.md (markdown format)
-          # Missing report fails the leg: warn-and-pass here once published
-          # a grey "unknown" badge for a dead coverage pipeline.
-          if [ ! -f rust-coverage-results.md ]; then
-            echo "❌ FAILURE: rust-coverage-results.md not found, cannot check thresholds"
-            exit 1
-          fi
-          
-          # Extract coverage percentages from markdown format
-          # Markdown format: **Summary** | **83%** (1212 / 1460) | **69%** (262 / 378) | 682 | ✔
-          # Match both integer (83%) and decimal (83.47%) percentages
-          rust_coverage=$(grep -E 'Summary.*\|.*%' rust-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
-          rust_branch=$(grep -E 'Summary.*\|.*%' rust-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
-          
-          echo "Rust Line Coverage: ${rust_coverage}%"
-          echo "Rust Branch Coverage: ${rust_branch}%"
-          echo "rust_coverage=${rust_coverage}" >> "$GITHUB_OUTPUT"
-          
-          # Check thresholds using awk for portability (no bc dependency)
-          line_check=$(awk -v cov="$rust_coverage" -v min="$RUST_LINE_COVERAGE_MIN" 'BEGIN { if (cov < min + 0) print "FAIL"; else print "PASS" }')
-          branch_check=$(awk -v cov="$rust_branch" 'BEGIN { if (cov < 80.0) print "WARN"; else print "PASS" }')
-          
-          if [ "$line_check" = "FAIL" ]; then
-            echo "❌ FAILURE: Rust line coverage ${rust_coverage}% is below ${RUST_LINE_COVERAGE_MIN}% threshold"
-            exit 1
-          fi
-          
-          if [ "$branch_check" = "WARN" ]; then
-            echo "⚠️ WARNING: Rust branch coverage ${rust_branch}% is below 80% threshold"
-            echo "This will become a failure in future releases"
-          fi
-          
-          echo "✅ Coverage thresholds met"
-
-      - name: Fail if Rust coverage thresholds not met
-        if: steps.rust_thresholds.outcome == 'failure'
-        run: |
-          echo "❌ Rust coverage thresholds not met (see above for details)"
-          exit 1
-
-  coverage-erlang:
-    needs: changes
-    if: needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-latest
-    # Measured ~10.5 min (eunit + stdlib + BUnit with cover); 25 leaves
-    # headroom for cold caches.
-    timeout-minutes: 25
-    permissions:
-      contents: read
-    outputs:
-      erlang_coverage: ${{ steps.erlang_thresholds.outputs.erlang_coverage }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
-        with:
-          path: |
-            ~/.cache/rebar3
-            runtime/_build
-            ~/.rebar3
-          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
-          restore-keys: |
-            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
-            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      # Lean pre-build (no `cargo build --all-targets`): the Erlang suites
-      # drive `cargo run --bin beamtalk`, which builds just the binary and
-      # its deps on demand — see `coverage-build` in the Justfile.
-      - name: Build coverage prerequisites
-        run: just coverage-build
-
-      - name: Generate Erlang coverage (unit + E2E + stdlib)
-        # `coverage-all` runs its own E2E pass (`coverage-e2e`) on this
-        # runner, so the legs stay independent (no cross-job artifact wait).
-        run: just coverage-all
-
-      - name: Dump workspace startup logs
-        # coverage-stdlib/coverage-bunit boot real workspace BEAM nodes, same
-        # as test-parity above.
-        if: failure()
-        run: |
-          epmd -names || true
-          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
-            echo "=== $f ==="
-            cat "$f"
-          done
-
-      - name: Erlang Coverage Summary
-        id: erlang_coverage
-        continue-on-error: true
-        uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
-        with:
-          # All four runtime apps. bt@* compiled-Beamtalk modules carry no
-          # Erlang abstract code and are auto-excluded from cover (BT-1672), so
-          # the stdlib XML reports only its hand-written FFI .erl modules.
-          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml,runtime/_build/test/covertool/beamtalk_stdlib.covertool.xml,runtime/_build/test/covertool/beamtalk_compiler.covertool.xml'
-          badge: true
-          format: markdown
-          output: both
-          hide_branch_rate: false
-          hide_complexity: true
-          indicators: true
-          thresholds: '60 70'
-
-      - name: Preserve Erlang Runtime Coverage Report
-        run: |
-          # Rename Erlang coverage report for clarity
-          if [ -f code-coverage-results.md ]; then
-            mv code-coverage-results.md erlang-coverage-results.md
-          fi
-
-      - name: Upload Erlang Coverage Reports
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: erlang-coverage-reports
-          path: |
-            erlang-coverage-results.md
-            runtime/_build/test/cover/index.html
-            runtime/_build/test/cover/aggregate/*.html
-            runtime/_build/test/covertool/*.xml
-          retention-days: 30
-
-      - name: Add Erlang Coverage to Job Summary
-        run: |
-          echo "### Erlang Coverage" >> $GITHUB_STEP_SUMMARY
-          if [ -f erlang-coverage-results.md ]; then
-            cat erlang-coverage-results.md >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "![Coverage](${{ steps.erlang_coverage.outputs.badge }})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ WARNING: Erlang coverage report not generated" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Check Erlang Coverage Thresholds
-        id: erlang_thresholds
-        continue-on-error: true
-        run: |
-          # Missing report fails the leg: warn-and-pass here once published
-          # a grey "unknown" badge for a dead coverage pipeline.
-          if [ ! -f erlang-coverage-results.md ]; then
-            echo "❌ FAILURE: erlang-coverage-results.md not found, cannot check thresholds"
-            exit 1
-          fi
-          
-          erlang_coverage=$(grep -E 'Summary.*\|.*%' erlang-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | head -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
-          erlang_branch=$(grep -E 'Summary.*\|.*%' erlang-coverage-results.md | grep -oE '\*\*[0-9]+(\.[0-9]+)?%\*\*' | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?' || echo "0")
-          
-          echo "Erlang Line Coverage: ${erlang_coverage}%"
-          echo "Erlang Branch Coverage: ${erlang_branch}%"
-          echo "erlang_coverage=${erlang_coverage}" >> "$GITHUB_OUTPUT"
-          
-          line_check=$(awk -v cov="$erlang_coverage" -v min="$ERLANG_LINE_COVERAGE_MIN" 'BEGIN { if (cov < min + 0) print "FAIL"; else print "PASS" }')
-          branch_check=$(awk -v cov="$erlang_branch" 'BEGIN { if (cov < 60.0) print "WARN"; else print "PASS" }')
-          
-          if [ "$line_check" = "FAIL" ]; then
-            echo "❌ FAILURE: Erlang line coverage ${erlang_coverage}% is below ${ERLANG_LINE_COVERAGE_MIN}% threshold"
-            exit 1
-          fi
-          
-          if [ "$branch_check" = "WARN" ]; then
-            echo "⚠️ WARNING: Erlang branch coverage ${erlang_branch}% is below 60% threshold"
-            echo "This will become a failure in future releases"
-          fi
-          
-          echo "✅ Erlang coverage thresholds met"
-
-      - name: Fail if Erlang coverage thresholds not met
-        if: steps.erlang_thresholds.outcome == 'failure'
-        run: |
-          echo "❌ Erlang coverage thresholds not met (see above for details)"
-          exit 1
-
-  publish-coverage:
-    # `!cancelled()` (always(), minus a cancelled run): a leg that fails its
-    # threshold must not stop publishing, or the badges freeze at the last
-    # passing value and one leg's miss freezes the other leg's badge too
-    # (BT-4379). Each leg writes its percentage output *before* its
-    # threshold check exits non-zero, and a failed job's step outputs are
-    # still visible through `needs`, so a below-floor value arrives here and
-    # is published as a red badge. The failed leg job — not this one — stays
-    # the workflow's failure signal. Main pushes only: PR and dispatch runs
-    # measure coverage but never publish it.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [coverage-rust, coverage-erlang]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      # persist-credentials kept: the step below pushes coverage badges to the `badges` branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
-        with:
-          persist-credentials: true
-
-      - name: Publish coverage badges
-        env:
-          RUST_COV: ${{ needs.coverage-rust.outputs.rust_coverage }}
-          ERLANG_COV: ${{ needs.coverage-erlang.outputs.erlang_coverage }}
-        run: |
-          # Badge colour: red below the leg's own floor (the threshold the leg
-          # just failed), otherwise graded by percentage.
-          badge_color() {
-            awk -v c="$1" -v min="$2" 'BEGIN {
-              if (c < min + 0) print "red"
-              else if (c >= 80) print "brightgreen"
-              else if (c >= 70) print "green"
-              else if (c >= 60) print "yellowgreen"
-              else if (c >= 50) print "yellow"
-              else print "red"
-            }'
-          }
-
-          # A leg contributes its badge only when it produced a report (a
-          # numeric percentage). A leg that died before measuring anything
-          # (build/test failure, timeout) leaves its badge untouched rather
-          # than overwriting it with "unknown"; its failed job is the signal.
-          args=()
-          add_badge() { # <file> <label> <value> <floor>
-            if echo "$3" | grep -Eq '^[0-9]+([.][0-9]+)?$'; then
-              args+=("$1" "{\"schemaVersion\":1,\"label\":\"$2\",\"message\":\"$3%\",\"color\":\"$(badge_color "$3" "$4")\"}")
-            else
-              echo "::warning::$2: no report from its leg, badge left unchanged"
-            fi
-          }
-          add_badge rust-coverage.json "Rust coverage" "$RUST_COV" "$RUST_LINE_COVERAGE_MIN"
-          add_badge erlang-coverage.json "Erlang coverage" "$ERLANG_COV" "$ERLANG_LINE_COVERAGE_MIN"
-
-          if [ "${#args[@]}" -eq 0 ]; then
-            echo "No coverage report from either leg; nothing to publish"
-            exit 0
-          fi
-
-          # Shared with liveview.yml's `coverage` job (elixir-coverage.json) —
-          # see scripts/ci/publish-coverage-badge.sh for the retry/worktree
-          # rationale (PR #3549 review: dedupe the two near-identical copies).
-          scripts/ci/publish-coverage-badge.sh "Update coverage badges [skip ci]" "${args[@]}"
