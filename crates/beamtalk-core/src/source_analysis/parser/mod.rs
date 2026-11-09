@@ -704,6 +704,15 @@ pub enum DiagnosticCategory {
     /// `maps:get/2`) silently misses. A hint, silent on `Dynamic` element
     /// types (ADR 0100 Rule 1). Suppressible with `@expect ffi_nested_string`.
     FfiNestedString,
+    /// A value that is provably a raw `Binary` (built by a Binary-only
+    /// producer such as `Binary fromBytes:`) compared with `==`/`/=`/`=`
+    /// against a statically-`String` value, or used as the key of a
+    /// `Dictionary(String, V)` / element of a `Set(String)` (BT-4257). A
+    /// String and a Binary with the same bytes are never equal, so the
+    /// comparison is always false and the lookup always misses. A hint,
+    /// silent on `Dynamic` types and on a declared `Binary` that may hold a
+    /// String (ADR 0086). Suppressible with `@expect binary_string_compare`.
+    BinaryStringCompare,
     /// A non-final cascade message on a value receiver answers an updated
     /// copy that the cascade discards (ADR 0145 § 3, BT-4512): `p withX: 5;
     /// withY: 10` sends `withY:` to `p`, not to the copy `withX:` answered.

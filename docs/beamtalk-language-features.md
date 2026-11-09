@@ -7657,6 +7657,33 @@ happen to be valid UTF-8, and a String literal answers a String. The runtime
 never sniffs bytes to decide — `class` answers the construction type, and
 dispatch follows the class.
 
+**A String never equals a Binary, even with the same bytes.** `"abc" ==
+(Binary fromBytes: #(97, 98, 99))` is `false` (in either order, and for
+`=:=`), their hashes differ, a `Dictionary` keyed by `"abc"` does not find the
+Binary, and a `Set` holds both. Convert first: `aBinary asString` (validated,
+answers a Result) or `asStringUnchecked`. Because the mismatch fails quietly —
+bytes from Erlang looked up in a String-keyed Dictionary just come back
+absent — the compiler gives a `binary-string-compare` hint (BT-4257) when a
+value that is provably a raw Binary meets a `String`-typed value in `==`,
+`/=`, `=:=` or `=/=`, as the key of a `Dictionary(String, V)` `at:`,
+`at:ifAbsent:`, `at:put:`, `includesKey:` or `removeKey:`, or as the argument
+of a `Set(String)` `includes:` or `add:`:
+
+```
+hint[binary-string-compare]: a Binary never equals a String, even with the same bytes
+  = help: convert the Binary first with `asString` (validated, answers a Result) or `asStringUnchecked`
+```
+
+"Provably a raw Binary" means built by a Binary-only producer — `Binary
+fromBytes:`/`fromIolist:`/`withAll:`/`serialize:`/`empty`, a `Digest` hash,
+`<<...>>`, or `concat:`/`part:size:` of one of those — or a local last
+assigned from one. A value merely *typed* `Binary` (a parameter, a field, a
+method result) may be a String (String is a subclass of Binary), so it never
+triggers the hint, and neither does `Dynamic`. For the same reason a
+`Dictionary(Binary, V)` probed with a String is not reported. Suppress the
+hint with `@expect binary_string_compare`, or package-wide with
+`binary-string-compare = "off"` under `[diagnostics]` in `beamtalk.toml`.
+
 ```beamtalk
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)

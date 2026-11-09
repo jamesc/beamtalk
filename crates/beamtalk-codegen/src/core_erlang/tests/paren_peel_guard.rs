@@ -142,6 +142,12 @@ const CEILINGS: &[(&str, usize)] = &[
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
     ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
+    // BT-4257: `is_raw_binary`, read on assignment values and send operands
+    // alike.
+    (
+        "beamtalk-core/src/semantic_analysis/type_checker/binary_string_compare.rs",
+        1,
+    ),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (
