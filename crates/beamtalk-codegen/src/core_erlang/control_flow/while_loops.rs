@@ -1487,26 +1487,13 @@ impl CoreErlangGenerator {
 
         let body_tier_check = match body_param {
             None => tier1_loop,
-            Some(body_param) => {
-                let body_stateful_error = self.generate_stateful_block_dispatch_error(
-                    real_selector,
-                    class_name,
-                    STATEFUL_BLOCK_DISPATCH_HINT,
-                );
-                docvec![
-                    "case call 'erlang':'is_function'(",
-                    leaf::var(body_param.clone()),
-                    ", 0) of <'true'> when 'true' -> ",
-                    tier1_loop,
-                    " <'false'> when 'true' -> case call 'erlang':'is_function'(",
-                    leaf::var(body_param),
-                    ", 1) of <'true'> when 'true' -> ",
-                    body_stateful_error,
-                    " <'false'> when 'true' -> ",
-                    placeholder_branch.clone(),
-                    " end end",
-                ]
-            }
+            Some(body_param) => self.while_fallback_body_tier_check(
+                &body_param,
+                tier1_loop,
+                placeholder_branch.clone(),
+                real_selector,
+                class_name,
+            ),
         };
 
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
@@ -1523,6 +1510,38 @@ impl CoreErlangGenerator {
             Document::Str(self_var),
             ", 1) of <'true'> when 'true' -> ",
             self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// The body half of [`Self::generate_while_structural_fallback`]'s tier
+    /// check: `tier1_loop` when the body block `body_param` is Tier 1, the
+    /// `stateful_block_dispatch` error when it is Tier 2, `placeholder_branch`
+    /// for a non-block body.
+    fn while_fallback_body_tier_check(
+        &mut self,
+        body_param: &str,
+        tier1_loop: Document<'static>,
+        placeholder_branch: Document<'static>,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let body_stateful_error = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_loop,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 1) of <'true'> when 'true' -> ",
+            body_stateful_error,
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",
