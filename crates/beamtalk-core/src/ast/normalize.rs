@@ -341,7 +341,7 @@ pub fn written_unary_loop(
     let &(unary, _) = UNARY_LOOPS.iter().find(|(_, k)| part.keyword == *k)?;
     matches!(
         arguments,
-        [Expression::Block(b)] if b.body.is_empty() && b.parameters.is_empty() && b.span.len() == 0
+        [Expression::Block(b)] if b.body.is_empty() && b.parameters.is_empty() && b.span.is_empty()
     )
     .then_some(unary)
 }

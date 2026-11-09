@@ -3793,7 +3793,10 @@ fn unary_while_rejection_names_the_written_selector() {
         assert!(message.contains(&format!("sent {written}")), "{message}");
         assert!(!message.contains(&format!("{selector}:`")), "{message}");
         let help = errors[0].hint.as_deref().unwrap_or_default().to_string();
-        assert!(help.contains(&format!("t := t + 1. [t < limit] {selector}: [t := t + 1]")), "{help}");
+        assert!(
+            help.contains(&format!("t := t + 1. [t < limit] {selector}: [t := t + 1]")),
+            "{help}"
+        );
     }
 }
 

@@ -2764,11 +2764,11 @@ impl<'d> Walker<'d> {
                 {
                     // BT-4313: a unary `[...] whileTrue` reaches here as the
                     // `whileTrue: []` it is canonicalised to; name it as written.
-                    let escape = match crate::ast::normalize::written_unary_loop(selector, arguments)
-                    {
-                        Some(unary) => Escape::UnaryLoop(unary.into()),
-                        None => Escape::Condition(sel.clone()),
-                    };
+                    let escape =
+                        match crate::ast::normalize::written_unary_loop(selector, arguments) {
+                            Some(unary) => Escape::UnaryLoop(unary.into()),
+                            None => Escape::Condition(sel.clone()),
+                        };
                     self.report_literal(block, &escape);
                 }
                 // BT-3884: a block literal sent a `value`-family selector of
