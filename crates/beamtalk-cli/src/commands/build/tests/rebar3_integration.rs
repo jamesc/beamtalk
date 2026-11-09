@@ -5,7 +5,8 @@
 
 use super::*;
 use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest::{self, NativeDependencyMap};
+use crate::commands::manifest::{self, NativeDependencyMap, NativeOverrideMap};
+use beamtalk_core::compilation::GitReference;
 
 // ---- ADR 0072 Phase 2: rebar3 integration tests ----
 
@@ -19,18 +20,23 @@ fn test_generate_rebar_config_basic() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
     deps.insert(
         "cowboy".to_string(),
         manifest::NativeDependency {
             name: "cowboy".to_string(),
-            constraint: "~> 2.12".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.12".to_string(),
+            },
         },
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
 
     assert!(config_path.exists(), "rebar.config should be created");
     let content = fs::read_to_string(&config_path).unwrap();
@@ -75,11 +81,14 @@ fn test_generate_rebar_config_with_native_dir() {
         "jason".to_string(),
         manifest::NativeDependency {
             name: "jason".to_string(),
-            constraint: "~> 1.4".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 1.4".to_string(),
+            },
         },
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
@@ -109,11 +118,14 @@ fn test_generate_rebar_config_with_native_include() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
@@ -178,15 +190,21 @@ fn test_aggregate_native_dependencies_root_only() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
 
     let resolved: Vec<super::super::super::deps::path::ResolvedDependency> = Vec::new();
-    let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+    let aggregated =
+        aggregate_native_dependencies(&root_deps, &NativeOverrideMap::new(), &resolved);
 
-    assert_eq!(aggregated.len(), 1);
-    assert_eq!(aggregated["gun"].constraint, "~> 2.1");
+    assert_eq!(aggregated.dependencies.len(), 1);
+    assert_eq!(
+        aggregated.dependencies["gun"].hex_constraint(),
+        Some("~> 2.1")
+    );
 }
 
 #[test]
@@ -199,11 +217,14 @@ fn test_generate_rebar_config_path_lives_in_build_tree() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, None).unwrap();
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
 
     // Config should be in _build/dev/native/
     let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
@@ -225,14 +246,18 @@ fn test_generate_rebar_config_with_locked_versions() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
     deps.insert(
         "cowboy".to_string(),
         manifest::NativeDependency {
             name: "cowboy".to_string(),
-            constraint: "~> 2.12".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.12".to_string(),
+            },
         },
     );
 
@@ -240,22 +265,20 @@ fn test_generate_rebar_config_with_locked_versions() {
     let mut locked = std::collections::BTreeMap::new();
     locked.insert(
         "gun".to_string(),
-        NativePackageLock {
-            name: "gun".to_string(),
-            version: "2.1.3".to_string(),
-            sha: "abc123".to_string(),
-        },
+        NativePackageLock::hex("gun", "2.1.3", "abc123"),
     );
     locked.insert(
         "cowboy".to_string(),
-        NativePackageLock {
-            name: "cowboy".to_string(),
-            version: "2.12.0".to_string(),
-            sha: "def456".to_string(),
-        },
+        NativePackageLock::hex("cowboy", "2.12.0", "def456"),
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, Some(&locked)).unwrap();
+    let config_path = generate_rebar_config(
+        &project_path,
+        &deps,
+        &NativeOverrideMap::new(),
+        Some(&locked),
+    )
+    .unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     // Should use exact locked versions, not constraints
@@ -286,14 +309,18 @@ fn test_generate_rebar_config_partial_lock() {
         "gun".to_string(),
         manifest::NativeDependency {
             name: "gun".to_string(),
-            constraint: "~> 2.1".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.1".to_string(),
+            },
         },
     );
     deps.insert(
         "cowboy".to_string(),
         manifest::NativeDependency {
             name: "cowboy".to_string(),
-            constraint: "~> 2.12".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.12".to_string(),
+            },
         },
     );
 
@@ -301,14 +328,16 @@ fn test_generate_rebar_config_partial_lock() {
     let mut locked = std::collections::BTreeMap::new();
     locked.insert(
         "gun".to_string(),
-        NativePackageLock {
-            name: "gun".to_string(),
-            version: "2.1.3".to_string(),
-            sha: "abc123".to_string(),
-        },
+        NativePackageLock::hex("gun", "2.1.3", "abc123"),
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, Some(&locked)).unwrap();
+    let config_path = generate_rebar_config(
+        &project_path,
+        &deps,
+        &NativeOverrideMap::new(),
+        Some(&locked),
+    )
+    .unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     assert!(
@@ -417,5 +446,198 @@ fn test_generate_package_corpus_excludes_internal_classes() {
     assert!(
         !class_corpus_path.exists(),
         "class_corpus.json should not be created for internal-only classes"
+    );
+}
+
+// ---- BT-4555: native git deps and [native.overrides] ----
+
+fn git_dep(name: &str, url: &str, reference: GitReference) -> manifest::NativeDependency {
+    manifest::NativeDependency {
+        name: name.to_string(),
+        source: manifest::NativeSource::Git {
+            url: url.to_string(),
+            reference,
+        },
+    }
+}
+
+#[test]
+fn test_generate_rebar_config_git_deps() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+    let mut deps = NativeDependencyMap::new();
+    for dep in [
+        git_dep(
+            "oidcc",
+            "https://github.com/jamesc/oidcc",
+            GitReference::Branch("rfc7009-revocation".to_string()),
+        ),
+        git_dep(
+            "jose",
+            "https://x/jose",
+            GitReference::Tag("1.11.10".to_string()),
+        ),
+        git_dep(
+            "yamerl",
+            "https://x/yamerl",
+            GitReference::Rev("abc1234".to_string()),
+        ),
+    ] {
+        deps.insert(dep.name.clone(), dep);
+    }
+
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+    let content = fs::read_to_string(&config_path).unwrap();
+
+    assert!(
+        content.contains(
+            r#"{oidcc, {git, "https://github.com/jamesc/oidcc", {branch, "rfc7009-revocation"}}}"#
+        ),
+        "{content}"
+    );
+    assert!(
+        content.contains(r#"{jose, {git, "https://x/jose", {tag, "1.11.10"}}}"#),
+        "{content}"
+    );
+    assert!(
+        content.contains(r#"{yamerl, {git, "https://x/yamerl", {ref, "abc1234"}}}"#),
+        "{content}"
+    );
+    assert!(!content.contains("overrides"), "{content}");
+}
+
+#[test]
+fn test_generate_rebar_config_git_dep_pinned_to_locked_sha() {
+    use crate::commands::deps::lockfile::NativePackageLock;
+
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+    let mut deps = NativeDependencyMap::new();
+    deps.insert(
+        "oidcc".to_string(),
+        git_dep(
+            "oidcc",
+            "https://github.com/jamesc/oidcc",
+            GitReference::Branch("main".to_string()),
+        ),
+    );
+    deps.insert(
+        "jose".to_string(),
+        git_dep(
+            "jose",
+            "https://x/jose-fork",
+            GitReference::Branch("main".to_string()),
+        ),
+    );
+
+    let mut locked = std::collections::BTreeMap::new();
+    locked.insert(
+        "oidcc".to_string(),
+        NativePackageLock::git("oidcc", "https://github.com/jamesc/oidcc", "deadbeef"),
+    );
+    // Locked from a different URL — the manifest moved, so the lock is stale.
+    locked.insert(
+        "jose".to_string(),
+        NativePackageLock::git("jose", "https://x/jose", "cafebabe"),
+    );
+
+    let config_path = generate_rebar_config(
+        &project_path,
+        &deps,
+        &NativeOverrideMap::new(),
+        Some(&locked),
+    )
+    .unwrap();
+    let content = fs::read_to_string(&config_path).unwrap();
+
+    assert!(
+        content.contains(r#"{oidcc, {git, "https://github.com/jamesc/oidcc", {ref, "deadbeef"}}}"#),
+        "{content}"
+    );
+    assert!(
+        content.contains(r#"{jose, {git, "https://x/jose-fork", {branch, "main"}}}"#),
+        "{content}"
+    );
+    assert!(!content.contains("cafebabe"), "{content}");
+}
+
+#[test]
+fn test_generate_rebar_config_hex_dep_ignores_git_lock() {
+    use crate::commands::deps::lockfile::NativePackageLock;
+
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+    // Switched from a git fork back to hex — the old git lock must not apply.
+    let mut deps = NativeDependencyMap::new();
+    deps.insert(
+        "oidcc".to_string(),
+        manifest::NativeDependency {
+            name: "oidcc".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 3.6".to_string(),
+            },
+        },
+    );
+    let mut locked = std::collections::BTreeMap::new();
+    locked.insert(
+        "oidcc".to_string(),
+        NativePackageLock::git("oidcc", "https://github.com/jamesc/oidcc", "deadbeef"),
+    );
+
+    let config_path = generate_rebar_config(
+        &project_path,
+        &deps,
+        &NativeOverrideMap::new(),
+        Some(&locked),
+    )
+    .unwrap();
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains(r#"{oidcc, "~> 3.6"}"#), "{content}");
+}
+
+#[test]
+fn test_generate_rebar_config_overrides() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+    let mut deps = NativeDependencyMap::new();
+    deps.insert(
+        "oidcc".to_string(),
+        manifest::NativeDependency {
+            name: "oidcc".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 3.6".to_string(),
+            },
+        },
+    );
+    let mut overrides = NativeOverrideMap::new();
+    overrides.insert(
+        "jose".to_string(),
+        manifest::NativeOverride {
+            erl_opts: Some(Vec::new()),
+        },
+    );
+    overrides.insert(
+        "cowlib".to_string(),
+        manifest::NativeOverride {
+            erl_opts: Some(vec![
+                "debug_info".to_string(),
+                "nowarn_export_all".to_string(),
+            ]),
+        },
+    );
+
+    let config_path = generate_rebar_config(&project_path, &deps, &overrides, None).unwrap();
+    let content = fs::read_to_string(&config_path).unwrap();
+
+    assert!(
+        content.contains(
+            "{overrides, [\n    {override, cowlib, [{erl_opts, [debug_info, nowarn_export_all]}]},\n    {override, jose, [{erl_opts, []}]}\n]}.\n"
+        ),
+        "{content}"
     );
 }
