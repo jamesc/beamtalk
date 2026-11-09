@@ -106,3 +106,62 @@ fn nested_with_form_is_silent() {
     let (_, diags) = compile_setup("    (self withA: 1) withB: 2");
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
+
+/// Compiles the `AbTest` class with a hand-written, unannotated `withBoth:`
+/// (which the type checker cannot prove answers an updated copy) and the
+/// given `setUp` body.
+fn compile_with_unannotated_with_both(setup_body: &str) -> Vec<Diagnostic> {
+    let source = format!(
+        "TestCase subclass: AbTest\n  field: a :: Integer = 0\n  field: b :: Integer = 0\n\n  \
+         withBoth: x => (self withA: x) withB: x\n\n  \
+         setUp =>\n{setup_body}\n\n  \
+         testA => self assert: self a equals: 1\n"
+    );
+    let (module, parse_diags) = parse(lex_with_eof(&source));
+    compute_diagnostics(&module, parse_diags)
+}
+
+fn has_setup_lint_warning(diags: &[Diagnostic]) -> bool {
+    diags.iter().any(|d| {
+        d.category == Some(DiagnosticCategory::Lint) && d.message.contains("silently dropped")
+    })
+}
+
+/// Only some of the drops are proven: `cascade-drops-update` fires at
+/// `withA:`, but the dropped `withBoth:` is unannotated and goes unproven.
+/// The `setUp` warning must still fire, or `withBoth:`'s lost update would
+/// be unreported.
+#[test]
+fn partially_proven_cascade_keeps_setup_warning() {
+    let diags = compile_with_unannotated_with_both("    self withA: 1; withBoth: 2; withB: 3");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::CascadeDropsUpdate)),
+        "expected the proven drop at `withA:` to warn, got: {diags:#?}"
+    );
+    assert!(
+        has_setup_lint_warning(&diags),
+        "expected the setUp warning for the unproven drop, got: {diags:#?}"
+    );
+}
+
+/// The only `cascade-drops-update` belongs to a cascade nested in an
+/// argument; the outer cascade's own drop (`withBoth:`) is unproven, so the
+/// `setUp` warning must still fire.
+#[test]
+fn nested_argument_cascade_warning_does_not_cover_outer_cascade() {
+    let diags = compile_with_unannotated_with_both(
+        "    self withBoth: (self withA: 1; withB: 2) a; withB: 2",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::CascadeDropsUpdate)),
+        "expected the inner cascade to warn, got: {diags:#?}"
+    );
+    assert!(
+        has_setup_lint_warning(&diags),
+        "expected the setUp warning for the outer cascade, got: {diags:#?}"
+    );
+}

@@ -676,6 +676,9 @@ struct SelfWithStarCascade {
     /// Whether the cascade's *last* message is a `with<Field>:` send, i.e.
     /// whether the cascade's value is a `with<Field>:` result at all.
     ends_in_with_star: bool,
+    /// The spans of the dropped `with<Field>:` messages, i.e. every one but
+    /// the cascade's last message (see [`dropped_with_star_spans`]).
+    dropped_with_star_spans: Vec<Span>,
 }
 
 /// Returns `true` if a send is a `with<Field>:` copy-setter send.
@@ -715,6 +718,7 @@ fn self_with_star_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
     Some(SelfWithStarCascade {
         with_star_selectors,
         ends_in_with_star,
+        dropped_with_star_spans: dropped_with_star_spans(cascade),
     })
 }
 
@@ -737,7 +741,7 @@ fn is_self_with_field_cascade(expr: &Expression) -> bool {
 /// last message's result (ADR 0067), and every message goes to the original
 /// receiver, so an earlier `with*:` in the same cascade is dropped (ADR 0145):
 /// `self withA: 1; withB: 2` evaluates to `self withB: 2`, losing `a` (see
-/// [`is_multi_with_star_self_cascade`]). Used by [`is_self_producing`]
+/// [`multi_with_star_self_cascade`]). Used by [`is_self_producing`]
 /// wherever the code needs to know what an expression evaluates to (a
 /// chained receiver, or `setUp`'s trailing statement) — never for mere
 /// presence detection, where [`is_self_with_field_cascade`] applies instead.
@@ -746,30 +750,86 @@ fn cascade_value_is_self_producing(expr: &Expression) -> bool {
         .is_some_and(|c| c.ends_in_with_star && c.with_star_selectors.len() == 1)
 }
 
-/// Returns `true` when `expr` is a cascade on a self-producing receiver that
-/// ends in a `with<Field>:` message but holds more than one of them — `self
-/// withA: 1; withB: 2`, where every `with*:` but the last is dropped. NOT
-/// self-producing (see [`cascade_value_is_self_producing`]).
-fn is_multi_with_star_self_cascade(expr: &Expression) -> bool {
-    self_with_star_cascade(expr)
-        .is_some_and(|c| c.ends_in_with_star && c.with_star_selectors.len() > 1)
+/// The cascade description when `expr` is a cascade on a self-producing
+/// receiver that ends in a `with<Field>:` message but holds more than one of
+/// them — `self withA: 1; withB: 2`, where every `with*:` but the last is
+/// dropped. NOT self-producing (see [`cascade_value_is_self_producing`]).
+/// `None` for every other expression.
+fn multi_with_star_self_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
+    self_with_star_cascade(expr).filter(|c| c.ends_in_with_star && c.with_star_selectors.len() > 1)
 }
 
 /// Returns `true` if `setUp`'s check has nothing of its own to report about
 /// a trailing value `expr`: either it reliably evaluates to the fully
 /// updated `self` ([`is_self_producing`]), or it is a multi-`with*:` cascade
-/// ([`is_multi_with_star_self_cascade`]) inside which `reported` (the type
-/// checker's diagnostics) already holds a `cascade-drops-update` warning —
-/// that warning names the dropped message and the nested-form fix, so a
-/// second warning would duplicate it (BT-4573). A multi-`with*:` cascade the
-/// type checker could not prove lossy is not accounted for.
+/// ([`multi_with_star_self_cascade`]) whose **every** dropped `with*:`
+/// message already carries a `cascade-drops-update` warning at its own span
+/// in `reported` (the type checker's diagnostics). That warning names the
+/// dropped message and the nested-form fix, so a second warning would
+/// duplicate it (BT-4573).
+///
+/// Every dropped send must be covered, not just one somewhere inside the
+/// cascade: if the type checker proved only some drops (say `withB:` is a
+/// hand-written method with no `-> Self` annotation), or the only warning
+/// belongs to a cascade nested in an argument, the `setUp` warning still
+/// fires, so a lost field is never left unreported.
+///
+/// The check sees the warning before the `[diagnostics]` table is applied.
+/// So with `cascade-drops-update = "off"` this case gets no diagnostic at
+/// all: the project has opted into fan-out cascades on values.
 fn is_setup_trailing_value_accounted_for(expr: &Expression, reported: &[Diagnostic]) -> bool {
-    is_self_producing(expr)
-        || (is_multi_with_star_self_cascade(expr)
-            && reported.iter().any(|d| {
-                d.category == Some(DiagnosticCategory::CascadeDropsUpdate)
-                    && expr.span().contains(d.span)
-            }))
+    if is_self_producing(expr) {
+        return true;
+    }
+    let Some(cascade) = multi_with_star_self_cascade(expr) else {
+        return false;
+    };
+    !cascade.dropped_with_star_spans.is_empty()
+        && cascade.dropped_with_star_spans.iter().all(|span| {
+            reported.iter().any(|d| {
+                d.category == Some(DiagnosticCategory::CascadeDropsUpdate) && d.span == *span
+            })
+        })
+}
+
+/// The spans at which the type checker reports `cascade-drops-update` for
+/// the dropped `with<Field>:` messages of `cascade`. These are every
+/// `with*:` message except the last message of the cascade. The folded first
+/// message is reported at its whole send's span and each later message at
+/// its `CascadeMessage` span, matching `check_cascade_drops_update`. Empty
+/// when `cascade` is not a cascade.
+fn dropped_with_star_spans(cascade: &Expression) -> Vec<Span> {
+    let Expression::Cascade {
+        receiver, messages, ..
+    } = cascade
+    else {
+        return Vec::new();
+    };
+    let first = match receiver.as_ref() {
+        Expression::MessageSend {
+            selector,
+            arguments,
+            span,
+            ..
+        } => Some((selector, arguments.len(), *span)),
+        _ => None,
+    };
+    let sends: Vec<_> = first
+        .into_iter()
+        .chain(
+            messages
+                .iter()
+                .map(|m| (&m.selector, m.arguments.len(), m.span)),
+        )
+        .collect();
+    let Some((_, non_final)) = sends.split_last() else {
+        return Vec::new();
+    };
+    non_final
+        .iter()
+        .filter(|(selector, arity, _)| *arity == 1 && is_with_star_selector(selector))
+        .map(|(_, _, span)| *span)
+        .collect()
 }
 
 /// Returns `true` if `expr` contains a self-reconstructing send anywhere in
