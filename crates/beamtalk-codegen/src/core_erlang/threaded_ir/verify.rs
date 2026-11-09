@@ -17,10 +17,10 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
+    RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -570,6 +570,28 @@ pub(in crate::core_erlang) enum VerifyError {
     /// foreign throw ([`NlrCarry::Foreign`]).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
 
+    /// ADR 0146 R1: where the actor-state cell is live (an actor instance
+    /// method's threaded body), the clause a foreign `$bt_nlr` takes through
+    /// an [`ThreadedStmt::EnsureCatch`] does not store the cleanup's final
+    /// `StateAcc` to the cell. Invariant, for every scope kind: a `^` is
+    /// never an error for its owner, so every unwinding exit of a scope that
+    /// threads actor `State` leaves the cell holding that scope's final
+    /// version. `EnsureCatch` is the only node that runs user code while
+    /// unwinding, so the rule is its: a `^` of another method of the same
+    /// actor (from a block it passed in) that unwinds through an inlined
+    /// cleanup which advanced `StateAcc` must find the cleanup's final
+    /// version in the cell. Scopes with no actor `State` (a class method
+    /// running in its caller, ADR 0142; a value type; the REPL) and a
+    /// closure, whose state already is the cell, have no obligation
+    /// (`cell_live` is false). The repro: a method calls `self run: [^3]`,
+    /// where `run:` does `[blk value] ensure: [self.n := 40]`; the `^` took
+    /// the error path, whose cleanup runs with write-through off, so `n`
+    /// kept its old value.
+    EnsureForeignCleanupNotStored {
+        defect: ForeignStoreDefect,
+        at: Span,
+    },
+
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
     /// the condition slot hands the condition's version back into the loop's
@@ -889,6 +911,19 @@ pub(in crate::core_erlang) enum EnsureRelayDefect {
     /// Test builds only, with the one node shape that has it.
     #[cfg(any(test, feature = "test"))]
     RebuildsCarriedStateAtSite,
+}
+
+/// What is wrong with an [`ThreadedStmt::EnsureCatch`]'s foreign `$bt_nlr`
+/// clause ([`VerifyError::EnsureForeignCleanupNotStored`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ForeignStoreDefect {
+    /// There is no foreign clause: the throw takes the error path.
+    NoClause,
+    /// The clause stores nothing to the cell.
+    NoStore,
+    /// The clause stores a `StateAcc` version other than the cleanup's final
+    /// one.
+    StoresStaleVersion { stored: usize, expected: usize },
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -2012,6 +2047,8 @@ impl VerifyWalk<'_> {
                 private_scratch,
                 cleanup,
                 relay,
+                cell_live,
+                foreign,
                 span,
                 ..
             } => {
@@ -2021,6 +2058,12 @@ impl VerifyWalk<'_> {
                 {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
+                }
+                if let Some(defect) =
+                    check_ensure_foreign_store(*cell_live, *cleanup, foreign.as_ref())
+                {
+                    self.errors
+                        .push(VerifyError::EnsureForeignCleanupNotStored { defect, at: *span });
                 }
             }
             ThreadedStmt::Return(value, state, span) => {
@@ -2122,6 +2165,35 @@ fn check_ensure_relay(
             Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
         }
         _ => Some(EnsureRelayDefect::RethrowsStaleState),
+    }
+}
+
+/// ADR 0146 R1 obligation of one [`ThreadedStmt::EnsureCatch`]: where the
+/// actor-state cell is live and the cleanup is inlined and advances
+/// `StateAcc` (`final_version`), the clause a foreign `$bt_nlr` takes stores
+/// that final version to the cell. A cleanup applied as a closure writes the
+/// cell in place and owes nothing; one that threads no write has nothing to
+/// store.
+fn check_ensure_foreign_store(
+    cell_live: bool,
+    cleanup: EnsureCleanup,
+    foreign: Option<&EnsureForeignNlr>,
+) -> Option<ForeignStoreDefect> {
+    let EnsureCleanup::Inlined {
+        final_version: Some(expected),
+        ..
+    } = cleanup
+    else {
+        return None;
+    };
+    if !cell_live {
+        return None;
+    }
+    match foreign.map(|foreign| foreign.store) {
+        None => Some(ForeignStoreDefect::NoClause),
+        Some(None) => Some(ForeignStoreDefect::NoStore),
+        Some(Some(stored)) if stored == expected => None,
+        Some(Some(stored)) => Some(ForeignStoreDefect::StoresStaleVersion { stored, expected }),
     }
 }
 

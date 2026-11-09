@@ -57,9 +57,10 @@ use super::super::intrinsics::{
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureNlrRelay, FrameId,
-    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot,
-    StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureForeignNlr,
+    EnsureNlrRelay, FrameId, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
+    RenderCtx, RethrowSlot, StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::LocalWrite;
@@ -1231,9 +1232,9 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            (carry, false),
+            (carry, false, self.synced_calls_active()),
             EnsureCleanup::Closure { writes_cell },
-            relay,
+            (relay, None),
             other,
             receiver.span(),
         );
@@ -1599,19 +1600,60 @@ impl CoreErlangGenerator {
             _ => None,
         };
         self.set_self_version(outer_self);
+        // ADR 0146 R1: where the cell is live, a `^` the relay does not take
+        // (one of another method of this actor, from a block it passed in)
+        // must leave the cell holding the cleanup's final `StateAcc`: the
+        // error path runs the cleanup with write-through off, so its writes
+        // would die with the re-raise. A cleanup that threads no write has
+        // nothing to store.
+        let foreign = if cell_boundary && cleanup_final.is_some() {
+            let (seed, cleanup) =
+                self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?;
+            self.set_self_version(outer_self);
+            Some(EnsureForeignNlr {
+                seed,
+                store: Some(cleanup.state_version),
+                cleanup: cleanup.doc,
+            })
+        } else {
+            None
+        };
         Ok(self.ensure_catch(
             EnsureCatchTriple {
                 carried_var,
                 ..triple
             },
-            (scope_carry, private_scratch),
+            (scope_carry, private_scratch, cell_boundary),
             EnsureCleanup::Inlined {
                 final_version: cleanup_final,
                 writes_cell,
             },
-            relay,
+            (relay, foreign),
             Document::Vec(other),
             span,
+        ))
+    }
+
+    /// The cleanup of an inlined `ensure:` compiled once more, seeded from the
+    /// actor-state cell (ADR 0137 §5): the cell refresh into `StateAcc` and
+    /// the arm's family seed, then the cleanup's arm. Where a `^` unwinds
+    /// through the `ensure:` with the cell live, the cell holds the state at
+    /// the throw (a `^` stores before it throws, and every clause further in
+    /// stores its own result), so this is the cleanup's entry state for the
+    /// scope's own throw ([`Self::ensure_relay`]) and a foreign one alike.
+    fn ensure_cleanup_from_cell(
+        &mut self,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        arm: Option<&ArmFrame>,
+        outer_version: usize,
+    ) -> Result<(Document<'static>, ExceptionArm)> {
+        let family_seed = self.seed_exception_arm_family(families, outer_version);
+        let cleanup =
+            self.generate_exception_body_with_threading(cleanup_block, families, arm, None)?;
+        Ok((
+            docvec![Self::ensure_cell_refresh_doc(), family_seed],
+            cleanup,
         ))
     }
 
@@ -1669,20 +1711,28 @@ impl CoreErlangGenerator {
         };
         let relay = match carry {
             NlrCarry::Bindings | NlrCarry::ActorState => {
-                let seed = if cell_boundary {
-                    Self::ensure_cell_refresh_doc()
+                let (seed, cleanup) = if cell_boundary {
+                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?
                 } else {
-                    docvec!["let StateAcc = ", leaf::var(carried.to_string()), " in "]
+                    let family_seed = self.seed_exception_arm_family(families, outer_version);
+                    let cleanup = self.generate_exception_body_with_threading(
+                        cleanup_block,
+                        families,
+                        arm,
+                        None,
+                    )?;
+                    (
+                        docvec![
+                            "let StateAcc = ",
+                            leaf::var(carried.to_string()),
+                            " in ",
+                            family_seed
+                        ],
+                        cleanup,
+                    )
                 };
-                let family_seed = self.seed_exception_arm_family(families, outer_version);
-                let cleanup = self.generate_exception_body_with_threading(
-                    cleanup_block,
-                    families,
-                    arm,
-                    None,
-                )?;
                 EnsureNlrRelay {
-                    seed: docvec![seed, family_seed],
+                    seed,
                     cleanup: cleanup.doc,
                     cell_store: cell_boundary,
                     rethrow: RethrowSlot::Version(cleanup.state_version),
@@ -1928,9 +1978,9 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            (Some(NlrCarry::Foreign), false),
+            (Some(NlrCarry::Foreign), false, false),
             EnsureCleanup::Closure { writes_cell: true },
-            Some(relay),
+            (Some(relay), None),
             other,
             beamtalk_core::source_analysis::Span::default(),
         )

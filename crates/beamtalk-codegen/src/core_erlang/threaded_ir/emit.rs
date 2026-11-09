@@ -10,9 +10,9 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    EnsureCatchVars, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry,
-    NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode,
-    TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM,
+    LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt,
+    ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -278,6 +278,7 @@ pub(in crate::core_erlang) fn render(
                 token,
                 carry,
                 relay,
+                foreign,
                 other,
                 ..
             } => docs.push(render_ensure_catch(
@@ -285,6 +286,7 @@ pub(in crate::core_erlang) fn render(
                 token.as_ref(),
                 *carry,
                 relay.as_ref(),
+                foreign.as_ref(),
                 other,
             )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
@@ -723,14 +725,17 @@ fn render_on_do_catch(
 /// Renders one [`ThreadedStmt::EnsureCatch`]: `catch <Type, Error, Stack> ->`
 /// and, with a relay, a `case` whose first clause matches the scope's own
 /// `$bt_nlr` throw, runs the relay's cleanup from the state it carries and
-/// resumes the throw with the cleanup's result; every other exception (and a
-/// foreign token's throw) takes `other`. Without a relay the catch is `other`
-/// alone, the shape every `ensure:` had before BT-4312.
+/// resumes the throw with the cleanup's result; with a foreign clause (ADR
+/// 0146 R1) every other `$bt_nlr` throw runs the cleanup, stores its final
+/// `StateAcc` to the cell and is re-raised unchanged; every other exception
+/// takes `other`. With neither the catch is `other` alone, the shape every
+/// `ensure:` had before BT-4312.
 fn render_ensure_catch(
     vars: &EnsureCatchVars,
     token: Option<&TokenId>,
     carry: Option<NlrCarry>,
     relay: Option<&EnsureNlrRelay>,
+    foreign: Option<&EnsureForeignNlr>,
     other: &Document<'static>,
 ) -> Document<'static> {
     let head = docvec![
@@ -742,9 +747,80 @@ fn render_ensure_catch(
         leaf::var(vars.stack_var.clone()),
         "> -> ",
     ];
-    let (Some(relay), Some(carry)) = (relay, carry) else {
-        return docvec![head, other.clone()];
+    let relay_clause = match (relay, carry) {
+        (Some(relay), Some(carry)) => render_ensure_relay_clause(vars, token, carry, relay),
+        _ => None,
     };
+    let foreign_clause = foreign.map(|foreign| render_ensure_foreign_clause(vars, foreign));
+    if relay_clause.is_none() && foreign_clause.is_none() {
+        return docvec![head, other.clone()];
+    }
+    docvec![
+        head,
+        "case {",
+        leaf::var(vars.type_var.clone()),
+        ", ",
+        leaf::var(vars.error_var.clone()),
+        "} of ",
+        relay_clause.unwrap_or(Document::Nil),
+        foreign_clause.unwrap_or(Document::Nil),
+        "<",
+        leaf::var(vars.other_pair_var.clone()),
+        "> when 'true' -> ",
+        other.clone(),
+        " end",
+    ]
+}
+
+/// ADR 0146 R1: the [`EnsureForeignNlr`] clause of an `ensure:` catch: a
+/// `$bt_nlr` throw of either shape the relay did not take runs the cleanup
+/// from the cell, stores its final `StateAcc` to the cell, and is re-raised
+/// as it came. Followed by a space.
+fn render_ensure_foreign_clause(
+    vars: &EnsureCatchVars,
+    foreign: &EnsureForeignNlr,
+) -> Document<'static> {
+    let store = match foreign.store {
+        Some(version) => docvec![
+            "let _ = ",
+            cell_put_call(leaf::var(super::super::util::versioned_var(
+                "StateAcc", version
+            ))),
+            " in ",
+        ],
+        None => Document::Nil,
+    };
+    docvec![
+        "<{'throw', ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "), ",
+        leaf::atom("$bt_nlr"),
+        ") -> ",
+        foreign.seed.clone(),
+        foreign.cleanup.clone(),
+        " ",
+        store,
+        CoreErlangGenerator::emit_raw_raise(
+            vars.type_var.clone(),
+            vars.error_var.clone(),
+            vars.stack_var.clone(),
+        ),
+        " ",
+    ]
+}
+
+/// The relay clause of an `ensure:` catch: the scope's own `$bt_nlr` throw
+/// (or, BT-4429, every one) runs the relay's cleanup and resumes with its
+/// result. `None` when no throw of the scope can reach it. Followed by a
+/// space.
+fn render_ensure_relay_clause(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+) -> Option<Document<'static>> {
     // The scope's own throw matches its token; a foreign one (BT-4429) is
     // every `$bt_nlr` throw that reaches the catch.
     let guard = match (carry, token) {
@@ -756,7 +832,7 @@ fn render_ensure_catch(
             leaf::var(token.name().to_string()),
             ")",
         ],
-        (_, None) => return docvec![head, other.clone()],
+        (_, None) => return None,
     };
     let rethrow = match &relay.rethrow {
         RethrowSlot::Version(version) => {
@@ -800,13 +876,8 @@ fn render_ensure_catch(
     } else {
         Document::Nil
     };
-    docvec![
-        head,
-        "case {",
-        leaf::var(vars.type_var.clone()),
-        ", ",
-        leaf::var(vars.error_var.clone()),
-        "} of <{'throw', {'$bt_nlr', ",
+    Some(docvec![
+        "<{'throw', {'$bt_nlr', ",
         leaf::var(vars.nlr_tok_var.clone()),
         ", ",
         leaf::var(vars.nlr_val_var.clone()),
@@ -826,12 +897,8 @@ fn render_ensure_catch(
         leaf::var(vars.nlr_val_var.clone()),
         ", ",
         rethrow,
-        "}) <",
-        leaf::var(vars.other_pair_var.clone()),
-        "> when 'true' -> ",
-        other.clone(),
-        " end",
-    ]
+        "}) ",
+    ])
 }
 
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {

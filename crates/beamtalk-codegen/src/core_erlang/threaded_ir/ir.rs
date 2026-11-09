@@ -994,6 +994,21 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         private_scratch: bool,
         cleanup: EnsureCleanup,
         relay: Option<EnsureNlrRelay>,
+        /// ADR 0146 R1: the actor-state cell is live here (an actor instance
+        /// method's threaded body, the lowering's `cell_boundary`): a `^`
+        /// that unwinds through this `ensure:` meets its boundary with the
+        /// cell as the state of record, so the cleanup's writes must reach
+        /// the cell. `false` where there is no actor `State` to store (a
+        /// class method, which runs in its caller under ADR 0142; a value
+        /// type; the REPL) or the state already is the cell (a closure).
+        cell_live: bool,
+        /// ADR 0146 R1: the clause every `$bt_nlr` throw the `relay` does not
+        /// take (a foreign `^`, from a block another method of the same actor
+        /// passed in) runs: the cleanup, its final `StateAcc` stored to the
+        /// cell, the term re-thrown unchanged. `None` where `cell_live` is
+        /// false or the cleanup threads no write, so such a throw takes
+        /// `other`.
+        foreign: Option<EnsureForeignNlr>,
         other: Document<'static>,
         span: Span,
     },
@@ -1644,6 +1659,10 @@ pub(in crate::core_erlang) struct EnsureCatchVars {
     /// relay of an [`NlrCarry::Foreign`] throw for
     /// [`RethrowSlot::CellIfCarried`]. Empty when that relay is not rendered.
     pub cell_snapshot_var: String,
+    /// ADR 0146 R1: the pattern variable of the foreign `$bt_nlr` clause
+    /// ([`EnsureForeignNlr`]), bound to the thrown term. Empty when that
+    /// clause is not rendered.
+    pub foreign_nlr_var: String,
 }
 
 /// BT-4312: where the state a scope's own `^` carries lives, as an `ensure:`
@@ -1761,6 +1780,28 @@ pub(in crate::core_erlang) struct EnsureNlrRelay {
     /// as a `^` does, so a cleanup further out reads it.
     pub cell_store: bool,
     pub rethrow: RethrowSlot,
+}
+
+/// ADR 0146 R1: the typed `$bt_nlr` clause of an [`ThreadedStmt::EnsureCatch`]
+/// that a throw the relay does not take (a foreign `^`) runs where the
+/// actor-state cell is live. The error path (`other`) runs the cleanup after
+/// write-through is switched off, so its field writes only advance the
+/// threaded `StateAcc` and die with the re-raise; this clause runs the same
+/// cleanup, stores its final `StateAcc` to the cell (`cell_put_call`), then
+/// re-raises the term unchanged. Matches either throw shape (`{'$bt_nlr', Tok,
+/// Val}` or `{'$bt_nlr', Tok, Val, State}`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct EnsureForeignNlr {
+    /// The cleanup's entry: the cell refresh into `StateAcc` and the arm's
+    /// family seed. Rendered first.
+    pub seed: Document<'static>,
+    /// The cleanup's code, a `let ... in` chain (verified by its own arm
+    /// frame when it is built).
+    pub cleanup: Document<'static>,
+    /// The `StateAcc` version the clause stores to the cell before the
+    /// re-raise (`None`: it stores nothing, the shape before ADR 0146,
+    /// test builds' fault only).
+    pub store: Option<usize>,
 }
 
 /// The two `$bt_nlr` throw shapes a compiled catch passes through.

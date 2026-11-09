@@ -100,9 +100,10 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
-    EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode,
-    TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
+    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
+    VersionedVar,
 };
 pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
@@ -128,7 +129,7 @@ pub(super) use verify::{
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
-    CatchRestoreDefect, EnsureRelayDefect, ScopeKind, verify, verify_in_scope,
+    CatchRestoreDefect, EnsureRelayDefect, ForeignStoreDefect, ScopeKind, verify, verify_in_scope,
 };
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level

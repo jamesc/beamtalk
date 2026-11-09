@@ -167,6 +167,23 @@ TestCase subclass: ActorClosureCellTest
     self assert: c performedCleanupInALoopAfterReturn equals: 2
     self assert: c n equals: 2
 
+  // ADR 0146 R1 (BT-4534): a `^` from a block passed to another method of
+  // the same actor unwinds through that method's inlined `ensure:`; the
+  // cleanup's write is in the cell while the `^` is in flight, so the
+  // owner's own cleanup reads it. (What the owner finally commits is
+  // BT-4535's.)
+  testForeignReturnLeavesTheCleanupsWriteInTheCell =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    self assert: (c foreignReturnThroughEnsure: rec) equals: 3
+    self assert: rec last equals: 40
+
+  testForeignReturnLeavesTheCleanupsWriteAfterACallInTheCell =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    self assert: (c foreignReturnThroughEnsureAfterACall: rec) equals: 3
+    self assert: rec last equals: 41
+
   testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
     c := ClosureCellEnsure spawn
     rec := ClosureCellRecorder spawn

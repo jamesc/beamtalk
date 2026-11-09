@@ -13,7 +13,10 @@
 //! body, an `on:do:` protected block) and the `ensure:` shapes: both
 //! operands block literals (the cleanup inlined), and a receiver or cleanup
 //! that is not a block literal (the cleanup applied as a closure, the shape
-//! of finding B of the BT-4312 review). Three proofs per cell:
+//! of finding B of the BT-4312 review), and who throws the `^` (ADR 0146
+//! R1): the scope itself, or another method of the same class that passes
+//! the `ensure:`'s method a `^` block (a foreign `^` there). Four proofs per
+//! cell:
 //!
 //! 1. It compiles with the `ThreadedIr` verifier on and through `erlc`.
 //! 2. With the relay off (`fault::RelayFault::NoRelay`, every `ensure:`
@@ -26,6 +29,13 @@
 //!    relay, finding A) every cell that relays in a scope whose state lives
 //!    in the cell fails `RebuildsCarriedStateAtSite`, and no value-type or
 //!    class cell does.
+//! 4. With no foreign clause (`fault::RelayFault::ForeignOnErrorPath`, every
+//!    `ensure:` before ADR 0146 R1) a cell fails
+//!    `EnsureForeignCleanupNotStored` exactly when, by the oracle
+//!    [`foreign_store_needed`], its `ensure:` sits where the actor-state cell
+//!    is live with an inlined cleanup that writes: every such foreign-throw
+//!    cell fails, so a foreign `^` there would take the error path and drop
+//!    the cleanup's writes.
 //!
 //! The merged Tier 2 fun is reachable only in an unvalidated compile (ADR
 //! 0133 rejects a stored block that assigns a captured local), like
@@ -88,7 +98,8 @@ impl Scope {
         }
     }
 
-    /// Method `name` running `stmt` in this scope.
+    /// Method `name` (a unary selector, or a keyword one with its
+    /// parameter) running `stmt` in this scope.
     fn method(self, name: &str, stmt: &str) -> String {
         match self {
             Self::ActorMethod | Self::ValueTypeMethod => {
@@ -103,6 +114,45 @@ impl Scope {
             // with the captured locals flushed over it.
             Self::MergedTier2Fun => format!(
                 "  {name} =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 1. {stmt}. count]\n    b value\n    0\n"
+            ),
+        }
+    }
+}
+
+/// Who throws the `^` that unwinds through the `ensure:` (ADR 0146 R1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Thrower {
+    /// The scope itself: `[^1]` is its own block.
+    OwnScope,
+    /// Another method of the same class: it sends the `ensure:`'s method a
+    /// `^` block (`self probe: [^1]`), which that method runs as `blk value`
+    /// (or holds as `r0 := blk`). Its `^` is foreign at the `ensure:`.
+    OtherMethod,
+}
+
+const THROWERS: &[Thrower] = &[Thrower::OwnScope, Thrower::OtherMethod];
+
+impl Thrower {
+    /// `ensure`, with the scope's own `^` block replaced by the method's
+    /// parameter where another method throws.
+    fn ensure(self, ensure: &str) -> String {
+        match self {
+            Self::OwnScope => ensure.to_string(),
+            Self::OtherMethod => ensure
+                .replace("r0 := [^1]", "r0 := blk")
+                .replace("[^1]", "[blk value]"),
+        }
+    }
+
+    /// The methods of a cell named `name` running `stmt` in `scope`: the
+    /// probe, and for another method's `^` the method that sends it one.
+    fn methods(self, scope: Scope, name: &str, stmt: &str) -> String {
+        match self {
+            Self::OwnScope => scope.method(name, stmt),
+            Self::OtherMethod => format!(
+                "{}\n{}",
+                scope.method(&format!("{name}: blk"), stmt),
+                scope.method(&format!("call{name}"), &format!("self {name}: [^1]"))
             ),
         }
     }
@@ -132,55 +182,74 @@ enum Cleanup {
     Indirect,
 }
 
-/// The `ensure:` shapes, `{F}` a write of the scope's field. A shape with
-/// two `ensure:`s is classified by the one that needs the most: a relay
-/// failure of either fails the cell.
-const SHAPES: &[(&str, &str, Cleanup)] = &[
-    (
-        "literal, writing",
-        "[^1] ensure: [{F}]",
-        Cleanup::Inlined { writes: true },
-    ),
-    (
-        "literal, not writing",
-        "[^1] ensure: [nil]",
-        Cleanup::Inlined { writes: false },
-    ),
-    (
-        "stored receiver",
-        "r0 := [^1]. r0 ensure: [{F}]",
-        Cleanup::Closure,
-    ),
-    (
-        "stored cleanup",
-        "c0 := [{F}]. [^1] ensure: c0",
-        Cleanup::Closure,
-    ),
-    (
-        "stored receiver and cleanup",
-        "r0 := [^1]. c0 := [{F}]. r0 ensure: c0",
-        Cleanup::Closure,
-    ),
-    (
-        "stored cleanup, not writing",
-        "c0 := [nil]. [^1] ensure: c0",
-        Cleanup::Closure,
-    ),
-    (
-        "literal, writing through a self-send",
-        "[^1] ensure: [self bump]",
-        Cleanup::Indirect,
-    ),
-    (
-        "literal, running a stored block that writes",
-        "c0 := [{F}]. [^1] ensure: [c0 value]",
-        Cleanup::Indirect,
-    ),
-    (
-        "stored cleanup inside a literal one",
-        "c0 := [{F}]. [[^1] ensure: c0] ensure: [{F}]",
-        Cleanup::Closure,
-    ),
+/// An `ensure:` shape: its label, its source (`{F}` a write of the scope's
+/// field), how its cleanup runs, and whether it holds an inlined cleanup
+/// that writes the scope's state (both operands block literals, the cleanup
+/// writing directly or indirectly), the one a foreign `^` must find stored
+/// in the cell (ADR 0146 R1). A shape with two `ensure:`s is classified by
+/// the one that needs the most: a relay failure of either fails the cell.
+struct Shape {
+    label: &'static str,
+    ensure: &'static str,
+    cleanup: Cleanup,
+    inlined_write: bool,
+}
+
+const SHAPES: &[Shape] = &[
+    Shape {
+        label: "literal, writing",
+        ensure: "[^1] ensure: [{F}]",
+        cleanup: Cleanup::Inlined { writes: true },
+        inlined_write: true,
+    },
+    Shape {
+        label: "literal, not writing",
+        ensure: "[^1] ensure: [nil]",
+        cleanup: Cleanup::Inlined { writes: false },
+        inlined_write: false,
+    },
+    Shape {
+        label: "stored receiver",
+        ensure: "r0 := [^1]. r0 ensure: [{F}]",
+        cleanup: Cleanup::Closure,
+        inlined_write: false,
+    },
+    Shape {
+        label: "stored cleanup",
+        ensure: "c0 := [{F}]. [^1] ensure: c0",
+        cleanup: Cleanup::Closure,
+        inlined_write: false,
+    },
+    Shape {
+        label: "stored receiver and cleanup",
+        ensure: "r0 := [^1]. c0 := [{F}]. r0 ensure: c0",
+        cleanup: Cleanup::Closure,
+        inlined_write: false,
+    },
+    Shape {
+        label: "stored cleanup, not writing",
+        ensure: "c0 := [nil]. [^1] ensure: c0",
+        cleanup: Cleanup::Closure,
+        inlined_write: false,
+    },
+    Shape {
+        label: "literal, writing through a self-send",
+        ensure: "[^1] ensure: [self bump]",
+        cleanup: Cleanup::Indirect,
+        inlined_write: true,
+    },
+    Shape {
+        label: "literal, running a stored block that writes",
+        ensure: "c0 := [{F}]. [^1] ensure: [c0 value]",
+        cleanup: Cleanup::Indirect,
+        inlined_write: true,
+    },
+    Shape {
+        label: "stored cleanup inside a literal one",
+        ensure: "c0 := [{F}]. [[^1] ensure: c0] ensure: [{F}]",
+        cleanup: Cleanup::Closure,
+        inlined_write: true,
+    },
 ];
 
 /// The oracle: whether the cleanup can write the state a `^` of `scope`
@@ -211,17 +280,35 @@ fn rejected_value_type_closure(cell: &Cell, why: &str) -> bool {
     cell.scope == Scope::ValueTypeMethod && why.contains("Cannot assign to field 'k'")
 }
 
+/// ADR 0146 R1, the oracle: whether a foreign `^` crossing the cell's
+/// `ensure:` must find the cleanup's writes stored to the actor-state cell.
+/// That is where the cell is live and the cleanup is inlined and writes: an
+/// actor method's threaded body. Not an actor closure or merged Tier 2 fun,
+/// whose state already is the cell; not a value type or class method, which
+/// have no actor state (a class method runs in its caller, ADR 0142). Who
+/// throws plays no part: an `ensure:` of an actor method's threaded body
+/// owes the clause whether or not its own scope also has a `^`, since a
+/// foreign one may cross it either way.
+fn foreign_store_needed(cell: &Cell) -> bool {
+    cell.scope == Scope::ActorMethod && cell.inlined_write
+}
+
 struct Cell {
     scope: Scope,
+    thrower: Thrower,
     label: String,
     stmt: String,
     cleanup: Cleanup,
+    inlined_write: bool,
 }
 
 impl Cell {
     fn source(&self) -> String {
         let (header, _) = self.scope.class();
-        format!("{header}\n{}", self.scope.method("probe", &self.stmt))
+        format!(
+            "{header}\n{}",
+            self.thrower.methods(self.scope, "probe", &self.stmt)
+        )
     }
 }
 
@@ -230,15 +317,19 @@ fn cells() -> Vec<Cell> {
     for &scope in SCOPES {
         let (_, field) = scope.class();
         let write = format!("self.{field} := 9");
-        for (position, template) in POSITIONS {
-            for (shape, ensure, cleanup) in SHAPES {
-                let stmt = template.replace("{E}", &ensure.replace("{F}", &write));
-                cells.push(Cell {
-                    scope,
-                    label: format!("{scope:?} x {position} x {shape}"),
-                    stmt,
-                    cleanup: *cleanup,
-                });
+        for &thrower in THROWERS {
+            for &(position, template) in POSITIONS {
+                for shape in SHAPES {
+                    let ensure = thrower.ensure(&shape.ensure.replace("{F}", &write));
+                    cells.push(Cell {
+                        scope,
+                        thrower,
+                        label: format!("{scope:?} x {thrower:?} x {position} x {}", shape.label),
+                        stmt: template.replace("{E}", &ensure),
+                        cleanup: shape.cleanup,
+                        inlined_write: shape.inlined_write,
+                    });
+                }
             }
         }
     }
@@ -297,11 +388,22 @@ fn ensure_relay_corpus_compiles_and_relays() {
     let (compiled, mut failures) = compiled_cells();
     for (cell, code) in &compiled {
         let relays = code.contains("_EnsureNlrTok");
-        let needed = relay_needed(cell.scope, cell.cleanup);
+        // Another method's `^` is no `^` of the `ensure:`'s scope: there is
+        // nothing of its own to relay.
+        let needed = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
         if relays != needed {
             failures.push(format!(
                 "{}: relays: {relays}, oracle: {needed}\n{}",
                 cell.label,
+                cell.source()
+            ));
+        }
+        let stores = code.contains("_EnsureForeignNlr");
+        if stores != foreign_store_needed(cell) {
+            failures.push(format!(
+                "{}: stores a foreign `^`'s cleanup: {stores}, oracle: {}\n{}",
+                cell.label,
+                foreign_store_needed(cell),
                 cell.source()
             ));
         }
@@ -320,7 +422,7 @@ fn ensure_relay_corpus_compiles_and_relays() {
                 .iter()
                 .filter(|(c, _)| c.scope == scope)
                 .enumerate()
-                .map(|(i, (c, _))| scope.method(&format!("probe{i}"), &c.stmt))
+                .map(|(i, (c, _))| c.thrower.methods(scope, &format!("probe{i}"), &c.stmt))
                 .collect();
             let src = format!("{header}\n{}", methods.join("\n"));
             match compile(&src) {
@@ -345,15 +447,15 @@ fn ensure_relay_corpus_compiles_and_relays() {
         .count();
     let indirect_shapes = SHAPES
         .iter()
-        .filter(|(_, _, c)| *c == Cleanup::Indirect)
+        .filter(|shape| shape.cleanup == Cleanup::Indirect)
         .count();
     assert_eq!(
         indirect,
-        3 * POSITIONS.len() * indirect_shapes,
+        3 * THROWERS.len() * POSITIONS.len() * indirect_shapes,
         "an indirect-write actor cell does not compile"
     );
     assert!(
-        compiled.len() >= SCOPES.len() * POSITIONS.len() * SHAPES.len() * 4 / 5,
+        compiled.len() >= SCOPES.len() * THROWERS.len() * POSITIONS.len() * SHAPES.len() * 4 / 5,
         "the corpus has thinned out: {}",
         compiled.len()
     );
@@ -377,7 +479,7 @@ fn ensure_relay_corpus_fails_without_the_relay() {
         let lost = report
             .as_deref()
             .is_some_and(|r| r.contains("EnsureCleanupLostOnNlr") && r.contains("NoRelay"));
-        let expected = relay_needed(cell.scope, cell.cleanup);
+        let expected = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
         fired += usize::from(lost);
         if lost != expected || (!expected && report.is_some()) {
             failures.push(format!(
@@ -413,8 +515,9 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
             .as_deref()
             .is_some_and(|r| r.contains("RebuildsCarriedStateAtSite"));
         fired += usize::from(rebuilt);
-        let needed = relay_needed(cell.scope, cell.cleanup);
+        let needed = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
         let agrees = match cell.scope {
+            _ if cell.thrower == Thrower::OtherMethod => report.is_none(),
             Scope::ActorClosure | Scope::MergedTier2Fun => rebuilt == needed,
             Scope::ActorMethod => rebuilt || report.is_none(),
             Scope::ValueTypeMethod | Scope::ClassMethod => report.is_none(),
@@ -436,6 +539,89 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// Proof 4 (ADR 0146 R1): with no foreign clause (every `ensure:` before
+/// the fix), a cell fails `EnsureForeignCleanupNotStored` exactly when the
+/// oracle says a foreign `^` crossing its `ensure:` must find the cleanup's
+/// writes in the cell, and every foreign-throw cell in an actor method's
+/// threaded body whose cleanup writes is one of them.
+#[test]
+fn ensure_relay_corpus_fails_when_a_foreign_return_takes_the_error_path() {
+    let (compiled, mut failures) = compiled_cells();
+    let mut fired_foreign = 0;
+    for (cell, _) in &compiled {
+        let src = cell.source();
+        let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&src)).err();
+        let lost = report
+            .as_deref()
+            .is_some_and(|r| r.contains("EnsureForeignCleanupNotStored") && r.contains("NoClause"));
+        let expected = foreign_store_needed(cell);
+        if cell.thrower == Thrower::OtherMethod {
+            fired_foreign += usize::from(lost);
+        }
+        if lost != expected || (!expected && report.is_some()) {
+            failures.push(format!(
+                "{}: with no foreign clause, expected EnsureForeignCleanupNotStored: {expected}, got {report:?}",
+                cell.label
+            ));
+        }
+    }
+    let foreign_writing = SHAPES.iter().filter(|shape| shape.inlined_write).count();
+    assert_eq!(
+        fired_foreign,
+        POSITIONS.len() * foreign_writing,
+        "not every foreign-throw actor-method cell whose cleanup writes fails"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} cell(s) disagree:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+}
+
+/// ADR 0146 R1 / ADR 0142: a class method that runs in its caller (its
+/// class declares no class variables) has no actor `State`, even in an
+/// actor class: its inlined `ensure:` emits no foreign clause and no store,
+/// whoever throws. The same `ensure:` in an instance method of the class
+/// does.
+#[test]
+fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
+    let header = "Actor subclass: Bt4534CallerClassMethod\n  state: n = 0\n\n";
+    let class_methods = "  class probe: blk =>\n    x := 0\n    [blk value] ensure: [x := 1]\n    x\n\n  class callProbe => self probe: [^1]\n";
+    let instance_method = "  probe: blk =>\n    [blk value] ensure: [self.n := 40]\n    0\n";
+    let class_only = format!("{header}{class_methods}");
+    let code = compile(&class_only).expect("compiles with the verifier on");
+    assert!(
+        code.contains("primop 'raw_raise'"),
+        "the class method has no `ensure:` catch:\n{code}"
+    );
+    assert!(
+        !code.contains("_EnsureForeignNlr") && !code.contains("'beamtalk_actor_state':'store'"),
+        "a class method running in its caller stores a foreign `^`'s cleanup:\n{code}"
+    );
+    // The verifier owes it nothing, so the pre-fix catch is no defect there.
+    let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&class_only)).err();
+    assert_eq!(report, None, "a class method's `ensure:` owes no store");
+    // The control: the same `ensure:` in an instance method stores, and
+    // fails without its foreign clause.
+    let both = format!("{header}{class_methods}\n{instance_method}");
+    let code = compile(&both).expect("compiles with the verifier on");
+    assert!(
+        code.contains("_EnsureForeignNlr") && code.contains("'beamtalk_actor_state':'store'"),
+        "the instance method's `ensure:` has no foreign clause:\n{code}"
+    );
+    let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&both)).err();
+    assert!(
+        report
+            .as_deref()
+            .is_some_and(|r| r.contains("EnsureForeignCleanupNotStored")),
+        "with no foreign clause, expected EnsureForeignCleanupNotStored, got {report:?}"
+    );
+    if erlc_available() {
+        assert_compiles_through_erlc("test", &code);
+    }
 }
 
 /// BT-4429: `Block>>ensure:` reached dynamically (`perform:`) compiles to the

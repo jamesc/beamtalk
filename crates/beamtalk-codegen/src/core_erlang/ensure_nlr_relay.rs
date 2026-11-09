@@ -33,8 +33,16 @@
 //!   binding cannot be stored, ADR 0133) or a value type's `Self` (a closure
 //!   cannot assign its fields), so there nothing is relayed.
 //! - **A `^` of another scope** (a block created by another method) carries
-//!   that scope's state, not this one's: it takes the error path and is
-//!   re-raised as it came.
+//!   that scope's state, not this one's, and is re-raised as it came. Where
+//!   the actor-state cell is live (an actor instance method's threaded body)
+//!   it takes the foreign clause (ADR 0146 R1, [`EnsureForeignNlr`]): the
+//!   cleanup runs from the cell and its final `StateAcc` is stored to the
+//!   cell before the re-raise, so a scope that unwinds by a `^` it does not
+//!   own leaves the cell holding its final version. The error path cannot:
+//!   it runs with write-through off, so its writes die with the re-raise.
+//!   Elsewhere (a class method running in its caller, ADR 0142, a value
+//!   type, the REPL) there is no actor `State` to store, and in a closure the
+//!   state already is the cell; there it takes the error path.
 //! - **`Block>>ensure:` reached dynamically** (`perform:`, BT-4429). Its
 //!   structural-fallback body runs in the Block method, where every `^` is of
 //!   another scope and its state kind is known only at run time
@@ -66,8 +74,8 @@
 
 use super::generator::CoreErlangGenerator;
 use super::threaded_ir::{
-    self, EnsureCatchVars, EnsureCleanup, EnsureNlrRelay, NlrCarry, RenderCtx, RethrowSlot,
-    ThreadedStmt, TokenId,
+    self, EnsureCatchVars, EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, NlrCarry, RenderCtx,
+    RethrowSlot, ThreadedStmt, TokenId,
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
@@ -88,21 +96,29 @@ impl CoreErlangGenerator {
     /// Builds, verifies and renders the catch of a compiled `ensure:`
     /// ([`ThreadedStmt::EnsureCatch`]): `other` is the error path (the cleanup
     /// and the re-raise), `relay` the `$bt_nlr` clause for the scope's own
-    /// throw, `carry` what that throw carries (with whether the construct's
-    /// scratch map is private, which the verifier reads to exempt it) and
-    /// `cleanup` how the cleanup runs (inlined, ending at a version of the
-    /// carried family, or as a closure). The single owner of every compiled `ensure:` catch.
+    /// throw, `foreign` (ADR 0146 R1) the one every other `$bt_nlr` throw
+    /// takes where the actor-state cell is live (`cell_live`), `carry` what
+    /// the scope's throw carries (with whether the construct's scratch map is
+    /// private, which the verifier reads to exempt it) and `cleanup` how the
+    /// cleanup runs (inlined, ending at a version of the carried family, or
+    /// as a closure). The single owner of every compiled `ensure:` catch.
     pub(in crate::core_erlang) fn ensure_catch(
         &mut self,
         triple: EnsureCatchTriple,
-        (carry, private_scratch): (Option<NlrCarry>, bool),
+        (carry, private_scratch, cell_live): (Option<NlrCarry>, bool, bool),
         cleanup: EnsureCleanup,
-        relay: Option<EnsureNlrRelay>,
+        (relay, foreign): (Option<EnsureNlrRelay>, Option<EnsureForeignNlr>),
         other: Document<'static>,
         span: Span,
     ) -> Document<'static> {
+        let foreign = match fault::active() {
+            // The catch before ADR 0146 R1: a foreign `^` takes the error
+            // path, whose cleanup's writes die with the re-raise.
+            Some(fault::RelayFault::ForeignOnErrorPath) => None,
+            _ => foreign,
+        };
         let relay = match fault::active() {
-            None => relay,
+            None | Some(fault::RelayFault::ForeignOnErrorPath) => relay,
             Some(fault::RelayFault::NoRelay) => None,
             // The relay before review: a cell-carried throw resumed with what
             // a `^` at this site would carry, rebuilt from the site's bindings.
@@ -135,12 +151,21 @@ impl CoreErlangGenerator {
                 Some(var) => var,
                 None => nlr_var(self, "EnsureCarried"),
             },
-            other_pair_var: nlr_var(self, "EnsureOther"),
+            other_pair_var: if relay.is_some() || foreign.is_some() {
+                self.fresh_temp_var("EnsureOther")
+            } else {
+                String::new()
+            },
             cell_snapshot_var: match &relay {
                 Some(relay) if relay.rethrow == RethrowSlot::CellIfCarried => {
                     self.fresh_temp_var("EnsureCellSnap")
                 }
                 _ => String::new(),
+            },
+            foreign_nlr_var: if foreign.is_some() {
+                self.fresh_temp_var("EnsureForeignNlr")
+            } else {
+                String::new()
             },
             type_var: triple.type_var,
             error_var: triple.error_var,
@@ -153,6 +178,8 @@ impl CoreErlangGenerator {
             private_scratch,
             cleanup,
             relay,
+            cell_live,
+            foreign,
             other,
             span,
         }];
@@ -175,6 +202,8 @@ impl CoreErlangGenerator {
 
 /// Test-only: compiles `ensure:` with its `$bt_nlr` relay as it was before a
 /// fix, so [`VerifyError::EnsureCleanupLostOnNlr`](super::threaded_ir::VerifyError::EnsureCleanupLostOnNlr)
+/// (and, for the foreign clause,
+/// [`VerifyError::EnsureForeignCleanupNotStored`](super::threaded_ir::VerifyError::EnsureForeignCleanupNotStored))
 /// can be shown to fire on a real compile
 /// (`beamtalk-repl/tests/repl_loop_body_return.rs`,
 /// `tests/ensure_relay_corpus.rs`). Compiled for this crate's tests and for
@@ -198,6 +227,11 @@ pub mod fault {
         /// it builds.
         #[cfg(any(test, feature = "test"))]
         RebuildAtSite,
+        /// ADR 0146 R1: no foreign clause. A `^` of another method of the
+        /// same actor takes the error path, which runs the cleanup with
+        /// write-through off and re-raises, so the cleanup's writes never
+        /// reach the cell (`VerifyError::EnsureForeignCleanupNotStored`).
+        ForeignOnErrorPath,
     }
 
     #[cfg(any(test, feature = "test"))]
