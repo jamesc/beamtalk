@@ -1,6 +1,6 @@
 # Single source of truth for the OTP support window (ADR 0125 §3.1).
 #
-# Supported = max(27, current_major - 1) .. current_major. When a new OTP
+# Supported = current_major - 1 .. current_major. When a new OTP
 # major ships, bump max-major and min-major together — dropping the oldest
 # major is a minor-version release note, not a breaking change. Every
 # consumer (`beamtalk doctor`, `beamtalk build`/`release`, the CI matrix, the

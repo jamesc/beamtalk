@@ -1010,11 +1010,14 @@ contributor's `mise`/`asdf` installs, and one enforced number beats a second
 lookup path. Per-major artifacts are unnecessary.
 
 Below the window is therefore not "untested" but a guaranteed boot crash,
-so it fails fast everywhere: `beamtalk doctor` reports `Erlang/OTP 27 is
-unsupported — Beamtalk needs OTP 28+`, and every command that boots a node
-on the toolchain's code (`build`, `check`, the build worker, the workspace
-node behind `repl`/`run`) stops with the same line before starting `erl`.
-Above the window stays a warning.
+so it fails fast: `beamtalk doctor` reports `Erlang/OTP 27 is
+unsupported — Beamtalk needs OTP 28+`, and the commands whose node must
+load the toolchain's code (`build`, `check`, every compile through
+`BeamCompiler::compile_batch`, and the workspace node behind `repl`/`run`)
+stop with the same line before starting `erl`. OTP type-spec extraction
+(`lint`, `type-coverage`, `warm-otp-cache`) is not guarded: a failed
+extraction degrades those types to `Dynamic` rather than crashing. Above
+the window stays a warning.
 
 **History.** The window was 27–28 when this ADR was accepted. OTP 29 moved
 it to 28–29 (BT-4605); dropping 27 was recorded as a release note.

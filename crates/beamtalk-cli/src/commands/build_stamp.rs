@@ -60,8 +60,9 @@ pub(crate) fn current_otp_version() -> Option<&'static str> {
 /// The toolchain's `.beam` files are built on `min-major`, and BEAM bytecode
 /// never loads on an older release, so booting a node on the toolchain's code
 /// below the floor dies with ERTS's `requires a more recent Erlang/OTP
-/// version` crash. Every command that boots such a node (the build worker,
-/// the workspace node) calls this first, so the user gets the same
+/// version` crash. The paths that must boot such a node (`build`, `check`,
+/// `BeamCompiler::compile_batch`, the workspace node) call this first, so
+/// the user gets the same
 /// "unsupported, need N+" line `beamtalk doctor` prints instead. Fails open
 /// (`Ok`) when the OTP major cannot be probed, matching every other consumer
 /// of [`current_otp_version`]; above the window is only a warning

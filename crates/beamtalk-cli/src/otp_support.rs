@@ -120,9 +120,9 @@ pub fn major_from_version_str(version: &str) -> Option<u32> {
 /// §3.1 — `.tool-versions` pins it, enforced by a test below), and BEAM
 /// bytecode never loads on an *older* release (§3.2). So below the floor
 /// is not "untested", it is a guaranteed boot crash (`requires a more recent
-/// Erlang/OTP version`). `beamtalk doctor` reports this message and every
-/// command that boots a BEAM node on the toolchain's code fails fast with it
-/// rather than letting the node crash. Above the window stays a warning:
+/// Erlang/OTP version`). `beamtalk doctor` reports this message, and the
+/// compile and workspace paths fail fast with it rather than letting the
+/// node crash. Above the window stays a warning:
 /// newer releases load older bytecode.
 #[must_use]
 pub fn below_floor_message(major: u32) -> Option<String> {
