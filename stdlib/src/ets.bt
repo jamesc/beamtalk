@@ -118,6 +118,7 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   ///
   /// ## Examples
   /// ```beamtalk
+  /// // Both lines must run in the same process (one REPL input or one method body).
   /// secrets := Ets private: #set
   /// secrets at: "nonce" put: "abc"
   /// ```
