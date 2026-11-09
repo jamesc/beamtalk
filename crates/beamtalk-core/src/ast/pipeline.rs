@@ -54,10 +54,23 @@ use crate::span::Span;
 /// Keyed by the send's span; each entry holds the comments written between
 /// the previous stage and the `|>` (see the module docs). Empty for code with
 /// no pipeline. Ordered by source position, so its `Debug` form (which tree
-/// comparisons in tests read) is deterministic.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// comparisons in tests read) is deterministic; that form shows each key as a
+/// [`Span`], like every other position in the tree.
+#[derive(Clone, Default, PartialEq)]
 pub struct PipelineSends {
     sends: BTreeMap<(u32, u32), CommentAttachment>,
+}
+
+impl std::fmt::Debug for PipelineSends {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(
+                self.sends
+                    .iter()
+                    .map(|(&(start, end), comments)| (Span::new(start, end), comments)),
+            )
+            .finish()
+    }
 }
 
 fn key(span: Span) -> (u32, u32) {

@@ -134,6 +134,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 649,
                         end: 685,
@@ -266,6 +267,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 689,
                         end: 760,
@@ -322,6 +324,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 764,
                         end: 792,
@@ -442,4 +445,5 @@ Module {
     },
     file_leading_comments: [],
     file_trailing_comments: [],
+    pipeline_sends: {},
 }

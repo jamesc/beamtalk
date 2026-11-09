@@ -6,9 +6,11 @@
 //! each send the owning definition's record names.
 
 use super::common::*;
-use crate::ast::normalize::{peel_operand_parens_recording, restore_operand_parens};
+use crate::ast::normalize::{
+    peel_operand_parens, peel_operand_parens_recording, restore_operand_parens,
+};
 use crate::ast::{MethodDefinition, PipelineSends};
-use crate::test_helpers::test_support::parse_bt;
+use crate::test_helpers::test_support::{parse_bt, without_spans};
 
 const CLASS: &str = "\
 Object subclass: Piper
@@ -98,4 +100,21 @@ fn comments_between_stages_round_trip() {
         "x foo  // after foo\n  // before bar\n  |> bar  // after bar\n  |> baz  // after baz\n",
     );
     assert_idempotent("x foo  // after foo\n  |> bar\n  |> baz\n");
+}
+
+#[test]
+fn a_peeled_pipeline_argument_gets_its_parentheses_back() {
+    // The operand peel removes `( … )` around a send argument; unparse must
+    // add them back around a pipeline, or `|>` would pipe the whole send.
+    let source = "x at: (a |> foo)\ny bar: (a foo: 1 |> baz) + (b |> c)\nz foo; at: (a |> d)\n";
+    let mut module = parse_bt(source);
+    peel_operand_parens(&mut module);
+    let text = unparse_module(&module);
+    let mut reparsed = parse_bt(&text);
+    peel_operand_parens(&mut reparsed);
+    assert_eq!(
+        without_spans(&reparsed),
+        without_spans(&module),
+        "re-parse of the peeled unparse differs:\n{text}"
+    );
 }

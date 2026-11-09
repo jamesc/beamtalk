@@ -1605,8 +1605,10 @@ enum OperandSlot<'a> {
     BinaryReceiver(&'a str),
     /// The argument of a binary send with this operator.
     BinaryArgument(&'a str),
-    /// A keyword send's receiver or argument.
+    /// A keyword send's receiver.
     KeywordOperand,
+    /// A keyword send's argument.
+    KeywordArgument,
 }
 
 impl<'a> OperandSlot<'a> {
@@ -1621,9 +1623,14 @@ impl<'a> OperandSlot<'a> {
     fn argument_of(selector: &'a MessageSelector) -> Self {
         match selector {
             // A unary send has no arguments; keyword is the conservative answer.
-            MessageSelector::Unary(_) | MessageSelector::Keyword(_) => Self::KeywordOperand,
+            MessageSelector::Unary(_) | MessageSelector::Keyword(_) => Self::KeywordArgument,
             MessageSelector::Binary(op) => Self::BinaryArgument(op),
         }
+    }
+
+    /// Whether this slot is a send's argument (rather than its receiver).
+    const fn is_argument(self) -> bool {
+        matches!(self, Self::BinaryArgument(_) | Self::KeywordArgument)
     }
 
     /// Whether `expr` must be parenthesised to re-parse as this slot's
@@ -1633,13 +1640,22 @@ impl<'a> OperandSlot<'a> {
     /// ([`binary_binding_power`]): Beamtalk binary operators have math
     /// precedence, not Smalltalk's flat left-to-right order, so `(a + b) * c`
     /// keeps its parentheses while `(a * b) + c` and `a + (b * c)` do not.
+    ///
+    /// A pipeline (ADR 0145) prints as `head |> stage`, and `|>` binds looser
+    /// than every message, so as an argument it must be parenthesised
+    /// whatever its own shape: `x at: (a |> foo)`. As a receiver it needs
+    /// nothing extra: a message after it extends its last stage, which is the
+    /// same tree.
     fn needs_parens(self, expr: &Expression) -> bool {
+        if self.is_argument() && starts_with_pipeline(expr) {
+            return true;
+        }
         match OperandShape::of(expr) {
             OperandShape::Tight => false,
             OperandShape::Loose => true,
             OperandShape::Binary(inner) => match self {
                 Self::UnaryReceiver => true,
-                Self::KeywordOperand => false,
+                Self::KeywordOperand | Self::KeywordArgument => false,
                 // `inner`'s chain swallows `outer` when `outer` binds its
                 // left operand at least as tightly as `inner` binds its right.
                 Self::BinaryReceiver(outer) => {
@@ -1848,10 +1864,39 @@ impl Drop for PipelineScope {
     }
 }
 
+/// Whether the send spanning `span` was written with `|>`.
+fn is_pipeline_send(span: Span) -> bool {
+    PIPELINE_SENDS.with(|current| current.borrow().contains(span))
+}
+
 /// The comments written before the `|>` of the send spanning `span`, or
 /// `None` if that send was not written with `|>`.
 fn pipeline_comments(span: Span) -> Option<CommentAttachment> {
     PIPELINE_SENDS.with(|current| current.borrow().comments(span).cloned())
+}
+
+/// Whether `expr` prints as a pipeline: whether a send on its receiver
+/// spine (itself, its receiver, that one's receiver, …) was written with
+/// `|>`. A parenthesised receiver ends the spine: it is self-delimiting.
+fn starts_with_pipeline(expr: &Expression) -> bool {
+    let mut current = expr;
+    loop {
+        match current {
+            Expression::MessageSend { receiver, span, .. } => {
+                if is_pipeline_send(*span) {
+                    return true;
+                }
+                current = receiver;
+            }
+            Expression::Match { value, span, .. } => {
+                if is_pipeline_send(*span) {
+                    return true;
+                }
+                current = value;
+            }
+            _ => return false,
+        }
+    }
 }
 
 /// The receiver half of a send written with `|>`: the previous stage as

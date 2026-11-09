@@ -116,6 +116,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 279,
                         end: 304,
@@ -161,6 +162,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 308,
                         end: 339,
@@ -235,6 +237,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 359,
                         end: 402,
@@ -309,6 +312,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 442,
                         end: 475,
@@ -373,6 +377,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 479,
                         end: 518,
@@ -447,6 +452,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 560,
                         end: 595,
@@ -511,6 +517,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 599,
                         end: 648,
@@ -575,6 +582,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 652,
                         end: 697,
@@ -649,6 +657,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 717,
                         end: 762,
@@ -704,6 +713,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 782,
                         end: 811,
@@ -768,6 +778,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 815,
                         end: 855,
@@ -842,6 +853,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 874,
                         end: 903,
@@ -917,4 +929,5 @@ Module {
     },
     file_leading_comments: [],
     file_trailing_comments: [],
+    pipeline_sends: {},
 }
