@@ -72,6 +72,35 @@ fn trailing_single_with_cascade_is_silent() {
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
+/// A hand-written `with*:` method with no `-> Self` annotation gives the
+/// type checker nothing to prove the drop with, so `cascade-drops-update`
+/// stays silent — and the `setUp` check's generic warning still fires, so
+/// the lost update is never unreported.
+#[test]
+fn unannotated_hand_written_with_star_cascade_keeps_setup_warning() {
+    let source = "TestCase subclass: AbTest\n  field: a :: Integer = 0\n  field: b :: Integer = 0\n\n  \
+                  withBoth: x => (self withA: x) withB: x\n\n  \
+                  setUp =>\n    self withBoth: 1; withB: 2\n\n  \
+                  testA => self assert: self a equals: 1\n";
+    let (module, parse_diags) = parse(lex_with_eof(source));
+    let diags = compute_diagnostics(&module, parse_diags);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly one diagnostic, got: {diags:#?}"
+    );
+    assert_eq!(
+        diags[0].category,
+        Some(DiagnosticCategory::Lint),
+        "got: {diags:#?}"
+    );
+    assert!(
+        diags[0].message.contains("silently dropped"),
+        "got: {}",
+        diags[0].message
+    );
+}
+
 #[test]
 fn nested_with_form_is_silent() {
     let (_, diags) = compile_setup("    (self withA: 1) withB: 2");
