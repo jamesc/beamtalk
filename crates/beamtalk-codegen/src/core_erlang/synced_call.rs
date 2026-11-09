@@ -361,13 +361,23 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// with no cover runs with a stale cell, and is a
     /// [`VerifyError::UnbracketedNlrClosure`].
     pub(in crate::core_erlang) nlr_operands: std::collections::HashMap<Span, String>,
-    /// BT-4524: how many lowerings that store the threaded state before the
-    /// call that runs their closures enclose the code being compiled
-    /// ([`CoreErlangGenerator::with_nlr_closure_cover`]).
-    pub(in crate::core_erlang) nlr_cover: usize,
+    /// BT-4524: the block literals (by span) whose call stores the threaded
+    /// state before it runs them, for the lowerings that enclose the code
+    /// being compiled ([`CoreErlangGenerator::with_nlr_closure_cover`]).
+    pub(in crate::core_erlang) nlr_cover: Vec<Span>,
     /// BT-4524: `^`-holding closures compiled with no store before the call
     /// that runs them, reported as [`VerifyError::UnbracketedNlrClosure`].
     pub(in crate::core_erlang) nlr_closure_gaps: Vec<UnbracketedSend>,
+}
+
+/// BT-4524/BT-4532: a pre-store decided for a call that runs a `^`-holding
+/// block as a closure ([`CoreErlangGenerator::nlr_closure_prestore`]),
+/// emitted around the call by
+/// [`CoreErlangGenerator::nlr_closure_prestored_call`].
+#[derive(Debug)]
+pub(in crate::core_erlang) struct NlrPrestore {
+    source: ActorStateSource,
+    at: Span,
 }
 
 /// BT-4279: a fast path offered by a guarded send's emitter
@@ -396,7 +406,7 @@ impl SyncedCallState {
             window_receivers: Vec::new(),
             pending_fast_path: None,
             nlr_operands: std::collections::HashMap::new(),
-            nlr_cover: 0,
+            nlr_cover: Vec::new(),
             nlr_closure_gaps: Vec::new(),
         }
     }
@@ -713,6 +723,19 @@ impl CoreErlangGenerator {
             SendUserCode::Never => UserCodeCall::No,
             SendUserCode::Inlined => self.classify_inlined(receiver, selector, arguments),
             SendUserCode::MayRun => UserCodeCall::Yes,
+            // BT-4532 (ADR 0146): a construct runs a value that is not a block
+            // literal as a closure; it may be any block, one holding a `^` of
+            // this method included, so the call is entered with the state
+            // stored. The one rule for every operand that may be a block (a
+            // variable, a parameter, any expression): a literal is judged by
+            // the construct that knows whether it inlines it.
+            SendUserCode::ClosureOperand => {
+                if nlr_closures_store_first() {
+                    UserCodeCall::Yes
+                } else {
+                    UserCodeCall::No
+                }
+            }
             // A fold the block analysis threads is lowered in place (its
             // statements are bracketed where they are compiled); one it does
             // not is `lists:foreach(Closure, List)` with a send fallback: a call.
@@ -944,7 +967,7 @@ impl CoreErlangGenerator {
         }
         let class = self.classify_send(receiver, selector, arguments, is_cast);
         if class == UserCodeCall::No && !is_cast && self.synced.window_depth == 0 {
-            self.note_nlr_operands(receiver, selector, arguments);
+            self.note_nlr_operands(receiver, selector, arguments, at);
         }
         if matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend) {
             return;
@@ -973,12 +996,26 @@ impl CoreErlangGenerator {
     /// `^` rule: what decides a finding is whether the lowering then compiles
     /// such a block as a closure ([`Self::check_nlr_closure`]). A cast runs
     /// nothing here and records nothing.
+    ///
+    /// BT-4532 (ADR 0146): an operand the send runs as a closure that is not
+    /// a block literal ([`SendUserCode::ClosureOperand`]: a block variable or
+    /// parameter, or any expression) may hold a `^` of this method whatever
+    /// its value turns out to be, and there is no block to check later: the
+    /// send itself is the finding, a [`VerifyError::UnbracketedNlrClosure`]
+    /// at `at`. Read off the shared selector table directly, not the
+    /// classifier's answer, so a path that classifies such a send `No` before
+    /// reaching the table is caught too.
     fn note_nlr_operands(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         arguments: &[Expression],
+        at: Span,
     ) {
+        if send_user_code(receiver, selector, arguments) == SendUserCode::ClosureOperand {
+            let gap = self.make_unbracketed_send(selector.name().to_string(), at);
+            self.synced.nlr_closure_gaps.push(gap);
+        }
         let blocks =
             std::iter::once(receiver)
                 .chain(arguments)
@@ -1014,23 +1051,27 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4524: runs `f` (which compiles the closures of a call that stores
-    /// the threaded state before it runs them) as covered: a `^`-holding
-    /// operand compiled as a closure inside is not a finding. The callers are
-    /// the conditional fallback's pre-store or bracket and `on:do:`'s
-    /// closure path (whose catch boundary stores the pre-region `State` on
-    /// entry).
+    /// the threaded state before it runs them) with `blocks` covered: one of
+    /// them holding a `^`, compiled as a closure inside, is not a finding.
+    /// The callers are the conditional fallback's pre-store or bracket, an
+    /// unbracketed runtime dispatch's pre-store, and `on:do:`'s closure path
+    /// (whose catch boundary stores the pre-region `State` on entry).
+    ///
+    /// BT-4532: the cover names the block literals the store vouches for, by
+    /// span, and nothing else `f` compiles. A `^`-holding closure of some
+    /// other send nested in a non-block operand (`f` compiles every operand)
+    /// is run by that send, which has to store for itself, and is still
+    /// checked; it runs while the operands are evaluated, before a pre-store
+    /// that follows them.
     pub(in crate::core_erlang) fn with_nlr_closure_cover<T>(
         &mut self,
-        covered: bool,
+        blocks: &[Span],
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        if covered {
-            self.synced.nlr_cover += 1;
-        }
+        let depth = self.synced.nlr_cover.len();
+        self.synced.nlr_cover.extend_from_slice(blocks);
         let out = f(self);
-        if covered {
-            self.synced.nlr_cover -= 1;
-        }
+        self.synced.nlr_cover.truncate(depth);
         out
     }
 
@@ -1044,16 +1085,17 @@ impl CoreErlangGenerator {
         let Some(selector) = self.synced.nlr_operands.remove(&at) else {
             return;
         };
-        if self.synced.window_depth > 0 || self.synced.nlr_cover > 0 {
+        if self.synced.window_depth > 0 || self.synced.nlr_cover.contains(&at) {
             return;
         }
         let gap = self.make_unbracketed_send(selector, at);
         self.synced.nlr_closure_gaps.push(gap);
     }
 
-    /// BT-4524: whether [`Self::nlr_closure_prestore`] stores for `blocks`:
-    /// one holds a `^` and the cell protocol applies (an actor instance
-    /// method, outside an actor closure).
+    /// BT-4524: whether a call that runs `blocks` as closures stores first
+    /// for them ([`Self::nlr_closure_prestore`]): one holding a `^` and the
+    /// cell protocol applies (an actor instance method, outside an actor
+    /// closure).
     pub(in crate::core_erlang) fn nlr_closure_prestore_applies(
         &self,
         blocks: &[&beamtalk_core::ast::Block],
@@ -1063,31 +1105,73 @@ impl CoreErlangGenerator {
             && blocks.iter().any(|block| block_returns_from_scope(block))
     }
 
-    /// BT-4524: the store a call that runs `blocks` as closures makes first
-    /// when one of them holds a `^` (ADR 0146 P0), for a call no bracket
-    /// covers (a conditional's non-Boolean fallback send): the state an
-    /// inline `^` here would store (`StateReadSite::NlrThrowState`), so the
-    /// closure's throw, which carries the cell, carries it. `None` when no
-    /// block holds a `^` or the cell protocol does not apply; `Some(Nil)` when
-    /// the cell is already the source (a bracketed region).
+    /// BT-4524: the store a call no bracket covers (a conditional's
+    /// non-Boolean fallback send, an unbracketed runtime dispatch) makes
+    /// before it runs `blocks` as closures, when one of them holds a `^`
+    /// (ADR 0146 P0): the state an inline `^` here would store
+    /// (`StateReadSite::NlrThrowState`), so the closure's throw, which
+    /// carries the cell, carries it. Decided before the closures compile
+    /// (their cover depends on it) and emitted around the call by
+    /// [`Self::nlr_closure_prestored_call`]. `None` when no block holds a `^`
+    /// or the cell protocol does not apply.
     pub(in crate::core_erlang) fn nlr_closure_prestore(
         &self,
         blocks: &[&beamtalk_core::ast::Block],
         at: Span,
-    ) -> Option<Document<'static>> {
+    ) -> Option<NlrPrestore> {
         if !self.nlr_closure_prestore_applies(blocks) {
             return None;
         }
-        Some(
-            match self.actor_state_source(StateReadSite::NlrThrowState, at) {
-                ActorStateSource::Cell => Document::Nil,
-                ActorStateSource::Var(var) => docvec![
-                    "let _ = ",
-                    super::threaded_ir::cell_put_call(leaf::var(var)),
-                    " in ",
-                ],
-            },
-        )
+        Some(NlrPrestore {
+            source: self.actor_state_source(StateReadSite::NlrThrowState, at),
+            at,
+        })
+    }
+
+    /// BT-4532: `call` preceded by `prestore`'s store, built as the
+    /// store-only [`ThreadedStmt::SyncedCall`] node (no reload: a closure
+    /// that only returns writes nothing the method has to read back) and
+    /// verified like every other bracket. The node is a self-contained slice, like
+    /// [`Self::bracket_conditional_fallback`]'s: its gensym store renders
+    /// verbatim from the root frame. Where the cell is already the source (a
+    /// bracketed region) there is nothing to store and `call` is unchanged.
+    ///
+    /// The store runs on every execution of the call, not only when a
+    /// closure's `^` fires: whether the callee runs the closure, and whether
+    /// the `^` then throws, is decided at run time by code this method did
+    /// not compile, and by the time the `^` throws the cell has to hold the
+    /// method's state plus whatever the call wrote to it in between (a
+    /// closure's field write, an aliased self-send's). Storing at the throw
+    /// instead would have to merge the two, the runtime reconciliation
+    /// ADR 0146 removes. The store is one process-dictionary write.
+    pub(in crate::core_erlang) fn nlr_closure_prestored_call(
+        &mut self,
+        prestore: NlrPrestore,
+        call: Document<'static>,
+    ) -> Document<'static> {
+        let ActorStateSource::Var(var) = prestore.source else {
+            return call;
+        };
+        let node = ThreadedStmt::SyncedCall {
+            store: VersionedVar::new(VersionPrefix::Gensym(var), 0, FrameId::ROOT),
+            call,
+            result: None,
+            load: None,
+            span: prestore.at,
+            tier2_local_rebinds: Vec::new(),
+            // The store is the read choke point's answer for a `^`
+            // (`StateReadSite::NlrThrowState`), never a frame's scratch
+            // `StateAcc`: in a direct-params or tuple-accumulator loop it is
+            // the whole `State` the loop captured on entry, the one an inline
+            // `^` there carries, and its staleness under a loop bracket is
+            // that site's record (`StaleReadInBracketedLoop`).
+            on_private_scratch: false,
+            fast_path: None,
+        };
+        let errors = self.verify_threaded_ir(std::slice::from_ref(&node));
+        self.report_threaded_ir_verify_errors(&errors, "`^`-closure pre-store", prestore.at);
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        super::threaded_ir::render(&[node], &mut ctx)
     }
 
     /// In count-only test mode, accepts a verifier finding instead of failing

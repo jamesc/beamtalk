@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4532: a block held in a variable or parameter, not a literal, passed to
+// a call that runs it as a closure. The block's `^` carries the cell, so the
+// call must enter with the method's state stored (ADR 0146). See
+// bt4532block_operand_test.bt.
+
+Actor subclass: Bt4532BlockOperandActor
+  state: x = 0
+  state: seen = 0
+
+  // The `bar:` example: `^1` belongs to `viaParameter`; `bar:` writes `x`
+  // and then hands the block on as a parameter.
+  viaParameter =>
+    self bar: [^1]
+    0
+
+  bar: blk =>
+    self.x := 7
+    3 timesRepeat: blk
+    0
+
+  // The same through a block variable of the method that owns the `^`.
+  viaVariable =>
+    blk := [^2]
+    self.x := 7
+    3 timesRepeat: blk
+    0
+
+  // The same as a loop body that runs the variable.
+  viaVariableInLoop =>
+    blk := [^3]
+    self.x := 7
+    1 to: 3 do: [:i | blk value]
+    0
+
+  currentX => self.x

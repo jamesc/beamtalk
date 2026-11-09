@@ -110,7 +110,11 @@ when the block touches nothing else of the actor's: the closure's `^` carries
 the cell, so the cell must hold the method's `State` first (ADR 0146 P0,
 BT-4524). A call no bracket covers (a conditional's non-Boolean fallback
 send, a conditional the compiler does not inline) stores that `State` just
-before it instead.
+before it instead, through a store-only `SyncedCall` node. The rule holds for
+every operand that may be a block, not only literals (BT-4532): a construct
+handed a block variable or parameter where it runs a block (`blk value`,
+`3 timesRepeat: blk`, `xs do: blk`, `[…] ensure: blk`) runs whatever that
+value is as a closure, so it is bracketed like any call into user code.
 
 Three kinds of call need no bracket. A construct the compiler lowers in place
 (`ifTrue:`, an inlined `do:`, `whileTrue:`, …) is not a call. An intrinsic or

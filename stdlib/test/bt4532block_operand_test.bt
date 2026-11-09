@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4532 (ADR 0146): a call that may run a block held in a variable or
+// parameter, not only a literal, is entered with the method's state stored
+// to the cell, so the block's `^` keeps the method's earlier field writes.
+// `testBlockParameterKeepsTheWrite` is the issue's `bar:` example: the `^`
+// belongs to another method, and the cell holds `x = 7` when it throws, so
+// the method it returns to commits 7. Fixture:
+// fixtures/bt4532block_operand_actor.bt.
+
+TestCase subclass: Bt4532BlockOperandTest
+
+  testBlockParameterKeepsTheWrite =>
+    a := Bt4532BlockOperandActor spawn
+    self assert: a viaParameter equals: 1
+    self assert: a currentX equals: 7
+
+  testBlockVariableKeepsTheWrite =>
+    a := Bt4532BlockOperandActor spawn
+    self assert: a viaVariable equals: 2
+    self assert: a currentX equals: 7
+
+  testBlockVariableInLoopKeepsTheWrite =>
+    a := Bt4532BlockOperandActor spawn
+    self assert: a viaVariableInLoop equals: 3
+    self assert: a currentX equals: 7
