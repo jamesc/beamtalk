@@ -588,6 +588,42 @@ live_registry_test_() ->
                 %% find_defining_class_method walks the class-side tables.
                 {beamtalk_string, H} = beamtalk_interface:help('Integer', new),
                 ?assertNotEqual(nomatch, binary:match(H, <<"new">>))
+            end},
+            {"help: lists own class methods with their signatures (BT-4166)", fun() ->
+                %% Binary's factories are class-side only; before BT-4166
+                %% `help:` never mentioned them, so a parameter type like
+                %% `List(Integer)` was only learnable from a compile error.
+                {beamtalk_string, H} = beamtalk_interface:help('Binary'),
+                ?assertNotEqual(nomatch, binary:match(H, <<"\nClass methods:\n">>)),
+                ?assertNotEqual(
+                    nomatch,
+                    binary:match(H, <<"\n  fromBytes: bytes :: List(Integer) -> Binary">>)
+                )
+            end},
+            {"help: lists class methods for a class-side-only facade (BT-4166)", fun() ->
+                %% Logger has no instance methods of its own — every method
+                %% is class-side, and `help:` used to list none of them.
+                {beamtalk_string, H} = beamtalk_interface:help('Logger'),
+                ?assertEqual(nomatch, binary:match(H, <<"Instance methods:">>)),
+                ?assertNotEqual(nomatch, binary:match(H, <<"\nClass methods:\n">>)),
+                ?assertNotEqual(nomatch, binary:match(H, <<"\n  info: message :: String">>))
+            end},
+            {"help: summarises inherited class methods by defining class (BT-4166)", fun() ->
+                {beamtalk_string, H} = beamtalk_interface:help('Integer'),
+                ?assertNotEqual(
+                    nomatch, binary:match(H, <<"\nInherited class methods from Value (">>)
+                ),
+                %% Inherited class methods are summarised, not listed as own.
+                [_, ClassSection] = binary:split(H, <<"\nClass methods:\n">>),
+                [OwnClassLines | _] = binary:split(ClassSection, <<"\nInherited">>),
+                ?assertEqual(nomatch, binary:match(OwnClassLines, <<"  new">>))
+            end},
+            {"help:selector: on a class method carries its doc comment (BT-4166)", fun() ->
+                {beamtalk_string, H} = beamtalk_interface:help('Binary', 'fromBytes:'),
+                ?assertNotEqual(
+                    nomatch, binary:match(H, <<"fromBytes: bytes :: List(Integer) -> Binary">>)
+                ),
+                ?assertNotEqual(nomatch, binary:match(H, <<"Create a binary from a list">>))
             end}
         ]
     end}.
