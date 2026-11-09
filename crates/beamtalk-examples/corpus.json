@@ -3603,7 +3603,7 @@
         "process",
         "set"
       ],
-      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
+      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache\n\n// Unnamed tables, owned by the caller\nsecrets := Ets private: #set      // only this process may use it\nboard := Ets protected: #set      // others may read, only this process writes",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -3623,6 +3623,40 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-330",
+      "title": "Creating a Table (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Actor",
+        "SessionStore",
+        "actor",
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "claim:",
+        "concurrent",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "initialize",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "remember:state:",
+        "set",
+        "subclassing"
+      ],
+      "source": "Actor subclass: SessionStore\n  state: table :: Ets\n\n  initialize -> Nil =>\n    self.table := Ets private: #set\n    nil\n\n  remember: id state: s => self.table at: id put: s\n  claim: id => self.table removeKey: id ifAbsent: [nil]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-331",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3632,17 +3666,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-333",
+      "id": "docs-beamtalk-language-features-block-334",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "cache size                      // => number of entries\ncache isEmpty                   // => true if no entries\ncache isNotEmpty                // => true if at least one entry\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache removeAll                 // remove all entries, keep the table\ncache delete                    // destroy the table; frees all memory",
+      "source": "cache size                      // => number of entries\ncache isEmpty                   // => true if no entries\ncache isNotEmpty                // => true if at least one entry\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache removeKey: \"key\" ifAbsent: [nil]  // atomically remove and answer the value (ets:take)\ncache removeAll                 // remove all entries, keep the table\ncache delete                    // destroy the table; frees all memory",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-334",
+      "id": "docs-beamtalk-language-features-block-335",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3665,7 +3699,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-336",
+      "id": "docs-beamtalk-language-features-block-337",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3680,7 +3714,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-337",
+      "id": "docs-beamtalk-language-features-block-338",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3690,7 +3724,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-339",
+      "id": "docs-beamtalk-language-features-block-340",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3703,7 +3737,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-340",
+      "id": "docs-beamtalk-language-features-block-341",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3726,7 +3760,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-341",
+      "id": "docs-beamtalk-language-features-block-342",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3754,7 +3788,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-342",
+      "id": "docs-beamtalk-language-features-block-343",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3782,7 +3816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-345",
+      "id": "docs-beamtalk-language-features-block-346",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3813,7 +3847,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-346",
+      "id": "docs-beamtalk-language-features-block-347",
       "title": "Shared Tests — Abstract Test Cases (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -3841,7 +3875,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-347",
+      "id": "docs-beamtalk-language-features-block-348",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
