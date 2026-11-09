@@ -468,7 +468,7 @@ brings the fast path back. `new` needs no chain check because `new/0` is
 itself the override slot (a custom `new` compiles to, or delegates from, it),
 so the direct call and the gen_server path reach the same function either
 way; an ancestor's class-side `new` extension does not shadow the class's own
-synthesized `new`, as on the class-process path.
+synthesized `new` (whether an ancestor's `new:` extension should is BT-4588).
 
 The class, its tag and module (or the decline) are memoised per class pid and
 selector in `beamtalk_class_derived_cache` (`{direct_constructor, ClassPid,
@@ -757,10 +757,7 @@ find_class_side_method(Selector, StartName, ClassName) ->
     class_side_found().
 walk_class_side(Selector, StartName, ClassName, Extensions) ->
     StepFun = fun(AncestorName, _Depth) ->
-        case
-            Extensions andalso
-                beamtalk_dispatch:check_extension(receiver_tag(AncestorName), Selector)
-        of
+        case Extensions andalso class_side_extension(receiver_tag(AncestorName), Selector) of
             {ok, Fun} ->
                 {found, {extension, AncestorName, Fun}};
             _ ->
@@ -787,6 +784,22 @@ walk_class_side(Selector, StartName, ClassName, Extensions) ->
                 #{domain => [beamtalk, runtime]}
             ),
             not_found
+    end.
+
+%% The class-side extension registered for `Selector` under the metaclass tag
+%% `Tag`, read from the registry only while the tag's raw `extension` shadow
+%% flag is up: `beamtalk_extensions:register/5` raises it before the row is
+%% visible and clears it only after the tag's last row is gone, so once the
+%% flags are authoritative (`is_ready/0`) a lowered flag means no row, and the
+%% lookup pays one `persistent_term` read per class instead of an ETS lookup.
+-spec class_side_extension(atom(), selector()) -> {ok, fun()} | not_found.
+class_side_extension(Tag, Selector) ->
+    case
+        beamtalk_class_shadow_flags:is_ready() andalso
+            not beamtalk_class_shadow_flags:is_set(extension, Tag)
+    of
+        true -> not_found;
+        false -> beamtalk_dispatch:check_extension(Tag, Selector)
     end.
 
 -spec receiver_tag(class_name()) -> atom().
@@ -1011,7 +1024,7 @@ class_self_dispatch_local(ClassName, Selector, Args, #beamtalk_object{} = ClassS
 ) ->
     term() | no_return().
 class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+    case class_side_extension(ClassTag, Selector) of
         {ok, Fun} ->
             apply_class_self_extension(ClassName, Fun, Selector, Args, ClassSelf);
         not_found ->
@@ -1538,7 +1551,7 @@ Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+    case class_side_extension(ClassTag, Selector) of
         {ok, Fun} ->
             invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector);
         not_found ->
@@ -2111,7 +2124,7 @@ whether `ClassName` itself is currently registered).
 -spec class_understands_class_selector(class_name(), selector()) -> boolean().
 class_understands_class_selector(ClassName, Selector) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+    case class_side_extension(ClassTag, Selector) of
         {ok, _Fun} ->
             true;
         not_found ->

@@ -2471,7 +2471,8 @@ shadowed after a caller warmed up is honoured on the path the caller falls
 back to. The raw shadow flags (`beamtalk_class_shadow_flags:is_shadowed/2`,
 one `persistent_term` read each) pre-screen the common unshadowed class. Only
 the class's own shadows count: an ancestor's class-side `new` extension does
-not shadow the class's synthesized `new`, as on the class-process lookup.
+not shadow the class's synthesized `new` (an ancestor's `new:` extension is
+not seen either yet: BT-4588).
 """.
 -spec constructor_shadowed(class_name(), selector()) -> boolean().
 constructor_shadowed(ClassName, Selector) ->

@@ -32,6 +32,7 @@
 // To add a case, add a `classSend:` row to the test method for its kind.
 //
 // Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
+// fixtures/guarded_diff_class_ext_protocol.bt,
 // fixtures/guarded_diff_class_stateful.bt, fixtures/guarded_diff_class_forgot.bt,
 // fixtures/guarded_diff_class_fun_root.bt, fixtures/guarded_diff_class_fun_leaf.bt,
 // fixtures/guarded_diff_class_sealed.bt, fixtures/guarded_diff_sup.bt,
@@ -263,6 +264,9 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
     // `respondsTo:` on the class side agrees with the send.
     self assert: (GuardedDiffClassLeaf respondsTo: #rootExtension)
     self deny: (GuardedDiffClassLeaf respondsTo: #noSuchClassSelector)
+    // So does protocol conformance.
+    self assert: (GuardedDiffClassRoot conformsTo: #GuardedDiffClassRootExtended)
+    self assert: (GuardedDiffClassLeaf conformsTo: #GuardedDiffClassRootExtended)
 
   // An ADR 0084 runtime class-method fun installed on an ancestor of the
   // receiving class shadows the ancestor's compiled method, for the
