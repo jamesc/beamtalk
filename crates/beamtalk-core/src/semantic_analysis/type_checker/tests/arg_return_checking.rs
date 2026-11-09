@@ -840,11 +840,13 @@ typed Value subclass: Thing
 /// (c) A fully-valid multi-message cascade — every message's arguments
 /// already match their declared parameter types — must stay diagnostic-free.
 /// No regression: adding the check must not fire false positives on correct code.
+/// `probeCascadeA:` answers `Integer`, not `Thing`, so the cascade does not
+/// discard an updated copy (the `cascade-drops-update` warning, ADR 0145 § 3).
 #[test]
 fn test_cascade_all_messages_valid_no_warning() {
     let source = "\
 typed Value subclass: Thing
-  probeCascadeA: x :: Integer -> Thing => self
+  probeCascadeA: x :: Integer -> Integer => x
   probeCascadeB: x :: Integer -> Integer => x + 1
 
   class probeCascadeRun -> Nil =>

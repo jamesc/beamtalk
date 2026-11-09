@@ -11,6 +11,9 @@
 // understand '>'`), answered a wrong value or the raw `{Value, State}`
 // carrier, or dropped the writes, and was a compile error until it was
 // lowered as a producer of the frame that holds it.
+//
+// The `0 max: 1; max: (…)` cascades fan out on purpose (only the argument's
+// fold matters), so each carries `@expect cascade_drops_update` (ADR 0145 § 3).
 
 Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
 
@@ -47,9 +50,11 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
     [:z | z + 1] value: (self.items inject: 0 into: [:b :y | b + self bump])
 
   cascadeLast =>
+    @expect cascade_drops_update
     0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
 
   cascadeReturn =>
+    @expect cascade_drops_update
     ^(0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump]))
 
   // The value of `self fieldAt:put:`, at the root, in a `do:` body and in an
@@ -176,6 +181,7 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
     #(r, self.n)
 
   cascadeRoot =>
+    @expect cascade_drops_update
     r := 0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
     #(r, self.n)
 
@@ -240,6 +246,7 @@ Bt4310UnsequencedBase subclass: Bt4310UnsequencedActor
     #(r, self.n)
 
   cascadeInCollect =>
+    @expect cascade_drops_update
     r := #(1, 2) collect: [:x |
       0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
     ]

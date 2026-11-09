@@ -77,6 +77,7 @@ mod types;
 mod validation;
 pub(crate) mod well_known;
 
+pub use inference::cascade_drops_update;
 pub use native_type_registry::{
     FFI_ARG_RUNTIME_GUARDS, FunctionSignature, NativeTypeRegistry, ParamType,
     ffi_arg_passes_unchanged, ffi_result_passes_unchanged,
