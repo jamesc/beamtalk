@@ -409,6 +409,7 @@ sha = "def456..."
 - **Commit to version control.** The lockfile should be checked into git so all developers and CI use the same dependency versions.
 - **Path dependencies are not locked.** They resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
 - **Registry dependencies lock like git dependencies**, plus the requested `version` field shown above.
+- **Native packages track the dependency graph.** `[[native_package]]` entries are rewritten from rebar3's resolution on each build that has native dependencies. When nothing in the graph declares a native dependency any more (for example, a dependency dropped its native deps), `beamtalk build` prunes the leftover entries, and `beamtalk deps update` clears all native locks so the next build re-resolves them.
 - **Implicit fetch on build.** `beamtalk build`, `beamtalk test`, and `beamtalk repl` automatically fetch and compile dependencies if the lockfile is missing or stale. No separate "deps get" step is needed.
 
 ## Qualified Names (`package@Class`)
