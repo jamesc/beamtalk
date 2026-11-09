@@ -975,9 +975,15 @@ mod tests {
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
-        let output = generator.generate_method_table(&module).unwrap().to_pretty_string();
+        let output = generator
+            .generate_method_table(&module)
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'method_table'/0"), "got: {output}");
-        assert!(output.contains("~{}~"), "empty class should produce empty map, got: {output}");
+        assert!(
+            output.contains("~{}~"),
+            "empty class should produce empty map, got: {output}"
+        );
     }
 
     #[test]
@@ -993,9 +999,15 @@ mod tests {
         });
         let module = Module::new(vec![assignment], s());
         let generator = CoreErlangGenerator::new("script");
-        let output = generator.generate_method_table(&module).unwrap().to_pretty_string();
+        let output = generator
+            .generate_method_table(&module)
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'method_table'/0"), "got: {output}");
-        assert!(output.contains("'add'"), "expression-based method should appear in table, got: {output}");
+        assert!(
+            output.contains("'add'"),
+            "expression-based method should appear in table, got: {output}"
+        );
     }
 
     #[test]
@@ -1004,7 +1016,10 @@ mod tests {
         // with no class definition falls back to the plain lists:member form.
         let module = Module::new(vec![], s());
         let generator = CoreErlangGenerator::new("script");
-        let output = generator.generate_has_method(&module).unwrap().to_pretty_string();
+        let output = generator
+            .generate_has_method(&module)
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'has_method'/1"), "got: {output}");
         assert!(
             output.contains("'lists':'member'"),
@@ -1019,7 +1034,10 @@ mod tests {
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
-        let output = generator.generate_has_method(&module).unwrap().to_pretty_string();
+        let output = generator
+            .generate_has_method(&module)
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'has_method'/1"), "got: {output}");
         assert!(
             output.contains("'Counter'"),
@@ -1034,9 +1052,15 @@ mod tests {
         let class = make_actor_class("Counter");
         let module = Module::with_classes(vec![class], s());
         let generator = CoreErlangGenerator::new("counter");
-        let output = generator.generate_class_name_function(&module).unwrap().to_pretty_string();
+        let output = generator
+            .generate_class_name_function(&module)
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'class_name'/0"), "got: {output}");
-        assert!(output.contains("'Counter'"), "class_name/0 should return 'Counter', got: {output}");
+        assert!(
+            output.contains("'Counter'"),
+            "class_name/0 should return 'Counter', got: {output}"
+        );
     }
 
     #[test]
@@ -1045,7 +1069,10 @@ mod tests {
         // safe_dispatch/4 (caller supplies Self) with the NLR relay clause
         // (BT-3580/BT-3582) that returns '$bt_nlr' throws as bare error values.
         let mut generator = CoreErlangGenerator::new("counter");
-        let output = generator.generate_safe_dispatch().unwrap().to_pretty_string();
+        let output = generator
+            .generate_safe_dispatch()
+            .unwrap()
+            .to_pretty_string();
         assert!(output.contains("'safe_dispatch'/3"), "got: {output}");
         assert!(output.contains("'safe_dispatch'/4"), "got: {output}");
         assert!(
