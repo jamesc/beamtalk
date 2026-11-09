@@ -192,3 +192,40 @@ fn list_literal_elements_are_checked_against_a_protocol() {
         "{msgs:#?}"
     );
 }
+
+/// A singleton is a `Symbol`, not an unknown class the open-world
+/// conformance gate waves through.
+#[test]
+fn singleton_is_judged_as_a_symbol() {
+    let msgs = checker_messages(&source_with(
+        r"
+  run => q :: Quacker := #foo. q
+",
+    ));
+    assert_eq!(msgs.len(), 1, "{msgs:#?}");
+    assert!(
+        msgs[0].starts_with("Type mismatch: declared as Quacker, got "),
+        "{msgs:#?}"
+    );
+}
+
+/// A protocol-typed value is some conformer: it fits `Object`, and no
+/// narrower class — not even `Protocol`.
+#[test]
+fn protocol_typed_value_fits_object_but_not_protocol() {
+    let msgs = checker_messages(&source_with(
+        r"
+  run: q :: Quacker => o :: Object := q. o
+",
+    ));
+    assert!(msgs.is_empty(), "{msgs:#?}");
+    let msgs = checker_messages(&source_with(
+        r"
+  run: q :: Quacker => p :: Protocol := q. p
+",
+    ));
+    assert_eq!(
+        msgs,
+        vec!["Type mismatch: declared as Protocol, got Quacker".to_string()]
+    );
+}

@@ -17,6 +17,7 @@ use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
 };
+use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::Span;
 use ecow::EcoString;
@@ -234,12 +235,20 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> bool {
+        let value = InferredType::union_of(instances);
+        // As in `instance_assignable`: where a protocol is involved, the
+        // nominal rule's unknown-class leniency must not decide.
+        let protocol_involved = protocol_registry.is_some_and(|registry| {
+            Self::mentions_protocol(&value, hierarchy, registry)
+                || Self::mentions_protocol(declared, hierarchy, registry)
+        });
         instances.is_empty()
-            || Self::is_assignable_to(
-                &InferredType::union_of(instances).display_name(),
-                &declared.display_name(),
-                hierarchy,
-            )
+            || (!protocol_involved
+                && Self::is_assignable_to(
+                    &value.display_name(),
+                    &declared.display_name(),
+                    hierarchy,
+                ))
             || Self::members_conform_structurally(
                 instances,
                 Self::union_members(declared),
@@ -377,8 +386,15 @@ impl TypeChecker {
                         _ => false,
                     };
                 }
+                // A singleton (`#foo`) is a `Symbol`, not an unknown class
+                // the open-world gate would wave through.
+                let conformer = if value_class.starts_with('#') {
+                    "Symbol"
+                } else {
+                    value_class.as_str()
+                };
                 registry
-                    .check_conformance(value_class, protocol, hierarchy)
+                    .check_conformance(conformer, protocol, hierarchy)
                     .is_ok()
             }
             // A class object is judged by the slot rule, never here.
@@ -387,15 +403,19 @@ impl TypeChecker {
             {
                 false
             }
+            // A protocol-typed value is *some* conformer: every class is an
+            // `Object`, but no conformer is provably any narrower class (nor
+            // a `Protocol`) — whether or not the protocol has a synthetic
+            // hierarchy entry (same-file) or not (cross-file).
+            (InferredType::Known { class_name, .. }, _)
+                if Self::is_protocol_type(class_name, hierarchy, registry) =>
+            {
+                WellKnownClass::from_str(&declared.display_name()) == Some(WellKnownClass::Object)
+            }
             _ => {
-                // A protocol-typed value is not an unknown class: it fits a
-                // class only nominally, never by the union leniency.
-                let protocol_value = Self::mentions_protocol(value, hierarchy, registry);
                 let (value, declared) = (value.display_name(), declared.display_name());
                 Self::is_assignable_to(&value, &declared, hierarchy)
-                    || (union
-                        && !protocol_value
-                        && Self::is_type_compatible(&value, &declared, hierarchy))
+                    || (union && Self::is_type_compatible(&value, &declared, hierarchy))
             }
         }
     }
