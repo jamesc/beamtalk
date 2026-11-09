@@ -390,14 +390,14 @@ cast_future_autoawait() ->
 
 send4_class_object_test_() ->
     {setup, fun actor_setup/0, fun actor_teardown/1, [
-        {"send/4 class object delegates to class_send (ignoring timeout)",
-            fun send4_class_object_delegates/0},
+        {"send/4 class object delegates to class_send/4", fun send4_class_object_delegates/0},
         {"send/4 with undefined pid actor raises actor_dead", fun send4_invalid_pid_raises/0}
     ]}.
 
 send4_class_object_delegates() ->
-    %% send/4 on a class object falls through to beamtalk_object_class:class_send
-    %% (timeout is ignored because class dispatch is synchronous in-process).
+    %% send/4 on a class object delegates to beamtalk_object_class:class_send/4
+    %% (`name` answers from the Class chain in the caller, so the timeout,
+    %% which bounds only a class-process wait, never applies; BT-4556).
     ClassPid = beamtalk_class_registry:whereis_class('Object'),
     ?assert(is_pid(ClassPid)),
     ClassTag = beamtalk_class_registry:class_object_tag('Object'),

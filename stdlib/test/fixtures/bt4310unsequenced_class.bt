@@ -5,6 +5,9 @@
 // stdlib/test/bt4003residuals_test.bt: the actor column's shapes over class
 // variables, which a class method writes in place (ADR 0130). They answered
 // right before BT-4310 too; the actor column must answer the same.
+//
+// The `0 max: 1; max: (…)` cascades fan out on purpose (only the argument's
+// fold matters), so each carries `@expect cascade_drops_update` (ADR 0145 § 3).
 
 Object subclass: Bt4310UnsequencedClass
   classState: n = 0
@@ -74,6 +77,7 @@ Object subclass: Bt4310UnsequencedClass
 
   class cascadeRoot =>
     self.n := 0
+    @expect cascade_drops_update
     r := 0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
     #(r, self.n)
 
@@ -122,6 +126,7 @@ Object subclass: Bt4310UnsequencedClass
 
   class cascadeInCollect =>
     self.n := 0
+    @expect cascade_drops_update
     r := #(1, 2) collect: [:x |
       0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
     ]

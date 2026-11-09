@@ -11,10 +11,16 @@
 //! [`TypeChecker::infer_message_send_with_receiver_ty`] against that shared
 //! receiver — the same dispatch entry point the cascade's first send (and
 //! every non-cascade `MessageSend`) uses.
+//!
+//! It also hosts the `cascade-drops-update` warning (ADR 0145 § 3,
+//! BT-4512): on a value receiver, a non-final cascade message that answers
+//! an updated copy has that copy thrown away, because the next message goes
+//! to the original receiver. See [`cascade_drops_update`].
 
-use crate::ast::{CascadeMessage, Expression};
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::ast::{CascadeMessage, Expression, MessageSelector};
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 impl TypeChecker {
     /// Infer a cascade `receiver msg1; msg2; msg3` — the `Expression::Cascade`
@@ -88,6 +94,21 @@ impl TypeChecker {
         // calls `infer_expr` on it), so this doesn't re-walk the receiver
         // subtree and can't double-emit the DNU/type diagnostics the first
         // send already produced.
+        if let Expression::MessageSend {
+            selector: first_sel,
+            span: first_span,
+            is_cast: false,
+            ..
+        } = receiver
+        {
+            self.check_cascade_drops_update(
+                cascade_target,
+                &dispatch_ty,
+                (first_sel, *first_span),
+                messages,
+                hierarchy,
+            );
+        }
         for msg in messages {
             self.infer_message_send_with_receiver_ty(
                 cascade_target,
@@ -101,5 +122,116 @@ impl TypeChecker {
             );
         }
         send_ty
+    }
+
+    /// The `cascade-drops-update` warning (ADR 0145 § 3, BT-4512): one
+    /// warning at each **non-final** cascade message that
+    /// [`cascade_drops_update`] says answers an updated copy the cascade
+    /// then discards. The help suggests the nested form; it switches to the
+    /// `|>` pipeline once that operator ships (ADR 0145 § 2).
+    fn check_cascade_drops_update(
+        &mut self,
+        cascade_target: &Expression,
+        dispatch_ty: &InferredType,
+        first: (&MessageSelector, Span),
+        messages: &[CascadeMessage],
+        hierarchy: &ClassHierarchy,
+    ) {
+        let InferredType::Known { class_name, .. } = dispatch_ty else {
+            return;
+        };
+        // Every message but the last one: the first send, then all
+        // continuations except the final one.
+        let sends = std::iter::once(first)
+            .chain(messages.iter().map(|m| (&m.selector, m.span)))
+            .collect::<Vec<_>>();
+        for pair in sends.windows(2) {
+            let [(dropped, span), (next, _)] = pair else {
+                continue;
+            };
+            if !cascade_drops_update(hierarchy, dispatch_ty, &dropped.name()) {
+                continue;
+            }
+            let dropped_name = dropped.name();
+            let next_name = next.name();
+            let receiver_text = match cascade_target {
+                Expression::Identifier(id) => id.name.to_string(),
+                Expression::Super(_) => "super".to_string(),
+                _ => "…".to_string(),
+            };
+            let display = InferredType::class_name_for_diagnostic(class_name.as_str());
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!("the result of `{dropped_name}` is discarded"),
+                    *span,
+                )
+                .with_note(
+                    format!(
+                        "`{display}` is a value: `{dropped_name}` answers a new value and \
+                         leaves the receiver unchanged, and a cascade sends `{next_name}` \
+                         to the receiver, not to that result"
+                    ),
+                    None,
+                )
+                .with_hint(format!(
+                    "to send `{next_name}` to the result, nest the sends: `({receiver_text} {}) {}`",
+                    send_shape(dropped),
+                    send_shape(next),
+                ))
+                .with_category(DiagnosticCategory::CascadeDropsUpdate),
+            );
+        }
+    }
+}
+
+/// Whether a non-final cascade message `selector` sent to a receiver of
+/// static type `receiver_ty` draws the `cascade-drops-update` warning
+/// (ADR 0145 § 3): the receiver is a `Known` instance of a value kind
+/// (`Value` or a subclass), and `selector` resolves to a method whose
+/// defining class is itself a value kind and whose recorded return type is
+/// `Self` or that defining class, type arguments ignored — it answers an
+/// updated copy, which the cascade discards.
+///
+/// The one decision both the type checker's warning and `beamtalk-lint`'s
+/// `cascade_candidate` (which must not suggest a cascade this would flag)
+/// read. `Dynamic`, union, metatype and non-value receivers answer `false`.
+#[must_use]
+pub fn cascade_drops_update(
+    hierarchy: &ClassHierarchy,
+    receiver_ty: &InferredType,
+    selector: &str,
+) -> bool {
+    let InferredType::Known { class_name, .. } = receiver_ty else {
+        return false;
+    };
+    if !hierarchy.is_value_subclass(class_name) {
+        return false;
+    }
+    let Some(method) = hierarchy.find_method(class_name, selector) else {
+        return false;
+    };
+    if !hierarchy.is_value_subclass(&method.defined_in) {
+        return false;
+    }
+    match &method.return_type {
+        Some(DeclaredType::SelfType) => true,
+        Some(DeclaredType::Simple(name) | DeclaredType::Generic { base: name, .. }) => {
+            *name == method.defined_in
+        }
+        _ => false,
+    }
+}
+
+/// A selector rendered as a send with its arguments elided (`withX: …`,
+/// `+ …`, `negated`), for the nested-form help text.
+fn send_shape(selector: &MessageSelector) -> String {
+    match selector {
+        MessageSelector::Unary(name) => name.to_string(),
+        MessageSelector::Binary(op) => format!("{op} …"),
+        MessageSelector::Keyword(parts) => parts
+            .iter()
+            .map(|p| format!("{} …", p.keyword))
+            .collect::<Vec<_>>()
+            .join(" "),
     }
 }

@@ -25,6 +25,7 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testSelf/1,
     class_testClassVar/1,
     'class_testWith:'/2,
+    'class_testSleep:'/2,
     class_testInternalUndef/1,
     class_testRaise/1,
     class_testSignal/1,
@@ -98,6 +99,15 @@ Exercises the keyword-selector arity path: erlang:apply receives
 -spec 'class_testWith:'(term(), term()) -> term().
 'class_testWith:'(_ClassSelf, Arg) ->
     {with_arg, Arg}.
+
+-doc """
+One-argument keyword class method that sleeps `Ms` milliseconds and answers
+the pid it ran in (BT-4556: bounds a class-process `send/4` wait).
+""".
+-spec 'class_testSleep:'(term(), non_neg_integer()) -> pid().
+'class_testSleep:'(_ClassSelf, Ms) ->
+    timer:sleep(Ms),
+    self().
 
 -doc """
 Zero-argument class method that calls a non-existent function internally.

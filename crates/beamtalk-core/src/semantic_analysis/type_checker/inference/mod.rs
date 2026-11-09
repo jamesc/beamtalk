@@ -41,6 +41,8 @@ mod generics;
 mod literals;
 mod send;
 
+pub use cascade::cascade_drops_update;
+
 /// The class whose method table answers for a `Known` type name.
 ///
 /// A symbol singleton (`#foo`) is a subtype of `Symbol` and has no method

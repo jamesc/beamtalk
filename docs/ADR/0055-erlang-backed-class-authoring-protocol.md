@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-06)
 
+> **Amended (BT-4556, 2026-11-09): the `class_*` calling convention below is out of date.** Compiled class methods no longer take a `ClassVars` argument: since ADR 0130 a class method is `'class_<selector>'(ClassSelf, Args...)`, so the keyword constructor below is `'class_status:headers:body:'/4`, not `/5`. Calling a compiled `class_*` function from Erlang is not a supported interface at all: the caller has to build a valid `ClassSelf`, since a method body may send to `self`, and the function bypasses class-side extensions and the class process. Native code calls Beamtalk through `beamtalk_native_api` (`send/3`, `send/4`, `class_named/1` and the `String` and `Result` helpers); see [Calling Beamtalk from native code](../beamtalk-native-erlang.md#calling-beamtalk-from-native-code). The examples below are kept as written in 2026-03.
+
 ## Context
 
 ### The Problem
@@ -51,6 +53,7 @@ fieldName(Self) ->
 
 %% class_field1:field2:/N — keyword class-side constructor
 %% N = number of fields + 2 (ClassSelf, ClassVars, then one arg per field)
+%% (Out of date, BT-4556: now N = fields + 1, no ClassVars; see Status.)
 'class_status:headers:body:'(_ClassSelf, _ClassVars, Arg0, Arg1, Arg2) ->
     #{'$beamtalk_class' => 'HTTPResponse',
       status => Arg0, headers => Arg1, body => Arg2}.
@@ -109,6 +112,8 @@ new() ->
       status => 0, headers => [], body => <<>>}.
 
 %% Keyword class-side constructor — called from Erlang producers
+%% (Out of date, BT-4556: now /4 without ClassVars, and not a supported
+%% entry point; native code uses beamtalk_native_api:send/3. See Status.)
 -spec 'class_status:headers:body:'(term(), term(), integer(), list(), binary()) -> t().
 'class_status:headers:body:'(_ClassSelf, _ClassVars, Status, Headers, Body) ->
     #{'$beamtalk_class' => 'HTTPResponse',
@@ -210,7 +215,7 @@ With this protocol, the two pragma forms are narrowed to one case each (per the 
 | Situation | Mechanism |
 |-----------|-----------|
 | Value class field reads/writes | `state:` declarations → auto-generated getter + updater |
-| Value class construction (Erlang side) | Call `Module:'class_f1:f2:'/N` from generated module |
+| Value class construction (Erlang side) | Call `Module:'class_f1:f2:'/N` from generated module (superseded, BT-4556: `beamtalk_native_api:send(Class, 'f1:f2:', Args)`) |
 | Value class computed property | Pure Beamtalk expression in method body |
 | Value class complex Erlang op | `(Erlang module) selector: self` |
 | Actor with Beamtalk logic | `state:` declarations + method bodies (existing) |

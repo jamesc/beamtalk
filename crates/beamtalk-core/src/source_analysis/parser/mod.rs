@@ -704,6 +704,12 @@ pub enum DiagnosticCategory {
     /// `maps:get/2`) silently misses. A hint, silent on `Dynamic` element
     /// types (ADR 0100 Rule 1). Suppressible with `@expect ffi_nested_string`.
     FfiNestedString,
+    /// A non-final cascade message on a value receiver answers an updated
+    /// copy that the cascade discards (ADR 0145 § 3, BT-4512): `p withX: 5;
+    /// withY: 10` sends `withY:` to `p`, not to the copy `withX:` answered.
+    /// A warning, silent on `Dynamic` targets. Suppressible with
+    /// `@expect cascade_drops_update`.
+    CascadeDropsUpdate,
     /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
     /// writes an outer local, or a local bound to one — flows to a send that
     /// has no way to return the write (anything but a control-flow construct,

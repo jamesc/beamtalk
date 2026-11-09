@@ -637,6 +637,26 @@ same message at the same span. No operation is surface-specific.
 - A tuple-pattern arm (`{a, b}`) is never a catch-all, even when every element
   is a variable.
 
+### `cascade-drops-update` diagnostic (ADR 0145 § 3, BT-4512)
+
+A non-final cascade message whose receiver is statically a value kind and
+which resolves to a method defined on a value class returning `Self` or that
+class gets a `cascade-drops-update` warning at the message
+(``the result of `withX:` is discarded``), with a help line suggesting the
+nested form. It is computed by the type checker beside `infer_cascade`
+(`type_checker/inference/cascade.rs`), so every surface that reports semantic
+diagnostics (CLI `build`/`check`/`lint`/`test`, REPL load, LSP
+`textDocument/publishDiagnostics`, MCP `lint`/`diagnostic_summary`) reports
+the same message at the same span. No operation is surface-specific.
+
+- Category `CascadeDropsUpdate`; `[diagnostics]` key `cascade-drops-update`;
+  `@expect cascade_drops_update`.
+- REPL input: a workspace binding carries no static type, so
+  `p withX: 5; withY: 10` typed at the REPL against a bound `p` is `Dynamic`
+  and stays silent (a known limitation, ADR 0145 § 3).
+- `beamtalk lint`'s `cascade_candidate` pass reads the same predicate
+  (`cascade_drops_update`) and does not suggest a cascade it would flag.
+
 ### `ffi-nested-string` diagnostic (ADR 0140 Rejection, BT-4243)
 
 An argument of an inline `Erlang <mod> <fn>:` call to a stock module whose
