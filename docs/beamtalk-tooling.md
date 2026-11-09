@@ -245,6 +245,24 @@ The Beamtalk compiler (`beamtalk-core`, written in Rust) runs as an OTP Port man
 - **Cross-platform** — OTP Ports work on all platforms (Linux, macOS, Windows). No Unix-specific IPC.
 - **Stateless port** — The Rust compiler binary is a pure function: source code + metadata in, Core Erlang out. All session state (class cache, known variables) lives in the Erlang gen_server and is injected per request via ETF (Erlang Term Format) over length-prefixed frames.
 
+## Check
+
+`beamtalk check` runs the full analysis pipeline — lexing, parsing, type inference, annotation and `@expect` handling, cross-file alias/protocol resolution, and visibility checks — and fails on the same error diagnostics `beamtalk build` emits for those phases, without emitting any output files.
+
+```bash
+beamtalk check              # Check the current project
+beamtalk check path/to/dir  # Check a specific directory
+beamtalk check path/to/file.bt  # Check a single file
+```
+
+**What it runs:** Pass 1 indexing plus the full semantic-analysis pipeline over every source file. It checks all files instead of stopping at the first failure.
+
+**What it skips:** No `.core` or `.beam` files are written, native Erlang sources are not compiled, the post-codegen verifier does not run, and no OTP packaging (`.app` file, corpus) is produced.
+
+**FFI caveat:** FFI and native-module checks see only already-built artifacts (from a prior `beamtalk build`). A passing `beamtalk check` does not guarantee `beamtalk build` succeeds.
+
+**Exit codes:** 0 for success, 1 if any file produces an error-severity diagnostic.
+
 ## Releases (ADR 0125)
 
 `beamtalk release` assembles a standard OTP release — a self-contained directory (or tarball) bootable with `erl -boot`, independent of the development workspace. Requires an `[application]` section in `beamtalk.toml` (a release is a long-running service with a root supervisor).
