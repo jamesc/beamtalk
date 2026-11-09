@@ -547,8 +547,8 @@ is_unknown_field_test() ->
     ?assertNot(beamtalk_error:is_unknown_field(undefined)),
     ?assertNot(beamtalk_error:is_unknown_field({error, timeout})).
 
-%% BT-4208: a lookup miss (a raw `does_not_understand` record) is the only
-%% DNU; any other record, and any already-wrapped exception map (an invoked
+%% BT-4208: only a raw `does_not_understand` record reads as a lookup miss;
+%% any other record, and any already-wrapped exception map (an invoked
 %% method that raised, even with a DNU of its own), is a real error.
 is_does_not_understand_test() ->
     Dnu = beamtalk_error:new(does_not_understand, 'Integer'),

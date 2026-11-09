@@ -344,7 +344,9 @@ A method that was invoked and raised can also answer an already-wrapped
 exception map (BT-4173 / BT-4208: a value-class owner's `dispatch/4` adapter
 returns the raised term as is). That is never a lookup miss, so it answers
 `false` — even when the raised error is itself a `does_not_understand` from
-inside the method body.
+inside the method body. The converse does not hold: the walk's own catch
+around a compiled `dispatch/4` unwraps a raise back to a record, so a DNU
+raised inside an invoked method can still read as a miss (BT-4593).
 
 Example:
   beamtalk_error:is_does_not_understand(beamtalk_error:new(does_not_understand, 'Integer'))

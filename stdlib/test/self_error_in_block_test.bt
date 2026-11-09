@@ -57,6 +57,13 @@ TestCase subclass: SelfErrorInBlockTest
     self assert: a superCaught equals: "x"
     a stop
 
+  testActorPerformErrorReachesCaller =>
+    a := Bt4208Actor spawn
+    self assert: ([
+      a perform: #error: withArguments: #("x")
+    ] on: Error do: [:e | e message]) equals: "x"
+    a stop
+
   testActorCastOnDo =>
     a := Bt4208Actor spawn
     a castCaught!
