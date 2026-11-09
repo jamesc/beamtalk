@@ -18,9 +18,10 @@
 //! to the original receiver. See [`cascade_drops_update`].
 
 use crate::ast::{CascadeMessage, Expression, Literal, MessageSelector};
+use crate::ast_walker::cascade_part_sends;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 impl TypeChecker {
     /// Infer a cascade `receiver msg1; msg2; msg3` — the `Expression::Cascade`
@@ -94,17 +95,11 @@ impl TypeChecker {
         // calls `infer_expr` on it), so this doesn't re-walk the receiver
         // subtree and can't double-emit the DNU/type diagnostics the first
         // send already produced.
-        if let Expression::MessageSend {
-            selector: first_sel,
-            span: first_span,
-            is_cast: false,
-            ..
-        } = receiver
-        {
+        if let Expression::MessageSend { is_cast: false, .. } = receiver {
             self.check_cascade_drops_update(
                 cascade_target,
                 &dispatch_ty,
-                (first_sel, *first_span),
+                receiver,
                 messages,
                 hierarchy,
             );
@@ -133,7 +128,7 @@ impl TypeChecker {
         &mut self,
         cascade_target: &Expression,
         dispatch_ty: &InferredType,
-        first: (&MessageSelector, Span),
+        receiver: &Expression,
         messages: &[CascadeMessage],
         hierarchy: &ClassHierarchy,
     ) {
@@ -141,9 +136,10 @@ impl TypeChecker {
             return;
         };
         // Every message but the last one: the first send, then all
-        // continuations except the final one.
-        let sends = std::iter::once(first)
-            .chain(messages.iter().map(|m| (&m.selector, m.span)))
+        // continuations except the final one. Each is reported at its
+        // `SendRef::span`, the definition the `setUp` lint also reads.
+        let sends = cascade_part_sends(receiver, messages)
+            .map(|send| (send.selector, send.span))
             .collect::<Vec<_>>();
         for pair in sends.windows(2) {
             let [(dropped, span), (next, _)] = pair else {

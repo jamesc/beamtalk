@@ -793,42 +793,19 @@ fn is_setup_trailing_value_accounted_for(expr: &Expression, reported: &[Diagnost
 }
 
 /// The spans at which the type checker reports `cascade-drops-update` for
-/// the dropped `with<Field>:` messages of `cascade`. These are every
-/// `with*:` message except the last message of the cascade. The folded first
-/// message is reported at its whole send's span and each later message at
-/// its `CascadeMessage` span, matching `check_cascade_drops_update`. Empty
-/// when `cascade` is not a cascade.
+/// the dropped `with<Field>:` messages of `cascade`: every `with*:` message
+/// except the cascade's last message, each at its [`SendRef::span`]. That is
+/// the same span definition `check_cascade_drops_update` reports at, so the
+/// two cannot drift apart. Empty when `cascade` is not a cascade.
 fn dropped_with_star_spans(cascade: &Expression) -> Vec<Span> {
-    let Expression::Cascade {
-        receiver, messages, ..
-    } = cascade
-    else {
-        return Vec::new();
-    };
-    let first = match receiver.as_ref() {
-        Expression::MessageSend {
-            selector,
-            arguments,
-            span,
-            ..
-        } => Some((selector, arguments.len(), *span)),
-        _ => None,
-    };
-    let sends: Vec<_> = first
-        .into_iter()
-        .chain(
-            messages
-                .iter()
-                .map(|m| (&m.selector, m.arguments.len(), m.span)),
-        )
-        .collect();
+    let sends: Vec<_> = cascade_sends(cascade).collect();
     let Some((_, non_final)) = sends.split_last() else {
         return Vec::new();
     };
     non_final
         .iter()
-        .filter(|(selector, arity, _)| *arity == 1 && is_with_star_selector(selector))
-        .map(|(_, _, span)| *span)
+        .filter(|send| is_with_star_send(send))
+        .map(|send| send.span)
         .collect()
 }
 

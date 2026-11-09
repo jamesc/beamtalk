@@ -165,3 +165,23 @@ fn nested_argument_cascade_warning_does_not_cover_outer_cascade() {
         "expected the setUp warning for the outer cascade, got: {diags:#?}"
     );
 }
+
+/// A dropped message after the first one is reported at its own message
+/// span, and the `setUp` lint reads that same span: two proven drops, two
+/// `cascade-drops-update` warnings, no `setUp` warning.
+#[test]
+fn later_dropped_message_is_reported_at_its_own_span() {
+    let (source, diags) = compile_setup("    self withA: 1; withB: 2; withA: 3");
+    let at: Vec<&str> = diags
+        .iter()
+        .map(|d| {
+            assert_eq!(
+                d.category,
+                Some(DiagnosticCategory::CascadeDropsUpdate),
+                "got: {diags:#?}"
+            );
+            &source[d.span.start() as usize..d.span.end() as usize]
+        })
+        .collect();
+    assert_eq!(at, ["self withA: 1", "withB: 2"], "got: {diags:#?}");
+}
