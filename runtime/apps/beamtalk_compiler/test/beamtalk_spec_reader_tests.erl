@@ -1323,6 +1323,39 @@ read_specs_batch_module_names_test() ->
     [{ModName, _}] = Results,
     ?assertEqual(<<"lists">>, ModName).
 
+%%% ---------------------------------------------------------------
+%%% add_export_only_entries/2 — exports without specs (BT-4574)
+%%% ---------------------------------------------------------------
+
+%% With no specs at all, every export becomes an export-only entry.
+add_export_only_entries_no_specs_test() ->
+    ListsBeam = code:which(lists),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, []),
+    ?assert(
+        lists:member(#{name => <<"reverse">>, arity => 1, export_only => true}, Entries)
+    ),
+    ?assert(lists:all(fun(#{export_only := true}) -> true end, Entries)),
+    ?assertEqual(length(lists:module_info(exports)), length(Entries)).
+
+%% A spec'd export keeps its spec entry and gets no export-only duplicate;
+%% an export without a spec (`module_info/0') is appended.
+add_export_only_entries_skips_specced_test() ->
+    ListsBeam = code:which(lists),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(ListsBeam),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, Specs),
+    ?assertEqual(Specs, lists:sublist(Entries, length(Specs))),
+    ExportOnly = [{N, A} || #{name := N, arity := A, export_only := true} <- Entries],
+    ?assertNot(lists:member({<<"reverse">>, 1}, ExportOnly)),
+    ?assert(lists:member({<<"module_info">>, 0}, ExportOnly)).
+
+%% An unreadable `.beam' leaves the specs unchanged.
+add_export_only_entries_missing_beam_test() ->
+    Specs = [#{name => <<"f">>, arity => 0, params => [], return_type => <<"Integer">>}],
+    ?assertEqual(
+        Specs,
+        beamtalk_spec_reader:add_export_only_entries("missing_bt4574.beam", Specs)
+    ).
+
 %% Parallel batch processing must produce exactly the same results,
 %% in the same order, as a sequential `read_specs/1' map — across a batch large
 %% enough to span multiple worker chunks and to exercise the shared remote-type

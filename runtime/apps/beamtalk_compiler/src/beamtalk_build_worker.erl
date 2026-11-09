@@ -90,14 +90,19 @@ compile_loop() ->
 %% Handle {read_specs, BeamFiles} command via beamtalk_spec_reader.
 %%
 %% Emits one line per module: "beamtalk-specs-module:<module>:<erlang_term>"
-%% where <erlang_term> is a printable Erlang term of the spec list.
+%% where <erlang_term> is a printable Erlang term of the spec list, followed
+%% by an export-only entry for each exported function without a spec
+%% (`beamtalk_spec_reader:add_export_only_entries/2', BT-4574).
 %% Ends with "beamtalk-specs-result-ok" or "beamtalk-specs-result-error".
 handle_read_specs(BeamFiles) ->
     try
-        Results = beamtalk_spec_reader:read_specs_batch(BeamFiles),
+        %% `read_specs_batch/1' preserves input order, so each result pairs
+        %% with the `.beam' it came from.
+        Results = lists:zip(BeamFiles, beamtalk_spec_reader:read_specs_batch(BeamFiles)),
         lists:foreach(
             fun
-                ({ModName, {ok, Specs}}) ->
+                ({BeamFile, {ModName, {ok, SpecsOnly}}}) ->
+                    Specs = beamtalk_spec_reader:add_export_only_entries(BeamFile, SpecsOnly),
                     %% Encode specs as an Erlang term string on one line
                     TermStr = io_lib:format("~0tp", [Specs]),
                     io:put_chars([
@@ -107,7 +112,7 @@ handle_read_specs(BeamFiles) ->
                         TermStr,
                         "\n"
                     ]);
-                ({ModName, {error, Reason}}) ->
+                ({_BeamFile, {ModName, {error, Reason}}}) ->
                     io:put_chars(
                         standard_error,
                         io_lib:format("Warning: ~s: ~tp~n", [ModName, Reason])

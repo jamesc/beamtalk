@@ -200,6 +200,12 @@ fn native_declaration_signature_to_function(
 ///
 /// The Erlang term is a list of maps with keys: `name` (binary), `arity`
 /// (integer), `params` (list of `#{name, type}` maps), `return_type` (binary).
+///
+/// Entries carrying `export_only => true` (and no type keys) name an exported
+/// function that has no `-spec` (BT-4574). They are recorded with
+/// [`NativeTypeRegistry::register_module_exports`], not as signatures, so they
+/// add no type information — only "this function is exported", which the
+/// stub drift check needs.
 pub fn parse_specs_line(line: &str, registry: &mut NativeTypeRegistry) -> Option<String> {
     let rest = line.strip_prefix(SPECS_MODULE_PREFIX)?;
 
@@ -212,8 +218,9 @@ pub fn parse_specs_line(line: &str, registry: &mut NativeTypeRegistry) -> Option
         return None;
     }
 
-    let functions = parse_erlang_spec_term(term_str);
+    let (functions, exports) = parse_erlang_spec_term(term_str);
     registry.register_module(module_name, functions);
+    registry.register_module_exports(module_name, exports);
 
     Some(module_name.to_string())
 }
@@ -248,26 +255,34 @@ pub fn is_specs_result_error(line: &str) -> bool {
 /// This is a best-effort parser for the specific format emitted by
 /// `beamtalk_spec_reader.erl`. It handles the structural patterns we emit
 /// rather than implementing a full Erlang term parser.
-fn parse_erlang_spec_term(term: &str) -> Vec<FunctionSignature> {
+///
+/// Returns the spec'd signatures plus the canonical `(name, arity)` of every
+/// `export_only` entry (an exported function with no `-spec`).
+fn parse_erlang_spec_term(term: &str) -> (Vec<FunctionSignature>, Vec<(String, u8)>) {
     let trimmed = term.trim();
 
     // The term should be a list: [...]
     let inner = match trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         Some(s) => s.trim(),
-        None => return vec![],
+        None => return (vec![], vec![]),
     };
 
     if inner.is_empty() {
-        return vec![];
+        return (vec![], vec![]);
     }
 
     // Split into individual map entries at top-level `#{` boundaries
     let maps = split_top_level_maps(inner);
 
-    let parsed: Vec<(bool, FunctionSignature)> = maps
-        .iter()
-        .filter_map(|map_str| parse_spec_map(map_str))
-        .collect();
+    let mut parsed: Vec<(bool, FunctionSignature)> = Vec::with_capacity(maps.len());
+    let mut exports: Vec<(String, u8)> = Vec::new();
+    for map_str in &maps {
+        if let Some(export) = parse_export_only_map(map_str) {
+            exports.push(export);
+        } else if let Some(entry) = parse_spec_map(map_str) {
+            parsed.push(entry);
+        }
+    }
 
     // Deduplicate keyword aliases that normalize to the same (name, arity).
     // E.g., `terminateChild/2`, `'terminateChild:class:'/2`, and
@@ -292,7 +307,23 @@ fn parse_erlang_spec_term(term: &str) -> Vec<FunctionSignature> {
         }
     }
 
-    result
+    (result, exports)
+}
+
+/// Parses an `export_only` entry — `#{arity => 1,name => <<"to_public">>,
+/// export_only => true}`, keys in any order — into its canonical
+/// `(name, arity)`. Returns `None` for any other map (a spec entry).
+fn parse_export_only_map(map_str: &str) -> Option<(String, u8)> {
+    let inner = map_str
+        .trim()
+        .strip_prefix("#{")
+        .and_then(|s| s.strip_suffix('}'))?;
+    if !inner.contains("export_only => true") {
+        return None;
+    }
+    let name = canonical_function_name(&extract_binary_value(inner, "name")?);
+    let arity = u8::try_from(extract_integer_value(inner, "arity")?).ok()?;
+    Some((name, arity))
 }
 
 /// Parses a single Erlang map representing a spec entry.
@@ -630,6 +661,38 @@ mod tests {
             type_args[0],
             InferredType::simple_union(&["String", "Binary"])
         );
+    }
+
+    /// BT-4574: `export_only` entries (exported functions with no `-spec`)
+    /// register as exports, never as signatures.
+    #[test]
+    fn parse_specs_line_export_only_entries() {
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:jose_jwk:[#{arity => 1,name => <<\"from_map\">>,params => [#{name => <<\"m\">>,type => <<\"Dictionary\">>}],return_type => <<\"Tuple\">>},#{arity => 1,name => <<\"to_public\">>,export_only => true},#{arity => 2,export_only => true,name => <<\"sign:with:\">>}]";
+        assert_eq!(
+            parse_specs_line(line, &mut reg).as_deref(),
+            Some("jose_jwk")
+        );
+
+        assert_eq!(reg.module_functions("jose_jwk").unwrap().len(), 1);
+        assert!(reg.lookup("jose_jwk", "to_public", 1).is_none());
+        assert!(reg.exports_function("jose_jwk", "to_public", 1));
+        assert!(reg.exports_function("jose_jwk", "from_map", 1));
+        // Keyword-alias names are canonicalized like spec names.
+        assert!(reg.exports_function("jose_jwk", "sign", 2));
+        assert!(!reg.exports_function("jose_jwk", "to_public", 2));
+    }
+
+    /// A module with no specs at all is still registered, with its exports.
+    #[test]
+    fn parse_specs_line_only_export_only_entries() {
+        let mut reg = NativeTypeRegistry::new();
+        let line =
+            "beamtalk-specs-module:nospecs:[#{arity => 0,name => <<\"f\">>,export_only => true}]";
+        parse_specs_line(line, &mut reg);
+        assert!(reg.has_module("nospecs"));
+        assert!(reg.module_functions("nospecs").unwrap().is_empty());
+        assert!(reg.exports_function("nospecs", "f", 0));
     }
 
     #[test]

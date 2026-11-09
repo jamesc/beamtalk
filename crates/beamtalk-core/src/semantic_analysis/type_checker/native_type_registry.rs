@@ -36,7 +36,7 @@
 use super::types::DynamicReason;
 use super::types::{InferredType, TypeProvenance};
 use ecow::EcoString;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Type signature for a single Erlang function.
@@ -135,15 +135,18 @@ pub struct ParamType {
 pub struct NativeTypeRegistry {
     /// Module name → list of function type signatures.
     modules: Arc<HashMap<String, Vec<FunctionSignature>>>,
+    /// Module name → exported `(name, arity)` pairs that have *no* signature
+    /// in `modules` (an export without a `-spec`, BT-4574). Carries no type
+    /// information: it exists so [`Self::detect_stub_drift`] can tell "not
+    /// exported" apart from "exported but unspec'd".
+    exports_without_signature: Arc<HashMap<String, HashSet<(String, u8)>>>,
 }
 
 impl NativeTypeRegistry {
     /// Creates an empty registry.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            modules: Arc::new(HashMap::new()),
-        }
+        Self::default()
     }
 
     /// Registers type information for an Erlang module.
@@ -151,6 +154,37 @@ impl NativeTypeRegistry {
     /// Replaces any existing signatures for this module.
     pub fn register_module(&mut self, module_name: &str, functions: Vec<FunctionSignature>) {
         Arc::make_mut(&mut self.modules).insert(module_name.to_string(), functions);
+    }
+
+    /// Records `exports` — exported `(name, arity)` pairs with no `-spec` —
+    /// for `module_name`, replacing any previously recorded for it (BT-4574).
+    ///
+    /// These are not signatures: [`Self::lookup`] and
+    /// [`Self::module_functions`] never see them. Only
+    /// [`Self::exports_function`] (and so the stub drift check) does.
+    pub fn register_module_exports(
+        &mut self,
+        module_name: &str,
+        exports: impl IntoIterator<Item = (String, u8)>,
+    ) {
+        let exports: HashSet<(String, u8)> = exports.into_iter().collect();
+        let map = Arc::make_mut(&mut self.exports_without_signature);
+        if exports.is_empty() {
+            map.remove(module_name);
+        } else {
+            map.insert(module_name.to_string(), exports);
+        }
+    }
+
+    /// Whether `module:function/arity` is known to be exported: it has a
+    /// signature, or was recorded by [`Self::register_module_exports`].
+    #[must_use]
+    pub fn exports_function(&self, module: &str, function: &str, arity: u8) -> bool {
+        self.lookup(module, function, arity).is_some()
+            || self
+                .exports_without_signature
+                .get(module)
+                .is_some_and(|exports| exports.contains(&(function.to_string(), arity)))
     }
 
     /// Merges all modules from `other` into `self`, keeping `self`'s entry on
@@ -163,9 +197,20 @@ impl NativeTypeRegistry {
     pub fn merge(&mut self, other: NativeTypeRegistry) {
         let other_modules =
             Arc::try_unwrap(other.modules).unwrap_or_else(|shared| (*shared).clone());
+        let mut other_exports = Arc::try_unwrap(other.exports_without_signature)
+            .unwrap_or_else(|shared| (*shared).clone());
         let self_modules = Arc::make_mut(&mut self.modules);
+        let self_exports = Arc::make_mut(&mut self.exports_without_signature);
         for (module, functions) in other_modules {
-            self_modules.entry(module).or_insert(functions);
+            // A module's export list travels with its signatures: whichever
+            // side's signatures win the collision supplies both.
+            if self_modules.contains_key(&module) {
+                continue;
+            }
+            if let Some(exports) = other_exports.remove(&module) {
+                self_exports.insert(module.clone(), exports);
+            }
+            self_modules.insert(module, functions);
         }
     }
 
@@ -249,6 +294,11 @@ impl NativeTypeRegistry {
     /// function/arity that doesn't exist there, paired with its owning
     /// module name.
     ///
+    /// "Exists" means [`Self::exports_function`]: a spec'd signature *or* an
+    /// export without a `-spec` (BT-4574). Checking signatures alone would
+    /// flag every stub for a module with no specs — exactly the modules
+    /// ADR 0075 says to hand-write stubs for.
+    ///
     /// Call with the *pre-merge* auto-extracted registry (before
     /// [`Self::apply_overrides`] applies the same stubs) — merging first
     /// would make every stub function trivially "exist".
@@ -264,17 +314,14 @@ impl NativeTypeRegistry {
     ) -> Vec<(&'a str, &'a FunctionSignature)> {
         let mut drift = Vec::new();
         for module in stubs.module_names() {
-            let Some(actual_functions) = self.module_functions(module) else {
+            if !self.has_module(module) {
                 continue;
-            };
+            }
             let Some(stub_functions) = stubs.module_functions(module) else {
                 continue;
             };
             for stub_fn in stub_functions {
-                let exists = actual_functions
-                    .iter()
-                    .any(|f| f.name == stub_fn.name && f.arity == stub_fn.arity);
-                if !exists {
+                if !self.exports_function(module, &stub_fn.name, stub_fn.arity) {
                     drift.push((module, stub_fn));
                 }
             }
@@ -997,5 +1044,93 @@ mod tests {
         );
 
         assert!(auto_extract.detect_stub_drift(&stubs).is_empty());
+    }
+
+    /// BT-4574: a module with no `-spec`s (e.g. `jose_jwk`) has no
+    /// signatures, only exports. A stub for an exported-but-unspec'd function
+    /// is not drift; a stub for a function the `.beam` doesn't export still is.
+    #[test]
+    fn detect_stub_drift_accepts_exports_without_specs() {
+        let mut auto_extract = NativeTypeRegistry::new();
+        auto_extract.register_module(
+            "jose_jwk",
+            vec![extracted_sig(
+                "from_map",
+                1,
+                vec![param("map", "Dictionary")],
+                InferredType::known("Tuple"),
+            )],
+        );
+        auto_extract.register_module_exports(
+            "jose_jwk",
+            [
+                ("to_public".to_string(), 1),
+                ("generate_key".to_string(), 1),
+            ],
+        );
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "jose_jwk",
+            vec![
+                declared_sig("from_map", 1, InferredType::known("Tuple")),
+                declared_sig("to_public", 1, InferredType::known("Tuple")),
+                declared_sig("generate_key", 1, InferredType::known("Tuple")),
+                // Right name, wrong arity: not exported.
+                declared_sig("to_public", 2, InferredType::known("Tuple")),
+            ],
+        );
+
+        let drift = auto_extract.detect_stub_drift(&stubs);
+
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].0, "jose_jwk");
+        assert_eq!(drift[0].1.name, "to_public");
+        assert_eq!(drift[0].1.arity, 2);
+        // Export-only entries add no type information.
+        assert!(auto_extract.lookup("jose_jwk", "to_public", 1).is_none());
+        assert!(auto_extract.exports_function("jose_jwk", "to_public", 1));
+    }
+
+    /// A module with exports but no signatures at all still counts as known,
+    /// so a stub for a function it doesn't export warns.
+    #[test]
+    fn detect_stub_drift_flags_unexported_function_of_specless_module() {
+        let mut auto_extract = NativeTypeRegistry::new();
+        auto_extract.register_module("jose_jwk", vec![]);
+        auto_extract.register_module_exports("jose_jwk", [("to_public".to_string(), 1)]);
+
+        let mut stubs = NativeTypeRegistry::new();
+        stubs.register_module(
+            "jose_jwk",
+            vec![
+                declared_sig("to_public", 1, InferredType::known("Tuple")),
+                declared_sig("bogus", 0, InferredType::known("Tuple")),
+            ],
+        );
+
+        let drift = auto_extract.detect_stub_drift(&stubs);
+
+        assert_eq!(drift.len(), 1);
+        assert_eq!(drift[0].1.name, "bogus");
+    }
+
+    #[test]
+    fn merge_keeps_exports_with_the_winning_module() {
+        let mut otp = NativeTypeRegistry::new();
+        otp.register_module("shared", vec![]);
+        otp.register_module_exports("shared", [("otp_fn".to_string(), 0)]);
+
+        let mut dep = NativeTypeRegistry::new();
+        dep.register_module("shared", vec![]);
+        dep.register_module_exports("shared", [("dep_fn".to_string(), 0)]);
+        dep.register_module("dep_only", vec![]);
+        dep.register_module_exports("dep_only", [("f".to_string(), 1)]);
+
+        otp.merge(dep);
+
+        assert!(otp.exports_function("shared", "otp_fn", 0));
+        assert!(!otp.exports_function("shared", "dep_fn", 0));
+        assert!(otp.exports_function("dep_only", "f", 1));
     }
 }

@@ -25,6 +25,7 @@ types come from the first clause (Erlang convention).
 -export([
     read_specs/1,
     read_specs_batch/1,
+    add_export_only_entries/2,
     read_raw_specs/1,
     read_types/1,
     format_erlang_spec/1,
@@ -126,6 +127,39 @@ read_one_spec(BeamFile, RemoteCache) ->
             {ModName, {ok, Specs}};
         {error, Reason} ->
             {ModName, {error, Reason}}
+    end.
+
+-doc """
+Append an export-only entry for every function `BeamFile` exports that has
+no entry in `Specs` (BT-4574).
+
+`Specs` holds only functions with a `-spec`, so it is not the module's export
+list: a module with no specs at all (e.g. `jose_jwk`) yields `[]`. Consumers
+that need "is `F/A` exported?" — the stub drift check in `beamtalk build` —
+read these entries instead. The export list comes from the `.beam`'s
+`exports` chunk, so it also covers `-compile(export_all)` and
+`module_info/0,1`. Each entry is
+`#{name => binary(), arity => non_neg_integer(), export_only => true}`; it has
+no `params` or `return_type`, so it carries no type information.
+
+If the `exports` chunk cannot be read, `Specs` is returned unchanged.
+""".
+-spec add_export_only_entries(file:filename_all(), [map()]) -> [map()].
+add_export_only_entries(BeamFile, Specs) ->
+    case beam_lib:chunks(BeamFile, [exports]) of
+        {ok, {_Module, [{exports, Exports}]}} ->
+            Specced = sets:from_list(
+                [{Name, Arity} || #{name := Name, arity := Arity} <- Specs]
+            ),
+            ExportOnly = [
+                #{name => NameBin, arity => Arity, export_only => true}
+             || {Name, Arity} <- lists:usort(Exports),
+                NameBin <- [atom_to_binary(Name, utf8)],
+                not sets:is_element({NameBin, Arity}, Specced)
+            ],
+            Specs ++ ExportOnly;
+        {error, beam_lib, _Reason} ->
+            Specs
     end.
 
 %% Order-preserving, bounded-concurrency parallel map. Splits `List' into at
