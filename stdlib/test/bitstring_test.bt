@@ -101,9 +101,9 @@ TestCase subclass: BitstringTest
     self assert: {self tail, 1} printString equals: "\{<<10:5>>, 1}"
 
   testFieldNamesIsEmpty =>
-    // A Bitstring is a raw BEAM term with no fields. Sent dynamically: the
-    // inline `fieldNames` intrinsic mishandles every non-map value receiver
-    // (BT-4264).
+    // A Bitstring is a raw BEAM term with no fields; the inline and
+    // dynamic paths agree (BT-4264).
+    self assert: self tail fieldNames equals: #()
     self assert: (self tail perform: #fieldNames) equals: #()
 
   testFieldAccessOnABitstringIsStructured =>
