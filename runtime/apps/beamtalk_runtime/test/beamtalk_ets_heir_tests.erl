@@ -45,6 +45,8 @@ heir_test_() ->
                 fun trace_store_reclaims_after_crash/0},
             {"announcements crash: tables survive and are reclaimed by the new bus",
                 fun announcements_reclaims_after_crash/0},
+            {"instance registry crash: registrations survive and stay monitored",
+                fun instance_registry_reclaims_after_crash/0},
             {"boot-time tables name the heir", fun boot_tables_name_heir/0}
         ]}}.
 
@@ -218,6 +220,55 @@ announcements_reclaims_after_crash() ->
         beamtalk_announcements,
         [beamtalk_announcement_subs, beamtalk_announcement_by_class]
     ).
+
+instance_registry_reclaims_after_crash() ->
+    %% BT-4123: actors register once at spawn, so a registry crash that lost
+    %% the tables would orphan them for good.
+    Class = bt4123_registry_crash_test,
+    Actor = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = beamtalk_object_instances:register(Class, Actor),
+    %% Simulate a server killed part-way through a two-table write: an
+    %% `unregister` that dropped the bag row but not the index row (Orphan),
+    %% and a `register` that wrote the bag but not the index (Actor's index
+    %% row removed). The restart must reconcile the index with the bag.
+    Orphan = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    true = ets:insert(beamtalk_instance_class, {Orphan, Class}),
+    true = ets:delete(beamtalk_instance_class, Actor),
+    try
+        owner_restart_reclaims(
+            beamtalk_object_instances,
+            [beamtalk_instance_registry, beamtalk_instance_class]
+        ),
+        ?assertEqual([Actor], beamtalk_object_instances:all(Class)),
+        ?assertEqual(Class, beamtalk_object_instances:class_of(Actor)),
+        ?assertEqual(Class, beamtalk_actor:lookup_class(Actor)),
+        ?assertEqual(undefined, beamtalk_object_instances:class_of(Orphan)),
+        ActorStr = beamtalk_primitive:string_from_binary(list_to_binary(pid_to_list(Actor))),
+        ?assert(
+            lists:any(
+                fun(Row) -> lists:member(ActorStr, maps:values(Row)) end,
+                beamtalk_trace_store:bottlenecks(1000000)
+            )
+        ),
+        %% The restarted server re-monitored the reclaimed pid: its death
+        %% still cleans the registration up.
+        kill_and_wait(Actor),
+        %% A synchronous call is processed after the queued 'DOWN'.
+        _ = sys:get_state(beamtalk_object_instances),
+        ?assertEqual([], beamtalk_object_instances:all(Class)),
+        ?assertEqual(undefined, beamtalk_object_instances:class_of(Actor))
+    after
+        exit(Actor, kill),
+        exit(Orphan, kill)
+    end.
 
 boot_tables_name_heir() ->
     HeirPid = whereis(beamtalk_ets_heir),
