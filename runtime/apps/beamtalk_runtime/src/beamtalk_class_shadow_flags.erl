@@ -194,7 +194,8 @@ the class's tag lock, records the tag in the per-tag index
 added (a target already present is never rewritten). Every erase of the
 class's derived key (`erase_direct_flag/1`: `set/2`, `set_class_vars/2`,
 `invalidate/1`, and through `invalidate/1` an ancestor's write) also erases
-the class's per-class static call key, unconditionally (it may outlive a
+the class's per-class static call key (as does an ancestor gaining or losing a
+class-side extension, `invalidate_descendants_of_tag/1`, BT-4307), unconditionally (it may outlive a
 derived key another path erased), so every target is gone wherever the
 dynamic answer could change. Targets are never erased one at a time: any
 write that could change one class's answer erases the whole map, and the next
@@ -259,6 +260,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_direct_flag_set/1,
     direct_flag_value/1,
     invalidate/1,
+    invalidate_descendants_of_tag/1,
     erase_all_static_call_keys/0,
     set_class_vars/2,
     mark_ready/0,
@@ -333,6 +335,12 @@ class_tag(class_vars, Name) -> beamtalk_class_registry:class_object_tag(Name).
 -spec erase_direct_flag(atom()) -> ok.
 erase_direct_flag(Tag) ->
     erase_if_present(Tag),
+    erase_static_calls(Tag).
+
+%% Erase the class's per-class static call key (BT-4442) and forget its tag in
+%% the index. Runs only under the tag lock.
+-spec erase_static_calls(atom()) -> ok.
+erase_static_calls(Tag) ->
     %% No atom, no key: a class no call site ever warmed creates no atom here.
     try binary_to_existing_atom(static_calls_key_name(Tag)) of
         StaticCallsKey -> erase_if_present(StaticCallsKey)
@@ -397,6 +405,44 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
+
+-doc """
+Erase the static call keys of every descendant of the class tagged `Tag`, each
+under its own tag lock (BT-4307). Called by `beamtalk_extensions:register/5`
+and `unregister/3` when a class-side extension row under `Tag` appears or goes
+away, after the row is written and the derived-fact cache is flushed: an
+ancestor's class-side extension counts as that ancestor's method for a send
+to a descendant, so it can change the descendant's in-caller owner
+(`beamtalk_class_dispatch:in_caller_owner/2`), and with it whether a static
+call key whose owner is inherited (BT-4270's caller-safe raise) may stay
+installed. A key for a method the descendant defines itself cannot change
+(its own method is found before an ancestor's extension), but the whole
+per-class map goes, as every eraser does. The descendant's derived flag stays:
+it reads only the class's own shadows and its chain's class variables, never
+an ancestor's extension. The class's own keys are erased by `set/2` already.
+
+Erase-after-write, as `invalidate/1` is for descendants: between the row
+write and the erase, a descendant's warmed static call may still take its old
+key once. The lock is taken for each descendant even when it has no key, for
+the reason `invalidate/1` gives (an install in flight may have validated
+before the write and not have put yet). A tag that names no loaded class, or
+a class with no descendants, erases nothing. Must never be called from inside
+`with_tag_lock/2`.
+""".
+-spec invalidate_descendants_of_tag(atom()) -> ok.
+invalidate_descendants_of_tag(Tag) ->
+    case beamtalk_primitive:class_name_from_tag(Tag) of
+        undefined ->
+            ok;
+        ClassName ->
+            lists:foreach(
+                fun(Descendant) ->
+                    DescendantTag = beamtalk_class_registry:class_object_tag(Descendant),
+                    with_tag_lock(DescendantTag, fun() -> erase_static_calls(DescendantTag) end)
+                end,
+                beamtalk_class_registry:all_subclasses(ClassName)
+            )
+    end.
 
 -doc """
 Erase every class's derived key and static call keys, each under its tag lock

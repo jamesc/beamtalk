@@ -1380,7 +1380,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. It re-raises the stacktrace captured when the exception was caught, with each frame's argument values reduced to its arity, as `e stackTrace` shows them. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
-**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. (A class-side extension on an *ancestor* of the receiving class is not seen, by this shortcut or by the ordinary class send: [BT-4307](https://linear.app/beamtalk/issue/BT-4307).) `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
+**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. A class-side extension of `signal:` on an *ancestor* of the receiving class counts as that ancestor's method, so it takes the ordinary class send too, and runs with the receiving class as `self` (BT-4307). `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
 
 ```beamtalk
 [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
@@ -5872,6 +5872,17 @@ String >> shoutIt => super printString uppercase ++ "!"
 // Class-side foreign extension
 String class >> banner => "=== String ==="
 ```
+
+A class-side extension is inherited the way a class method is: at each class
+up the chain, its class-side extensions are checked before its own class
+methods, so `Sub banner` answers an extension registered on `Base class`, with
+`Sub` as `self`, and an extension on `Base class` shadows a compiled class
+method of `Base` for `Sub` too (unless `Sub` itself defines the method). An
+outside send, a dynamic send, a class-side `self` send, `super`,
+`respondsTo:` and protocol conformance all agree (BT-4307). Two exceptions
+remain: `performLocally:withArguments:` applies compiled class methods only, and
+the instance-creation sends `new` and `new:` do not yet see an ancestor's
+class-side extension of them ([BT-4588](https://linear.app/beamtalk/issue/BT-4588)).
 
 ---
 

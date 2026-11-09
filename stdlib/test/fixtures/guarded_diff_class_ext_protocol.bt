@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4307: a protocol whose only requirement is a class-side selector that
+// GuardedDiffClassRoot answers only through a class-side extension
+// (class_dispatch_differential_test.bt), so a subclass conforms only if
+// conformance sees the ancestor's extension.
+
+Protocol define: GuardedDiffClassRootExtended
+  class rootExtension -> Symbol

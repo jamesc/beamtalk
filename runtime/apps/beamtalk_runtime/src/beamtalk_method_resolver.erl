@@ -167,7 +167,7 @@ per-class published-record probe.
 `ClassPid`'s own method table is checked here, outside the depth-counted
 walk — the receiver's own class is "free" and the `?MAX_HIERARCHY_DEPTH`
 budget applies only to the superclass chain above it (the same split
-`beamtalk_class_dispatch:find_class_method_in_chain/2` uses). The walk
+`beamtalk_class_dispatch:find_class_super_method/2` uses). The walk
 itself starts at the immediate superclass.
 """.
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.

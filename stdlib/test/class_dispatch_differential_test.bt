@@ -32,6 +32,7 @@
 // To add a case, add a `classSend:` row to the test method for its kind.
 //
 // Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
+// fixtures/guarded_diff_class_ext_protocol.bt,
 // fixtures/guarded_diff_class_stateful.bt, fixtures/guarded_diff_class_forgot.bt,
 // fixtures/guarded_diff_class_fun_root.bt, fixtures/guarded_diff_class_fun_leaf.bt,
 // fixtures/guarded_diff_class_sealed.bt, fixtures/guarded_diff_sup.bt,
@@ -215,14 +216,12 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
 
   // A class-side extension (ADR 0066) on an ancestor of the receiving class.
   // Sent to the ancestor itself, the extension answers. Sent to a subclass,
-  // the extension is NOT reached today: an external class-side send to `Sub`
-  // checks only `Sub`'s own extensions and then walks the compiled class
-  // methods, so an extension-only selector raises `does_not_understand` and an
-  // extension shadowing a compiled ancestor method is bypassed (a class-side
-  // `super` does see ancestor extensions, BT-4250). ADR 0142 §2 assumes "a
-  // class-side extension at each ancestor counts as that ancestor's method";
-  // that is BT-4307, a dispatch change of its own. These rows pin today's
-  // outcome on both paths; BT-4307 flips the three marked assertions.
+  // it answers too (BT-4307): a class-side send walks the chain with each
+  // ancestor's extension before its class methods, the order a class-side
+  // `super` uses (BT-4250) and ADR 0142 §2 assumes ("a class-side extension
+  // at each ancestor counts as that ancestor's method"). So an extension-only
+  // selector is understood, the extension's `self` is the receiving
+  // subclass, and an extension shadowing a compiled ancestor method wins.
   testAncestorClassSideExtension =>
     outcome := self
       classSend: #ownExtension
@@ -236,30 +235,38 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       dynamic: [:cls | cls shadowedByExtension]
       on: GuardedDiffClassRoot
     self assert: outcome equals: #(#returned, #fromRootExtension)
-    // BT-4307: becomes #(#returned, #fromRootExtension).
     outcome := self
       classSend: #ancestorExtension
       literal: [GuardedDiffClassLeaf rootExtension]
       dynamic: [:cls | cls rootExtension]
       on: GuardedDiffClassLeaf
-    self assert: (outcome at: 1) equals: #raised
-    self assert: (outcome at: 3) equals: #does_not_understand
-    // BT-4307: becomes #(#returned, #GuardedDiffClassLeaf) (the extension's
-    // `self` is the receiving subclass).
+    self assert: outcome equals: #(#returned, #fromRootExtension)
+    // The extension's `self` is the receiving subclass.
     outcome := self
       classSend: #ancestorExtensionSelf
       literal: [GuardedDiffClassLeaf rootExtensionReceiver]
       dynamic: [:cls | cls rootExtensionReceiver]
       on: GuardedDiffClassLeaf
-    self assert: (outcome at: 1) equals: #raised
-    self assert: (outcome at: 3) equals: #does_not_understand
-    // BT-4307: becomes #(#returned, #fromRootExtension).
+    self assert: outcome equals: #(#returned, #GuardedDiffClassLeaf)
     outcome := self
       classSend: #ancestorExtensionShadowsCompiled
       literal: [GuardedDiffClassLeaf shadowedByExtension]
       dynamic: [:cls | cls shadowedByExtension]
       on: GuardedDiffClassLeaf
-    self assert: outcome equals: #(#returned, #compiled)
+    self assert: outcome equals: #(#returned, #fromRootExtension)
+    // A class-side self-send from the subclass walks the same chain.
+    outcome := self
+      classSend: #ancestorExtensionSelfSend
+      literal: [GuardedDiffClassLeaf selfShadowedByExtension]
+      dynamic: [:cls | cls selfShadowedByExtension]
+      on: GuardedDiffClassLeaf
+    self assert: outcome equals: #(#returned, #fromRootExtension)
+    // `respondsTo:` on the class side agrees with the send.
+    self assert: (GuardedDiffClassLeaf respondsTo: #rootExtension)
+    self deny: (GuardedDiffClassLeaf respondsTo: #noSuchClassSelector)
+    // So does protocol conformance.
+    self assert: (GuardedDiffClassRoot conformsTo: #GuardedDiffClassRootExtended)
+    self assert: (GuardedDiffClassLeaf conformsTo: #GuardedDiffClassRootExtended)
 
   // An ADR 0084 runtime class-method fun installed on an ancestor of the
   // receiving class shadows the ancestor's compiled method, for the
