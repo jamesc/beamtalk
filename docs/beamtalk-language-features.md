@@ -8460,7 +8460,14 @@ The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValu
 
 ### Ets — Shared In-Memory Tables
 
-`Ets` wraps OTP ets tables for sharing mutable state between actors without message-passing overhead. Tables are named and public by default, so any process can read and write them.
+`Ets` wraps OTP ets tables: either shared between actors without message-passing overhead, or private to one actor.
+
+| Constructor | Name | Who may read / write | Use for |
+|---|---|---|---|
+| `Ets new: #name type: t` | node-global | any process / any process | State shared between actors |
+| `Ets newOrExisting: #name type: t` | node-global | any process / any process | Shared state that may already exist |
+| `Ets private: t` | none | owner only / owner only | One actor's internal state, secrets |
+| `Ets protected: t` | none | any process / owner only | One writer, many concurrent readers |
 
 #### Creating a Table
 
@@ -8476,6 +8483,24 @@ Ets new: #t4 type: #duplicateBag // multiple identical entries per key
 
 // Look up an existing named table from another actor
 cache := Ets named: #myCache
+
+// Unnamed tables, owned by the caller
+secrets := Ets private: #set      // only this process may use it
+board := Ets protected: #set      // others may read, only this process writes
+```
+
+A named table's name is global to the node, so a second instance of the same actor cannot create the same name again (`already_exists`). Unnamed tables avoid that: create one per actor in `initialize` and keep it in a field typed `:: Ets`. They have no name, so `Ets named:` cannot find them. Using one from a process its protection forbids, or calling `delete` from any process but the owner, raises `access_denied`, not a raw `badarg`. Each REPL input runs in a short-lived process, so an unnamed table created at the REPL is deleted when that input finishes; create it in the actor that uses it. Printing or inspecting an `Ets` never shows its entries.
+
+```beamtalk
+Actor subclass: SessionStore
+  state: table :: Ets
+
+  initialize -> Nil =>
+    self.table := Ets private: #set
+    nil
+
+  remember: id state: s => self.table at: id put: s
+  claim: id => self.table removeKey: id ifAbsent: [nil]
 ```
 
 #### Reading and Writing
@@ -8529,13 +8554,14 @@ cache isEmpty                   // => true if no entries
 cache isNotEmpty                // => true if at least one entry
 cache keys                      // => List of all keys (order unspecified for #set)
 cache removeKey: "key"          // delete entry; no-op if key is absent
+cache removeKey: "key" ifAbsent: [nil]  // atomically remove and answer the value (ets:take)
 cache removeAll                 // remove all entries, keep the table
 cache delete                    // destroy the table; frees all memory
 ```
 
 #### Cross-Actor Sharing
 
-ETS tables are process-owned but publicly readable and writable. Create a named table in one actor, then retrieve it from another:
+Tables made with `new:type:` are process-owned but publicly readable and writable. Create a named table in one actor, then retrieve it from another:
 
 ```beamtalk
 // Actor A — create the table
@@ -8549,7 +8575,7 @@ cache at: "token"               // => "abc123"
 
 #### Table Lifecycle
 
-The owning process (the one that called `Ets new:type:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Only the owning actor may call `delete` on the table — other actors should request deletion by messaging the owner. Call `delete` explicitly in the owner to release memory before the process exits.
+The owning process (the one that called `Ets new:type:`, `private:` or `protected:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Only the owning actor may call `delete` on the table — other actors should request deletion by messaging the owner. Call `delete` explicitly in the owner to release memory before the process exits.
 
 ---
 
