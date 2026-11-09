@@ -854,11 +854,10 @@ impl CoreErlangGenerator {
             .iter()
             .any(|block| self.loop_body_has_carried_mutations(block))
             || matches!(receiver, Expression::Block(_))
-                && arguments.iter().any(|a| match a {
-                    Expression::Block(body) => {
-                        self.while_condition_has_carried_effects(receiver, Some(body))
-                    }
-                    _ => false,
+                && arguments.iter().any(|a| {
+                    beamtalk_core::semantic_analysis::block_facts::while_body_block(a).is_some_and(
+                        |body| self.while_condition_has_carried_effects(receiver, Some(body)),
+                    )
                 });
         if carried {
             UserCodeCall::No
