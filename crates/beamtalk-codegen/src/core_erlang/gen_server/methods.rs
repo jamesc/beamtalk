@@ -431,11 +431,11 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
-    /// BT-3814 / BT-3819: the one lowering of the arguments of a send whose
-    /// statement lowering compiles them itself: a `super` send (`super take:
-    /// (self bump)`, `^super take: (c ifTrue: [self.n := 1 ...])`) and,
-    /// BT-4310, a `self error:`, `self fieldAt:put:` or `self clearField:`
-    /// statement, at the method root (`frame` is `ROOT`) or in an arm frame.
+    /// BT-4310: the one lowering of the arguments of a send whose statement
+    /// lowering compiles them itself: a `self error:`, `self fieldAt:put:` or
+    /// `self clearField:` statement, at the method root (`frame` is `ROOT`)
+    /// or in an arm frame. (A `super` send's arguments are sequenced by
+    /// `super_send_producer`, BT-4318.)
     /// Their state-effecting sub-expressions thread ahead of the send into
     /// `stmts` (the sequencing rule), so the send reads the post-operand
     /// `State` and an operand's rebind is not scoped away inside its closed

@@ -89,6 +89,7 @@ const SHAPES: &[(&str, &str)] = &[
     ("returned", "    ^POS\n"),
     ("statement_then_read", "    POS.\n    self.n\n"),
     ("assigned_then_read", "    x := POS.\n    x.\n    self.n\n"),
+    ("field_value", "    self.n := POS.\n    self.n\n"),
     (
         "field_assigned",
         "    self.n := self.n + 1.\n    x := POS.\n    self.n := self.n + 1.\n    x\n",

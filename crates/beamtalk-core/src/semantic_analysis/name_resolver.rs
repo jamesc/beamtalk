@@ -249,7 +249,7 @@ impl NameResolver {
                     Diagnostic::error("a cast (`!`) cannot be sent to `super`", span).with_hint(
                         "`super` runs the parent class's method here, synchronously: \
                          send it without `!` (`super foo`), or cast to `self` \
-                         (`self foo!`) to post it to this actor's mailbox",
+                         (`self foo!`) to post it asynchronously",
                     ),
                 );
                 return;
