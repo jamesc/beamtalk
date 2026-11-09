@@ -980,7 +980,9 @@ server_api_test_() ->
         {"find_ffi_sites_in_source/4", fun api_find_ffi_sites/0},
         {"resolve_method_span/4", fun api_resolve_method_span/0},
         {"diagnostics/3 class_hierarchy overlay map is per-request only (BT-3109)",
-            fun api_diagnostics_class_hierarchy_overlay_does_not_touch_ambient_cache/0}
+            fun api_diagnostics_class_hierarchy_overlay_does_not_touch_ambient_cache/0},
+        {"diagnostics/3 source_path applies the file's project table (BT-4325)",
+            fun api_diagnostics_source_path_applies_project_table/0}
     ]}.
 
 api_compile_expression() ->
@@ -1025,6 +1027,44 @@ api_compile() ->
 api_diagnostics() ->
     Result = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
     ?assertMatch({ok, _}, Result).
+
+%% BT-4325: `source_path' reaches the port, which checks the buffer under
+%% that file's project scope — here the project's `[diagnostics] type =
+%% "error"' table turns a type mismatch the port-cwd scope reports as a
+%% warning into the error `load_project' would fail on.
+api_diagnostics_source_path_applies_project_table() ->
+    Root = filename:join(
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
+        "bt4325_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    SourcePath = filename:join([Root, "src", "bad.bt"]),
+    ok = filelib:ensure_dir(SourcePath),
+    try
+        ok = file:write_file(
+            filename:join(Root, "beamtalk.toml"),
+            <<
+                "[package]\nname = \"bt4325\"\nversion = \"0.1.0\"\n\n"
+                "[diagnostics]\ntype = \"error\"\n"
+            >>
+        ),
+        Source = <<"typed Value subclass: Bad\n  field: n :: Integer = \"oops\"\n">>,
+        ok = file:write_file(SourcePath, Source),
+        {ok, Scoped} = beamtalk_compiler_server:diagnostics(Source, <<"expression">>, #{
+            source_path => unicode:characters_to_binary(SourcePath)
+        }),
+        {ok, Unscoped} = beamtalk_compiler_server:diagnostics(Source, <<"expression">>, #{}),
+        ?assertEqual([<<"error">>], mismatch_severities(Scoped)),
+        ?assertNotEqual([<<"error">>], mismatch_severities(Unscoped))
+    after
+        file:del_dir_r(Root)
+    end.
+
+mismatch_severities(Diagnostics) ->
+    [
+        Severity
+     || #{message := Message, severity := Severity} <- Diagnostics,
+        binary:match(Message, <<"declared as Integer">>) =/= nomatch
+    ].
 
 api_version() ->
     Result = beamtalk_compiler_server:version(),

@@ -302,6 +302,13 @@ Options:
   `beamtalk_protocol_registry:create_protocol_class/2'), which defeats the
   nominal-mismatch escape hatch and makes every selector on
   a protocol-typed receiver look unresolved.
+
+  source_path => binary() (BT-4325) — the file the buffer edits. When it
+  sits under a `beamtalk.toml', the port checks the buffer with that
+  file's project scope (its `[diagnostics]' table, cross-file and
+  dependency type aliases, FFI registry) — the scope `compile' gives the
+  same file on `load_project' — so the editor and a load agree. Omitted, the
+  check keeps the port-process scope. Ignored in `"method"' mode.
 """.
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
@@ -1159,7 +1166,15 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
             Overlay when is_map(Overlay) ->
                 {Overlay, alias_source_list(State#state.aliases), State#state.protocols}
         end,
-    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases, Protocols),
+    Result = do_diagnostics(
+        State#state.port,
+        Source,
+        Mode,
+        Classes,
+        Aliases,
+        Protocols,
+        maps:get(source_path, Options, undefined)
+    ),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -1659,8 +1674,10 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 %% trigger), same opt-in and same `"method"'-mode exclusion.
 %% `Protocols' is the ambient protocol-registry cache, same opt-in
 %% and same `"method"'-mode exclusion as `Classes'/`Aliases'.
-do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols) ->
-    Request = #{
+%% `SourcePath' (BT-4325), when a binary, scopes the check to that file's
+%% project — see `diagnostics/3'.
+do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols, SourcePath) ->
+    Request0 = #{
         command => diagnostics,
         source => Source,
         mode => Mode,
@@ -1668,6 +1685,11 @@ do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols) ->
         known_type_aliases => Aliases,
         protocol_registry => Protocols
     },
+    Request =
+        case SourcePath of
+            Path when is_binary(Path) -> Request0#{source_path => Path};
+            _ -> Request0
+        end,
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
             handle_diagnostics_response(Response);

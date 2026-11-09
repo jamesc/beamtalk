@@ -57,8 +57,15 @@
 //! `_build/type_cache/` — gets only its `stubs/` tier, like the port's
 //! completion path and the LSP's cache replay get none. Likewise out of
 //! scope: path dependencies (their sources live outside `_build/deps/`; see
-//! BT-4326) and the editor `diagnostics/3` entry point, which keeps legacy
-//! behaviour on the keystroke path (see BT-4325).
+//! BT-4326).
+//!
+//! The editor `diagnostics/3` entry point resolves the same scope as
+//! `compile` when its request carries the buffer's `source_path`
+//! ([`RequestScope`], BT-4325); without one — a scratch buffer or an
+//! expression typed at the REPL — it keeps the legacy scope, as does
+//! `compile_expression` (REPL input belongs to no file's project). On the
+//! keystroke path the memo above means a keystroke re-stats the project but
+//! never re-parses it unless a fingerprint changed.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -98,10 +105,7 @@ pub(crate) struct FileProjectContext {
 /// reported as a hard alias/alias collision the moment the project
 /// reloads, breaking the redefine-in-session flow that works today.
 /// Everything else appends project-first, mirroring the build's order.
-pub(crate) fn merge_aliases(
-    session_aliases: Vec<AliasInfo>,
-    project_aliases: &[AliasInfo],
-) -> Vec<AliasInfo> {
+fn merge_aliases(session_aliases: Vec<AliasInfo>, project_aliases: &[AliasInfo]) -> Vec<AliasInfo> {
     let session_names: HashSet<String> = session_aliases
         .iter()
         .map(|info| info.name.to_string())
@@ -114,6 +118,57 @@ pub(crate) fn merge_aliases(
             .cloned(),
     );
     merged
+}
+
+/// The analysis scope one request runs under: its file's project when
+/// `source_path` sits under a manifest, otherwise the legacy port-process
+/// scope (cwd `[diagnostics]` table, no registry, session aliases only).
+///
+/// The one place `compile`, `compile_method` and `diagnostics/3` pick their
+/// scope, so the editor's diagnostics and a `load_project` compile of the
+/// same file can never drift apart again (BT-4325).
+pub(crate) struct RequestScope {
+    project: Option<FileProjectContext>,
+    legacy_project: ProjectAnalysisContext,
+}
+
+impl RequestScope {
+    /// Resolve the scope for a request carrying `source_path` (and, for a
+    /// `load_project` compile, its `project_batch` token). `None` — no path,
+    /// a manifest-less file, or a stdlib compile the caller already
+    /// excluded — is the legacy scope.
+    pub(crate) fn for_source(source_path: Option<&str>, batch: Option<&str>) -> Self {
+        Self {
+            project: source_path.and_then(|path| project_context_for_source(path, batch)),
+            legacy_project: ProjectAnalysisContext::default(),
+        }
+    }
+
+    /// The `[diagnostics]` table: the project's own, else the port cwd's.
+    pub(crate) fn diagnostics_table(&self) -> &DiagnosticsTable {
+        match &self.project {
+            Some(project) => &project.diagnostics_table,
+            None => crate::registry::diagnostics_overrides(),
+        }
+    }
+
+    /// Registry + known modules + package name for
+    /// `compute_diagnostics_and_analysis`.
+    pub(crate) fn analysis_project(&self) -> &ProjectAnalysisContext {
+        match &self.project {
+            Some(project) => &project.analysis_project,
+            None => &self.legacy_project,
+        }
+    }
+
+    /// The request's session aliases merged with the project's
+    /// ([`merge_aliases`]: session wins, then project-first).
+    pub(crate) fn aliases(&self, session_aliases: Vec<AliasInfo>) -> Vec<AliasInfo> {
+        match &self.project {
+            Some(project) => merge_aliases(session_aliases, &project.aliases),
+            None => session_aliases,
+        }
+    }
 }
 
 /// Memoized per-root scope. Fingerprints are exact path→(mtime, length)
@@ -382,7 +437,7 @@ fn load_project_registry(utf8_root: &Utf8Path) -> Option<Arc<NativeTypeRegistry>
 /// that verified scope without re-statting the project. A `load_project`
 /// does not edit the project mid-batch, and the next batch — or any request
 /// without a token — verifies afresh.
-pub(crate) fn project_context_for_source(
+fn project_context_for_source(
     source_path: &str,
     batch: Option<&str>,
 ) -> Option<FileProjectContext> {
