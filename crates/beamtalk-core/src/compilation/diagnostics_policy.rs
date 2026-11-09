@@ -1096,6 +1096,64 @@ fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDi
     }
 }
 
+/// What a REPL `load-project` does with one diagnostic (BT-4334, BT-4377).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveRecheckVerdict {
+    /// `Error` severity: the compile itself fails, before any recheck.
+    CompileError,
+    /// A non-error `Dnu`/`Type` diagnostic: the whole-image recheck reports
+    /// it as a finding (`relevant_image_diagnostic/1` answers `true`).
+    Finding,
+    /// Neither: the load succeeds as far as this diagnostic is concerned.
+    Pass,
+}
+
+impl LiveRecheckVerdict {
+    /// The fixture spelling (`live_recheck_verdict_conformance.json`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompileError => "compile_error",
+            Self::Finding => "finding",
+            Self::Pass => "pass",
+        }
+    }
+}
+
+/// Classifies a lint-pipeline diagnostic the way a REPL `load-project`
+/// would (BT-4334).
+///
+/// The `Finding` arm is the Rust side of `relevant_image_diagnostic/1` in
+/// `runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`: any non-error
+/// `Dnu`/`Type` diagnostic. The `CompileError` arm is the compile step that
+/// runs before the recheck (and that `relevant_image_diagnostic/1` therefore
+/// drops). Both sides are pinned to the shared fixture
+/// `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`
+/// (Rust: `live_recheck_verdict_matches_shared_corpus` below; Erlang:
+/// `beamtalk_recheck_tests:relevant_image_diagnostic_matches_shared_corpus_test/0`).
+#[must_use]
+pub fn live_recheck_verdict(diag: &Diagnostic) -> LiveRecheckVerdict {
+    if diag.severity == Severity::Error {
+        LiveRecheckVerdict::CompileError
+    } else if matches!(
+        diag.category,
+        Some(DiagnosticCategory::Dnu | DiagnosticCategory::Type)
+    ) {
+        LiveRecheckVerdict::Finding
+    } else {
+        LiveRecheckVerdict::Pass
+    }
+}
+
+/// Whether a diagnostic fails the `--warnings-as-errors` gate: anything a
+/// REPL `load-project` would reject (see [`live_recheck_verdict`]). Plain
+/// `lint` only counts `Severity::Lint`, so the same source would otherwise
+/// pass CLI and fail REPL.
+#[must_use]
+pub fn is_live_recheck_failure(diag: &Diagnostic) -> bool {
+    live_recheck_verdict(diag) != LiveRecheckVerdict::Pass
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1814,5 +1872,62 @@ dnu = "error"
             diags.iter().any(|d| d.provision.is_some()),
             "provision diagnostic kept: {diags:?}"
         );
+    }
+
+    /// BT-4377: the `--warnings-as-errors` verdict and the REPL whole-image
+    /// recheck (`relevant_image_diagnostic/1` in `beamtalk_recheck.erl`) are
+    /// both pinned to one shared severity × category → verdict corpus. The
+    /// Erlang half is
+    /// `beamtalk_recheck_tests:relevant_image_diagnostic_matches_shared_corpus_test/0`.
+    #[test]
+    fn live_recheck_verdict_matches_shared_corpus() {
+        use crate::source_analysis::category_name;
+
+        let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&corpus).expect("read verdict corpus");
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("JSON array");
+        assert!(!rows.is_empty());
+
+        let severities = [
+            Severity::Error,
+            Severity::Warning,
+            Severity::Hint,
+            Severity::Lint,
+        ];
+        let categories = [
+            DiagnosticCategory::Dnu,
+            DiagnosticCategory::Type,
+            DiagnosticCategory::UnresolvedClass,
+            DiagnosticCategory::Lint,
+        ];
+        for row in &rows {
+            let sev_str = row["severity"].as_str().expect("row.severity");
+            let severity = *severities
+                .iter()
+                .find(|s| s.as_str() == sev_str)
+                .unwrap_or_else(|| panic!("unknown severity {sev_str:?}"));
+            let category = row["category"].as_str().map(|name| {
+                *categories
+                    .iter()
+                    .find(|c| category_name(**c) == name)
+                    .unwrap_or_else(|| panic!("unknown category {name:?}"))
+            });
+            let mut diag = Diagnostic::hint("corpus row", Span::default());
+            diag.severity = severity;
+            diag.category = category;
+            let expected = row["verdict"].as_str().expect("row.verdict");
+            assert_eq!(
+                live_recheck_verdict(&diag).as_str(),
+                expected,
+                "verdict for {row}"
+            );
+            assert_eq!(
+                is_live_recheck_failure(&diag),
+                expected != "pass",
+                "gate for {row}"
+            );
+        }
     }
 }

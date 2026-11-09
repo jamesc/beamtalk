@@ -141,22 +141,38 @@ same scope as `build`.
   `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`.
   `just ci` does not run this gate; add `beamtalk lint --warnings-as-errors`
   to your own project's CI to get the REPL verdict there. The MCP `lint`
-  tool applies the same table but has no `--warnings-as-errors` flag.
+  tool applies the same table and takes the same gate as an optional
+  `warnings_as_errors` flag, classified by the same shared rule
+  (`diagnostics_policy::is_live_recheck_failure`; BT-4336). MCP's analysis
+  pipeline is still separate (no cross-file extensions, pre-loaded
+  aliases/protocols, project-complete scope or `.erl` linting), so on
+  packages that rely on those its verdict can differ from the CLI's
+  (BT-4585).
+- `beamtalk build` re-checks a byte-identical file when a signature it
+  type-checks against changes elsewhere (BT-4336): every pre-loaded class
+  (project and dependency, trait provisions flattened in), protocol and
+  type alias, plus every standalone extension method and the project-known
+  Erlang modules, is hashed into each file's incremental cache key, so a
+  dependent is recompiled — and its diagnostics recomputed — rather than
+  replayed from the cache against the old signature. Doc-comment edits and
+  line shifts leave the hash alone; any signature change rebuilds the whole
+  package (per-file edges: BT-4586).
 
 Intentionally surface-specific behaviour (not parity bugs):
 
 - Plain `beamtalk lint` failing only on lint-severity diagnostics is by
   design; use the flag for the type/DNU verdict.
-- `beamtalk build` replays cached diagnostics for unchanged files
-  (content-hash incremental cache); `beamtalk build --force` or the
-  cache-free `lint` gate re-sweeps everything.
+- `beamtalk build` replays cached diagnostics for a file whose content
+  and cross-file analysis surface are both unchanged; `beamtalk build
+  --force` or the cache-free `lint` gate re-sweeps everything.
 - The compiler-port `diagnostics/3` entry (keystroke squiggles, recheck
   round-trips) runs without on-disk project context (no FFI registry or
   manifest package — BT-4322), while the batch paths load both. FFI-heavy
   code can therefore still read stricter in the REPL than in `build`; that
-  residual gap tracks BT-4322, not this policy.
-- The MCP `lint` tool (`crates/beamtalk-mcp`) is a separate implementation
-  with its own options plumbing and is not covered by the CLI flag.
+  residual gap is tracked by BT-4325.
+- MCP `lint` without `warnings_as_errors` fails only on `Error`
+  diagnostics, not on Lint-severity ones as plain `beamtalk lint` does; its
+  `lint_failures` count carries the plain-CLI verdict.
 
 ### Build Artifact Layout (`BuildLayout`)
 

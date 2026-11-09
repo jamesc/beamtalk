@@ -50,8 +50,9 @@ pub(crate) struct BuildGraphEdges {
     pub file_protocol_uses: HashMap<Utf8PathBuf, Vec<EcoString>>,
     /// Content hash of each provision-bearing protocol, by bare name.
     pub protocol_hashes: HashMap<EcoString, String>,
-    /// Hash of the flattened trait-user class surface (empty = none).
-    pub trait_surface_hash: String,
+    /// Hash of the cross-file analysis surface: every pre-loaded class,
+    /// protocol and alias signature (empty = none; BT-3674, BT-4336).
+    pub analysis_surface_hash: String,
     /// Hash of every FFI stub file the package's type registry was merged
     /// from, across all tiers (empty = no stubs; BT-4393) — see
     /// `stubs::ResolvedTypeRegistry::stub_inputs_hash`.
@@ -59,24 +60,24 @@ pub(crate) struct BuildGraphEdges {
 }
 
 /// Log why a file whose own content is unchanged is being rebuilt. A file
-/// with no protocols only moved because a package-wide input (the trait
+/// with no protocols only moved because a package-wide input (the analysis
 /// surface or the FFI stubs) changed (routine, `info!`); one that uses
 /// protocols gets the ADR 0127 §10a warning.
 fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
     if used_protocols.is_empty() {
         info!(
             file = %source_file,
-            "rebuilding '{source_file}': unchanged itself, but a trait-provided \
-             class surface or an FFI stub in this package changed since it was \
-             last built"
+            "rebuilding '{source_file}': unchanged itself, but a class, protocol \
+             or type-alias signature it may type-check against, or an FFI stub, \
+             changed since it was last built"
         );
     } else {
         warn!(
             file = %source_file,
             protocols = ?used_protocols,
             "rebuilding '{source_file}': unchanged itself, but a protocol it uses \
-             (one of {used_protocols:?}) or a trait-provided class surface it may \
-             call changed since it was last built"
+             (one of {used_protocols:?}) or a class, protocol or type-alias \
+             signature it may type-check against changed since it was last built"
         );
     }
 }
@@ -126,16 +127,18 @@ fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
 /// its bare `Name`, mirroring `trait_expansion`'s own resolution) into that
 /// file's stored/compared hash, so editing a protocol changes its users'
 /// cache keys and rebuilds them, even when their own source is untouched.
-/// `edges.trait_surface_hash` (BT-3674) covers the *other* direction: a file that
-/// merely *calls* a trait-provided method (it names neither the trait nor the
-/// trait user in `uses:`) type-checks against the flattened `ClassInfo` of
-/// trait-using classes in other files. Renaming a provision changes that
-/// surface without touching the caller's own source, so the package-wide hash
-/// of those flattened surfaces is folded into every file's key. Cost: a
-/// change to a trait or to a trait-using class's surface rebuilds the whole
-/// package (not just referencing files); packages without any `uses:` pay
-/// nothing (empty hash is a no-op), and edits that leave the surfaces equal
-/// (method bodies) keep it stable.
+/// `edges.analysis_surface_hash` (BT-3674, generalised in BT-4336) covers
+/// every *other* cross-file input: a file type-checks against the
+/// `ClassInfo` of classes in other files and dependencies (trait provisions
+/// flattened in), and against their protocols and type aliases. Changing a
+/// return type, dropping a method or renaming a provision changes that
+/// surface without touching the caller's own source, so the package-wide
+/// hash of it is folded into every file's key — otherwise the caller's
+/// `.beam` and cached diagnostics would be replayed against the old
+/// signature and `build` would pass code a REPL `load-project` rejects.
+/// Cost: a signature change anywhere rebuilds the whole package (not just
+/// referencing files); edits that leave every signature equal (method
+/// bodies, doc comments, line shifts) keep it stable.
 ///
 /// `edges.stub_inputs_hash` (BT-4393) does the same for the FFI stub tiers
 /// (project-local `stubs/`, package-bundled, distribution): every file
@@ -158,7 +161,7 @@ pub(crate) fn detect_changes(
     let BuildGraphEdges {
         file_protocol_uses,
         protocol_hashes,
-        trait_surface_hash,
+        analysis_surface_hash,
         stub_inputs_hash,
     } = edges;
     // Content hash of each source file as of the last successful
@@ -189,7 +192,7 @@ pub(crate) fn detect_changes(
             &own_hash,
             used_protocols,
             protocol_hashes,
-            trait_surface_hash,
+            analysis_surface_hash,
             stub_inputs_hash,
         );
 
@@ -302,7 +305,7 @@ fn combined_content_hash(
     own_hash: &str,
     used_protocols: &[EcoString],
     protocol_hashes: &HashMap<EcoString, String>,
-    trait_surface_hash: &str,
+    analysis_surface_hash: &str,
     stub_inputs_hash: &str,
 ) -> String {
     let mut protocol_hash_parts: Vec<&str> = used_protocols
@@ -311,7 +314,7 @@ fn combined_content_hash(
         .map(String::as_str)
         .collect();
     if protocol_hash_parts.is_empty()
-        && trait_surface_hash.is_empty()
+        && analysis_surface_hash.is_empty()
         && stub_inputs_hash.is_empty()
     {
         return own_hash.to_string();
@@ -323,9 +326,9 @@ fn combined_content_hash(
         buf.push('\n');
         buf.push_str(part);
     }
-    if !trait_surface_hash.is_empty() {
+    if !analysis_surface_hash.is_empty() {
         buf.push_str("\nsurface:");
-        buf.push_str(trait_surface_hash);
+        buf.push_str(analysis_surface_hash);
     }
     if !stub_inputs_hash.is_empty() {
         buf.push_str("\nstubs:");
