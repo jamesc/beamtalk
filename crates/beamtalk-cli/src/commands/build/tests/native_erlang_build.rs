@@ -70,6 +70,45 @@ fn test_build_without_native_dir_is_unaffected() {
 }
 
 #[test]
+fn test_build_prunes_orphaned_native_package_locks() {
+    // BT-4549: a lock carrying [[native_package]] entries that nothing in the
+    // dependency graph declares (e.g. a dependency dropped its native deps)
+    // must be pruned by the build, or the runtime tries to boot them.
+    use crate::commands::deps::lockfile::{Lockfile, NativePackageLock};
+
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let src_path = project_path.join("src");
+    write_test_file(&src_path.join("main.bt"), "main := [42].");
+    write_test_file(
+        &project_path.join("beamtalk.toml"),
+        "[package]\nname = \"orphan_native\"\nversion = \"0.1.0\"\n",
+    );
+    let mut lockfile = Lockfile::new();
+    lockfile.insert_native(NativePackageLock::hex("gun", "2.1.3", "def456"));
+    lockfile.insert_native(NativePackageLock::hex("cowlib", "2.13.0", "abc123"));
+    lockfile.write(&project_path).unwrap();
+
+    let result = build(project_path.as_str(), &default_options(), false);
+
+    if let Err(e) = result {
+        let error_msg = format!("{e:?}");
+        if error_msg.contains("escript not found") {
+            eprintln!("Skipping test - escript not installed in CI environment");
+            return;
+        }
+        panic!("Build failed with unexpected error: {e:?}");
+    }
+
+    assert!(
+        Lockfile::collect_hex_dep_names(&project_path)
+            .unwrap()
+            .is_empty(),
+        "orphaned native package locks should be pruned by the build"
+    );
+}
+
+#[test]
 #[ignore = "requires erlc"]
 fn test_build_with_native_erlang() {
     // ADR 0072 Phase 1: build should discover and compile native/*.erl files

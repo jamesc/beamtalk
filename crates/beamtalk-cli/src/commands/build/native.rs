@@ -74,6 +74,20 @@ pub(crate) fn compile_native_sources(
         );
         Some(rebar3_result)
     } else if pkg_manifest.is_some() {
+        // Nothing in the dependency graph declares a native dependency, so
+        // any `[[native_package]]` entries left in beamtalk.lock (e.g. from a
+        // dependency that has since dropped its native deps) are orphans.
+        // The runtime boots every locked native package, so they must go
+        // (BT-4549).
+        let pruned =
+            crate::commands::deps::lockfile::Lockfile::prune_native_packages(&env.project_root)?;
+        if !pruned.is_empty() {
+            eprintln!(
+                "Pruned orphaned native package lock(s) from beamtalk.lock: {}",
+                pruned.join(", ")
+            );
+        }
+
         // Path A: compile native/*.erl directly via erlc (no hex deps).
         // Uses compile_native_erlang_with_deps to also compile transitive
         // BT dependency native sources (same as Path B's post-rebar3 step).

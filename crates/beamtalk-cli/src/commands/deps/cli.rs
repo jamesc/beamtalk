@@ -534,7 +534,14 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let has_native_deps = !manifest.native_dependencies.is_empty();
+    // Native locks can come from transitive packages (or be orphans left by a
+    // package that dropped its native deps, BT-4549), so consult the lock as
+    // well as the root manifest.
+    let existing_lock = Lockfile::read(project_root)?;
+    let has_native_locks = existing_lock
+        .as_ref()
+        .is_some_and(Lockfile::has_native_packages);
+    let has_native_deps = !manifest.native_dependencies.is_empty() || has_native_locks;
 
     if let Some(target_name) = name {
         // Update a single dep — check existence before emptiness
@@ -598,16 +605,13 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
             }
         }
 
-        // Clear native package locks so the next build re-resolves via rebar3
-        if has_native_deps {
-            let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-            if lockfile.has_native_packages() {
-                lockfile.clear_native_packages();
-                lockfile.write(project_root)?;
-                println!("Cleared native package locks — next build will re-resolve via rebar3");
-            } else {
-                println!("No native packages locked — next build will resolve via rebar3");
-            }
+        // Clear native package locks so the next build re-resolves via rebar3.
+        // Re-read: the git/registry updates above rewrote the lockfile.
+        if has_native_locks {
+            Lockfile::prune_native_packages(project_root)?;
+            println!("Cleared native package locks — next build will re-resolve via rebar3");
+        } else if has_native_deps {
+            println!("No native packages locked — next build will resolve via rebar3");
         }
     }
 
@@ -1342,6 +1346,26 @@ utils = { path = \"utils\" }
 
         let result = run_update(&root, None);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_clears_orphaned_native_locks() {
+        // BT-4549: the root manifest declares no native deps, but the lock
+        // still carries entries from a dependency that dropped them.
+        use super::super::lockfile::NativePackageLock;
+
+        let (_dir, root) = create_project("my_app");
+        let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock::hex("gun", "2.1.3", "def456"));
+        lockfile.insert_native(NativePackageLock::hex("cowlib", "2.13.0", "abc123"));
+        lockfile.write(&root).unwrap();
+
+        run_update(&root, None).unwrap();
+
+        let has_native = Lockfile::read(&root)
+            .unwrap()
+            .is_some_and(|l| l.has_native_packages());
+        assert!(!has_native, "orphaned native locks should be cleared");
     }
 
     #[test]
