@@ -227,6 +227,11 @@ pub(super) mod fault {
         /// as before BT-4461, so the frame reads the value from before the
         /// construct (`ReplCachedBindingStale`).
         ReplCachedBindingsNotRethreaded,
+        /// BT-4318: the `super` producer gate answers `false`, so a
+        /// `State`-threading `super` send is compiled in place and its
+        /// `{reply, Result, NewState}` tuple becomes the value
+        /// (`StateEffectEscapesExpression`).
+        SuperSendNotAProducer,
     }
 
     thread_local! {

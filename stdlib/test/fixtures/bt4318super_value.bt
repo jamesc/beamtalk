@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4318: a `super` send in a value position at the method root answers its
+// value (not the raw `{reply, Value, State}` tuple) and keeps the callee's
+// state change.
+
+Bt4318SuperBase subclass: Bt4318SuperValue
+
+  assignValue =>
+    r := super bump: 3
+    r
+
+  assignOperand =>
+    r := (super bump: 3) + 1
+    r
+
+  binaryOperand => (super bump: 3) + 1
+
+  literalElements => #(super bump: 1, super bump: 2)
+
+  keywordArgument => self echo: (super bump: 3)
+
+  echo: x => x
+
+  receiverOfSend => (super bump: 3) printString
+
+  conditionalReceiver => (super bump: 3) > 2 ifTrue: [#big] ifFalse: [#small]
+
+  chained =>
+    r := super bump: 3
+    s := super bump: r
+    s
+
+  statementThenRead =>
+    super bump: 2
+    self.count

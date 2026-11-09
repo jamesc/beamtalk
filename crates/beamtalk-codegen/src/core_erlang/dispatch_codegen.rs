@@ -47,7 +47,8 @@ use super::gen_server::SpawnVariant;
 use super::method_frame::CLASS_SELF_VAR;
 use super::routing;
 use super::threaded_ir::{
-    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VerifyError, VersionPrefix,
+    VersionedVar,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 
@@ -3559,6 +3560,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        // Taken before any argument compiles, so a nested `super` send is
+        // judged on its own.
+        let from_producer = std::mem::take(&mut self.in_super_send_producer);
         let selector_atom = selector.name().to_string();
 
         // A class-side `super` resolves up the metaclass chain via the runtime
@@ -3616,18 +3620,27 @@ impl CoreErlangGenerator {
 
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at
-        // home), stores its answer back, and answers its value.
-        if self.in_cell_closure() {
+        // home), stores its answer back, and answers its value. So does one in
+        // a block or loop body, which threads no `State` for it (BT-3995): the
+        // enclosing call brackets the cell (`classify_super_send`).
+        if !self.super_send_threads_state() {
             return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
         }
 
-        // ADR 0137 §3: a block or loop body threads no `State` for a `super` send
-        // (BT-3995): it runs against the cell, which the enclosing call brackets
-        // (`classify_super_send`), and answers its value.
-        if self.super_send_uses_cell() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        // BT-4318: this form answers `{reply, Result, NewState}`; only
+        // `super_send_producer` unpacks it into a `State` `Bind`. Anywhere
+        // else the tuple leaks as the value and the state change is lost.
+        if !from_producer {
+            let at = self.current_send_span.unwrap_or_default();
+            self.report_threaded_ir_verify_errors(
+                &[VerifyError::StateEffectEscapesExpression {
+                    prefix: VersionPrefix::State,
+                    at,
+                }],
+                "state-threading super send compiled outside its producer",
+                at,
+            );
         }
-
         let current_state = self.current_state_var();
         let doc = docvec![
             "call 'beamtalk_dispatch':'super'(",
@@ -3644,6 +3657,21 @@ impl CoreErlangGenerator {
         // A `super` send in a closure runs against the cell (the early returns
         // above), so its change is kept and no guard is needed (BT-3985 retired).
         Ok(self.bracket_super_send(selector, doc, Span::default()))
+    }
+
+    /// Whether a `super` send compiled now threads the method's own `State`:
+    /// `generate_super_send` answers the raw `{reply, Result, NewState}`
+    /// tuple of `beamtalk_dispatch:super/5`, which the caller must unpack
+    /// (BT-4318) — through [`Self::threaded_expression`]'s `super` producer
+    /// in any value position. False on the class side, in a value type, and
+    /// wherever the send runs against the actor-state cell (a closure, a
+    /// block or loop body), all of which answer a plain value.
+    pub(super) fn super_send_threads_state(&self) -> bool {
+        self.builder_class_method_class().is_none()
+            && !self.in_class_method()
+            && self.context != CodeGenContext::ValueType
+            && !self.in_cell_closure()
+            && !self.super_send_uses_cell()
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.

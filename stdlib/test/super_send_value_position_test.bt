@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4318: a `super` send in any value position at an actor method root answers
+// its value and keeps the callee's state change.
+
+TestCase subclass: SuperSendValuePositionTest
+
+  testAssignmentValue =>
+    a := Bt4318SuperValue spawn
+    self assert: a assignValue equals: 3
+    self assert: a getCount equals: 3
+
+  testAssignmentOperand =>
+    a := Bt4318SuperValue spawn
+    self assert: a assignOperand equals: 4
+    self assert: a getCount equals: 3
+
+  testBinaryOperand =>
+    a := Bt4318SuperValue spawn
+    self assert: a binaryOperand equals: 4
+    self assert: a getCount equals: 3
+
+  testLiteralElements =>
+    a := Bt4318SuperValue spawn
+    self assert: a literalElements equals: #(1, 3)
+    self assert: a getCount equals: 3
+
+  testKeywordArgument =>
+    a := Bt4318SuperValue spawn
+    self assert: a keywordArgument equals: 3
+    self assert: a getCount equals: 3
+
+  testReceiverOfSend =>
+    a := Bt4318SuperValue spawn
+    self assert: a receiverOfSend equals: "3"
+    self assert: a getCount equals: 3
+
+  testConditionalReceiver =>
+    a := Bt4318SuperValue spawn
+    self assert: a conditionalReceiver equals: #big
+    self assert: a getCount equals: 3
+
+  testChainedSends =>
+    a := Bt4318SuperValue spawn
+    self assert: a chained equals: 6
+    self assert: a getCount equals: 6
+
+  testStatementThenRead =>
+    a := Bt4318SuperValue spawn
+    self assert: a statementThenRead equals: 2
+    self assert: a getCount equals: 2

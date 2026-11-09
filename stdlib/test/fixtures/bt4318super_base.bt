@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4318: superclass of Bt4318SuperValue.
+
+Actor subclass: Bt4318SuperBase
+  state: count = 0
+
+  bump: n =>
+    self.count := self.count + n
+    self.count
+
+  getCount => self.count

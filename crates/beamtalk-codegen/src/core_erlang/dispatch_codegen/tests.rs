@@ -220,6 +220,8 @@ fn test_generate_cast_send_non_actor_routes_via_cast() {
 fn test_generate_super_send_uses_beamtalk_dispatch() {
     let mut generator = CoreErlangGenerator::new("test");
     let selector = MessageSelector::Unary("initialize".into());
+    // The `State`-threading form is compiled only by `super_send_producer`.
+    generator.in_super_send_producer = true;
     let doc = generator.generate_super_send(&selector, &[]).unwrap();
     let output = doc.to_pretty_string();
     assert!(
