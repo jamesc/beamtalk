@@ -3,8 +3,9 @@
 ## Status
 Accepted (2026-11-07); proposed 2026-11-06. Tracking: BT-4505.
 
-Builds on ADR 0041 (state-carrying `^`), ADR 0137 (the actor-state cell) and
-ADR 0142 (where class methods run). Decides BT-4459. BT-4430, which came up
+Builds on ADR 0137 (the actor-state cell) and ADR 0142 (where class methods
+run). Amends ADR 0041: for an actor, the state a `^` throw carries is no
+longer the state the method commits. Decides BT-4459. BT-4430, which came up
 in the same review, was decided separately as an amendment to ADR 0133.
 
 ## Context
@@ -66,7 +67,16 @@ today.
 
 Whose cell it is gets decided once, by process identity: the commit reads the
 cell only when the method is running in the actor that owns it. Nothing
-compares two state maps to decide ownership.
+compares two state maps to decide ownership. At home the commit is the cell
+as it stands. The throw's own `__local__` keys are dead once the `^` reaches
+its method, so none of them is merged back. Away (a block's `super` send runs
+the method in another process) there is no cell of the actor's, and the commit
+is the carried state unchanged, as today.
+
+This amends ADR 0041 for actors. Their `^` still carries a state slot, because
+the same throw shape serves the REPL and value types, and away from home the
+slot is the only copy there is. At an actor method's boundary, though, the
+slot is no longer the state of record.
 
 Two behaviours follow, and both are deliberate:
 
@@ -81,8 +91,13 @@ Two behaviours follow, and both are deliberate:
   store written in place with no callback commit (ADR 0130).
 
 The relay machinery added by BT-4429 and BT-4448, including the owner stamp,
-becomes unnecessary and is removed. The runtime keeps its two entry points for
-one release so that code compiled by an older compiler still runs.
+becomes unnecessary and is removed. It is removed one release after the
+commit change ships, not with it. Code compiled before the commit change still
+commits the copy, and for that code the relay in the stdlib's `Block>>ensure:`
+is what keeps a cleanup's writes when `ensure:` is reached through `perform:`.
+The stdlib is always rebuilt with the runtime, so removing the relay from it
+along with the commit change would bring BT-4429 back for every library not
+yet recompiled.
 
 ## Prior Art
 
@@ -141,6 +156,16 @@ method that commits already knows its owner.
 today. Adding a store for them would be a new runtime mechanism with nothing
 to fix.
 
+**Stop carrying actor fields in the throw.** A class method's `^` already
+throws no state. If an actor's `^` did the same at home, "commit the cell"
+would hold by construction, and the verifier could reject any read of the
+slot. It is not adopted now for three reasons. A closure only knows at run
+time whether it is at home. Away, the capture is the only copy of the fields,
+and an away `super` send's illegal-write check reads it. And the slot's shape
+is shared with the REPL and value types. Committing the cell gives the same
+guarantee without changing the thrown term. Once the relay is gone, this
+remains open as a later simplification.
+
 ## Consequences
 
 Ownership is decided in one place, by identity. BT-4459 is fixed by the general
@@ -148,32 +173,62 @@ rule rather than by another patch, and the BT-4429/BT-4448 relay code goes. The
 compiler's obligation narrows to state that has no cell, which its verifier can
 check.
 
-The decision depends on the cell being current whenever a `^` starts. The
-three bugs found during review show that this has to be enforced rather than
-assumed. Their fixes added verifier checks, and new ways of compiling a `^`
-need the same.
+The decision depends on the cell being current whenever a `^` starts. Stated
+for every scope: any call that may run a closure holding a `^` is entered with
+the method's current state already stored to the cell. That covers a block
+passed as a literal, a block held in a variable or parameter, and a block
+reached some other way. The three bugs found during review show that this has
+to be enforced rather than assumed. Today the check (`UnbracketedNlrClosure`)
+only sees block-literal operands, so it is widened to cover any operand that
+may be a block. A test build also asserts the invariant directly at the commit.
+When a method's own `^` reaches its boundary at home without crossing an
+`ensure:`, the fields it carries must equal the cell. Any new way of compiling
+a `^` that breaks the invariant then fails across the whole test corpus,
+without its own verifier check having to exist first.
+
+Libraries compiled before the commit change depend on the relay for one more
+release, so the relay and the new commit live side by side for that release.
 
 ## Implementation
 
-Change the actor-method commit to read the cell; keep a cleanup's writes when a
-foreign `^` passes through it; remove the relay and stamp code with
-compatibility shims for one release; extend the `ensure:` test corpus to cover
-the REPL, a `^` from another method, and a `^` from another actor. The commit
-change and the foreign-`^` change land together. If they land separately, the
-cleanup's writes would survive only partly, depending on where the cleanup
-makes a call. Work items are tracked under BT-4505; BT-4532 holds the remaining
-cleanup from the BT-4524 fix.
+1. **Foundation.**
+   - The foreign-`^` change: a cleanup's writes are stored to the cell when a
+     `^` from another method of the same actor passes through an inlined
+     `ensure:`. Only actor instance methods are affected. A class method that
+     runs in its caller (ADR 0142) has no actor state, so nothing is emitted
+     for it.
+   - The pre-store from the BT-4524 fix moves into ThreadedIr.
+   - The invariant check is widened to any operand that may be a block.
+2. **The commit reads the cell.** A new `beamtalk_actor_state:commit/2`
+   answers the cell at home and the carried state away. Also in this phase:
+   the test-build assertion described under Consequences, and inspection and
+   printing skip `__local__` keys.
+3. **Removal, one release later.** In the release after phase 2 ships, the
+   relay, the owner stamp and `refresh_carried/2` are deleted. Only the
+   stdlib's `Block>>ensure:` emits `refresh_carried/2`, and the stdlib is
+   rebuilt with the runtime. Closures compiled before the removal still call
+   `nlr_state/2`, so it stays one more release as an alias of `view/2`.
+
+The foreign-`^` change lands before the commit change, or with it, but never
+after it. On its own it changes no visible behaviour, because the commit still
+uses the copy. In the other order, a foreign `^`'s cleanup writes would survive
+only up to the cleanup's last bracketed call. The `ensure:` test corpus is
+extended to cover the REPL, a `^` from another method, and a `^` from another
+actor. Work items are tracked under epic BT-4533 (design review: BT-4505).
 
 ## Migration Path
 
 No source changes. The two behaviour changes described under User Impact go in
-the release notes. Libraries compiled by an older compiler keep working for one
-release and must be recompiled after that.
+the release notes. Code compiled before the commit change keeps its old
+behaviour, including BT-4429's relay, until the release that removes the
+relay. It must be recompiled by then. Code compiled with the commit change
+keeps running for one release after the removal, through the `nlr_state/2`
+alias.
 
 ## Implementation Tracking
 
 **Epic:** BT-4533
-**Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp)
+**Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr; check covers any block operand), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp, one release after BT-4535)
 **Status:** Planned
 
 ## References

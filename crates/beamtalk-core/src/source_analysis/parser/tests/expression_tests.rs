@@ -665,6 +665,119 @@ fn parse_super_with_cascade() {
 }
 
 // ========================================================================
+// BT-4508: tokens after a cascade part on the same line
+// ========================================================================
+
+/// Asserts that `source` reports exactly one trailing-cascade-message error
+/// covering `expected_text`, and that the trailing tokens were consumed
+/// rather than parsed as a separate statement.
+fn assert_trailing_cascade_error(source: &str, expected_text: &str) {
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected exactly one diagnostic for {source:?}, got {diagnostics:?}"
+    );
+    let diag = &diagnostics[0];
+    assert!(
+        diag.message.contains("cascade part is a single message"),
+        "unexpected message: {}",
+        diag.message
+    );
+    assert!(
+        diag.hint
+            .as_deref()
+            .is_some_and(|h| h.contains("(x size) reversed")),
+        "missing hint: {:?}",
+        diag.hint
+    );
+    let start = diag.span.start() as usize;
+    let end = diag.span.end() as usize;
+    assert_eq!(&source[start..end], expected_text);
+    assert_eq!(
+        module.expressions.len(),
+        1,
+        "trailing tokens must not become a separate statement"
+    );
+    assert!(matches!(
+        module.expressions[0].expression,
+        Expression::Cascade { .. }
+    ));
+}
+
+#[test]
+fn bt4508_trailing_unary_after_cascade_part_is_error() {
+    assert_trailing_cascade_error("x foo; size reversed", "reversed");
+}
+
+#[test]
+fn bt4508_trailing_unary_chain_after_cascade_part_is_error() {
+    assert_trailing_cascade_error("x foo; size reversed first", "reversed first");
+}
+
+#[test]
+fn bt4508_trailing_binary_after_cascade_part_is_error() {
+    assert_trailing_cascade_error("x foo; size + 1", "+ 1");
+}
+
+#[test]
+fn bt4508_trailing_binary_after_binary_cascade_part_is_error() {
+    assert_trailing_cascade_error("x foo; + 1 * 2", "* 2");
+}
+
+#[test]
+fn bt4508_trailing_keyword_after_cascade_part_is_error() {
+    assert_trailing_cascade_error("x foo; size at: 1 + 2", "at: 1 + 2");
+}
+
+#[test]
+fn bt4508_trailing_keyword_after_middle_cascade_part_is_error() {
+    // The check runs after the last part; a middle part followed by `;` is fine.
+    assert_trailing_cascade_error("x foo; bar; size max: 3", "max: 3");
+}
+
+#[test]
+fn bt4508_new_statement_on_next_line_after_cascade_parses() {
+    let module = parse_ok("x foo; size\nreversed\ny bar; baz: 1\ny + 2");
+    assert_eq!(module.expressions.len(), 4);
+    assert!(matches!(
+        module.expressions[0].expression,
+        Expression::Cascade { .. }
+    ));
+    assert!(matches!(
+        module.expressions[1].expression,
+        Expression::Identifier(_)
+    ));
+    assert!(matches!(
+        module.expressions[2].expression,
+        Expression::Cascade { .. }
+    ));
+}
+
+#[test]
+fn bt4508_cascade_followed_by_period_or_bracket_parses() {
+    let module = parse_ok("x foo; size. y bar");
+    assert_eq!(module.expressions.len(), 2);
+    let module = parse_ok("z := [:x | x foo; size] value: 1");
+    assert_eq!(module.expressions.len(), 1);
+    let module = parse_ok("(x foo; size) reversed");
+    assert_eq!(module.expressions.len(), 1);
+}
+
+#[test]
+fn bt4508_trailing_message_in_class_method_body_is_error() {
+    let source = "Object subclass: StageProbe\n  class run =>\n    reversed := 0\n    x := #(3, 1, 2); size reversed\n    x\n";
+    let diagnostics = parse_err(source);
+    assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("cascade part is a single message")
+    );
+}
+
+// ========================================================================
 // @primitive parsing tests
 // ========================================================================
 

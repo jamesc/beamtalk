@@ -30,7 +30,6 @@
 use beamtalk_core::ast::Module;
 use beamtalk_core::semantic_analysis;
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
-use ecow::EcoString;
 
 /// Project-level context for the unified diagnostic pipeline.
 ///
@@ -514,59 +513,18 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
 }
 
 /// [`compute_diagnostics_with_known_vars_classes_and_aliases`], additionally
-/// returning the alias names this compile's annotations transitively
-/// referenced (ADR 0108 hot-reload re-check trigger).
+/// returning the full [`AnalysisResult`](semantic_analysis::AnalysisResult) —
+/// class hierarchy, semantic facts, inferred method return types, and the
+/// `referenced_aliases` the compiler port ships back to populate the
+/// Erlang-side alias-name → dependent-class index (`beamtalk_alias_xref`,
+/// ADR 0108 hot-reload re-check trigger) — and taking the file's
+/// [`ProjectAnalysisContext`](beamtalk_core::semantic_analysis::ProjectAnalysisContext).
 ///
-/// Used by the compiler port's `compile`/`compile_method`/`diagnostics`
-/// handlers, which need this set to populate the Erlang-side alias-name →
-/// dependent-class index (`beamtalk_alias_xref`) — the lookup key a live
-/// alias redefinition's re-check trigger consults instead of sweeping every
-/// live class (unlike ADR 0107's `trigger_leaf_change/1`). Every other
-/// caller of the sibling function only needs diagnostics, so that function's
-/// signature is left unchanged rather than widened for this one consumer.
-#[must_use]
-pub fn compute_diagnostics_and_referenced_aliases(
-    module: &beamtalk_core::ast::Module,
-    parse_diagnostics: Vec<Diagnostic>,
-    known_vars: &[&str],
-    pre_loaded_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
-    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
-) -> (Vec<Diagnostic>, Vec<EcoString>) {
-    let (diagnostics, analysis_result) = compute_diagnostics_and_analysis(
-        module,
-        parse_diagnostics,
-        known_vars,
-        pre_loaded_classes,
-        pre_loaded_protocols,
-        // Diagnostics-only callers (e.g. `diagnostics/3`) never run codegen
-        // for this module, so there is no flattened output that a missing
-        // cross-file protocol AST could silently corrupt — same "no wire
-        // representation on this entry point yet" carve-out as
-        // `expression.rs`/`compile_method.rs`'s call sites.
-        Vec::new(),
-        pre_loaded_aliases,
-        diagnostics_overrides,
-        // Diagnostics-only entry point: no project on disk, so the legacy
-        // defaults (no package, no registry) apply — see BT-4322.
-        &beamtalk_core::semantic_analysis::ProjectAnalysisContext::default(),
-    );
-    (diagnostics, analysis_result.referenced_aliases)
-}
-
-/// [`compute_diagnostics_and_referenced_aliases`], additionally returning the
-/// full [`AnalysisResult`](semantic_analysis::AnalysisResult) —
-/// class hierarchy, semantic facts, and inferred method return types,
-/// alongside `referenced_aliases` (still reachable as a field on the result).
-///
-/// Used by compiler-port handlers that go on to run codegen for the same
-/// module (`compile`, `compile_method`, and `compile_expression`'s
-/// class/protocol-defining paths) so codegen can consume this analysis via
-/// `CodegenOptions::with_analysis` instead of re-deriving the class
-/// hierarchy, semantic facts, and inferred method return types from scratch.
-/// Callers that only need diagnostics/`referenced_aliases` should keep using
-/// [`compute_diagnostics_and_referenced_aliases`].
+/// Used by every compiler-port handler (`compile`, `compile_method`,
+/// `diagnostics`, and `compile_expression`'s class/protocol-defining paths)
+/// so they analyse a file under one scope; the ones that go on to run
+/// codegen thread the analysis through `CodegenOptions::with_analysis`
+/// instead of re-deriving it from scratch.
 ///
 /// `pre_loaded_protocol_defs` (ADR 0127 §10a, BT-3593) carries the full AST
 /// of every provision-bearing protocol the caller has resolved from outside

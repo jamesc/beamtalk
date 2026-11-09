@@ -196,11 +196,10 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
         3,
     ),
-    // Shared predicates over statements, assignment values and receivers, and
-    // the cascade's folded first send.
+    // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",
-        9,
+        7,
     ),
     // Constructs judged in any position (`expr` itself), the `Parenthesized`
     // arm, statements, cascade receivers (`nlr_cause`'s `check_send`, a

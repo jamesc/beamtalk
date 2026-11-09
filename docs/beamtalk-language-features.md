@@ -586,6 +586,11 @@ dict at: #name put: "hello"
 Transcript show: "Hello"; cr; show: "World"
 ```
 
+Each cascade part after a `;` is exactly one message. A further message on the
+same line, as in `x foo; size reversed`, is a parse error rather than a send to
+`size`'s result: write `(x size) reversed`, or put the next statement on a new
+line ([BT-4508](https://linear.app/beamtalk/issue/BT-4508)).
+
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
@@ -8662,7 +8667,17 @@ setUp =>
   self   // <- carries both field mutations forward
 ```
 
-`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send, or a `with*:` cascade.
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send (or a nested chain of them), or a cascade on `self` whose only `with<Field>:` message is its last.
+
+A cascade on `self` with more than one `with<Field>:` message is also reported (BT-4513, [ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). A cascade sends every message to the original receiver, so on a value each `with*:` returns its own copy and the cascade's value is the last message's result alone — every `with*:` before the last is silently dropped. Nest the sends instead, so each one applies to the previous result:
+
+```beamtalk
+// Wrong — `self withCounter: 1; withDb: 2` keeps only `db`; `counter` stays at its default
+setUp => self withCounter: 1; withDb: 2
+
+// Right — each send receives the copy the previous one returned
+setUp => (self withCounter: 1) withDb: 2
+```
 
 Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative to `self.field := value` — each `with*:` call itself returns the fully updated self, so the chain's own last call already carries every field set through. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies, and `beamtalk lint` (BT-3391/BT-3395) warns for both forms.
 
