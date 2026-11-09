@@ -60,6 +60,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_instance_method_infos_safe/1,
     compiled_method_safe/3,
     class_send/3,
+    class_send/4,
     local_call/3,
     set_class_var/3,
     has_class_var/2,
@@ -737,6 +738,15 @@ Delegates to beamtalk_class_dispatch.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
+
+-doc """
+`class_send/3` with an explicit bound on the wait for the class process
+(BT-4556). Delegates to `beamtalk_class_dispatch:class_send/4`, whose doc says
+which sends the bound applies to.
+""".
+-spec class_send(pid() | undefined, atom(), list(), timeout()) -> term().
+class_send(ClassPid, Selector, Args, Timeout) ->
+    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args, Timeout).
 
 -doc """
 Execute a class method in the caller's process.
