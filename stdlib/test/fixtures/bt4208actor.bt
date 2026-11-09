@@ -19,3 +19,7 @@ Actor subclass: Bt4208Actor
   castCaught => self.last := [self error: "x"] on: Error do: [:e | e message]
 
   last => self.last
+
+  // `super error:` inside a block runs through the actor-state cell's
+  // super send (beamtalk_actor_state:super_send/5).
+  superCaught => [super error: "x"] on: Error do: [:e | e message]

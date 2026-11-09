@@ -41784,10 +41784,11 @@
         "raise",
         "set",
         "subclassing",
+        "superCaught",
         "throw",
         "uncaughtInDo"
       ],
-      "source": "// BT-4208 fixtures: `self error:` inside a block body (an `on:do:` receiver\n// or a `do:` body) in a Server, a plain Actor and a value class, reached\n// from a sync method, a cast and (Server) `handleInfo:`.\n// See stdlib/test/self_error_in_block_test.bt.\n\nActor subclass: Bt4208Actor\n  state: last = nil\n\n  caught => [self error: \"x\"] on: Error do: [:e | e message]\n\n  caughtInDo =>\n    [#(1, 2) do: [:_ | self error: \"x\"]] on: Error do: [:e | e message]\n\n  uncaughtInDo => #(1, 2) do: [:_ | self error: \"x\"]\n\n  castCaught => self.last := [self error: \"x\"] on: Error do: [:e | e message]\n\n  last => self.last",
+      "source": "// BT-4208 fixtures: `self error:` inside a block body (an `on:do:` receiver\n// or a `do:` body) in a Server, a plain Actor and a value class, reached\n// from a sync method, a cast and (Server) `handleInfo:`.\n// See stdlib/test/self_error_in_block_test.bt.\n\nActor subclass: Bt4208Actor\n  state: last = nil\n\n  caught => [self error: \"x\"] on: Error do: [:e | e message]\n\n  caughtInDo =>\n    [#(1, 2) do: [:_ | self error: \"x\"]] on: Error do: [:e | e message]\n\n  uncaughtInDo => #(1, 2) do: [:_ | self error: \"x\"]\n\n  castCaught => self.last := [self error: \"x\"] on: Error do: [:e | e message]\n\n  last => self.last\n\n  // `super error:` inside a block runs through the actor-state cell's\n  // super send (beamtalk_actor_state:super_send/5).\n  superCaught => [super error: \"x\"] on: Error do: [:e | e message]",
       "explanation": "BT-4208 fixtures: `self error:` inside a block body (an `on:do:` receiver or a `do:` body) in a Server, a plain Actor and a value class, reached from a sync method, a cast and (Server) `handleInfo:`. See stdlib/test/self_error_in_block_test.bt."
     },
     {
@@ -65910,10 +65911,13 @@
       "tags": [
         "SelfErrorInBlockTest",
         "TestCase",
+        "anonymous function",
         "assign",
         "assignment",
         "async",
         "branch",
+        "callback",
+        "closure",
         "concurrent",
         "conditional",
         "constructor",
@@ -65931,6 +65935,7 @@
         "instantiate",
         "iterate",
         "iteration",
+        "lambda",
         "loop",
         "mutate",
         "mutation",
@@ -65940,6 +65945,7 @@
         "self_error_in_block_test",
         "set",
         "subclassing",
+        "testActorBlockSuperErrorOnDo",
         "testActorCastOnDo",
         "testActorSyncDoInsideOnDo",
         "testActorSyncOnDo",
@@ -65954,7 +65960,7 @@
         "testValueUncaughtDoReachesCaller",
         "throw"
       ],
-      "source": "// BT-4208: `self error: \"x\"` inside a block body must raise the user's Error\n// (catchable by `on: Error do:`, with message \"x\") in every class kind and\n// dispatch context, not an internal `function_clause` error.\n//\n// Fixtures: stdlib/test/fixtures/bt4208server.bt, bt4208actor.bt, bt4208value.bt\n\nTestCase subclass: SelfErrorInBlockTest\n\n  testServerSyncOnDo =>\n    s := Bt4208Server spawn\n    self assert: s caught equals: \"x\"\n    s stop\n\n  testServerSyncDoInsideOnDo =>\n    s := Bt4208Server spawn\n    self assert: s caughtInDo equals: \"x\"\n    s stop\n\n  testServerSyncUncaughtDoReachesCaller =>\n    s := Bt4208Server spawn\n    self assert: ([s uncaughtInDo] on: Error do: [:e | e message]) equals: \"x\"\n    s stop\n\n  testServerCastOnDo =>\n    s := Bt4208Server spawn\n    s castCaught!\n    self assert: s last equals: \"x\"\n    s stop\n\n  testServerHandleInfoOnDo =>\n    s := Bt4208Server spawn\n    s pid send: #ping\n    50 timesRepeat: [s last isNil ifTrue: [Timer sleep: 10]]\n    self assert: s last equals: \"x\"\n    s stop\n\n  testActorSyncOnDo =>\n    a := Bt4208Actor spawn\n    self assert: a caught equals: \"x\"\n    a stop\n\n  testActorSyncDoInsideOnDo =>\n    a := Bt4208Actor spawn\n    self assert: a caughtInDo equals: \"x\"\n    a stop\n\n  testActorSyncUncaughtDoReachesCaller =>\n    a := Bt4208Actor spawn\n    self assert: ([a uncaughtInDo] on: Error do: [:e | e message]) equals: \"x\"\n    a stop\n\n  testActorCastOnDo =>\n    a := Bt4208Actor spawn\n    a castCaught!\n    self assert: a last equals: \"x\"\n    a stop\n\n  testValueOnDo => self assert: Bt4208Value new caught equals: \"x\"\n\n  testValueDoInsideOnDo => self assert: Bt4208Value new caughtInDo equals: \"x\"\n\n  testValueUncaughtDoReachesCaller =>\n    self assert: ([Bt4208Value new uncaughtInDo] on: Error do: [:e | e message]) equals: \"x\"",
+      "source": "// BT-4208: `self error: \"x\"` inside a block body must raise the user's Error\n// (catchable by `on: Error do:`, with message \"x\") in every class kind and\n// dispatch context, not an internal `function_clause` error.\n//\n// Fixtures: stdlib/test/fixtures/bt4208server.bt, bt4208actor.bt, bt4208value.bt\n\nTestCase subclass: SelfErrorInBlockTest\n\n  testServerSyncOnDo =>\n    s := Bt4208Server spawn\n    self assert: s caught equals: \"x\"\n    s stop\n\n  testServerSyncDoInsideOnDo =>\n    s := Bt4208Server spawn\n    self assert: s caughtInDo equals: \"x\"\n    s stop\n\n  testServerSyncUncaughtDoReachesCaller =>\n    s := Bt4208Server spawn\n    self assert: ([s uncaughtInDo] on: Error do: [:e | e message]) equals: \"x\"\n    s stop\n\n  testServerCastOnDo =>\n    s := Bt4208Server spawn\n    s castCaught!\n    self assert: s last equals: \"x\"\n    s stop\n\n  testServerHandleInfoOnDo =>\n    s := Bt4208Server spawn\n    s pid send: #ping\n    50 timesRepeat: [s last isNil ifTrue: [Timer sleep: 10]]\n    self assert: s last equals: \"x\"\n    s stop\n\n  testActorSyncOnDo =>\n    a := Bt4208Actor spawn\n    self assert: a caught equals: \"x\"\n    a stop\n\n  testActorSyncDoInsideOnDo =>\n    a := Bt4208Actor spawn\n    self assert: a caughtInDo equals: \"x\"\n    a stop\n\n  testActorSyncUncaughtDoReachesCaller =>\n    a := Bt4208Actor spawn\n    self assert: ([a uncaughtInDo] on: Error do: [:e | e message]) equals: \"x\"\n    a stop\n\n  testActorBlockSuperErrorOnDo =>\n    a := Bt4208Actor spawn\n    self assert: a superCaught equals: \"x\"\n    a stop\n\n  testActorCastOnDo =>\n    a := Bt4208Actor spawn\n    a castCaught!\n    self assert: a last equals: \"x\"\n    a stop\n\n  testValueOnDo => self assert: Bt4208Value new caught equals: \"x\"\n\n  testValueDoInsideOnDo => self assert: Bt4208Value new caughtInDo equals: \"x\"\n\n  testValueUncaughtDoReachesCaller =>\n    self assert: ([\n      Bt4208Value new uncaughtInDo\n    ] on: Error do: [:e | e message]) equals: \"x\"",
       "explanation": "BT-4208: `self error: \"x\"` inside a block body must raise the user's Error (catchable by `on: Error do:`, with message \"x\") in every class kind and dispatch context, not an internal `function_clause` error.  Fixtures: stdlib/test/fixtures/bt4208server.bt, bt4208actor.bt, bt4208value.bt"
     },
     {
