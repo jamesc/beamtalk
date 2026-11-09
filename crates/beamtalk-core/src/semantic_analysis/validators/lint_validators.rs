@@ -12,10 +12,12 @@
 //! - Effect-free statements
 
 use crate::ast::{
-    BinarySegment, CascadeMessage, Expression, Identifier, MessageSelector, Module, TypeAnnotation,
+    BinarySegment, Expression, Identifier, MessageSelector, Module, TypeAnnotation,
     WellKnownSelector,
 };
-use crate::ast_walker::{walk_expression, walk_module};
+use crate::ast_walker::{
+    SendRef, cascade_sends, cascade_shared_receiver, walk_expression, walk_module,
+};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{InferredType, TypeMap};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -656,62 +658,62 @@ fn is_self_producing(expr: &Expression) -> bool {
         || cascade_value_is_self_producing(expr)
 }
 
-/// Returns `true` if a cascade message is a `with<Field>:` copy-setter send.
-fn is_with_star_cascade_message(msg: &CascadeMessage) -> bool {
-    msg.arguments.len() == 1 && is_with_star_selector(&msg.selector)
+/// The `with<Field>:` shape of a cascade whose shared receiver is
+/// self-producing — see [`self_with_star_cascade`].
+struct SelfWithStarCascade {
+    /// The `with<Field>:` selectors among *all* the cascade's messages
+    /// (the folded first one included), in source order.
+    with_star_selectors: Vec<EcoString>,
+    /// Whether the cascade's *last* message is a `with<Field>:` send, i.e.
+    /// whether the cascade's value is a `with<Field>:` result at all.
+    ends_in_with_star: bool,
+    /// Whether the shared receiver is the bare `self` (rather than a
+    /// `with*:` chain), which the suggested nested form starts from.
+    receiver_is_bare_self: bool,
 }
 
-/// For a cascade whose common receiver is self-producing (literal `self`, or
+/// Returns `true` if a send is a `with<Field>:` copy-setter send.
+fn is_with_star_send(send: &SendRef<'_>) -> bool {
+    send.arguments.len() == 1 && is_with_star_selector(send.selector)
+}
+
+/// For a cascade whose shared receiver is self-producing (literal `self`, or
 /// itself a `with<Field>:` send/chain — recursively, via
-/// [`is_self_producing`]), returns the `with<Field>:` selectors among *all* of
-/// its messages, in source order — including the first message. The parser
-/// always fills the `Cascade` node's own `receiver` field with the cascade's
-/// first message send (see
-/// `ast_walker::tests::walk_cascade_visits_receiver_and_message_arguments`),
-/// so the common receiver is *that* send's receiver. `None` when `expr` is
-/// not such a cascade (including the grammatically unreachable case where
-/// the `receiver` field isn't a message send).
+/// [`is_self_producing`]), describes its `with<Field>:` messages. `None` when
+/// `expr` is not such a cascade. Expands the cascade with the shared
+/// [`cascade_sends`], so the first message — which the parser folds into
+/// the `Cascade` node's own `receiver` — counts like every later one.
 ///
 /// Every message of a cascade is sent to the same, original receiver, so on
 /// a value type each `with<Field>:` returns its own independent copy: only
 /// the cascade's *last* message's result is its value (ADR 0067, ADR 0145).
 /// Two or more `with<Field>:` sends in one cascade therefore always drop
 /// every one but the last.
-fn self_cascade_with_star_selectors(expr: &Expression) -> Option<Vec<EcoString>> {
-    let Expression::Cascade {
-        receiver, messages, ..
-    } = expr.unwrap_parens()
-    else {
+fn self_with_star_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
+    let cascade = expr.unwrap_parens();
+    let Expression::Cascade { receiver, .. } = cascade else {
         return None;
     };
-    let Expression::MessageSend {
-        receiver: common_receiver,
-        selector: first_selector,
-        arguments: first_arguments,
-        ..
-    } = receiver.unwrap_parens()
-    else {
-        return None;
-    };
-    if !is_self_producing(common_receiver) {
+    let shared_receiver = cascade_shared_receiver(receiver);
+    if !is_self_producing(shared_receiver) {
         return None;
     }
-    let first = (first_arguments.len() == 1 && is_with_star_selector(first_selector))
-        .then(|| first_selector.name());
-    Some(
-        first
-            .into_iter()
-            .chain(
-                messages
-                    .iter()
-                    .filter(|msg| is_with_star_cascade_message(msg))
-                    .map(|msg| msg.selector.name()),
-            )
-            .collect(),
-    )
+    let mut with_star_selectors = Vec::new();
+    let mut ends_in_with_star = false;
+    for send in cascade_sends(cascade) {
+        ends_in_with_star = is_with_star_send(&send);
+        if ends_in_with_star {
+            with_star_selectors.push(send.selector.name());
+        }
+    }
+    Some(SelfWithStarCascade {
+        with_star_selectors,
+        ends_in_with_star,
+        receiver_is_bare_self: is_bare_self(shared_receiver),
+    })
 }
 
-/// Returns `true` if `expr` is a cascade whose common receiver is
+/// Returns `true` if `expr` is a cascade whose shared receiver is
 /// self-producing and *at least one* of its messages is a `with<Field>:`
 /// send — e.g. `self withCounter: 1; withDb: 2`, or a cascade with an
 /// unrelated message mixed in. Presence-only: this answers "did a field
@@ -720,53 +722,31 @@ fn self_cascade_with_star_selectors(expr: &Expression) -> Option<Vec<EcoString>>
 /// anything to drop at all. It does NOT tell you whether the cascade's own
 /// *value* is self — for that, use [`cascade_value_is_self_producing`].
 fn is_self_with_field_cascade(expr: &Expression) -> bool {
-    self_cascade_with_star_selectors(expr).is_some_and(|selectors| !selectors.is_empty())
+    self_with_star_cascade(expr).is_some_and(|c| !c.with_star_selectors.is_empty())
 }
 
-/// Returns `true` if `expr` is a cascade whose common receiver is
+/// Returns `true` if `expr` is a cascade whose shared receiver is
 /// self-producing, whose *last* message is a `with<Field>:` send, and which
 /// contains no other `with<Field>:` send — the only shape of cascade that
 /// actually evaluates to the fully updated self. A cascade's value is its
 /// last message's result (ADR 0067), and every message goes to the original
 /// receiver, so an earlier `with*:` in the same cascade is dropped (ADR 0145):
-/// `self withA: 1; withB: 2` evaluates to `self withB: 2`, losing `a`. Such a
-/// multi-`with*:` cascade is what [`self_cascade_with_star_selectors`]
-/// reports as having two or more selectors. Used by [`is_self_producing`]
+/// `self withA: 1; withB: 2` evaluates to `self withB: 2`, losing `a` (see
+/// [`multi_with_star_self_cascade`]). Used by [`is_self_producing`]
 /// wherever the code needs to know what an expression evaluates to (a
 /// chained receiver, or `setUp`'s trailing statement) — never for mere
 /// presence detection, where [`is_self_with_field_cascade`] applies instead.
 fn cascade_value_is_self_producing(expr: &Expression) -> bool {
-    let Expression::Cascade { messages, .. } = expr.unwrap_parens() else {
-        return false;
-    };
-    messages.last().is_some_and(is_with_star_cascade_message)
-        && self_cascade_with_star_selectors(expr).is_some_and(|selectors| selectors.len() == 1)
+    self_with_star_cascade(expr)
+        .is_some_and(|c| c.ends_in_with_star && c.with_star_selectors.len() == 1)
 }
 
-/// Returns the `with<Field>:` selectors of `expr` when it is a cascade on a
+/// Returns the cascade description when `expr` is a cascade on a
 /// self-producing receiver that ends in a `with<Field>:` message but holds
 /// more than one of them — `self withA: 1; withB: 2`, where every `with*:`
-/// but the last is dropped. Also returns whether the cascade's common
-/// receiver is the bare `self` (rather than a `with*:` chain), which the
-/// diagnostic's suggested nested form starts from. `None` for every other
-/// expression.
-fn multi_with_star_self_cascade(expr: &Expression) -> Option<(bool, Vec<EcoString>)> {
-    let Expression::Cascade {
-        receiver, messages, ..
-    } = expr.unwrap_parens()
-    else {
-        return None;
-    };
-    if !messages.last().is_some_and(is_with_star_cascade_message) {
-        return None;
-    }
-    let selectors =
-        self_cascade_with_star_selectors(expr).filter(|selectors| selectors.len() > 1)?;
-    let receiver_is_bare_self = matches!(
-        receiver.unwrap_parens(),
-        Expression::MessageSend { receiver, .. } if is_bare_self(receiver)
-    );
-    Some((receiver_is_bare_self, selectors))
+/// but the last is dropped. `None` for every other expression.
+fn multi_with_star_self_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
+    self_with_star_cascade(expr).filter(|c| c.ends_in_with_star && c.with_star_selectors.len() > 1)
 }
 
 /// Returns `true` if `expr` contains a self-reconstructing send anywhere in
@@ -806,11 +786,11 @@ fn check_setup_body_returns_self(
         return;
     }
     let last_expr = last_stmt.expression.unwrap_parens();
-    if let Some((receiver_is_bare_self, selectors)) = multi_with_star_self_cascade(last_expr) {
+    if let Some(cascade) = multi_with_star_self_cascade(last_expr) {
         diagnostics.push(setup_cascade_drops_with_star_diagnostic(
             last_expr.span(),
-            receiver_is_bare_self,
-            &selectors,
+            cascade.receiver_is_bare_self,
+            &cascade.with_star_selectors,
         ));
         return;
     }
