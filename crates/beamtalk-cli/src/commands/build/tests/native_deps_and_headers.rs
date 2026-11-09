@@ -39,6 +39,7 @@ fn make_resolved_dep(
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
+        extensions: Default::default(),
     }
 }
 

@@ -45,6 +45,8 @@ type MergedClassIndexes = (
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
+    bool,
 );
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -476,6 +478,9 @@ fn generate_core_file(
     // `ProjectComplete`, cross-file receivers stay `Open` and their DNU/Type
     // diagnostics are suppressed, so `test --warnings-as-errors` passes code
     // the REPL live recheck (full image hierarchy) rejects.
+    // The pre-WS3 dependency guard starts on whenever the package has
+    // dependencies; analysis lifts it when `hierarchy` holds every
+    // dependency's extensions (ADR 0070 WS3, BT-4608), as for `build`.
     let (knowledge_scope, has_package_dependencies) = test_compile_scope(source_path);
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
@@ -483,7 +488,7 @@ fn generate_core_file(
         warnings_as_errors,
         current_package: current_package.map(str::to_string),
         knowledge_scope,
-        has_package_dependencies,
+        dependency_extensions_unknown: has_package_dependencies,
         // BT-4022: project-known Erlang modules so the `unresolved_ffi`
         // check agrees with `build`/`lint` on hex-dep and own-`native/`
         // modules.
@@ -926,6 +931,14 @@ struct TestPipeline {
     class_module_index: HashMap<String, String>,
     /// Merged class-name to superclass-name index across all packages.
     class_superclass_index: HashMap<String, String>,
+    /// Every discovered package's `src/` extensions plus its dependencies'
+    /// (ADR 0070 WS3, BT-4608), registered into each test/fixture file's
+    /// hierarchy as `build` does.
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Whether `extension_index` holds every dependency's extensions; lifts
+    /// the pre-WS3 dependency guard (`ClassHierarchyContext::
+    /// dependency_extensions_complete`).
+    dependency_extensions_complete: bool,
     /// ADR 0075 FFI type registry, merged across every discovered package's
     /// auto-extracted + stub-overridden native types (mirroring `beamtalk
     /// build`), or `extract_stdlib_type_specs()` when no package was
@@ -1167,11 +1180,15 @@ fn discover_packages_with_manifests(
 /// used for fixture compilation (which can reference any package's classes).
 ///
 /// Returns `(pkg_class_indexes, class_module_index, class_superclass_index,
-/// all_class_infos, all_alias_infos, all_protocol_infos)`. The protocol infos
+/// all_class_infos, all_alias_infos, all_protocol_infos, extension_index,
+/// dependency_extensions_complete)`. The protocol infos
 /// are every package's `src/` protocols plus its dependencies' exported ones,
 /// the same set `beamtalk build` pre-loads (`build_class_index`), so a test
 /// file resolves a package protocol — and `P class` (ADR 0144) — as `build`
-/// does (BT-4446).
+/// does (BT-4446). The extension index likewise holds every package's `src/`
+/// extensions plus its dependencies' (ADR 0070 WS3, BT-4608), and
+/// `dependency_extensions_complete` says whether every dependency's were
+/// loaded — `false` if any package's dependency resolution failed.
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
 ) -> MergedClassIndexes {
@@ -1195,12 +1212,14 @@ fn build_merged_class_indexes(
     let mut dep_protocol_infos: Vec<
         beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo,
     > = Vec::new();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    let mut dependency_extensions_complete = true;
     for (pkg_root, pkg) in discovered_packages {
         let mut pkg_src = None;
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, class_infos, _extensions, cached_asts)) =
+            if let Ok((pkg_class_map, pkg_super_map, class_infos, src_extensions, cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),
@@ -1213,6 +1232,9 @@ fn build_merged_class_indexes(
                 );
                 class_module_index.extend(pkg_class_map);
                 class_superclass_index.extend(pkg_super_map);
+                // The package's own `src/` extensions, as `build` registers
+                // them for every file (ADR 0066 / ADR 0100 Rule 2 WS1).
+                extension_index.merge(&src_extensions);
                 // Flattened below, once this package's dependencies (and so
                 // their protocols) are resolved.
                 pkg_src = Some((class_infos, cached_asts));
@@ -1233,6 +1255,11 @@ fn build_merged_class_indexes(
         let mut dep_protocol_defs = Vec::new();
         match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
             Ok(resolved_deps) => {
+                dependency_extensions_complete &=
+                    beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+                        resolved_deps.iter().map(|dep| &dep.extensions),
+                        &mut extension_index,
+                    );
                 for dep in &resolved_deps {
                     dep_protocol_defs.extend(dep.protocol_defs.iter().cloned());
                     for (class_name, module_name) in &dep.class_module_index {
@@ -1257,6 +1284,7 @@ fn build_merged_class_indexes(
                 }
             }
             Err(e) => {
+                dependency_extensions_complete = false;
                 warn!(
                     error = %e,
                     "Failed to resolve dependencies for test pipeline; \
@@ -1298,6 +1326,8 @@ fn build_merged_class_indexes(
         all_class_infos,
         all_alias_infos,
         all_protocol_infos,
+        extension_index,
+        dependency_extensions_complete,
     )
 }
 
@@ -1406,6 +1436,8 @@ fn initialize_pipeline(
         all_class_infos,
         mut all_alias_infos,
         package_protocol_infos,
+        extension_index,
+        dependency_extensions_complete,
     ) = build_merged_class_indexes(&discovered_packages);
 
     // See `collect_sibling_src_alias_infos`'s doc: only engages when
@@ -1448,6 +1480,8 @@ fn initialize_pipeline(
         all_class_infos,
         all_alias_infos,
         protocol_infos: package_protocol_infos,
+        extension_index,
+        dependency_extensions_complete,
         fixture_protocol_defs: FixtureProtocolDefs::default(),
         fixture_class_index: HashMap::new(),
         precompiled_modules: HashSet::new(),
@@ -1532,7 +1566,8 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
-        ..ClassHierarchyContext::default()
+        extension_index: pipeline.extension_index.clone(),
+        dependency_extensions_complete: pipeline.dependency_extensions_complete,
     };
     let fixtures_package = pipeline.current_package_for(&fixtures_dir);
     let precompiled = compile_fixtures_directory(
@@ -1688,7 +1723,8 @@ fn compile_single_test_file(
         pre_loaded_protocol_defs: pipeline.fixture_protocol_defs.defs.clone(),
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
-        ..ClassHierarchyContext::default()
+        extension_index: pipeline.extension_index.clone(),
+        dependency_extensions_complete: pipeline.dependency_extensions_complete,
     };
 
     // Handle deprecated @load directives as fallback.
@@ -2635,6 +2671,36 @@ mod tests {
 
     /// Pins the summary line's display format. See [`summary_line`] for the
     /// format's history and why it's still worth pinning.
+    /// ADR 0070 WS3 (BT-4608): a test file's hierarchy registers the
+    /// package's own `src/` extensions and its dependencies', as `build`
+    /// does, and says whether every dependency's were loaded.
+    #[test]
+    fn merged_class_indexes_carry_package_and_dependency_extensions() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let consumer = crate::commands::deps::test_support::consumer_with_fresh_path_dependency(
+            &root,
+            &[("ext.bt", "Object >> fromDependency -> Integer => 1\n")],
+            "",
+            &[("own.bt", "Object >> fromPackage -> Integer => 2\n")],
+        );
+        let manifest = manifest::parse_manifest_full(&consumer.join("beamtalk.toml"))
+            .unwrap()
+            .package;
+
+        let (_, _, _, _, _, _, extensions, complete) =
+            build_merged_class_indexes(&[(consumer, manifest)]);
+
+        let selectors: HashSet<String> = extensions
+            .entries()
+            .keys()
+            .map(|key| key.selector.to_string())
+            .collect();
+        assert!(selectors.contains("fromPackage"), "{selectors:?}");
+        assert!(selectors.contains("fromDependency"), "{selectors:?}");
+        assert!(complete);
+    }
+
     #[test]
     fn summary_line_format() {
         let line = summary_line(8, 168, 167, 1, 39.84);

@@ -84,6 +84,13 @@ pub struct ResolvedDependency {
     /// `None` if it declares no `[stubs]` section. Covers only this
     /// package's own native code, never its own dependencies' stubs.
     pub stubs_dir: Option<Utf8PathBuf>,
+    /// The extension methods this dependency's source defines, and whether
+    /// that is all of them (ADR 0070 WS3, BT-4608). Merged into the
+    /// consumer's cross-file extension index so its type checker sees them;
+    /// the pre-WS3 dependency guard lifts only when every dependency's is
+    /// complete. The default is *unknown* (incomplete), which keeps the guard
+    /// on.
+    pub extensions: beamtalk_cli::dependency_extensions::DependencyExtensions,
 }
 
 /// Runs `f` over the dependencies in `resolved` that `dep_name` depends on,
@@ -321,7 +328,7 @@ fn resolve_single_path_dep(
 
     info!(dep = %name, ebin = %ebin_path, "Resolved path dependency");
 
-    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources, extensions) =
         build_dep_class_index(&dep_root, name, resolved).unwrap_or_default();
 
     let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
@@ -339,6 +346,7 @@ fn resolve_single_path_dep(
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
         stubs_dir,
+        extensions,
     });
 
     Ok(())
@@ -382,7 +390,7 @@ pub(crate) fn compile_dependency_at(
         otp_specs,
     )?;
 
-    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
+    let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources, extensions) =
         build_dep_class_index(dep_root, dep_name, prior_deps).unwrap_or_default();
 
     let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
@@ -402,6 +410,7 @@ pub(crate) fn compile_dependency_at(
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
         stubs_dir,
+        extensions,
     })
 }
 
@@ -594,9 +603,14 @@ fn compile_dependency_with_context(
             pre_loaded_protocol_sources: dep_metadata.protocol_sources,
             pre_loaded_aliases: dep_metadata.alias_infos,
             // The dep's own project-wide extensions — its files see
-            // each other's extensions during its own compilation. (Exporting
-            // them to consumers is WS3 / the ADR 0070 amendment.)
+            // each other's extensions during its own compilation. Consumers
+            // get them through `ResolvedDependency::extensions` (ADR 0070
+            // WS3, BT-4608).
             extension_index: extension_index.clone(),
+            // A dependency compiles under its consumer's options and does
+            // not load *its* dependencies' extensions here, so the pre-WS3
+            // dependency guard stays as the options set it.
+            dependency_extensions_complete: false,
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
@@ -983,6 +997,7 @@ struct DepIndexScan {
     class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
     metadata: DepProtocolAliasMetadata,
+    extensions: beamtalk_cli::dependency_extensions::DependencyExtensions,
     dep_name: String,
 }
 
@@ -994,6 +1009,7 @@ pub(crate) type DepIndexExports = (
     Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    beamtalk_cli::dependency_extensions::DependencyExtensions,
 );
 
 impl DepIndexScan {
@@ -1010,6 +1026,7 @@ impl DepIndexScan {
             mut class_infos,
             trait_users,
             metadata,
+            extensions,
             dep_name,
         } = self;
         trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
@@ -1020,12 +1037,14 @@ impl DepIndexScan {
             metadata.protocol_defs,
             metadata.alias_infos,
             metadata.protocol_sources,
+            extensions,
         )
     }
 }
 
 /// [`DepIndexScan::into_exports`], or empty exports for a dependency without
-/// source files.
+/// source files — whose extensions are complete: with no `.bt` source it
+/// defines none at runtime either.
 fn exports_or_empty(
     scan: Option<DepIndexScan>,
     extra_protocol_defs: impl IntoIterator<Item = beamtalk_core::ast::ProtocolDefinition>,
@@ -1039,6 +1058,7 @@ fn exports_or_empty(
                 Vec::new(),
                 Vec::new(),
                 beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
+                beamtalk_cli::dependency_extensions::DependencyExtensions::scanning(),
             )
         },
         |scan| scan.into_exports(extra_protocol_defs),
@@ -1069,11 +1089,23 @@ fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndex
             dep_name,
         )?;
 
+    // ADR 0070 WS3 (BT-4608): the dependency's extensions, from the same
+    // parsed ASTs. A file the index pass could not read is missing from
+    // `cached_asts`, and leaves the result incomplete.
+    let mut extensions = beamtalk_cli::dependency_extensions::DependencyExtensions::scanning();
+    for file in &source_files {
+        match cached_asts.get(file) {
+            Some(ast) => extensions.add_file(&ast.module, file.as_std_path(), &ast.diagnostics),
+            None => extensions.mark_unreadable(),
+        }
+    }
+
     Ok(Some(DepIndexScan {
         class_module_index,
         class_infos,
         trait_users: crate::commands::build::package_trait_users(&cached_asts, Some(dep_name)),
         metadata: extract_dep_protocol_alias_metadata(&cached_asts, dep_name),
+        extensions,
         dep_name: dep_name.to_string(),
     }))
 }
@@ -1492,6 +1524,51 @@ dep_utils = { path = "dep_utils" }"#,
         );
     }
 
+    /// ADR 0070 WS3 (BT-4608): a dependency's export carries its extension
+    /// methods, complete when every source file parsed cleanly.
+    #[test]
+    fn build_dep_class_index_collects_dependency_extensions() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_ext");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_ext", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "ext.bt",
+            "Object >> shout -> Integer => 1\nInteger class >> fromShout => 2\n",
+        );
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+
+        let (_, _, _, _, _, _, extensions) =
+            build_dep_class_index(&dep_root, "dep_ext", &[]).unwrap();
+        assert!(extensions.is_complete());
+        assert_eq!(extensions.index().len(), 2);
+
+        write_source(dep_root.as_std_path(), "broken.bt", "Object >> ((( =>\n");
+        let (_, _, _, _, _, _, extensions) =
+            build_dep_class_index(&dep_root, "dep_ext", &[]).unwrap();
+        assert!(
+            !extensions.is_complete(),
+            "a parse error may have dropped an extension"
+        );
+    }
+
+    /// A dependency with no `.bt` source defines no extensions at runtime
+    /// either, so its (empty) extensions are complete.
+    #[test]
+    fn build_dep_class_index_without_sources_has_complete_extensions() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_native");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_native", "0.1.0", "");
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+
+        let (_, _, _, _, _, _, extensions) =
+            build_dep_class_index(&dep_root, "dep_native", &[]).unwrap();
+        assert!(extensions.is_complete());
+        assert!(extensions.index().is_empty());
+    }
+
     /// BT-3673: the `class_infos` a dependency exports to its consumers
     /// carry the provided methods of a trait declared in another of the
     /// dependency's own files (and the metadata its own multi-file compile
@@ -1514,7 +1591,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-        let (_, class_infos, _, protocol_defs, _, _) =
+        let (_, class_infos, _, protocol_defs, _, _, _) =
             build_dep_class_index(&dep_root, "dep_traits", &[]).unwrap();
 
         assert_eq!(protocol_defs.len(), 1, "Tagged is provision-bearing");
@@ -1561,7 +1638,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-        let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos, _) =
+        let (class_module_index, _class_infos, protocol_infos, _protocol_defs, alias_infos, _, _) =
             build_dep_class_index(&dep_root, "dep_types", &[]).unwrap();
 
         assert!(
@@ -1628,7 +1705,7 @@ dep_utils = { path = "dep_utils" }"#,
         );
 
         let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
-        let (_, _, _, protocol_defs, _, protocol_sources) =
+        let (_, _, _, protocol_defs, _, protocol_sources, _) =
             build_dep_class_index(&dep_root, "dep_traits", &[]).unwrap();
 
         assert_eq!(protocol_defs.len(), 1);
@@ -1665,6 +1742,7 @@ dep_utils = { path = "dep_utils" }"#,
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
+            extensions: Default::default(),
         }
     }
 
@@ -1718,7 +1796,7 @@ dep_utils = { path = "dep_utils" }"#,
             "Object subclass: Base\n  greet => \"hi from base\"\n",
         );
         let base_root = Utf8PathBuf::from_path_buf(base_dir).unwrap();
-        let (base_index, base_infos, _, _, _, _) =
+        let (base_index, base_infos, _, _, _, _, base_extensions) =
             build_dep_class_index(&base_root, "dep_base", &[]).unwrap();
         assert!(
             base_infos.iter().any(|c| c.name.as_str() == "Base"),
@@ -1741,6 +1819,7 @@ dep_utils = { path = "dep_utils" }"#,
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
+            extensions: base_extensions,
         };
 
         // Child package: `Child` inherits everything from cross-package `Base`.
@@ -1875,6 +1954,7 @@ dep_utils = { path = "dep_utils" }"#,
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
+            extensions: Default::default(),
         };
 
         let Some(registry) = dependency_type_registry(

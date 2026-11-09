@@ -427,8 +427,9 @@ pub struct AnalysisContext<'a> {
     /// means only the current module's own extensions are visible.
     pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
     /// Whether the current package has dependencies whose extensions are
-    /// not visible here (ADR 0100 Rule 2).
-    pub has_package_dependencies: bool,
+    /// not all visible here (ADR 0100 Rule 2; see
+    /// [`crate::CompilerOptions::dependency_extensions_unknown`]).
+    pub dependency_extensions_unknown: bool,
     /// Whether the module being analysed comes from a `stubs/` directory
     /// (ADR 0075). `declare native:` is only legal there — defaulting to
     /// `false` means any caller that doesn't know about stub files (the
@@ -456,7 +457,7 @@ impl<'a> AnalysisContext<'a> {
 
     /// Applies the subset of [`crate::CompilerOptions`] that semantic
     /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
-    /// `current_package`, `knowledge_scope`, `has_package_dependencies`,
+    /// `current_package`, `knowledge_scope`, `dependency_extensions_unknown`,
     /// `known_erlang_modules`.
     #[must_use]
     pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
@@ -464,7 +465,7 @@ impl<'a> AnalysisContext<'a> {
         self.skip_module_expression_lint = options.skip_module_expression_lint;
         self.current_package = options.current_package.as_deref();
         self.knowledge_scope = options.knowledge_scope;
-        self.has_package_dependencies = options.has_package_dependencies;
+        self.dependency_extensions_unknown = options.dependency_extensions_unknown;
         self.known_erlang_modules
             .clone_from(&options.known_erlang_modules);
         self
@@ -730,7 +731,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         native_type_registry,
         knowledge_scope,
         cross_file_extensions,
-        has_package_dependencies,
+        dependency_extensions_unknown,
         is_stub_file,
         known_erlang_modules,
     } = ctx;
@@ -852,7 +853,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.class_hierarchy.set_knowledge_scope(knowledge_scope);
     result
         .class_hierarchy
-        .set_dependency_extensions_unknown(has_package_dependencies);
+        .set_dependency_extensions_unknown(dependency_extensions_unknown);
 
     // ADR 0071: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {
