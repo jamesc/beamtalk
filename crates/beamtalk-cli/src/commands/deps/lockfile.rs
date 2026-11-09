@@ -47,10 +47,12 @@
 //! version = "2.12.0"
 //! sha = "ghi789..."
 //!
-//! # A native git dependency records its URL and resolved commit SHA.
+//! # A native git dependency records its URL, the reference it was resolved
+//! # from (absent for transitive git deps) and the resolved commit SHA.
 //! [[native_package]]
 //! name = "oidcc"
 //! git = "https://github.com/jamesc/oidcc"
+//! reference = "branch:rfc7009-revocation"
 //! sha = "0123abcd..."
 //! ```
 
@@ -141,6 +143,10 @@ pub enum NativeLockSource {
     Git {
         /// The repository URL.
         url: String,
+        /// The manifest reference the commit was resolved from, so a later
+        /// build can tell whether the lock is still current. `None` for a
+        /// transitive git dependency no `beamtalk.toml` declares.
+        reference: Option<GitReference>,
         /// The resolved commit SHA.
         sha: String,
     },
@@ -158,12 +164,13 @@ impl NativePackageLock {
         }
     }
 
-    /// A locked git dependency.
+    /// A locked git dependency, with no recorded manifest reference.
     pub fn git(name: &str, url: &str, sha: &str) -> Self {
         Self {
             name: name.to_string(),
             source: NativeLockSource::Git {
                 url: url.to_string(),
+                reference: None,
                 sha: sha.to_string(),
             },
         }
@@ -240,6 +247,9 @@ struct TomlNativePackageEntry {
     version: Option<String>,
     #[serde(default)]
     git: Option<String>,
+    /// The manifest reference a git entry was resolved from.
+    #[serde(default)]
+    reference: Option<String>,
     sha: String,
 }
 
@@ -367,6 +377,14 @@ impl Lockfile {
                 },
                 (None, Some(url)) => NativeLockSource::Git {
                     url,
+                    reference: entry
+                        .reference
+                        .as_deref()
+                        .map(parse_reference)
+                        .transpose()
+                        .wrap_err_with(|| {
+                            format!("Invalid reference for native package '{}'", entry.name)
+                        })?,
                     sha: entry.sha,
                 },
                 _ => miette::bail!(
@@ -440,16 +458,28 @@ impl Lockfile {
         }
 
         for entry in self.native_packages.values() {
+            // Every field comes from rebar3's output, so escape them all.
             output.push_str("[[native_package]]\n");
-            let _ = writeln!(output, "name = \"{}\"", entry.name);
+            let _ = writeln!(output, "name = \"{}\"", escape_toml_string(&entry.name));
             match &entry.source {
                 NativeLockSource::Hex { version, checksum } => {
-                    let _ = writeln!(output, "version = \"{version}\"");
-                    let _ = writeln!(output, "sha = \"{checksum}\"");
+                    let _ = writeln!(output, "version = \"{}\"", escape_toml_string(version));
+                    let _ = writeln!(output, "sha = \"{}\"", escape_toml_string(checksum));
                 }
-                NativeLockSource::Git { url, sha } => {
+                NativeLockSource::Git {
+                    url,
+                    reference,
+                    sha,
+                } => {
                     let _ = writeln!(output, "git = \"{}\"", escape_toml_string(url));
-                    let _ = writeln!(output, "sha = \"{sha}\"");
+                    if let Some(reference) = reference {
+                        let _ = writeln!(
+                            output,
+                            "reference = \"{}\"",
+                            escape_toml_string(&format_reference(reference))
+                        );
+                    }
+                    let _ = writeln!(output, "sha = \"{}\"", escape_toml_string(sha));
                 }
             }
             output.push('\n');
@@ -534,39 +564,50 @@ pub fn parse_rebar_lock(content: &str) -> Vec<NativePackageLock> {
     packages
 }
 
+/// Opening of a dependency entry in rebar.lock: `{<<"name">>, ...`.
+const REBAR_LOCK_ENTRY_OPEN: &str = "{<<\"";
+
+/// rebar.lock with all whitespace removed. rebar3 pretty-prints entries
+/// across lines; names, versions, URLs and SHAs contain no whitespace, so
+/// the scanners below can match each entry's shape exactly.
+fn compact_rebar_lock(content: &str) -> String {
+    content.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
 /// Extract `{<<"name">>, {pkg, <<"name">>, <<"version">>, ...}` entries
 /// from the first top-level list in rebar.lock.
+///
+/// Each entry must match in place: the `{pkg,` tuple has to follow the
+/// entry's own name, so a git entry is never stitched onto the next hex one.
 fn extract_pkg_entries(content: &str) -> Vec<(String, String)> {
+    const PKG_OPEN: &str = "\">>,{pkg,<<\"";
+    const VERSION_OPEN: &str = "\">>,<<\"";
+
+    let compact = compact_rebar_lock(content);
     let mut results = Vec::new();
+    let mut rest = compact.as_str();
 
-    // Match pattern: {<<"name">>,{pkg,<<"name">>,<<"version">>,...
-    // We look for the pattern with a simple regex-like scan
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        // Look for {<<"
-        if i + 3 < len && &bytes[i..i + 4] == b"{<<\"" {
-            // Extract the package name
-            let name_start = i + 4;
-            if let Some(name_end) = content[name_start..].find("\">>,{pkg,<<\"") {
-                let name = &content[name_start..name_start + name_end];
-                let after_pkg = name_start + name_end + 12; // skip "\">>,{pkg,<<\""
-
-                // Skip the repeated package name
-                if let Some(name2_end) = content[after_pkg..].find("\">>,<<\"") {
-                    let version_start = after_pkg + name2_end + 7; // skip "\">>,<<\""
-                    if let Some(version_end) = content[version_start..].find("\">>") {
-                        let version = &content[version_start..version_start + version_end];
-                        results.push((name.to_string(), version.to_string()));
-                        i = version_start + version_end;
-                        continue;
-                    }
-                }
-            }
-        }
-        i += 1;
+    while let Some(start) = rest.find(REBAR_LOCK_ENTRY_OPEN) {
+        rest = &rest[start + REBAR_LOCK_ENTRY_OPEN.len()..];
+        let Some(name_end) = rest.find('"') else {
+            break;
+        };
+        let name = &rest[..name_end];
+        let Some(after_name) = rest[name_end..].strip_prefix(PKG_OPEN) else {
+            continue;
+        };
+        // Skip the repeated package name
+        let Some(repeated_name_end) = after_name.find('"') else {
+            break;
+        };
+        let Some(after_name2) = after_name[repeated_name_end..].strip_prefix(VERSION_OPEN) else {
+            continue;
+        };
+        let Some(version_end) = after_name2.find('"') else {
+            break;
+        };
+        results.push((name.to_string(), after_name2[..version_end].to_string()));
+        rest = &after_name2[version_end..];
     }
 
     results
@@ -576,20 +617,19 @@ fn extract_pkg_entries(content: &str) -> Vec<(String, String)> {
 /// rebar.lock as `(name, url, sha)`.
 ///
 /// rebar3 always locks a git dependency to `{ref, Sha}`, whatever branch or
-/// tag the config named, and pretty-prints the tuple across several lines —
-/// so the scan runs over a whitespace-free copy (names, URLs and SHAs contain
-/// no whitespace).
+/// tag the config named. `{git_subdir, ...}` entries are not matched: the
+/// manifest has no way to declare a git subdirectory dependency, so one can
+/// only be transitive, and transitive deps are recorded but never pinned.
 fn extract_git_entries(content: &str) -> Vec<(String, String, String)> {
-    const NAME_OPEN: &str = "{<<\"";
     const GIT_OPEN: &str = "\">>,{git,\"";
     const REF_OPEN: &str = "\",{ref,\"";
 
-    let compact: String = content.chars().filter(|c| !c.is_whitespace()).collect();
+    let compact = compact_rebar_lock(content);
     let mut results = Vec::new();
     let mut rest = compact.as_str();
 
-    while let Some(start) = rest.find(NAME_OPEN) {
-        rest = &rest[start + NAME_OPEN.len()..];
+    while let Some(start) = rest.find(REBAR_LOCK_ENTRY_OPEN) {
+        rest = &rest[start + REBAR_LOCK_ENTRY_OPEN.len()..];
         let Some(name_end) = rest.find('"') else {
             break;
         };
@@ -1316,15 +1356,24 @@ sha = "ghi789"
     #[test]
     fn test_roundtrip_native_git_package() {
         let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock {
+            name: "oidcc".to_string(),
+            source: NativeLockSource::Git {
+                url: "https://github.com/jamesc/oidcc".to_string(),
+                reference: Some(GitReference::Branch("rfc7009-revocation".to_string())),
+                sha: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            },
+        });
         lockfile.insert_native(NativePackageLock::git(
-            "oidcc",
-            "https://github.com/jamesc/oidcc",
-            "0123456789abcdef0123456789abcdef01234567",
+            "jsx",
+            "https://github.com/talentdeficit/jsx",
+            "fedcba9876543210fedcba9876543210fedcba98",
         ));
         lockfile.insert_native(NativePackageLock::hex("jose", "1.11.10", "ABC"));
 
         let serialized = lockfile.serialize();
         assert!(serialized.contains("git = \"https://github.com/jamesc/oidcc\""));
+        assert!(serialized.contains("reference = \"branch:rfc7009-revocation\""));
         assert!(serialized.contains("sha = \"0123456789abcdef0123456789abcdef01234567\""));
         let parsed = Lockfile::parse(&serialized).unwrap();
         assert_eq!(lockfile, parsed);
@@ -1371,5 +1420,39 @@ sha = "abc"
                 "0123456789abcdef0123456789abcdef01234567"
             )
         );
+    }
+
+    #[test]
+    fn test_parse_rebar_lock_git_entry_between_hex_entries() {
+        // rebar3 sorts entries by name, so a git entry can sit between two
+        // hex ones; it must not be merged into the following hex entry.
+        let content = r#"{"1.2.0",
+[{<<"gun">>,{pkg,<<"gun">>,<<"2.1.0">>},0},
+ {<<"oidcc">>,
+  {git,"https://github.com/jamesc/oidcc",
+       {ref,"0123456789abcdef0123456789abcdef01234567"}},
+  0},
+ {<<"ranch">>,{pkg,<<"ranch">>,<<"2.1.0">>},1}]}.
+[
+{pkg_hash,[
+ {<<"gun">>,<<"AAA">>},
+ {<<"ranch">>,<<"BBB">>}]}
+].
+"#;
+        let packages = parse_rebar_lock(content);
+        let names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["gun", "oidcc", "ranch"]);
+        assert_eq!(packages[0].hex_version(), Some("2.1.0"));
+        assert_eq!(packages[1].hex_version(), None);
+        assert_eq!(packages[2].hex_version(), Some("2.1.0"));
+        assert_eq!(packages[2].hex_checksum(), Some("BBB"));
+    }
+
+    #[test]
+    fn test_roundtrip_native_package_special_characters() {
+        let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock::hex("odd", "1.0.0\"x", "a\\b"));
+        let parsed = Lockfile::parse(&lockfile.serialize()).unwrap();
+        assert_eq!(lockfile, parsed);
     }
 }

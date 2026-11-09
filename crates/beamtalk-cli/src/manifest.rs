@@ -107,8 +107,8 @@ impl fmt::Display for NativeSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeOverride {
     /// Replacement `erl_opts` for the dependency, as Erlang atom names
-    /// (e.g. `debug_info`). `None` leaves the dependency's own `erl_opts`.
-    pub erl_opts: Option<Vec<String>>,
+    /// (e.g. `debug_info`).
+    pub erl_opts: Vec<String>,
 }
 
 /// The top-level manifest structure parsed from `beamtalk.toml`.
@@ -853,7 +853,7 @@ struct TomlNativeGitDependency {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TomlNativeOverride {
-    erl_opts: Option<Vec<String>>,
+    erl_opts: Vec<String>,
 }
 
 /// Validate a native dependency (or override target) name.
@@ -972,7 +972,8 @@ fn parse_native_git_source(name: &str, fields: &toml::Table) -> Result<NativeSou
             )
         })?;
 
-    if dep.git.trim().is_empty() {
+    let url = dep.git.trim();
+    if url.is_empty() {
         miette::bail!("Native dependency '{name}' has an empty 'git' URL");
     }
 
@@ -984,7 +985,7 @@ fn parse_native_git_source(name: &str, fields: &toml::Table) -> Result<NativeSou
     )?;
 
     Ok(NativeSource::Git {
-        url: dep.git,
+        url: url.to_string(),
         reference,
     })
 }
@@ -1016,15 +1017,13 @@ fn parse_native_overrides(native: Option<&NativeSection>) -> Result<NativeOverri
                     )
                 })?;
 
-        if let Some(opts) = &entry.erl_opts {
-            for opt in opts {
-                if !is_plain_erlang_atom(opt) {
-                    miette::bail!(
-                        "Native override '{name}' has an invalid erl_opts entry '{opt}' — \
-                         only plain atoms such as \"debug_info\" or \"nowarn_export_all\" \
-                         are supported"
-                    );
-                }
+        for opt in &entry.erl_opts {
+            if !is_plain_erlang_atom(opt) {
+                miette::bail!(
+                    "Native override '{name}' has an invalid erl_opts entry '{opt}' — \
+                     only plain atoms such as \"debug_info\" or \"nowarn_export_all\" \
+                     are supported"
+                );
             }
         }
 
@@ -3283,14 +3282,11 @@ cowlib = { erl_opts = ["debug_info", "nowarn_export_all"] }
         assert_eq!(manifest.native_overrides.len(), 2);
         assert_eq!(
             manifest.native_overrides["jose"].erl_opts,
-            Some(Vec::<String>::new())
+            Vec::<String>::new()
         );
         assert_eq!(
             manifest.native_overrides["cowlib"].erl_opts,
-            Some(vec![
-                "debug_info".to_string(),
-                "nowarn_export_all".to_string()
-            ])
+            vec!["debug_info".to_string(), "nowarn_export_all".to_string()]
         );
     }
 
@@ -3312,6 +3308,30 @@ cowlib = { erl_opts = ["debug_info", "nowarn_export_all"] }
         assert!(
             err.contains("Native override 'jose' has an invalid format"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_override_without_erl_opts() {
+        let err = native_err("[native.overrides]\njose = {}\n");
+        assert!(
+            err.contains("Native override 'jose' has an invalid format"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_native_git_dep_trims_url() {
+        let manifest = parse_native_toml(
+            "[native.dependencies]\noidcc = { git = \" https://x/oidcc \", branch = \"main\" }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.native_dependencies["oidcc"].source,
+            NativeSource::Git {
+                url: "https://x/oidcc".to_string(),
+                reference: GitReference::Branch("main".to_string()),
+            }
         );
     }
 

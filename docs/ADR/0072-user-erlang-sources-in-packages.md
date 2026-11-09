@@ -266,12 +266,13 @@ version = "2.1.0"
 sha = "jkl012..."
 ```
 
-A native git dependency is locked by URL and resolved commit SHA instead of `version` (BT-4555); later builds pin it with `{ref, Sha}` while the manifest URL is unchanged:
+A native git dependency is locked by URL, the manifest reference and the resolved commit SHA instead of `version` (BT-4555). Later builds pin it with `{ref, Sha}` while the manifest URL and `tag`/`branch`/`rev` are unchanged:
 
 ```toml
 [[native_package]]
 name = "oidcc"
 git = "https://github.com/jamesc/oidcc"
+reference = "branch:rfc7009-revocation"
 sha = "0123abcd..."
 ```
 

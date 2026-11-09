@@ -476,7 +476,7 @@ oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation"
 jose = "~> 1.11"
 ```
 
-Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit (`{ref, Sha}`) until `beamtalk deps update` clears the native locks. Changing the URL also drops the locked SHA.
+Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit (`{ref, Sha}`) until `beamtalk deps update` clears the native locks. Changing the URL or the `branch`/`tag`/`rev` also drops the locked SHA.
 
 ### rebar3 Overrides
 

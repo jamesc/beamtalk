@@ -510,7 +510,7 @@ fn test_generate_rebar_config_git_deps() {
 
 #[test]
 fn test_generate_rebar_config_git_dep_pinned_to_locked_sha() {
-    use crate::commands::deps::lockfile::NativePackageLock;
+    use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
 
     let temp = TempDir::new().unwrap();
     let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
@@ -533,15 +533,42 @@ fn test_generate_rebar_config_git_dep_pinned_to_locked_sha() {
         ),
     );
 
+    deps.insert(
+        "yamerl".to_string(),
+        git_dep(
+            "yamerl",
+            "https://x/yamerl",
+            GitReference::Branch("next".to_string()),
+        ),
+    );
+
+    let locked_git = |name: &str, url: &str, branch: &str, sha: &str| NativePackageLock {
+        name: name.to_string(),
+        source: NativeLockSource::Git {
+            url: url.to_string(),
+            reference: Some(GitReference::Branch(branch.to_string())),
+            sha: sha.to_string(),
+        },
+    };
     let mut locked = std::collections::BTreeMap::new();
     locked.insert(
         "oidcc".to_string(),
-        NativePackageLock::git("oidcc", "https://github.com/jamesc/oidcc", "deadbeef"),
+        locked_git(
+            "oidcc",
+            "https://github.com/jamesc/oidcc",
+            "main",
+            "deadbeef",
+        ),
+    );
+    // Same URL, but the manifest moved from branch "main" to "next" — stale.
+    locked.insert(
+        "yamerl".to_string(),
+        locked_git("yamerl", "https://x/yamerl", "main", "0badf00d"),
     );
     // Locked from a different URL — the manifest moved, so the lock is stale.
     locked.insert(
         "jose".to_string(),
-        NativePackageLock::git("jose", "https://x/jose", "cafebabe"),
+        locked_git("jose", "https://x/jose", "main", "cafebabe"),
     );
 
     let config_path = generate_rebar_config(
@@ -561,7 +588,12 @@ fn test_generate_rebar_config_git_dep_pinned_to_locked_sha() {
         content.contains(r#"{jose, {git, "https://x/jose-fork", {branch, "main"}}}"#),
         "{content}"
     );
+    assert!(
+        content.contains(r#"{yamerl, {git, "https://x/yamerl", {branch, "next"}}}"#),
+        "{content}"
+    );
     assert!(!content.contains("cafebabe"), "{content}");
+    assert!(!content.contains("0badf00d"), "{content}");
 }
 
 #[test]
@@ -618,16 +650,13 @@ fn test_generate_rebar_config_overrides() {
     overrides.insert(
         "jose".to_string(),
         manifest::NativeOverride {
-            erl_opts: Some(Vec::new()),
+            erl_opts: Vec::new(),
         },
     );
     overrides.insert(
         "cowlib".to_string(),
         manifest::NativeOverride {
-            erl_opts: Some(vec![
-                "debug_info".to_string(),
-                "nowarn_export_all".to_string(),
-            ]),
+            erl_opts: vec!["debug_info".to_string(), "nowarn_export_all".to_string()],
         },
     );
 

@@ -504,7 +504,7 @@ fn shorten_git_url(url: &str) -> String {
 /// entry — the pinned version itself never changes; bumping it is a manifest
 /// edit).
 /// For native (hex) deps: clears locked versions so the next build
-/// re-resolves against hex.pm via rebar3 (ADR 0072 Phase 2).
+/// re-resolves via rebar3 (hex.pm and git sources, ADR 0072 Phase 2).
 fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
     let manifest_path = project_root.join("beamtalk.toml");
     let manifest = manifest::parse_manifest_full(&manifest_path)?;
@@ -604,11 +604,9 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
             if lockfile.has_native_packages() {
                 lockfile.clear_native_packages();
                 lockfile.write(project_root)?;
-                println!(
-                    "Cleared native package locks — next build will re-resolve against hex.pm"
-                );
+                println!("Cleared native package locks — next build will re-resolve via rebar3");
             } else {
-                println!("No native packages locked — next build will resolve against hex.pm");
+                println!("No native packages locked — next build will resolve via rebar3");
             }
         }
     }

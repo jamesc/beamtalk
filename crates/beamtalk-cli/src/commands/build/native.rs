@@ -451,8 +451,9 @@ pub(crate) fn aggregate_native_dependencies(
 ///
 /// A matching lock entry pins the dependency: a hex dep to its exact locked
 /// version, a git dep to its locked commit (`{ref, Sha}`) as long as the lock
-/// was taken from the same URL. Otherwise the manifest's constraint or
-/// tag/branch/rev is used.
+/// was resolved from the same URL and tag/branch/rev. Otherwise the
+/// manifest's constraint or tag/branch/rev is used, and the next lock write
+/// records the new resolution.
 fn rebar_dep_entry(dep: &NativeDependency, lock: Option<&NativePackageLock>) -> String {
     use crate::beam_compiler::escape_erlang_string;
 
@@ -466,12 +467,13 @@ fn rebar_dep_entry(dep: &NativeDependency, lock: Option<&NativePackageLock>) -> 
             format!("    {{{name}, \"{}\"}}", escape_erlang_string(constraint))
         }
         (
-            NativeSource::Git { url, .. },
+            NativeSource::Git { url, reference },
             Some(NativeLockSource::Git {
                 url: locked_url,
+                reference: Some(locked_reference),
                 sha,
             }),
-        ) if url == locked_url => {
+        ) if url == locked_url && reference == locked_reference => {
             format!(
                 "    {{{name}, {{git, \"{}\", {{ref, \"{}\"}}}}}}",
                 escape_erlang_string(url),
@@ -549,12 +551,11 @@ pub(crate) fn generate_rebar_config(
     // Names and erl_opts are validated as plain atoms by the manifest parser.
     let override_entries: Vec<String> = overrides
         .iter()
-        .filter_map(|(name, native_override)| {
-            let erl_opts = native_override.erl_opts.as_ref()?;
-            Some(format!(
+        .map(|(name, native_override)| {
+            format!(
                 "    {{override, {name}, [{{erl_opts, [{}]}}]}}",
-                erl_opts.join(", ")
-            ))
+                native_override.erl_opts.join(", ")
+            )
         })
         .collect();
     if !override_entries.is_empty() {
@@ -663,7 +664,23 @@ fn compile_with_rebar3(
         let mut lockfile = existing_lock.unwrap_or_default();
         // Replace all native entries with the freshly resolved set
         lockfile.clear_native_packages();
-        for pkg in resolved_native {
+        for mut pkg in resolved_native {
+            // rebar.lock only knows the commit; record which manifest
+            // reference produced it so a later branch/tag change re-resolves.
+            if let (
+                NativeLockSource::Git { url, reference, .. },
+                Some(NativeSource::Git {
+                    url: manifest_url,
+                    reference: manifest_reference,
+                }),
+            ) = (
+                &mut pkg.source,
+                native_deps.get(&pkg.name).map(|dep| &dep.source),
+            ) {
+                if url == manifest_url {
+                    *reference = Some(manifest_reference.clone());
+                }
+            }
             info!(
                 name = %pkg.name,
                 source = ?pkg.source,
