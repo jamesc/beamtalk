@@ -222,8 +222,9 @@ Actor subclass: ClosureCellEnsure
     0
 
   runEnsureAfterACall: blk =>
-    [blk value] ensure: [
-      self bump
-      self.n := self.n + 40
-    ]
+    [blk value]
+      ensure: [
+        self bump
+        self.n := self.n + 40
+      ]
     0
