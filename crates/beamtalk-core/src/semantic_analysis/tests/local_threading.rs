@@ -3779,6 +3779,24 @@ fn unary_while_condition_write_has_the_keyword_loop_verdict() {
     assert_eq!(checked, 18);
 }
 
+/// BT-4313: the rejection of a unary loop's receiver write names the selector
+/// as written, not the `whileTrue:` it is canonicalised to, and its help keeps
+/// the run-at-least-once semantics.
+#[test]
+fn unary_while_rejection_names_the_written_selector() {
+    for (selector, written) in [("whileTrue", "`whileTrue`"), ("whileFalse", "`whileFalse`")] {
+        let source = in_class(&format!("[t := t + 1. t < 3] {selector}\nt"));
+        let diags = adr0131_diagnostics(&source);
+        let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(errors.len(), 1, "{source}: {diags:?}");
+        let message = errors[0].message.to_string();
+        assert!(message.contains(&format!("sent {written}")), "{message}");
+        assert!(!message.contains(&format!("{selector}:`")), "{message}");
+        let help = errors[0].hint.as_deref().unwrap_or_default().to_string();
+        assert!(help.contains(&format!("t := t + 1. [t < limit] {selector}: [t := t + 1]")), "{help}");
+    }
+}
+
 /// BT-3782: a condition that only reads outer locals, and a loop body that
 /// writes them, stay accepted in every context.
 #[test]

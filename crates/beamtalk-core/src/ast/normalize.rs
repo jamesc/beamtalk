@@ -82,8 +82,9 @@
 //! classify, thread and lower one loop shape, not two that must agree. The
 //! body block the pass adds has a zero-width span at the end of the send,
 //! which no parsed block has (a `[]` literal spans its brackets), so
-//! [`restore_operand_parens`] recognises it and puts the unary send back
-//! without a record. Only a literal block receiver is rewritten: any other
+//! [`restore_operand_parens`] recognises it ([`written_unary_loop`]) and puts
+//! the unary send back without a record, and diagnostics name the selector as
+//! written. Only a literal block receiver is rewritten: any other
 //! receiver is an ordinary send of `whileTrue`/`whileFalse` (`Block` defines
 //! both for those).
 
@@ -318,35 +319,47 @@ pub fn desugar_unary_loops(expr: &mut Expression) {
     });
 }
 
+/// The unary selector a send of `selector` with `arguments` was written as,
+/// when it is a keyword loop [`desugar_unary_loops`] produced: its one
+/// argument is the empty, parameterless, zero-width block the pass adds (no
+/// parsed block is zero-width: a `[]` literal spans its brackets). `None` for
+/// any other send, a written `[c] whileTrue: []` included.
+///
+/// The one test for "this loop was written unary": the restore below and the
+/// diagnostics that name the selector as written read it.
+#[must_use]
+pub fn written_unary_loop(
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> Option<&'static str> {
+    let MessageSelector::Keyword(parts) = selector else {
+        return None;
+    };
+    let [part] = parts.as_slice() else {
+        return None;
+    };
+    let &(unary, _) = UNARY_LOOPS.iter().find(|(_, k)| part.keyword == *k)?;
+    matches!(
+        arguments,
+        [Expression::Block(b)] if b.body.is_empty() && b.parameters.is_empty() && b.span.len() == 0
+    )
+    .then_some(unary)
+}
+
 /// The inverse of [`desugar_unary_loops`] on `expr`'s tree: a keyword loop
-/// whose body is the empty block the pass added becomes the unary send again.
+/// whose body is the empty block the pass added ([`written_unary_loop`])
+/// becomes the unary send again.
 fn restore_unary_loops(expr: &mut Expression) {
     walk_expression_mut(expr, &mut |node| {
         let Expression::MessageSend {
             selector,
             arguments,
-            span,
             ..
         } = node
         else {
             return;
         };
-        let MessageSelector::Keyword(parts) = &*selector else {
-            return;
-        };
-        let [part] = parts.as_slice() else {
-            return;
-        };
-        let Some(&(unary, _)) = UNARY_LOOPS.iter().find(|(_, k)| part.keyword == *k) else {
-            return;
-        };
-        let added = matches!(
-            arguments.as_slice(),
-            [Expression::Block(b)] if b.body.is_empty()
-                && b.parameters.is_empty()
-                && b.span == desugared_body_span(*span)
-        );
-        if added {
+        if let Some(unary) = written_unary_loop(selector, arguments) {
             arguments.clear();
             *selector = MessageSelector::Unary(unary.into());
         }

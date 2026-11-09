@@ -3084,11 +3084,13 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
 | `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
-| `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[count := count + 1. count < 10] whileTrue` | ✅ |
+| `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ as for a `whileTrue:` condition (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
 | `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
 | `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
 | `inject:into:` | `items inject: 0 into: [:acc :x \| acc + x]` | ✅ |
+
+The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)): at the REPL it threads the bindings it writes; in a value-type or actor method it threads a local it writes when it also writes a field or sends to `self`; otherwise a local written in it (and every local in a class method) is a compile error. Keep the counter in a field, or write the loop with a body: `[count := count + 1. count < 10] whileTrue` runs as `count := count + 1. [count < 10] whileTrue: [count := count + 1]`.
 
 ### Local Variable Mutations
 
