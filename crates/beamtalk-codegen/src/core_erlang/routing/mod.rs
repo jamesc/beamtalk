@@ -190,24 +190,29 @@ pub(in crate::core_erlang) enum SendGuard {
     /// to `Tuple`. Rejecting a reserved head at every size is slightly
     /// over-conservative, and a miss is always sound.
     TupleWithoutReservedHead,
+    /// A bare binary: the half of [`Guard::BinaryOrStringTag`] that the
+    /// dynamic path routes to the row's own module (the other half, the
+    /// `String` tag, is the [`BuiltinRoute::string_tag_route`], BT-4510).
+    BareBinary,
 }
 
 impl SendGuard {
-    /// The send guard of a row whose representation test is `guard`, or
-    /// `None` when that test admits values the dynamic path routes to more
-    /// than one module. An exhaustive match, so a new guard kind must decide.
-    fn of(guard: Guard) -> Option<Self> {
+    /// The send guard of a row whose representation test is `guard`. An
+    /// exhaustive match, so a new guard kind must decide.
+    fn of(guard: Guard) -> Self {
         match guard {
             Guard::Bif(_)
             | Guard::StringTag
             | Guard::UnalignedBitstring
             | Guard::Symbol
             | Guard::ExactAtom(_)
-            | Guard::UntaggedMap => Some(Self::Exact(guard)),
-            Guard::UnreservedTuple => Some(Self::TupleWithoutReservedHead),
+            | Guard::UntaggedMap => Self::Exact(guard),
+            Guard::UnreservedTuple => Self::TupleWithoutReservedHead,
             // A bare binary routes to `Binary`, a `{beamtalk_string, _}` to
-            // `String`: the subclass-aware test spans two routes.
-            Guard::BinaryOrStringTag => None,
+            // `String`: the subclass-aware test spans two routes, so the
+            // row's own route guards on the bare-binary half and
+            // `route_of` adds the `String` half as a second route (BT-4510).
+            Guard::BinaryOrStringTag => Self::BareBinary,
         }
     }
 }
@@ -217,6 +222,22 @@ impl SendGuard {
 /// `target_module:dispatch/3`, so the call site may too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::core_erlang) struct BuiltinRoute {
+    pub(in crate::core_erlang) guard: SendGuard,
+    pub(in crate::core_erlang) target_module: &'static str,
+    /// BT-4510: for a row whose representation test also admits the
+    /// `String` tag (`Binary`), the `String` row's own route for the same
+    /// selector, tried when `guard` misses — `None` when the selector is one
+    /// of `String`'s special selectors (the dynamic path answers those
+    /// elsewhere, so a `String` value takes the dynamic send) and for every
+    /// other row.
+    pub(in crate::core_erlang) string_tag_route: Option<StringTagRoute>,
+}
+
+/// The `String` half of a [`Guard::BinaryOrStringTag`] row's route
+/// (BT-4510): a value passing `guard` (the `String` row's representation
+/// test) is routed by the dynamic path to `target_module`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) struct StringTagRoute {
     pub(in crate::core_erlang) guard: SendGuard,
     pub(in crate::core_erlang) target_module: &'static str,
 }
@@ -234,9 +255,6 @@ pub(in crate::core_erlang) enum NoBuiltinRoute {
     /// row's byte-level selectors shared with `Binary`, which go to
     /// `bt@stdlib@binary` unless a `String` extension overrides them.
     SpecialSelector(&'static str),
-    /// The row's representation test admits values routed to another module
-    /// (`Binary`'s test admits a `String`).
-    GuardSpansRoutes,
 }
 
 /// The guarded direct route of a typed send of `selector` to an instance of
@@ -281,10 +299,32 @@ fn route_of(row: &RoutingRow, selector: &str) -> std::result::Result<BuiltinRout
     {
         return Err(NoBuiltinRoute::SpecialSelector(special));
     }
-    let guard = SendGuard::of(guard).ok_or(NoBuiltinRoute::GuardSpansRoutes)?;
+    let string_tag_route = if guard == Guard::BinaryOrStringTag {
+        string_tag_route(selector)
+    } else {
+        None
+    };
+    let guard = SendGuard::of(guard);
     Ok(BuiltinRoute {
         guard,
         target_module,
+        string_tag_route,
+    })
+}
+
+/// The route of `selector` for the row whose representation test is exactly
+/// the `String` tag ([`Guard::StringTag`]), the values a
+/// [`Guard::BinaryOrStringTag`] test admits beyond a bare binary (BT-4510),
+/// or `None` when that row has no route for the selector (a special
+/// selector) or no such row exists.
+fn string_tag_route(selector: &str) -> Option<StringTagRoute> {
+    let row = rows()
+        .iter()
+        .find(|row| row.guard == Some(Guard::StringTag))?;
+    let route = route_of(row, selector).ok()?;
+    Some(StringTagRoute {
+        guard: route.guard,
+        target_module: route.target_module,
     })
 }
 

@@ -120,16 +120,13 @@ fn string_and_pid_ordinary_selectors_are_converted() {
 }
 
 #[test]
-fn builtin_whose_guard_spans_routes_reports_why() {
-    let hint = hint_for(
-        "Object subclass: Caller\n  run: b :: Binary => b frobnicate\n",
-        "frobnicate",
-    );
+fn binary_sends_are_converted() {
+    // BT-4510: `Binary`'s two routes (a bare binary, the `String` tag) are
+    // both guarded, so a `Binary` send is no longer a dynamic site.
+    let hints = report("Object subclass: Caller\n  run: b :: Binary => b frobnicate\n");
     assert!(
-        hint.contains(
-            "reason: builtin — Binary: its representation test also admits values routed away from bt@stdlib@binary"
-        ),
-        "{hint}"
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
     );
 }
 

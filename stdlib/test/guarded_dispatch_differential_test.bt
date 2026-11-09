@@ -186,16 +186,15 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   testOpenValueTypedSendsCompileToTheDirectShape =>
     self assert: (self importedCalls includes: {self pointModule, #dispatch, 3})
 
-  // BT-4294, BT-4390: the built-in typed rows with a route in the routing
-  // fixture really take the representation-guarded direct call (String and
-  // Pid for their ordinary selectors), and the row the fixture keeps dynamic
-  // (Binary) does not.
+  // BT-4294, BT-4390, BT-4510: the built-in typed rows with a route in the
+  // routing fixture really take the representation-guarded direct call
+  // (String and Pid for their ordinary selectors, Binary through both its
+  // bare-binary and String halves).
   testBuiltinTypedSendsCompileToTheDirectShape =>
     imports := self importedCalls
-    #(#'bt@stdlib@integer', #'bt@stdlib@float', #'bt@stdlib@string', #'bt@stdlib@symbol', #'bt@stdlib@true', #'bt@stdlib@false', #'bt@stdlib@undefined_object', #'bt@stdlib@block', #'bt@stdlib@tuple', #'bt@stdlib@list', #'bt@stdlib@dictionary', #'bt@stdlib@pid', #'bt@stdlib@reference', #'bt@stdlib@port') do: [:m |
+    #(#'bt@stdlib@integer', #'bt@stdlib@float', #'bt@stdlib@string', #'bt@stdlib@binary', #'bt@stdlib@symbol', #'bt@stdlib@true', #'bt@stdlib@false', #'bt@stdlib@undefined_object', #'bt@stdlib@block', #'bt@stdlib@tuple', #'bt@stdlib@list', #'bt@stdlib@dictionary', #'bt@stdlib@pid', #'bt@stdlib@reference', #'bt@stdlib@port') do: [:m |
       self assert: (imports includes: {m, #dispatch, 3})
     ]
-    self deny: (imports includes: {#'bt@stdlib@binary', #dispatch, 3})
 
   // `perform:` and its family, including `perform:withArguments:timeout:`,
   // which `send/3` rewrites before it classifies the receiver.
@@ -537,6 +536,55 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: Binary | r size]
       dynamic: [:r | r size]
       on: "abc"
+    // BT-4510: a `Binary`-typed String takes the String route, so a
+    // selector the two classes answer differently (`String>>asString` is
+    // the String, `Binary>>asString` a Result) still agrees with dynamic
+    // dispatch, as does a String special selector (dynamic send).
+    self
+      send: #stringTypedBinaryOverridden
+      typed: [:r :: Binary | r asString]
+      dynamic: [:r | r asString]
+      on: "abc"
+    self
+      send: #binaryTypedBinaryOverridden
+      typed: [:r :: Binary | r asString]
+      dynamic: [:r | r asString]
+      on: (Erlang erlang list_to_binary: #(104, 105))
+    self
+      send: #stringTypedBinarySpecial
+      typed: [:r :: Binary | r toBytes]
+      dynamic: [:r | r toBytes]
+      on: "abc"
+    // BT-4510: `value` to a typed non-Block receiver is a typed send, not
+    // block evaluation; a block lying as a Result misses the guard and is
+    // still evaluated by the dynamic send.
+    self
+      send: #resultValue
+      typed: [:r :: Result(Integer, Error) | r value]
+      dynamic: [:r | r value]
+      on: (Result ok: 3)
+    self
+      send: #blockTypedResultValue
+      typed: [:r :: Result(Integer, Error) | r value]
+      dynamic: [:r | r value]
+      on: [7]
+    // BT-4510: an interpolation segment's `displayString` takes the same
+    // typed route as a written send.
+    self
+      send: #interpolatedStringTypedBinary
+      typed: [:r :: Binary | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: "abc"
+    self
+      send: #interpolatedInteger
+      typed: [:r :: Integer | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: 42
+    self
+      send: #interpolatedResult
+      typed: [:r :: Result(Integer, Error) | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: (Result ok: 3)
     self
       send: #binaryTypedString
       typed: [:r :: String | r size]

@@ -139,7 +139,8 @@ impl CoreErlangGenerator {
                 }
                 StringSegment::Interpolation(expr) => {
                     let expr_doc = self.expression_doc(expr)?;
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(expr_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(expr_doc, expr);
                     let_bindings.push(chain_prefix);
                     binary_parts.push(reference);
                 }
@@ -179,19 +180,30 @@ impl CoreErlangGenerator {
     /// like every other opaque `Statement`/preamble fragment this
     /// generator builds) so callers concatenate it directly ahead of
     /// whatever comes next.
+    ///
+    /// BT-4510: the `displayString` send is the same decision as a
+    /// user-written `expr displayString` ([`Self::typed_send_target`]): a
+    /// segment whose static type has a guarded direct route (`String`,
+    /// `Integer`, a tagged Value class, …) calls that class's `dispatch/3`
+    /// behind its guard; any other segment sends dynamically.
     fn interpolation_segment_chain(
         &mut self,
         value_doc: Document<'static>,
+        expr: &Expression,
     ) -> (Document<'static>, Document<'static>) {
         let interp_var = self.fresh_temp_var("interpExpr");
         let raw_str_var = self.fresh_temp_var("interpRaw");
         let str_var = self.fresh_temp_var("interpStr");
 
-        let display_string_call = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(interp_var.clone()),
-            ", 'displayString', [])"
-        ]);
+        let display_string = MessageSelector::Unary("displayString".into());
+        let display_string_call = match self.typed_send_target(expr, &display_string) {
+            Ok(target) => self.guarded_send_on_vars(&target, "displayString", &interp_var, &[]),
+            Err(_) => self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(interp_var.clone()),
+                ", 'displayString', [])"
+            ]),
+        };
         // Evaluate the expression
         let prefix = docvec![
             "let ",
@@ -280,7 +292,8 @@ impl CoreErlangGenerator {
                     } else {
                         self.expression_doc(expr)?
                     };
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(value_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(value_doc, expr);
                     if i <= k {
                         prelude.push(ThreadedStmt::Statement(chain_prefix, span));
                     } else {

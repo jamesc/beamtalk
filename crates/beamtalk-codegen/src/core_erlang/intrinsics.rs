@@ -239,6 +239,33 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4510: whether a `value`/`value:`… send leaves the block intrinsic to
+    /// the typed send path, because the receiver's trusted static type is a
+    /// class other than `Block` that has a guarded direct route
+    /// ([`Self::typed_send_target`]): `aResult value` is `Result>>value`, not
+    /// block evaluation, and the intrinsic's `is_function` tests and dynamic
+    /// fallback would send it through `beamtalk_message_dispatch:send/3`
+    /// every time. A value that is a fun after all (a lying annotation)
+    /// misses the route's guard, which rejects every fun, and takes the
+    /// dynamic send, which evaluates the block as the intrinsic's fallback
+    /// would — except a Tier 2 (arity-1, stateful) fun, which the intrinsic
+    /// rejects with `stateful_block_dispatch` and the dynamic send rejects
+    /// with its own error. Block literals and `Block`-typed receivers keep
+    /// the intrinsic.
+    fn block_value_yields_to_typed_send(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) -> bool {
+        if matches!(receiver, Expression::Block(_)) {
+            return false;
+        }
+        let Ok(class) = self.trusted_static_class(receiver) else {
+            return false;
+        };
+        class.as_str() != "Block" && self.typed_send_target(receiver, selector).is_ok()
+    }
+
     /// Generates code for unary `value` message on a block receiver.
     ///
     /// When the receiver is a block literal, use fast inline apply.
@@ -269,6 +296,9 @@ impl CoreErlangGenerator {
                     receiver, selector, arguments, tuple_doc,
                 )));
             }
+        }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
@@ -493,6 +523,9 @@ impl CoreErlangGenerator {
                     receiver, selector, arguments, tuple_doc,
                 )));
             }
+        }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
