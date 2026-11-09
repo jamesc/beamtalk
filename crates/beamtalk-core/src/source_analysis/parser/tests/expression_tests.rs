@@ -770,9 +770,11 @@ fn bt4508_trailing_message_in_class_method_body_is_error() {
     let source = "Object subclass: StageProbe\n  class run =>\n    reversed := 0\n    x := #(3, 1, 2); size reversed\n    x\n";
     let diagnostics = parse_err(source);
     assert_eq!(diagnostics.len(), 1, "got {diagnostics:?}");
-    assert!(diagnostics[0]
-        .message
-        .contains("cascade part is a single message"));
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("cascade part is a single message")
+    );
 }
 
 // ========================================================================
