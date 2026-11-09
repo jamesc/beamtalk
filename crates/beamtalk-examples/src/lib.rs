@@ -10,7 +10,10 @@ mod search;
 
 pub use class_corpus::{ClassCorpus, ClassEntry, load_class_corpus_from_file, merge_class_corpora};
 pub use class_search::{ClassSearchResult, search_classes, search_classes_in};
-pub use corpus::{Corpus, CorpusEntry, load_corpus_from_file, merge_corpora};
+pub use corpus::{
+    BUNDLED_CORPUS_RELPATH, BundledCorpus, Corpus, CorpusEntry, bundled_corpus,
+    bundled_corpus_path, load_corpus_from_file, merge_corpora,
+};
 pub use search::{SearchResult, search, search_in};
 
 /// Generic merge-by-key for corpus-like collections.

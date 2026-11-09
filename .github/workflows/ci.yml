@@ -4,11 +4,12 @@
 name: CI
 
 # docs/learning/** is put back after '!docs/**' (a later pattern overrides an
-# earlier one): its fixtures and chapters feed corpus.json (check-corpus) and
-# the test-learn job (BT-3927), so a learning-guide-only change must still
-# run CI. docs/beamtalk-language-features.md is put back too: its code blocks
-# also feed corpus.json (BT-4554). ci-docs-only.yml excludes both for the same
-# reason; build-corpus's docs_corpus_sources_trigger_full_ci test enforces it.
+# earlier one): its fixtures and chapters feed the MCP example corpus that
+# `just build` generates (build-corpus, BT-4614) and the test-learn job
+# (BT-3927), so a learning-guide-only change must still run CI.
+# docs/beamtalk-language-features.md is put back too: its code blocks also
+# feed the corpus (BT-4554). build-corpus's docs_corpus_sources_trigger_full_ci
+# test enforces both.
 on:
   push:
     branches: [main]
@@ -257,10 +258,9 @@ jobs:
       # guard fails a PR that adds a dependency edge back onto it, which would
       # otherwise compile and pass every test while regressing the build-time
       # win. It used to be its own job; it needs only the Rust toolchain +
-      # Just (cargo metadata, no compilation), both already here — and unlike
-      # check-corpus it is not a required status check, so folding it in
-      # saves a runner spin-up per run for zero wall-clock cost (it takes
-      # seconds alongside clippy).
+      # Just (cargo metadata, no compilation), both already here, and it is
+      # not a required status check, so folding it in saves a runner spin-up
+      # per run for zero wall-clock cost (it takes seconds alongside clippy).
       - name: Check codegen dependency boundary (BT-3371)
         run: just check-codegen-boundary
 
@@ -410,34 +410,6 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/test-desktop
-
-  # ─── Corpus drift check (BT-2737) ──────────────────────────────────────
-  # crates/beamtalk-examples/corpus.json is generated from the .bt example/
-  # test sources; this fails the PR if it wasn't regenerated after a source
-  # change. Rust-only (no Erlang/OTP needed), so it stays fast.
-  check-corpus:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: profile-${{ hashFiles('Cargo.toml') }}
-
-      - name: Check corpus.json is up to date
-        run: just check-corpus
 
   # ─── Corpus .core diff harness (BT-3509, ADR 0122 Phase 0) ────────────
   # Informational: reports whether a PR touching crates/beamtalk-codegen/

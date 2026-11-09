@@ -7,7 +7,7 @@
 # there by default: they run here, on a daily schedule, on workflow_dispatch, and
 # on a PR carrying the `ci:all-platforms` label. This is a separate workflow so
 # that labelling a PR never re-triggers (or cancels) ci.yml, and so that none of
-# its job names can shadow a required check from ci.yml (`check-corpus`).
+# its job names can shadow a required check from ci.yml.
 # nightly.yml additionally runs the full test suite on macOS/Windows and builds
 # the distribution archives.
 
