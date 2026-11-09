@@ -520,8 +520,9 @@ impl CoreErlangGenerator {
             .enumerate()
             .filter(|(_, e)| {
                 let inner = e.unwrap_parens();
-                !Self::is_trivial_subexpr(inner)
-                    && !(stable_field_reads && matches!(inner, Expression::FieldAccess { .. }))
+                let stable_field_read =
+                    stable_field_reads && matches!(inner, Expression::FieldAccess { .. });
+                !(Self::is_trivial_subexpr(inner) || stable_field_read)
             })
             .map(|(i, _)| i);
         racing.next()?;
