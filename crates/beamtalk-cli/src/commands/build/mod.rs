@@ -78,8 +78,8 @@ pub(crate) use class_index::{collect_all_protocol_infos, collect_project_protoco
 #[cfg(test)]
 pub(crate) use native::{
     aggregate_native_dependencies, check_native_module_collisions, collect_erl_files,
-    compile_native_erlang_with_deps, generate_class_header, generate_rebar_config, rebar3_path,
-    validate_native_class_references,
+    compile_native_erlang_with_deps, generate_class_header, generate_rebar_config,
+    native_lock_is_current, prepare_rebar_lock, rebar3_path, validate_native_class_references,
 };
 #[cfg(test)]
 pub(crate) use sources::find_source_files;

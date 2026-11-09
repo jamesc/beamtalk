@@ -138,6 +138,10 @@ pub enum NativeLockSource {
         version: String,
         /// The hex package checksum for integrity verification.
         checksum: String,
+        /// The manifest constraint the version was resolved from, so a later
+        /// build can tell whether the lock is still current. `None` for a
+        /// transitive dependency, or an entry written before this was recorded.
+        constraint: Option<String>,
     },
     /// A git repository at an exact commit.
     Git {
@@ -153,13 +157,14 @@ pub enum NativeLockSource {
 }
 
 impl NativePackageLock {
-    /// A locked hex package.
+    /// A locked hex package, with no recorded manifest constraint.
     pub fn hex(name: &str, version: &str, checksum: &str) -> Self {
         Self {
             name: name.to_string(),
             source: NativeLockSource::Hex {
                 version: version.to_string(),
                 checksum: checksum.to_string(),
+                constraint: None,
             },
         }
     }
@@ -250,6 +255,9 @@ struct TomlNativePackageEntry {
     /// The manifest reference a git entry was resolved from.
     #[serde(default)]
     reference: Option<String>,
+    /// The manifest constraint a hex entry was resolved from.
+    #[serde(default)]
+    constraint: Option<String>,
     sha: String,
 }
 
@@ -374,6 +382,7 @@ impl Lockfile {
                 (Some(version), None) => NativeLockSource::Hex {
                     version,
                     checksum: entry.sha,
+                    constraint: entry.constraint,
                 },
                 (None, Some(url)) => NativeLockSource::Git {
                     url,
@@ -462,8 +471,19 @@ impl Lockfile {
             output.push_str("[[native_package]]\n");
             let _ = writeln!(output, "name = \"{}\"", escape_toml_string(&entry.name));
             match &entry.source {
-                NativeLockSource::Hex { version, checksum } => {
+                NativeLockSource::Hex {
+                    version,
+                    checksum,
+                    constraint,
+                } => {
                     let _ = writeln!(output, "version = \"{}\"", escape_toml_string(version));
+                    if let Some(constraint) = constraint {
+                        let _ = writeln!(
+                            output,
+                            "constraint = \"{}\"",
+                            escape_toml_string(constraint)
+                        );
+                    }
                     let _ = writeln!(output, "sha = \"{}\"", escape_toml_string(checksum));
                 }
                 NativeLockSource::Git {
@@ -713,6 +733,53 @@ fn find_pkg_hash_section(content: &str) -> Option<usize> {
         search_from = abs_pos + 12; // skip "pkg_hash_ext" to continue
     }
     None
+}
+
+/// Render a rebar3 `rebar.lock` from locked native packages — the inverse
+/// of [`parse_rebar_lock`].
+///
+/// rebar3 treats `rebar.lock` as authoritative: a locked dependency is
+/// fetched (or an existing checkout moved) to the locked version or commit,
+/// whatever `rebar.config` says. Writing it from `beamtalk.lock` before
+/// running rebar3 therefore pins every locked package — direct and
+/// transitive — on a fresh checkout too. `direct` names the manifest's own
+/// dependencies (level 0); everything else is written as level 1.
+pub fn render_rebar_lock<'a>(
+    packages: impl IntoIterator<Item = &'a NativePackageLock>,
+    direct: &dyn Fn(&str) -> bool,
+) -> String {
+    use crate::beam_compiler::escape_erlang_string as esc;
+
+    let mut entries = Vec::new();
+    let mut hashes = Vec::new();
+    for pkg in packages {
+        let name = esc(&pkg.name);
+        let level = u8::from(!direct(&pkg.name));
+        match &pkg.source {
+            NativeLockSource::Hex {
+                version, checksum, ..
+            } => {
+                entries.push(format!(
+                    "{{<<\"{name}\">>,{{pkg,<<\"{name}\">>,<<\"{}\">>}},{level}}}",
+                    esc(version)
+                ));
+                if !checksum.is_empty() {
+                    hashes.push(format!("{{<<\"{name}\">>,<<\"{}\">>}}", esc(checksum)));
+                }
+            }
+            NativeLockSource::Git { url, sha, .. } => entries.push(format!(
+                "{{<<\"{name}\">>,{{git,\"{}\",{{ref,\"{}\"}}}},{level}}}",
+                esc(url),
+                esc(sha)
+            )),
+        }
+    }
+
+    format!(
+        "{{\"1.2.0\",\n[{}]}}.\n[\n{{pkg_hash,[\n{}]}}\n].\n",
+        entries.join(",\n "),
+        hashes.join(",\n ")
+    )
 }
 
 /// Read and parse the rebar3 lockfile from the build directory.
@@ -1454,5 +1521,30 @@ sha = "abc"
         lockfile.insert_native(NativePackageLock::hex("odd", "1.0.0\"x", "a\\b"));
         let parsed = Lockfile::parse(&lockfile.serialize()).unwrap();
         assert_eq!(lockfile, parsed);
+    }
+
+    #[test]
+    fn test_render_rebar_lock_roundtrips_through_parse() {
+        let packages = vec![
+            NativePackageLock::hex("gun", "2.1.0", "AAA"),
+            NativePackageLock::git(
+                "oidcc",
+                "https://github.com/jamesc/oidcc",
+                "0123456789abcdef0123456789abcdef01234567",
+            ),
+            NativePackageLock::hex("ranch", "2.1.0", ""),
+        ];
+        let rendered = render_rebar_lock(&packages, &|name| name != "ranch");
+
+        assert!(
+            rendered.contains("{<<\"gun\">>,{pkg,<<\"gun\">>,<<\"2.1.0\">>},0}"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("{<<\"ranch\">>,{pkg,<<\"ranch\">>,<<\"2.1.0\">>},1}"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("<<\"ranch\">>,<<\"\">>"), "{rendered}");
+        assert_eq!(parse_rebar_lock(&rendered), packages);
     }
 }
