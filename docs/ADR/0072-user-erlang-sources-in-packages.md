@@ -107,6 +107,18 @@ cowboy = "~> 2.12"
 - `">= 1.0.0 and < 2.0.0"` — explicit range
 - `"2.12.0"` — exact version
 
+**Git sources and overrides (BT-4555).** An entry can instead be a git source, and `[native.overrides]` passes rebar3 overrides through:
+
+```toml
+[native.dependencies]
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+
+[native.overrides]
+jose = { erl_opts = [] }
+```
+
+A git entry takes exactly one of `tag`, `branch` or `rev` (the same keys as a git entry in `[dependencies]`) and becomes `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`) in the generated `rebar.config`. `[native.overrides]` supports only `erl_opts` (a list of plain atoms), emitted as `{overrides, [{override, Dep, [{erl_opts, [...]}]}]}`. Both aggregate across the dependency graph like hex constraints: first declaration wins, and a differing redeclaration produces a build warning.
+
 Naming: `[native.dependencies]` rather than `[erlang.dependencies]` because:
 - Consistent with the `native/` directory name
 - Consistent with the `native:` keyword (ADR 0056)
@@ -252,6 +264,16 @@ sha = "ghi789..."
 name = "ranch"       # transitive dep (via cowboy)
 version = "2.1.0"
 sha = "jkl012..."
+```
+
+A native git dependency is locked by URL, the manifest reference and the resolved commit SHA instead of `version` (BT-4555). Later builds pin it with `{ref, Sha}` while the manifest URL and `tag`/`branch`/`rev` are unchanged:
+
+```toml
+[[native_package]]
+name = "oidcc"
+git = "https://github.com/jamesc/oidcc"
+reference = "branch:rfc7009-revocation"
+sha = "0123abcd..."
 ```
 
 All resolved versions — direct and transitive — are pinned. This ensures `rebar.lock` in `_build/` can be regenerated deterministically from `beamtalk.lock`.

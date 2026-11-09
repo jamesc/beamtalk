@@ -180,7 +180,7 @@ beamtalk package registry build registry/ --name=beamtalk --private-key=key.pem
 
 **Version constraint solving — PubGrub (Phase 2+).** Registry deps will require a constraint solver. Beamtalk will use the **PubGrub** algorithm via the `pubgrub` Rust crate — the same algorithm used by Gleam (Rust), Dart/pub, and Elixir/Mix (via `hex_solver`). Gleam's `compiler-core/src/dependency.rs` is the reference implementation. Implementation details deferred to the Phase 2 implementation issue.
 
-**Native dep version conflicts.** `[native.dependencies]` are resolved by rebar3, which uses depth-first "first wins" — not PubGrub. If two Beamtalk packages declare conflicting hex dep versions (e.g., `gun = "~> 2.1"` vs `gun = "~> 2.0"`), rebar3 may silently pick one. The Beamtalk resolver has no visibility into rebar3's choices. Mitigation: `beamtalk build` should compare declared native dep versions across packages and warn on potential conflicts before invoking rebar3.
+**Native dep version conflicts.** `[native.dependencies]` are resolved by rebar3, which uses depth-first "first wins" — not PubGrub. If two Beamtalk packages declare conflicting hex dep versions (e.g., `gun = "~> 2.1"` vs `gun = "~> 2.0"`), rebar3 may silently pick one. The Beamtalk resolver has no visibility into rebar3's choices. Mitigation: `beamtalk build` should compare declared native dep versions across packages and warn on potential conflicts before invoking rebar3. *(Implemented in BT-4555: `beamtalk build` warns when packages declare the same native dependency with different sources — a different hex constraint, or git vs hex — and keeps the first declaration.)*
 
 #### Phase 3: Public hex.pm (When APIs Stabilise)
 

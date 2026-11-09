@@ -79,13 +79,19 @@ This tells `beamtalk run` to start the package as a supervised OTP application. 
 
 ### `[native]` Section
 
-For packages that depend on hex.pm Erlang packages:
+For packages that depend on Erlang packages from hex.pm or git:
 
 ```toml
 [native.dependencies]
 gun = "~> 2.1"
 cowboy = "2.12.0"
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+
+[native.overrides]
+jose = { erl_opts = [] }   # optional rebar3 override
 ```
+
+A git entry takes exactly one of `branch`, `tag` or `rev`. See the [Native Erlang Integration guide](beamtalk-native-erlang.md#git-sources) for git sources and overrides.
 
 Native dependencies are resolved via rebar3 and included on the BEAM code path. See [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) for details on Erlang interop within packages.
 

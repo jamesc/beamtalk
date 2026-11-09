@@ -466,6 +466,29 @@ Constraints follow hex.pm conventions:
 | `">= 1.0.0 and < 2.0.0"` | Explicit range |
 | `"2.12.0"` | Exact version |
 
+### Git Sources
+
+A native dependency can come from a git repository instead of hex.pm — for example, to build against a fork branch before a fix is released:
+
+```toml
+[native.dependencies]
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+jose = "~> 1.11"
+```
+
+Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit (`{ref, Sha}`) until `beamtalk deps update` clears the native locks. Changing the URL or the `branch`/`tag`/`rev` also drops the locked SHA.
+
+### rebar3 Overrides
+
+Some Erlang dependencies need their compile options replaced to build — for example, `jose` sets `warnings_as_errors`, which fails on OTP 27+. `[native.overrides]` maps to rebar3's `{overrides, [{override, Dep, Opts}]}`:
+
+```toml
+[native.overrides]
+jose = { erl_opts = [] }
+```
+
+Only `erl_opts` is supported, as a list of plain atom names (`["debug_info", "nowarn_export_all"]`). An override replaces the dependency's own `erl_opts`. The target can be a direct or transitive native dependency.
+
 ### How the Build Works
 
 `beamtalk build` handles native Erlang compilation automatically using one of two paths, selected by whether `[native.dependencies]` is present:
@@ -500,7 +523,7 @@ Object subclass: FastJson
 
 All native dependencies across the entire Beamtalk dependency graph are resolved together. `beamtalk build` collects `[native.dependencies]` from every transitive package and passes them to a single rebar3 invocation. Resolved versions are pinned in `beamtalk.lock` for reproducible builds.
 
-This top-level resolution is required by BEAM's flat module namespace — only one version of any module can be loaded at a time. If two packages declare different constraints for the same hex package, rebar3's constraint solver finds a version satisfying both (or reports a conflict).
+This top-level resolution is required by BEAM's flat module namespace — only one version of any module can be loaded at a time. Each native dependency name goes into `rebar.config` once: the root package's declaration wins, then the first dependency that declares it. If another package declares the same name differently (a different hex constraint, or git in one package and hex in another), `beamtalk build` keeps the first declaration and prints a warning naming both packages. `[native.overrides]` aggregate the same way, so a library's overrides also apply when an application depends on it.
 
 ## Compilation and Build Integration
 
@@ -719,7 +742,7 @@ beamtalk test
 | Wrap a few utility functions as class methods | `Object subclass:` with inline FFI calls |
 | Actor with OTP gen_server control | `Actor subclass: … native: module` + `self delegate` |
 | Actor with Beamtalk-only logic | Standard `Actor subclass:` (no `native:`) |
-| Hex.pm package dependency | `[native.dependencies]` in `beamtalk.toml` |
+| Hex.pm or git Erlang dependency | `[native.dependencies]` in `beamtalk.toml` |
 | Port, NIF, or raw process | Per-method `(Erlang module)` FFI |
 
 ### `self delegate` vs FFI in Native Actors
