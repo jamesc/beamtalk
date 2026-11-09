@@ -371,9 +371,9 @@ impl TypeChecker {
     /// fallthrough), so the type checker must model the same path.
     ///
     /// spawn/spawnWith: are still instance methods on Actor but routed
-    /// class-side by beamtalk_class_dispatch.erl — they need the bypass.
+    /// class-side by `beamtalk_class_dispatch.erl` — they need the bypass.
     /// new/new: are proper class methods on Value and found via
-    /// find_class_method through the hierarchy, so no bypass needed.
+    /// `find_class_method` through the hierarchy, so no bypass needed.
     ///
     /// ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
     /// every *concrete* Object subclass via the runtime's class instantiation
