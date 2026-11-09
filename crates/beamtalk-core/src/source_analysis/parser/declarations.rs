@@ -2459,6 +2459,7 @@ impl Parser {
         // would otherwise silently lose this signal.
         let initial_comments = self.collect_comment_attachment();
         let leading_blank_line = initial_comments.leading_blank_line;
+        let class_blank_line_after_comments = initial_comments.blank_line_after_comments;
         let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
@@ -2512,6 +2513,13 @@ impl Parser {
         // selector token, so comments before the class name would otherwise
         // be lost.
         if !class_leading_comments.is_empty() {
+            // The gap after the last leading comment belongs to whichever
+            // block ends the combined list: the selector token's own
+            // comments when there are any, else the class-name token's
+            // (e.g. a license header followed by a blank line, BT-4488).
+            if method.comments.leading.is_empty() {
+                method.comments.blank_line_after_comments = class_blank_line_after_comments;
+            }
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
