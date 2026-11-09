@@ -66,8 +66,7 @@ jobs:
   # `ci:all-platforms` PR label); only the ubuntu desktop leg for a PR touching
   # the desktop app's own paths stays here.
   #
-  # The corpus-tier path list is not repeated here: it lives in
-  # scripts/ci/corpus-gate.sh, which `just ci-changed` also calls.
+  # The Rust corpus tier is corpus.yml's (opt-in on PRs, BT-4609).
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -75,11 +74,6 @@ jobs:
       # A PR touched the desktop app's own paths: test-desktop (ubuntu) runs.
       # Never true on a push to main.
       desktop: ${{ steps.filter.outputs.desktop }}
-      # crates/beamtalk-core|codegen|repl, stdlib/, examples/, the runtime
-      # fixtures and the other corpus sources the tier's tests read,
-      # Cargo.toml/lock, Justfile, ci.yml: can change the Rust corpus tier's
-      # verdict (scripts/ci/corpus-gate.sh).
-      corpus: ${{ steps.filter.outputs.corpus }}
       # The core-diff snapshot pipelines changed: core-diff-modes has work.
       core_diff_modes: ${{ steps.filter.outputs.core_diff_modes }}
       # docs/learning/ or the doctest pipeline changed: test-integration
@@ -103,7 +97,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in corpus core_diff_modes learn runtime; do echo "$k=true"; done
+              for k in core_diff_modes learn runtime; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -125,9 +119,6 @@ jobs:
             return 1
           }
           flag() { if "$@"; then echo true; else echo false; fi; }
-
-          # Corpus tier: one path list, shared with `just ci-changed`.
-          if printf '%s\n' "$changed" | scripts/ci/corpus-gate.sh; then corpus=true; else corpus=false; fi
 
           core_diff_modes=$(flag matches \
             crates/beamtalk-cli/src/commands/build_stdlib.rs \
@@ -156,7 +147,6 @@ jobs:
 
           {
             echo "desktop=$desktop"
-            echo "corpus=$corpus"
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
             echo "runtime=$runtime"
@@ -268,9 +258,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: just dialyzer-specs
 
-  # The fast Rust tier on Linux (everything but the corpus tier, which is the
-  # test-corpus job). Full test-stdlib/test-bunit/test-runtime run in the
-  # test-beam / test-runtime jobs.
+  # The fast Rust tier on Linux (everything but the corpus tier, which is
+  # corpus.yml's test-corpus job). Full test-stdlib/test-bunit/test-runtime
+  # run in the test-beam / test-runtime jobs.
   test-rust:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -320,55 +310,6 @@ jobs:
       # against the built runtime and stdlib.
       - name: Build and Rust tests
         run: just build test-rust
-
-  # ─── Rust corpus tier (ADR 0111/0131 state-threading proofs) ───────────
-  # `just test-corpus` (agreement and corpus proofs, ~15 min as one job) runs
-  # on a PR only when scripts/ci/corpus-gate.sh (via the `changes` job) says the
-  # changed paths can affect it, and always on a push to main. Sharded in two
-  # with nextest --partition so the tier fits the PR time budget; the tests
-  # are OS-independent, so Linux only.
-  test-corpus:
-    needs: changes
-    if: needs.changes.outputs.corpus == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: stable
-
-      # erlc: the repl crate's assembler corpora compile generated Core Erlang.
-      - name: Install Erlang/OTP
-        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
-        with:
-          version-file: .tool-versions
-          version-type: strict
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install Just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
-
-      - name: Install cargo-nextest
-        uses: ./.github/actions/install-nextest
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          shared-key: linux-test
-          key: profile-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Rust corpus tier (state-threading agreement and corpus proofs)
-        run: just test-corpus count:${{ matrix.shard }}/2
 
   # ─── Desktop app (Tauri) crate tests (BT-3061) ─────────────────────────
   # desktop/src-tauri is excluded from the root Cargo workspace (root

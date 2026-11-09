@@ -20,9 +20,10 @@ on:
     # "CI (all platforms)" is ci-platforms.yml (BT-4209): the scheduled macOS/Windows/
     # desktop run. Its schedule runs report head_branch main with event `schedule`, so
     # they pass the guard below; its labelled PR runs have event `pull_request` and do
-    # not. "Nightly Coverage" is coverage.yml (BT-4609); its scheduled runs pass the
-    # same guard. If any of these workflows is renamed, update this list.
-    workflows: ["CI", "Nightly", "CI (all platforms)", "Nightly Coverage"]
+    # not. "Nightly Coverage" (coverage.yml) and "Corpus Tier" (corpus.yml) moved out
+    # of CI in BT-4609; their main runs pass the same guard. If any of these
+    # workflows is renamed, update this list.
+    workflows: ["CI", "Nightly", "CI (all platforms)", "Nightly Coverage", "Corpus Tier"]
     types: [completed]
   workflow_dispatch:
     inputs:

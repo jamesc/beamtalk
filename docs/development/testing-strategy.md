@@ -889,6 +889,29 @@ just ci
 #   just test-repl-protocol  # REPL TCP-protocol tests (~50s)
 ```
 
+### Opt-in CI checks
+
+PR wall-clock is dominated by waiting for a free runner, not by job length, so
+the most expensive informational or specialised checks run on a PR only when
+it carries their label (BT-4609). Adding the label starts a run, and later
+pushes to a labelled PR re-run it. AGENTS.md (Opt-in CI labels) says when an
+agent must add each one.
+
+| Label | Workflow | Runs on `main` | Add it when |
+|-------|----------|----------------|-------------|
+| `ci:corpus` | `corpus.yml` (Rust corpus tier, `just test-corpus`, two shards, about 33 runner-min) | Every merge | The PR changes state-threading lowering or its analysis, fixes a state-threading or `PIN-BUG` issue, or adds or changes a `*_corpus` / `*agreement*` test |
+| `ci:core-diff` | `core-diff.yml` (corpus `.core` diff vs the PR base) | Never | A codegen refactor should leave generated Core Erlang unchanged |
+| `core-diff:enforce` | `core-diff.yml`, failing on any diff | Never | As above, and any difference must fail the PR |
+| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule | The PR is platform-sensitive (paths, processes, file system) |
+
+Because `main` runs the corpus tier on every merge, and `ci-triage.yml` files
+an issue for a red `main` run, a PR that should have carried `ci:corpus` but
+didn't is caught one merge later. Locally, `just ci-changed` still runs the
+tier whenever `scripts/ci/corpus-gate.sh` matches the changed paths.
+
+Coverage is not on the PR path at all: see § Code Coverage (`coverage.yml`,
+nightly).
+
 ### Testing Pyramid
 
 The test suite follows a proper testing pyramid after [ADR 0014](../ADR/0014-beamtalk-test-framework.md).
