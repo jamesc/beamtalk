@@ -7041,9 +7041,12 @@ Announcements (typed domain events you subscribe to in app logic):
 > dispatcher — subscriptions on announcer A are never matched by an `announce:`
 > on announcer B, even for the same event class. `SystemAnnouncer` is the
 > canonical multi-subscriber bus for system-wide events. Cross-node delivery to
-> a *connected* node works; partition tolerance, replay, and the
-> `RecordingAnnouncer`/telemetry-bridge extras live in the optional
-> `beamtalk-announcements` package (BT-2454).
+> a *connected* node works. The optional
+> [`beamtalk-announcements`](https://github.com/jamesc/beamtalk-announcements)
+> package adds `RecordingAnnouncer` (a test double that records instead of
+> dispatching) and `AnnouncementTelemetry` (re-emits announcements as
+> `telemetry` events). Partition tolerance and replay are planned for that
+> package (BT-4600).
 
 ---
 
