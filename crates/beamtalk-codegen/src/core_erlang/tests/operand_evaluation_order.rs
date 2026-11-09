@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! BT-4296: the operands of one Core Erlang construct — collection-literal
+//! elements, runtime-dispatch arguments — evaluate in source order.
+//!
+//! Core Erlang leaves the evaluation order of a construct's operands
+//! unspecified, and erlc evaluates a list cell's tail before its head, so
+//! `#[a bump, a n]` lowered to `from_list([send(a, bump), send(a, n)])` ran
+//! `a n` first. `thread_subexprs` now binds every non-trivial operand before
+//! the last one to a `let` temp in source order. Each case here checks that
+//! the first side-effecting send is bound ahead of the construct and the last
+//! one stays in place inside it; the behaviour itself is pinned by
+//! `stdlib/test/eval_order_test.bt`.
+
+use super::{assert_compiles_through_erlc, codegen};
+
+const SRC: &str = "Value subclass: Probe
+  arrayOf: a => #[a bump, a n]
+  listOf: a => #(a bump, a n)
+  listTailOf: a => #(a bump | a rest)
+  tupleOf: a => {a bump, a n}
+  mapOf: a => #{#first => a bump, #second => a n}
+  argsOf: a with: h => h pair: a bump with: a n
+  oneSend: a => #[a bump, 1, #x]
+  class arrayOf: a => #[a bump, a n]
+";
+
+/// The text of method `name`'s function definition in `code`.
+fn method_body<'a>(code: &'a str, name: &str) -> &'a str {
+    // At a line start: the module header's export list names it first.
+    let head = format!("\n'{name}'/");
+    let start = code
+        .find(&head)
+        .unwrap_or_else(|| panic!("no function {name} in:\n{code}"));
+    let rest = &code[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// Asserts that in method `name`, the send of `first` is let-bound before the
+/// construct opened by `opener` and the send of `last` is evaluated inside it.
+fn assert_first_bound_before(code: &str, name: &str, opener: &str, first: &str, last: &str) {
+    let body = method_body(code, name);
+    let at_opener = body
+        .find(opener)
+        .unwrap_or_else(|| panic!("`{opener}` not in {name}:\n{body}"));
+    let (before, inside) = body.split_at(at_opener);
+    let first_send = format!("'{first}', [])");
+    let last_send = format!("'{last}', [])");
+    assert!(
+        before.contains(&first_send) && !inside.contains(&first_send),
+        "`{first}` should be let-bound before `{opener}` in {name}:\n{body}"
+    );
+    assert!(
+        inside.contains(&last_send),
+        "`{last}` should be evaluated in place inside `{opener}` in {name}:\n{body}"
+    );
+}
+
+#[test]
+fn bt4296_collection_literal_elements_bind_in_source_order() {
+    let code = codegen(SRC);
+    assert_first_bound_before(&code, "arrayOf:", "'from_list'([", "bump", "n");
+    assert_first_bound_before(&code, "listOf:", "[_ListLit@", "bump", "n");
+    assert_first_bound_before(&code, "listTailOf:", "[_ListLit@", "bump", "rest");
+    assert_first_bound_before(&code, "tupleOf:", "{_TupLit@", "bump", "n");
+    assert_first_bound_before(&code, "mapOf:", "~{ 'first' => _MapLit@", "bump", "n");
+    assert_first_bound_before(&code, "class_arrayOf:", "'from_list'([", "bump", "n");
+    assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn bt4296_runtime_dispatch_arguments_bind_in_source_order() {
+    let code = codegen(SRC);
+    assert_first_bound_before(&code, "argsOf:with:", "'pair:with:', [", "bump", "n");
+}
+
+#[test]
+fn bt4296_a_single_side_effecting_operand_stays_in_place() {
+    let code = codegen(SRC);
+    let body = method_body(&code, "oneSend:");
+    assert!(
+        body.contains("'from_list'([call 'beamtalk_message_dispatch':'send'(_a@"),
+        "a lone non-trivial element has nothing to race with and needs no temp:\n{body}"
+    );
+    assert!(!body.contains("_ArrLit@"), "no temp expected:\n{body}");
+}

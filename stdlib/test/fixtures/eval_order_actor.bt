@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: an actor whose `bump` writes its state and whose `n` reads it, so
+// a literal or argument list holding `(a bump), a n` shows which element ran
+// first. The actor column of stdlib/test/eval_order_test.bt also lives here:
+// methods that send `bump`/`n` to ANOTHER EvalOrderActor from inside an actor
+// method.
+
+Actor subclass: EvalOrderActor
+  state: n = 0
+
+  n => self.n
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  pair: x with: y => #[x, y]
+
+  arrayOf: a => #[a bump, a n]
+
+  listOf: a => #(a bump, a n)
+
+  tupleOf: a => {a bump, a n}
+
+  mapOf: a => #{#first => a bump, #second => a n}
+
+  argsOf: a => self pair: a bump with: a n
+
+  binaryOf: a => a bump - a n

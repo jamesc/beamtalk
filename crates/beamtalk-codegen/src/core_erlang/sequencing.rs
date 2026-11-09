@@ -426,6 +426,17 @@ impl CoreErlangGenerator {
     /// order, into `prelude` (a plain one via a fresh `let <prefix>N = ...
     /// in`), preserving left-to-right evaluation order exactly as
     /// `hoist_subexpr_splits` did.
+    ///
+    /// BT-4296: the docs are operands of one Core Erlang construct (a list
+    /// cell, a tuple, a map, a call's arguments), whose operand evaluation
+    /// order Core Erlang leaves unspecified — erlc evaluates a list cell's
+    /// tail before its head, so `[E1, E2]` runs `E2` first. So when two or
+    /// more operands are non-trivial (any of them may send a message), the
+    /// hoisting point also extends to the last non-trivial operand: every
+    /// non-trivial operand before it is bound to a temp in source order, and
+    /// only that last one (followed by trivial operands alone) is left in
+    /// place. A single non-trivial operand has nothing to race with and
+    /// stays in place.
     pub(super) fn thread_subexprs(
         &mut self,
         exprs: &[&Expression],
@@ -433,7 +444,8 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
         let frame = self.current_frame();
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
-        let Some(k) = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e)) else {
+        let needs_prelude = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e));
+        let Some(k) = needs_prelude.max(Self::last_racing_operand(exprs)) else {
             let mut docs = Vec::with_capacity(exprs.len());
             for e in exprs {
                 docs.push(self.expression_doc(e)?);
@@ -447,8 +459,27 @@ impl CoreErlangGenerator {
             // the ordinary `expression_doc` (`take_precompiled_subexpr`)
             // instead of re-threading it — see `subexpr_needs_prelude`'s
             // doc comment for the double-dispatch this avoids.
-            if i > k || self.precompiled_subexprs_contains(e) {
+            let inner = e.unwrap_parens();
+            // A literal, variable, class reference or block reads no state and
+            // runs nothing, so it may evaluate in place after every prelude
+            // (BT-4296: no temp for a map literal's `#key`).
+            let trivial = Self::is_trivial_subexpr(inner);
+            if i > k || (trivial && !self.precompiled_subexprs_contains(e)) {
                 docs.push(self.expression_doc(e)?);
+                continue;
+            }
+            if self.precompiled_subexprs_contains(e) {
+                // Already evaluated by the enclosing prelude; an operand
+                // before `k` is still pinned to a temp so a later operand
+                // left in place cannot run ahead of reading it (BT-4296).
+                let doc = self.expression_doc(e)?;
+                if i < k && !trivial {
+                    let (binding, var) = self.bind_subexpr_to_temp(prefix, doc);
+                    prelude.push(ThreadedStmt::Statement(binding, inner.span()));
+                    docs.push(leaf::var(var));
+                } else {
+                    docs.push(doc);
+                }
                 continue;
             }
             let tv = self.threaded_expression(e, frame)?;
@@ -457,13 +488,28 @@ impl CoreErlangGenerator {
             let value_doc = self.threaded_value_doc(&tv.value);
             if must_bind {
                 let (binding, var) = self.bind_subexpr_to_temp(prefix, value_doc);
-                prelude.push(ThreadedStmt::Statement(binding, e.unwrap_parens().span()));
+                prelude.push(ThreadedStmt::Statement(binding, inner.span()));
                 docs.push(leaf::var(var));
             } else {
                 docs.push(value_doc);
             }
         }
         Ok((prelude, docs))
+    }
+
+    /// BT-4296: the index of the last non-trivial operand of `exprs` when two
+    /// or more are non-trivial — the operand [`Self::thread_subexprs`] must
+    /// hoist up to so the operands evaluate in source order whatever order
+    /// the enclosing Core Erlang construct evaluates them in. `None` when at
+    /// most one operand is non-trivial.
+    fn last_racing_operand(exprs: &[&Expression]) -> Option<usize> {
+        let mut non_trivial = exprs
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !Self::is_trivial_subexpr(e.unwrap_parens()))
+            .map(|(i, _)| i);
+        let first = non_trivial.next()?;
+        Some(non_trivial.last().unwrap_or(first)).filter(|last| *last != first)
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns

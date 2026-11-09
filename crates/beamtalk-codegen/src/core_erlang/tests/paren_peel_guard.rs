@@ -118,7 +118,7 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/patterns/match_lowering.rs",
         5,
     ),
-    ("beamtalk-codegen/src/core_erlang/sequencing.rs", 3),
+    ("beamtalk-codegen/src/core_erlang/sequencing.rs", 4),
     ("beamtalk-codegen/src/core_erlang/synced_call.rs", 8),
     ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 14),
     ("beamtalk-codegen/src/core_erlang/threading_analysis.rs", 3),
