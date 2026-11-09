@@ -976,9 +976,8 @@ impl CoreErlangGenerator {
     /// (`Binary`: a bare binary or the `String` tag) gets both, guarded one
     /// after the other (BT-4510). Rows that carry a `dynamic_only` reason
     /// (`Boolean`, `Bitstring`, `Character`, the records, the proxy) stay
-    /// dynamic. A
-    /// stdlib built-in's module can be neither removed nor redefined into
-    /// another module, so the pinned target never goes stale.
+    /// dynamic. A stdlib built-in's module can be neither removed nor
+    /// redefined into another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
@@ -1166,17 +1165,9 @@ impl CoreErlangGenerator {
         };
         let direct_call = match own_arm {
             Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
-            None => docvec![
-                "call ",
-                leaf::atom(module_name),
-                ":'dispatch'(",
-                leaf::atom(selector_atom.to_string()),
-                ", [",
-                args_list_doc.clone(),
-                "], ",
-                leaf::var(receiver_var.to_string()),
-                ")",
-            ],
+            None => {
+                Self::dispatch3_call_doc(module_name, selector_atom, &args_list_doc, receiver_var)
+            }
         };
         // BT-4366: both calls sit inside the type-test `case`, so each carries
         // the send's line itself.
@@ -1204,17 +1195,13 @@ impl CoreErlangGenerator {
                 // before the dynamic send.
                 let miss_doc = match route.string_tag_route {
                     Some(string_route) => {
-                        let string_call = self.annotate_current_send_call(docvec![
-                            "call ",
-                            leaf::atom(string_route.target_module),
-                            ":'dispatch'(",
-                            leaf::atom(selector_atom.to_string()),
-                            ", [",
-                            args_list_doc.clone(),
-                            "], ",
-                            leaf::var(receiver_var.to_string()),
-                            ")",
-                        ]);
+                        let string_call =
+                            self.annotate_current_send_call(Self::dispatch3_call_doc(
+                                string_route.target_module.to_string(),
+                                selector_atom,
+                                &args_list_doc,
+                                receiver_var,
+                            ));
                         self.render_send_guard(
                             string_route.guard,
                             receiver_var,
@@ -1227,6 +1214,27 @@ impl CoreErlangGenerator {
                 self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
             }
         }
+    }
+
+    /// `call 'Module':'dispatch'('sel', [Args], Recv)` — the remote
+    /// `dispatch/3` call every guarded direct send makes (BT-4510).
+    fn dispatch3_call_doc(
+        module_name: String,
+        selector_atom: &str,
+        args_list_doc: &Document<'static>,
+        receiver_var: &str,
+    ) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "], ",
+            leaf::var(receiver_var.to_string()),
+            ")",
+        ]
     }
 
     /// BT-4473: the own-class `dispatch/3` method arm that answers
