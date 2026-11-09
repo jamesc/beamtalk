@@ -199,11 +199,11 @@ A registry dependency's row shows the resolved git URL, tag, and locked commit S
 ### Updating Dependencies
 
 ```bash
-beamtalk deps update          # Update all git and registry dependencies
+beamtalk deps update          # Update all git, registry and native dependencies
 beamtalk deps update json     # Update a single dependency
 ```
 
-Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated.
+Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated. For native dependencies (`[native.dependencies]`), `deps update` clears their locks so the next build re-resolves them; `deps update <name>` does that for one native package, direct or transitive.
 
 ### Manual Editing
 
