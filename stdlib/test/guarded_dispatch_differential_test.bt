@@ -568,6 +568,23 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: Result(Integer, Error) | r value]
       dynamic: [:r | r value]
       on: [7]
+    // BT-4510: an interpolation segment's `displayString` takes the same
+    // typed route as a written send.
+    self
+      send: #interpolatedStringTypedBinary
+      typed: [:r :: Binary | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: "abc"
+    self
+      send: #interpolatedInteger
+      typed: [:r :: Integer | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: 42
+    self
+      send: #interpolatedResult
+      typed: [:r :: Result(Integer, Error) | "<{r}>"]
+      dynamic: [:r | "<{r}>"]
+      on: (Result ok: 3)
     self
       send: #binaryTypedString
       typed: [:r :: String | r size]

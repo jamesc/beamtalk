@@ -248,7 +248,10 @@ impl CoreErlangGenerator {
     /// every time. A value that is a fun after all (a lying annotation)
     /// misses the route's guard, which rejects every fun, and takes the
     /// dynamic send, which evaluates the block as the intrinsic's fallback
-    /// would. Block literals and `Block`-typed receivers keep the intrinsic.
+    /// would — except a Tier 2 (arity-1, stateful) fun, which the intrinsic
+    /// rejects with `stateful_block_dispatch` and the dynamic send rejects
+    /// with its own error. Block literals and `Block`-typed receivers keep
+    /// the intrinsic.
     fn block_value_yields_to_typed_send(
         &self,
         receiver: &Expression,

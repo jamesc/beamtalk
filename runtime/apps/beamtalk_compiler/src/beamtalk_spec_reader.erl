@@ -943,7 +943,7 @@ map_type({type, _, tuple, any}) ->
 %% represented (the routing fixture's reserved `beamtalk_string` 2-tuple tag,
 %% BT-4173): a String, not a Tuple, as a tagged map is its class rather than
 %% a Dictionary (BT-4510).
-map_type({type, _, tuple, [{atom, _, beamtalk_string}, _Bytes]}) ->
+map_type({type, _, tuple, [{atom, _, beamtalk_string}, {type, _, binary, _}]}) ->
     <<"String">>;
 %% Typed tuple `{T1, ..., Tn}` — carry positional element types so
 %% `aTuple at: <literal int>` can infer the element type at that index

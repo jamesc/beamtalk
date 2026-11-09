@@ -1473,6 +1473,11 @@ impl InferredType {
                 }
             }
         }
+        // A bare generic member is subsumed by an instantiation of the same
+        // class (`Result & Result(String, Error)` is `Result(String,
+        // Error)`), so it is dropped rather than kept beside it (BT-4510).
+        let snapshot = flat.clone();
+        flat.retain(|m| !snapshot.iter().any(|o| Self::bare_instantiation_of(m, o)));
         flat.sort_by_key(Self::display_name);
         match flat.len() {
             // Unreachable from `intersect`'s call site (which always passes two

@@ -1315,3 +1315,44 @@ fn difference_parameterized_minus_bare_same_class_is_never() {
         bare
     );
 }
+
+#[test]
+fn is_kind_of_bare_generic_narrows_to_the_instantiation() {
+    // `x :: Result(String, Error) | Integer; x isKindOf: Result` — the true
+    // branch keeps the instantiation (`intersect_with_class`, shared with
+    // match type-pattern arms) and the false branch removes it.
+    let h = hierarchy();
+    let current =
+        InferredType::union_of(&[result_of_string_error(), InferredType::known("Integer")]);
+    assert_eq!(
+        TypeChecker::intersect_with_class(&current, &"Result".into(), &h, None),
+        result_of_string_error()
+    );
+    assert_eq!(
+        InferredType::difference(&current, &InferredType::known("Result"), prov(), Some(&h)),
+        InferredType::known("Integer")
+    );
+}
+
+#[test]
+fn stored_intersection_drops_a_bare_member_subsumed_by_an_instantiation() {
+    // `(Printable & Result(String, Error)) ∩ Result` keeps the
+    // instantiation rather than storing a bare `Result` beside it.
+    let registry = protocol_registry_with(&["Printable"]);
+    let h = hierarchy();
+    let stored = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &result_of_string_error(),
+        prov(),
+        Some(&h),
+        Some(&registry),
+    );
+    let narrowed = InferredType::intersect(
+        &stored,
+        &InferredType::known("Result"),
+        prov(),
+        Some(&h),
+        Some(&registry),
+    );
+    assert_eq!(narrowed, stored);
+}
