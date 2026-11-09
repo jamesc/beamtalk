@@ -155,6 +155,7 @@ init([]) ->
     ok = beamtalk_ets_heir:ensure_table(?INSTANCE_CLASS, [
         named_table, public, set, {read_concurrency, true}
     ]),
+    ok = sync_class_index(),
     {ok, #state{monitors = monitor_registered()}}.
 
 handle_call({register, Class, Pid}, _From, State) ->
@@ -267,11 +268,35 @@ ensure_class_index() ->
             ?INSTANCE_CLASS = ets:new(?INSTANCE_CLASS, [
                 named_table, public, set, {read_concurrency, true}
             ]),
-            ets:insert(?INSTANCE_CLASS, [
-                {Pid, Class}
-             || {Class, Pid} <- ets:tab2list(?INSTANCE_REGISTRY)
-            ]),
-            ok;
+            sync_class_index();
         _ ->
             ok
     end.
+
+-doc """
+Make the pid-keyed index agree with the bag, which is the source of truth:
+add a `{Pid, Class}` row for every bag row and drop index rows whose pid has
+no bag row.
+
+Each write updates the two tables in two steps, so a server killed between
+them leaves the tables out of step. Before BT-4123 that state died with the
+tables; now it survives under the heir, so `init/1` repairs it before
+re-monitoring. Rows are added before stale ones are dropped, so a concurrent
+`class_of/1` never sees a registered pid's row missing.
+""".
+-spec sync_class_index() -> ok.
+sync_class_index() ->
+    Pairs = ets:tab2list(?INSTANCE_REGISTRY),
+    true = ets:insert(?INSTANCE_CLASS, [{Pid, Class} || {Class, Pid} <- Pairs]),
+    InBag = maps:from_list([{Pid, true} || {_, Pid} <- Pairs]),
+    Stale = ets:foldl(
+        fun({Pid, _Class}, Acc) ->
+            case maps:is_key(Pid, InBag) of
+                true -> Acc;
+                false -> [Pid | Acc]
+            end
+        end,
+        [],
+        ?INSTANCE_CLASS
+    ),
+    lists:foreach(fun(Pid) -> ets:delete(?INSTANCE_CLASS, Pid) end, Stale).

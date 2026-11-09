@@ -231,6 +231,17 @@ instance_registry_reclaims_after_crash() ->
         end
     end),
     ok = beamtalk_object_instances:register(Class, Actor),
+    %% Simulate a server killed part-way through a two-table write: an
+    %% `unregister` that dropped the bag row but not the index row (Orphan),
+    %% and a `register` that wrote the bag but not the index (Actor's index
+    %% row removed). The restart must reconcile the index with the bag.
+    Orphan = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    true = ets:insert(beamtalk_instance_class, {Orphan, Class}),
+    true = ets:delete(beamtalk_instance_class, Actor),
     try
         owner_restart_reclaims(
             beamtalk_object_instances,
@@ -239,6 +250,7 @@ instance_registry_reclaims_after_crash() ->
         ?assertEqual([Actor], beamtalk_object_instances:all(Class)),
         ?assertEqual(Class, beamtalk_object_instances:class_of(Actor)),
         ?assertEqual(Class, beamtalk_actor:lookup_class(Actor)),
+        ?assertEqual(undefined, beamtalk_object_instances:class_of(Orphan)),
         ActorStr = beamtalk_primitive:string_from_binary(list_to_binary(pid_to_list(Actor))),
         ?assert(
             lists:any(
@@ -254,7 +266,8 @@ instance_registry_reclaims_after_crash() ->
         ?assertEqual([], beamtalk_object_instances:all(Class)),
         ?assertEqual(undefined, beamtalk_object_instances:class_of(Actor))
     after
-        exit(Actor, kill)
+        exit(Actor, kill),
+        exit(Orphan, kill)
     end.
 
 boot_tables_name_heir() ->
