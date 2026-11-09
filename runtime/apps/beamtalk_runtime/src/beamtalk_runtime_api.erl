@@ -17,6 +17,9 @@ Adding a function here constitutes explicit approval of the cross-context
 call. Any call to a runtime module not delegated from here requires team
 review and a corresponding update to `docs/development/erlang-guidelines.md`.
 
+Package native Erlang code (`native/`, ADR 0072) does not use this module:
+its supported entry point is `beamtalk_native_api` (BT-4556).
+
 See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 """.
 

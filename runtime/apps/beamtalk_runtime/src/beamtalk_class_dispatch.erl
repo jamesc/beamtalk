@@ -29,6 +29,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 -export([
     class_send/3,
+    class_send/4,
     handle_class_self_call/1,
     lookup_direct_constructor/3,
     class_super_dispatch/4,
@@ -50,6 +51,10 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 -type selector() :: atom().
 -type class_name() :: atom().
+%% The bound on a class-process `class_method_call`: `default` picks the
+%% per-selector default (`class_method_call_timeout/1`), anything else is
+%% passed to `gen_server:call/3` unchanged (BT-4556).
+-type call_timeout() :: timeout() | default.
 
 %% ADR 0142 (BT-4300): the in-caller class-send path is one call into the
 %% compiled method, plus the guard and memo reads; its helpers are inlined so
@@ -69,7 +74,21 @@ message protocol ({Selector, Args}) to the class process message format.
 Unwraps {ok, Value} / {error, Error} results for seamless integration.
 """.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
-class_send(undefined, Selector, _Args) ->
+class_send(ClassPid, Selector, Args) ->
+    class_send(ClassPid, Selector, Args, default).
+
+-doc """
+`class_send/3` with an explicit bound on the wait for the class process
+(BT-4556): when the send of a class method goes through the class gen_server
+(ADR 0142 declined to run it in the caller), `Timeout` replaces the default
+`class_method_call` timeout (`class_method_call_timeout/1`: 60 s, 5 min for
+test execution); `default` keeps it. A send that runs in the caller has no
+wait to bound, so `Timeout` does not apply to it; neither does it apply to the
+instantiation and supervisor-start selectors (`new`, `new:`, `spawn`,
+`spawnWith:`, `supervise`, ...), which keep their own routes.
+""".
+-spec class_send(pid() | undefined, atom(), list(), call_timeout()) -> term().
+class_send(undefined, Selector, _Args, _Timeout) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
 %% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
@@ -77,7 +96,7 @@ class_send(undefined, Selector, _Args) ->
 %% `beamtalk_supervisor:class_start/4`, never in the class gen_server (which
 %% would queue every other send to the class behind the start and deadlock
 %% any child that messages the class while it starts).
-class_send(ClassPid, Selector, Args) when
+class_send(ClassPid, Selector, Args, Timeout) when
     is_pid(ClassPid),
     (Selector =:= supervise orelse Selector =:= spawn orelse Selector =:= 'spawnWith:' orelse
         Selector =:= 'spawnAs:' orelse Selector =:= 'spawnWith:as:')
@@ -86,10 +105,10 @@ class_send(ClassPid, Selector, Args) when
         {ok, ClassName, Module} ->
             beamtalk_supervisor:class_start(ClassName, Module, Selector, Args);
         error ->
-            class_send_plain(ClassPid, Selector, Args)
+            class_send_plain(ClassPid, Selector, Args, Timeout)
     end;
-class_send(ClassPid, Selector, Args) ->
-    class_send_plain(ClassPid, Selector, Args).
+class_send(ClassPid, Selector, Args, Timeout) ->
+    class_send_plain(ClassPid, Selector, Args, Timeout).
 
 %% `{ok, ClassName, Module}` when `ClassPid` is a Supervisor or
 %% DynamicSupervisor class (ETS reads only), else `error`.
@@ -108,20 +127,20 @@ supervisor_start_target(ClassPid) ->
             error
     end.
 
--spec class_send_plain(pid(), atom(), list()) -> term().
+-spec class_send_plain(pid(), atom(), list(), call_timeout()) -> term().
 %% Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
 %% When a class method sends new/new:/spawn/spawnWith: to its own class (ClassPid == self()),
 %% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
 %% using class metadata from the process dictionary (set during init).
-class_send_plain(ClassPid, 'new', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new', Args);
-class_send_plain(ClassPid, 'new:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new:', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new:', Args);
-class_send_plain(ClassPid, spawn, Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, spawn, Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, spawn, Args);
-class_send_plain(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'spawnWith:', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
-class_send_plain(ClassPid, 'new', []) ->
+class_send_plain(ClassPid, 'new', [], _Timeout) ->
     %% an eligible Value builds in the caller via a direct
     %% `Module:new()` call — the same call `handle_new_compiled` would make,
     %% minus the gen_server hop (and its `IsConstructible` cache write, which
@@ -135,7 +154,7 @@ class_send_plain(ClassPid, 'new', []) ->
                 unwrap_class_call(gen_server:call(P, {new, []}))
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Arg]) ->
+class_send_plain(ClassPid, 'new:', [Arg], _Timeout) ->
     %% same for `new:` with a map argument, via `Module:new/1`. A non-map
     %% argument never builds directly (see `lookup_direct_constructor/3`).
     %% BT-4475: either way, a class whose own explicit class-side `new:` needs
@@ -155,11 +174,11 @@ class_send_plain(ClassPid, 'new:', [Arg]) ->
                 end)
             end)
     end;
-class_send_plain(ClassPid, spawn, []) ->
+class_send_plain(ClassPid, spawn, [], _Timeout) ->
     class_send_with_recovery(ClassPid, spawn, fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, []}))
     end);
-class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
+class_send_plain(ClassPid, 'spawnWith:', [Map], _Timeout) ->
     class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
     end);
@@ -190,14 +209,14 @@ class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
 %% Report it the way `handle_metaclass_self_call/2` already reports
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
-class_send_plain(ClassPid, Selector, Args) ->
+class_send_plain(ClassPid, Selector, Args, Timeout) ->
     %% ADR 0142 §2 (BT-4300): a class method of a class that needs no process
     %% (no class variables anywhere in its chain, not shadowed, a selector
     %% that is not process-bound) runs in the caller. Checked
     %% before the self-call guard: an in-caller call has no gen_server to
     %% deadlock on, so a block re-entering its class answers.
     send_in_caller_or(ClassPid, Selector, Args, fun() ->
-        class_send_via_process(ClassPid, Selector, Args)
+        class_send_via_process(ClassPid, Selector, Args, Timeout)
     end).
 
 %% Run `Selector` in the caller when `in_caller_owner/2` names its owner
@@ -216,16 +235,16 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
     end.
 
 %% Today's routing for a send the caller may not run itself (ADR 0142 §2).
--spec class_send_via_process(pid(), selector(), list()) -> term().
+-spec class_send_via_process(pid(), selector(), list(), call_timeout()) -> term().
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (a class-side extension or ADR 0084 runtime fun the class
 %% process honours), a chain with class variables, or a process-bound selector.
-class_send_via_process(ClassPid, Selector, Args) when ClassPid =:= self() ->
+class_send_via_process(ClassPid, Selector, Args, _Timeout) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
-class_send_via_process(ClassPid, Selector, Args) ->
+class_send_via_process(ClassPid, Selector, Args, Timeout) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
-        class_send_dispatch(P, Selector, Args)
+        class_send_dispatch(P, Selector, Args, Timeout)
     end).
 
 -doc """
@@ -382,7 +401,7 @@ context seeding, the mirrored caller pid, the entry group leader, the call
 timeouts) are not recreated: the caller is the context they stand in for.
 
 The outcome is adapted exactly as the class-process path adapts the same
-outcome (`run_with_class_vars/3`'s reply, then `class_method_call/3`), so
+outcome (`run_with_class_vars/3`'s reply, then `class_method_call/4`), so
 every error is raised with the value it has today.
 """.
 -spec run_in_caller(
@@ -1130,13 +1149,13 @@ inherited class method and no runtime-installed class-method fun for the
 selector, the `Class`/`Behaviour` method runs in the caller straight away,
 exactly as it would after the gen_server replied `{error, not_found}`.
 """.
--spec class_send_dispatch(pid(), selector(), list()) -> term().
-class_send_dispatch(ClassPid, Selector, Args) ->
+-spec class_send_dispatch(pid(), selector(), list(), call_timeout()) -> term().
+class_send_dispatch(ClassPid, Selector, Args, Timeout) ->
     case class_chain_only_send(ClassPid, Selector, Args) of
         {ok, ClassName, Module} ->
             class_chain_send(ClassPid, ClassName, Module, Selector, Args);
         error ->
-            class_method_call(ClassPid, Selector, Args)
+            class_method_call(ClassPid, Selector, Args, Timeout)
     end.
 
 -doc """
@@ -1213,32 +1232,69 @@ class_chain_send(ClassPid, ClassName, Module, Selector, Args) ->
     end.
 
 -doc "Ask the class process to run a class method (`class_method_call`).".
--spec class_method_call(pid(), selector(), list()) -> term().
-class_method_call(ClassPid, Selector, Args) ->
+-spec class_method_call(pid(), selector(), list(), call_timeout()) -> term().
+class_method_call(ClassPid, Selector, Args, default) ->
+    class_method_call(ClassPid, Selector, Args, class_method_call_timeout(Selector));
+class_method_call(ClassPid, Selector, Args, Timeout) ->
     %% Try user-defined class methods before raising does_not_understand.
-    %% Test execution may take a long time; use longer timeout.
-    %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
-    %% must accommodate network latency.  Test selectors get 5 minutes because a
-    %% full suite can run hundreds of tests sequentially.
-    Timeout =
-        case is_test_execution_selector(Selector) of
-            % 5 minutes for test suites
-            true -> 300000;
-            % 60 seconds — class methods may do network I/O
-            false -> 60000
-        end,
     %% ADR 0081: pass the caller's session context explicitly in the
     %% message instead of having the class gen_server copy our whole process
     %% dictionary via `process_info/2`. We read our own two keys cheaply with
     %% `get/1` here and the receiving clause seeds from the tuple.
-    class_method_result(
-        ClassPid,
+    %% BT-4556: running out of `Timeout` waiting for this class process raises
+    %% the structured `timeout` error an actor send raises, not the raw
+    %% `gen_server:call` exit. Only this call's own timeout is translated: the
+    %% `[ClassPid | _]` match leaves any other exit unchanged.
+    Reply =
+        try
+            gen_server:call(
+                ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
+            )
+        catch
+            exit:{timeout, {gen_server, call, [ClassPid | _]}} ->
+                raise_class_timeout(ClassPid, Selector, Timeout)
+        end,
+    class_method_result(ClassPid, Selector, Args, Reply).
+
+-doc """
+Raise the structured `timeout` error for a class method the class process did
+not answer within `Timeout` milliseconds (BT-4556).
+""".
+-spec raise_class_timeout(pid(), selector(), timeout()) -> no_return().
+raise_class_timeout(ClassPid, Selector, Timeout) ->
+    %% The registry's pid index only: `class_name_safe/1` falls back to a
+    %% `gen_server:call` into the class process, which has just shown it is
+    %% busy.
+    ClassName =
+        case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+            {ok, Name} -> Name;
+            not_found -> unknown
+        end,
+    Error = beamtalk_error:new(
+        timeout,
+        ClassName,
         Selector,
-        Args,
-        gen_server:call(
-            ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
-        )
-    ).
+        <<"The class method may legitimately take longer: send it with a longer timeout">>
+    ),
+    Message = iolist_to_binary(
+        io_lib:format("Class process did not answer within ~p ms", [Timeout])
+    ),
+    Error1 = beamtalk_error:with_message(Error, Message),
+    beamtalk_exception_handler:reraise(Error1).
+
+-doc """
+The default bound on a class-process `class_method_call` (BT-4556 exposes an
+override through `class_send/4`). Class methods can do arbitrary I/O (HTTP,
+file, database), so the default must accommodate network latency; test
+selectors get 5 minutes because a full suite can run hundreds of tests
+sequentially.
+""".
+-spec class_method_call_timeout(selector()) -> timeout().
+class_method_call_timeout(Selector) ->
+    case is_test_execution_selector(Selector) of
+        true -> 300000;
+        false -> 60000
+    end.
 
 -doc """
 Interpret a class method's reply (`{ok, Result}`, `{error, _}`), from the
