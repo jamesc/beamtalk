@@ -56,7 +56,7 @@ corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_c
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
+ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension
 
 [windows]
 ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -1025,6 +1025,25 @@ test-grammar:
 [windows]
 test-grammar:
     @echo "test-grammar: skipped on Windows (covered by Linux CI)"
+
+# Build the "Beamtalk for GitHub" Chrome extension (load editors/github-chrome/dist unpacked)
+[working-directory: 'editors/github-chrome']
+build-github-extension:
+    npm ci --quiet
+    npm run build
+
+# Tokenizer tests for the Chrome extension, run against the VS Code grammar
+[unix]
+[working-directory: 'editors/github-chrome']
+test-github-extension:
+    @echo "🔍 Running GitHub Chrome extension tokenizer tests..."
+    npm ci --quiet
+    npm test
+    @echo "✅ GitHub Chrome extension tokenizer tests passed"
+
+[windows]
+test-github-extension:
+    @echo "test-github-extension: skipped on Windows (covered by Linux CI)"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:
