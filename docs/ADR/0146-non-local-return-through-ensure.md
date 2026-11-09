@@ -158,11 +158,13 @@ need the same.
 Change the actor-method commit to read the cell; keep a cleanup's writes when a
 foreign `^` passes through it; remove the relay and stamp code with
 compatibility shims for one release; extend the `ensure:` test corpus to cover
-the REPL, a `^` from another method, and a `^` from another actor. The commit
-change and the foreign-`^` change land together. If they land separately, the
-cleanup's writes would survive only partly, depending on where the cleanup
-makes a call. Work items are tracked under BT-4505; BT-4532 holds the remaining
-cleanup from the BT-4524 fix.
+the REPL, a `^` from another method, and a `^` from another actor. The
+foreign-`^` change lands before the commit change, or with it, but never after
+it. On its own it changes no visible behaviour, because the commit still uses
+the copy. In the other order, a foreign `^`'s cleanup writes would survive only
+up to the cleanup's last bracketed call. Work items are tracked under epic
+BT-4533 (design review: BT-4505); BT-4532 holds the remaining cleanup from the
+BT-4524 fix.
 
 ## Migration Path
 
