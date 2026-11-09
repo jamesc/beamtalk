@@ -328,22 +328,33 @@ fn optional_list_parameter_is_checked() {
     );
 }
 
-/// A protocol element type is left to the structural conformance checks:
-/// the per-element rule is nominal and would reject a conforming class.
+/// A protocol element type is judged by structural conformance (BT-4482),
+/// not nominally: conforming elements pass, a non-conforming one warns.
 #[test]
-fn protocol_element_type_is_not_judged_nominally() {
+fn protocol_element_type_is_judged_structurally() {
     let source = r#"
 Protocol define: Sized
   size -> Integer
 
+Protocol define: Quacker
+  quack -> String
+
 Object subclass: Taker
   class sized: xs :: List(Sized) -> Integer => 1
+  class quackers: xs :: List(Quacker) -> Integer => 1
 
 Object subclass: Caller
   run => Taker sized: #("abc", #(1))
+  bad => Taker quackers: #("abc")
 "#;
     let msgs = checker_messages(source);
-    assert!(!msgs.iter().any(|m| m.starts_with("Element ")), "{msgs:#?}");
+    assert_eq!(
+        msgs.iter()
+            .filter(|m| m.starts_with("Element "))
+            .collect::<Vec<_>>(),
+        vec!["Element 1 of argument 1 of 'quackers:' on Taker expects Quacker, got String"],
+        "{msgs:#?}"
+    );
 }
 
 #[test]

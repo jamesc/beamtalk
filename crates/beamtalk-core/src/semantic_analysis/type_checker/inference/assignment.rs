@@ -162,11 +162,22 @@ impl TypeChecker {
                 (!rest.is_empty()).then(|| InferredType::union_of(&rest).display_name())
             };
             let inferred_rest = rest_of(inferred_members);
+            let inferred_instances: Vec<InferredType> = inferred_members
+                .iter()
+                .filter(|m| ClassObjectType::of(m).is_none())
+                .cloned()
+                .collect();
             // Widening: every member of the value fits the declared type.
             let widening = refused_class_object.is_none()
-                && inferred_rest
-                    .as_ref()
-                    .is_none_or(|rest| Self::is_assignable_to(rest, &declared_name, hierarchy));
+                && inferred_rest.as_ref().is_none_or(|rest| {
+                    Self::is_assignable_to(rest, &declared_name, hierarchy)
+                        || Self::members_conform_structurally(
+                            &inferred_instances,
+                            declared_members,
+                            hierarchy,
+                            protocol_registry,
+                        )
+                });
             // Narrowing escape hatch: every member of the declared type fits
             // some member of the value.
             let narrowing =
@@ -188,8 +199,28 @@ impl TypeChecker {
             widening || narrowing
         } else {
             let inferred_name = inferred_ty.display_name();
-            Self::is_assignable_to(&inferred_name, &declared_name, hierarchy)
-                || Self::is_assignable_to(&declared_name, &inferred_name, hierarchy)
+            // BT-4482: where a protocol is involved, structural conformance
+            // decides — the nominal rule's unknown-class leniency would wave
+            // a protocol name through a union (`String` into `P | Nil`).
+            let protocol_involved = protocol_registry.is_some_and(|registry| {
+                Self::mentions_protocol(inferred_ty, hierarchy, registry)
+                    || Self::mentions_protocol(declared, hierarchy, registry)
+            });
+            (!protocol_involved
+                && (Self::is_assignable_to(&inferred_name, &declared_name, hierarchy)
+                    || Self::is_assignable_to(&declared_name, &inferred_name, hierarchy)))
+                || Self::members_conform_structurally(
+                    inferred_members,
+                    declared_members,
+                    hierarchy,
+                    protocol_registry,
+                )
+                || Self::members_conform_structurally(
+                    declared_members,
+                    inferred_members,
+                    hierarchy,
+                    protocol_registry,
+                )
         };
         if assignable {
             return None;
@@ -222,6 +253,121 @@ impl TypeChecker {
             inferred_display,
             nonconformance,
         })
+    }
+
+    /// BT-4482: whether every one of the `values` (union members of a value
+    /// type) fits some member of `declared`, judging a protocol-typed part by
+    /// structural conformance ([`ProtocolRegistry::check_conformance`], the
+    /// rule protocol-typed method arguments use, open-world gate included)
+    /// rather than by the superclass chain [`Self::is_assignable_to`] walks.
+    /// A declared intersection (`P1 & P2`) needs every part; a value
+    /// intersection fits when any of its parts does; a value typed as a
+    /// protocol fits a declared protocol it subsumes. Every other part is
+    /// [`Self::is_assignable_to`], so this only ever accepts more than the
+    /// nominal rule where a protocol is involved. `false` without a registry.
+    fn members_conform_structurally(
+        values: &[InferredType],
+        declared: &[InferredType],
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        let Some(registry) = protocol_registry else {
+            return false;
+        };
+        let union = declared.len() > 1;
+        !values.is_empty()
+            && values.iter().all(|value| {
+                matches!(value, InferredType::Dynamic(_) | InferredType::Never)
+                    || declared.iter().any(|member| {
+                        Self::conforms_structurally(value, member, union, hierarchy, registry)
+                    })
+            })
+    }
+
+    /// Whether `ty` — a union member or intersection part of it — is a
+    /// protocol type ([`Self::is_protocol_type`]).
+    fn mentions_protocol(
+        ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        registry: &ProtocolRegistry,
+    ) -> bool {
+        match ty {
+            InferredType::Known { class_name, .. } => {
+                Self::is_protocol_type(class_name, hierarchy, registry)
+            }
+            InferredType::Union { members, .. } | InferredType::Intersection { members, .. } => {
+                members
+                    .iter()
+                    .any(|member| Self::mentions_protocol(member, hierarchy, registry))
+            }
+            _ => false,
+        }
+    }
+
+    /// One value member against one declared member of
+    /// [`Self::members_conform_structurally`]. `union`: the declared member
+    /// is one of several, where [`Self::is_assignable_to`] judges a
+    /// non-protocol member by [`Self::is_type_compatible`] (unknown classes
+    /// accepted) — kept so a protocol in the union changes nothing else.
+    fn conforms_structurally(
+        value: &InferredType,
+        declared: &InferredType,
+        union: bool,
+        hierarchy: &ClassHierarchy,
+        registry: &ProtocolRegistry,
+    ) -> bool {
+        if let InferredType::Intersection { members, .. } = declared {
+            return members
+                .iter()
+                .all(|part| Self::conforms_structurally(value, part, false, hierarchy, registry));
+        }
+        if let InferredType::Intersection { members, .. } = value {
+            return members.iter().any(|part| {
+                Self::conforms_structurally(part, declared, union, hierarchy, registry)
+            });
+        }
+        match (value, declared) {
+            (
+                InferredType::Known {
+                    class_name: value_class,
+                    ..
+                },
+                InferredType::Known {
+                    class_name: protocol,
+                    ..
+                },
+            ) if Self::is_protocol_type(protocol, hierarchy, registry) => {
+                let protocol = type_resolver::base_name_of_string(protocol);
+                if Self::is_protocol_type(value_class, hierarchy, registry) {
+                    // A protocol-typed value is *some* conformer of its own
+                    // protocol: it fits a protocol that one subsumes.
+                    return match (registry.get(value_class), registry.get(protocol)) {
+                        (Some(value_protocol), Some(declared_protocol)) => value_protocol
+                            .subsumes_conformance_to(declared_protocol, registry, hierarchy),
+                        _ => false,
+                    };
+                }
+                registry
+                    .check_conformance(value_class, protocol, hierarchy)
+                    .is_ok()
+            }
+            // A class object is judged by the slot rule, never here.
+            _ if ClassObjectType::of(value).is_some()
+                || ClassObjectType::of(declared).is_some() =>
+            {
+                false
+            }
+            _ => {
+                // A protocol-typed value is not an unknown class: it fits a
+                // class only nominally, never by the union leniency.
+                let protocol_value = Self::mentions_protocol(value, hierarchy, registry);
+                let (value, declared) = (value.display_name(), declared.display_name());
+                Self::is_assignable_to(&value, &declared, hierarchy)
+                    || (union
+                        && !protocol_value
+                        && Self::is_type_compatible(&value, &declared, hierarchy))
+            }
+        }
     }
 
     /// The top-level members of a union type, or the type itself.
