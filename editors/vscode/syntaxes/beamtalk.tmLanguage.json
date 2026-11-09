@@ -143,12 +143,26 @@
           "match": "\\b(true|false)\\b"
         },
         {
-          "name": "keyword.other.sealed.beamtalk",
-          "match": "\\bsealed\\b"
+          "comment": "Type alias: `[internal] type Name = ...` (or `type Name(T) = ...`). Listed before the modifier rule so it wins the tie at line start.",
+          "match": "^\\s*(?:(internal)\\s+)?(type)\\s+([A-Z][a-zA-Z0-9_]*)(?=\\s*[(=])",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.beamtalk" },
+            "2": { "name": "keyword.other.type.beamtalk" },
+            "3": { "name": "entity.name.type.beamtalk" }
+          }
         },
         {
-          "name": "keyword.other.abstract.beamtalk",
-          "match": "\\babstract\\b"
+          "comment": "Declaration modifiers at line start: class headers (`abstract sealed typed internal`) and method definitions (`class internal sealed`). These are contextual keywords, so they are only matched as a leading run on the line, and not when the line is an assignment to a variable of the same name (`class := ...`). A unary method name directly after the run is scoped as a function name, as `class name =>` already was.",
+          "match": "^\\s*((?:(?:abstract|sealed|typed|internal|class)\\s+)+)(?!:=)(?:([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*(?:->|=>)))?",
+          "captures": {
+            "1": {
+              "patterns": [
+                { "name": "keyword.other.modifier.beamtalk", "match": "\\b(?:abstract|sealed|typed|internal)\\b" },
+                { "name": "storage.modifier.class.beamtalk", "match": "\\bclass\\b" }
+              ]
+            },
+            "2": { "name": "entity.name.function.beamtalk" }
+          }
         }
       ]
     },
@@ -207,12 +221,31 @@
           }
         },
         {
-          "match": "\\b(state:|field:|classState:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
+          "match": "\\b(Protocol)\\s+(define:)\\s+([A-Z][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.other.declaration.beamtalk" },
-            "2": { "name": "variable.other.field.beamtalk" },
-            "3": { "name": "keyword.operator.type-annotation.beamtalk" },
-            "4": { "name": "entity.name.type.class.beamtalk" }
+            "1": { "name": "entity.other.inherited-class.beamtalk" },
+            "2": { "name": "keyword.other.define.beamtalk" },
+            "3": { "name": "entity.name.type.class.beamtalk" }
+          }
+        },
+        {
+          "comment": "Backing Erlang module: a class header's `... subclass: Foo native: beamtalk_foo`, or a type stub's `declare native: lists`. Anchored to end of line so an ordinary `native:` keyword send mid-expression is unaffected.",
+          "match": "\\b(?:(declare)\\s+)?(native:)\\s+([a-z][a-zA-Z0-9_]*)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.other.declare.beamtalk" },
+            "2": { "name": "keyword.other.native.beamtalk" },
+            "3": { "name": "entity.name.namespace.beamtalk" }
+          }
+        },
+        {
+          "comment": "Slot declarations, optionally `late` (ADR 0124). `late` is a contextual keyword only directly before these.",
+          "match": "\\b(?:(late)\\s+)?(state:|field:|classState:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.beamtalk" },
+            "2": { "name": "keyword.other.declaration.beamtalk" },
+            "3": { "name": "variable.other.field.beamtalk" },
+            "4": { "name": "keyword.operator.type-annotation.beamtalk" },
+            "5": { "name": "entity.name.type.class.beamtalk" }
           }
         }
       ]
