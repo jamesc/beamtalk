@@ -197,7 +197,7 @@ fn test_collision_between_root_and_dependency() {
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: Default::default(),
+        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
     }];
 
     let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
@@ -264,7 +264,7 @@ fn test_collision_between_two_dependencies() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: Default::default(),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
         super::super::super::deps::path::ResolvedDependency {
             name: "dep_b".to_string(),
@@ -279,7 +279,7 @@ fn test_collision_between_two_dependencies() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: Default::default(),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
     ];
 
@@ -343,7 +343,7 @@ fn test_no_collision_different_native_modules() {
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: Default::default(),
+        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
     }];
 
     let result = check_native_module_collisions(&project_path, "root_pkg", &deps);

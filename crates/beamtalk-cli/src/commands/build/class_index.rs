@@ -317,12 +317,18 @@ pub(crate) fn build_class_index(
             &extension_index,
         );
         // Whether the dependency guard lifts changes every file's
-        // diagnostics, and can flip without the extension index changing
-        // (a dependency file gains a parse error), so it is part of the
-        // surface too.
-        if !dependency_extensions_complete {
+        // diagnostics, and can flip without the extension index changing (a
+        // dependency file gains a parse error; diagnostics cached before
+        // dependency extensions were loaded at all), so for a package with
+        // dependencies it is part of the surface too.
+        if !dep_ctx.resolved_deps.is_empty() {
+            let state = if dependency_extensions_complete {
+                "loaded"
+            } else {
+                "unknown"
+            };
             analysis_surface_hash = crate::commands::util::sha256_hex(
-                format!("{analysis_surface_hash}\ndependency-extensions:unknown").as_bytes(),
+                format!("{analysis_surface_hash}\ndependency-extensions:{state}").as_bytes(),
             );
         }
     }

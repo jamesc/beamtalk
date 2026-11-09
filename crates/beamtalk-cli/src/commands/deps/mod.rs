@@ -1451,7 +1451,7 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: Default::default(),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         }];
 
         clean_stale_deps(&root, &resolved).unwrap();
@@ -1487,7 +1487,7 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: Default::default(),
+                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
             },
             path::ResolvedDependency {
                 name: "b".to_string(),
@@ -1502,7 +1502,7 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: Default::default(),
+                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
             },
         ];
 

@@ -1742,7 +1742,7 @@ dep_utils = { path = "dep_utils" }"#,
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: Default::default(),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         }
     }
 
@@ -1954,7 +1954,7 @@ dep_utils = { path = "dep_utils" }"#,
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: Default::default(),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         };
 
         let Some(registry) = dependency_type_registry(

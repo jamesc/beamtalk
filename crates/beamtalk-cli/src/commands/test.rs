@@ -908,6 +908,7 @@ struct CompiledDocTest {
 ///
 /// Each phase reads from and writes to this struct, avoiding the need to pass
 /// many individual variables between the extracted phase functions.
+#[allow(clippy::struct_excessive_bools)] // Independent orthogonal flags, not a state machine.
 struct TestPipeline {
     /// Original test path from CLI.
     test_path: Utf8PathBuf,
@@ -1189,6 +1190,7 @@ fn discover_packages_with_manifests(
 /// extensions plus its dependencies' (ADR 0070 WS3, BT-4608), and
 /// `dependency_extensions_complete` says whether every dependency's were
 /// loaded — `false` if any package's dependency resolution failed.
+#[allow(clippy::too_many_lines)] // linear merge pipeline (per package: src + deps), as `build_class_index`
 fn build_merged_class_indexes(
     discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
 ) -> MergedClassIndexes {
