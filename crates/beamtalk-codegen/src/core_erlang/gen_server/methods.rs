@@ -2302,7 +2302,13 @@ impl CoreErlangGenerator {
             || beamtalk_core::source_analysis::Span::new(0, 0),
             |p| p.value.span(),
         );
-        let mut hoisted = self.hoist_cascade_splits(splits, docs, span).into_iter();
+        // BT-4296: the map literal evaluates its last pair first, so two
+        // computed operands that may run code are hoisted in source order.
+        let operands: Vec<&Expression> = pairs.iter().flat_map(|p| [&p.key, &p.value]).collect();
+        let racing = self.last_racing_operand(&operands).is_some();
+        let mut hoisted = self
+            .hoist_cascade_splits(splits, docs, span, racing)
+            .into_iter();
         let missing_split =
             || CodeGenError::Internal("classMethods: map entry lost a hoisted operand".to_string());
 

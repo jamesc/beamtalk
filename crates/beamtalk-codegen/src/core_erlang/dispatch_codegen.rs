@@ -1844,6 +1844,11 @@ impl CoreErlangGenerator {
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
                 let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+                // BT-4296: the arguments land in a list, which erlc evaluates
+                // last-first, so every argument before the last one that may
+                // run code is bound to a temp in source order.
+                let arg_exprs: Vec<&Expression> = arguments.iter().collect();
+                let racing_last = self.last_racing_operand(&arg_exprs);
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -1861,6 +1866,13 @@ impl CoreErlangGenerator {
                             " in "
                         ]);
                         arg_parts.push(leaf::var(wrapper_var));
+                    } else if racing_last.is_some_and(|last| i < last)
+                        && !Self::is_trivial_subexpr(arg)
+                    {
+                        let doc = self.expression_doc(arg)?;
+                        let (binding, var) = self.bind_subexpr_to_temp("ErlArg", doc);
+                        preamble_docs.push(binding);
+                        arg_parts.push(leaf::var(var));
                     } else {
                         arg_parts.push(self.expression_doc(arg)?);
                     }
@@ -3649,13 +3661,15 @@ impl CoreErlangGenerator {
         }
 
         let class_name = self.class_name();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         // value/primitive-context funs (`fun(Args, Self) -> Result`)
         // have no `State` binding, so `super` must not reference one. Route to
         // `super_value/4`, which walks the same chain and returns a plain value.
+        // BT-4296: its arguments are sequenced (`thread_args`) so the argument
+        // list evaluates them in source order.
         if self.context == CodeGenContext::ValueType {
-            return Ok(docvec![
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let call_doc = docvec![
                 "call 'beamtalk_dispatch':'super_value'(",
                 leaf::atom(selector_atom),
                 ", [",
@@ -3663,22 +3677,39 @@ impl CoreErlangGenerator {
                 "], Self, ",
                 leaf::atom(class_name),
                 ")",
-            ]);
+            ];
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at
-        // home), stores its answer back, and answers its value.
-        if self.in_cell_closure() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        // home), stores its answer back, and answers its value. A block or loop
+        // body threads no `State` for a `super` send either (BT-3995): it runs
+        // against the cell, which the enclosing call brackets
+        // (`classify_super_send`), and answers its value. Sends there are not
+        // sync-bracketed, so the arguments are sequenced (`thread_args`) to
+        // evaluate in source order (BT-4296).
+        if self.in_cell_closure() || self.super_send_uses_cell() {
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // The prelude closes around this call, so a threaded-state rebind in
+            // it would be scoped away from later statements (BT-3809): report
+            // it, as `capture_argument_list_doc` does for its arguments.
+            let escaped = super::threaded_ir::opaque_escapes(&args_preamble, false);
+            let at = arguments
+                .first()
+                .map_or_else(Span::default, Expression::span);
+            self.report_threaded_ir_verify_errors(
+                &escaped,
+                "super-send argument state rebind trapped in a closed argument list",
+                at,
+            );
+            let call_doc = self.cell_super_send_doc(&selector_atom, &class_name, args_doc);
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
-        // ADR 0137 §3: a block or loop body threads no `State` for a `super` send
-        // (BT-3995): it runs against the cell, which the enclosing call brackets
-        // (`classify_super_send`), and answers its value.
-        if self.super_send_uses_cell() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
-        }
+        // A method-body `super` send's sending arguments are sync sites, already
+        // sequenced by the enclosing `sequence_children` and read back here.
+        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let current_state = self.current_state_var();
         let doc = docvec![
