@@ -153,31 +153,21 @@ impl TypeChecker {
             });
         let assignable = if has_class_object(inferred_members) || has_class_object(declared_members)
         {
-            let rest_of = |members: &[InferredType]| -> Option<EcoString> {
-                let rest: Vec<InferredType> = members
-                    .iter()
-                    .filter(|m| ClassObjectType::of(m).is_none())
-                    .cloned()
-                    .collect();
-                (!rest.is_empty()).then(|| InferredType::union_of(&rest).display_name())
-            };
-            let inferred_rest = rest_of(inferred_members);
             let inferred_instances: Vec<InferredType> = inferred_members
                 .iter()
                 .filter(|m| ClassObjectType::of(m).is_none())
                 .cloned()
                 .collect();
+            let inferred_rest = (!inferred_instances.is_empty())
+                .then(|| InferredType::union_of(&inferred_instances).display_name());
             // Widening: every member of the value fits the declared type.
             let widening = refused_class_object.is_none()
-                && inferred_rest.as_ref().is_none_or(|rest| {
-                    Self::is_assignable_to(rest, &declared_name, hierarchy)
-                        || Self::members_conform_structurally(
-                            &inferred_instances,
-                            declared_members,
-                            hierarchy,
-                            protocol_registry,
-                        )
-                });
+                && Self::instances_widen(
+                    &inferred_instances,
+                    declared,
+                    hierarchy,
+                    protocol_registry,
+                );
             // Narrowing escape hatch: every member of the declared type fits
             // some member of the value.
             let narrowing =
@@ -198,29 +188,7 @@ impl TypeChecker {
                     });
             widening || narrowing
         } else {
-            let inferred_name = inferred_ty.display_name();
-            // BT-4482: where a protocol is involved, structural conformance
-            // decides — the nominal rule's unknown-class leniency would wave
-            // a protocol name through a union (`String` into `P | Nil`).
-            let protocol_involved = protocol_registry.is_some_and(|registry| {
-                Self::mentions_protocol(inferred_ty, hierarchy, registry)
-                    || Self::mentions_protocol(declared, hierarchy, registry)
-            });
-            (!protocol_involved
-                && (Self::is_assignable_to(&inferred_name, &declared_name, hierarchy)
-                    || Self::is_assignable_to(&declared_name, &inferred_name, hierarchy)))
-                || Self::members_conform_structurally(
-                    inferred_members,
-                    declared_members,
-                    hierarchy,
-                    protocol_registry,
-                )
-                || Self::members_conform_structurally(
-                    declared_members,
-                    inferred_members,
-                    hierarchy,
-                    protocol_registry,
-                )
+            Self::instance_assignable(inferred_ty, declared, hierarchy, protocol_registry)
         };
         if assignable {
             return None;
@@ -253,6 +221,68 @@ impl TypeChecker {
             inferred_display,
             nonconformance,
         })
+    }
+
+    /// Whether the non-class-object members of a value (`instances`) all
+    /// fit `declared` — the widening half of
+    /// [`Self::detect_assignment_type_mismatch`]'s class-object arm. Vacuously
+    /// true when there are none; a protocol part is judged structurally
+    /// (BT-4482).
+    fn instances_widen(
+        instances: &[InferredType],
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        instances.is_empty()
+            || Self::is_assignable_to(
+                &InferredType::union_of(instances).display_name(),
+                &declared.display_name(),
+                hierarchy,
+            )
+            || Self::members_conform_structurally(
+                instances,
+                Self::union_members(declared),
+                hierarchy,
+                protocol_registry,
+            )
+    }
+
+    /// The instance-type arm of [`Self::detect_assignment_type_mismatch`]
+    /// (no class object on either side): either type assignable to the
+    /// other. BT-4482: where a protocol is involved, structural conformance
+    /// ([`Self::members_conform_structurally`]) alone decides — the nominal
+    /// rule's unknown-class leniency would wave a protocol name through a
+    /// union (`String` into `P | Nil`).
+    fn instance_assignable(
+        inferred_ty: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        let inferred_members = Self::union_members(inferred_ty);
+        let declared_members = Self::union_members(declared);
+        let protocol_involved = protocol_registry.is_some_and(|registry| {
+            Self::mentions_protocol(inferred_ty, hierarchy, registry)
+                || Self::mentions_protocol(declared, hierarchy, registry)
+        });
+        if !protocol_involved {
+            let inferred_name = inferred_ty.display_name();
+            let declared_name = declared.display_name();
+            return Self::is_assignable_to(&inferred_name, &declared_name, hierarchy)
+                || Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
+        }
+        Self::members_conform_structurally(
+            inferred_members,
+            declared_members,
+            hierarchy,
+            protocol_registry,
+        ) || Self::members_conform_structurally(
+            declared_members,
+            inferred_members,
+            hierarchy,
+            protocol_registry,
+        )
     }
 
     /// BT-4482: whether every one of the `values` (union members of a value
