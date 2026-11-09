@@ -12,6 +12,7 @@
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::type_checker::binary_string_compare;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
@@ -340,6 +341,11 @@ impl TypeChecker {
             inferred_ty
         };
 
+        // BT-4257: classify before the write below clears the target's own
+        // raw-Binary fact (`x := x concat: y` reads it).
+        let value_is_raw_binary =
+            binary_string_compare::is_raw_binary(value, &|name| env.is_raw_binary_local(name));
+
         match target {
             Expression::Identifier(ident) => {
                 // Track type origin for generic type params
@@ -362,8 +368,12 @@ impl TypeChecker {
                 match known_remote::classify(value, &|id| {
                     env.known_remote(&EnvKey::local(id.name.clone()))
                 }) {
-                    Some(remote) => env.mark_known_remote(key, remote),
+                    Some(remote) => env.mark_known_remote(key.clone(), remote),
                     None => env.clear_known_remote(&key),
+                }
+                // BT-4257: the write above cleared any raw-Binary fact.
+                if value_is_raw_binary {
+                    env.mark_raw_binary(key);
                 }
             }
             Expression::FieldAccess {

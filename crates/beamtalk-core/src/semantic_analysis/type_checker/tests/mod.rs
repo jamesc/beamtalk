@@ -15,6 +15,7 @@ mod arg_return_checking;
 mod argument_check_matrix;
 mod asserted_match_exhaustiveness;
 mod basic_inference;
+mod binary_string_compare;
 mod bt2826_block_param_types;
 mod bt2829_return_type_union_dynamic;
 mod bt2835_stream_collect_return_type;

@@ -682,6 +682,28 @@ is surface-specific.
   `gen_server:call`) and a standalone `Cls >> sel => self delegate` definition
   are not checked.
 
+### `binary-string-compare` diagnostic (BT-4257)
+
+A provably raw `Binary` (built by a Binary-only producer — `Binary
+fromBytes:`/`fromIolist:`/`withAll:`/`serialize:`/`empty`, a `Digest` hash,
+`<<...>>`, `concat:`/`part:size:` of one of those — or a local last assigned
+from one) compared with a `String`-typed value by `==`/`/=`/`=:=`/`=/=`, or
+used as the key of a `Dictionary(String, V)` key operation or the argument of
+a `Set(String)` `includes:`/`add:`, gets a `binary-string-compare` hint on the
+send: a String and a Binary are never equal. It is computed by the
+`beamtalk-core` type checker (`type_checker/binary_string_compare.rs`), so
+every surface that reports semantic diagnostics (CLI `build`/`check`/`lint`/
+`test`, REPL eval and load, LSP `textDocument/publishDiagnostics`, MCP `lint`/
+`diagnostic_summary`) reports the same message at the same span. No operation
+is surface-specific.
+
+- Severity `Hint`, category `BinaryStringCompare`; `@expect
+  binary_string_compare`, `[diagnostics]` key `binary-string-compare`
+  (`"off"` drops it).
+- Silent on `Dynamic`/unknown types (ADR 0100 Rule 1), on a value merely
+  typed `Binary` (it may be a String, ADR 0086), and on a `Dictionary(Binary,
+  V)` / `Set(Binary)` probed with a String.
+
 ### Outer-local threading errors (ADR 0131 §6 and Phase 0, BT-3745)
 
 Three compile errors, computed in `beamtalk-core` semantic analysis
