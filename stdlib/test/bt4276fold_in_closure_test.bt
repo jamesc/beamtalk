@@ -9,11 +9,9 @@
 TestCase subclass: Bt4276FoldInClosureTest
   field: actor = nil
 
-  setUp =>
-    self.actor := Bt4276FoldInClosure spawn
+  setUp => self.actor := Bt4276FoldInClosure spawn
 
-  tearDown =>
-    self.actor isNil ifFalse: [self.actor stop]
+  tearDown => self.actor isNil ifFalse: [self.actor stop]
 
   testInjectInClosureRunInLoop =>
     self assert: self.actor injectInClosureRunInLoop equals: 9
