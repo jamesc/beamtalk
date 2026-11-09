@@ -29,7 +29,7 @@ restart. They are lost only if the heir dies too while it holds them (a
 runtime-level failure; see `beamtalk_ets_heir`): the tables come back empty
 and already-running actors stay unregistered until they are respawned.
 
-See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
+See also: docs/beamtalk-ddd-model.md "Instance Tracking"
 """.
 
 %% API
