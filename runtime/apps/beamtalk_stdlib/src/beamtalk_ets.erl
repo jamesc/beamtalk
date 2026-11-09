@@ -408,7 +408,16 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         ets:delete(TableName),
         nil
     catch
+        error:badarg when not is_atom(TableName) ->
+            %% An unnamed table's id is never reused, so the failure is
+            %% unambiguous: gone, or the caller is not the owner (only the
+            %% owner may delete, whatever the protection).
+            case ets:info(TableName, owner) of
+                undefined -> stale_table_error('delete', TableName);
+                _Owner -> access_denied_error('delete', TableName)
+            end;
         error:badarg ->
+            %% Named tables keep their historical `permission_error`.
             beamtalk_error:raise(
                 beamtalk_error:new(
                     permission_error,
@@ -793,8 +802,10 @@ access_denied_error(Selector, TableName) ->
         case ets:info(TableName, protection) of
             protected ->
                 <<"This table is protected: other processes may read it, but only its owner may write">>;
+            private ->
+                <<"This table is private: only the process that created it may use it">>;
             _ ->
-                <<"This table is private: only the process that created it may use it">>
+                <<"Only the process that created this table may do this">>
         end,
     beamtalk_error:raise(
         beamtalk_error:with_hint(

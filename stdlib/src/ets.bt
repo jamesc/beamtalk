@@ -110,7 +110,9 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// actor's internal state, especially secrets such as tokens or nonces.
   ///
   /// The owner is the process that runs this call: create the table in the
-  /// actor that will use it (e.g. in `initialize`). A class method of a class
+  /// long-lived actor that will use it (e.g. in `initialize`). Each REPL
+  /// input runs in a short-lived process, so a table created at the REPL is
+  /// deleted when that input finishes. A class method of a class
   /// with class variables runs in the class's process, so a table made there
   /// belongs to that process and callers get `access_denied`.
   ///
@@ -406,6 +408,9 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// Destroy the table, freeing all memory. Returns `nil`.
   ///
   /// Only the process that created the table (the owner) may call `delete`.
+  /// Otherwise an unnamed (`private:`/`protected:`) table raises
+  /// `access_denied`, or `stale_table` once deleted; a named table raises
+  /// `permission_error` in both cases.
   /// After calling `delete`, this `Ets` instance is no longer valid.
   /// Any further operations on the deleted table will raise an error.
   ///

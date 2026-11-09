@@ -8445,7 +8445,7 @@ secrets := Ets private: #set      // only this process may use it
 board := Ets protected: #set      // others may read, only this process writes
 ```
 
-A named table's name is global to the node, so a second instance of the same actor cannot create the same name again (`already_exists`). Unnamed tables avoid that: create one per actor in `initialize` and keep it in a field typed `:: Ets`. They have no name, so `Ets named:` cannot find them. Using one from a process its protection forbids raises `access_denied`, not a raw `badarg`. Printing or inspecting an `Ets` never shows its entries.
+A named table's name is global to the node, so a second instance of the same actor cannot create the same name again (`already_exists`). Unnamed tables avoid that: create one per actor in `initialize` and keep it in a field typed `:: Ets`. They have no name, so `Ets named:` cannot find them. Using one from a process its protection forbids, or calling `delete` from any process but the owner, raises `access_denied`, not a raw `badarg`. Each REPL input runs in a short-lived process, so an unnamed table created at the REPL is deleted when that input finishes; create it in the actor that uses it. Printing or inspecting an `Ets` never shows its entries.
 
 ```beamtalk
 Actor subclass: SessionStore

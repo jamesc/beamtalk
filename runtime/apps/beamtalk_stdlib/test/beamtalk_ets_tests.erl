@@ -1064,6 +1064,15 @@ bt4576_protected_table_allows_other_readers_only_test() ->
     ?assertEqual(1, beamtalk_ets:lookup(T, k)),
     beamtalk_ets:deleteTable(T).
 
+bt4576_delete_unnamed_table_errors_test() ->
+    T = beamtalk_ets:'protected:'(set),
+    %% Only the owner may delete, even a table others may read.
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+    ?assertEqual(nil, beamtalk_ets:deleteTable(T)),
+    ?assertError(
+        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:deleteTable(T)
+    ).
+
 bt4576_deleted_private_table_is_stale_test() ->
     T = beamtalk_ets:'private:'(set),
     beamtalk_ets:deleteTable(T),
