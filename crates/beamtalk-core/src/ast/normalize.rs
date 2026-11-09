@@ -353,6 +353,13 @@ fn restore_unary_loops(expr: &mut Expression) {
     });
 }
 
+/// [`restore_unary_loops`] over every root of `module`: the normalised tree
+/// with only its operand parentheses peeled, for a reader that indexes sends
+/// by the selector as written (the send index, `method_source_walker`).
+pub fn restore_unary_loops_in_module(module: &mut Module) {
+    for_each_root_mut(module, &mut |_, root| restore_unary_loops(root));
+}
+
 /// The span of the first unary loop send in `expr`'s tree that
 /// [`desugar_unary_loops`] would rewrite, or `None`.
 fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
