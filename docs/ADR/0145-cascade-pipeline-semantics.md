@@ -1,7 +1,7 @@
 # ADR 0145: Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `|>` Pipeline
 
 ## Status
-Accepted (2026-11-06); proposed 2026-11-05.
+Accepted (2026-11-06); proposed 2026-11-05; amended 2026-11-09 (review: stage spans, raw-tree consumer audit, AST design reopened).
 
 Decision record for the "Cascade Semantics" question that ADR 0042 deferred
 (to a planned "ADR 0044" that was never written — 0044 became
@@ -360,7 +360,12 @@ Its declared signature follows `Object >> ifNotNil:`
 block bare for the same reason (BT-2834). Pharo spells the same method
 `in:`; the Elixir name is chosen for this ADR's audience. Nothing in the
 stdlib, the runtime or a current ADR defines `then:` today. (ADR 0034's
-Future `then:` is superseded.) It is deliberately **not** `sealed`, so a
+Future `then:` is superseded.) Forwarding proxies that rely on
+`doesNotUnderstand:` (`TimeoutProxy`, the `TransparentProxy` example) would
+answer `then:` themselves rather than forward it. BT-4515 either forwards
+it explicitly in those proxies or documents the behaviour. `then:` ships
+after `|>` (blocked by BT-4514): on its own, `then:` written after a
+keyword message merges into it (see Option E). It is deliberately **not** `sealed`, so a
 user class that already defines `then:`, such as a promise type, keeps
 compiling and overrides it.
 
@@ -437,7 +442,15 @@ handle:
    tree. Each needs a `Pipeline` arm. Position features also need to
    rebuild a stage's synthesised receiver span to look it up in the type
    map. Eleven language-service files match on `Expression::Cascade`
-   today; that is the size of the set to audit.
+   today, but that undercounts the set to audit. Across all crates, 42
+   non-test files match on it. The senders, references, announce-sites
+   and field-accesses queries (`senders_query.rs`, `references_to_query.rs`,
+   …) parse reflected method source directly and do not normalise it, and
+   that source keeps `|>` (point 2). `@expect` collection
+   (`diagnostics_policy.rs`) also walks the raw module. Walkers that end in
+   a catch-all `_ =>` arm would silently skip a `Pipeline` rather than fail
+   to compile. So the audit must cover every `match` on `Expression`, not
+   only those that name `Cascade`.
 
 A defaulted marker field on `MessageSend` (a `SendForm`) or a parser side
 table of stage spans would avoid the new variant. They were rejected
@@ -447,9 +460,50 @@ parentheses. The side table makes every raw-tree consumer re-derive
 pipeline structure from spans. Points 1–3 apply to any of the three
 designs.
 
-**Diagnostics.** A diagnostic on a pipeline stage is reported at the
-synthesised send's span, which is the stage as written (`|> withY: 10`),
-so it already points at the right place. Wording is not specialised. A
+**Reopened (2026-11-09 review), still to decide before BT-4514.** The
+rejection above covers a side table that *every* raw-tree consumer reads. A
+narrower variant was not weighed: the **parser** emits the nested
+`MessageSend`s directly and records each pipeline in a side table that only
+the re-sugaring consumers read (unparse, fmt, reflected source, syntax
+highlighting). Hover, definition, completion, the senders/references
+queries and `@expect` collection only need ordinary sends, so they would
+need no change. Under that design there is no new variant, no change to the
+normalisation gate (point 1) and no catch-all-arm audit (point 3), and
+most of the language-service phase goes away. Spans are correct by
+construction, because they are the hand-nested spans. The costs are:
+completion right after a `|>` needs the table, comments between stages need
+a home (see below), and a re-sugaring consumer that ignores the table
+silently prints nested sends rather than failing to compile. The
+`Expression::Pipeline` design stays the default until the maintainer
+chooses.
+
+**Comments between stages.** A multi-line pipeline invites a trailing
+`// …` on a stage. Comments currently attach only at statement level, and
+the workspace compares reflected source with the file on disk. So
+whichever design is chosen, fmt and the reflected-source restore must keep
+a comment between stages, or every method that has one is reported as
+modified. The source-fidelity issue (BT-4517) needs a round-trip test for
+this.
+
+**Spans (amended 2026-11-09).** Each synthesised send gets the span the
+hand-nested form would give it: from the start of its receiver (the
+pipeline head) to the end of its message, `receiver.span().merge(…)` as in
+`parse_keyword_message`. It does **not** get just the stage as written.
+Span-keyed analysis facts depend on this: `dispatch_kinds` and
+`state_effects` (`semantic_analysis/facts.rs`) and the type map.
+- If sends took the stage span, a stage of several messages
+  (`|> keys sorted`) would produce two sends with the same span. BT-4122
+  hit this class of aliasing for block profiles.
+- An outer send's span would then no longer contain its receiver's span,
+  which every node-at-position lookup assumes.
+
+The wire check adds a test that every span in a desugared pipeline is
+unique and contains its receiver's span.
+
+**Diagnostics.** A diagnostic on a pipeline stage is reported at that
+stage's message span. That is the message's own selector-and-arguments
+span inside the synthesised send, so `withY: 10`, not the whole chain. It
+points at the right place without special wording. Wording is not specialised. A
 message that says "the receiver of this send" means the previous stage's
 value, and the span shows which one.
 
@@ -489,6 +543,21 @@ warning[cascade-drops-update]: the result of `withX:` is discarded
 Part 3 ships before part 2 and does not depend on it. Until `|>` exists,
 or if it is rejected, the help suggests the nested form
 (`(p withX: 5) withY: 10`) instead.
+
+Two cases the rule above leaves open (added 2026-11-09):
+- **Union-typed targets (ADR 0102).** The warning fires only if every
+  member of the union is a value kind. The simplest conforming
+  implementation does not fire on unions at all.
+- **Protocol-provided methods** (e.g. `Comparable >> max: -> Self`).
+  `Integer max:` must warn, so the implementation decides how "defining
+  class" reads for a method that a protocol supplies, and records that
+  choice in BT-4512.
+
+**REPL limitation.** REPL bindings carry names, not types, so in the
+REPL `p withX: 5; withY: 10` has a `Dynamic` target and does **not** warn.
+The REPL transcript in part 2 shows the result, not a diagnostic. A
+type-free trigger (two or more synthesised `with*:` selectors in one
+cascade) would cover that case. It is a possible follow-up.
 
 It does **not** fire on `Dynamic` targets, actors, `Object` instances,
 non-final messages answering some other type (`printString`, `size`), or
@@ -580,7 +649,7 @@ debugging and stack traces are unchanged.
 sends, no new dispatch, no hot-reload implications.
 
 **Tooling developer.** Analysis-backed features (type inference,
-senders/references queries, lints that run behind `normalised()`) see an
+lints that run behind `normalised()`) see an
 ordinary nested send. Position-based LSP features (hover, definition,
 completion, signature help) read the raw tree and need a `Pipeline` arm
 that rebuilds each stage's receiver span for type-map lookup. So do the
@@ -905,7 +974,15 @@ hit as a warning first.
 
 ## Open Questions (for the maintainer)
 
-None remain. Every question raised in earlier drafts was settled with the
+One question was reopened by the 2026-11-09 review. It blocks BT-4514 and
+the rest of the operator work, but not part 3:
+
+- **AST design for `|>`.** Should it be the `Expression::Pipeline` variant
+  desugared in normalisation (the current text), or desugared in the
+  parser with a side table read only by the re-sugaring consumers
+  (§ AST representation, "Reopened")?
+
+Every other question raised in earlier drafts was settled with the
 maintainer on 2026-11-06 and is recorded below.
 
 ### Resolved (2026-11-06)
@@ -950,7 +1027,7 @@ it later would break code.
 | 1 | BT-4512: `cascade-drops-update` warning | M | — |
 | 1 | BT-4513: `setUp` lint rejects multi-`with*:` cascades | S | — |
 | 2 | BT-4514: wire check (lex `\|>`, `Pipeline` node, normalise) | M | — |
-| 2 | BT-4515: `Object >> then:` and its typing rule | S | — |
+| 2 | BT-4515: `Object >> then:` and its typing rule | S | BT-4514 |
 | 3 | BT-4516: complete `\|>` parsing and errors, REPL multi-line | M | BT-4514 |
 | 3 | BT-4517: source fidelity (unparse, fmt, reflected source, editors) | M | BT-4514 |
 | 3 | BT-4518: language service support | M | BT-4514 |
