@@ -1155,7 +1155,9 @@ grow_counters() ->
 -doc """
 Resolve the class atom from the instance registry, else `unknown`: one
 lookup on its pid-keyed index (BT-4113), the same as
-`beamtalk_actor:lookup_class/1`.
+`beamtalk_actor:lookup_class/1`. `unknown` also covers a lost index (the
+registry server and `beamtalk_ets_heir` both down, BT-4123); a registry
+crash alone keeps it, since the restarted server reclaims it from the heir.
 """.
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
@@ -1793,7 +1795,10 @@ do_bottlenecks(Limit) ->
                 beamtalk_instance_registry
             )
         catch
-            %% Registry table missing (partial harness): no actors to report.
+            %% Registry table missing: a partial harness, or the table was
+            %% genuinely lost (registry server and `beamtalk_ets_heir` both
+            %% down, BT-4123) — no actors to report. A registry crash alone
+            %% keeps the table: it survives under the heir and is reclaimed.
             error:badarg -> []
         end
     ),
