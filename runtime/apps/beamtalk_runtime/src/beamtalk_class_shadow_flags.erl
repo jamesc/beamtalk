@@ -259,6 +259,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_direct_flag_set/1,
     direct_flag_value/1,
     invalidate/1,
+    invalidate_descendants_of_tag/1,
     erase_all_static_call_keys/0,
     set_class_vars/2,
     mark_ready/0,
@@ -397,6 +398,27 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
+
+-doc """
+Erase the derived and static call keys of every descendant of the class
+tagged `Tag`, each under its own tag lock (BT-4307). Called by
+`beamtalk_extensions:register/5` and `unregister/3` after a class-side
+extension row under `Tag` is written and the derived-fact cache is flushed:
+an ancestor's class-side extension now counts as that ancestor's method for a
+send to a descendant, so it can change the descendant's in-caller owner
+(`beamtalk_class_dispatch:in_caller_owner/2`), and with it whether a static
+call key (an inherited caller-safe raise, BT-4270) may stay installed. The
+class's own keys are erased by `set/2` already. Erase-after-write, as
+`invalidate/1` is for descendants. A tag that names no loaded class, or a
+class with no descendants, erases nothing. Must never be called from inside
+`with_tag_lock/2`.
+""".
+-spec invalidate_descendants_of_tag(atom()) -> ok.
+invalidate_descendants_of_tag(Tag) ->
+    case beamtalk_primitive:class_name_from_tag(Tag) of
+        undefined -> ok;
+        ClassName -> erase_descendant_flags(ClassName)
+    end.
 
 -doc """
 Erase every class's derived key and static call keys, each under its tag lock

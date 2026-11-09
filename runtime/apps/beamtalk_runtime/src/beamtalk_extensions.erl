@@ -270,6 +270,9 @@ register(Class, Selector, Fun, Owner, Source) when
     %% `has_method_local/1` consults this table), invalidating cached
     %% defining-method entries.
     beamtalk_class_derived_cache:invalidate(),
+    %% BT-4307: a class-side extension is inherited by the class's
+    %% subclasses, so their static call keys may no longer hold.
+    invalidate_class_side_descendants(Class),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -380,6 +383,7 @@ unregister(Class, Selector, ClassSide) when
     end),
     %% Removal changes resolution the same way installation does.
     beamtalk_class_derived_cache:invalidate(),
+    invalidate_class_side_descendants(EtsClass),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
@@ -388,6 +392,17 @@ unregister(Class, Selector, ClassSide) when
     %% no-op if the xref gen_server is unavailable.
     safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
+
+%% BT-4307: a class-side extension (a class-object tag) counts as its class's
+%% method for a send to any subclass, so erase the subclasses' derived and
+%% static call keys after the row and the derived cache changed. An
+%% instance-side tag has no such keys.
+-spec invalidate_class_side_descendants(atom()) -> ok.
+invalidate_class_side_descendants(Tag) ->
+    case beamtalk_class_registry:is_class_name(Tag) of
+        true -> beamtalk_class_shadow_flags:invalidate_descendants_of_tag(Tag);
+        false -> ok
+    end.
 
 %% BT-3669: drop the class's "has shadows" flag once its last extension is gone.
 %% Runs under the per-tag lock held by `unregister/3`, and `register/5` also

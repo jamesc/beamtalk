@@ -10,3 +10,7 @@ GuardedDiffClassRoot subclass: GuardedDiffClassLeaf
   class leafOnly -> Symbol => #leaf
 
   class describe -> String => "leaf"
+
+  // A class-side self-send of a selector an ancestor's class-side extension
+  // shadows (class_dispatch_differential_test.bt, BT-4307).
+  class selfShadowedByExtension -> Symbol => self shadowedByExtension

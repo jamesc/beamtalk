@@ -119,3 +119,28 @@ TestCase subclass: ClassLiteralSignalTest
     self assert: (self outcomeOf: [
       self raiseLeaf: "x"
     ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "x")
+
+  // A class-side extension of `signal:` on an ancestor between the receiving
+  // class and `Exception`, registered after warm-up, is honoured by the call
+  // site compiled before it (BT-4307: an ancestor's extension counts as that
+  // ancestor's method, so its registration takes away the descendant's key),
+  // and the raise is back once it goes.
+  testExtensionOnAnAncestorAfterWarmUpIsHonoured =>
+    self assert: (self outcomeOf: [
+      self raiseLeaf: "x"
+    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "x")
+    Erlang beamtalk_extensions
+      register: #'Bt4270RaiseMid class'
+      selector: #signal:
+      fun: [:args :receiver | receiver name]
+      owner: #test
+    shadowed := self outcomeOf: [self raiseLeaf: "x"] on: Bt4270RaiseLeaf
+    Erlang beamtalk_extensions
+      unregister: #Bt4270RaiseMid
+      selector: #signal:
+      classSide: true
+    // The extension runs with the receiving class as `self`.
+    self assert: shadowed equals: #(#returned, #Bt4270RaiseLeaf)
+    self assert: (self outcomeOf: [
+      self raiseLeaf: "x"
+    ] on: Bt4270RaiseLeaf) equals: #(#raised, Bt4270RaiseLeaf, "x")
