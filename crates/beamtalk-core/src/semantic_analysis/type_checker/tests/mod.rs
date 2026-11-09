@@ -52,6 +52,7 @@ mod bt4233_type_var_placeholder;
 mod bt4235_value_type_trailing_field_assignment;
 mod bt4385_list_literal_element_check;
 mod bt4444_block_value_arg_check;
+mod bt4482_protocol_assignment_conformance;
 mod bt4512_cascade_drops_update;
 mod cast_and_sync_send;
 mod destructure_and_extension;

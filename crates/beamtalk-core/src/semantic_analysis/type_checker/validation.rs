@@ -1883,7 +1883,7 @@ impl TypeChecker {
             }
             other => list_element(other)?,
         };
-        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+        if Self::element_type_is_unjudged(&element, hierarchy) {
             return None;
         }
         Some(ListLiteralElements {
@@ -1895,12 +1895,10 @@ impl TypeChecker {
 
     /// Whether a declared list element type is left to the whole-argument
     /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
-    /// or mentions a type variable placeholder or a protocol anywhere in it.
-    fn element_type_is_unjudged(
-        ty: &InferredType,
-        hierarchy: &ClassHierarchy,
-        protocol_registry: Option<&ProtocolRegistry>,
-    ) -> bool {
+    /// or mentions a type variable placeholder anywhere in it. A protocol
+    /// element type is judged: the per-element rule checks structural
+    /// conformance (BT-4482).
+    fn element_type_is_unjudged(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
         match ty {
             InferredType::Dynamic(_) => true,
             InferredType::Known {
@@ -1909,15 +1907,13 @@ impl TypeChecker {
                 ..
             } => {
                 super::is_type_var_placeholder(class_name, hierarchy)
-                    || hierarchy.is_protocol_class(class_name)
-                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
-                    || type_args.iter().any(|arg| {
-                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
-                    })
+                    || type_args
+                        .iter()
+                        .any(|arg| Self::element_type_is_unjudged(arg, hierarchy))
             }
             InferredType::Union { members, .. } => members
                 .iter()
-                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy)),
             InferredType::Meta { .. }
             | InferredType::ProtocolMeta { .. }
             | InferredType::Never
