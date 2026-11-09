@@ -458,6 +458,12 @@ pub struct TypeChecker {
     /// expected-type threading through `infer_expr`, so this side channel is
     /// how a declared type reaches the literal.
     pub(super) block_param_pushdown: HashMap<Span, Vec<InferredType>>,
+    /// BT-4526: spans of the sends whose own selector `check_class_side_send`
+    /// found unresolved (`DynamicReason::UnresolvedSelector`). The reason
+    /// flows on through wrappers and through sends that only pass a block's
+    /// result along (`ifTrue:ifFalse:`, `value`), so the typed-class warning
+    /// fires only at a send recorded here — the one that owns the selector.
+    pub(super) unresolved_selector_sends: std::collections::HashSet<Span>,
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
@@ -557,6 +563,7 @@ impl TypeChecker {
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 
@@ -579,6 +586,7 @@ impl TypeChecker {
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 

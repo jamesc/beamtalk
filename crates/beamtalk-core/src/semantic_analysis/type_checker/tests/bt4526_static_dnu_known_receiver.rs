@@ -228,3 +228,41 @@ typed Object subclass: Stream
         "got: {diags:#?}"
     );
 }
+
+#[test]
+fn block_result_pass_through_sends_are_not_blamed() {
+    // `ifTrue:ifFalse:` / `value` only pass the block's `Dynamic` along:
+    // each unresolved inner send warns once under its own selector, and the
+    // pass-through send never warns under *its* (resolved) selector.
+    for (body, expected) in [
+        (
+            "flag ifTrue: [HPACK validateHeader: name value: name] ifFalse: [HPACK other: name]",
+            vec!["validateHeader:value:", "other:"],
+        ),
+        (
+            "[HPACK validateHeader: name value: name] value",
+            vec!["validateHeader:value:"],
+        ),
+    ] {
+        let source = format!(
+            "sealed Object subclass: HPACK
+typed Object subclass: Stream
+  check: name :: String flag: flag :: Boolean -> Nil =>
+    {body}
+    nil
+"
+        );
+        let diags = diagnostics(&source, true);
+        let named: Vec<_> = diags
+            .iter()
+            .filter_map(|d| {
+                d.message
+                    .split("(unresolved selector '")
+                    .nth(1)
+                    .map(|rest| rest.trim_end_matches("')").to_string())
+            })
+            .collect();
+        assert_eq!(named, expected, "{body}: {diags:#?}");
+        assert_eq!(diags.len(), expected.len(), "{body}: {diags:#?}");
+    }
+}

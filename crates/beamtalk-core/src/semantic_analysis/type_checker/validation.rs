@@ -355,6 +355,7 @@ impl TypeChecker {
                 InferredType::Dynamic(if dnu_reported {
                     DynamicReason::DynamicReceiver
                 } else if selector_absent {
+                    self.unresolved_selector_sends.insert(span);
                     DynamicReason::UnresolvedSelector
                 } else {
                     DynamicReason::UnannotatedReturn

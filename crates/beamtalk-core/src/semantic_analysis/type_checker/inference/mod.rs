@@ -932,9 +932,12 @@ impl TypeChecker {
         // "Dynamic in typed class" warning is pure data (see
         // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
         // `validation.rs`'s job.
-        if let Some(fact) =
-            Self::detect_dynamic_in_typed_class(expr, ty, self.typed_class_context.as_ref())
-        {
+        if let Some(fact) = Self::detect_dynamic_in_typed_class(
+            expr,
+            ty,
+            self.typed_class_context.as_ref(),
+            &self.unresolved_selector_sends,
+        ) {
             self.emit_dynamic_in_typed_class(&fact, expr.span());
         }
     }
@@ -956,6 +959,7 @@ impl TypeChecker {
         expr: &Expression,
         ty: &InferredType,
         typed_class_context: Option<&EcoString>,
+        unresolved_selector_sends: &std::collections::HashSet<crate::source_analysis::Span>,
     ) -> Option<DynamicInTypedClass> {
         let InferredType::Dynamic(reason) = ty else {
             return None;
@@ -973,12 +977,16 @@ impl TypeChecker {
         let class_name = typed_class_context?.clone();
         let description = reason.description()?;
         // `UnresolvedSelector` warns once, at the send that owns the
-        // selector. A wrapper — `(…)`, `x := …`, or a cascade, whose type is
-        // its first send's (post-processed on its own by `infer_cascade`) —
-        // passes that send's type through and must not repeat the warning
-        // without the selector (BT-4526).
+        // selector (BT-4526). The reason flows on through wrappers (`(…)`,
+        // `x := …`, a cascade, whose type is its first send's) and through
+        // sends that only pass a block's result along (`ifTrue:ifFalse:`,
+        // `value`); none of those may repeat it, least of all under their
+        // own, resolved selector. Ownership is positive: the span that
+        // `check_class_side_send` recorded when it produced the reason.
         let unresolved_selector = match (reason, expr) {
-            (DynamicReason::UnresolvedSelector, Expression::MessageSend { selector, .. }) => {
+            (DynamicReason::UnresolvedSelector, Expression::MessageSend { selector, span, .. })
+                if unresolved_selector_sends.contains(span) =>
+            {
                 Some(selector.name())
             }
             (DynamicReason::UnresolvedSelector, _) => return None,
