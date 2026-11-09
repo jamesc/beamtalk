@@ -1324,8 +1324,10 @@ pub fn while_condition_writes_thread(
 /// lowered in place: a bare block literal. Only then does codegen consider the
 /// stateful lowering (`generate_while_true`/`generate_while_false`), which is
 /// the only lowering that carries a write in the condition; any other body (a
-/// variable, a parenthesized or computed block) takes the simple lowering,
-/// which runs the condition as a plain closure. The one rule the Phase 0 check
+/// variable, a computed block) takes the simple lowering,
+/// which runs the condition as a plain closure. (The parser drops the
+/// parentheses around a block argument, so `([...])` is a literal.) The one
+/// rule the Phase 0 check
 /// (`Walker`'s `whileTrue:` condition arm) and the codegen loop gates read.
 #[must_use]
 pub fn while_body_block(body: &Expression) -> Option<&Block> {
