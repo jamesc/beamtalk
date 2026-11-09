@@ -497,6 +497,9 @@ ERROR: Cannot remove stdlib class
 == Integer < Number ==
 Instance methods:
   + - * / ...
+Class methods:
+  parse: text :: Binary radix: base :: Integer -> Result(Integer, Error) [sealed]
+...
 
 > :help Integer +
 == Integer >> + ==
