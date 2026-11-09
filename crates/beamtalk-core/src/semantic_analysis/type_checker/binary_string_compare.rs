@@ -28,12 +28,17 @@
 //!   fact on [`TypeEnv`](super::TypeEnv), like ADR 0126's known-remote
 //!   fact: any later write to the local clears it, and it does not
 //!   propagate through fields, parameters, collections or method returns).
-//!   A local that any block literal in the body writes is never marked:
-//!   blocks run in a child environment and may run at any later point, so
-//!   their writes cannot clear the fact ([`block_written_locals`]).
+//!   A local that any block literal or `match:` arm in the body writes is
+//!   never marked: both are inferred in a child environment, and a block may
+//!   run at any later point, so their writes cannot clear the fact
+//!   ([`block_written_locals`]). Nor is a local trusted at a send whose
+//!   later-evaluated argument assigns it: the check runs after every
+//!   argument was inferred, but the operand was read before.
 //!
-//! The String side must have the static type `String` exactly; `String` is
-//! sealed, so that is a real String. `Dynamic`, unions and anything else
+//! The String side must have the static type `String` exactly (`String` is
+//! sealed). That is a static claim: a parameter typed `String` is not checked
+//! at run time, so a Dynamic caller can still pass a Binary — acceptable for
+//! a hint. `Dynamic`, unions and anything else
 //! stay silent (ADR 0100 Rule 1).
 //!
 //! The "reverse" collection case — a `Dictionary(Binary, V)` or `Set(Binary)`
@@ -45,6 +50,7 @@ use std::collections::HashSet;
 use ecow::EcoString;
 
 use crate::ast::{Expression, ExpressionStatement, MessageSelector};
+use crate::semantic_analysis::block_facts;
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -119,20 +125,42 @@ pub(super) fn is_raw_binary(expr: &Expression, is_raw_local: &dyn Fn(&str) -> bo
     }
 }
 
-/// The locals written by any block literal in `body`, at any depth — the
-/// one ADR 0131 outer-write walk (`block_facts::outer_local_writes`) run on
-/// every block. Treating every name as possibly outer over-approximates,
-/// which only ever silences the hint.
+/// The locals written by any block literal or `match:` arm body in `body`, at
+/// any depth — the shared outer-write walks (`block_facts::outer_local_writes`,
+/// `block_facts::match_arm_body_writes`) run on each. Both are inferred in a
+/// child environment whose writes never reach the flow fact. Treating every
+/// name as possibly outer over-approximates, which only ever silences the
+/// hint.
 pub(super) fn block_written_locals(body: &[ExpressionStatement]) -> HashSet<EcoString> {
     let mut names = HashSet::new();
     for stmt in body {
         crate::ast_walker::walk_expression(&stmt.expression, &mut |expr| {
-            if let Expression::Block(block) = expr {
-                names.extend(
-                    crate::semantic_analysis::block_facts::outer_local_writes(block, &|_| true)
-                        .into_iter()
-                        .map(|write| write.name),
-                );
+            let writes = match expr {
+                Expression::Block(block) => block_facts::outer_local_writes(block, &|_| true),
+                // An arm that assigns a bound outer local threads the write
+                // back (BT-3947), but the checker infers each arm in a child
+                // environment that drops it.
+                Expression::Match { arms, .. } => {
+                    block_facts::match_arm_body_writes(arms, &|_| true)
+                }
+                _ => return,
+            };
+            names.extend(writes.into_iter().map(|write| write.name));
+        });
+    }
+    names
+}
+
+/// The locals assigned (`x := …`) anywhere in `exprs`, nested blocks
+/// included. Only a plain assignment can mark a local raw.
+fn assigned_locals(exprs: &[Expression]) -> HashSet<EcoString> {
+    let mut names = HashSet::new();
+    for expr in exprs {
+        crate::ast_walker::walk_expression(expr, &mut |e| {
+            if let Expression::Assignment { target, .. } = e {
+                if let Expression::Identifier(ident) = target.as_ref() {
+                    names.insert(ident.name.clone());
+                }
             }
         });
     }
@@ -163,15 +191,25 @@ impl TypeChecker {
         let (Some(arg), Some(arg_ty)) = (arguments.first(), arg_types.first()) else {
             return;
         };
-        let is_raw = |expr: &Expression, ty: &InferredType| {
-            is_known(ty, "Binary") && is_raw_binary(expr, &|name| env.is_raw_binary_local(name))
+        // The receiver is read before every argument, argument 0 before the
+        // rest; a later argument that rebinds the local makes the fact (read
+        // after all of them) describe the wrong value.
+        let written_by_args = assigned_locals(arguments);
+        let written_after_arg0 = assigned_locals(arguments.get(1..).unwrap_or_default());
+        let is_raw = |expr: &Expression, ty: &InferredType, written_later: &HashSet<EcoString>| {
+            is_known(ty, "Binary")
+                && is_raw_binary(expr, &|name| {
+                    env.is_raw_binary_local(name) && !written_later.contains(name)
+                })
         };
 
         let mismatch = match selector {
             MessageSelector::Binary(op) => {
                 crate::source_analysis::equality_operator_is_negated(op).is_some()
-                    && ((is_raw(receiver, receiver_ty) && is_known(arg_ty, "String"))
-                        || (is_known(receiver_ty, "String") && is_raw(arg, arg_ty)))
+                    && ((is_raw(receiver, receiver_ty, &written_by_args)
+                        && is_known(arg_ty, "String"))
+                        || (is_known(receiver_ty, "String")
+                            && is_raw(arg, arg_ty, &written_after_arg0)))
             }
             MessageSelector::Unary(_) => false,
             MessageSelector::Keyword(_) => {
@@ -193,7 +231,7 @@ impl TypeChecker {
                     && type_args
                         .first()
                         .is_some_and(|key_ty| is_known(key_ty, "String"))
-                    && is_raw(arg, arg_ty)
+                    && is_raw(arg, arg_ty, &written_after_arg0)
             }
         };
         if mismatch {

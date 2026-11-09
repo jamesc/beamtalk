@@ -194,6 +194,75 @@ fn local_written_by_a_block_is_never_raw() {
 }
 
 #[test]
+fn local_written_by_a_match_arm_is_never_raw() {
+    // BT-3947: an arm's write to a bound outer local is threaded back.
+    assert_no_hint(&probe_with(
+        "s :: String flag: f",
+        "y := Binary fromBytes: #(104)\n    f match: [#a -> y := s; _ -> nil]\n    y == s",
+    ));
+    assert_no_hint(&probe_with(
+        "s :: String flag: f",
+        "y := Binary fromBytes: #(104)\n    \
+         f match: [#a -> (f match: [#b -> y := s; _ -> nil]); _ -> nil]\n    y == s",
+    ));
+}
+
+#[test]
+fn later_argument_rebinding_the_operand_is_not_trusted() {
+    // The operand is read before the argument rebinds it to a producer.
+    assert_no_hint(&probe_with(
+        "s :: String b: b :: Binary",
+        "y := b\n    y == (y := Binary fromBytes: #(104)) asStringUnchecked",
+    ));
+    assert_no_hint(&probe_with(
+        "d :: Dictionary(String, Integer) b: b :: Binary",
+        "y := b\n    d at: y put: (y := Binary fromBytes: #(1)) size",
+    ));
+}
+
+#[test]
+fn every_method_kind_resets_the_block_written_set() {
+    // A block write in one method must not silence another; a class-side
+    // method and a standalone definition are checked like instance methods.
+    assert_one_hint(
+        "Object subclass: Probe\n  \
+         other: s :: String =>\n    \
+         #(1) do: [:i | b := s]\n  \
+         class run: s :: String =>\n    \
+         b := Binary fromBytes: #(97)\n    \
+         b == s\n",
+    );
+    assert_one_hint(
+        "Object subclass: Probe\n\n\
+         Probe >> run: s :: String =>\n  \
+         b := Binary fromBytes: #(97)\n  \
+         b == s\n",
+    );
+}
+
+#[test]
+fn string_segment_construction_is_still_raw() {
+    assert_one_hint(&probe("<<s/binary>> == s"));
+}
+
+#[test]
+fn dictionary_key_hint_accompanies_the_argument_type_warning() {
+    // The generic argument check already warns that the key is not a
+    // String; the hint adds why the lookup can never succeed.
+    let diags = diagnostics(&probe_with(
+        "d :: Dictionary(String, Integer)",
+        "d at: (Binary fromBytes: #(97))",
+    ));
+    assert_eq!(compare_hints(&diags).len(), 1, "{diags:#?}");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::Type)),
+        "{diags:#?}"
+    );
+}
+
+#[test]
 fn block_local_of_the_same_name_does_not_leak_out() {
     // A block's own parameter `b` is not the method local; the hint inside
     // the block is about the parameter, which is a String, so nothing fires.
