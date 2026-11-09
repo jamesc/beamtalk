@@ -209,13 +209,14 @@ fn singleton_is_judged_as_a_symbol() {
     );
 }
 
-/// A protocol-typed value is some conformer: it fits `Object`, and no
-/// narrower class — not even `Protocol`.
+/// A protocol-typed value is some conformer: it fits `Object` and its
+/// ancestors, and no narrower class — not even `Protocol`.
 #[test]
 fn protocol_typed_value_fits_object_but_not_protocol() {
     let msgs = checker_messages(&source_with(
         r"
   run: q :: Quacker => o :: Object := q. o
+  root: q :: Quacker => o :: ProtoObject := q. o
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");

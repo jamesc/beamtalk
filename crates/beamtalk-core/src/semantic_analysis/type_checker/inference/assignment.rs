@@ -17,7 +17,6 @@ use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
 };
-use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::Span;
 use ecow::EcoString;
@@ -388,11 +387,7 @@ impl TypeChecker {
                 }
                 // A singleton (`#foo`) is a `Symbol`, not an unknown class
                 // the open-world gate would wave through.
-                let conformer = if value_class.starts_with('#') {
-                    "Symbol"
-                } else {
-                    value_class.as_str()
-                };
+                let conformer = super::method_resolution_class(value_class);
                 registry
                     .check_conformance(conformer, protocol, hierarchy)
                     .is_ok()
@@ -403,14 +398,14 @@ impl TypeChecker {
             {
                 false
             }
-            // A protocol-typed value is *some* conformer: every class is an
-            // `Object`, but no conformer is provably any narrower class (nor
-            // a `Protocol`) — whether or not the protocol has a synthetic
-            // hierarchy entry (same-file) or not (cross-file).
+            // A protocol-typed value is *some* conformer: it fits `Object`
+            // (and its ancestors), but no conformer is provably any narrower
+            // class (nor a `Protocol`) — whether or not the protocol has a
+            // synthetic hierarchy entry (same-file) or not (cross-file).
             (InferredType::Known { class_name, .. }, _)
                 if Self::is_protocol_type(class_name, hierarchy, registry) =>
             {
-                WellKnownClass::from_str(&declared.display_name()) == Some(WellKnownClass::Object)
+                Self::is_assignable_to(&"Object".into(), &declared.display_name(), hierarchy)
             }
             _ => {
                 let (value, declared) = (value.display_name(), declared.display_name());
