@@ -40,6 +40,14 @@ test("class definition names the class and superclass as types", () => {
   assert.ok(pairs.some(([t, c]) => t === "Object" && c === "type"), JSON.stringify(pairs));
 });
 
+for (const keyword of ["state:", "field:", "classState:"]) {
+  test(`${keyword} declarations are keywords, not selector keywords`, () => {
+    const pairs = categorised(`  ${keyword} count :: Integer = 0`);
+    assert.deepEqual(pairs[0], [keyword, "keyword"]);
+    assert.ok(pairs.some(([t, c]) => t === "Integer" && c === "type"), JSON.stringify(pairs));
+  });
+}
+
 test("self and nil are constants", () => {
   const pairs = categorised("self foo ifNil: [nil]");
   assert.ok(pairs.some(([t, c]) => t === "self" && c === "constant"));

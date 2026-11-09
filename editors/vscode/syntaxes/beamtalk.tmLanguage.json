@@ -207,9 +207,9 @@
           }
         },
         {
-          "match": "\\b(state:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
+          "match": "\\b(state:|field:|classState:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
           "captures": {
-            "1": { "name": "keyword.other.state.beamtalk" },
+            "1": { "name": "keyword.other.declaration.beamtalk" },
             "2": { "name": "variable.other.field.beamtalk" },
             "3": { "name": "keyword.operator.type-annotation.beamtalk" },
             "4": { "name": "entity.name.type.class.beamtalk" }
