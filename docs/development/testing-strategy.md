@@ -695,10 +695,13 @@ carry this harness. True for any commit once BT-3509 has landed on `main` —
 which is why it's Phase 0 of its epic and blocks every other issue in it —
 but not for a branch diffed against a pre-BT-3509 `main`.
 
-**CI:** runs as an informational job (`.github/workflows/ci.yml`'s
-`core-diff` job) on PRs touching `crates/beamtalk-codegen/`, reporting any
-diff to the job summary without failing the build. Add the
-`core-diff:enforce` label to a PR to make a real diff fail that job instead.
+**CI:** opt-in. The Core Diff workflow (`.github/workflows/core-diff.yml`)
+runs only on a PR that touches `crates/beamtalk-codegen/` and carries the
+`ci:core-diff` label, reporting any diff to the job summary without failing
+the build. The `core-diff:enforce` label also runs it, and makes a real diff
+fail the job. Adding either label starts a run. It used to run on every
+codegen PR, but nothing read the report and it cost about 19 runner-minutes
+per run (BT-4609); run `just core-diff` locally for the same report.
 
 The job diffs against the PR's base SHA (`github.event.pull_request.base.sha`)
 rather than a freshly fetched `origin/main`, because the base side is
