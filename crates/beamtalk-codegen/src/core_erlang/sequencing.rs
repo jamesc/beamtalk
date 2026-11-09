@@ -460,14 +460,15 @@ impl CoreErlangGenerator {
             // instead of re-threading it — see `subexpr_needs_prelude`'s
             // doc comment for the double-dispatch this avoids.
             let inner = e.unwrap_parens();
-            // A literal, variable, class reference or block reads no state and
-            // runs nothing, so it may evaluate in place after every prelude
-            // (BT-4296: no temp for a map literal's `#key`).
-            let trivial = Self::is_trivial_subexpr(inner);
-            if i > k || (trivial && !self.precompiled_subexprs_contains(e)) {
+            // BT-4296: a literal is a constant, so it stays in place after every
+            // prelude (no temp for a map literal's `#key`). Not a variable: its
+            // read may compile to a state-map or cell lookup that a later
+            // operand's rebind would change, so it is threaded as before.
+            if i > k || matches!(inner, Expression::Literal(..)) {
                 docs.push(self.expression_doc(e)?);
                 continue;
             }
+            let trivial = Self::is_trivial_subexpr(inner);
             if self.precompiled_subexprs_contains(e) {
                 // Already evaluated by the enclosing prelude; an operand
                 // before `k` is still pinned to a temp so a later operand
