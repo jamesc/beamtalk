@@ -126,8 +126,8 @@ Object subclass: Bt4310UnsequencedClass
 
   class cascadeInCollect =>
     self.n := 0
+    @expect cascade_drops_update
     r := #(1, 2) collect: [:x |
-      @expect cascade_drops_update
       0 max: 1; max: (self.items inject: 0 into: [:b :y | b + self bump])
     ]
     #(r, self.n)
