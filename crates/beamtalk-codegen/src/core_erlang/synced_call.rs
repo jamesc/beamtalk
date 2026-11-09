@@ -1131,9 +1131,9 @@ impl CoreErlangGenerator {
     /// BT-4532: `call` preceded by `prestore`'s store, built as the
     /// store-only [`ThreadedStmt::SyncedCall`] node (no reload: a closure
     /// that only returns writes nothing the method has to read back) and
-    /// verified like every other bracket. The node is a self-contained slice, like
-    /// [`Self::bracket_conditional_fallback`]'s: its gensym store renders
-    /// verbatim from the root frame. Where the cell is already the source (a
+    /// verified like every other bracket. The node is a self-contained
+    /// slice, like [`Self::bracket_conditional_fallback`]'s: its gensym store
+    /// renders verbatim from the root frame. Where the cell is already the source (a
     /// bracketed region) there is nothing to store and `call` is unchanged.
     ///
     /// The store runs on every execution of the call, not only when a
