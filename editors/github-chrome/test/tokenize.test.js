@@ -95,6 +95,42 @@ test("type aliases and protocol definitions", () => {
   assert.ok(protocol.some(([t, c]) => t === "define:" && c === "keyword"), JSON.stringify(protocol));
 });
 
+test("```beamtalk fences in doc comments are highlighted as code", () => {
+  const lines = [
+    "  /// Example:",
+    "  /// ```beamtalk",
+    '  /// x := #foo -> "hi"   // => 2',
+    "  /// ```",
+    "  count => self.count",
+  ];
+  const tokens = tokenizer.tokenizeLines(lines, true);
+  const at = (i) => tokens[i].map(([s, e, c]) => [lines[i].slice(s, e).trim(), c]);
+  assert.deepEqual(at(1), [["/// ```beamtalk", "comment"]]);
+  assert.deepEqual(at(2), [
+    ["///", "comment"],
+    [":=", "keyword"],
+    ["#foo", "constant"],
+    ["->", "keyword"],
+    ['"hi"', "string"],
+    ["// => 2", "comment"],
+  ]);
+  assert.deepEqual(at(3), [["/// ```", "comment"]]);
+  assert.ok(at(4).some(([t, c]) => t === "self" && c === "constant"), "code after the fence");
+});
+
+test("an unclosed doc fence ends at the first non-/// line", () => {
+  const lines = ["/// ```beamtalk", "/// x foo", "Object subclass: Foo"];
+  const tokens = tokenizer.tokenizeLines(lines, true);
+  const last = tokens[2].map(([s, e, c]) => [lines[2].slice(s, e), c]);
+  assert.deepEqual(last[0], ["Object", "type"]);
+});
+
+test("prose in doc comments stays a comment", () => {
+  assert.deepEqual(categorised("/// Answers `Result ok: nil` on success."), [
+    ["/// Answers `Result ok: nil` on success.", "comment"],
+  ]);
+});
+
 test("self and nil are constants", () => {
   const pairs = categorised("self foo ifNil: [nil]");
   assert.ok(pairs.some(([t, c]) => t === "self" && c === "constant"));
