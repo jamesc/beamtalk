@@ -11,6 +11,7 @@
 //! filesystem/offline — no REPL connection required, which is what lets both
 //! MCP tools work without a live workspace.
 
+use beamtalk_core::compilation::diagnostics_policy::is_live_recheck_failure;
 use beamtalk_core::semantic_analysis::protocol_source::{
     dedupe_provision_diagnostics, provision_report_target,
 };
@@ -36,6 +37,25 @@ pub(crate) struct LintResult {
     pub(crate) warnings: Vec<LintDiagnostic>,
     pub(crate) errors: Vec<LintDiagnostic>,
     pub(crate) total: usize,
+    /// Lint-severity diagnostics: the set plain CLI `beamtalk lint` fails on.
+    pub(crate) lint_failures: usize,
+    /// Diagnostics a REPL `load-project` rejects — any `Error` plus the
+    /// non-error `Dnu`/`Type` findings — classified by the shared
+    /// [`is_live_recheck_failure`] rule CLI `beamtalk lint
+    /// --warnings-as-errors` uses (BT-4336). File-level read errors are not
+    /// counted here; they are already in `errors`.
+    pub(crate) live_recheck_failures: usize,
+}
+
+impl LintResult {
+    /// Whether the `lint` tool reports failure (`is_error`). Without
+    /// `warnings_as_errors` only `errors` fail it; with it, it fails exactly
+    /// where CLI `beamtalk lint --warnings-as-errors` does — on Lint-severity
+    /// diagnostics or the live-recheck set — plus file-level errors (BT-4336).
+    pub(crate) fn fails(&self, warnings_as_errors: bool) -> bool {
+        !self.errors.is_empty()
+            || (warnings_as_errors && (self.lint_failures > 0 || self.live_recheck_failures > 0))
+    }
 }
 
 /// Run the shared lint analysis pipeline for a single
@@ -403,6 +423,8 @@ fn lint_error(file: &str, message: String) -> LintResult {
         warnings: vec![],
         errors: vec![diag],
         total: 1,
+        lint_failures: 0,
+        live_recheck_failures: 0,
     }
 }
 
@@ -775,6 +797,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
     // Pass 1: Parse files and extract class metadata.
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
+    let mut gate = GateCounts::default();
     let mut pass1 = run_lint_pass1(
         &extraction_files,
         &target_set,
@@ -871,6 +894,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
 
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
+            gate.count(diag);
             let line = diag.span.line_number(&source);
             push_lint_diagnostic(
                 diag,
@@ -889,6 +913,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         let Some((path, text)) = provision_report_target(&diag, &protocol_sources) else {
             continue;
         };
+        gate.count(&diag);
         let line = (!text.is_empty()).then(|| diag.span.line_number(text));
         push_lint_diagnostic(&diag, path, line, &mut warnings, &mut errors);
     }
@@ -898,5 +923,26 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         warnings,
         errors,
         total,
+        lint_failures: gate.lint,
+        live_recheck_failures: gate.live_recheck,
+    }
+}
+
+/// The CLI gate counts [`LintResult`] carries (BT-4336), tallied per
+/// reported diagnostic with the same rules CLI `beamtalk lint` applies.
+#[derive(Default)]
+struct GateCounts {
+    lint: usize,
+    live_recheck: usize,
+}
+
+impl GateCounts {
+    fn count(&mut self, diag: &beamtalk_core::source_analysis::Diagnostic) {
+        if diag.severity == Severity::Lint {
+            self.lint += 1;
+        }
+        if is_live_recheck_failure(diag) {
+            self.live_recheck += 1;
+        }
     }
 }

@@ -890,8 +890,9 @@ non-`error` `Dnu` or `Type` diagnostic" — the same two categories `trigger/4`
 treats as reload-relevant, minus the selector-name/classification narrowing
 that only makes sense relative to one specific change.
 
-`beamtalk lint --warnings-as-errors` reproduces this verdict in Rust
-(`live_recheck_verdict` in `crates/beamtalk-cli/src/commands/lint.rs`); both
+`beamtalk lint --warnings-as-errors` and MCP `lint` (`warnings_as_errors`)
+reproduce this verdict in Rust (`live_recheck_verdict` in
+`crates/beamtalk-core/src/compilation/diagnostics_policy.rs`); both
 are pinned to `test/fixtures/live_recheck_verdict_conformance.json`
 (BT-4377), so change the fixture, not just one side.
 """.

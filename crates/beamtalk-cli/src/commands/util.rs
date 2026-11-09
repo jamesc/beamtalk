@@ -179,32 +179,86 @@ pub(crate) fn protocol_hashes<'a>(
         })
 }
 
-/// Hash of the cross-file class surface contributed by trait flattening
-/// (BT-3674): the `ClassInfo` of each class in `flattened_names` (the classes
-/// declared in files with `uses:` lines) within `pkg_name`, sorted by name.
+/// Hash of the cross-file analysis surface every Pass 2 file type-checks
+/// against (BT-3674, generalised in BT-4336): every pre-loaded `ClassInfo`
+/// (the project's own — trait provisions already flattened in — and every
+/// dependency's), every pre-loaded `ProtocolInfo`, and every pre-loaded
+/// `AliasInfo`.
 ///
-/// A caller's type-check depends on these flattened surfaces, but its own
-/// source and the protocols *it* uses do not change when a provision in some
-/// other file is renamed — so `detect_changes` folds this into every file's
-/// cache key. `serde_json::to_value` yields key-sorted maps (the workspace
-/// does not enable `preserve_order`), so the `HashMap` fields of `ClassInfo`
-/// hash deterministically. Empty string when no class uses a protocol, which
-/// leaves every file's key untouched.
+/// A file's diagnostics depend on these signatures, but its own source does
+/// not change when a class it calls changes a return type, drops a method,
+/// or stops conforming to a protocol in another file or package — so
+/// `detect_changes` folds this into every file's cache key, and a
+/// byte-identical dependent is re-checked instead of replaying the
+/// diagnostics it had against the old signature. Only signature-bearing
+/// data is hashed: method doc comments and source spans are left out, so a
+/// doc edit or a line shift above a declaration rebuilds just its own file.
+///
+/// `serde_json::to_value` yields key-sorted maps (the workspace does not
+/// enable `preserve_order`), so the `HashMap` fields of `ClassInfo` hash
+/// deterministically; each list is sorted by `(package, name)` so input
+/// order does not matter either. Empty string when there is nothing
+/// cross-file to check against, which leaves every file's key untouched.
 #[must_use]
-pub(crate) fn class_surface_hash(
-    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
-    flattened_names: &[ecow::EcoString],
-    pkg_name: &str,
+pub(crate) fn analysis_surface_hash(
+    class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    protocol_infos: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
+    alias_infos: &[beamtalk_core::semantic_analysis::AliasInfo],
 ) -> String {
-    if flattened_names.is_empty() {
+    if class_infos.is_empty() && protocol_infos.is_empty() && alias_infos.is_empty() {
         return String::new();
     }
-    let mut infos: Vec<_> = all_class_infos
+    let mut classes: Vec<_> = class_infos
         .iter()
-        .filter(|c| c.package.as_deref() == Some(pkg_name) && flattened_names.contains(&c.name))
+        .map(|info| {
+            let mut info = info.clone();
+            for method in info.methods.iter_mut().chain(info.class_methods.iter_mut()) {
+                method.doc = None;
+            }
+            info
+        })
         .collect();
-    infos.sort_by(|a, b| a.name.cmp(&b.name));
-    surface_hash_of(serde_json::to_value(&infos))
+    classes.sort_by(|a, b| (&a.package, &a.name).cmp(&(&b.package, &b.name)));
+    let requirements = |reqs: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement]| {
+        reqs.iter()
+            .map(|r| serde_json::json!([r.selector.as_str(), r.arity, r.return_type.as_deref(), r.param_types]))
+            .collect::<Vec<_>>()
+    };
+    let mut protocols: Vec<_> = protocol_infos
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "package": p.package.as_deref(),
+                "name": p.name.as_str(),
+                "type_params": p.type_params,
+                "type_param_bounds": p.type_param_bounds,
+                "extending": p.extending.as_deref(),
+                "methods": requirements(&p.methods),
+                "class_methods": requirements(&p.class_methods),
+                "provided_selectors": p.provided_selectors,
+            })
+        })
+        .collect();
+    protocols.sort_by_key(|p| (p["package"].to_string(), p["name"].to_string()));
+    let mut aliases: Vec<_> = alias_infos
+        .iter()
+        .map(|a| {
+            serde_json::json!([
+                a.package.as_deref(),
+                a.name.as_str(),
+                a.annotation.type_name().as_str(),
+                a.is_internal,
+            ])
+        })
+        .collect();
+    aliases.sort_by_key(ToString::to_string);
+    surface_hash_of(serde_json::to_value(&classes).map(|classes| {
+        serde_json::json!({
+            "classes": classes,
+            "protocols": protocols,
+            "aliases": aliases,
+        })
+    }))
 }
 
 /// Hash a serialized class surface. A serialization failure must not collapse
@@ -215,7 +269,7 @@ fn surface_hash_of(value: serde_json::Result<serde_json::Value>) -> String {
         Ok(v) => sha256_hex(v.to_string().as_bytes()),
         Err(e) => {
             tracing::warn!(
-                "could not serialize trait-provided class surfaces ({e}); \
+                "could not serialize the cross-file analysis surface ({e}); \
                  rebuilding all files this build"
             );
             let nanos = SystemTime::now()
@@ -781,5 +835,68 @@ mod tests {
         let line = "x greet: \"hi // => bye\"  // => ok";
         let pos = find_assertion_marker_pos(line).expect("marker should be found");
         assert_eq!(&line[pos..], "// => ok");
+    }
+
+    /// BT-4336: the analysis surface hash moves with every signature a
+    /// dependent file type-checks against — a class method's return type,
+    /// a protocol requirement, a type alias — and stays put for edits that
+    /// cannot change a dependent's diagnostics: doc comments, and line
+    /// shifts that move the declarations' source spans.
+    #[test]
+    fn analysis_surface_hash_tracks_signatures_not_docs_or_spans() {
+        use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+        use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+        use beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry;
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
+        let hash = |source: &str| {
+            let (module, diags) = parse(lex_with_eof(source));
+            assert!(diags.is_empty(), "{diags:?}");
+            analysis_surface_hash(
+                &ClassHierarchy::extract_class_infos(&module),
+                &ProtocolRegistry::extract_protocol_infos(&module),
+                &AliasRegistry::extract_alias_infos(&module),
+            )
+        };
+        let source = |pad: &str, doc: &str, ret: &str, req: &str, alias: &str| {
+            format!(
+                "{pad}type Mode = {alias}\n\n\
+                 Protocol define: Labelled\n  label -> {req}\n\n\
+                 Value subclass: Lib\n\n  /// {doc}\n  label -> {ret} => \"x\"\n"
+            )
+        };
+        let base = hash(&source("", "Doc.", "String", "String", "#a | #b"));
+        assert!(!base.is_empty());
+        assert_eq!(
+            base,
+            hash(&source("", "Doc.", "String", "String", "#a | #b"))
+        );
+        assert_eq!(
+            base,
+            hash(&source("", "Reworded doc.", "String", "String", "#a | #b")),
+            "a doc-comment edit must not move the hash"
+        );
+        assert_eq!(
+            base,
+            hash(&source("\n\n", "Doc.", "String", "String", "#a | #b")),
+            "shifted spans must not move the hash"
+        );
+        for (what, changed) in [
+            (
+                "class method return type",
+                source("", "Doc.", "Object", "String", "#a | #b"),
+            ),
+            (
+                "protocol requirement",
+                source("", "Doc.", "String", "Object", "#a | #b"),
+            ),
+            (
+                "type alias",
+                source("", "Doc.", "String", "String", "#a | #c"),
+            ),
+        ] {
+            assert_ne!(base, hash(&changed), "a {what} change must move the hash");
+        }
+        assert_eq!(analysis_surface_hash(&[], &[], &[]), "");
     }
 }

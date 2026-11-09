@@ -345,6 +345,59 @@ fn build_recompiles_unchanged_file_on_diagnostics_cache_miss() {
         );
 }
 
+/// BT-4336 (buccaneer-style cache staleness): a byte-identical file must be
+/// re-checked when a signature it type-checks against changes in another
+/// file. `App.bt` never changes; only `Lib label`'s declared return type
+/// does, which makes `App shout -> String` a type error. Before, the second
+/// build replayed `App.bt`'s clean cached diagnostics and passed code a
+/// REPL `load-project` rejects; only `--force` or `lint
+/// --warnings-as-errors` saw the error. A doc-comment-only edit keeps the
+/// signature equal and must not rebuild `App.bt`.
+#[test]
+fn build_rechecks_unchanged_dependent_when_dependency_signature_changes() {
+    let project = tempfile::tempdir().expect("create tempdir");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("src")).expect("mkdir src");
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        "[package]\nname = \"surface_probe\"\nversion = \"0.1.0\"\n\n\
+         [diagnostics]\ntype = \"error\"\n",
+    )
+    .expect("write beamtalk.toml");
+    let lib = root.join("src/Lib.bt");
+    let write_lib = |doc: &str, return_type: &str, body: &str| {
+        std::fs::write(
+            &lib,
+            format!("Value subclass: Lib\n\n  /// {doc}\n  label -> {return_type} => {body}\n"),
+        )
+        .expect("write src/Lib.bt");
+    };
+    write_lib("The label.", "String", "\"x\"");
+    std::fs::write(
+        root.join("src/App.bt"),
+        "Value subclass: App\n\n  shout -> String => Lib new label\n",
+    )
+    .expect("write src/App.bt");
+
+    let build = || {
+        cli_common::beamtalk()
+            .current_dir(root)
+            .arg("build")
+            .assert()
+    };
+    build().success();
+
+    // Doc-only edit: the signature is unchanged, so `App.bt` is not rebuilt.
+    write_lib("The label, documented.", "String", "\"x\"");
+    build().success().stderr(contains("Compiling 1 of 2 files"));
+
+    // Signature change with `App.bt` byte-identical: the build must fail.
+    write_lib("The label, documented.", "Integer", "1");
+    build()
+        .failure()
+        .stderr(contains("declares return type String, but body returns"));
+}
+
 // ---------------------------------------------------------------------------
 // E0401/E0402 visibility checks must fire at build time
 // ---------------------------------------------------------------------------

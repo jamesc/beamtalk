@@ -20,7 +20,7 @@ use crate::server::{BeamtalkMcp, ToolTimer};
 impl BeamtalkMcp {
     /// Run lint checks on a `.bt` source file or directory.
     #[tool(
-        description = "Run style and redundancy lint checks on a .bt source file or directory. Returns structured diagnostics with file, line, message, and severity. Use path=. for the current directory."
+        description = "Run style and redundancy lint checks on a .bt source file or directory. Returns structured diagnostics with file, line, message, and severity, plus lint_failures/live_recheck_failures gate counts. Use path=. for the current directory; set warnings_as_errors=true to fail where `beamtalk lint --warnings-as-errors` (REPL load-project parity) does."
     )]
     pub(crate) async fn lint(
         &self,
@@ -28,12 +28,13 @@ impl BeamtalkMcp {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::new("lint");
         let path = params.path.unwrap_or_else(|| ".".to_string());
-        tracing::debug!(tool = "lint", path = %path, "tool invoked");
+        let warnings_as_errors = params.warnings_as_errors.unwrap_or(false);
+        tracing::debug!(tool = "lint", path = %path, warnings_as_errors, "tool invoked");
         // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
         let result = tokio::task::spawn_blocking(move || run_lint_structured(&path))
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        let has_errors = !result.errors.is_empty();
+        let has_errors = result.fails(warnings_as_errors);
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();
         let mut call_result = CallToolResult::default();

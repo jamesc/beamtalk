@@ -266,7 +266,7 @@ fn execute_build_passes(
         &BuildGraphEdges {
             file_protocol_uses,
             protocol_hashes,
-            trait_surface_hash: index.trait_surface_hash.clone(),
+            analysis_surface_hash: index.analysis_surface_hash.clone(),
             stub_inputs_hash,
         },
     );

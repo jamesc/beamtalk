@@ -301,9 +301,10 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
     ).
 
 %% BT-4377: shared Rust/Erlang conformance corpus for the REPL load verdict.
-%% `crates/beamtalk-cli/src/commands/lint.rs`'s
+%% `crates/beamtalk-core/src/compilation/diagnostics_policy.rs`'s
 %% `live_recheck_verdict_matches_shared_corpus` asserts the same rows against
-%% `beamtalk lint --warnings-as-errors`'s `live_recheck_verdict`. A row is a
+%% `live_recheck_verdict`, the rule `beamtalk lint --warnings-as-errors` and
+%% MCP `lint` share. A row is a
 %% recheck finding here exactly when its verdict is `finding`; `compile_error`
 %% rows fail the compile before the recheck runs, so this filter drops them.
 %% A `null` category is sent without the key, as the compiler port does.

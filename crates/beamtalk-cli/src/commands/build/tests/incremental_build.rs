@@ -510,7 +510,7 @@ fn test_detect_changes_qualified_uses_follows_the_named_packages_protocol() {
     );
 
     // Only the body of the project's own protocol changes: selectors and types,
-    // hence `trait_surface_hash`, stay put, so the self-qualified user is
+    // hence `analysis_surface_hash`, stay put, so the self-qualified user is
     // rebuilt through its protocol hash alone.
     let own_edit = build(false, "aTag2", "bTag2", "\"hello\"");
     assert_eq!(
@@ -870,7 +870,7 @@ fn detect_and_record(project: &Utf8Path) -> (Vec<String>, Vec<String>) {
         &BuildGraphEdges {
             file_protocol_uses: index.file_protocol_uses.clone(),
             protocol_hashes,
-            trait_surface_hash: index.trait_surface_hash.clone(),
+            analysis_surface_hash: index.analysis_surface_hash.clone(),
             ..BuildGraphEdges::default()
         },
     );
