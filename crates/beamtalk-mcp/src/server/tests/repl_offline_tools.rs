@@ -335,14 +335,8 @@ async fn connect_refuses_node_with_stale_toolchain_version() {
     // of attaching (tools must not silently fall back to offline mode).
     // Bypasses `fake_mcp` on purpose: that harness models a
     // version-matching node.
-    let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(|request| {
-        vec![text(&serde_json::json!({
-            "id": request.get("id"),
-            "status": ["done"],
-            "ops": {},
-            "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
-        }))]
-    });
+    let responder: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &stale_versions())]);
     let fake = spawn_ws(HandshakeMode::Ok, "fake-session", responder).await;
     let err = crate::client::ReplClient::connect(fake.port, "test-cookie", None)
         .await
@@ -350,6 +344,53 @@ async fn connect_refuses_node_with_stale_toolchain_version() {
     assert!(err.contains("version mismatch"), "got: {err}");
     assert!(err.contains("0.0.0-stale"), "got: {err}");
     assert!(err.contains("beamtalk workspace stop"), "got: {err}");
+}
+
+#[tokio::test]
+async fn reconnect_fails_when_restarted_node_has_stale_versions() {
+    // BT-4329: the node restarts on the same port with a different
+    // toolchain. Connection 1 is a version-matching node that drops the
+    // socket on the first real request; `send`'s retry reconnects to the
+    // cached port and lands on connection 2, whose `describe` reports stale
+    // versions. `ReplClient::reconnect` must refuse it rather than replay
+    // the request against the stale node.
+    let matching_then_close: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| {
+            if request.get("op").and_then(serde_json::Value::as_str) == Some("describe") {
+                vec![describe_reply(request, &matching_versions())]
+            } else {
+                vec![tokio_tungstenite::tungstenite::Message::Close(None)]
+            }
+        });
+    let stale: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &stale_versions())]);
+    let fake = spawn_sequence(
+        "fake-session",
+        vec![
+            (HandshakeMode::Ok, matching_then_close),
+            (HandshakeMode::Ok, stale),
+        ],
+    )
+    .await;
+
+    let client = crate::client::ReplClient::connect(fake.port, "test-cookie", None)
+        .await
+        .expect("connection 1 is version-matching");
+    let err = client
+        .list_classes(None)
+        .await
+        .expect_err("reconnect against a stale node should fail");
+    assert!(err.contains("version mismatch"), "got: {err}");
+    assert!(err.contains("0.0.0-stale"), "got: {err}");
+
+    // Connection 2 saw only its handshake `auth` and the version-check
+    // `describe` — the retried request never reached the stale node.
+    let second = fake.seen_per_connection[1].lock().await;
+    let ops: Vec<&str> = second
+        .iter()
+        .filter_map(|frame| frame.get("op").and_then(serde_json::Value::as_str))
+        .collect();
+    assert_eq!(ops, ["describe"], "connection 2 frames: {second:?}");
 }
 
 #[tokio::test]

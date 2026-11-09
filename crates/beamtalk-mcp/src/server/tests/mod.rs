@@ -58,7 +58,10 @@ pub(crate) fn running_as_root() -> bool {
 // module's doc comment for the full extraction rationale). `FakeRepl`
 // aliases the shared server type under this file's existing name, so
 // every call site below (`fake.port`) is unchanged.
-pub(crate) use beamtalk_repl_protocol::test_support::{HandshakeMode, spawn as spawn_ws, text};
+pub(crate) use beamtalk_repl_protocol::test_support::{
+    HandshakeMode, describe_reply, matching_versions, spawn as spawn_ws, spawn_sequence,
+    stale_versions, text,
+};
 
 pub(crate) type FakeRepl = beamtalk_repl_protocol::test_support::FakeWsServer;
 
@@ -88,16 +91,7 @@ pub(crate) async fn spawn_fake_repl(responder: FakeReplResponder) -> FakeRepl {
         let is_first_describe = request.get("op").and_then(|v| v.as_str()) == Some("describe")
             && !version_check_done.swap(true, Ordering::SeqCst);
         if is_first_describe {
-            let versions = serde_json::json!({
-                "beamtalk": beamtalk_repl_protocol::handshake::beamtalk_version(),
-                "protocol": beamtalk_repl_protocol::handshake::PROTOCOL_VERSION,
-            });
-            return vec![text(&serde_json::json!({
-                "id": request.get("id"),
-                "status": ["done"],
-                "ops": {},
-                "versions": versions,
-            }))];
+            return vec![describe_reply(request, &matching_versions())];
         }
         let mut reply = responder(request);
         if reply.get("id").is_none() {

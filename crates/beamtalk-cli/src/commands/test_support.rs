@@ -262,10 +262,7 @@ pub(crate) fn fake_node_handshake(
     Some(versions)
 }
 
-/// The `versions` map a node built from an older toolchain reports.
-pub(crate) fn stale_versions() -> serde_json::Value {
-    serde_json::json!({"beamtalk": "0.0.0-stale", "protocol": "0.0"})
-}
+pub(crate) use beamtalk_repl_protocol::test_versions::stale_versions;
 
 /// When `req` is a `describe`, answer it with `versions` (or with no
 /// `versions` map at all, like a node predating the version handshake, when
@@ -278,11 +275,10 @@ pub(crate) fn answer_describe(
     if req.get("op").and_then(serde_json::Value::as_str) != Some("describe") {
         return false;
     }
-    let mut reply = serde_json::json!({"id": req.get("id"), "status": ["done"], "ops": {}});
-    if let Some(versions) = versions {
-        reply["versions"] = versions.clone();
-    }
-    send_json(ws, &reply);
+    send_json(
+        ws,
+        &beamtalk_repl_protocol::test_versions::describe_reply_json(req, versions),
+    );
     true
 }
 

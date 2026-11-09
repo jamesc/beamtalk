@@ -26,6 +26,10 @@ pub mod test_ports;
 /// `test` Cargo feature in their `[dev-dependencies]`.
 #[cfg(any(test, feature = "test"))]
 pub mod test_support;
+/// Test-only version-lock fixtures (stale/matching `versions`, `describe`
+/// replies; no async deps). Same gating as [`test_ports`].
+#[cfg(any(test, feature = "test-ports"))]
+pub mod test_versions;
 
 pub use request::{RequestBuilder, next_msg_id};
 pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, Warning};
