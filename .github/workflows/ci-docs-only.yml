@@ -8,6 +8,10 @@
 # check in branch protection, GitHub then waits forever for a status that
 # will never arrive, blocking merge on doc-only PRs.
 #
+# Corpus sources under docs/ (docs/learning/**, docs/beamtalk-language-features.md)
+# are excluded here so they run ci.yml's real check-corpus (BT-4554); build-corpus's
+# docs_corpus_sources_trigger_full_ci test enforces that.
+#
 # This workflow triggers on the exact inverse paths and reports an
 # immediate success for the same job name, satisfying the required check.
 # See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#example-excluding-branches-and-tags
@@ -21,6 +25,7 @@ on:
       - '*.md'
       - 'docs/**'
       - '!docs/learning/**'
+      - '!docs/beamtalk-language-features.md'
       - 'LICENSE'
       - 'SECURITY.md'
       - '.github/skills/**'
@@ -31,6 +36,7 @@ on:
       - '*.md'
       - 'docs/**'
       - '!docs/learning/**'
+      - '!docs/beamtalk-language-features.md'
       - 'LICENSE'
       - 'SECURITY.md'
       - '.github/skills/**'
