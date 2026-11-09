@@ -1013,7 +1013,8 @@ Below the window is therefore not "untested" but a guaranteed boot crash,
 so it fails fast: `beamtalk doctor` reports `Erlang/OTP 27 is
 unsupported — Beamtalk needs OTP 28+`, and the commands whose node must
 load the toolchain's code (`build`, `check`, every compile through
-`BeamCompiler::compile_batch`, and the workspace node behind `repl`/`run`)
+`BeamCompiler::compile_batch`, the workspace node behind `repl`/`run`, and
+the `repl --foreground` node)
 stop with the same line before starting `erl`. OTP type-spec extraction
 (`lint`, `type-coverage`, `warm-otp-cache`) is not guarded: a failed
 extraction degrades those types to `Dynamic` rather than crashing. Above
