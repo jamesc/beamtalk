@@ -219,7 +219,7 @@ pub fn peel_operand_parens(module: &mut Module) {
 }
 
 /// `module` with every redundant send-operand wrapper removed: borrowed as it
-/// is when it is already canonical (one [`has_parenthesised_operand`] scan),
+/// is when it is already canonical (one [`needs_normalising`] scan),
 /// otherwise a peeled clone.
 ///
 /// The one entry for a reader that holds a parsed module by shared reference
@@ -434,15 +434,16 @@ pub fn restore_operand_parens_in_scope(
     }
 }
 
-/// `true` if [`peel_operand_parens`] would change `module`: a cheap scan so
-/// callers holding a shared reference can skip cloning a module that is
-/// already canonical.
+/// `true` if `module` has a send operand [`peel_operand_parens`] would
+/// unwrap. Not the whole pass: it ignores the unary loops the pass also
+/// canonicalises. To decide whether to clone, use [`needs_normalising`].
 #[must_use]
 pub fn has_parenthesised_operand(module: &Module) -> bool {
     first_parenthesised_operand(module).is_some()
 }
 
-/// `true` if [`peel_operand_parens_expr_recording`] would change `expr`.
+/// `true` if `expr` has a send operand [`peel_operand_parens_expr_recording`]
+/// would unwrap (unary loops not included: see [`expr_needs_normalising`]).
 #[must_use]
 pub fn expr_has_parenthesised_operand(expr: &Expression) -> bool {
     expr_first_parenthesised_operand(expr).is_some()
