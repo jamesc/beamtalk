@@ -56,6 +56,18 @@ pub enum DynamicReason {
     /// its own diagnostic (if any) at its source, so this reason does not
     /// re-warn "Dynamic in typed class" on the enclosing expression.
     DynamicBranch,
+    /// A send whose selector the receiver's *visible* method surface does not
+    /// define (BT-4526) — e.g. `HPACK validateHeader:value:` after the method
+    /// was removed. The receiver is well-typed; it is the selector that is
+    /// unresolved.
+    ///
+    /// Only produced where the checker could not prove a does-not-understand
+    /// (the receiver's surface is `Open` — e.g. the pre-WS3 dependency
+    /// guard, ADR 0100 Rule 2 — so an unseen extension might still define
+    /// it). Where the surface is `ClosedComplete` the DNU diagnostic is the
+    /// root cause and the send's result is `DynamicReceiver` instead, so the
+    /// "Dynamic in typed class" warning does not repeat it.
+    UnresolvedSelector,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -74,6 +86,7 @@ impl DynamicReason {
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
             Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
             Self::DynamicBranch => Some("dynamic branch"),
+            Self::UnresolvedSelector => Some("unresolved selector"),
             Self::Unknown => None,
         }
     }
@@ -1727,6 +1740,10 @@ pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
 pub(in crate::semantic_analysis::type_checker) struct DynamicInTypedClass {
     pub(in crate::semantic_analysis::type_checker) class_name: EcoString,
     pub(in crate::semantic_analysis::type_checker) description: &'static str,
+    /// For [`DynamicReason::UnresolvedSelector`], the unresolved selector, so
+    /// the diagnostic names the real problem rather than suggesting a type
+    /// annotation (BT-4526). `None` for every other reason.
+    pub(in crate::semantic_analysis::type_checker) unresolved_selector: Option<EcoString>,
 }
 
 #[cfg(test)]
