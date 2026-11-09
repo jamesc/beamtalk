@@ -7655,6 +7655,7 @@ dispatch follows the class.
 // Construction
 bin := Binary fromBytes: #(104, 101, 108, 108, 111)
 bin := Binary fromIolist: #("hello", " ", "world")
+bin := Binary empty                  // canonical empty binary (<<>>)
 bin := <<104, 101, 108, 108, 111>>   // bit syntax, see Binary construction (ADR 0143)
 
 // Byte access (1-based, Collection protocol) — elements are byte Integers
