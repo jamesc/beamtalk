@@ -957,3 +957,140 @@ impl CoreErlangGenerator {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use beamtalk_core::ast::{Block, Expression, ExpressionStatement, Identifier, Module};
+    use beamtalk_core::source_analysis::Span;
+    use beamtalk_core::test_helpers::test_support::make_actor_class;
+
+    use crate::core_erlang::CoreErlangGenerator;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    #[test]
+    fn generate_method_table_empty_class() {
+        let class = make_actor_class("Counter");
+        let module = Module::with_classes(vec![class], s());
+        let generator = CoreErlangGenerator::new("counter");
+        let output = generator
+            .generate_method_table(&module)
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'method_table'/0"), "got: {output}");
+        assert!(
+            output.contains("~{}~"),
+            "empty class should produce empty map, got: {output}"
+        );
+    }
+
+    #[test]
+    fn generate_method_table_expression_module() {
+        // Covers the script/workspace expression-based path in
+        // collect_primary_method_names_and_arities: top-level `name := [block]`
+        // assignments are collected as method entries.
+        let assignment = ExpressionStatement::bare(Expression::Assignment {
+            target: Box::new(Expression::Identifier(Identifier::new("add", s()))),
+            value: Box::new(Expression::Block(Block::new(vec![], vec![], s()))),
+            type_annotation: None,
+            span: s(),
+        });
+        let module = Module::new(vec![assignment], s());
+        let generator = CoreErlangGenerator::new("script");
+        let output = generator
+            .generate_method_table(&module)
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'method_table'/0"), "got: {output}");
+        assert!(
+            output.contains("'add'"),
+            "expression-based method should appear in table, got: {output}"
+        );
+    }
+
+    #[test]
+    fn generate_has_method_script_module_uses_member_check() {
+        // Covers the script/workspace branch in generate_has_method: a module
+        // with no class definition falls back to the plain lists:member form.
+        let module = Module::new(vec![], s());
+        let generator = CoreErlangGenerator::new("script");
+        let output = generator
+            .generate_has_method(&module)
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'has_method'/1"), "got: {output}");
+        assert!(
+            output.contains("'lists':'member'"),
+            "script path should use lists:member check, got: {output}"
+        );
+    }
+
+    #[test]
+    fn generate_has_method_actor_class() {
+        // Covers the standard class-based branch in generate_has_method:
+        // an Actor subclass gets the full extension/superclass-aware form,
+        // which delegates to beamtalk_extensions:has and
+        // beamtalk_dispatch:responds_to for superclass checking.
+        let class = make_actor_class("Counter");
+        let module = Module::with_classes(vec![class], s());
+        let generator = CoreErlangGenerator::new("counter");
+        let output = generator
+            .generate_has_method(&module)
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'has_method'/1"), "got: {output}");
+        assert!(
+            output.contains("'Counter'"),
+            "class-based has_method should reference class name, got: {output}"
+        );
+        assert!(
+            output.contains("'beamtalk_extensions':'has'"),
+            "class-based has_method should delegate to beamtalk_extensions:has, got: {output}"
+        );
+        assert!(
+            output.contains("'beamtalk_dispatch':'responds_to'"),
+            "class-based has_method should delegate to beamtalk_dispatch:responds_to, got: {output}"
+        );
+    }
+
+    #[test]
+    fn generate_class_name_function_emits_class_atom() {
+        // Covers generate_class_name_function's module-name-to-CamelCase fallback:
+        // when no class identity is explicitly set, class_name/0 is derived from the
+        // module name ("my_counter" -> 'MyCounter'). The ClassDefinition passed to
+        // the function is irrelevant — generate_class_name_function ignores _module
+        // and uses self.class_name() which falls back to the module name conversion.
+        let class = make_actor_class("Counter");
+        let module = Module::with_classes(vec![class], s());
+        let generator = CoreErlangGenerator::new("my_counter");
+        let output = generator
+            .generate_class_name_function(&module)
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'class_name'/0"), "got: {output}");
+        assert!(
+            output.contains("'MyCounter'"),
+            "class_name/0 should use module-name-to-CamelCase fallback 'MyCounter', got: {output}"
+        );
+    }
+
+    #[test]
+    fn generate_safe_dispatch_emits_both_arities_and_nlr_relay() {
+        // Covers generate_safe_dispatch: emits safe_dispatch/3 (derives Self) and
+        // safe_dispatch/4 (caller supplies Self) with the NLR relay clause
+        // (BT-3580/BT-3582) that returns '$bt_nlr' throws as bare error values.
+        let mut generator = CoreErlangGenerator::new("counter");
+        let output = generator
+            .generate_safe_dispatch()
+            .unwrap()
+            .to_pretty_string();
+        assert!(output.contains("'safe_dispatch'/3"), "got: {output}");
+        assert!(output.contains("'safe_dispatch'/4"), "got: {output}");
+        assert!(
+            output.contains("'$bt_nlr'"),
+            "safe_dispatch/4 should relay '$bt_nlr' throws as bare error values, got: {output}"
+        );
+    }
+}
