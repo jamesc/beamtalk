@@ -13,7 +13,6 @@ use crate::decode::{
 use crate::diagnostics::{
     DiagInfo, filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
 };
-use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_ok_response, diagnostic_error_response, error_response, format_codegen_error,
     with_verifier_warnings,
@@ -60,20 +59,17 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // project-first, mirroring the build's merge order.
     // BT-4378: a `load_project` tags its compiles with one `project_batch`
     // token, so the project scope is verified once per batch, not per file.
-    let project = if stdlib_mode {
+    let scope_path = if stdlib_mode {
         None
     } else {
-        let batch = map_get(request, "project_batch").and_then(term_to_string);
-        map_get(request, "source_path")
-            .and_then(term_to_string)
-            .and_then(|path| {
-                crate::project_context::project_context_for_source(&path, batch.as_deref())
-            })
+        map_get(request, "source_path").and_then(term_to_string)
     };
-    let pre_loaded_aliases = match project.as_ref() {
-        Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),
-        None => session_aliases,
-    };
+    let batch = map_get(request, "project_batch").and_then(term_to_string);
+    let scope =
+        crate::project_context::RequestScope::for_source(scope_path.as_deref(), batch.as_deref());
+    // A file compile's source is its whole file: it declares the file's own
+    // aliases, so the on-disk copy's are not pre-loaded on top (BT-4325).
+    let pre_loaded_aliases = scope.whole_file_aliases(session_aliases);
     // ADR 0127 §10a / BT-3593: the live-reload fan-out recompiles a
     // protocol's users from their own files, one `compile` request per file
     // — each such request carries the just-edited protocol's full source
@@ -101,11 +97,6 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // `CodegenOptions::with_analysis` so it doesn't re-derive the class
     // hierarchy, semantic facts, and inferred method return types from
     // scratch.
-    let default_project = beamtalk_core::semantic_analysis::ProjectAnalysisContext::default();
-    let (overrides, analysis_project) = match project.as_ref() {
-        Some(project) => (&project.diagnostics_table, &project.analysis_project),
-        None => (diagnostics_overrides(), &default_project),
-    };
     let (mut all_diagnostics, analysis) =
         beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
@@ -115,8 +106,8 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
             pre_loaded_protocols,
             pre_loaded_protocol_defs,
             pre_loaded_aliases.clone(),
-            overrides,
-            analysis_project,
+            scope.diagnostics_table(),
+            scope.analysis_project(),
         );
     let referenced_aliases = analysis.referenced_aliases.clone();
 
