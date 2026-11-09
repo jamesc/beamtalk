@@ -17,7 +17,7 @@
 //! an updated copy has that copy thrown away, because the next message goes
 //! to the original receiver. See [`cascade_drops_update`].
 
-use crate::ast::{CascadeMessage, Expression, MessageSelector};
+use crate::ast::{CascadeMessage, Expression, Literal, MessageSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -154,11 +154,7 @@ impl TypeChecker {
             }
             let dropped_name = dropped.name();
             let next_name = next.name();
-            let receiver_text = match cascade_target {
-                Expression::Identifier(id) => id.name.to_string(),
-                Expression::Super(_) => "super".to_string(),
-                _ => "…".to_string(),
-            };
+            let receiver_text = receiver_display(cascade_target);
             let display = InferredType::class_name_for_diagnostic(class_name.as_str());
             self.diagnostics.push(
                 Diagnostic::warning(
@@ -222,6 +218,22 @@ pub fn cascade_drops_update(
     }
 }
 
+/// The cascade's shared receiver as written, for the nested-form help text:
+/// an identifier, `super`, a class reference, or a simple literal (integer,
+/// symbol, string) renders through the shared unparser; any other receiver
+/// expression is elided as `…`.
+fn receiver_display(receiver: &Expression) -> String {
+    match receiver {
+        Expression::Identifier(_)
+        | Expression::Super(_)
+        | Expression::ClassReference { .. }
+        | Expression::Literal(Literal::Integer(_) | Literal::Symbol(_) | Literal::String(_), _) => {
+            crate::unparse::unparse_expression(receiver).to_pretty_string()
+        }
+        _ => "…".to_string(),
+    }
+}
+
 /// A selector rendered as a send with its arguments elided (`withX: …`,
 /// `+ …`, `negated`), for the nested-form help text.
 fn send_shape(selector: &MessageSelector) -> String {
@@ -233,5 +245,61 @@ fn send_shape(selector: &MessageSelector) -> String {
             .map(|p| format!("{} …", p.keyword))
             .collect::<Vec<_>>()
             .join(" "),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::receiver_display;
+    use crate::ast::{Expression, Identifier, Literal, MessageSelector};
+    use crate::source_analysis::Span;
+
+    fn span() -> Span {
+        Span::new(0, 1)
+    }
+
+    fn ident(name: &str) -> Identifier {
+        Identifier::new(name, span())
+    }
+
+    fn lit(literal: Literal) -> Expression {
+        Expression::Literal(literal, span())
+    }
+
+    #[test]
+    fn receiver_display_renders_simple_receivers_as_written() {
+        let class_ref = Expression::ClassReference {
+            name: ident("Point"),
+            package: None,
+            span: span(),
+        };
+        let qualified = Expression::ClassReference {
+            name: ident("Parser"),
+            package: Some(ident("json")),
+            span: span(),
+        };
+        assert_eq!(receiver_display(&class_ref), "Point");
+        assert_eq!(receiver_display(&qualified), "json@Parser");
+        assert_eq!(receiver_display(&lit(Literal::Integer(0))), "0");
+        assert_eq!(receiver_display(&lit(Literal::Symbol("a".into()))), "#a");
+        assert_eq!(
+            receiver_display(&lit(Literal::String("ab".into()))),
+            "\"ab\""
+        );
+        assert_eq!(receiver_display(&Expression::Identifier(ident("p"))), "p");
+        assert_eq!(receiver_display(&Expression::Super(span())), "super");
+    }
+
+    #[test]
+    fn receiver_display_elides_other_receivers() {
+        let send = Expression::MessageSend {
+            receiver: Box::new(Expression::Identifier(ident("p"))),
+            selector: MessageSelector::Unary("next".into()),
+            arguments: vec![],
+            is_cast: false,
+            span: span(),
+        };
+        assert_eq!(receiver_display(&lit(Literal::Float(1.5))), "…");
+        assert_eq!(receiver_display(&send), "…");
     }
 }
