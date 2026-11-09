@@ -18,9 +18,9 @@
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySegmentValue, BinarySignedness,
-    Block, BlockParameter, CascadeMessage, Expression, ExpressionStatement, Identifier,
-    KeywordPart, Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm, MessageSelector,
-    Pattern, StringSegment, binary_literal_size,
+    Block, BlockParameter, CascadeMessage, CommentAttachment, Expression, ExpressionStatement,
+    Identifier, KeywordPart, Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm,
+    MessageSelector, Pattern, StringSegment, binary_literal_size,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -544,18 +544,157 @@ impl Parser {
         })
     }
 
-    /// Parses a cascade (multiple messages to the same receiver).
+    /// Parses a cascade (multiple messages to the same receiver) or a
+    /// pipeline (each stage sent to the previous stage's result).
     ///
-    /// Syntax: `receiver message1; message2; message3`
+    /// Syntax: `receiver message1; message2; message3` or
+    /// `receiver message1 |> message2 |> message3` (ADR 0145).
     fn parse_cascade(&mut self) -> Expression {
-        let receiver = self.parse_keyword_message();
+        let head = self.parse_keyword_message();
+
+        if self.check(&TokenKind::PipeGt) {
+            let pipeline = self.parse_pipeline(head);
+            if self.check(&TokenKind::Semicolon) {
+                self.report_cascade_pipeline_mix();
+                // Recover: parse the cascade onto the pipeline's last send
+                // so its messages do not surface as stray statements.
+                self.advance();
+                return self.parse_cascade_messages(pipeline);
+            }
+            return pipeline;
+        }
 
         // Check if this is a cascade
         if !self.match_token(&TokenKind::Semicolon) {
-            return receiver;
+            return head;
         }
+        let cascade = self.parse_cascade_messages(head);
+        if self.check(&TokenKind::PipeGt) {
+            self.report_cascade_pipeline_mix();
+            // Recover: consume the stages so they do not surface as a stray
+            // statement; the program is in error, so the cascade is answered.
+            let mark = self.pipeline_sends.len();
+            let _ = self.parse_pipeline(cascade.clone());
+            self.pipeline_sends.truncate(mark);
+        }
+        cascade
+    }
 
-        // This is a cascade - parse additional messages
+    /// Reports `;` and `|>` used in one expression without parentheses
+    /// (ADR 0145), at the current (offending) token.
+    fn report_cascade_pipeline_mix(&mut self) {
+        let span = self.current_token().span();
+        self.diagnostics.push(
+            Diagnostic::error(
+                "cannot mix cascade `;` and pipeline `|>` in one expression; \
+                 parenthesise the part you mean",
+                span,
+            )
+            .with_hint("write `(a m1 |> m2) m3; m4`, or bind the pipeline to a local first"),
+        );
+    }
+
+    /// Parses `( '|>' stage )+` after `head`, building the left-nested sends
+    /// it means: `recv m1 |> m2 |> m3` is `((recv m1) m2) m3` (ADR 0145).
+    ///
+    /// There is no pipeline node. Each stage is parsed as an ordinary keyword
+    /// expression whose receiver is the previous stage's value, so the tree
+    /// is the one the hand-nested form builds, with the same
+    /// `receiver.span().merge(message end)` spans. The send each `|>`
+    /// introduces is recorded, with the comments written before that `|>`,
+    /// in `Parser::pipeline_sends`, so the unparser can print the `|>` back.
+    fn parse_pipeline(&mut self, head: Expression) -> Expression {
+        let mut value = head;
+        while self.check(&TokenKind::PipeGt) {
+            // Comments between the previous stage and this `|>` attach to the
+            // send this `|>` introduces (see `ast::pipeline`): an end-of-line
+            // comment after the previous stage, and comments on their own
+            // lines before the `|>`.
+            let mut comments = self.collect_comment_attachment();
+            comments.trailing = self.collect_trailing_comment();
+            self.advance(); // consume `|>`
+            value = self.parse_pipeline_stage(value, comments);
+        }
+        value
+    }
+
+    /// Parses one pipeline stage with `receiver` (the previous stage's value)
+    /// supplied:
+    ///
+    /// ```text
+    /// stage := unary-message+ binary-tail? keyword-message? | keyword-message
+    /// ```
+    ///
+    /// So `|> keys sorted`, `|> foo at: 1` and `|> size + 1` are each one
+    /// stage. This is the keyword-expression parser with the receiver
+    /// supplied, not [`Self::parse_cascade_message`], which parses a single
+    /// message. The keyword tail keeps `should_stop_keyword_continuation`, so
+    /// a final keyword stage does not swallow the next method header.
+    fn parse_pipeline_stage(
+        &mut self,
+        receiver: Expression,
+        comments: CommentAttachment,
+    ) -> Expression {
+        let receiver_span = receiver.span();
+        match self.current_kind() {
+            TokenKind::Identifier(name) => {
+                // The first unary message of a stage may sit on the line
+                // after a trailing `|>`; later ones follow the usual rule.
+                let selector = MessageSelector::Unary(name.clone());
+                let tok = self.advance();
+                let first = Expression::MessageSend {
+                    receiver: Box::new(receiver),
+                    selector,
+                    arguments: Vec::new(),
+                    is_cast: false,
+                    span: receiver_span.merge(tok.span()),
+                };
+                self.pipeline_sends.push((first.span(), comments));
+                let unary = self.parse_unary_tail(first);
+                let binary = self.parse_binary_tail(unary, 0);
+                self.parse_keyword_tail(binary)
+            }
+            TokenKind::Keyword(_) => {
+                let send = self.parse_keyword_tail(receiver);
+                if send.span() == receiver_span {
+                    // The keyword starts the next class member, not a message.
+                    self.report_missing_pipeline_stage();
+                } else {
+                    self.pipeline_sends.push((send.span(), comments));
+                }
+                send
+            }
+            TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
+                let span = self.current_token().span();
+                self.diagnostics.push(
+                    Diagnostic::error("a pipeline stage cannot start with a binary message", span)
+                        .with_hint("parenthesise the left side: `(…) + 1`"),
+                );
+                // Recover: parse the binary tail so its operand does not
+                // surface as a stray statement.
+                let binary = self.parse_binary_tail(receiver, 0);
+                self.parse_keyword_tail(binary)
+            }
+            _ => {
+                self.report_missing_pipeline_stage();
+                receiver
+            }
+        }
+    }
+
+    /// Reports a `|>` not followed by a message, at the current token.
+    fn report_missing_pipeline_stage(&mut self) {
+        let span = self.current_token().span();
+        self.diagnostics.push(
+            Diagnostic::error("expected a message after `|>`", span).with_hint(
+                "`|>` sends a message to the previous result; it does not apply a function",
+            ),
+        );
+    }
+
+    /// Parses the `; message` parts of a cascade whose first `;` has been
+    /// consumed, onto `receiver` (the cascade's first send).
+    fn parse_cascade_messages(&mut self, receiver: Expression) -> Expression {
         let mut messages = Vec::new();
 
         loop {
@@ -787,7 +926,13 @@ impl Parser {
     /// Parses a keyword message (lowest precedence).
     pub(super) fn parse_keyword_message(&mut self) -> Expression {
         let receiver = self.parse_binary_message();
+        self.parse_keyword_tail(receiver)
+    }
 
+    /// Parses an optional keyword message sent to an already-parsed
+    /// `receiver`, answering `receiver` itself when no keyword message
+    /// follows (or the keyword starts the next class member).
+    fn parse_keyword_tail(&mut self, receiver: Expression) -> Expression {
         // Check if this is a keyword message.
         // A keyword token can never validly start a new statement on its own
         // (it always requires a receiver), so a keyword on a new line is
@@ -910,8 +1055,13 @@ impl Parser {
     /// * `min_bp` - Minimum binding power to continue parsing (0 for top-level)
     fn parse_binary_with_pratt(&mut self, min_bp: u8) -> Expression {
         // Parse the left-hand side (unary expression)
-        let mut left = self.parse_unary_message();
+        let left = self.parse_unary_message();
+        self.parse_binary_tail(left, min_bp)
+    }
 
+    /// Parses the binary messages, binding at least `min_bp` tightly, sent to
+    /// an already-parsed `left` operand.
+    fn parse_binary_tail(&mut self, mut left: Expression, min_bp: u8) -> Expression {
         // `<<` is not a binary operator: only a leading `<<` (in operand
         // position) means anything, opening a binary construction (ADR
         // 0143). One right after an operand on the same line is reported
@@ -988,8 +1138,13 @@ impl Parser {
 
     /// Parses unary messages (highest message precedence).
     pub(super) fn parse_unary_message(&mut self) -> Expression {
-        let mut receiver = self.parse_primary();
+        let receiver = self.parse_primary();
+        self.parse_unary_tail(receiver)
+    }
 
+    /// Parses the unary messages on the current line sent to an
+    /// already-parsed `receiver`.
+    fn parse_unary_tail(&mut self, mut receiver: Expression) -> Expression {
         // Parse chain of unary messages
         // Stop if the identifier is on a new line (start of new statement)
         while let TokenKind::Identifier(name) = self.current_kind() {

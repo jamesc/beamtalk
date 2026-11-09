@@ -236,6 +236,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
     // bumps the shared state-version counter, but that binding is scoped inside the
     // `fun` and never reaches the caller). Must now be a clear compile-time error.
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -310,6 +311,7 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
     // in stored closures via the Tier 2 protocol (i.e., codegen is allowed and succeeds).
     // Build a module with: test := [ count := 0. myBlock := [count := count + 1]. myBlock ]
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

@@ -90,6 +90,7 @@ mod expression;
 mod method;
 pub mod normalize;
 mod pattern;
+mod pipeline;
 pub(crate) mod visitor;
 pub mod well_known;
 
@@ -98,6 +99,7 @@ pub use class::*;
 pub use expression::*;
 pub use method::*;
 pub use pattern::*;
+pub use pipeline::PipelineSends;
 pub use well_known::*;
 
 use crate::span::Span;
@@ -146,6 +148,11 @@ pub struct Module {
     ///
     /// Comments at the end of the file, after the last class/method/expression.
     pub file_trailing_comments: Vec<Comment>,
+    /// The sends outside any method that were written with `|>` (ADR 0145):
+    /// in top-level and REPL expressions and in state and class-variable
+    /// initialisers. A method's own are on
+    /// [`MethodDefinition::pipeline_sends`].
+    pub pipeline_sends: PipelineSends,
 }
 
 impl Module {
@@ -162,6 +169,7 @@ impl Module {
             span,
             file_leading_comments: Vec::new(),
             file_trailing_comments: Vec::new(),
+            pipeline_sends: PipelineSends::default(),
         }
     }
 
@@ -178,6 +186,7 @@ impl Module {
             span,
             file_leading_comments: Vec::new(),
             file_trailing_comments: Vec::new(),
+            pipeline_sends: PipelineSends::default(),
         }
     }
 
@@ -198,6 +207,7 @@ impl Module {
             span,
             file_leading_comments,
             file_trailing_comments: Vec::new(),
+            pipeline_sends: PipelineSends::default(),
         }
     }
 

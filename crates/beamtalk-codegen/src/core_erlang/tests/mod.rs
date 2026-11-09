@@ -281,6 +281,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         span: Span::new(0, 0),
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -346,6 +347,7 @@ mod nlr;
 mod nlr_closure_call_corpus;
 mod paren_peel_guard;
 mod paren_transparency;
+mod pipeline;
 mod plain_arm_nested_construct_corpus;
 mod primitives;
 mod protocol_registration_conformance;

@@ -56,6 +56,7 @@ fn test_self_inside_method_no_error() {
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::FieldAccess {
@@ -87,6 +88,7 @@ fn test_self_inside_method_no_error() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -134,6 +136,7 @@ fn test_unused_variable_in_method_warns() {
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![
@@ -179,6 +182,7 @@ fn test_unused_variable_in_method_warns() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -218,6 +222,7 @@ fn test_used_variable_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![
@@ -253,6 +258,7 @@ fn test_used_variable_no_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -288,6 +294,7 @@ fn test_underscore_prefixed_variable_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("doSomething".into()),
             parameters: vec![],
             body: vec![bare(Expression::Assignment {
@@ -320,6 +327,7 @@ fn test_underscore_prefixed_variable_no_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -356,6 +364,7 @@ fn test_unused_parameter_emits_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "setValue:".into(),
                 span: test_span(),
@@ -389,6 +398,7 @@ fn test_unused_parameter_emits_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -427,6 +437,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "setValue:".into(),
                 span: test_span(),
@@ -460,6 +471,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -496,6 +508,7 @@ fn test_used_parameter_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "process:".into(),
                 span: test_span(),
@@ -532,6 +545,7 @@ fn test_used_parameter_no_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -569,6 +583,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "at:".into(),
                 span: test_span(),
@@ -608,6 +623,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -647,6 +663,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "spawnWith:".into(),
                 span: test_span(),
@@ -686,6 +703,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -724,6 +742,7 @@ fn test_unused_variable_in_class_method_warns() {
         state: vec![],
         methods: vec![],
         class_methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("create".into()),
             parameters: vec![],
             body: vec![
@@ -761,6 +780,7 @@ fn test_unused_variable_in_class_method_warns() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -797,6 +817,7 @@ fn test_block_parameter_no_unused_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Block(Block::new(
@@ -831,6 +852,7 @@ fn test_block_parameter_no_unused_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -867,6 +889,7 @@ fn test_pattern_variable_no_unused_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Match {
@@ -903,6 +926,7 @@ fn test_pattern_variable_no_unused_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -939,6 +963,7 @@ fn test_unused_variable_in_nested_block_warns() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Block(Block::new(
@@ -978,6 +1003,7 @@ fn test_unused_variable_in_nested_block_warns() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1016,6 +1042,7 @@ fn test_variable_used_via_closure_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![
@@ -1061,6 +1088,7 @@ fn test_variable_used_via_closure_no_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

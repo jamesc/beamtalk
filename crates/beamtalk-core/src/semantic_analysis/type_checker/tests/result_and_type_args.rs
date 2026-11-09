@@ -436,6 +436,7 @@ fn type_args_for_generic_class_no_false_positive() {
 fn type_args_for_non_generic_class_in_method_param_warns() {
     // Method parameter annotated as `:: Boolean(Integer)` — Boolean has no type params
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("doSomething".into()),
         parameters: vec![ParameterDefinition {
             name: ident("flag"),
@@ -513,6 +514,7 @@ fn type_args_for_block_no_false_positive() {
     // Block uses type args as documentation convention (e.g., `Block(E, Boolean)`)
     // This should NOT trigger the "no type parameters" warning
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("doSomething".into()),
         parameters: vec![ParameterDefinition {
             name: ident("block"),

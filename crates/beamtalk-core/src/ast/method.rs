@@ -218,6 +218,9 @@ pub struct MethodDefinition {
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).
     pub doc_comment: Option<String>,
+    /// The sends in this method's body that were written with `|>`
+    /// (ADR 0145), so the unparser can print the body as written.
+    pub pipeline_sends: super::PipelineSends,
     /// Source location.
     pub span: Span,
 }
@@ -321,6 +324,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }
@@ -346,6 +350,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }
@@ -372,6 +377,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }

@@ -28,27 +28,9 @@ use crate::ast::normalize::{
 use crate::ast::{MethodDefinition, Module};
 use crate::source_analysis::corpus_test_support::{read_corpus_file, repo_root};
 use crate::source_analysis::{Severity, lex_with_eof, parse};
-use crate::test_helpers::test_support::{arb_program, parse_bt, proptest_config_default};
-
-/// `module`'s `Debug` form with every span erased, so two trees that differ
-/// only in source positions compare equal.
-fn without_spans(module: &Module) -> String {
-    let debug = format!("{module:?}");
-    let mut out = String::with_capacity(debug.len());
-    let mut rest = debug.as_str();
-    while let Some(at) = rest.find("Span { start: ") {
-        out.push_str(&rest[..at]);
-        out.push_str("Span");
-        match rest[at..].find('}') {
-            Some(close) => rest = &rest[at + close + 1..],
-            None => {
-                rest = "";
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+use crate::test_helpers::test_support::{
+    arb_program, parse_bt, proptest_config_default, without_spans,
+};
 
 fn peeled(mut module: Module) -> Module {
     peel_operand_parens(&mut module);

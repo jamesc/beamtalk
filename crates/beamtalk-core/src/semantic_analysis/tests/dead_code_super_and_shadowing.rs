@@ -24,6 +24,7 @@ fn test_dead_code_after_return_in_method() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![
@@ -66,6 +67,7 @@ fn test_dead_code_after_return_in_method() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -106,6 +108,7 @@ fn test_no_dead_code_without_return() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
@@ -133,6 +136,7 @@ fn test_no_dead_code_without_return() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -181,6 +185,7 @@ fn test_dead_code_in_block() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![bare(block)],
@@ -208,6 +213,7 @@ fn test_dead_code_in_block() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -243,6 +249,7 @@ fn test_return_at_end_no_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Return {
@@ -273,6 +280,7 @@ fn test_return_at_end_no_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -331,6 +339,7 @@ fn test_super_inside_method_no_error() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("reset".into()),
             parameters: vec![],
             body: vec![bare(Expression::MessageSend {
@@ -364,6 +373,7 @@ fn test_super_inside_method_no_error() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -605,6 +615,7 @@ fn test_block_param_shadows_outer_variable() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![bare(outer_block)],
@@ -632,6 +643,7 @@ fn test_block_param_shadows_outer_variable() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -692,6 +704,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![bare(outer_block)],
@@ -719,6 +732,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -777,6 +791,7 @@ fn test_no_shadow_warning_different_names() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![bare(outer_block)],
@@ -804,6 +819,7 @@ fn test_no_shadow_warning_different_names() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
