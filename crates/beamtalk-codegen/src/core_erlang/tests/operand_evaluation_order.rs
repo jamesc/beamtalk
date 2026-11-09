@@ -110,6 +110,49 @@ fn bt4296_field_reads_do_not_race() {
     );
 }
 
+/// The actor-closure column (ADR 0137 §3): inside a block an actor's sends
+/// are not sync-bracketed, so a `super` send's arguments and a field read (a
+/// live cell lookup) racing a sibling send are bound in source order too.
+const ACTOR_SRC: &str = "Actor subclass: ActorProbe
+  state: n = 0
+  blockSuperOf: a => #(1) collect: [:_i | super pair: a bump with: a n]
+  blockFieldOf: blk => #(1) collect: [:_i | #[self.n, blk value]]
+";
+
+/// The text of actor method `name`'s clause in the generated dispatch `case`.
+fn actor_method_body<'a>(code: &'a str, name: &str) -> &'a str {
+    let head = format!("<'{name}'> when 'true' ->");
+    let start = code
+        .find(&head)
+        .unwrap_or_else(|| panic!("no dispatch clause for {name} in:\n{code}"));
+    let rest = &code[start + head.len()..];
+    let end = rest.find("\n        <'").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+#[test]
+fn bt4296_actor_closure_operands_bind_in_source_order() {
+    let code = super::codegen_named(ACTOR_SRC, "actor_probe");
+    // `super` inside a block: `bump` bound ahead of the argument list.
+    let body = actor_method_body(&code, "blockSuperOf:");
+    let at = body.find("'pair:with:', [").expect("super send");
+    let (before, inside) = body.split_at(at);
+    assert!(
+        before.contains("'bump', [])") && !inside[..inside.find(']').unwrap()].contains("'bump'"),
+        "`bump` should be let-bound before the super argument list:\n{body}"
+    );
+    // A cell field read before `blk value`: bound ahead of the array.
+    let body = actor_method_body(&code, "blockFieldOf:");
+    let at = body.find("'from_list'([").expect("array literal");
+    let inside = &body[at..];
+    let elems = &inside[..inside.find("])").expect("array end")];
+    assert!(
+        elems.starts_with("'from_list'([_ArrLit@"),
+        "the cell field read should be let-bound ahead of the array:\n{body}"
+    );
+    assert_compiles_through_erlc("actor_probe", &code);
+}
+
 #[test]
 fn bt4296_a_single_side_effecting_operand_stays_in_place() {
     let code = codegen(SRC);

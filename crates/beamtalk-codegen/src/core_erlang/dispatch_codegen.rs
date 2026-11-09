@@ -3639,6 +3639,18 @@ impl CoreErlangGenerator {
         // evaluate in source order (BT-4296).
         if self.in_cell_closure() || self.super_send_uses_cell() {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // The prelude closes around this call, so a threaded-state rebind in
+            // it would be scoped away from later statements (BT-3809): report
+            // it, as `capture_argument_list_doc` does for its arguments.
+            let escaped = super::threaded_ir::opaque_escapes(&args_preamble, false);
+            let at = arguments
+                .first()
+                .map_or_else(Span::default, Expression::span);
+            self.report_threaded_ir_verify_errors(
+                &escaped,
+                "super-send argument state rebind trapped in a closed argument list",
+                at,
+            );
             let call_doc = self.cell_super_send_doc(&selector_atom, &class_name, args_doc);
             return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
