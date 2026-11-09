@@ -2457,6 +2457,12 @@ impl Parser {
         // The later `collect_comment_attachment()` inside
         // `parse_method_definition()` looks at the selector token instead, which
         // would otherwise silently lose this signal.
+        //
+        // A `///` block directly above the class-name token is this method's
+        // doc comment; collect it first (as class and method parsing do) so
+        // `collect_comment_attachment` doesn't demote it to an orphaned
+        // leading comment, which split it from the method on format.
+        let class_doc_comment = self.collect_doc_comment();
         let initial_comments = self.collect_comment_attachment();
         let leading_blank_line = initial_comments.leading_blank_line;
         let class_blank_line_after_comments = initial_comments.blank_line_after_comments;
@@ -2507,6 +2513,10 @@ impl Parser {
                 span,
             )
         });
+
+        if method.doc_comment.is_none() {
+            method.doc_comment = class_doc_comment;
+        }
 
         // Prepend the class-name token's leading comments to the method's
         // own comments.  parse_method_definition() reads trivia from the

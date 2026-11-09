@@ -706,13 +706,9 @@ fn comment_before_instance_side_standalone_method_stays_above_it() {
 
 #[test]
 fn doc_comment_before_standalone_method_stays_above_it() {
-    // `///` before a standalone method is kept as a leading comment and
-    // separated by the orphaned-doc-comment blank line; the point here is
-    // that it is not spliced into the signature, and the output is stable.
-    let source = concat!("/// Doc for qux.\n", "Foo class >> qux => 3\n",);
-    let formatted = format_source(source).expect("formats");
-    assert_eq!(formatted, "/// Doc for qux.\n\nFoo class >> qux => 3\n");
-    assert_identity(&formatted);
+    // `///` before a standalone method is its doc comment (BT-4488): it is
+    // not spliced into the signature, and stays directly above it.
+    assert_identity(concat!("/// Doc for qux.\n", "Foo class >> qux => 3\n"));
 }
 
 // --- Blank line between a leading comment and its declaration ---
@@ -913,4 +909,17 @@ fn standalone_methods_interleaved_with_classes_keep_source_order() {
 #[test]
 fn standalone_method_without_gap_after_leading_comment_stays_tight() {
     assert_identity(concat!("// A comment.\n", "Port >> foo => 1\n",));
+}
+
+#[test]
+fn doc_comment_on_standalone_method_stays_attached() {
+    assert_identity(concat!(
+        "// License.\n",
+        "\n",
+        "/// Answer one.\n",
+        "Port >> one => 1\n",
+        "\n",
+        "/// Answer two.\n",
+        "Port class >> two => 2\n",
+    ));
 }
