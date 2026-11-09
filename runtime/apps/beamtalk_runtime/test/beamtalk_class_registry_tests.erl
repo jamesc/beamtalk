@@ -1116,7 +1116,12 @@ restart_class_recovery_test_() ->
                 ?assertEqual(
                     {ok, 'RestartTest1888'},
                     beamtalk_class_registry:class_name_for_pid(NewPid)
-                )
+                ),
+                %% A graceful stop (removeFromSystem) reclaims the kept dead
+                %% incarnation's row along with its own.
+                ok = gen_server:stop(NewPid),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(OldPid)),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(NewPid))
             end}
         ]}.
 

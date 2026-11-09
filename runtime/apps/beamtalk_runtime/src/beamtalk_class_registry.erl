@@ -67,6 +67,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_pending_errors_table/0,
     record_class_pid/2,
     class_name_for_pid/1,
+    forget_class_pids/2,
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
@@ -905,6 +906,30 @@ class_name_for_pid(Pid) ->
         error:badarg -> not_found
     end.
 
+-doc """
+Drop the reverse-index rows of a class that is shutting down gracefully:
+`Pid`'s own row and every dead local incarnation of `ClassName` that
+`restart_class/1` kept for crash recovery (BT-4552).
+
+Called from `beamtalk_object_class:terminate/2`. Rows of live pids are left
+alone, so a replacement process already recorded under the same name is not
+clobbered (the reason `forget_loaded_class/2` guards on `self()`).
+""".
+-spec forget_class_pids(pid(), class_name()) -> ok.
+forget_class_pids(Pid, ClassName) ->
+    try
+        ets:delete(beamtalk_class_pids, Pid),
+        _ = [
+            ets:delete(beamtalk_class_pids, P)
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
+        ],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
 %%====================================================================
 %% Class-State (classState:) Live Snapshot
 %%====================================================================
@@ -1355,8 +1380,9 @@ restart_class(ClassName) ->
             %% only name the class from this row. Deleting it on restart (the
             %% eager `beamtalk_class_monitor` restart runs immediately on the
             %% crash) turned every such send into
-            %% `Class 'unknown' not found`. The cost is one small row per crash,
-            %% which the monitor's per-class restart budget keeps rare.
+            %% `Class 'unknown' not found`. The cost is one small row per crash
+            %% (eager or lazy restart) for the class's lifetime: a graceful stop
+            %% reclaims them all (`forget_class_pids/2`).
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(
