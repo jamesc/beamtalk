@@ -6,7 +6,9 @@ name: CI
 # docs/learning/** is put back after '!docs/**' (a later pattern overrides an
 # earlier one): its fixtures and chapters feed corpus.json (check-corpus) and
 # the test-learn job (BT-3927), so a learning-guide-only change must still
-# run CI. ci-docs-only.yml excludes it for the same reason.
+# run CI. docs/beamtalk-language-features.md is put back too: its code blocks
+# also feed corpus.json (BT-4554). ci-docs-only.yml excludes both for the same
+# reason; build-corpus's docs_corpus_sources_trigger_full_ci test enforces it.
 on:
   push:
     branches: [main]
@@ -15,6 +17,7 @@ on:
       - '!*.md'
       - '!docs/**'
       - 'docs/learning/**'
+      - 'docs/beamtalk-language-features.md'
       - '!LICENSE'
       - '!SECURITY.md'
       - '!.github/skills/**'
@@ -32,6 +35,7 @@ on:
       - '!*.md'
       - '!docs/**'
       - 'docs/learning/**'
+      - 'docs/beamtalk-language-features.md'
       - '!LICENSE'
       - '!SECURITY.md'
       - '!.github/skills/**'
