@@ -478,7 +478,8 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 /// The normalisation invariant (BT-4232), for tests: panics unless every send
 /// operand of `module` is canonical — no `Parenthesized` wrapper other than
 /// the ones [`peel_operand_parens`] deliberately keeps (`(super)`, and the
-/// cascade's folded first send, which is not an operand).
+/// cascade's folded first send, which is not an operand) — and no unary loop
+/// the pass canonicalises is left (`[c] whileTrue`, BT-4313).
 ///
 /// Codegen and analysis match send operands directly, without peeling, on
 /// the strength of this invariant. Codegen's module entry and the REPL
@@ -489,8 +490,9 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 ///
 /// # Panics
 ///
-/// When a send operand of `module` is still parenthesised; the message names
-/// `context` (the entry that broke the invariant) and the operand's span.
+/// When a send operand of `module` is still parenthesised, or a unary loop
+/// was not canonicalised; the message names `context` (the entry that broke
+/// the invariant) and the node's span.
 pub fn assert_operands_normalised(module: &Module, context: &str) {
     let mut unary_loop = None;
     for_each_root(module, &mut |_, root| {
@@ -511,7 +513,8 @@ pub fn assert_operands_normalised(module: &Module, context: &str) {
 ///
 /// # Panics
 ///
-/// When a send operand in `expressions` is still parenthesised.
+/// When a send operand in `expressions` is still parenthesised, or a unary
+/// loop was not canonicalised.
 pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str) {
     assert_no_unary_loop(expressions.iter().find_map(expr_first_unary_loop), context);
     if let Some(span) = expressions
