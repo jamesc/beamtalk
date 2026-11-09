@@ -335,3 +335,19 @@ TestCase subclass: EtsTest
     self assert: (self.table removeKey: "token" ifAbsent: [nil]) equals: 7
     self deny: (self.table includesKey: "token")
     self assert: (self.table removeKey: "token" ifAbsent: [0]) equals: 0
+
+  testActorOwnsItsPrivateTable =>
+    // Each instance owns a separate private table created in initialize.
+    a := PrivateEtsStore spawn
+    b := PrivateEtsStore spawn
+    a remember: "k" value: 1
+    b remember: "k" value: 2
+    self assert: (a recall: "k") equals: 1
+    self assert: (b recall: "k") equals: 2
+    self assert: (a claim: "k") equals: 1
+    self assert: (a claim: "k") equals: nil
+    // A leaked handle is useless to any other process, including this test.
+    leaked := b leakTable
+    self should: [leaked at: "k"] raise: #access_denied
+    a stop
+    b stop

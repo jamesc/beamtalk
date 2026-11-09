@@ -109,6 +109,11 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// created. The table is deleted when its owner terminates. Use it for an
   /// actor's internal state, especially secrets such as tokens or nonces.
   ///
+  /// The owner is the process that runs this call: create the table in the
+  /// actor that will use it (e.g. in `initialize`). A class method of a class
+  /// with class variables runs in the class's process, so a table made there
+  /// belongs to that process and callers get `access_denied`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// secrets := Ets private: #set

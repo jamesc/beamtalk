@@ -25,7 +25,7 @@ Ets objects are represented as tagged maps:
 ```
 
 A use the table's protection forbids raises `access_denied`, never a raw
-`badarg` (see `badarg_error/3`).
+`badarg` (see `table_fault/2`).
 
 ## Class Methods
 
@@ -383,9 +383,16 @@ tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     %% `ets:info/2` answers even across a `private` boundary, so check access
     %% explicitly rather than relying on a `badarg`.
     case table_fault(TableName, read) of
-        stale -> stale_table_error('tableSize:', TableName);
-        access_denied -> access_denied_error('tableSize:', TableName);
-        ok -> ets:info(TableName, size)
+        stale ->
+            stale_table_error('tableSize:', TableName);
+        access_denied ->
+            access_denied_error('tableSize:', TableName);
+        ok ->
+            %% The table may be deleted between the probe and this read.
+            case ets:info(TableName, size) of
+                undefined -> stale_table_error('tableSize:', TableName);
+                Size -> Size
+            end
     end;
 tableSize(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'size', <<"Receiver must be an Ets instance">>).
@@ -690,6 +697,12 @@ has_match_variable(_) ->
 -doc "Raise a structured error unless the table holds one entry per key.".
 -spec require_unique_keys(table(), atom()) -> ok.
 require_unique_keys(TableName, Selector) ->
+    %% `ets:info/2` answers across a protection boundary; deny a caller that
+    %% may not write before revealing the table type in an error.
+    case table_fault(TableName, write) of
+        access_denied -> access_denied_error(Selector, TableName);
+        _ -> ok
+    end,
     case ets:info(TableName, type) of
         T when T =:= set; T =:= ordered_set ->
             ok;

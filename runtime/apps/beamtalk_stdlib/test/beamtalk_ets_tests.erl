@@ -1040,6 +1040,11 @@ bt4576_private_table_denies_other_processes_test() ->
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:insert(T, k, x) end)),
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:tableSize(T) end)),
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:values(T) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:includesKey(T, k) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:removeAll(T) end)),
+    ?assertAccessDenied(
+        in_other_process(fun() -> beamtalk_ets:updateAt(T, k, fun(V) -> V end) end)
+    ),
     ?assertAccessDenied(
         in_other_process(fun() -> beamtalk_ets:removeKey(T, k, fun() -> nil end) end)
     ),
@@ -1090,3 +1095,29 @@ bt4576_remove_key_if_absent_takes_value_test() ->
             beamtalk_ets:removeKey(T, k, not_a_block)
         )
     end).
+
+bt4576_atomic_ops_on_private_bag_deny_before_type_check_test() ->
+    %% A non-owner must get access_denied, not unsupported_table_type (which
+    %% would reveal the table type).
+    T = beamtalk_ets:'private:'(bag),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:incrementAt(T, k, 1) end)),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_protected_table_bulk_reads_from_other_process_test() ->
+    T = beamtalk_ets:'protected:'(set),
+    beamtalk_ets:insert(T, k, 1),
+    ?assertEqual({ok, [k]}, in_other_process(fun() -> beamtalk_ets:keys(T) end)),
+    ?assertEqual({ok, [1]}, in_other_process(fun() -> beamtalk_ets:values(T) end)),
+    ?assertEqual({ok, #{k => 1}}, in_other_process(fun() -> beamtalk_ets:asDictionary(T) end)),
+    ?assertEqual(
+        {ok, 2}, in_other_process(fun() -> beamtalk_ets:ifPresent(T, k, fun(V) -> V + 1 end) end)
+    ),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_remove_key_if_absent_on_bag_removes_all_entries_test() ->
+    T = beamtalk_ets:'private:'(duplicateBag),
+    #{table := Tid} = T,
+    ets:insert(Tid, [{k, a}, {k, b}]),
+    ?assertEqual(a, beamtalk_ets:removeKey(T, k, fun() -> nil end)),
+    ?assertNot(beamtalk_ets:includesKey(T, k)),
+    beamtalk_ets:deleteTable(T).
