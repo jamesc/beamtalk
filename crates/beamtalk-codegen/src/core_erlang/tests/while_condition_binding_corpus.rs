@@ -310,6 +310,7 @@ const PURE_BODIES: &[Option<&str>] = &[
     Some("nil"),
     Some("s := s + 1"),
     Some("s := s + t. u := u + w"),
+    Some("s := (self take: s) + 1"),
 ];
 
 /// `(name, header, method keyword)`: every compiled method context, a class
@@ -349,7 +350,7 @@ fn pure_condition_rows() -> Vec<(String, String, bool)> {
                         Some(body) => format!("{selector} [{body}]"),
                     };
                     let src = format!(
-                        "{header}  {kw}probe =>\n    s := 0\n    t := 0\n    u := 0\n    w := 0\n    x := 0\n    [{cond}] {send}\n    #(s, t, u, w, x)\n"
+                        "{header}  {kw}take: v => v\n  {kw}probe =>\n    s := 0\n    t := 0\n    u := 0\n    w := 0\n    x := 0\n    [{cond}] {send}\n    #(s, t, u, w, x)\n"
                     );
                     let body_writes = body.is_some_and(|b| b.contains(":="));
                     out.push((format!("{name} cond{c} body{b} {send}"), src, body_writes));

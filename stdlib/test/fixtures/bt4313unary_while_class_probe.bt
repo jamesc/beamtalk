@@ -16,16 +16,25 @@ Object subclass: Bt4313UnaryWhileClassProbe
 
   class localWhileTrue =>
     t := 0
-    [t := t + 1. t < 3] whileTrue
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue
     t
 
   class localWhileFalse =>
     t := 10
-    [t := t - 1. t <= 4] whileFalse
+    [
+      t := t - 1
+      t <= 4
+    ] whileFalse
     t
 
   class localConditionAndBody =>
     t := 0
     u := 0
-    [t := t + 1. t < 5] whileTrue: [u := u + t]
+    [
+      t := t + 1
+      t < 5
+    ] whileTrue: [u := u + t]
     #(t, u)
