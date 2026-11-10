@@ -140,6 +140,15 @@ pub struct NativeTypeRegistry {
     /// information: it exists so [`Self::detect_stub_drift`] can tell "not
     /// exported" apart from "exported but unspec'd".
     exports_without_signature: Arc<HashMap<String, HashSet<(String, u8)>>>,
+    /// Modules whose extracted `-spec` return types may prove that an inline
+    /// FFI call needs no result coercion (BT-4507). Fails closed: a module not
+    /// in this set never proves a call, so an empty set proves nothing.
+    ///
+    /// Only OTP, the runtime's own `beamtalk_*` modules and a package's own
+    /// `native/` modules are trusted. Specs are not enforced at run time, and a
+    /// wrong spec in a third-party dependency would silently drop the
+    /// `Result`/`String` coercion the proxy applies.
+    trusted_result_modules: Arc<HashSet<String>>,
 }
 
 impl NativeTypeRegistry {
@@ -187,6 +196,21 @@ impl NativeTypeRegistry {
                 .is_some_and(|exports| exports.contains(&(function.to_string(), arity)))
     }
 
+    /// Trusts every module currently registered to prove result coercions
+    /// (BT-4507). Call it on a registry built only from OTP, runtime or the
+    /// package's own `native/` specs, before merging in anything else.
+    pub fn trust_all_modules(&mut self) {
+        let trusted = Arc::make_mut(&mut self.trusted_result_modules);
+        trusted.extend(self.modules.keys().cloned());
+    }
+
+    /// Whether `module`'s extracted specs may prove that an inline FFI call
+    /// needs no result coercion (BT-4507).
+    #[must_use]
+    pub fn is_result_trusted(&self, module: &str) -> bool {
+        self.trusted_result_modules.contains(module)
+    }
+
     /// Merges all modules from `other` into `self`, keeping `self`'s entry on
     /// a module-name collision.
     ///
@@ -199,16 +223,22 @@ impl NativeTypeRegistry {
             Arc::try_unwrap(other.modules).unwrap_or_else(|shared| (*shared).clone());
         let mut other_exports = Arc::try_unwrap(other.exports_without_signature)
             .unwrap_or_else(|shared| (*shared).clone());
+        let other_trusted = other.trusted_result_modules;
         let self_modules = Arc::make_mut(&mut self.modules);
         let self_exports = Arc::make_mut(&mut self.exports_without_signature);
+        let self_trusted = Arc::make_mut(&mut self.trusted_result_modules);
         for (module, functions) in other_modules {
-            // A module's export list travels with its signatures: whichever
-            // side's signatures win the collision supplies both.
+            // A module's export list and result trust travel with its
+            // signatures: whichever side's signatures win the collision
+            // supplies all three.
             if self_modules.contains_key(&module) {
                 continue;
             }
             if let Some(exports) = other_exports.remove(&module) {
                 self_exports.insert(module.clone(), exports);
+            }
+            if other_trusted.contains(&module) {
+                self_trusted.insert(module.clone());
             }
             self_modules.insert(module, functions);
         }
@@ -223,6 +253,10 @@ impl NativeTypeRegistry {
     /// function/arity-level upsert stub declarations need: a `stubs/lists.bt`
     /// overriding `reverse/1` must not discard `lists`'s other
     /// auto-extracted functions.
+    ///
+    /// The module's result trust (BT-4507) is left as it is: upserted stubs
+    /// are `Declared` and never prove a call, and the module's other
+    /// extracted functions keep their proofs.
     pub fn upsert_functions(&mut self, module_name: &str, functions: Vec<FunctionSignature>) {
         let self_modules = Arc::make_mut(&mut self.modules);
         let entry = self_modules.entry(module_name.to_string()).or_default();
@@ -339,12 +373,18 @@ impl NativeTypeRegistry {
     /// proved, and neither are hand-written stub signatures: a stub that
     /// misstates a return type may cost a wrong warning, never a dropped
     /// coercion.
+    ///
+    /// The module must also be trusted ([`Self::is_result_trusted`], BT-4507):
+    /// only OTP, runtime and the package's own `native/` specs prove a call.
+    /// Specs are not enforced, so a wrong `-spec` in a third-party dependency
+    /// must not change what an inline FFI call returns.
     #[must_use]
     pub fn proves_no_result_coercion(&self, module: &str, function: &str, arity: u8) -> bool {
-        self.lookup(module, function, arity).is_some_and(|sig| {
-            sig.provenance == TypeProvenance::Extracted
-                && ffi_result_passes_unchanged(&sig.return_type)
-        })
+        self.is_result_trusted(module)
+            && self.lookup(module, function, arity).is_some_and(|sig| {
+                sig.provenance == TypeProvenance::Extracted
+                    && ffi_result_passes_unchanged(&sig.return_type)
+            })
     }
 
     /// Sorted `module:function/arity` keys of every function
@@ -545,6 +585,7 @@ mod tests {
                 ),
             ],
         );
+        registry.trust_all_modules();
         assert!(registry.proves_no_result_coercion("erlang", "monotonic_time", 0));
         assert!(!registry.proves_no_result_coercion("erlang", "get", 1));
         assert!(!registry.proves_no_result_coercion("erlang", "monotonic_time", 1));
@@ -559,8 +600,102 @@ mod tests {
         let mut stub = extracted_sig("answer", 0, vec![], InferredType::known("Integer"));
         stub.provenance = TypeProvenance::Declared(crate::span::Span::new(0, 0));
         stubbed.register_module("native_mod", vec![stub]);
+        stubbed.trust_all_modules();
         assert!(!stubbed.proves_no_result_coercion("native_mod", "answer", 0));
         assert!(stubbed.proved_no_coercion_keys().is_empty());
+    }
+
+    fn integer_module(module: &str, function: &str) -> NativeTypeRegistry {
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            module,
+            vec![extracted_sig(
+                function,
+                0,
+                vec![],
+                InferredType::known("Integer"),
+            )],
+        );
+        registry
+    }
+
+    #[test]
+    fn untrusted_extracted_spec_proves_nothing() {
+        // BT-4507: a dependency's `-spec f() -> integer()` is not enforced, so
+        // it must not move the call off the proxy.
+        let registry = integer_module("dep_mod", "answer");
+        assert!(!registry.is_result_trusted("dep_mod"));
+        assert!(!registry.proves_no_result_coercion("dep_mod", "answer", 0));
+        assert!(registry.proved_no_coercion_keys().is_empty());
+        // The signature itself is still there for type checking.
+        assert!(registry.lookup("dep_mod", "answer", 0).is_some());
+    }
+
+    #[test]
+    fn merge_keeps_trust_from_the_winning_side() {
+        let mut otp = integer_module("erlang", "monotonic_time");
+        otp.trust_all_modules();
+
+        // The dependency side ships a same-named `erlang` (loses) and its own
+        // untrusted module.
+        let mut dep = integer_module("erlang", "monotonic_time");
+        dep.register_module(
+            "dep_mod",
+            vec![extracted_sig(
+                "answer",
+                0,
+                vec![],
+                InferredType::known("Integer"),
+            )],
+        );
+        otp.merge(dep);
+        assert!(otp.proves_no_result_coercion("erlang", "monotonic_time", 0));
+        assert!(!otp.proves_no_result_coercion("dep_mod", "answer", 0));
+
+        // An untrusted base keeps its own module untrusted even when the
+        // trusted side carries the same name.
+        let mut untrusted = integer_module("shared_mod", "answer");
+        let mut trusted = integer_module("shared_mod", "answer");
+        trusted.register_module(
+            "native_mod",
+            vec![extracted_sig(
+                "answer",
+                0,
+                vec![],
+                InferredType::known("Integer"),
+            )],
+        );
+        trusted.trust_all_modules();
+        untrusted.merge(trusted);
+        assert!(!untrusted.proves_no_result_coercion("shared_mod", "answer", 0));
+        assert!(untrusted.proves_no_result_coercion("native_mod", "answer", 0));
+        assert_eq!(
+            untrusted.proved_no_coercion_keys(),
+            vec!["native_mod:answer/0"]
+        );
+    }
+
+    #[test]
+    fn stub_upsert_keeps_trusted_modules_other_proofs() {
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "erlang",
+            vec![
+                extracted_sig("monotonic_time", 0, vec![], InferredType::known("Integer")),
+                extracted_sig("system_time", 0, vec![], InferredType::known("Integer")),
+            ],
+        );
+        registry.trust_all_modules();
+
+        let mut stubs = NativeTypeRegistry::new();
+        let mut stub = extracted_sig("system_time", 0, vec![], InferredType::known("Integer"));
+        stub.provenance = TypeProvenance::Declared(crate::span::Span::new(0, 0));
+        stubs.register_module("erlang", vec![stub]);
+        registry.apply_overrides(stubs);
+
+        assert!(registry.is_result_trusted("erlang"));
+        assert!(registry.proves_no_result_coercion("erlang", "monotonic_time", 0));
+        assert!(!registry.proves_no_result_coercion("erlang", "system_time", 0));
     }
 
     fn extracted_sig(

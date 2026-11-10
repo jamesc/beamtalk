@@ -771,7 +771,9 @@ pub(crate) fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
         .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
 
     match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
-        Ok(registry) => {
+        Ok(mut registry) => {
+            // BT-4507: the runtime's own specs may prove direct FFI calls.
+            registry.trust_all_modules();
             if registry.module_count() > 0 {
                 info!(
                     modules = registry.module_count(),

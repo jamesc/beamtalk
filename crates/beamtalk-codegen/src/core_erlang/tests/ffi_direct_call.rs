@@ -51,6 +51,8 @@ fn registry() -> NativeTypeRegistry {
         ],
     );
     registry.register_module("beamtalk_process_ops", vec![sig("current", &[], "Pid")]);
+    // OTP and runtime specs are trusted to prove a result (BT-4507).
+    registry.trust_all_modules();
     registry
 }
 
@@ -232,6 +234,7 @@ fn stub_declared_result_stays_on_proxy() {
     let mut stub = sig("answer", &[], "Integer");
     stub.provenance = TypeProvenance::Declared(beamtalk_core::source_analysis::Span::new(0, 0));
     registry.register_module("native_mod", vec![stub]);
+    registry.trust_all_modules();
     let src = "Object subclass: Probe\n  class run =>\n    Erlang native_mod answer\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
@@ -242,4 +245,26 @@ fn stub_declared_result_stays_on_proxy() {
     )
     .expect("codegen should succeed");
     assert_proxied(&code, "native_mod", "answer");
+}
+
+#[test]
+fn untrusted_dependency_spec_stays_on_proxy() {
+    // BT-4507: a dependency's `-spec answer() -> integer()` is not enforced.
+    // If it is wrong (the function really returns `{ok, X}`, `ok` or a
+    // charlist), a direct call would hand the caller the raw term instead of
+    // the proxy's `Result`/`String`, so only trusted modules prove a call.
+    let mut registry = registry();
+    let mut dep = NativeTypeRegistry::new();
+    dep.register_module("dep_mod", vec![sig("answer", &[], "Integer")]);
+    registry.merge(dep);
+    let src = "Object subclass: Probe\n  class run =>\n    Erlang dep_mod answer\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("probe")
+            .with_native_type_registry(Some(std::sync::Arc::new(registry))),
+    )
+    .expect("codegen should succeed");
+    assert_proxied(&code, "dep_mod", "answer");
 }

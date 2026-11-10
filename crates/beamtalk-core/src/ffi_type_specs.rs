@@ -1397,6 +1397,15 @@ pub fn collect_project_known_erlang_modules(
     known
 }
 
+/// Whether `dir` is a package's own compiled `native/` ebin
+/// (`_build/dev/native/ebin`), whose specs may prove direct FFI calls
+/// (BT-4507). Path/git dependency ebins (`_build/deps/*/ebin`) and rebar3
+/// hex-dependency ebins (`_build/dev/native/default/lib/*/ebin`) are not.
+#[must_use]
+pub fn is_own_native_ebin(dir: &Utf8Path) -> bool {
+    dir.ends_with("_build/dev/native/ebin")
+}
+
 /// ADR 0075 Phase 1: Extract type specs from OTP and
 /// dependency `.beam` files and cache them.
 ///
@@ -1465,6 +1474,25 @@ pub fn extract_type_specs(
         }
     };
 
+    // BT-4507: only OTP and the package's own `native/` specs may prove that
+    // an inline FFI call needs no result coercion. A third-party dependency's
+    // `-spec` is not enforced and is out of the package author's control.
+    let mut otp_registry = otp_registry;
+    otp_registry.trust_all_modules();
+
+    let (native_beams, dep_beams): (Vec<_>, Vec<_>) = dep_beams
+        .into_iter()
+        .partition(|beam| beam.parent().is_some_and(is_own_native_ebin));
+
+    let mut native_registry = match extract_beam_specs(&native_beams, cache_dir) {
+        Ok(registry) => registry,
+        Err(e) => {
+            debug!("Native type spec extraction failed (non-fatal): {e}");
+            NativeTypeRegistry::new()
+        }
+    };
+    native_registry.trust_all_modules();
+
     let dep_registry = match extract_beam_specs(&dep_beams, cache_dir) {
         Ok(registry) => registry,
         Err(e) => {
@@ -1473,8 +1501,10 @@ pub fn extract_type_specs(
         }
     };
 
-    // Merge dependency specs into the OTP registry; OTP wins on any collision.
+    // Merge in precedence order — OTP, the package's own native code, then
+    // dependencies; the earlier registry wins on any collision.
     let mut registry = otp_registry;
+    registry.merge(native_registry);
     registry.merge(dep_registry);
 
     if registry.module_count() > 0 {
@@ -2114,6 +2144,22 @@ mod tests {
     #[test]
     fn sanitize_module_name_empty_string() {
         assert_eq!(sanitize_module_name(""), "");
+    }
+
+    #[test]
+    fn is_own_native_ebin_trusts_only_the_package_native_dir() {
+        // BT-4507: only the package's own native/ specs prove direct calls.
+        assert!(is_own_native_ebin(Utf8Path::new(
+            "/proj/_build/dev/native/ebin"
+        )));
+        assert!(is_own_native_ebin(Utf8Path::new("_build/dev/native/ebin")));
+        assert!(!is_own_native_ebin(Utf8Path::new(
+            "/proj/_build/deps/x/ebin"
+        )));
+        assert!(!is_own_native_ebin(Utf8Path::new(
+            "/proj/_build/dev/native/default/lib/x/ebin"
+        )));
+        assert!(!is_own_native_ebin(Utf8Path::new("/proj/native/ebin")));
     }
 
     #[test]
