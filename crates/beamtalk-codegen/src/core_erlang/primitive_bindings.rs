@@ -412,6 +412,20 @@ mod tests {
         )
     }
 
+    /// BT-4612: a `no_user_code` primitive never runs a block passed to it,
+    /// so the runtime dispatch, which has no `^`-closure pre-store, needs
+    /// none for one. That holds only while no parameter of a marked
+    /// primitive can be a block.
+    #[test]
+    fn no_user_code_parameters_exclude_blocks() {
+        assert!(
+            !NO_USER_CODE_PARAMETER_TYPES
+                .iter()
+                .any(|ty| ty.contains("Block")),
+            "{NO_USER_CODE_PARAMETER_TYPES:?}"
+        );
+    }
+
     #[test]
     fn test_no_user_code_mark_rejects_untyped_and_open_parameters() {
         let mut table = PrimitiveBindingTable::new();

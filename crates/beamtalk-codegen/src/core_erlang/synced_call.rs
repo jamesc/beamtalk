@@ -170,6 +170,9 @@ thread_local! {
     /// argument (the pre-store's `at`)
     /// ([`CoreErlangGenerator::publish_fault_prestore_read`]); cleared with
     /// the fault.
+    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged.
+    pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
+        std::cell::RefCell<Vec<(String, SendUserCode)>> = const { std::cell::RefCell::new(Vec::new()) };
     pub(in crate::core_erlang) static PRESTORE_EARLY_READ: std::cell::RefCell<
         std::collections::HashMap<Span, Option<PrestoreRead>>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -1246,6 +1249,34 @@ impl CoreErlangGenerator {
         self.report_threaded_ir_verify_errors(&errors, "`^`-closure pre-store", prestore.at);
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
+    }
+
+    /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
+    /// outside every bracket window with a `^`-holding block literal among
+    /// its operands, where the cell protocol applies, with its
+    /// [`SendUserCode`] class ([`DISPATCH_NLR_LITERALS`]). The dispatch has
+    /// no pre-store, so every logged send must be [`SendUserCode::Never`].
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn note_dispatch_nlr_literals(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) {
+        let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
+            .chain(arguments)
+            .filter_map(|operand| match operand {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        if self.synced.window_depth > 0 || !self.nlr_closure_prestore_applies(&blocks) {
+            return;
+        }
+        let class = send_user_code(receiver, selector, arguments);
+        DISPATCH_NLR_LITERALS.with(|log| {
+            log.borrow_mut().push((selector.name().to_string(), class));
+        });
     }
 
     /// BT-4612 test-only fault hook, called where the conditional `send`

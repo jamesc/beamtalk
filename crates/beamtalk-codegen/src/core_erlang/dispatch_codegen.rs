@@ -1699,12 +1699,33 @@ impl CoreErlangGenerator {
             all_exprs.push(arg);
         }
         // BT-4612: no `^`-closure pre-store here. Outside every bracket
-        // window a send reaches this dispatch only when it is classified
-        // `UserCodeCall::No`, and a block literal among its operands then
-        // makes it a `SendUserCode::Never` send (`p spawnWith: [^1]`), which
-        // runs none of them: nothing to store for (`nlr_closure_prestore`).
-        // Any other such send would leave its `^` block an
-        // `UnbracketedNlrClosure` finding.
+        // window a send reaches this dispatch only when `classify_send`
+        // answered `UserCodeCall::No` (a `Yes` send there is a gap, and a
+        // self or `super` send dispatches elsewhere). Each way to `No`, with
+        // a block literal holding a `^` among the operands:
+        //
+        // - `SendUserCode::Never` (`p spawnWith: [^1]`): runs none of its
+        //   operands, so there is nothing to store for (BT-4606). The one
+        //   shape that reaches this dispatch (`never_spawn_with`).
+        // - `is_no_user_code_send`: a sealed primitive the stdlib marked
+        //   `no_user_code` promises to run no user code, so it never runs a
+        //   block either, and `build-stdlib` rejects a mark whose parameter
+        //   could be a block (`NO_USER_CODE_PARAMETER_TYPES`, which
+        //   `no_user_code_parameters_exclude_blocks` keeps free of `Block`).
+        // - `Inlined`, `LoopOrClosureCall`, `InlinedOrClosureCall` answered
+        //   `No`: the construct is lowered in place by its own lowering
+        //   (a conditional's fallback stores for itself,
+        //   `boolean_fallback_send`), never through this dispatch.
+        //
+        // Checked, not argued: in test builds every such send that reaches
+        // this dispatch is logged (`note_dispatch_nlr_literals`), and
+        // `only_never_sends_reach_the_dispatch_with_a_nlr_literal` compiles
+        // the whole `nlr_closure_call_corpus` (every in-place construct, and
+        // the fallback shapes with a non-literal operand) and fails on any
+        // logged send that is not `Never`. In any build, such a send would
+        // leave its `^` block an `UnbracketedNlrClosure` finding.
+        #[cfg(test)]
+        self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let mut seq = self.sequence_call(&all_exprs, "Disp")?;
         let actual_receiver = seq.next();
 

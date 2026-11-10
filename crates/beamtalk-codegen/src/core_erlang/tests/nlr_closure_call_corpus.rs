@@ -42,8 +42,8 @@
 
 use super::assert_compiles_through_erlc;
 use crate::core_erlang::synced_call::{
-    CLASSIFY_SEND_CALLS, FAULT_NLR_CLOSURES_UNSTORED, FAULT_PRESTORE_READS_BEFORE_OPERANDS,
-    PRESTORE_EARLY_READ,
+    CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, FAULT_NLR_CLOSURES_UNSTORED,
+    FAULT_PRESTORE_READS_BEFORE_OPERANDS, PRESTORE_EARLY_READ,
 };
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -160,6 +160,27 @@ const CALLS: &[(&str, &str, bool)] = &[
     // `^` block outside every window: a `Never` send, which runs nothing,
     // so the dispatch stores nothing (it has no pre-store).
     ("never_spawn_with", "p spawnWith: [^1]", false),
+    // BT-4612: in-place constructs given an operand they cannot inline
+    // (not a block literal, or a receiver of unknown class) next to a `^`
+    // literal: whatever they fall back to, it is not the runtime dispatch
+    // with a `^` literal outside every window
+    // (`only_never_sends_reach_the_dispatch_with_a_nlr_literal`).
+    (
+        "mixed_conditional",
+        "r := p ifTrue: [^8] ifFalse: blk",
+        true,
+    ),
+    ("to_do_unknown_bound", "1 to: p do: [:i | ^i]", true),
+    ("to_do_unknown_receiver", "p to: 3 do: [:i | ^i]", true),
+    (
+        "inject_unknown_receiver",
+        "p inject: 0 into: [:a :x | ^x]",
+        false,
+    ),
+    ("times_repeat_unknown_receiver", "p timesRepeat: [^7]", true),
+    ("while_true_param_receiver", "blk whileTrue: [^2]", true),
+    ("ensure_param_body", "blk ensure: [^2]", true),
+    ("on_do_param_body", "blk on: Error do: [:e | ^4]", true),
     // BT-4612: a parenthesised block literal operand is the literal (the
     // operand normalisation pass peels it), recorded, stored for and covered
     // like the bare one (`note_nlr_operands`, `on:do:`'s cover).
@@ -402,6 +423,34 @@ fn a_prestore_read_before_its_operands_reports_stale() {
     assert_eq!(
         reported,
         (STATE_STEP_PRESTORES.len() + 1) * POSITIONS.len() * PREFIXES.len()
+    );
+}
+
+/// BT-4612: the runtime dispatch has no `^`-closure pre-store, so a send
+/// that reaches it outside every bracket window with a `^`-holding block
+/// literal operand must run none of its operands: a `SendUserCode::Never`
+/// send. Over the whole corpus (every in-place construct, and their shapes
+/// with an operand they cannot inline) every such send is one, and the probe
+/// sees the one shape known to reach it (`p spawnWith: [^1]`).
+#[test]
+fn only_never_sends_reach_the_dispatch_with_a_nlr_literal() {
+    use beamtalk_core::state_threading_selectors::SendUserCode;
+    DISPATCH_NLR_LITERALS.with(|log| log.borrow_mut().clear());
+    for (_, src, _) in corpus() {
+        compile(&src);
+    }
+    let logged = DISPATCH_NLR_LITERALS.with(|log| std::mem::take(&mut *log.borrow_mut()));
+    let not_never: Vec<_> = logged
+        .iter()
+        .filter(|(_, class)| *class != SendUserCode::Never)
+        .collect();
+    assert!(
+        not_never.is_empty(),
+        "sends reaching the runtime dispatch with a `^` literal that may run it: {not_never:?}"
+    );
+    assert!(
+        logged.iter().any(|(selector, _)| selector == "spawnWith:"),
+        "the probe saw no send at all: {logged:?}"
     );
 }
 
