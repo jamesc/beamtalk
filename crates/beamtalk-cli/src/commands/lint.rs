@@ -910,11 +910,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // Two-package fixture setup + assertions; splitting would obscure the flow
     fn lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias() {
         let temp = tempfile::TempDir::new().unwrap();
-        // Canonicalise root — parsed files carry the canonical spelling, which
-        // `consumer_file` is compared against below; see
-        // find_package_root_from_subdir.
-        let root = std::fs::canonicalize(temp.path()).unwrap();
-        let root = root.as_path();
+        let root = temp.path();
 
         // Producer package: public Status alias, internal Secret alias,
         // Greetable protocol.
@@ -1073,7 +1069,13 @@ mod tests {
             ..
         } = parsed_files
             .into_iter()
-            .find(|f| f.path == consumer_file)
+            // Parsed files carry the canonical spelling (`/private/var/...`
+            // on macOS, `\\?\C:\...` on Windows), so compare canonically.
+            // The fixture root itself stays raw: a verbatim Windows path
+            // would not resolve the manifest's `../producer` dependency.
+            .find(|f| {
+                std::fs::canonicalize(&f.path).ok() == std::fs::canonicalize(&consumer_file).ok()
+            })
             .expect("consumer.bt should be among the parsed files");
 
         let diags = analyse_file(
