@@ -259,6 +259,34 @@ Server subclass: Connection
 
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 
+### Secret State and Selectors (BT-4567)
+
+An actor holding secrets (tokens, PKCE verifiers, passwords) can keep them out of OTP status output and crash reports by declaring them with two class-side methods:
+
+```beamtalk
+Actor subclass: SessionStore
+  state: verifier :: String | Nil = nil
+
+  /// State slots whose values never appear in status or crash reports.
+  class secretState -> List(Symbol) => #(#verifier)
+
+  /// Messages whose arguments and replies never appear in status, sys logs or crash reports.
+  class secretSelectors -> List(Symbol) => #(#create:boundTo:, #consume:boundTo:)
+```
+
+Every actor has a compiled `format_status/1` that applies the declarations:
+
+| Where | What is redacted |
+|-------|------------------|
+| `sys:get_status` state, and a crash report's state | each `secretState` slot's value becomes `"[redacted]"`; other slots are unchanged |
+| a crash report's last message | a send of a `secretSelectors` selector keeps its selector, but its arguments become `"[redacted]"` (also for `perform:` of that selector) |
+| `sys:get_status` logged events and a crash report's log (with `sys:log` on) | incoming secret sends, the reply to a secret call, and the state in each entry, as above |
+
+- Both methods default to `#()` on `Actor`, which leaves status output exactly as before. A subclass's lists **add to** its superclass's.
+- The body must be a **literal list of symbols**: the compiler reads it at compile time and bakes it into the actor module, so no user code runs while OTP formats a status or crash report. Anything else is a compile error. A `secretState` name that is not a state slot, or a `secretSelectors` name the class does not understand, is a compile warning. Calling `SessionStore secretState` still answers the class's own list.
+- The crash **reason** is not redacted. Don't raise an error whose message or value carries a secret.
+- Only output that OTP passes through `format_status/1` is redacted. `sys:get_state`, `sys:log(Pid, get)`, `sys:log(Pid, print)`, `sys:trace` and the raw debug term `sys:get_status` returns beside the formatted status show raw values; they are debugging tools with full access to the process. Beamtalk's own `inspect` and `actor_stats` are not covered either.
+
 ### Three Class Kinds (ADR 0067)
 
 Beamtalk has three class kinds with distinct data keywords and construction protocols:

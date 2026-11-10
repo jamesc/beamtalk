@@ -608,3 +608,53 @@ fn test_method_table_with_script_methods_includes_arity() {
         "method_table should list 'binary' with arity 2. Got:\n{table_body}"
     );
 }
+
+// ── format_status / '__beamtalk_secrets' (BT-4567) ──────────────────────────
+
+#[test]
+fn test_format_status_delegates_to_redaction_runtime() {
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("'format_status'/1, '__beamtalk_secrets'/0"),
+        "Actor modules must export format_status/1 and '__beamtalk_secrets'/0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor_redaction':'format_status'('test', Status)"),
+        "format_status/1 must delegate to beamtalk_actor_redaction. Got:\n{code}"
+    );
+    // No declarations: empty lists, and no chain past the Actor root.
+    assert!(
+        code.contains("'__beamtalk_secrets'/0 = fun () ->\n    {[], []}"),
+        "An actor declaring nothing has no secrets. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_secrets_metadata_bakes_declared_literals() {
+    let code = codegen(
+        "Actor subclass: Vault\n  state: token = nil\n  \
+         class secretState => #(#token)\n  \
+         class secretSelectors => #(#unlock:, #peek)\n  \
+         unlock: x => x\n  peek => self.token\n",
+    );
+    assert!(
+        code.contains("{['token'], ['unlock:', 'peek']}"),
+        "'__beamtalk_secrets'/0 must answer the declared literals. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_secrets_metadata_chains_to_superclass_module() {
+    let code =
+        codegen("Vault subclass: PinVault\n  state: pin = nil\n  class secretState => #(#pin)\n");
+    assert!(
+        code.contains("let <ParentSecrets> = call 'bt@vault':'__beamtalk_secrets'() in"),
+        "A subclass must chain to its superclass module's secrets. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'beamtalk_actor_redaction':'merge_secrets'(ParentSecrets, ['pin'], [])"
+        ),
+        "A subclass must append its own secrets to its superclass's. Got:\n{code}"
+    );
+}

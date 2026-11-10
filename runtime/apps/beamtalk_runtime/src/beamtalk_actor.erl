@@ -232,9 +232,6 @@ handle_getValue([], State) ->
 %% per sync call, nothing otherwise.
 -define(CALL_FROM_KEY, '$bt_call_from').
 
-%% BT-3968: the `handle_continue/2` term carrying the continuation queue.
--define(BT_CONTINUE_TAG, '$bt_continue').
-
 %% BT-3992: start-args key carrying the starter's `{StarterPid, AckRef}`
 %% initialize-ack target (see with_init_ack/1 and await_initialize/3), and
 %% the process-dictionary key the actor keeps it under between init/1 and

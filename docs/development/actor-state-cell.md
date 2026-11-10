@@ -66,8 +66,8 @@ An error that escapes a method returns the pre-call `State`. An actor's
 `on:do:` continues with the `State` from before the protected block. Phase 1
 (BT-4008) moved the runtime callback wrappers in `beamtalk_actor.erl` onto
 `beamtalk_actor_state`, which installs the cell, adapts the method's
-`{reply, R, NewState}` into it and takes it back on exit. Nothing hibernates,
-and nothing implements `format_status/1`.
+`{reply, R, NewState}` into it and takes it back on exit. Nothing hibernates.
+`format_status/1` (BT-4567) redacts declared secrets and reads no state cell.
 
 ## Mechanism
 
@@ -533,7 +533,7 @@ returns, or stops with, the state it was called with.
 | `handle_call`, `handle_cast`, `handle_info`, BT-3968 continuations | one method | around the dispatch | `{reply, R, NewState}` / `{noreply, NewState}` from the method's answer | pre-call state; `handle_call` replies with the error, no-reply handlers follow ADR 0134 |
 | `terminate/2` | `terminate:` if defined | around the dispatch | `ok`, cell erased | caught and ignored, as today; cell erased |
 | `code_change/3` | none; `beamtalk_hot_reload:code_change/3` | not installed | `{ok, NewState}` | unchanged |
-| `format_status/1` | not implemented | not installed | would format the `gen_server` state | n/a |
+| `format_status/1` | none; `beamtalk_actor_redaction:format_status/2` redacts the class's compiled `secretState` / `secretSelectors` (BT-4567) | not installed | the status map with secret slots, secret-selector arguments and their replies replaced by `"[redacted]"` | fails closed: state, message and log replaced |
 
 ## 6. OTP fit
 

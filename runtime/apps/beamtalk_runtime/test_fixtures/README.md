@@ -25,6 +25,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/
 ├── typed_field_counter.bt # Actor with typed-no-default field, for hot-reload field migration (BT-3532)
 ├── shape_hook_cart.bt   # Class-side migrateFromV1: hook (BT-3535, ADR 0123 Phase 1 spike)
 ├── shape_hook_raising_cart.bt # migrateFromV1: hook that always raises (BT-3535)
+├── secret_vault_actor.bt # Actor declaring secretState/secretSelectors, for format_status/1 (BT-4567)
 └── README.md           # This file
 ```
 
