@@ -100,6 +100,7 @@ let _temp@19 = _coll@18 in let _temp@20 = case call 'erlang':'is_list'(_temp@19)
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('FoldValueCtr', Selector)
             end of

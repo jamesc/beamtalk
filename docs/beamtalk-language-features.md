@@ -2475,7 +2475,7 @@ the class's own or inherited version instead:
 
 ```beamtalk
 typed Value subclass: SupervisionTree
-  // This class's own `do:` answers `self` (chainable), not `Nil` —
+  // This class's own `do:` walks the enriched `nodes`, not `elements` —
   // `Enumerable`'s provision is dropped before it can conflict.
   uses: Enumerable(SupervisionNode) excluding: #(#do:)
 ```

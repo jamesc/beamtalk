@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4515 (ADR 0145 § 2): a class that defines its own `then:`, as a promise
+// type would. `Object >> then:` is not sealed, so this one wins: its block
+// gets the resolved value, not the receiver. See then_test.bt.
+
+Value subclass: ThenPromise
+  field: resolved :: Integer = 0
+
+  then: aBlock :: Block(Integer, Object) -> ThenPromise =>
+    ThenPromise resolved: (aBlock value: self resolved)

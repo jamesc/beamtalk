@@ -92,6 +92,7 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('ParamCollisionTest', Selector)
             end of
