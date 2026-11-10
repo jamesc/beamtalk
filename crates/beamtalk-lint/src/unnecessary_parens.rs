@@ -30,6 +30,7 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::source_analysis::Diagnostic;
+use beamtalk_core::unparse::prints_as_pipeline;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions
 /// that never require precedence disambiguation.
@@ -62,8 +63,10 @@ impl LintPass for UnnecessaryParensPass {
 /// needs them to hold a pipeline at all. The tree holds a pipeline as plain
 /// sends (`(a foo) bar` here, which on its own looks like a removable
 /// unary send), so the owning definitions' `|>` records say which sends
-/// were written with `|>`. Spans are offsets into the one file, so the
-/// module's and every method's records can be read together.
+/// were written with `|>`, and the unparser's own recogniser
+/// ([`prints_as_pipeline`]) says whether the parenthesised expression is a
+/// pipeline. Spans are offsets into the one file, so the module's and every
+/// method's records can be read together.
 fn parens_around_pipelines(module: &Module) -> HashSet<(u32, u32)> {
     let piped: PipelineSends = std::iter::once(&module.pipeline_sends)
         .chain(module.all_methods().map(|m| &m.pipeline_sends))
@@ -78,7 +81,7 @@ fn parens_around_pipelines(module: &Module) -> HashSet<(u32, u32)> {
         for stmt in seq {
             walk_expression(&stmt.expression, &mut |e| {
                 if let Expression::Parenthesized { expression, span } = e {
-                    if piped.on_receiver_spine(expression) {
+                    if prints_as_pipeline(expression, &piped) {
                         spans.insert((span.start(), span.end()));
                     }
                 }

@@ -50,7 +50,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{CommentAttachment, Expression};
+use super::CommentAttachment;
 use crate::span::Span;
 
 /// The sends of one definition that were written with `|>` (ADR 0145).
@@ -116,30 +116,6 @@ impl PipelineSends {
     /// The recorded send spans, in source order.
     pub fn spans(&self) -> impl Iterator<Item = Span> + '_ {
         self.sends.keys().map(|&(start, end)| Span::new(start, end))
-    }
-
-    /// Whether a send on `expr`'s receiver spine (`expr` itself, its
-    /// receiver, that one's receiver, …) was written with `|>`: whether
-    /// `expr` holds a pipeline that parentheses around it would delimit. A
-    /// parenthesised receiver ends the spine.
-    ///
-    /// Conservative for its callers (a lint that must not report
-    /// parentheses a pipeline needs): the unparser's own recogniser also
-    /// stops at a receiver that needs parentheses of its own.
-    #[must_use]
-    pub fn on_receiver_spine(&self, expr: &Expression) -> bool {
-        let mut current = expr;
-        loop {
-            let (receiver, span) = match current {
-                Expression::MessageSend { receiver, span, .. } => (receiver, *span),
-                Expression::Match { value, span, .. } => (value, *span),
-                _ => return false,
-            };
-            if self.contains(span) {
-                return true;
-            }
-            current = receiver;
-        }
     }
 
     /// The entries whose sends lie inside `span`, with their comments.

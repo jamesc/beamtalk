@@ -1910,20 +1910,21 @@ impl Drop for PipelineScope {
     }
 }
 
-/// Whether the send spanning `span` was written with `|>`.
-fn is_pipeline_send(span: Span) -> bool {
-    PIPELINE_SENDS.with(|current| current.borrow().contains(span))
-}
-
-/// The comments written before the `|>` of the send spanning `span`, or
-/// `None` if that send was not written with `|>`.
-fn pipeline_comments(span: Span) -> Option<CommentAttachment> {
-    PIPELINE_SENDS.with(|current| current.borrow().comments(span).cloned())
-}
-
 /// Whether `expr` prints as a pipeline (see [`Pipeline::of`]).
 fn starts_with_pipeline(expr: &Expression) -> bool {
     Pipeline::of(expr).is_some()
+}
+
+/// Whether `expr`, in the definition whose `|>` record is `sends`, prints as
+/// a pipeline: `head |> stage …`, which parentheses around it delimit.
+///
+/// The same recogniser the unparser prints pipelines with
+/// ([`Pipeline::recognise`]), for callers that hold the record rather than
+/// unparsing: the `unnecessary_parens` lint, which must not report
+/// parentheses a pipeline needs.
+#[must_use]
+pub fn prints_as_pipeline(expr: &Expression, sends: &PipelineSends) -> bool {
+    Pipeline::recognise(expr, sends).is_some()
 }
 
 /// One message on a pipeline's receiver spine: a send, or a `match:` (whose
@@ -2017,16 +2018,24 @@ struct PipelineStage<'e> {
 /// A send chain that prints as a pipeline (ADR 0145): a head expression and
 /// the stages piped through it, `head |> stage |> stage`.
 ///
-/// Recognised from the tree and the installed `|>` record by [`Self::of`],
-/// the one place that decides where a pipeline starts and ends, so printing
-/// ([`Self::unparse`]) and the "does this need parentheses" checks agree.
+/// Recognised from the tree and a `|>` record by [`Self::recognise`], the one
+/// place that decides where a pipeline starts and ends, so printing
+/// ([`Self::unparse`]), the "does this need parentheses" checks and the
+/// `unnecessary_parens` lint ([`prints_as_pipeline`]) agree.
 struct Pipeline<'e> {
     head: &'e Expression,
     stages: Vec<PipelineStage<'e>>,
 }
 
 impl<'e> Pipeline<'e> {
-    /// The pipeline `expr` prints as, or `None` if it prints as plain sends.
+    /// The pipeline `expr` prints as under the installed `|>` record (see
+    /// [`PipelineScope`]), or `None` if it prints as plain sends.
+    fn of(expr: &'e Expression) -> Option<Self> {
+        PIPELINE_SENDS.with(|current| Self::recognise(expr, &current.borrow()))
+    }
+
+    /// The pipeline `expr` prints as in the definition whose `|>` record is
+    /// `sends`, or `None` if it prints as plain sends.
     ///
     /// Walks `expr`'s receiver spine (the send, its receiver, that one's
     /// receiver, …) for as long as each receiver prints bare before its
@@ -2035,10 +2044,10 @@ impl<'e> Pipeline<'e> {
     /// above it starts a stage. The walk stops at a receiver that needs
     /// parentheses, so `(a |> foo: 1) bar` is a send to a parenthesised
     /// pipeline, not a pipeline: its `bar` does not extend the last stage.
-    fn of(expr: &'e Expression) -> Option<Self> {
+    fn recognise(expr: &'e Expression, sends: &PipelineSends) -> Option<Self> {
         // Every send asks, so code without `|>` (nearly all of it) must not
         // pay for a spine walk.
-        if PIPELINE_SENDS.with(|current| current.borrow().is_empty()) {
+        if sends.is_empty() {
             return None;
         }
         // The spine's messages, outermost first, each with its receiver and
@@ -2046,7 +2055,7 @@ impl<'e> Pipeline<'e> {
         let mut spine: Vec<(&'e Expression, Span, SpineMessage<'e>, bool)> = Vec::new();
         let mut current = expr;
         while let Some((receiver, span, message)) = SpineMessage::of(current) {
-            let piped = is_pipeline_send(span);
+            let piped = sends.contains(span);
             if !piped && message.receiver_needs_parens(receiver) {
                 break;
             }
@@ -2065,7 +2074,7 @@ impl<'e> Pipeline<'e> {
             match stages.last_mut() {
                 Some(stage) if !piped => stage.messages.push(message),
                 _ => stages.push(PipelineStage {
-                    comments: pipeline_comments(span).unwrap_or_default(),
+                    comments: sends.comments(span).cloned().unwrap_or_default(),
                     messages: vec![message],
                 }),
             }
