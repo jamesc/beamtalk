@@ -181,3 +181,21 @@ fn exactly_max_arms_is_still_guarded() {
     assert!(send_site(&code).contains("<'A4'> when 'true'"), "{code}");
     assert_compiles_through_erlc("test", &code);
 }
+
+/// BT-4630: a protocol with one tagged conformer resolves to a single
+/// `Tagged` target, but a real `Block` can conform structurally and is never
+/// an arm, so `t value` keeps the block intrinsic's inline `apply`.
+#[test]
+fn protocol_typed_value_send_keeps_block_intrinsic() {
+    let src = concat!(
+        "Object subclass: Caller\n",
+        "  run: t :: Thunk -> Integer =>\n",
+        "    t value\n\n",
+        "Protocol define: Thunk\n  value -> Integer\n\n",
+        "sealed Value subclass: Const\n  value -> Integer => 1\n\n",
+    );
+    let code = codegen_with_full_analysis(src);
+    assert!(code.contains("call 'erlang':'is_function'("), "{code}");
+    assert!(code.contains("apply "), "{code}");
+    assert_compiles_through_erlc("test", &code);
+}

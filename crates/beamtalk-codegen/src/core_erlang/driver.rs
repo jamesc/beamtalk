@@ -368,26 +368,9 @@ pub fn generate_module_with_warnings(
     // (auto-chained initialize dispatch in handle_continue and inherited
     // typed-no-default field validation).
     generator.class_hierarchy = Some(hierarchy.clone());
-    // BT-4486: the known conformers of each protocol, for guarded sends to a
-    // protocol-typed receiver. Structural, so a heuristic — the emitted tag
-    // guard is the contract.
-    if let Some(registry) = &protocol_registry {
-        generator.protocol_conformers = registry
-            .protocol_names()
-            .map(|protocol| {
-                let mut conformers: Vec<EcoString> = hierarchy
-                    .class_names()
-                    .filter(|class| {
-                        !hierarchy.is_protocol_class(class)
-                            && registry.conforms_by_known_surface(class, protocol, &hierarchy)
-                    })
-                    .cloned()
-                    .collect();
-                conformers.sort();
-                (protocol.clone(), conformers)
-            })
-            .collect();
-    }
+    // BT-4486/BT-4630: protocol conformers are computed lazily per protocol
+    // from this registry and the hierarchy.
+    generator.protocol_registry = protocol_registry;
 
     // BT-4232: codegen matches send operands directly, without peeling, so the
     // module it generates from must be canonical. Test builds check it here,

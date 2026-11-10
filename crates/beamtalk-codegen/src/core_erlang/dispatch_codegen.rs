@@ -1027,11 +1027,45 @@ impl CoreErlangGenerator {
                 )),
             };
         }
-        if let Some(conformers) = self.protocol_conformers.get(class_name.as_str()) {
-            return self.protocol_send_target(conformers);
+        if let Some(conformers) = self.protocol_conformers_of(class_name.as_str()) {
+            return self.protocol_send_target(&conformers);
         }
         self.typed_tagged_target(class_name)
             .map(TypedSendTarget::Tagged)
+    }
+
+    /// BT-4486/BT-4630: the known conformers of `protocol` (non-protocol
+    /// classes whose known surface satisfies it), sorted by name; `None` when
+    /// `protocol` is not a protocol in scope. Structural, so a heuristic —
+    /// the emitted tag guard is the contract. Computed on first use and
+    /// memoised per protocol.
+    pub(in crate::core_erlang) fn protocol_conformers_of(
+        &self,
+        protocol: &str,
+    ) -> Option<std::rc::Rc<Vec<ecow::EcoString>>> {
+        let registry = self.protocol_registry.as_ref()?;
+        if !registry.has_protocol(protocol) {
+            return None;
+        }
+        if let Some(hit) = self.protocol_conformers_memo.borrow().get(protocol) {
+            return Some(std::rc::Rc::clone(hit));
+        }
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let name = ecow::EcoString::from(protocol);
+        let mut conformers: Vec<ecow::EcoString> = hierarchy
+            .class_names()
+            .filter(|class| {
+                !hierarchy.is_protocol_class(class)
+                    && registry.conforms_by_known_surface(class, &name, hierarchy)
+            })
+            .cloned()
+            .collect();
+        conformers.sort();
+        let conformers = std::rc::Rc::new(conformers);
+        self.protocol_conformers_memo
+            .borrow_mut()
+            .insert(name, std::rc::Rc::clone(&conformers));
+        Some(conformers)
     }
 
     /// BT-4486: the guarded target for a receiver typed by a protocol —
