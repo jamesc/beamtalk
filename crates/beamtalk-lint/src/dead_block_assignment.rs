@@ -37,8 +37,8 @@
 //! - a block statement whose value is discarded (an arm statement that is not
 //!   the arm's value);
 //! - a block literal at a construct position §6 accepts but the shared
-//!   table does not thread (`eachWithIndex:` / `do:separatedBy:` outside an
-//!   actor), which loses the write at runtime today. (A `whileTrue:` /
+//!   table does not thread (BT-3753: `eachWithIndex:` / `do:separatedBy:`
+//!   outside an actor), which loses the write at runtime today. (A `whileTrue:` /
 //!   `whileFalse:` condition threads with a literal body, the unary form
 //!   included, BT-4602, and is a §6 error with any other.) As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
