@@ -58,6 +58,7 @@ mod bt4487_destructure_tuple_types;
 mod bt4512_cascade_drops_update;
 mod bt4515_object_then;
 mod bt4526_static_dnu_known_receiver;
+mod bt4594_protocol_receiver_object_methods;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

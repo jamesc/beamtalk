@@ -19,6 +19,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
@@ -723,8 +724,19 @@ impl TypeChecker {
             // (`#west =:= unionVar`) must fall through to the
             // statically-decidable-comparison hint below rather than
             // short-circuiting on `Symbol`'s `=:=`.
+            //
+            // A protocol receiver's non-protocol selector that every object
+            // answers (`printString`, `respondsTo:`) resolves through
+            // `Object`'s method table for its argument and return types
+            // (BT-4594).
             let resolve_class: EcoString =
-                if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+                if self.protocol_send_resolution(class_name, &selector_name, hierarchy)
+                    == Some(ProtocolSendResolution::Object)
+                {
+                    EcoString::from(WellKnownClass::Object.as_str())
+                } else if !class_name.contains('|')
+                    && !matches!(selector, MessageSelector::Binary(_))
+                {
                     EcoString::from(super::super::method_resolution_class(class_name))
                 } else {
                     class_name.clone()
@@ -1344,7 +1356,19 @@ impl TypeChecker {
             // `Boolean`) and downgrades genuine non-responder warnings to hints.
             // The original `member_name` (`#foo`) is still used for the
             // user-facing missing-selector message and for `Self`-typed returns.
-            let resolve_name: &str = super::super::method_resolution_class(member_name);
+            //
+            // A protocol member's non-protocol selector that every object
+            // answers resolves through `Object` the same way (BT-4594), so
+            // the member responds with `Object`'s return type rather than
+            // counting as uncertain.
+            let resolve_name: &str =
+                if self.protocol_send_resolution(member_name, selector, hierarchy)
+                    == Some(ProtocolSendResolution::Object)
+                {
+                    WellKnownClass::Object.as_str()
+                } else {
+                    super::super::method_resolution_class(member_name)
+                };
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
