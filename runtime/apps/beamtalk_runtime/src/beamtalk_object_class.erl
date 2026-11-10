@@ -2499,7 +2499,9 @@ as that ancestor's class-side `new:`, exactly as its compiled `class new:`
 synthesized `new:` does not hide it. The direct path declines it through
 `beamtalk_class_metadata:chain_has_user_new1/1`; this answers it on the path
 the caller falls back to, as the class-side chain walk finds it
-(`beamtalk_class_dispatch:ancestor_class_side_extension/2`).
+(`beamtalk_class_dispatch:ancestor_class_side_extension/2`). The memoised
+`chain_has_user_new1/1`, `true` whenever an ancestor has a `new:` extension,
+pre-screens the walk, so the common class pays one cache read.
 """.
 -spec constructor_shadowed(class_name(), selector()) -> boolean().
 constructor_shadowed(ClassName, Selector) ->
@@ -2508,6 +2510,7 @@ constructor_shadowed(ClassName, Selector) ->
         (beamtalk_dispatch:check_extension(Tag, Selector) =/= not_found orelse
             beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error)) orelse
         (Selector =:= 'new:' andalso
+            beamtalk_class_metadata:chain_has_user_new1(ClassName) andalso
             beamtalk_class_dispatch:ancestor_class_side_extension(ClassName, 'new:')).
 
 -doc """

@@ -809,7 +809,9 @@ indirect_value_subclass_test_() ->
                     {ok, _}, beamtalk_class_dispatch:lookup_direct_constructor(Leaf, new, [])
                 ),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, [])),
-                ?assertNotEqual({ok, from_extension}, gen_server:call(Leaf, {new, []}))
+                %% The class process builds through Leaf's own `new/0`,
+                %% which answers the builder's pid: the class process.
+                ?assertEqual({ok, Leaf}, gen_server:call(Leaf, {new, []}))
             after
                 beamtalk_extensions:unregister('BT4588NewMid', new, true),
                 [stop_class(P) || P <- [Leaf, Mid]]
