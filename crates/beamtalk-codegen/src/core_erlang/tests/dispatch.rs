@@ -5059,13 +5059,19 @@ fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
         "stub ancestor must keep `new:` bound: {list}"
     );
 
-    let mut hierarchy = ClassHierarchy::with_builtins();
+    // Analysis side, as `generate_module` builds it: register `Kid`, inject
+    // the index stub, publish the verdicts, then ask about `Kid`.
+    let (built, _) = ClassHierarchy::build(&module);
+    let mut hierarchy = built.expect("hierarchy builds");
     let _ = hierarchy.add_external_superclasses(&index);
+    hierarchy.publish_explicit_new1_verdicts(&module);
     assert!(hierarchy.chain_has_class_variables("Sibling"));
+    assert!(hierarchy.chain_has_class_variables("Kid"));
     assert!(!hierarchy.runs_class_method_in_caller("Sibling", "foo"));
     assert_eq!(
-        hierarchy.runs_class_method_in_caller("Sibling", "new:"),
-        !published_bound
+        hierarchy.runs_class_method_in_caller("Kid", "new:"),
+        !published_bound,
+        "analysis and codegen must agree on Kid's new:"
     );
 }
 

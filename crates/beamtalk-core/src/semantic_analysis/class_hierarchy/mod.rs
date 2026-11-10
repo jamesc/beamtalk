@@ -531,7 +531,7 @@ impl ClassHierarchy {
             // A superclass-index stub (`add_external_superclasses`) carries
             // only name + superclass: its class variables are unknown, not
             // absent, so it answers `true` like any other doubt (BT-4644).
-            if class.has_class_variables() || (class.is_module_less && class.surface_incomplete) {
+            if class.has_class_variables() || class.is_superclass_index_stub() {
                 return true;
             }
             match class.superclass.as_deref() {
