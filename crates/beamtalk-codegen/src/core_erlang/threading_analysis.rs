@@ -503,10 +503,10 @@ impl CoreErlangGenerator {
     /// the bindings map the loop always carries). BT-4602: the Phase 0 check
     /// accepts such a write in a compiled method too whenever the body is a
     /// block literal (`block_facts::while_condition_threads`), proven by
-    /// `while_condition_binding_corpus.rs`. Before, such a condition was a plain closure answering only
-    /// its boolean: the write was lost (the loop re-read the pre-loop value
-    /// forever), or a body that read it read the closure's own variable
-    /// (`erlc`: unbound variable). Like a state effect, a write counts only
+    /// `while_condition_binding_corpus.rs`. Before, such a condition was a
+    /// plain closure answering only its boolean: the write was lost (the loop
+    /// re-read the pre-loop value forever), or a body that read it read the
+    /// closure's own variable (`erlc`: unbound variable). Like a state effect, a write counts only
     /// when the loop has something to carry it in (BT-3999).
     pub(in crate::core_erlang) fn while_condition_has_carried_effects(
         &self,
