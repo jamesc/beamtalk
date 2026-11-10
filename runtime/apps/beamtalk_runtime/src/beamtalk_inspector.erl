@@ -124,7 +124,7 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
 -type field_map() :: #{
     '$beamtalk_class' := 'InspectorField',
     name := term(),
-    label := binary(),
+    label := {beamtalk_string, binary()},
     value := term(),
     kind := atom(),
     drillable := boolean()
@@ -510,12 +510,15 @@ unavailable_field() ->
 
 %% Mint an `InspectorField` Value record (tagged map). Field order mirrors the
 %% stdlib `field:` declarations: name, label, value, kind, drillable.
+%% BT-4581: `label` is declared `:: String`, so it is tagged as a Beamtalk
+%% String here — a raw binary would dispatch as `Binary`, failing `++` in
+%% `InspectorField>>printString` and comparing unequal to String literals.
 -spec inspector_field(term(), binary(), term(), atom(), boolean()) -> field_map().
 inspector_field(Name, Label, Value, Kind, Drillable) ->
     #{
         '$beamtalk_class' => 'InspectorField',
         name => Name,
-        label => Label,
+        label => beamtalk_primitive:string_from_binary(Label),
         value => Value,
         kind => Kind,
         drillable => Drillable
@@ -1140,7 +1143,9 @@ mark_seen(_, Seen) ->
 %% `Prov` is the parent cursor's provenance, scoping the charlist→`String`
 %% heuristic for any value summarised inline.
 -spec render_field(map(), integer(), non_neg_integer(), map(), provenance()) -> iolist().
-render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent, Seen, Prov) when
+render_field(
+    #{label := {beamtalk_string, Label}, value := Value, drillable := true}, Depth, Indent, Seen, Prov
+) when
     Depth > 1
 ->
     case actor_pid(Value) of
@@ -1154,7 +1159,7 @@ render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent
         not_actor ->
             expand_field(Label, Value, Depth, Indent, Seen, Prov)
     end;
-render_field(#{label := Label, value := Value}, _Depth, Indent, _Seen, Prov) ->
+render_field(#{label := {beamtalk_string, Label}, value := Value}, _Depth, Indent, _Seen, Prov) ->
     scalar_field_line(Label, Value, Indent, Prov).
 
 %% Expand a drillable field into its own (depth-1) sub-tree, or fall back to a
@@ -1389,11 +1394,11 @@ field_dictionary(#{
     name := Name, label := Label, value := Value, kind := Kind, drillable := Drillable
 }) ->
     %% BT-4173: label/value are display text — tag them as Strings so the
-    %% wire form compares equal to String literals. `name` stays a raw
-    %% navigation key.
+    %% wire form compares equal to String literals (`label` is already a
+    %% String on the field record, BT-4581). `name` stays a raw navigation key.
     #{
         name => Name,
-        label => beamtalk_primitive:string_from_binary(Label),
+        label => Label,
         value => beamtalk_primitive:string_from_binary(value_string(Value)),
         kind => Kind,
         drillable => Drillable
