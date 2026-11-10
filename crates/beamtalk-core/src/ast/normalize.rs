@@ -248,8 +248,9 @@ pub fn peel_operand_parens_recording(module: &mut Module) -> PeeledParens {
 }
 
 /// Strips redundant parentheses from every send operand in `expr`'s tree
-/// (including nested blocks), leaving `expr` itself as it is, and adds what
-/// it removed to `record`.
+/// (including nested blocks; a wrapper around `expr` itself is kept), adds
+/// what it removed to `record`, and canonicalises every unary loop in the
+/// tree, `expr` itself included ([`desugar_unary_loops`]).
 ///
 /// The expression-level entry of [`peel_operand_parens_recording`], for
 /// callers that hold module-level expressions rather than a module (the

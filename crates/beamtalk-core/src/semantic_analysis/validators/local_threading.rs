@@ -1421,7 +1421,8 @@ enum Escape {
     Condition(EcoString),
     /// The receiver of a unary `whileTrue`/`whileFalse` (BT-4313): the same
     /// condition as [`Self::Condition`], named as written. The flag is whether
-    /// the method has fields to keep the state in (not a class method).
+    /// the method can write a field to keep the state in
+    /// ([`Walker::method_can_write_field`]).
     UnaryLoop(EcoString, bool),
     /// The condition of a `whileTrue:`/`whileFalse:` whose body is not a block
     /// literal: the loop runs its condition as a closure in every context
@@ -2800,7 +2801,9 @@ impl<'d> Walker<'d> {
                     // `whileTrue: []` it is canonicalised to; name it as written.
                     let escape =
                         match crate::ast::normalize::written_unary_loop(selector, arguments) {
-                            Some(unary) => Escape::UnaryLoop(unary.into(), self.context != Class),
+                            Some(unary) => {
+                                Escape::UnaryLoop(unary.into(), self.method_can_write_field())
+                            }
                             None => Escape::Condition(sel.clone()),
                         };
                     self.report_literal(block, &escape);
@@ -2969,6 +2972,20 @@ impl<'d> Walker<'d> {
                 .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );
         }
+    }
+
+    /// Whether `self.f := ...` is legal in this method, so a diagnostic may
+    /// suggest keeping state in a field: an instance method of an actor or a
+    /// `TestCase` subclass. Not a class-side method, an `Object` subclass
+    /// (which cannot declare instance data) or a `Value` subclass
+    /// ([`ClassHierarchy::rejects_slot_assignment`]).
+    fn method_can_write_field(&self) -> bool {
+        self.context != Class
+            && self.receivers.as_ref().is_some_and(|facts| {
+                let class = facts.class_name.as_str();
+                facts.hierarchy.resolve_class_kind(class) != crate::ast::ClassKind::Object
+                    && !facts.hierarchy.rejects_slot_assignment(class)
+            })
     }
 
     /// Whether codegen threads an outer-local write in the condition block of

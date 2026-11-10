@@ -3812,13 +3812,25 @@ fn unary_while_rejection_names_the_written_selector() {
         // A class method has no fields to keep the state in.
         assert!(!help.contains("self.t"), "{help}");
     }
-    // A value-type method does: the help offers one.
-    let source = in_value("[t := t + 1. t < 3] whileTrue\nt");
-    let diags = adr0131_diagnostics(&source);
-    let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-    assert_eq!(errors.len(), 1, "{source}: {diags:?}");
-    let help = errors[0].hint.as_deref().unwrap_or_default();
-    assert!(help.contains("self.t := self.t + 1"), "{help}");
+    // Only a method that can write a field is offered one (BT-4313 review):
+    // an actor, not a `Value` subclass (immutable) or an `Object` subclass
+    // (no instance data).
+    let hint = |source: String| {
+        let diags = adr0131_diagnostics(&source);
+        let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+        assert_eq!(errors.len(), 1, "{source}: {diags:?}");
+        errors[0].hint.as_deref().unwrap_or_default().to_string()
+    };
+    let body = "t := 0\n[t := t + 1. t < 3] whileTrue\nt";
+    assert!(hint(in_actor(body)).contains("self.t := self.t + 1"));
+    assert!(!hint(in_value(body)).contains("self.t"));
+    assert!(
+        !hint(format!(
+            "Object subclass: Plain\n  probe =>\n{}\n",
+            indent(body)
+        ))
+        .contains("self.t")
+    );
 }
 
 /// BT-3782: a condition that only reads outer locals, and a loop body that
