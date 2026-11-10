@@ -501,10 +501,10 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "dict do: with local mutation should use lists:foldl. Got:\n{code}"
         );
-        // Tuple-accumulator: element(1, ...) reads the threaded local inside the lambda.
+        // BT-4116: a single threaded local is a bare accumulator — no tuple.
         assert!(
-            code.contains("'erlang':'element'(1,"),
-            "dict do: tuple-acc path should use element(1, ...) to read the threaded local. Got:\n{code}"
+            !code.contains("'erlang':'element'(1,"),
+            "dict do: single-local path should use a bare accumulator. Got:\n{code}"
         );
         // Exactly one maps:get for the outer extraction after the loop (not inside the lambda).
         let get_count = code.matches("maps':'get'('__local__total'").count();
@@ -785,9 +785,11 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "ValueType dict do: with local mutation must use lists:foldl. Got:\n{code}"
         );
+        // BT-4116: the lambda unpacks the bare accumulator (`Total = AccSt`); the
+        // per-call `{'nil', Map}` repack after the fold is a follow-up.
         assert!(
-            code.contains("maps':'get'('__local__total'"),
-            "ValueType dict do: map-acc path should extract local via maps:get. Got:\n{code}"
+            code.contains("let Total@ = _AccSt@") && !code.contains("'erlang':'element'(1, _AccSt"),
+            "ValueType dict do: single-local path should fold a bare accumulator. Got:\n{code}"
         );
     }
 
@@ -814,12 +816,14 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "ValueType doWithKey: with local mutation must use lists:foldl. Got:\n{code}"
         );
+        // BT-4116: the lambda unpacks the bare accumulator (`Total = AccSt`); the
+        // per-call `{'nil', Map}` repack after the fold is a follow-up.
         assert!(
-            code.contains("maps':'get'('__local__total'"),
-            "ValueType doWithKey: map-acc path should extract local via maps:get. Got:\n{code}"
+            code.contains("let Total@ = _AccSt@") && !code.contains("'erlang':'element'(1, _AccSt"),
+            "ValueType doWithKey: single-local path should fold a bare accumulator. Got:\n{code}"
         );
         assert!(
-            code.contains("{'nil', _FoldResult"),
+            code.contains("{'nil', _PkSt"),
             "ValueType doWithKey: closed form answers the carrier. Got:\n{code}"
         );
     }

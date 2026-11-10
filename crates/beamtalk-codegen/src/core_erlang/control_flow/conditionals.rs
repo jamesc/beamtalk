@@ -882,7 +882,7 @@ impl CoreErlangGenerator {
         self.rebind_frames.get(&frame).is_some_and(|rebind| {
             matches!(
                 rebind.kind,
-                RebindFrameKind::Loop(ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_))
+                RebindFrameKind::Loop(ThreadingMode::DirectParams | ThreadingMode::TupleAcc(..))
             )
         })
     }

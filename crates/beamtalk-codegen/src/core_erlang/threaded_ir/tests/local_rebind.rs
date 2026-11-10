@@ -103,12 +103,12 @@ fn rebind_shape_table_covers_every_frame_mode_and_membership() {
             RebindShape::Let,
         ),
         (
-            RebindFrameKind::Loop(ThreadingMode::TupleAcc(1)),
+            RebindFrameKind::Loop(ThreadingMode::TupleAcc(1, FoldAccShape::Tuple)),
             true,
             RebindShape::LoopParam,
         ),
         (
-            RebindFrameKind::Loop(ThreadingMode::TupleAcc(1)),
+            RebindFrameKind::Loop(ThreadingMode::TupleAcc(1, FoldAccShape::Tuple)),
             false,
             RebindShape::Let,
         ),
@@ -138,7 +138,7 @@ fn rebind_frame_reads_mode_and_threads_off_the_enclosing_node() {
     let arm = build_branch_arm(FrameId::new(4), threads(&["u"]), Vec::new());
     assert_eq!(frame_of(&arm).kind, RebindFrameKind::BranchArm);
     let fold = ThreadedStmt::Threaded {
-        mode: ThreadingMode::TupleAcc(0),
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Tuple),
         frame: FrameId::new(2),
         threads: threads(&["t"]),
         body: Vec::new(),
@@ -149,7 +149,7 @@ fn rebind_frame_reads_mode_and_threads_off_the_enclosing_node() {
         frame_of(&fold),
         RebindFrame {
             frame: FrameId::new(2),
-            kind: RebindFrameKind::Loop(ThreadingMode::TupleAcc(0)),
+            kind: RebindFrameKind::Loop(ThreadingMode::TupleAcc(0, FoldAccShape::Tuple)),
             threads: threads(&["t"]),
         }
     );
@@ -392,7 +392,7 @@ fn direct_params_non_member_is_a_plain_let_outside_the_loop_chain() {
 fn tuple_acc_member_is_a_loop_param_and_non_member_a_plain_let() {
     let frame = FrameId::new(1);
     let fold = |body| ThreadedStmt::Threaded {
-        mode: ThreadingMode::TupleAcc(0),
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Tuple),
         frame,
         threads: threads(&["t"]),
         body,

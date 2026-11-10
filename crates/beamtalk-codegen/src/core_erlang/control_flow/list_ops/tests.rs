@@ -235,9 +235,11 @@ fn test_do_with_local_mutation_uses_tuple_acc() {
         put_count, 1,
         "do: tuple mode should have exactly 1 maps:put (repack after loop). Got:\n{code}"
     );
+    // BT-4116: one threaded local in a `do:` is a bare accumulator — no tuple,
+    // so no `element` call either.
     assert!(
-        code.contains("'erlang':'element'(1,"),
-        "do: tuple mode should use element(1, ...) to read threaded local. Got:\n{code}"
+        !code.contains("'erlang':'element'(1,"),
+        "do: with one threaded local should use a bare accumulator. Got:\n{code}"
     );
 }
 
@@ -1536,10 +1538,12 @@ fn test_value_type_do_with_local_mutation_open_chain() {
         !code.contains("ThreadedResult"),
         "ValueType do: open chain should NOT emit a ThreadedResult wrapper. Got:\n{code}"
     );
-    // Open chain: extracts local via maps:get (map-acc), not element(N, ...) (tuple-acc).
+    // BT-4116: one threaded local folds a bare accumulator — no map, no tuple.
     assert!(
-        code.contains("maps':'get'('__local__total'"),
-        "ValueType do: should extract updated local via maps:get. Got:\n{code}"
+        !code.contains("maps':'get'('__local__total'")
+            && !code.contains("maps':'put'('__local__total'")
+            && !code.contains("'erlang':'element'(1,"),
+        "ValueType do: should fold a bare accumulator. Got:\n{code}"
     );
 }
 

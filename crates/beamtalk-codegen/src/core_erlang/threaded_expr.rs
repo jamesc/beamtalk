@@ -192,6 +192,14 @@ pub(super) mod fault {
         /// names the loop context's `StateAcc`
         /// (`TupleAccStateReadNotEntryState`).
         TupleAccNoEntryCapture,
+        /// BT-4116: no fold selects a tuple/bare accumulator — every fold
+        /// threads its locals through the `StateAcc` map, as before BT-4116.
+        /// The agreement corpus's oracle build (`fold_acc_shape_agreement`).
+        ForceStateAccFold,
+        /// BT-4116: a gate-slot-free single-local `do:` fold repacks its
+        /// accumulator as a one-element tuple while its mode unpacks a bare
+        /// value (`FoldAccShapeMismatch`).
+        BareFoldTupleRepack,
         /// BT-3982: an actor evaluated literal block that threads `State` is
         /// no producer (`actor_evaluated_block_producer_parts` answers
         /// `None`), as before BT-3982: in value position it reaches the
@@ -1893,7 +1901,7 @@ impl CoreErlangGenerator {
         // frame kind starts a scratch of its own.
         let private_scratch = match &rebind.kind {
             RebindFrameKind::Loop(
-                threaded_ir::ThreadingMode::DirectParams | threaded_ir::ThreadingMode::TupleAcc(_),
+                threaded_ir::ThreadingMode::DirectParams | threaded_ir::ThreadingMode::TupleAcc(..),
             ) => true,
             RebindFrameKind::BranchArm => self.in_private_scratch,
             _ => false,

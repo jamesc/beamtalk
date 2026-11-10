@@ -9,16 +9,16 @@ Module {
             name: Identifier {
                 name: "FoldValueCtr",
                 span: Span {
-                    start: 939,
-                    end: 951,
+                    start: 696,
+                    end: 708,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Object",
                     span: Span {
-                        start: 922,
-                        end: 928,
+                        start: 679,
+                        end: 685,
                     },
                 },
             ),
@@ -37,8 +37,8 @@ Module {
                             KeywordPart {
                                 keyword: "sumDo:",
                                 span: Span {
-                                    start: 1009,
-                                    end: 1015,
+                                    start: 766,
+                                    end: 772,
                                 },
                             },
                         ],
@@ -48,8 +48,8 @@ Module {
                             name: Identifier {
                                 name: "coll",
                                 span: Span {
-                                    start: 1016,
-                                    end: 1020,
+                                    start: 773,
+                                    end: 777,
                                 },
                             },
                             type_annotation: None,
@@ -68,8 +68,8 @@ Module {
                                     Identifier {
                                         name: "sum",
                                         span: Span {
-                                            start: 1028,
-                                            end: 1031,
+                                            start: 785,
+                                            end: 788,
                                         },
                                     },
                                 ),
@@ -78,14 +78,14 @@ Module {
                                         0,
                                     ),
                                     Span {
-                                        start: 1035,
-                                        end: 1036,
+                                        start: 792,
+                                        end: 793,
                                     },
                                 ),
                                 type_annotation: None,
                                 span: Span {
-                                    start: 1028,
-                                    end: 1036,
+                                    start: 785,
+                                    end: 793,
                                 },
                             },
                             preceding_blank_line: false,
@@ -102,8 +102,8 @@ Module {
                                     Identifier {
                                         name: "coll",
                                         span: Span {
-                                            start: 1041,
-                                            end: 1045,
+                                            start: 798,
+                                            end: 802,
                                         },
                                     },
                                 ),
@@ -112,8 +112,8 @@ Module {
                                         KeywordPart {
                                             keyword: "do:",
                                             span: Span {
-                                                start: 1046,
-                                                end: 1049,
+                                                start: 803,
+                                                end: 806,
                                             },
                                         },
                                     ],
@@ -126,8 +126,8 @@ Module {
                                                     name: "each",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1052,
-                                                        end: 1056,
+                                                        start: 809,
+                                                        end: 813,
                                                     },
                                                 },
                                             ],
@@ -144,8 +144,8 @@ Module {
                                                             Identifier {
                                                                 name: "sum",
                                                                 span: Span {
-                                                                    start: 1059,
-                                                                    end: 1062,
+                                                                    start: 816,
+                                                                    end: 819,
                                                                 },
                                                             },
                                                         ),
@@ -154,8 +154,8 @@ Module {
                                                                 Identifier {
                                                                     name: "sum",
                                                                     span: Span {
-                                                                        start: 1066,
-                                                                        end: 1069,
+                                                                        start: 823,
+                                                                        end: 826,
                                                                     },
                                                                 },
                                                             ),
@@ -167,38 +167,38 @@ Module {
                                                                     Identifier {
                                                                         name: "each",
                                                                         span: Span {
-                                                                            start: 1072,
-                                                                            end: 1076,
+                                                                            start: 829,
+                                                                            end: 833,
                                                                         },
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 1066,
-                                                                end: 1076,
+                                                                start: 823,
+                                                                end: 833,
                                                             },
                                                         },
                                                         type_annotation: None,
                                                         span: Span {
-                                                            start: 1059,
-                                                            end: 1076,
+                                                            start: 816,
+                                                            end: 833,
                                                         },
                                                     },
                                                     preceding_blank_line: false,
                                                 },
                                             ],
                                             span: Span {
-                                                start: 1050,
-                                                end: 1077,
+                                                start: 807,
+                                                end: 834,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 1041,
-                                    end: 1077,
+                                    start: 798,
+                                    end: 834,
                                 },
                             },
                             preceding_blank_line: false,
@@ -214,8 +214,8 @@ Module {
                                 Identifier {
                                     name: "sum",
                                     span: Span {
-                                        start: 1082,
-                                        end: 1085,
+                                        start: 839,
+                                        end: 842,
                                     },
                                 },
                             ),
@@ -233,8 +233,8 @@ Module {
                             Comment {
                                 content: "ValueType: `do:` with a captured local mutation.",
                                 span: Span {
-                                    start: 1009,
-                                    end: 1015,
+                                    start: 766,
+                                    end: 772,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -247,8 +247,8 @@ Module {
                     doc_comment: None,
                     pipeline_sends: {},
                     span: Span {
-                        start: 1009,
-                        end: 1085,
+                        start: 766,
+                        end: 842,
                     },
                 },
                 MethodDefinition {
@@ -257,8 +257,8 @@ Module {
                             KeywordPart {
                                 keyword: "totalInject:",
                                 span: Span {
-                                    start: 1133,
-                                    end: 1145,
+                                    start: 890,
+                                    end: 902,
                                 },
                             },
                         ],
@@ -268,8 +268,8 @@ Module {
                             name: Identifier {
                                 name: "coll",
                                 span: Span {
-                                    start: 1146,
-                                    end: 1150,
+                                    start: 903,
+                                    end: 907,
                                 },
                             },
                             type_annotation: None,
@@ -288,8 +288,8 @@ Module {
                                     Identifier {
                                         name: "coll",
                                         span: Span {
-                                            start: 1158,
-                                            end: 1162,
+                                            start: 915,
+                                            end: 919,
                                         },
                                     },
                                 ),
@@ -298,15 +298,15 @@ Module {
                                         KeywordPart {
                                             keyword: "inject:",
                                             span: Span {
-                                                start: 1163,
-                                                end: 1170,
+                                                start: 920,
+                                                end: 927,
                                             },
                                         },
                                         KeywordPart {
                                             keyword: "into:",
                                             span: Span {
-                                                start: 1173,
-                                                end: 1178,
+                                                start: 930,
+                                                end: 935,
                                             },
                                         },
                                     ],
@@ -317,8 +317,8 @@ Module {
                                             0,
                                         ),
                                         Span {
-                                            start: 1171,
-                                            end: 1172,
+                                            start: 928,
+                                            end: 929,
                                         },
                                     ),
                                     Block(
@@ -328,16 +328,16 @@ Module {
                                                     name: "acc",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1181,
-                                                        end: 1184,
+                                                        start: 938,
+                                                        end: 941,
                                                     },
                                                 },
                                                 BlockParameter {
                                                     name: "each",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1186,
-                                                        end: 1190,
+                                                        start: 943,
+                                                        end: 947,
                                                     },
                                                 },
                                             ],
@@ -354,8 +354,8 @@ Module {
                                                             Identifier {
                                                                 name: "acc",
                                                                 span: Span {
-                                                                    start: 1193,
-                                                                    end: 1196,
+                                                                    start: 950,
+                                                                    end: 953,
                                                                 },
                                                             },
                                                         ),
@@ -367,32 +367,32 @@ Module {
                                                                 Identifier {
                                                                     name: "each",
                                                                     span: Span {
-                                                                        start: 1199,
-                                                                        end: 1203,
+                                                                        start: 956,
+                                                                        end: 960,
                                                                     },
                                                                 },
                                                             ),
                                                         ],
                                                         is_cast: false,
                                                         span: Span {
-                                                            start: 1193,
-                                                            end: 1203,
+                                                            start: 950,
+                                                            end: 960,
                                                         },
                                                     },
                                                     preceding_blank_line: false,
                                                 },
                                             ],
                                             span: Span {
-                                                start: 1179,
-                                                end: 1204,
+                                                start: 936,
+                                                end: 961,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 1158,
-                                    end: 1204,
+                                    start: 915,
+                                    end: 961,
                                 },
                             },
                             preceding_blank_line: false,
@@ -409,8 +409,8 @@ Module {
                             Comment {
                                 content: "ValueType: `inject:into:` foldl shape.",
                                 span: Span {
-                                    start: 1133,
-                                    end: 1145,
+                                    start: 890,
+                                    end: 902,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -423,8 +423,8 @@ Module {
                     doc_comment: None,
                     pipeline_sends: {},
                     span: Span {
-                        start: 1133,
-                        end: 1204,
+                        start: 890,
+                        end: 961,
                     },
                 },
             ],
@@ -435,8 +435,8 @@ Module {
                     Comment {
                         content: "Copyright 2026 James Casey",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -444,116 +444,80 @@ Module {
                     Comment {
                         content: "SPDX-License-Identifier: Apache-2.0",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the excluded TupleAcc",
+                        content: "BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the ValueType and",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: true,
                     },
                     Comment {
-                        content: "cells. ValueType and ClassMethod contexts both fall back to the",
+                        content: "ClassMethod cells. Since BT-4116 a foldl list-op that threads only outer",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "non-optimized map-shaped `StateAcc` accumulator for foldl list-ops with",
+                        content: "locals takes the TupleAcc convention in these contexts too: a `do:` over a",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "mutations, confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`",
+                        content: "single local folds a bare accumulator (no tuple, no map), `inject:into:`",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "(\"StateAcc fallback — not a letrec loop\" — both route through the shared",
+                        content: "threads its own accumulator. Confirm with `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "`generate_list_do_body_with_threading` compat shim, control_flow/mod.rs:2808,",
+                        content: "Field writes, self-sends, and the other guards in `select_tuple_acc` still",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "which calls `ThreadingPlan::new(self, body, None)` — `allow_tuple_acc` is",
+                        content: "fall back to the map-shaped `StateAcc`. This file pins the byte-level shape",
                         span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
                     },
                     Comment {
-                        content: "hardcoded `false` there, independent of `select_tuple_acc`'s own",
+                        content: "for both contexts so a future change cannot silently alter it.",
                         span: Span {
-                            start: 922,
-                            end: 928,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "`ValueType`-only exclusion at control_flow/mod.rs:448-466). This file",
-                        span: Span {
-                            start: 922,
-                            end: 928,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "pins that behaviour for both contexts so a future migration cannot",
-                        span: Span {
-                            start: 922,
-                            end: 928,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "silently start selecting tuple-acc for one of them without the snapshot",
-                        span: Span {
-                            start: 922,
-                            end: 928,
-                        },
-                        kind: Line,
-                        preceding_blank_line: false,
-                    },
-                    Comment {
-                        content: "corpus catching the byte-level change.",
-                        span: Span {
-                            start: 922,
-                            end: 928,
+                            start: 679,
+                            end: 685,
                         },
                         kind: Line,
                         preceding_blank_line: false,
@@ -571,24 +535,24 @@ Module {
             superclass_type_args: [],
             uses: [],
             span: Span {
-                start: 922,
-                end: 1204,
+                start: 679,
+                end: 961,
             },
         },
         ClassDefinition {
             name: Identifier {
                 name: "FoldClassMethodCtr",
                 span: Span {
-                    start: 1222,
-                    end: 1240,
+                    start: 979,
+                    end: 997,
                 },
             },
             superclass: Some(
                 Identifier {
                     name: "Actor",
                     span: Span {
-                        start: 1206,
-                        end: 1211,
+                        start: 963,
+                        end: 968,
                     },
                 },
             ),
@@ -608,8 +572,8 @@ Module {
                             KeywordPart {
                                 keyword: "sumDo:",
                                 span: Span {
-                                    start: 1352,
-                                    end: 1358,
+                                    start: 1109,
+                                    end: 1115,
                                 },
                             },
                         ],
@@ -619,8 +583,8 @@ Module {
                             name: Identifier {
                                 name: "coll",
                                 span: Span {
-                                    start: 1359,
-                                    end: 1363,
+                                    start: 1116,
+                                    end: 1120,
                                 },
                             },
                             type_annotation: None,
@@ -639,8 +603,8 @@ Module {
                                     Identifier {
                                         name: "sum",
                                         span: Span {
-                                            start: 1371,
-                                            end: 1374,
+                                            start: 1128,
+                                            end: 1131,
                                         },
                                     },
                                 ),
@@ -649,14 +613,14 @@ Module {
                                         0,
                                     ),
                                     Span {
-                                        start: 1378,
-                                        end: 1379,
+                                        start: 1135,
+                                        end: 1136,
                                     },
                                 ),
                                 type_annotation: None,
                                 span: Span {
-                                    start: 1371,
-                                    end: 1379,
+                                    start: 1128,
+                                    end: 1136,
                                 },
                             },
                             preceding_blank_line: false,
@@ -673,8 +637,8 @@ Module {
                                     Identifier {
                                         name: "coll",
                                         span: Span {
-                                            start: 1384,
-                                            end: 1388,
+                                            start: 1141,
+                                            end: 1145,
                                         },
                                     },
                                 ),
@@ -683,8 +647,8 @@ Module {
                                         KeywordPart {
                                             keyword: "do:",
                                             span: Span {
-                                                start: 1389,
-                                                end: 1392,
+                                                start: 1146,
+                                                end: 1149,
                                             },
                                         },
                                     ],
@@ -697,8 +661,8 @@ Module {
                                                     name: "each",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1395,
-                                                        end: 1399,
+                                                        start: 1152,
+                                                        end: 1156,
                                                     },
                                                 },
                                             ],
@@ -715,8 +679,8 @@ Module {
                                                             Identifier {
                                                                 name: "sum",
                                                                 span: Span {
-                                                                    start: 1402,
-                                                                    end: 1405,
+                                                                    start: 1159,
+                                                                    end: 1162,
                                                                 },
                                                             },
                                                         ),
@@ -725,8 +689,8 @@ Module {
                                                                 Identifier {
                                                                     name: "sum",
                                                                     span: Span {
-                                                                        start: 1409,
-                                                                        end: 1412,
+                                                                        start: 1166,
+                                                                        end: 1169,
                                                                     },
                                                                 },
                                                             ),
@@ -738,38 +702,38 @@ Module {
                                                                     Identifier {
                                                                         name: "each",
                                                                         span: Span {
-                                                                            start: 1415,
-                                                                            end: 1419,
+                                                                            start: 1172,
+                                                                            end: 1176,
                                                                         },
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 1409,
-                                                                end: 1419,
+                                                                start: 1166,
+                                                                end: 1176,
                                                             },
                                                         },
                                                         type_annotation: None,
                                                         span: Span {
-                                                            start: 1402,
-                                                            end: 1419,
+                                                            start: 1159,
+                                                            end: 1176,
                                                         },
                                                     },
                                                     preceding_blank_line: false,
                                                 },
                                             ],
                                             span: Span {
-                                                start: 1393,
-                                                end: 1420,
+                                                start: 1150,
+                                                end: 1177,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 1384,
-                                    end: 1420,
+                                    start: 1141,
+                                    end: 1177,
                                 },
                             },
                             preceding_blank_line: false,
@@ -785,8 +749,8 @@ Module {
                                 Identifier {
                                     name: "sum",
                                     span: Span {
-                                        start: 1425,
-                                        end: 1428,
+                                        start: 1182,
+                                        end: 1185,
                                     },
                                 },
                             ),
@@ -804,8 +768,8 @@ Module {
                             Comment {
                                 content: "ClassMethod: `do:` with a captured local mutation (class var untouched).",
                                 span: Span {
-                                    start: 1346,
-                                    end: 1351,
+                                    start: 1103,
+                                    end: 1108,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -818,8 +782,8 @@ Module {
                     doc_comment: None,
                     pipeline_sends: {},
                     span: Span {
-                        start: 1346,
-                        end: 1428,
+                        start: 1103,
+                        end: 1185,
                     },
                 },
                 MethodDefinition {
@@ -828,8 +792,8 @@ Module {
                             KeywordPart {
                                 keyword: "totalInject:",
                                 span: Span {
-                                    start: 1484,
-                                    end: 1496,
+                                    start: 1241,
+                                    end: 1253,
                                 },
                             },
                         ],
@@ -839,8 +803,8 @@ Module {
                             name: Identifier {
                                 name: "coll",
                                 span: Span {
-                                    start: 1497,
-                                    end: 1501,
+                                    start: 1254,
+                                    end: 1258,
                                 },
                             },
                             type_annotation: None,
@@ -859,8 +823,8 @@ Module {
                                     Identifier {
                                         name: "coll",
                                         span: Span {
-                                            start: 1509,
-                                            end: 1513,
+                                            start: 1266,
+                                            end: 1270,
                                         },
                                     },
                                 ),
@@ -869,15 +833,15 @@ Module {
                                         KeywordPart {
                                             keyword: "inject:",
                                             span: Span {
-                                                start: 1514,
-                                                end: 1521,
+                                                start: 1271,
+                                                end: 1278,
                                             },
                                         },
                                         KeywordPart {
                                             keyword: "into:",
                                             span: Span {
-                                                start: 1524,
-                                                end: 1529,
+                                                start: 1281,
+                                                end: 1286,
                                             },
                                         },
                                     ],
@@ -888,8 +852,8 @@ Module {
                                             0,
                                         ),
                                         Span {
-                                            start: 1522,
-                                            end: 1523,
+                                            start: 1279,
+                                            end: 1280,
                                         },
                                     ),
                                     Block(
@@ -899,16 +863,16 @@ Module {
                                                     name: "acc",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1532,
-                                                        end: 1535,
+                                                        start: 1289,
+                                                        end: 1292,
                                                     },
                                                 },
                                                 BlockParameter {
                                                     name: "each",
                                                     type_annotation: None,
                                                     span: Span {
-                                                        start: 1537,
-                                                        end: 1541,
+                                                        start: 1294,
+                                                        end: 1298,
                                                     },
                                                 },
                                             ],
@@ -925,8 +889,8 @@ Module {
                                                             Identifier {
                                                                 name: "acc",
                                                                 span: Span {
-                                                                    start: 1544,
-                                                                    end: 1547,
+                                                                    start: 1301,
+                                                                    end: 1304,
                                                                 },
                                                             },
                                                         ),
@@ -938,32 +902,32 @@ Module {
                                                                 Identifier {
                                                                     name: "each",
                                                                     span: Span {
-                                                                        start: 1550,
-                                                                        end: 1554,
+                                                                        start: 1307,
+                                                                        end: 1311,
                                                                     },
                                                                 },
                                                             ),
                                                         ],
                                                         is_cast: false,
                                                         span: Span {
-                                                            start: 1544,
-                                                            end: 1554,
+                                                            start: 1301,
+                                                            end: 1311,
                                                         },
                                                     },
                                                     preceding_blank_line: false,
                                                 },
                                             ],
                                             span: Span {
-                                                start: 1530,
-                                                end: 1555,
+                                                start: 1287,
+                                                end: 1312,
                                             },
                                         },
                                     ),
                                 ],
                                 is_cast: false,
                                 span: Span {
-                                    start: 1509,
-                                    end: 1555,
+                                    start: 1266,
+                                    end: 1312,
                                 },
                             },
                             preceding_blank_line: false,
@@ -980,8 +944,8 @@ Module {
                             Comment {
                                 content: "ClassMethod: `inject:into:` foldl shape.",
                                 span: Span {
-                                    start: 1478,
-                                    end: 1483,
+                                    start: 1235,
+                                    end: 1240,
                                 },
                                 kind: Line,
                                 preceding_blank_line: true,
@@ -994,8 +958,8 @@ Module {
                     doc_comment: None,
                     pipeline_sends: {},
                     span: Span {
-                        start: 1478,
-                        end: 1555,
+                        start: 1235,
+                        end: 1312,
                     },
                 },
             ],
@@ -1004,8 +968,8 @@ Module {
                     name: Identifier {
                         name: "total",
                         span: Span {
-                            start: 1255,
-                            end: 1260,
+                            start: 1012,
+                            end: 1017,
                         },
                     },
                     type_annotation: None,
@@ -1015,8 +979,8 @@ Module {
                                 0,
                             ),
                             Span {
-                                start: 1263,
-                                end: 1264,
+                                start: 1020,
+                                end: 1021,
                             },
                         ),
                     ),
@@ -1031,8 +995,8 @@ Module {
                     },
                     doc_comment: None,
                     span: Span {
-                        start: 1243,
-                        end: 1264,
+                        start: 1000,
+                        end: 1021,
                     },
                 },
             ],
@@ -1050,8 +1014,8 @@ Module {
             superclass_type_args: [],
             uses: [],
             span: Span {
-                start: 1206,
-                end: 1555,
+                start: 963,
+                end: 1312,
             },
         },
     ],
@@ -1061,8 +1025,8 @@ Module {
     native_declarations: [],
     expressions: [],
     span: Span {
-        start: 922,
-        end: 1555,
+        start: 679,
+        end: 1312,
     },
     file_leading_comments: [],
     file_trailing_comments: [],

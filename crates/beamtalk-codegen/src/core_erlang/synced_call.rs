@@ -613,7 +613,7 @@ impl CoreErlangGenerator {
         match self.rebind_frames.get(&self.current_frame()) {
             Some(frame) => match &frame.kind {
                 RebindFrameKind::BranchArm => UserCodeRegion::BranchArm,
-                RebindFrameKind::Loop(ThreadingMode::TupleAcc(_)) => UserCodeRegion::FoldBody,
+                RebindFrameKind::Loop(ThreadingMode::TupleAcc(..)) => UserCodeRegion::FoldBody,
                 RebindFrameKind::Loop(_) if self.in_fold_frame => UserCodeRegion::FoldBody,
                 RebindFrameKind::Loop(_) => UserCodeRegion::LetrecLoop,
                 RebindFrameKind::MethodBody => UserCodeRegion::MethodRoot,
@@ -1858,7 +1858,7 @@ impl CoreErlangGenerator {
             || matches!(
                 self.rebind_frames.get(&self.current_frame()).map(|f| &f.kind),
                 Some(RebindFrameKind::Loop(
-                    ThreadingMode::TupleAcc(_) | ThreadingMode::DirectParams | ThreadingMode::Hybrid
+                    ThreadingMode::TupleAcc(..) | ThreadingMode::DirectParams | ThreadingMode::Hybrid
                 ))
             )
     }

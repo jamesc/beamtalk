@@ -12,8 +12,9 @@
 use super::super::CoreErlangGenerator;
 use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, RebindFrame, RebindLowering, RebindShape,
-    ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CloseContext, FoldAccShape, FrameId, RebindFrame,
+    RebindLowering, RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
@@ -66,6 +67,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
     param_name: &str,
     mode_gate_slots: usize,
     node_gate_slots: usize,
+    shape: FoldAccShape,
     threaded_locals: &[String],
     span: Span,
 ) -> (ThreadedStmt, Vec<VersionedVar>) {
@@ -80,12 +82,13 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
         })
         .collect();
     let stmt = ThreadedStmt::Threaded {
-        mode: ThreadingMode::TupleAcc(mode_gate_slots),
+        mode: ThreadingMode::TupleAcc(mode_gate_slots, shape),
         frame,
         threads: threaded_locals.to_vec(),
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: node_gate_slots,
+            shape,
             targets: targets.clone(),
             frame,
             span,

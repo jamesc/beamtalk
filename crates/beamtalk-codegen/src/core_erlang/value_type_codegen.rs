@@ -16,7 +16,7 @@ use std::fmt::Write as FmtWrite;
 
 use super::control_flow::analysis::ThreadedFamilies;
 use super::control_flow::family_slots::{self, FamilyVersionStep};
-use super::control_flow::{BodyKind, SoloBoolean, ThreadingPlan};
+use super::control_flow::{BodyKind, ListOpKind, SoloBoolean, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
@@ -2671,9 +2671,16 @@ impl CoreErlangGenerator {
         // return) — see this function's own doc comment — so it uses the same
         // `foldl_call_doc` every other `Foldl*` call site does.
         let fold_plan = self.with_fold_self_slot_consumer(expr, |this| {
-            ThreadingPlan::new(this, body, None).with_value_self_slot(this, body)
+            ThreadingPlan::new_for_foldl_list_op(this, body, ListOpKind::Do)
+                .with_value_self_slot(this, body)
         })?;
         let threaded_locals = fold_plan.threaded_locals.clone();
+
+        // BT-4116: a body that threads only outer locals folds a bare value (one
+        // local) or an N-tuple (several) — no map, no per-element `maps:get`/`put`.
+        if fold_plan.use_tuple_acc {
+            return self.generate_value_type_do_open_tuple(receiver, block_expr, body, &fold_plan);
+        }
 
         // Phase 1: create a fresh map and pack each captured local into it.
         let init_map_var = self.fresh_temp_var("InitMap");
@@ -2808,6 +2815,68 @@ impl CoreErlangGenerator {
         // Intentionally open — the caller's next body_part provides the continuation.
         docs.push(concat(post_docs));
 
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-4116: the tuple/bare-accumulator form of
+    /// [`Self::generate_value_type_do_open`]. The fold seed is the threaded
+    /// locals' current values (the single value for a bare accumulator), the
+    /// lambda unpacks them per element, and the post-fold chain rebinds each
+    /// local as an open `let` for the caller's next body part.
+    fn generate_value_type_do_open_tuple(
+        &mut self,
+        receiver: &Expression,
+        _block_expr: &Expression,
+        body: &beamtalk_core::ast::Block,
+        fold_plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        let init_acc = fold_plan.initial_vars_tuple_doc(self);
+        let acc_var = self.fresh_temp_var("AccSt");
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            super::control_flow::list_recv_to_safe_list_doc(
+                recv_code,
+                None,
+                list_var,
+                safe_list_var.clone(),
+            ),
+            "let ",
+            leaf::var(lambda_var.clone()),
+            " = fun (",
+            leaf::var(item_var.clone()),
+            ", ",
+            leaf::var(acc_var.clone()),
+            ") -> ",
+        ]];
+
+        self.emit_loop_convention_diagnostic(fold_plan, body.span);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, &item_var);
+        }
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, fold_plan, &BodyKind::FoldlDo, &acc_var, 0)?;
+        self.pop_scope();
+        docs.push(body_doc);
+
+        let fold_result = self.fresh_temp_var("FoldResult");
+        docs.push(ThreadingPlan::foldl_call_doc(
+            &lambda_var,
+            init_acc,
+            &safe_list_var,
+            &fold_result,
+        ));
+        // The extraction rebinds each local under its current Core name (the
+        // suffix reads it via `lookup_var`), shadowing the pre-loop binding for
+        // every later body part.
+        docs.push(fold_plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self));
+        // Intentionally open — the caller's next body_part provides the continuation.
         Ok(Document::Vec(docs))
     }
 

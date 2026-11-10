@@ -17,10 +17,10 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry,
-    NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
-    RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef,
-    VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX,
+    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering,
+    RebindShape, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion,
+    ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -80,22 +80,21 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
-    /// Invariant class 2: `select_tuple_acc`'s `ValueType`-context
-    /// exclusion (`control_flow/mod.rs`'s `select_tuple_acc`), pinned
-    /// structurally. `ValueType` methods have no actor `State` `gen_server`
-    /// variable to reference — `TupleAcc` mode is unconditionally
-    /// unavailable there, and this fires if a future change to
-    /// `select_tuple_acc`'s guard ordering ever lets `use_tuple_acc` become
-    /// `true` in a `ValueType` context. Regression-pinning (see ADR
-    /// §Verifier honesty) — `select_tuple_acc`'s own early-return already
-    /// makes this unreachable today.
-    ///
-    /// `#[cfg(test)]`: this variant's sole constructor
-    /// ([`verify_tuple_acc_value_type_exclusion`]) is itself test-only —
-    /// see that function's doc comment for why production never reaches
-    /// it structurally.
-    #[cfg(test)]
-    TupleAccInValueTypeContext { at: Span },
+    /// BT-4116 (replaces the retired `ValueType`-context rule, invariant
+    /// class 2): a tuple-accumulator fold whose plan also threads a family
+    /// (`Self`, ...). The tuple accumulator carries locals only; a family
+    /// rides the map path (`select_tuple_acc`'s `field_writes` guard).
+    TupleAccWithFamily { at: Span },
+
+    /// BT-4116: the fold's accumulator statement disagrees with its mode's
+    /// [`FoldAccShape`] — a bare value where the mode unpacks a tuple, or a
+    /// tuple where it unpacks a bare value (the next iteration would read
+    /// the wrong shape).
+    FoldAccShapeMismatch {
+        mode: FoldAccShape,
+        found: FoldCarry,
+        at: Span,
+    },
 
     /// Invariant class 3: the recursive inter-construct fallback
     /// invariant `list_op_needs_stateacc_fallback_recursive` encodes
@@ -845,7 +844,7 @@ pub(in crate::core_erlang) fn verify_tuple_acc_state_reads(
     reads: &[String],
     at: Span,
 ) -> Vec<VerifyError> {
-    if !matches!(mode, ThreadingMode::TupleAcc(_)) {
+    if !matches!(mode, ThreadingMode::TupleAcc(..)) {
         return Vec::new();
     }
     let mut errors: Vec<VerifyError> = Vec::new();
@@ -1190,6 +1189,20 @@ pub(in crate::core_erlang) fn verify_fold_family_carried(
     }
 }
 
+/// BT-4116: [`VerifyError::TupleAccWithFamily`] — a tuple-accumulator fold
+/// must thread no family.
+pub(in crate::core_erlang) fn verify_tuple_acc_no_family(
+    mode: &ThreadingMode,
+    families_empty: bool,
+    at: Span,
+) -> Vec<VerifyError> {
+    if matches!(mode, ThreadingMode::TupleAcc(..)) && !families_empty {
+        vec![VerifyError::TupleAccWithFamily { at }]
+    } else {
+        Vec::new()
+    }
+}
+
 /// BT-3863, [`VerifyError::FoldLocalsNotCarried`] over one fold lambda body
 /// (the statement list of a `Foldl*` `Threaded` node with `mode`, threading
 /// `threads`): when it threads any local, its last statement must be the
@@ -1211,8 +1224,25 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
         Some(ThreadedStmt::FoldAccumulator { carry, span, .. }) => (Some(carry), *span),
         _ => (None, at),
     };
+    if let (ThreadingMode::TupleAcc(_, shape), Some(carry)) = (mode, found) {
+        let carry_shape = match carry {
+            FoldCarry::Locals(_) => Some(FoldAccShape::Tuple),
+            FoldCarry::BareLocal(_) => Some(FoldAccShape::Bare),
+            _ => None,
+        };
+        if carry_shape.is_some_and(|c| c != *shape) {
+            return vec![VerifyError::FoldAccShapeMismatch {
+                mode: *shape,
+                found: carry.clone(),
+                at,
+            }];
+        }
+    }
     let carried = match (mode, found) {
-        (ThreadingMode::TupleAcc(_), Some(FoldCarry::Locals(locals))) => locals == threads,
+        (ThreadingMode::TupleAcc(..), Some(FoldCarry::Locals(locals))) => locals == threads,
+        (ThreadingMode::TupleAcc(..), Some(FoldCarry::BareLocal(local))) => {
+            threads.len() == 1 && threads[0] == *local
+        }
         (ThreadingMode::StateAcc(_), Some(FoldCarry::StateMap)) => true,
         _ => false,
     };
@@ -2131,7 +2161,7 @@ impl VerifyWalk<'_> {
                 // the node's own `gate_slots` must match the enclosing mode's.
                 if let Some(mode) = self.mode_stack.last() {
                     match mode {
-                        ThreadingMode::TupleAcc(mode_gate_slots) => {
+                        ThreadingMode::TupleAcc(mode_gate_slots, _) => {
                             if *mode_gate_slots != *gate_slots {
                                 self.errors.push(VerifyError::EarlyExitGateSlotMismatch {
                                     mode_gate_slots: *mode_gate_slots,

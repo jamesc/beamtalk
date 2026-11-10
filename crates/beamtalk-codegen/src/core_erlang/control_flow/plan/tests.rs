@@ -74,6 +74,7 @@ fn make_plan(
         use_direct_params,
         use_tuple_acc,
         tuple_acc_gate_slots: 0,
+        fold_acc_shape: FoldAccShape::Tuple,
         use_hybrid_params,
         readonly_fields,
         fallback_reason: StateAccFallbackReason::None,
@@ -389,11 +390,11 @@ fn select_tuple_acc_empty_threaded() {
 }
 
 #[test]
-fn select_tuple_acc_blocked_by_value_type_context() {
+fn select_tuple_acc_allowed_in_value_type_context() {
     let threaded = vec!["x".to_string()];
     let analysis = clean_body_analysis();
     let effects = clean_effects();
-    assert!(!ThreadingPlan::select_tuple_acc(
+    assert!(ThreadingPlan::select_tuple_acc(
         true,
         &threaded,
         CodeGenContext::ValueType,

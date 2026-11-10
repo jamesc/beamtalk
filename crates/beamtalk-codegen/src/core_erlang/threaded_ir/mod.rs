@@ -100,10 +100,10 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry,
-    NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue,
-    ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix,
-    VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, FoldCarry, FrameId, LoopCounter,
+    NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt,
+    ThreadedValue, ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter,
+    VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
@@ -113,7 +113,7 @@ pub(super) use verify::{
     ClassMethodDefect, SequencedSibling, StaleReadDefect, StateReadSite, StateRestoreDefect,
     VerifyError, verify_bind_frames, verify_fold_family_carried, verify_fold_locals_carried,
     verify_producer_sites_threaded, verify_repl_producer_sites_threaded, verify_sibling_reads,
-    verify_tuple_acc_state_reads,
+    verify_tuple_acc_no_family, verify_tuple_acc_state_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name
