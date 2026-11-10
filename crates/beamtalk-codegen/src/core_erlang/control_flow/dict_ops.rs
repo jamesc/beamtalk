@@ -52,6 +52,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -127,8 +128,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -139,11 +140,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(values_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);
@@ -268,6 +265,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -366,8 +364,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -378,11 +376,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(pairs_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);

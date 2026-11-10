@@ -144,7 +144,7 @@ export const CmEditor = {
     // trip, which runs the real `erlc` and surfaces structured errors inline.
     if (!readOnly && this.el.dataset.lintMode !== "erlang") {
       const lintMode = this.el.dataset.lintMode || null
-      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode)))
+      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode, this.tabId)))
     }
     // Ctrl/Cmd-click go-to-definition (BT-2666): modifier-click a class name or a
     // selector send to open its definition / implementor(s). Skipped for native

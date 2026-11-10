@@ -1,0 +1,12 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Lint-verdict parity fixture (BT-4585): a native `.erl` lint finding counts
+# toward the lint gate on CLI `beamtalk lint` and MCP `lint` alike.
+
+[package]
+name = "parity_lint_verdict_erl"
+version = "0.1.0"
+description = "CLI/MCP .erl lint parity fixture (BT-4585)"
+
+[dependencies]

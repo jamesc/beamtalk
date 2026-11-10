@@ -82,6 +82,8 @@ value_module_resolution_test_() ->
             fun inherited_object_send_makes_no_xref_call/0},
         {"fun-backed methods added or replaced at runtime are seen by the next send (BT-4071)",
             fun runtime_method_changes_are_seen_by_next_send/0},
+        {"BT-4624: perform: finds fun-backed methods of a module-less class",
+            fun perform_finds_runtime_fun_methods/0},
         {"method_origin/3 copies no generation table (BT-4071)",
             fun method_origin_copies_no_generation_table/0}
     ]}.
@@ -153,66 +155,25 @@ module_less_class_paths_make_no_code_server_call() ->
     %% BT-4056: module-less ancestors and the class itself must not be probed
     %% by `new`, dispatch lookup or has_method_local/2. `new` runs inside the
     %% class gen_server, so trace that process as well as the worker.
-    Base = start_class('ZzMlBase', undefined, 'Object'),
+    Base = start_class('ZzMlBase', undefined, 'Object', [foo]),
     Sub = start_class('ZzMlSub', undefined, 'ZzMlBase'),
     try
-        {_, Calls} = code_server_calls_traced([Base, Sub], fun() ->
+        {Result, Calls} = calls_during([{code_server, call, 1}], [Base, Sub], fun() ->
             _ = gen_server:call(Sub, {new, []}),
             _ = gen_server:call(Base, {new, []}),
+            %% `foo` is defined on Base, so the walk reaches
+            %% dispatchable_module/1 (and its class-name thunk).
             _ = beamtalk_dispatch:lookup(
-                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, 'ZzMlSub', #{}
+                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, #{}, 'ZzMlSub'
             ),
-            _ = beamtalk_object_class:has_method_local(Sub, foo)
+            _ = beamtalk_object_class:has_method_local(Base, foo),
+            ok
         end),
-        ?assertEqual([], Calls)
+        ?assertEqual(ok, Result),
+        ?assertEqual([], [R || {code_server, call, [R]} <- Calls])
     after
         stop_class(Sub),
         stop_class(Base)
-    end.
-
-code_server_calls_traced(ExtraPids, Fun) ->
-    Pattern = {code_server, call, 1},
-    Parent = self(),
-    Worker = spawn(fun() ->
-        receive
-            go -> ok
-        end,
-        Parent ! {result, self(), catch Fun()}
-    end),
-    erlang:trace_pattern(Pattern, true, [local]),
-    Pids = [Worker | ExtraPids],
-    try
-        lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, Pids),
-        Worker ! go,
-        Result =
-            receive
-                {result, Worker, R} -> R
-            after 5000 -> error(worker_timeout)
-            end,
-        lists:foreach(
-            fun(P) ->
-                Ref = erlang:trace_delivered(P),
-                receive
-                    {trace_delivered, P, Ref} -> ok
-                after 5000 -> error(trace_delivery_timeout)
-                end
-            end,
-            Pids
-        ),
-        {Result, collect_traced(Pids)}
-    after
-        erlang:trace_pattern(Pattern, false, [local]),
-        exit(Worker, kill)
-    end.
-
-collect_traced(Pids) ->
-    receive
-        {trace, P, call, {code_server, call, [Req]}} when is_pid(P) ->
-            case lists:member(P, Pids) of
-                true -> [Req | collect_traced(Pids)];
-                false -> collect_traced(Pids)
-            end
-    after 0 -> []
     end.
 
 warm_value_send_does_no_string_work() ->
@@ -399,6 +360,47 @@ runtime_method_changes_are_seen_by_next_send() ->
         unpublished, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, answer)
     ).
 
+perform_finds_runtime_fun_methods() ->
+    %% BT-4624: the reflective path (beamtalk_dispatch:lookup/5) must resolve
+    %% fun-backed methods of module-less classes, including inherited ones,
+    %% exactly as the direct send does.
+    Parent = start_class(?MODULE_LESS, undefined, 'Object'),
+    Child = start_class('PkgHotModuleLessChild', undefined, ?MODULE_LESS),
+    Self = #{'$beamtalk_class' => 'PkgHotModuleLessChild'},
+    try
+        ok = beamtalk_object_class:put_method(Parent, answer, fun(_S) -> 42 end),
+        ok = beamtalk_object_class:put_method(Parent, 'plus:', fun(_S, N) -> N + 1 end),
+        ?assertEqual(42, beamtalk_primitive:send(Self, answer, [])),
+        ?assertEqual(42, beamtalk_primitive:send(Self, 'perform:', [answer])),
+        ?assertEqual(
+            8, beamtalk_primitive:send(Self, 'perform:withArguments:', ['plus:', [7]])
+        ),
+        ?assertEqual(
+            8,
+            beamtalk_primitive:send(
+                Self, 'perform:withArguments:timeout:', ['plus:', [7], 1000]
+            )
+        ),
+        ?assertEqual(
+            {reply, 42, #{}},
+            beamtalk_dispatch:lookup(answer, [], Self, #{}, 'PkgHotModuleLessChild')
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(nope, [], Self, #{}, 'PkgHotModuleLessChild')
+        ),
+        %% A fun overriding a selector a compiled ancestor (Object) defines must
+        %% win under perform: exactly as under a direct send.
+        ok = beamtalk_object_class:put_method(Parent, 'printString', fun(_S) -> <<"foo">> end),
+        ?assertEqual(<<"foo">>, beamtalk_primitive:send(Self, 'printString', [])),
+        ?assertEqual(
+            <<"foo">>, beamtalk_primitive:send(Self, 'perform:', ['printString'])
+        )
+    after
+        stop_class(Child),
+        stop_class(Parent)
+    end.
+
 method_origin_copies_no_generation_table() ->
     %% Reflection (`CompiledMethod origin`) still reads xref, but a one-class
     %% read snapshots only that class's generation (read_stable/2), not the
@@ -423,7 +425,15 @@ start_class(Name, Module) ->
     start_class(Name, Module, none).
 
 start_class(Name, Module, Superclass) ->
-    Base = #{superclass => Superclass, class_methods => #{}, class_state => #{}},
+    start_class(Name, Module, Superclass, []).
+
+start_class(Name, Module, Superclass, Selectors) ->
+    Base = #{
+        superclass => Superclass,
+        class_methods => #{},
+        class_state => #{},
+        instance_methods => maps:from_list([{S, #{}} || S <- Selectors])
+    },
     ClassInfo =
         case Module of
             undefined -> Base;
@@ -473,6 +483,13 @@ every `{M, F, Args}` call that process made to a function matching one of
 `Patterns` (`{M, F, Arity}`, `'_'` wildcards allowed, traced as local calls).
 """.
 calls_during(Patterns, Fun) ->
+    calls_during(Patterns, [], Fun).
+
+-doc """
+As `calls_during/2`, additionally tracing `ExtraPids` (e.g. class gen_servers
+that run part of `Fun`'s work); their calls are included in `Calls`.
+""".
+calls_during(Patterns, ExtraPids, Fun) ->
     Parent = self(),
     Worker = spawn(fun() ->
         receive
@@ -488,7 +505,7 @@ calls_during(Patterns, Fun) ->
     %% success path it has already exited, so the kill is a no-op.
     Result =
         try
-            1 = erlang:trace(Worker, true, [call]),
+            lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, [Worker | ExtraPids]),
             Worker ! go,
             receive
                 {result, Worker, R} -> R
@@ -499,16 +516,25 @@ calls_during(Patterns, Fun) ->
             exit(Worker, kill)
         end,
     %% Make sure every trace message the worker generated has arrived.
-    Ref = erlang:trace_delivered(Worker),
-    receive
-        {trace_delivered, Worker, Ref} -> ok
-    after 5000 -> error(trace_delivery_timeout)
-    end,
-    {Result, drain_calls(Worker, [])}.
+    Pids = [Worker | ExtraPids],
+    lists:foreach(
+        fun(P) ->
+            Ref = erlang:trace_delivered(P),
+            receive
+                {trace_delivered, P, Ref} -> ok
+            after 5000 -> error(trace_delivery_timeout)
+            end
+        end,
+        Pids
+    ),
+    {Result, drain_calls(Pids, [])}.
 
-drain_calls(Worker, Acc) ->
+drain_calls(Pids, Acc) ->
     receive
-        {trace, Worker, call, MFA} ->
-            drain_calls(Worker, [MFA | Acc])
+        {trace, P, call, MFA} when is_pid(P) ->
+            case lists:member(P, Pids) of
+                true -> drain_calls(Pids, [MFA | Acc]);
+                false -> drain_calls(Pids, Acc)
+            end
     after 0 -> lists:reverse(Acc)
     end.
