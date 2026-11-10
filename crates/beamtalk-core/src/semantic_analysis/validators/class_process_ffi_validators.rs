@@ -18,6 +18,9 @@
 //!   process, `gen_tcp:controlling_process/2` and `file:sendfile/5` fail with
 //!   `not_owner` (the caller owns the socket), and `erlang:self/0`, the
 //!   process dictionary, `link` and `monitor` all see the class process.
+//!   A table from `ets:new/2` or the `Ets` constructors (`new:type:`,
+//!   `newOrExisting:type:`, `private:`, `protected:`) is owned by the class
+//!   process, so a private one refuses every caller (BT-4587).
 //!   Suppress deliberate serialisation with `@expect class_process_ffi`.
 //! - **`class-method-process-resource`** — no class in the chain declares
 //!   class variables, so the method runs in the caller, and it creates a resource tied to the calling
@@ -43,8 +46,9 @@
 //! 2. the class is known to the hierarchy and the selector is not
 //!    process-bound ([`ClassInfo::is_process_bound_class_selector`]: those
 //!    keep their routing whatever the class declares, so no hint can help);
-//! 3. the body contains a direct `(Erlang mod) fn ...` call listed in
-//!    [`CLASS_METHOD_FFI`] with an effect for the process the method runs in.
+//! 3. the body contains a direct `(Erlang mod) fn ...` call, or a class-side
+//!    send such as `Ets private:`, listed in [`CLASS_METHOD_FFI`] with an
+//!    effect for the process the method runs in.
 //!    Transitive calls (a helper does the FFI) are not followed in v1.
 //!
 //! **Deliberately excluded from the table** (flagging them would fire on the
@@ -77,6 +81,10 @@ enum Sensitivity {
     /// The call depends on the identity or ownership of the calling process
     /// (socket owner, mailbox, process dictionary, links, monitors).
     Ownership,
+    /// The call creates a resource owned by the calling process (an ETS
+    /// table), so the class process owns it: it lives as long as the class
+    /// process, and an access-restricted one refuses every caller.
+    OwnedResource,
 }
 
 /// Why a call is surprising in the **caller**
@@ -91,11 +99,40 @@ enum CallerEffect {
     Identity,
 }
 
-/// One curated row: the Erlang function and its effect in each process a
-/// class method can run in. `None` means that process's lint does not fire.
+/// What a [`ClassMethodFfi`] row matches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Callee {
+    /// `(Erlang <module>) <function>...`: matched on the module and the
+    /// Erlang function name (the selector's first keyword).
+    Erlang {
+        module: &'static str,
+        function: &'static str,
+    },
+    /// `<class> <selector>`: a class-side send to the unqualified class
+    /// reference, matched on the full selector. For stdlib constructors that
+    /// wrap a process-sensitive FFI call (`Ets private:` wraps `ets:new/2`),
+    /// which the `Erlang` rows cannot see through (BT-4587).
+    Class {
+        class: &'static str,
+        selector: &'static str,
+    },
+}
+
+impl Callee {
+    /// The call as the diagnostic names it: `` `mod:fn/arity` `` or
+    /// `` `Class selector` ``.
+    fn render(self, arity: usize) -> String {
+        match self {
+            Self::Erlang { module, function } => format!("`{module}:{function}/{arity}`"),
+            Self::Class { class, selector } => format!("`{class} {selector}`"),
+        }
+    }
+}
+
+/// One curated row: the callee and its effect in each process a class method
+/// can run in. `None` means that process's lint does not fire.
 struct ClassMethodFfi {
-    module: &'static str,
-    function: &'static str,
+    callee: Callee,
     /// Effect when the method runs in the class process (`class-process-ffi`).
     in_class_process: Option<Sensitivity>,
     /// Effect when the method runs in the caller
@@ -112,8 +149,21 @@ const fn row(
     in_caller: Option<CallerEffect>,
 ) -> ClassMethodFfi {
     ClassMethodFfi {
-        module,
-        function,
+        callee: Callee::Erlang { module, function },
+        in_class_process,
+        in_caller,
+    }
+}
+
+/// Builds a [`Callee::Class`] row.
+const fn class_row(
+    class: &'static str,
+    selector: &'static str,
+    in_class_process: Option<Sensitivity>,
+    in_caller: Option<CallerEffect>,
+) -> ClassMethodFfi {
+    ClassMethodFfi {
+        callee: Callee::Class { class, selector },
         in_class_process,
         in_caller,
     }
@@ -121,15 +171,20 @@ const fn row(
 
 const BLOCKING: Option<Sensitivity> = Some(Sensitivity::Blocking);
 const OWNERSHIP: Option<Sensitivity> = Some(Sensitivity::Ownership);
+const OWNED_RESOURCE: Option<Sensitivity> = Some(Sensitivity::OwnedResource);
 const RESOURCE: Option<CallerEffect> = Some(CallerEffect::Resource);
 const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 
-/// The single curated v1 table of process-sensitive Erlang functions, read by
-/// both lints: a function both lints care about (`self`, the process
+/// The single curated v1 table of process-sensitive calls, read by both
+/// lints: a function both lints care about (`self`, the process
 /// dictionary, `process_flag`, links, monitors) has one row with both
 /// effects. Modelled on the curated `ffi_exports` table: a spec-derived
 /// attribute is a possible follow-up. See the module docs for what is
 /// deliberately left out.
+///
+/// The `Ets` constructor rows fire only in the class process: in the caller
+/// they make a table the caller owns, which is what they are for, whereas
+/// a direct `ets:new` there is flagged as an FFI resource escape hatch.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "self", OWNERSHIP, IDENTITY),
     row("erlang", "send", OWNERSHIP, None),
@@ -146,7 +201,11 @@ const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "register", None, RESOURCE),
     row("erlang", "send_after", None, RESOURCE),
     row("erlang", "start_timer", None, RESOURCE),
-    row("ets", "new", None, RESOURCE),
+    row("ets", "new", OWNED_RESOURCE, RESOURCE),
+    class_row("Ets", "new:type:", OWNED_RESOURCE, None),
+    class_row("Ets", "newOrExisting:type:", OWNED_RESOURCE, None),
+    class_row("Ets", "private:", OWNED_RESOURCE, None),
+    class_row("Ets", "protected:", OWNED_RESOURCE, None),
     row("timer", "apply_interval", None, RESOURCE),
     row("timer", "apply_repeatedly", None, RESOURCE),
     row("timer", "send_after", None, RESOURCE),
@@ -175,9 +234,34 @@ const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
 ];
 
 fn table_row(module: &str, function: &str) -> Option<&'static ClassMethodFfi> {
-    CLASS_METHOD_FFI
-        .iter()
-        .find(|r| r.module == module && r.function == function)
+    CLASS_METHOD_FFI.iter().find(|r| {
+        matches!(r.callee, Callee::Erlang { module: m, function: f } if m == module && f == function)
+    })
+}
+
+/// The row matching the send `receiver selector`, if any: an `Erlang` row
+/// for an FFI call, a `Class` row for a class-side send to an unqualified
+/// class reference.
+fn row_for_send(
+    receiver: &Expression,
+    selector: &MessageSelector,
+) -> Option<&'static ClassMethodFfi> {
+    if let Some(module) = erlang_module_of_receiver(receiver) {
+        let function = erlang_function_name(selector)?;
+        return table_row(module, &function);
+    }
+    let Expression::ClassReference {
+        name,
+        package: None,
+        ..
+    } = receiver.unwrap_parens()
+    else {
+        return None;
+    };
+    let sent = selector.name();
+    CLASS_METHOD_FFI.iter().find(|r| {
+        matches!(r.callee, Callee::Class { class, selector } if class == name.name.as_str() && selector == sent.as_str())
+    })
 }
 
 /// Whether `(Erlang <module>) <selector>` is any row of the curated
@@ -257,20 +341,15 @@ fn check_method(
             else {
                 return;
             };
-            let (Some(ffi_module), Some(function)) = (
-                erlang_module_of_receiver(receiver),
-                erlang_function_name(ffi_selector),
-            ) else {
+            let Some(entry) = row_for_send(receiver, ffi_selector) else {
                 return;
             };
-            let Some(entry) = table_row(ffi_module, &function) else {
-                return;
-            };
-            let arity = erlang_arity(ffi_selector, arguments.len());
             let site = Site {
                 class_name,
                 selector: &selector,
-                call: format!("`{ffi_module}:{function}/{arity}`"),
+                call: entry
+                    .callee
+                    .render(erlang_arity(ffi_selector, arguments.len())),
                 expr,
             };
             let diagnostic = if runs_in_caller {
@@ -354,6 +433,11 @@ impl Site<'_> {
             Sensitivity::Ownership => (
                 "which depends on the identity or ownership of the calling process",
                 "so it acts on the class process instead of the caller",
+            ),
+            Sensitivity::OwnedResource => (
+                "which creates a resource owned by the calling process",
+                "so the class process owns it: it lives as long as the class process, and a \
+                 private or protected table refuses callers with `access_denied`",
             ),
         };
         Diagnostic::warning(
@@ -468,10 +552,24 @@ mod tests {
     const IN_CALLER: [Probe; 2] = [Probe::SealedStateless, Probe::OpenStateless];
     const IN_CLASS_PROCESS: [Probe; 2] = [Probe::Stateful, Probe::InheritsState];
 
-    /// A one-method class calling `(Erlang module) function: x` from
+    /// A one-method class making `callee`'s call (every argument `x`) from
     /// `class probe: x`.
-    fn probe_class(module: &str, function: &str, probe: Probe) -> String {
-        let call = format!("(Erlang {module}) {function}: x");
+    fn probe_row(callee: Callee, probe: Probe) -> String {
+        let call = match callee {
+            Callee::Erlang { module, function } => format!("(Erlang {module}) {function}: x"),
+            Callee::Class { class, selector } => {
+                let args: Vec<String> = selector
+                    .split_inclusive(':')
+                    .map(|k| format!("{k} x"))
+                    .collect();
+                format!("{class} {}", args.join(" "))
+            }
+        };
+        probe_class_calling(&call, probe)
+    }
+
+    /// A one-method class making `call` from `class probe: x`.
+    fn probe_class_calling(call: &str, probe: Probe) -> String {
         match probe {
             Probe::SealedStateless => {
                 format!("sealed Object subclass: Probe\n  class sealed probe: x => {call}\n")
@@ -492,19 +590,16 @@ mod tests {
     #[test]
     fn every_caller_row_fires_in_the_caller_and_not_in_the_class_process() {
         for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_some()) {
-            let (m, f) = (entry.module, entry.function);
+            let c = entry.callee;
             for probe in IN_CALLER {
-                let fires = in_caller(&probe_class(m, f, probe));
-                assert_eq!(fires.len(), 1, "{m}:{f} {probe:?}: {fires:?}");
-                assert!(
-                    fires[0].message.contains(&format!("`{m}:{f}/1`")),
-                    "{fires:?}"
-                );
+                let fires = in_caller(&probe_row(c, probe));
+                assert_eq!(fires.len(), 1, "{c:?} {probe:?}: {fires:?}");
+                assert!(fires[0].message.contains(&c.render(1)), "{fires:?}");
                 assert_eq!(fires[0].severity, Severity::Warning);
             }
             for probe in IN_CLASS_PROCESS {
-                let silent = in_caller(&probe_class(m, f, probe));
-                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+                let silent = in_caller(&probe_row(c, probe));
+                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
             }
         }
     }
@@ -512,10 +607,10 @@ mod tests {
     #[test]
     fn rows_without_a_caller_effect_never_fire_class_method_process_resource() {
         for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_none()) {
-            let (m, f) = (entry.module, entry.function);
+            let c = entry.callee;
             for probe in IN_CALLER {
-                let silent = in_caller(&probe_class(m, f, probe));
-                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+                let silent = in_caller(&probe_row(c, probe));
+                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
             }
         }
     }
@@ -526,18 +621,15 @@ mod tests {
             .iter()
             .filter(|r| r.in_class_process.is_some())
         {
-            let (m, f) = (entry.module, entry.function);
+            let c = entry.callee;
             for probe in IN_CLASS_PROCESS {
-                let fires = in_class_process(&probe_class(m, f, probe));
-                assert_eq!(fires.len(), 1, "{m}:{f} {probe:?}: {fires:?}");
-                assert!(
-                    fires[0].message.contains(&format!("`{m}:{f}/1`")),
-                    "{fires:?}"
-                );
+                let fires = in_class_process(&probe_row(c, probe));
+                assert_eq!(fires.len(), 1, "{c:?} {probe:?}: {fires:?}");
+                assert!(fires[0].message.contains(&c.render(1)), "{fires:?}");
             }
             for probe in IN_CALLER {
-                let silent = in_class_process(&probe_class(m, f, probe));
-                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+                let silent = in_class_process(&probe_row(c, probe));
+                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
             }
         }
     }
@@ -548,10 +640,10 @@ mod tests {
             .iter()
             .filter(|r| r.in_class_process.is_none())
         {
-            let (m, f) = (entry.module, entry.function);
+            let c = entry.callee;
             for probe in IN_CLASS_PROCESS {
-                let silent = in_class_process(&probe_class(m, f, probe));
-                assert!(silent.is_empty(), "{m}:{f} {probe:?}: {silent:?}");
+                let silent = in_class_process(&probe_row(c, probe));
+                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
             }
         }
     }
@@ -561,17 +653,11 @@ mod tests {
         for (i, a) in CLASS_METHOD_FFI.iter().enumerate() {
             assert!(
                 a.in_class_process.is_some() || a.in_caller.is_some(),
-                "{}:{} fires nowhere",
-                a.module,
-                a.function
+                "{:?} fires nowhere",
+                a.callee
             );
             for b in &CLASS_METHOD_FFI[i + 1..] {
-                assert!(
-                    (a.module, a.function) != (b.module, b.function),
-                    "duplicate row {}:{}",
-                    a.module,
-                    a.function
-                );
+                assert!(a.callee != b.callee, "duplicate row {:?}", a.callee);
             }
         }
     }
@@ -593,6 +679,50 @@ mod tests {
         let h = hint(&diags[0]);
         assert!(h.contains("Actor"), "{h}");
         assert!(h.contains("`classState:` on `Tables`"), "{h}");
+    }
+
+    // ── Ets constructors (BT-4587) ───────────────────────────────────────
+
+    #[test]
+    fn ets_constructor_in_a_class_with_class_variables_warns_the_class_process_owns_it() {
+        let src = "Object subclass: Secrets
+  classState: count = 0
+
+  class table => Ets private: #set
+";
+        let diags = in_class_process(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let msg = &diags[0].message;
+        assert!(msg.contains("`Secrets table`"), "{msg}");
+        assert!(msg.contains("`Ets private:`"), "{msg}");
+        assert!(
+            msg.contains("creates a resource owned by the calling process"),
+            "{msg}"
+        );
+        assert!(msg.contains("`access_denied`"), "{msg}");
+        assert!(hint(&diags[0]).contains("`Secrets` declares class variables"));
+        assert!(in_caller(src).is_empty());
+    }
+
+    #[test]
+    fn ets_constructor_in_a_class_without_class_variables_is_silent() {
+        let src = "Object subclass: Secrets
+  class table => Ets private: #set
+  class shared => Ets newOrExisting: #shared type: #set
+";
+        assert!(in_class_process(src).is_empty());
+        assert!(in_caller(src).is_empty());
+    }
+
+    #[test]
+    fn package_qualified_or_instance_side_ets_sends_are_silent() {
+        let src = "Object subclass: Secrets
+  classState: count = 0
+
+  class table => other@Ets private: #set
+  table => Ets private: #set
+";
+        assert!(in_class_process(src).is_empty());
     }
 
     #[test]
