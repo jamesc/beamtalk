@@ -221,7 +221,7 @@ REPL:
   everything up to the next `|>` (or the end of the expression), parsed as
   an ordinary keyword expression whose receiver is the previous stage's
   value**: `stage := unary-message+ binary-tail? keyword-message? |
-  keyword-message`. So `|> keys sorted` sends `keys` and then `sorted`,
+  keyword-message`. So `|> keys sort` sends `keys` and then `sort`,
   `|> foo at: 1` sends `foo` and then `at: 1` to that result, and
   `|> size + 1` adds 1 to the size. Each is exactly what the same text
   means with the previous value written in front of it. This differs
@@ -336,8 +336,8 @@ d at: #k |> + 1
 // error: a pipeline stage cannot start with a binary message;
 //        write `(d at: #k) + 1`
 
-x |> keys sorted
-// fine: `(x keys) sorted`; a stage is a whole message chain, not one message
+x |> keys sort
+// fine: `(x keys) sort`; a stage is a whole message chain, not one message
 ```
 
 **`then:` for the value-as-argument case.** Elixir's `&` and Gleam's `_`
@@ -496,7 +496,7 @@ pipeline head) to the end of its message, `receiver.span().merge(…)` as in
 Span-keyed analysis facts depend on this: `dispatch_kinds` and
 `state_effects` (`semantic_analysis/facts.rs`) and the type map.
 - If sends took the stage span, a stage of several messages
-  (`|> keys sorted`) would produce two sends with the same span. BT-4122
+  (`|> keys sort`) would produce two sends with the same span. BT-4122
   hit this class of aliasing for block profiles.
 - An outer send's span would then no longer contain its receiver's span,
   which every node-at-position lookup assumes.
@@ -928,7 +928,7 @@ Phases for `/plan-adr`; sizes are rough.
    Parser tests for each, plus a `tests/repl-protocol/cases/` case for
    multi-line REPL input. The stage parser is the keyword-expression
    parser with an implicit receiver (not `parse_cascade_message`), with
-   tests that `|> keys sorted` and `|> foo at: 1` stay one stage and that
+   tests that `|> keys sort` and `|> foo at: 1` stay one stage and that
    a stage starting with `BinarySelector`/`Arrow`/`GtGt` is rejected.
    `Object >> then:` in `stdlib/src/object.bt` (not sealed), with BUnit
    tests on value, actor and class receivers, plus the type-checker rule

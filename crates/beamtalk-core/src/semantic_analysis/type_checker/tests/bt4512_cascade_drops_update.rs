@@ -51,10 +51,9 @@ fn value_with_star_cascade_warns_at_dropped_message() {
     assert_eq!(d.severity, Severity::Warning);
     let hint = d.hint.as_deref().unwrap_or_default();
     assert!(
-        hint.contains("`(p withX: …) withY: …`"),
-        "help should suggest the nested form, got: {hint}"
+        hint.contains("use a pipeline: `p withX: … |> withY: …`"),
+        "help should suggest a pipeline, got: {hint}"
     );
-    assert!(!hint.contains("|>"), "help must not mention `|>`: {hint}");
 }
 
 #[test]
@@ -99,9 +98,24 @@ fn integer_max_warns() {
     // BT-4573: a literal receiver is rendered as written, not elided.
     let hint = hits[0].hint.as_deref().unwrap_or_default();
     assert!(
-        hint.contains("`(0 max: …) max: …`"),
+        hint.contains("`0 max: … |> max: …`"),
         "help should render the literal receiver, got: {hint}"
     );
+}
+
+#[test]
+fn binary_next_message_suggests_nested_form() {
+    // A pipeline stage cannot start with a binary message (ADR 0145 § 2),
+    // so the help falls back to the nested form when the next message is one.
+    let diags = diagnostics_for("  run -> Integer =>\n    0 max: 1; + 2\n");
+    let hits = drops(&diags);
+    assert_eq!(hits.len(), 1, "got: {diags:#?}");
+    let hint = hits[0].hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("nest the sends: `(0 max: …) + …`"),
+        "help should suggest the nested form, got: {hint}"
+    );
+    assert!(!hint.contains("|>"), "help must not suggest `|>`: {hint}");
 }
 
 #[test]

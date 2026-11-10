@@ -917,7 +917,7 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
     .with_hint(
         "End `setUp` with a bare `self` — or make the last statement a \
          `self.field := value` assignment, a `self with<Field>: value` \
-         send (nest several as `(self withA: 1) withB: 2`) — or a local \
+         send (chain several with a pipeline: `self withA: 1 |> withB: 2`) — or a local \
          bound once to such a send — so the updated fields carry forward",
     )
     .with_category(DiagnosticCategory::Lint)
@@ -2176,6 +2176,23 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no warnings for a 2-deep with*: chain as the trailing statement, got: {diagnostics:?}"
+        );
+    }
+
+    /// The `|>` pipeline the warning's help suggests (ADR 0145 § 2),
+    /// `self withA: 1 |> withB: 2 |> withC: 3`, is the same nested chain, so
+    /// following the help must not warn.
+    #[test]
+    fn setup_with_field_pipeline_no_warn() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: ChainedTest\n  field: a = nil\n  field: b = nil\n  field: c = nil\n\
+                   \n  setUp =>\n    self withA: 1 |> withB: 2 |> withC: 3";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = Vec::new();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no warnings for a with*: pipeline as the trailing statement, got: {diagnostics:?}"
         );
     }
 

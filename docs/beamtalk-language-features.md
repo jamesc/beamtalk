@@ -12,6 +12,8 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 
 - [String Encoding and UTF-8](#string-encoding-and-utf-8)
 - [Core Syntax](#core-syntax)
+  - [Cascades](#cascades)
+  - [Pipelines (`|>`) (ADR 0145)](#pipelines--adr-0145)
   - [Class-Side Methods (ADR 0048)](#class-side-methods-adr-0048)
   - [Doc Comments (`///`)](#doc-comments-)
   - [Erlang FFI](#erlang-ffi)
@@ -490,7 +492,12 @@ p2 y                     // => 2
 
 // Chaining
 p3 := (Point new withX: 5) withY: 7   // x=5, y=7
+p4 := Point new withX: 5 |> withY: 7  // the same, as a pipeline
 ```
+
+Chain `with*:` setters by nesting or with a [pipeline](#pipelines--adr-0145)
+(`|>`), not with a cascade: `p withX: 5; withY: 7` sends both messages to `p`
+and keeps only the last update (see [Cascades](#cascades)).
 
 The `with<SlotName>:` selector is built by uppercasing only the *first* letter of the slot name. Two slots whose names differ only by the case of their first letter (e.g. `x` and `X`) would generate the same setter selector — this is a compile error:
 
@@ -584,12 +591,284 @@ dict at: #name put: "hello"
 
 // Cascade - multiple messages to same receiver
 Transcript show: "Hello"; cr; show: "World"
+
+// Pipeline - each message to the previous result
+(Point x: 1 y: 2) withX: 5 |> withY: 10
 ```
+
+### Cascades
+
+A cascade sends every message to the **same receiver** and answers the last
+message's result:
+
+```beamtalk
+Transcript show: "Hello"; cr; show: "World"
+// ≡  Transcript show: "Hello".  Transcript cr.  Transcript show: "World"
+```
+
+The cascade's receiver is the receiver of its first message, and `;` fans out
+to it whatever it is: an actor, a value, a class, an Erlang term or a
+`Dynamic` value. That is the right meaning for anything whose messages act on
+the receiver in place, such as an actor, a `ClassBuilder`, an `Ets` table or
+`Transcript`.
 
 Each cascade part after a `;` is exactly one message. A further message on the
 same line, as in `x foo; size reversed`, is a parse error rather than a send to
 `size`'s result: write `(x size) reversed`, or put the next statement on a new
 line ([BT-4508](https://linear.app/beamtalk/issue/BT-4508)).
+
+**A cascade on a value drops every update but the last.** A value's "update"
+messages (`with*:` setters, `Dictionary at:put:`, `Integer max:`) answer a new
+value and leave the receiver alone. A cascade sends the next message to the
+original receiver, not to that new value, so the earlier results are thrown
+away:
+
+```beamtalk
+p := Point x: 1 y: 2
+p withX: 5; withY: 10      // => Point(x: 1, y: 10), the withX: result was dropped
+p withX: 5 |> withY: 10    // => Point(x: 5, y: 10), the pipeline sends withY: to the copy
+```
+
+To chain messages on the previous result, use a [pipeline](#pipelines--adr-0145)
+(`|>`), the nested form `(p withX: 5) withY: 10`, or temp locals.
+
+The compiler warns about this shape with **`cascade-drops-update`**
+([ADR 0145](ADR/0145-cascade-pipeline-semantics.md) § 3), at each dropped
+message:
+
+```text
+warning: the result of `withX:` is discarded
+  note: `Point` is a value: `withX:` answers a new value and leaves the receiver
+        unchanged, and a cascade sends `withY:` to the receiver, not to that result
+  help: to send `withY:` to the result, use a pipeline: `p withX: … |> withY: …`
+```
+
+It fires only when all of these hold:
+
+- the cascade's receiver is statically typed as a value class (a
+  `Value subclass:` or a built-in value such as `Integer`, `String`, `List`
+  or `Dictionary`);
+- a message before the last one resolves to a method defined on a value
+  class, not on `Object`;
+- that method's declared return type is `Self` or its defining class (type
+  arguments ignored), so it answers an updated copy.
+
+`Dynamic` and union-typed receivers, actors, `Object` instances, messages that
+answer some other type (`printString`, `size`) and methods inherited from
+`Object` (`yourself`, `show:`) stay silent. REPL bindings carry no static
+type, so a cascade on a REPL variable does not warn; the same cascade inside a
+method with a typed parameter does. When the next message is binary, the help
+suggests the nested form instead, because a pipeline stage cannot start with a
+binary message.
+
+A cascade that fans out on a value on purpose (for a side effect of each
+message) can keep its meaning: silence one with `@expect cascade_drops_update`
+on the statement, or a whole package with `cascade-drops-update = "off"` under
+`[diagnostics]` in `beamtalk.toml`:
+
+```beamtalk
+@expect cascade_drops_update
+0 max: 1; max: 2
+```
+
+### Pipelines (`|>`) (ADR 0145)
+
+The pipeline operator `|>` sends each message to the **previous result**.
+`recv m1 |> m2 |> m3` is exactly `((recv m1) m2) m3`, and is defined by that
+rewrite: there is no new runtime behaviour, the compiler sees the nested
+sends, and it works the same on values, actors and `Dynamic` receivers. It is
+the chaining counterpart of the cascade's fan-out
+([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)):
+
+```beamtalk
+p := Point x: 1 y: 2
+p withX: 5 |> withY: 10            // => Point(x: 5, y: 10), same as (p withX: 5) withY: 10
+
+// Collection pipelines
+#(1, 2, 3, 4) select: [:x | x isEven]
+  |> collect: [:x | x * 10]
+  |> inject: 0 into: [:sum :x | sum + x]   // => 60
+
+// Mixed unary and keyword stages
+#{#b => 2, #a => 1} |> keys sort |> at: 1   // => #a
+```
+
+A deep chain of functional updates no longer needs nested parentheses:
+
+```beamtalk
+// Before
+self store: ((((st withWebsock: websock)
+  withWebsockState: websock)
+  withWebsocketOptions: opts)
+  withRespState: #upgraded)
+
+// After
+self store: (st withWebsock: websock
+  |> withWebsockState: websock
+  |> withWebsocketOptions: opts
+  |> withRespState: #upgraded)
+```
+
+#### Stages
+
+The part before the first `|>` is an ordinary expression (`recv m1`, or just
+`recv`: `st |> withX: 1` is `st withX: 1`). Each stage after a `|>` runs up to
+the next `|>` or the end of the expression, and is parsed as an ordinary
+keyword expression whose receiver is the previous stage's value:
+
+```text
+stage := unary-message+ binary-tail? keyword-message? | keyword-message
+```
+
+So a stage is a whole message chain, not one message. Each one means exactly
+what the same text means with the previous value written in front of it:
+
+| Stage | Means |
+|---|---|
+| `x \|> keys sort` | `(x keys) sort` |
+| `x \|> sort at: 1` | `(x sort) at: 1` |
+| `x \|> size + 1` | `(x size) + 1` |
+| `x \|> inject: 0 into: [...]` | `x inject: 0 into: [...]` |
+
+This differs from a cascade part, which is a single message. `|>` binds looser
+than keyword messages, like `;`. A stage the previous result does not
+understand raises `does_not_understand`, exactly as the nested form would, and
+the type checker reports it at that stage. Reflected source
+(`(MyClass >> #sel) source`) and `beamtalk fmt` keep the `|>` as written.
+
+#### Where `|>` is allowed
+
+A pipeline may appear anywhere a full keyword expression parses: a statement,
+the right-hand side of an assignment, a `^` value, inside parentheses (and so
+in a block body), in string interpolation
+(`"total: {orders select: [...] |> size}"`), in a `match:` arm body, in a map
+value, and in a list, array or tuple literal element.
+
+The one place that needs parentheses is a **keyword argument**, which is parsed
+at binary level for every keyword message:
+
+```beamtalk
+d at: #k put: (p withX: 1 |> withY: 2)   // the pipeline is the argument
+d at: #k put: p |> withY: 2               // sends withY: to the result of at:put:
+```
+
+Map keys also need parentheses, as they do for any keyword message.
+
+#### Errors
+
+| Code | Error |
+|---|---|
+| `p withX: 5 \|> withY: 10; withZ: 3` | cannot mix cascade `;` and pipeline `\|>` in one expression; parenthesise the part you mean |
+| `p withX: 5 \|>` (end of input) | expected a message after `\|>` |
+| `p withX: 5 \|> 10` | expected a message after `\|>`, with the hint "`\|>` sends a message to the previous result; it does not apply a function" |
+| `d at: #k \|> + 1` | a pipeline stage cannot start with a binary message; write `(…) + …` |
+| `p withX: 5 \|> withY: 10!` | Cast (!) has no return value and cannot be used in an expression, with the hint "bind the pipeline's result to a local, then cast to it on the next line" |
+| `x := 1. \|> negated` (a `\|>` where a statement starts, or a leading-`\|>` line typed on its own at the REPL) | a statement cannot start with `\|>` |
+
+- **`;` and `|>` do not mix** without parentheses, because both readings are
+  plausible. Write `(a m1 |> m2) m3; m4`, or bind the pipeline to a local.
+- **A stage cannot start with a binary message** (`+`, `->`, `>>`). Unary
+  binds tighter than binary, so `|> size + 1` already chains; for a binary
+  send to a keyword stage's result, parenthesise the left side:
+  `(d at: #k) + 1`.
+- **A pipeline cannot end in `!`**, just as a cascade cannot.
+- **`|>` is not a selector.** It cannot be defined as a method. `| >` with a
+  space is a `|` followed by a binary `>`.
+
+#### Layout and the REPL
+
+In a source file a line that **starts** with `|>` continues the expression
+above, by the same rule that lets a line starting with a keyword part continue
+(see [Splitting a Message Send Across Lines](#splitting-a-message-send-across-lines)):
+`|>` can never begin a statement, so the continuation is unambiguous.
+
+In the REPL the line above is already complete, and runs, when you press
+Enter. So at the REPL, either end each line with `|>` (a line that ends in
+`|>` is incomplete, and the REPL waits for the next line), or wrap the whole
+pipeline in parentheses:
+
+```text
+> #(3, 1, 2) |>
+.   sort |>
+.   at: 1
+// => 1
+> (#(3, 1, 2)
+.   |> sort
+.   |> at: 1)
+// => 1
+```
+
+A leading-`|>` line typed on its own at the REPL is the error "a statement
+cannot start with `|>`", with a hint that says to do one of these instead.
+
+#### For Elixir and Gleam users
+
+The value on the left flows into the step on the right, as in Elixir and
+Gleam. The one difference is where it lands: in Elixir and Gleam it becomes
+the first argument of a function; in Beamtalk it becomes the **receiver of a
+message**. A Smalltalk receiver sits where an Elixir first argument sits, so
+the shapes line up one for one (each row is a separate stage, not one chain):
+
+| Elixir | Gleam | Beamtalk |
+|---|---|---|
+| `orders \|> Enum.filter(&paid?/1)` | `orders \|> list.filter(is_paid)` | `orders select: [:o \| o isPaid]` |
+| `\|> Enum.map(& &1.amount)` | `\|> list.map(fn(o) { o.amount })` | `\|> collect: [:o \| o amount]` |
+| `\|> Enum.sum()` | `\|> int.sum` | `\|> sum` |
+| `\|> Map.put(:a, 1)` | `\|> dict.insert("a", 1)` | `\|> at: #a put: 1` |
+
+The function name (`Enum.map`) becomes a selector on the value (`collect:`),
+and the module disappears because the value's class decides which method runs.
+Idiomatic Beamtalk does not pipe the head: `orders select: …` already sends to
+`orders`, and Elixir needs `orders |> Enum.filter(…)` only because
+`Enum.filter` is a function. There is no capture syntax (Elixir's `&`, Gleam's
+`_`) for putting the value anywhere but the receiver; when it must be an
+argument, use `then:`, a temp local or the nested form.
+
+#### `then:` — the value as an argument
+
+`Object >> then: aBlock` answers `aBlock value: self`, named after Elixir's
+`Kernel.then/2`. It puts the piped value somewhere other than the receiver of
+the next message:
+
+```beamtalk
+3 then: [:x | x * x]                                     // => 9
+#(1, 2, 3) collect: [:x | x * 2] |> then: [:xs | xs size * 10]   // => 30
+#(2, 4, 6) |> then: [:xs | xs inject: 0 into: [:a :b | a + b]] |> printString   // => "12"
+```
+
+It is an ordinary message, so it also works without `|>`. Put `|>` in front of
+a `then:` that follows a keyword message: `xs inject: 0 into: [...] then: [...]`
+is one `inject:into:then:` send. Unlike `ifNotNil:`, `then:` is not inlined by
+the compiler, and it is not `sealed`. That has these consequences:
+
+- **Types.** Its `aBlock` parameter is deliberately untyped, so a class with
+  its own `then:` (a promise, a parser combinator's `then: next :: Parser`)
+  overrides it without an override-compatibility warning. The type checker
+  does not read that signature for a literal block: it types the block's
+  parameter as the receiver's type and answers the block's result type, so a
+  pipeline after `then:` keeps its types and completion.
+- **A class's own `then:` wins.** A promise type that defines `then:` keeps
+  its meaning.
+- **Captured locals.** A block passed to `then:` that assigns a captured local
+  is an escaping block ([ADR 0133](ADR/0133-scope-of-captured-variable-mutation-in-blocks.md)), a
+  compile error: "`t` is assigned in a block passed to `then:`, which is not a
+  construct the compiler threads it through". Bind the result to a temp local
+  instead (`total := 3 then: [:x | x + 1]`). Reading a captured local is fine.
+- **Actors.** On an actor receiver `then:` is a synchronous call and the block
+  runs in the **actor's** process, not the caller's. A block that sends back to
+  the calling actor fails with `deadlock_detected` or a call timeout. A send to
+  the block's argument (the actor itself) is a self-send in the actor's own
+  process and answers. To run the block in the caller, as Elixir's `then`
+  always does, bind the value to a temp local and use it directly.
+- **Classes.** On a class receiver whose class or an ancestor declares class
+  variables, the block runs in the class process
+  ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md)).
+- **Proxies.** `TimeoutProxy` forwards `then:` to its target, so the target's
+  own `then:` runs if it has one, and a block that sends back to the proxy
+  from the target's process can deadlock or time out. A proxy that forwards
+  through `doesNotUnderstand:` alone (such as the `TransparentProxy` example)
+  answers `then:` itself, with the proxy as the block's argument, unless it
+  forwards `then:` explicitly.
 
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
@@ -8709,15 +8988,18 @@ setUp =>
   self   // <- carries both field mutations forward
 ```
 
-`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send (or a nested chain of them), or a cascade on `self` whose only `with<Field>:` message is its last.
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send (or a chain of them, nested or written as a `|>` pipeline), or a cascade on `self` whose only `with<Field>:` message is its last.
 
-A cascade on `self` with more than one `with<Field>:` message does not return the updated self either ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). A cascade sends every message to the original receiver, so on a value each `with*:` returns its own copy and the cascade's value is the last message's result alone — every `with*:` before the last is silently dropped. The general `cascade-drops-update` warning reports this at each dropped message (here, `withCounter:`), so the `setUp` check adds no second warning of its own for this shape — also when `setUp` ends in a local bound to such a cascade (BT-4573). One `@expect cascade_drops_update` on the statement silences it. If `cascade-drops-update` cannot prove every dropped message (for example, one is a hand-written `with*:` method with no `-> Self` return annotation), the `setUp` warning above still fires. Turning `cascade-drops-update` off under `[diagnostics]` opts the project into fan-out cascades on values, so this shape then gets no warning at all. Nest the sends instead, so each one applies to the previous result:
+A cascade on `self` with more than one `with<Field>:` message does not return the updated self either ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). A cascade sends every message to the original receiver, so on a value each `with*:` returns its own copy and the cascade's value is the last message's result alone — every `with*:` before the last is silently dropped. The general `cascade-drops-update` warning reports this at each dropped message (here, `withCounter:`), so the `setUp` check adds no second warning of its own for this shape — also when `setUp` ends in a local bound to such a cascade (BT-4573). One `@expect cascade_drops_update` on the statement silences it. If `cascade-drops-update` cannot prove every dropped message (for example, one is a hand-written `with*:` method with no `-> Self` return annotation), the `setUp` warning above still fires. Turning `cascade-drops-update` off under `[diagnostics]` opts the project into fan-out cascades on values, so this shape then gets no warning at all. Chain the sends with a [pipeline](#pipelines--adr-0145) instead, so each one applies to the previous result:
 
 ```beamtalk
 // Wrong — `self withCounter: 1; withDb: 2` keeps only `db`; `counter` stays at its default
 setUp => self withCounter: 1; withDb: 2
 
 // Right — each send receives the copy the previous one returned
+setUp => self withCounter: 1 |> withDb: 2
+
+// Also right — the nested form the pipeline stands for
 setUp => (self withCounter: 1) withDb: 2
 ```
 
