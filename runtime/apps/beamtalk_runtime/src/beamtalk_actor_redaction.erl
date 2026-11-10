@@ -43,9 +43,9 @@ are raw. `sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
 `sys:log(Pid, print)` and `sys:trace/2` do not go through `format_status/1`
 (OTP gives them no hook), so they show raw values. Neither do the raw
 process dictionary and `Debug` terms `sys:get_status/1` returns next to the
-formatted status: with `sys:log` on, the debug term holds the raw log. Only the formatted part (the "State" and
-"Logged events" data) is redacted. These are debugging tools with full
-access to the process.
+formatted status: with `sys:log` on, the debug term holds the raw log. Only
+the formatted part (the "State" and "Logged events" data) is redacted. These
+are debugging tools with full access to the process.
 
 ## Message shapes
 

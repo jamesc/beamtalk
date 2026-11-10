@@ -489,12 +489,16 @@ Object subclass: Actor
   /// ```
   class isSupervisor -> Boolean => false
 
-  /// State slots whose values never appear in status or crash reports.
+  /// State slots whose values are redacted in the formatted state of
+  /// status and crash reports.
   ///
   /// Override with a literal list of slot names. The compiler reads the list
   /// at compile time, and the actor's `format_status/1` shows each named
-  /// slot's value as `"[redacted]"` in `sys:get_status` and in a crash
-  /// report. A subclass's list adds to its superclass's. Defaults to `#()`.
+  /// slot's value as `"[redacted]"` in the state that `sys:get_status` and a
+  /// crash report show. Only the state is covered: list any accessor that
+  /// takes or answers a secret slot (`token`, `token:`) in `secretSelectors`
+  /// too, or its arguments and reply show in the sys log. A subclass's list
+  /// adds to its superclass's. Defaults to `#()`.
   ///
   /// ## Examples
   /// ```beamtalk
