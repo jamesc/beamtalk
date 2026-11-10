@@ -120,6 +120,12 @@ impl TypeChecker {
             && !Self::is_class_side_receiver(receiver, env)
             && Self::then_resolves_to_object(&receiver_ty, hierarchy);
 
+        // BT-4636: collect the block arguments' writes to outer locals and join
+        // them into `env` once all arguments are inferred (see
+        // `TypeChecker::defer_block_widening`).
+        let outer_defer = std::mem::replace(&mut self.defer_block_widening, true);
+        let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
+
         // Infer argument types, applying narrowing to block arguments when detected.
         let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
             self.infer_args_with_narrowing(
@@ -234,6 +240,10 @@ impl TypeChecker {
                 in_abstract_method,
             )
         };
+
+        self.defer_block_widening = outer_defer;
+        let deferred = std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+        Self::apply_deferred_block_widenings(&deferred, env);
 
         // BT-4444: `[:x :: T | ...] value: arg` — check each argument
         // against the literal's annotated parameter types.

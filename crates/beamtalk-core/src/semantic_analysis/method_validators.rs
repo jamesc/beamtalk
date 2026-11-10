@@ -44,6 +44,16 @@ pub(crate) trait MethodValidator {
         receiver_type: Option<&InferredType>,
         span: Span,
     ) -> Vec<Diagnostic>;
+
+    /// Validate the receiver expression of a message send. Most validators
+    /// only constrain arguments, so the default accepts any receiver.
+    fn validate_receiver(
+        &self,
+        _selector: &MessageSelector,
+        _receiver: &Expression,
+    ) -> Vec<Diagnostic> {
+        vec![]
+    }
 }
 
 /// Registry mapping message selectors to their validators.
@@ -103,9 +113,16 @@ impl MethodValidatorRegistry {
         }
 
         // Block arity validators (0-parameter block)
-        for selector in &["whileTrue:", "whileFalse:", "timesRepeat:"] {
-            self.validators
-                .insert(selector, Box::new(BlockArityValidator::new(0, 0)));
+        self.validators
+            .insert("timesRepeat:", Box::new(BlockArityValidator::new(0, 0)));
+
+        // A loop's condition (receiver) block is evaluated with no arguments,
+        // like its body (BT-4617).
+        for selector in &["whileTrue:", "whileFalse:"] {
+            self.validators.insert(
+                selector,
+                Box::new(BlockArityValidator::new(0, 0).with_receiver_arity(0)),
+            );
         }
 
         // inject:into: — block is the second argument (index 1)
@@ -348,14 +365,50 @@ struct BlockArityExpectation {
 /// Variables and other expressions are skipped (runtime handles those).
 struct BlockArityValidator {
     expectation: BlockArityExpectation,
+    /// Expected arity of a literal block receiver, for selectors whose
+    /// receiver block is evaluated too (`whileTrue:`'s condition).
+    receiver_arity: Option<usize>,
 }
 
 impl BlockArityValidator {
     const fn new(arity: usize, arg_index: usize) -> Self {
         Self {
             expectation: BlockArityExpectation { arity, arg_index },
+            receiver_arity: None,
         }
     }
+
+    const fn with_receiver_arity(mut self, arity: usize) -> Self {
+        self.receiver_arity = Some(arity);
+        self
+    }
+}
+
+/// The diagnostic for a literal block of the wrong arity, shared by the
+/// argument and receiver checks. `None` when the arity matches.
+fn block_arity_diagnostic(
+    block: &crate::ast::Block,
+    expected: usize,
+    message_prefix: &str,
+    hint: String,
+) -> Option<Diagnostic> {
+    let actual = block.arity();
+    if actual == expected {
+        return None;
+    }
+    let params_word = if expected == 1 {
+        "parameter"
+    } else {
+        "parameters"
+    };
+    Some(
+        Diagnostic::error(
+            format!("{message_prefix} a block with {expected} {params_word}, but got {actual}"),
+            block.span,
+        )
+        .with_hint(hint)
+        .with_category(DiagnosticCategory::Type),
+    )
 }
 
 impl MethodValidator for BlockArityValidator {
@@ -377,27 +430,34 @@ impl MethodValidator for BlockArityValidator {
             return vec![];
         };
 
-        let actual = block.arity();
-        if actual == expected {
-            return vec![];
-        }
-
         let selector_name = selector.name();
-        let params_word = if expected == 1 {
-            "parameter"
-        } else {
-            "parameters"
-        };
-        let message = format!(
-            "{selector_name} expects a block with {expected} {params_word}, but got {actual}"
-        );
-        let hint = block_arity_hint(&selector_name, expected);
+        block_arity_diagnostic(
+            block,
+            expected,
+            &format!("{selector_name} expects"),
+            block_arity_hint(&selector_name, expected),
+        )
+        .into_iter()
+        .collect()
+    }
 
-        vec![
-            Diagnostic::error(message, block.span)
-                .with_hint(hint)
-                .with_category(DiagnosticCategory::Type),
-        ]
+    fn validate_receiver(
+        &self,
+        selector: &MessageSelector,
+        receiver: &Expression,
+    ) -> Vec<Diagnostic> {
+        let (Some(expected), Expression::Block(block)) = (self.receiver_arity, receiver) else {
+            return vec![];
+        };
+        let selector_name = selector.name();
+        block_arity_diagnostic(
+            block,
+            expected,
+            &format!("{selector_name} expects its receiver to be"),
+            format!("Use a {expected}-parameter condition block: [...] {selector_name} [...]"),
+        )
+        .into_iter()
+        .collect()
     }
 }
 
@@ -1193,6 +1253,47 @@ mod tests {
                 .message
                 .contains("expects a block with 0 parameters, but got 1")
         );
+    }
+
+    #[test]
+    fn test_while_condition_block_arity_wrong() {
+        // BT-4617: the loop evaluates its condition with no arguments.
+        let registry = MethodValidatorRegistry::new();
+        for selector in ["whileTrue:", "whileFalse:"] {
+            let validator = registry.get(selector).unwrap();
+            let diags = validator.validate_receiver(&keyword_selector(selector), &make_block(1));
+            assert_eq!(diags.len(), 1, "{selector}");
+            assert!(
+                diags[0]
+                    .message
+                    .contains("expects its receiver to be a block with 0 parameters, but got 1"),
+                "{}",
+                diags[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn test_while_condition_block_arity_correct_or_not_a_block() {
+        let registry = MethodValidatorRegistry::new();
+        let validator = registry.get("whileTrue:").unwrap();
+        let selector = keyword_selector("whileTrue:");
+        assert!(
+            validator
+                .validate_receiver(&selector, &make_block(0))
+                .is_empty()
+        );
+        let variable = Expression::Identifier(crate::ast::Identifier::new("cond", test_span()));
+        assert!(validator.validate_receiver(&selector, &variable).is_empty());
+    }
+
+    #[test]
+    fn test_receiver_arity_unchecked_by_default() {
+        // `timesRepeat:`'s receiver is an Integer; only the loops check it.
+        let registry = MethodValidatorRegistry::new();
+        let validator = registry.get("timesRepeat:").unwrap();
+        let diags = validator.validate_receiver(&keyword_selector("timesRepeat:"), &make_block(1));
+        assert!(diags.is_empty());
     }
 
     #[test]

@@ -516,7 +516,8 @@ impl ClassHierarchy {
 
     /// Whether `class_name` or any of its ancestors declares class variables
     /// ([`ClassInfo::has_class_variables`]), or the chain cannot be followed to
-    /// its root (an unknown class or superclass, a cycle): any doubt answers
+    /// its root (an unknown class or superclass, a cycle, a superclass-index
+    /// stub from [`Self::add_external_superclasses`]): any doubt answers
     /// `true`, as the runtime's `beamtalk_class_metadata:
     /// chain_has_class_variables/1` answers for an unpublished fact.
     #[must_use]
@@ -530,7 +531,10 @@ impl ClassHierarchy {
             let Some(class) = self.get_class(current) else {
                 return true;
             };
-            if class.has_class_variables() {
+            // A superclass-index stub (`add_external_superclasses`) carries
+            // only name + superclass: its class variables are unknown, not
+            // absent, so it answers `true` like any other doubt (BT-4644).
+            if class.has_class_variables() || class.is_superclass_index_stub() {
                 return true;
             }
             match class.superclass.as_deref() {

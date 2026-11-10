@@ -858,4 +858,49 @@ mod tests {
             }
         }
     }
+
+    // BT-4647: pins BT-4629's discarded-fold repack drop for the dict folds. A
+    // closed `do:` / `doWithKey:` that is the method root's last expression
+    // answers a bare `{'nil'}` carrier: nothing reads the locals back, so no
+    // `maps:put` of `'__local__total'` and no `{'nil', Map}`.
+    #[test]
+    fn test_dict_do_discarded_locals_answer_bare_carrier() {
+        for send in [
+            "#{#a => 1, #b => 2} do: [:v | total := total + v]",
+            "#{#a => 1, #b => 2} doWithKey: [:k :v | total := total + v]",
+        ] {
+            let src = format!(
+                "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    {send}\n"
+            );
+            let code = codegen(&src);
+            assert!(
+                code.contains("{'nil'} in let _ThreadedValue"),
+                "discarded `{send}` should answer a bare carrier. Got:\n{code}"
+            );
+            assert!(
+                !code.contains("{'nil', ") && !code.contains("'__local__total'"),
+                "discarded `{send}` must not repack locals into a map. Got:\n{code}"
+            );
+        }
+    }
+
+    // BT-4647: a dict fold whose tail is read afterwards is not discarded: it
+    // must keep the `{'nil', ...}` carrier (the producer unpacks the local).
+    #[test]
+    fn test_dict_do_read_afterwards_keeps_carrier() {
+        let src = concat!(
+            "Value subclass: V\n",
+            "  state: dummy = 0\n\n",
+            "  run =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} do: [:v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("let Total@ = _FoldResult@")
+                && !code.contains("{'nil'} in let _ThreadedValue"),
+            "a dict do: whose local is read afterwards must not drop its carrier. Got:\n{code}"
+        );
+    }
 }
