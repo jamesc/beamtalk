@@ -84,6 +84,8 @@ value_module_resolution_test_() ->
             fun runtime_method_changes_are_seen_by_next_send/0},
         {"BT-4624: perform: finds fun-backed methods of a module-less class",
             fun perform_finds_runtime_fun_methods/0},
+        {"BT-4642: perform: of a fun-backed method relays `^` and script-exit throws",
+            fun perform_relays_nlr_and_script_exit_from_runtime_fun/0},
         {"method_origin/3 copies no generation table (BT-4071)",
             fun method_origin_copies_no_generation_table/0}
     ]}.
@@ -399,6 +401,26 @@ perform_finds_runtime_fun_methods() ->
     after
         stop_class(Child),
         stop_class(Parent)
+    end.
+
+perform_relays_nlr_and_script_exit_from_runtime_fun() ->
+    %% BT-4642: a `^` NLR throw (ADR 0041) or script exit (ADR 0099 §3) raised in
+    %% a fun-backed method (or a block passed to it) is control flow: perform:
+    %% must let it propagate exactly as a direct send does, not wrap it.
+    Pid = start_class(?MODULE_LESS, undefined, 'Object'),
+    Self = #{'$beamtalk_class' => ?MODULE_LESS},
+    Nlr = ?NLR(make_ref(), 7, #{}),
+    try
+        ok = beamtalk_object_class:put_method(Pid, 'do:', fun(_S, Blk) -> Blk(1) end),
+        Throwing = fun(_) -> erlang:throw(Nlr) end,
+        ?assertThrow(Nlr, beamtalk_primitive:send(Self, 'do:', [Throwing])),
+        ?assertThrow(Nlr, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [Throwing]])),
+        Exit = {beamtalk_script_exit, 3},
+        ExitBlk = fun(_) -> erlang:throw(Exit) end,
+        ?assertThrow(Exit, beamtalk_primitive:send(Self, 'do:', [ExitBlk])),
+        ?assertThrow(Exit, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [ExitBlk]]))
+    after
+        stop_class(Pid)
     end.
 
 method_origin_copies_no_generation_table() ->

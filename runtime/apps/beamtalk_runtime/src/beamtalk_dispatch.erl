@@ -661,6 +661,13 @@ invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             try
                 {reply, erlang:apply(Fun, [Self | Args]), State}
             catch
+                %% A `^` NLR throw (ADR 0041) or script exit (ADR 0099 §3) is
+                %% control flow, not an error: a direct send lets both
+                %% propagate, so perform: must too (as invoke_extension/6).
+                throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
+                    erlang:raise(throw, ScriptExit, ScriptStack);
+                throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
+                    erlang:raise(throw, Nlr, NlrStack);
                 Type:Reason:Stack ->
                     wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
             end;
