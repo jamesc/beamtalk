@@ -27,6 +27,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     class_responds_to/2,
     class_name_to_module/1,
     class_name_from_tag/1,
+    runtime_instance_method/2,
     print_string/1,
     display_string/1,
     process_label/1,
@@ -54,8 +55,6 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %% module instead of their class's own module. Every such route lives here:
 %% this map is the one source the routing conformance test enumerates.
 -define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
-
--export([runtime_instance_method/2]).
 
 -include("beamtalk.hrl").
 

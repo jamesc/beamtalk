@@ -429,6 +429,13 @@ perform_finds_runtime_fun_methods() ->
         ?assertMatch(
             {error, #beamtalk_error{kind = does_not_understand}},
             beamtalk_dispatch:lookup(nope, [], Self, #{}, 'PkgHotModuleLessChild')
+        ),
+        %% A fun overriding a selector a compiled ancestor (Object) defines must
+        %% win under perform: exactly as under a direct send.
+        ok = beamtalk_object_class:put_method(Parent, 'printString', fun(_S) -> <<"foo">> end),
+        ?assertEqual(<<"foo">>, beamtalk_primitive:send(Self, 'printString', [])),
+        ?assertEqual(
+            <<"foo">>, beamtalk_primitive:send(Self, 'perform:', ['printString'])
         )
     after
         stop_class(Child),
