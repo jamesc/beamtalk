@@ -1144,10 +1144,29 @@ safe_start_native(Backing, Config, Registration, Link) ->
     end.
 
 %% The pid already holding a named start's name, or `undefined`.
+%%
+%% A local name is released atomically when its process exits. A global name
+%% is not: `global:whereis_name/1` reads global's table, whose row for a dead
+%% process goes only once the global name server has handled its `'DOWN'`,
+%% so a supervisor restarting a crashed `#global` child can still see the dead
+%% pid. A dead holder on this node counts as none, so the restart is not
+%% refused; a name that really is taken is still refused after the start by
+%% `register_native_started/2`.
 -spec name_holder(none | {local | global, atom()}) -> pid() | port() | undefined.
-name_holder(none) -> undefined;
-name_holder({local, Name}) -> whereis(Name);
-name_holder({global, Name}) -> global:whereis_name(Name).
+name_holder(none) ->
+    undefined;
+name_holder({local, Name}) ->
+    whereis(Name);
+name_holder({global, Name}) ->
+    case global:whereis_name(Name) of
+        Pid when is_pid(Pid), node(Pid) =:= node() ->
+            case is_process_alive(Pid) of
+                true -> Pid;
+                false -> undefined
+            end;
+        Other ->
+            Other
+    end.
 
 -spec start_native_trapped(module(), map(), none | {local | global, atom()}, link_mode()) ->
     {ok, pid()} | {error, term()}.
