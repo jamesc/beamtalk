@@ -63,6 +63,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     get_method_return_type/2,
     get_class_method_return_type/2,
     restart_class/1,
+    is_deliberate_stop/1,
     ensure_pid_table/0,
     ensure_pending_errors_table/0,
     record_class_pid/2,
@@ -937,17 +938,36 @@ prune_dead_class_pids(ClassName) ->
     end.
 
 -doc """
-Drop the reverse-index rows of a class whose process is terminating:
-`Pid`'s own row and every dead local incarnation of `ClassName` that
-`restart_class/1` kept for crash recovery (BT-4552).
+Whether a class process's exit `Reason` is a deliberate stop rather than a
+crash: `normal`, `shutdown` or `{shutdown, _}` — what `gen_server:stop/1`
+(`removeFromSystem`, rename, reload) and supervisor shutdown use.
 
-Called from `beamtalk_object_class:terminate/2`, whatever its `Reason`:
-that callback deletes the class's metadata row in the same pass, so the class
-cannot be restarted afterwards and its rows must go with it (a callback
-exception included; only an untrappable kill skips `terminate/2` and keeps
-them for recovery). Rows of live pids are left
-alone, so a replacement process already recorded under the same name is not
-clobbered (the reason `forget_loaded_class/2` guards on `self()`).
+The one definition of that rule (BT-4622), shared by
+`beamtalk_object_class:terminate/2`, which does the removal teardown
+(`ClassRemoved`, metadata and index rows) only for a deliberate stop, and
+`beamtalk_class_monitor`, which restarts the class for any other reason. Any
+other reason — a callback exception, an untrappable kill — is a crash: the
+class keeps its registration so it can be restarted.
+""".
+-spec is_deliberate_stop(term()) -> boolean().
+is_deliberate_stop(normal) -> true;
+is_deliberate_stop(shutdown) -> true;
+is_deliberate_stop({shutdown, _}) -> true;
+is_deliberate_stop(_) -> false.
+
+-doc """
+Drop the reverse-index rows of a class that is being removed: `Pid`'s own
+row and every dead local incarnation of `ClassName` that `restart_class/1`
+kept for crash recovery (BT-4552).
+
+Called from `beamtalk_object_class:terminate/2` only for a deliberate stop
+(`is_deliberate_stop/1`), in the same pass that deletes the class's metadata
+row, so the removed class's rows go with it. A crash (a callback exception or
+an untrappable kill) keeps them, together with the metadata, so
+`beamtalk_class_monitor` can restart the class and a class object holding a
+dead pid still recovers (BT-4622). Rows of live pids are left alone, so a
+replacement process already recorded under the same name is not clobbered
+(the reason `forget_loaded_class/2` guards on `self()`).
 """.
 -spec forget_class_pids(pid(), class_name()) -> ok.
 forget_class_pids(Pid, ClassName) ->
@@ -1170,11 +1190,13 @@ record_loaded_class(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
 -doc """
 Remove a class from the fast loaded-class name index.
 
-Called from `beamtalk_object_class:terminate/1` on graceful shutdown. The
+Called from `beamtalk_object_class:terminate/2` on a deliberate stop
+(`is_deliberate_stop/1`). The
 delete is guarded on the *pid* so that a stale row left by a crashed-then-
 restarted class (whose new init already re-recorded a different pid) is not
 clobbered by the dying old process: only a row still pointing at `Pid` is
-removed. On a hard crash `terminate/1` does not run, so a dead row can linger;
+removed. On a crash (an untrappable kill, or a callback exception: BT-4622)
+this is not called, so a dead row can linger;
 `loaded_class_names/0` / `loaded_class_entries/0` filter those out with a cheap
 local `is_process_alive/1` (no messaging), exactly as `live_class_entries/0`
 drops dead pg members.
@@ -1345,13 +1367,13 @@ record_backing_module_entry(ClassName, Meta, Pid) when
 
 -doc """
 Remove a class's row(s) from the backing-module reverse index, guarded on the
-pid (graceful shutdown only).
+pid (deliberate stop only, `is_deliberate_stop/1`).
 
 Called from `beamtalk_object_class:terminate/2`, mirroring
 `forget_loaded_class/2`: only rows still pointing at `Pid` are removed, so a
 dying old process cannot clobber a row a replacement process already recorded
-for the same class name. On a hard crash `terminate/2` does not run, so a
-stale row can linger — harmless, since `classes_backing_module/1`'s caller
+for the same class name. On a crash (an untrappable kill, or a callback
+exception: BT-4622) this is not called, so a stale row can linger — harmless, since `classes_backing_module/1`'s caller
 re-verifies each class name via a live process lookup before use, and
 `record_backing_module_entry/3` clears any stale row unconditionally the next
 time the class (re)registers.
@@ -1440,8 +1462,8 @@ restart_class(ClassName) ->
             %% crash) turned every such send into
             %% `Class 'unknown' not found`. Only the newest
             %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
-            %% (`prune_dead_class_pids/1`), and any `terminate/2` (removal or a
-            %% callback exception) reclaims the rest (`forget_class_pids/2`).
+            %% (`prune_dead_class_pids/1`), and a removal's `terminate/2`
+            %% reclaims the rest (`forget_class_pids/2`).
             prune_dead_class_pids(ClassName),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->

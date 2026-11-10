@@ -185,6 +185,46 @@ class_removed_fires_on_stop_test_() ->
         end)
     end}.
 
+%% BT-4622: a callback-exception crash is not a removal — no ClassRemoved,
+%% and the metadata row stays so the class can be restarted.
+class_removed_not_fired_on_callback_crash_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Name = 'SysAnnCrashedClass',
+            ClassInfo = #{
+                name => Name,
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                instance_variables => []
+            },
+            {ok, Pid} = beamtalk_object_class:start(Name, ClassInfo),
+            _SubRef = subscribe_self('ClassRemoved'),
+            MRef = erlang:monitor(process, Pid),
+            ?assertExit(_, gen_server:call(Pid, bt4622_no_such_call)),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 5000 -> ?assert(false)
+            end,
+            try
+                receive
+                    {got, 'ClassRemoved', _} -> ?assert(false)
+                after 300 -> ok
+                end,
+                ?assertEqual({ok, test_class}, beamtalk_class_metadata:lookup_module(Name))
+            after
+                %% A monitor from another suite may have restarted it; stop
+                %% whatever runs now, then drop the crashed class's rows.
+                case beamtalk_class_registry:whereis_class(Name) of
+                    undefined -> ok;
+                    Live -> catch gen_server:stop(Live)
+                end,
+                beamtalk_class_metadata:delete(Name),
+                beamtalk_class_registry:forget_class_pids(Pid, Name)
+            end
+        end)
+    end}.
+
 %% BT-4502: each runtime lifecycle event reaches both an exact-class subscriber
 %% and an `Announcement`-superclass subscriber.
 system_events_reach_exact_and_superclass_subscribers_test_() ->
