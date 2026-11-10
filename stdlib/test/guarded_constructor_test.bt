@@ -12,7 +12,7 @@
 // descendant warmed its direct `new:`.
 //
 // Fixtures: fixtures/gc_ext_point.bt, fixtures/gc_fun_point.bt,
-// fixtures/gc_base.bt, fixtures/gc_leaf.bt.
+// fixtures/gc_base.bt, fixtures/gc_leaf.bt, fixtures/gc_grand_leaf.bt.
 
 TestCase subclass: GuardedConstructorTest
 
@@ -79,11 +79,14 @@ TestCase subclass: GuardedConstructorTest
   // ancestor's class-side `new:`, exactly as an ancestor's runtime fun or
   // compiled `class new:` does: a descendant's `new:` answers it, sent
   // statically or dynamically, and removing it brings the descendant's own
-  // synthesized `new:` back.
+  // synthesized `new:` back. Two levels down (GcGrandLeaf), the walk passes
+  // GcLeaf's own synthesized `new:` and still reaches the extension.
   testAncestorNewInitExtensionWins =>
     leaf := self lookUp: #GcLeaf
+    grand := self lookUp: #GcGrandLeaf
     self assert: (GcLeaf new: #{#x => 1}) x equals: 1
     self assert: (leaf new: #{#x => 1}) x equals: 1
+    self assert: (grand new: #{#x => 1}) x equals: 1
     Erlang beamtalk_extensions
       register: #'GcBase class'
       selector: #new:
@@ -94,6 +97,8 @@ TestCase subclass: GuardedConstructorTest
       self assert: (GcLeaf new: #{#x => 1}) equals: expected
       self assert: (leaf new: #{#x => 1}) equals: expected
       self assert: (GcBase new: #{#x => 1}) equals: expected
+      self assert: (GcGrandLeaf new: #{#x => 1}) equals: expected
+      self assert: (grand new: #{#x => 1}) equals: expected
     ]
       ensure: [
         Erlang beamtalk_extensions
@@ -103,6 +108,7 @@ TestCase subclass: GuardedConstructorTest
       ]
     self assert: (GcLeaf new: #{#x => 1}) x equals: 1
     self assert: (leaf new: #{#x => 1}) x equals: 1
+    self assert: (grand new: #{#x => 1}) x equals: 1
 
   // BT-4588: `new` is different. A class's synthesized `new` is its own
   // class-side method (the `new/0` override slot), and a class's own method
