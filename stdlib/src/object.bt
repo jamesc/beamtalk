@@ -127,17 +127,19 @@ ProtoObject subclass: Object
   /// follows a keyword message: without it, `xs inject: 0 into: [...]
   /// then: [...]` is one `inject:into:then:` send.
   ///
-  /// The `aBlock` param is a bare `Block` for the same reason as
-  /// `ifNotNil:` above (BT-2834). The type checker does not consult this
-  /// declared signature for a literal block: it types the block's parameter
-  /// as the receiver's type and answers the block's result type
-  /// (`infer_args_for_then` in `inference/blocks.rs`, BT-4515).
+  /// The `aBlock` param is deliberately untyped. Every class inherits this
+  /// method, so a declared `Block` would make each user class's own `then:`
+  /// with another parameter type (a parser combinator's `then: next ::
+  /// Parser`, say) draw an override-incompatibility warning. The type checker
+  /// does not consult this signature for a literal block anyway: it types the
+  /// block's parameter as the receiver's type and answers the block's result
+  /// type (`infer_args_for_then` in `inference/blocks.rs`, BT-4515).
   ///
   /// `then:` is not inlined and not `sealed`. A class that defines its own
   /// `then:` (a promise, say) keeps it. Because it is a message, on an actor
   /// receiver the block runs in the actor's process, so a block that sends
   /// back to the calling actor (or, through `TimeoutProxy`, to the proxy)
-  /// deadlocks; on a class receiver whose class declares class variables it
+  /// fails with `deadlock_detected` or a call timeout; on a class receiver whose class declares class variables it
   /// runs in the class process (ADR 0142). A block passed to it that assigns
   /// a captured local is an escaping block (ADR 0133), a compile error: bind
   /// the value to a temp local instead. `TimeoutProxy` forwards `then:` to
@@ -148,7 +150,7 @@ ProtoObject subclass: Object
   /// 3 then: [:x | x * x]                       // => 9
   /// #(1, 2, 3) collect: [:x | x * 2] |> then: [:xs | xs size * 10]   // => 30
   /// ```
-  then: aBlock :: Block => aBlock value: self
+  then: aBlock => aBlock value: self
 
   // === Printing and inspecting ===
 

@@ -166,6 +166,24 @@ Object subclass: Probe
 }
 
 #[test]
+fn an_own_then_with_a_non_block_parameter_draws_no_override_warning() {
+    // A parser combinator's `then:` takes a `Parser`, not a `Block`.
+    // `Object >> then:` leaves its parameter untyped, so this is not an
+    // incompatible override.
+    let source = "\
+Object subclass: Parser
+  then: next :: Parser -> Parser => next
+";
+    let (_, diags) = check_source(source);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("incompatible with parent")),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn a_dynamic_receiver_keeps_the_generic_path() {
     // An untyped parameter may be a class with its own `then:`, so neither
     // the block parameter nor the result is typed from `Object`'s method.
