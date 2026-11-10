@@ -21,6 +21,7 @@
 
 use super::{codegen_named, verifier_report};
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -173,16 +174,21 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
         "Run = fun(M) -> try {ok, M:run(M:new())} catch C:R -> {caught, C, element(1, case R of {E, _} -> {E}; E -> {E} end)} end end,\n",
     );
     for (n, o) in &exec {
-        script.push_str(&format!(
-            "case Run({n}) =:= Run({o}) of true -> ok; false -> io:format(\"DISAGREE ~p ~p ~p~n\", [{n}, Run({n}), Run({o})]) end,\n"
-        ));
+        let _ = writeln!(
+            script,
+            "case Run({n}) =:= Run({o}) of true -> ok; false -> io:format(\"DISAGREE ~p ~p ~p~n\", [{n}, Run({n}), Run({o})]) end,"
+        );
     }
     // Guard against a vacuous agreement (both builds failing alike): most
     // programs must actually answer a value.
-    script.push_str(&format!(
+    let _ = write!(
+        script,
         "Ok = length([M || M <- [{}], element(1, Run(M)) =/= caught]),\nio:format(\"RAN ~p~n\", [Ok]),\n",
-        exec.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
-    ));
+        exec.iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     script.push_str("io:format(\"DONE~n\"), halt().");
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell").arg("-pa").arg(&dir);
