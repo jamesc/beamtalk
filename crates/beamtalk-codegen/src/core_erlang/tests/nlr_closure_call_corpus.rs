@@ -184,7 +184,7 @@ const CALLS: &[(&str, &str, bool)] = &[
 /// (`state_step_operand`, `state_step_argument`) do not report with the
 /// pre-store off: the `UnbracketedNlrClosure` rule exempts every closure
 /// compiled inside a bracket window, though the operands run before the
-/// window's store. The pre-store is emitted there all the same.
+/// window's store (BT-4632). The pre-store is emitted there all the same.
 const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
     (
         "state_step_if_true",
