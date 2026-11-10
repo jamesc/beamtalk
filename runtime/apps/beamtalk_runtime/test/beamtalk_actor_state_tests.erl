@@ -387,12 +387,14 @@ refresh_carried_leaves_its_own_stamp_alone_under_another_actors_cell_test() ->
 %% ADR 0146 (BT-4535): an actor method's `^` commits the cell at home and the
 %% carried state away.
 commit_at_home_answers_the_cell_test() ->
-    with_cell(#{n => 5, '__local__i' => 1}, fun() ->
-        %% The throw's own `__local__` keys are dead: not merged back.
-        ?assertEqual(
-            #{n => 5, '__local__i' => 1},
-            beamtalk_actor_state:commit(self_obj(), #{n => 0, '__local__j' => 2})
-        )
+    with_commit_check(false, fun() ->
+        with_cell(#{n => 5, '__local__i' => 1}, fun() ->
+            %% The throw's own `__local__` keys are dead: not merged back.
+            ?assertEqual(
+                #{n => 5, '__local__i' => 1},
+                beamtalk_actor_state:commit(self_obj(), #{n => 0, '__local__j' => 2})
+            )
+        end)
     end).
 
 commit_under_another_owners_cell_answers_the_carried_state_test() ->
@@ -415,12 +417,18 @@ commit_for_another_pid_answers_the_carried_state_test() ->
 commit_without_a_cell_answers_the_carried_state_test() ->
     ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 0})).
 
-with_commit_check(Fun) ->
-    beamtalk_actor_state:enable_commit_check(true),
+%% Runs `Fun` with the `commit/2` test-build check on (or off), restoring
+%% what it was: the Justfile exports `BEAMTALK_CHECK_NLR_COMMIT`, so a runtime
+%% started by the test run may already have it on.
+with_commit_check(Fun) -> with_commit_check(true, Fun).
+
+with_commit_check(Enabled, Fun) ->
+    Was = persistent_term:get({beamtalk_actor_state, check_commit}, false),
+    beamtalk_actor_state:enable_commit_check(Enabled),
     try
         Fun()
     after
-        beamtalk_actor_state:enable_commit_check(false),
+        beamtalk_actor_state:enable_commit_check(Was),
         erlang:erase('$bt_nlr_cell_ahead')
     end.
 
@@ -467,15 +475,19 @@ commit_check_skips_an_away_capture_test() ->
     end).
 
 commit_check_off_never_raises_test() ->
-    with_cell(#{n => 0}, fun() ->
-        ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 5}))
+    with_commit_check(false, fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 5}))
+        end)
     end).
 
 store_unwound_stores_like_store_test() ->
-    with_cell(#{n => 0}, fun() ->
-        ok = beamtalk_actor_state:store_unwound(#{n => 3}),
-        ?assertEqual(#{n => 3}, beamtalk_actor_state:take()),
-        ?assertEqual(undefined, erlang:get('$bt_nlr_cell_ahead'))
+    with_commit_check(false, fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ok = beamtalk_actor_state:store_unwound(#{n => 3}),
+            ?assertEqual(#{n => 3}, beamtalk_actor_state:take()),
+            ?assertEqual(undefined, erlang:get('$bt_nlr_cell_ahead'))
+        end)
     end).
 
 call_foreign_takes_the_cell_over_a_stamped_entry_answer_test() ->
