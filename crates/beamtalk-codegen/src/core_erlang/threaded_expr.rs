@@ -166,6 +166,11 @@ pub(super) mod fault {
         /// so the condition closure answers only its boolean and the write
         /// dies with it (`ConditionFamilyNotCarried` over a `Local` family).
         ConditionWritesNotCarried,
+        /// BT-4584: a destructuring statement of a carried
+        /// `whileTrue:`/`whileFalse:` condition binds its names with plain
+        /// `let`s, as before BT-4584, so the map the condition hands back
+        /// lacks the write (`ConditionWriteNotInMap`).
+        ConditionDestructurePlain,
         /// BT-4017: a fold body statement that `thread_ahead` would register
         /// unwrapped takes the fold's raw `{Value, StateAcc}` unpack instead,
         /// as before BT-4017. With a non-literal block argument the

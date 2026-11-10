@@ -38,11 +38,12 @@ use super::super::threaded_ir::{
     ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use super::ThreadingPlan;
 use super::family_slots::append_family_slots;
+use super::{LocalWrite, ThreadingPlan};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 
 /// Result of pre-extracting hybrid loop fields: pre-extraction docs, readonly params, mutated params.
 ///
@@ -633,6 +634,11 @@ impl CoreErlangGenerator {
         // an operand another lowering compiles (`family_only_operand_site_exprs`)
         // are checked against the lowered frame, as a loop body's sites are.
         let family_sites = self.family_only_operand_sites_of(&filtered);
+        // BT-4584: the condition's local-write sites, each checked for the
+        // `Put` that carries its write in the map the closure hands back. Read
+        // before the condition is lowered, as `loop_condition_written_locals`
+        // requires (a name the condition binds is not an outer one).
+        let write_sites = self.condition_local_write_sites(condition, rest);
         let stmts = self.with_body_producer_sites(&filtered, false, false, |this| {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
             for expr in rest {
@@ -648,6 +654,23 @@ impl CoreErlangGenerator {
                     // iteration's read (the loop's own exit condition never
                     // advances).
                     let _ = this.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr
+                    && !this.condition_destructure_plain_fault()
+                {
+                    // BT-4584: each name is written as the branch above writes
+                    // `name := ...` here, a `Put` into the condition's
+                    // `StateAcc` (`LocalWrite::Slot`), so the map the closure
+                    // hands back carries it. Before, the statement took the
+                    // generic branch below: plain `let`s that died with the
+                    // closure (`ConditionWriteNotInMap`).
+                    let _ = this.lower_destructure_bind(
+                        pattern,
+                        value,
+                        frame,
+                        span,
+                        &mut stmts,
+                        &|_| LocalWrite::Slot,
+                    )?;
                 } else if this.is_field_assignment(expr) && this.in_actor_instance_context() {
                     // An actor field write steps the frame's `State` by a
                     // `Bind`, as a loop body's does, so the statements after
@@ -708,6 +731,7 @@ impl CoreErlangGenerator {
         // loop's own plan records: a loop that threads no local but carries
         // `SelfVt` (`NoThreadedLocals`) carries it through the loop's own
         // parameters, not through this closure.
+        let mut errors = threaded_ir::verify_condition_writes_in_map(&stmts, &write_sites);
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::ConditionStateEffects),
             frame,
@@ -716,7 +740,7 @@ impl CoreErlangGenerator {
             produces: Vec::new(),
             span: condition.span(),
         }];
-        let errors = self.verify_threaded_ir(&wrapper);
+        errors.extend(self.verify_threaded_ir(&wrapper));
         self.report_threaded_ir_verify_errors(
             &errors,
             "while condition ThreadedIr must be well-formed",
@@ -724,6 +748,66 @@ impl CoreErlangGenerator {
         );
         let mut ctx = threaded_ir::RenderCtx::new(self);
         Ok(threaded_ir::render(&wrapper, &mut ctx))
+    }
+
+    /// BT-4584: the local-write sites of a carried while condition's
+    /// statements before its tail (`rest`): each statement that assigns
+    /// (`name := ...`) or destructures (`#(a, b) := ...`) a local the
+    /// condition writes for the loop ([`Self::loop_condition_written_locals`],
+    /// the condition's `Local` families), with each such name and its
+    /// scratch-map key. The condition hands its `StateAcc` back to the loop,
+    /// so each site must `Put` each name into it
+    /// ([`threaded_ir::verify_condition_writes_in_map`]).
+    fn condition_local_write_sites(
+        &self,
+        condition: &Expression,
+        rest: &[&Expression],
+    ) -> Vec<threaded_ir::ConditionWriteSite> {
+        let written = self.loop_condition_written_locals(condition);
+        rest.iter()
+            .filter_map(|expr| {
+                let names: Vec<String> = match expr {
+                    Expression::Assignment { target, .. } => match target.as_ref() {
+                        Expression::Identifier(id) => vec![id.name.to_string()],
+                        _ => Vec::new(),
+                    },
+                    Expression::DestructureAssignment { pattern, .. } => {
+                        extract_pattern_bindings(pattern)
+                            .0
+                            .into_iter()
+                            .map(|id| id.name.to_string())
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let writes: Vec<(String, String)> = names
+                    .into_iter()
+                    .filter(|name| written.contains(name))
+                    .map(|name| {
+                        let key = self.local_scratch_key(&name);
+                        (name, key)
+                    })
+                    .collect();
+                (!writes.is_empty()).then(|| threaded_ir::ConditionWriteSite {
+                    span: expr.span(),
+                    writes,
+                })
+            })
+            .collect()
+    }
+
+    /// Test-only fault injection (BT-4584): a destructuring statement of a
+    /// carried while condition takes the generic statement lowering, as
+    /// before BT-4584, so `ConditionWriteNotInMap` is shown to fire on a real
+    /// compile (`tests/while_condition_binding_corpus.rs`).
+    fn condition_destructure_plain_fault(&self) -> bool {
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::ConditionDestructurePlain)
+        {
+            return true;
+        }
+        false
     }
 
     /// The tail (boolean) statement of a carried while condition — see
