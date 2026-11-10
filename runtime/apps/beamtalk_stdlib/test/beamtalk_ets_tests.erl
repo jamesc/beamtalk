@@ -723,10 +723,11 @@ stale_table_delete_test() ->
         _:_ -> ok
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_delete, set),
-    %% Delete the underlying table directly, then verify deleteTable raises permission_error
+    %% Delete the underlying table directly, then verify deleteTable raises stale_table
+    %% (the same kind as an unnamed table and every other operation; BT-4604).
     ets:delete(bt_ets_test_stale_delete),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = permission_error, class = 'Ets'}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
         beamtalk_ets:deleteTable(Table)
     ).
 
@@ -1072,6 +1073,25 @@ bt4576_delete_unnamed_table_errors_test() ->
     ?assertError(
         #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:deleteTable(T)
     ).
+
+bt4604_delete_named_table_by_non_owner_is_access_denied_test() ->
+    T = beamtalk_ets:'new:type:'(bt4604_named_delete, set),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+    ?assertEqual(nil, beamtalk_ets:deleteTable(T)).
+
+bt4604_delete_fault_name_reuse_test() ->
+    %% No table under the name: stale.
+    ?assertEqual(stale, beamtalk_ets:delete_fault(bt4604_reuse)),
+    %% The caller owns the table now under the name, so the one it failed to
+    %% delete was a predecessor that is gone: stale.
+    ets:new(bt4604_reuse, [named_table, public]),
+    ?assertEqual(stale, beamtalk_ets:delete_fault(bt4604_reuse)),
+    %% Another process owns the table under the name: access_denied (the
+    %% stated default; the original and a replacement cannot be told apart).
+    ?assertEqual({ok, access_denied}, in_other_process(fun() ->
+        beamtalk_ets:delete_fault(bt4604_reuse)
+    end)),
+    ets:delete(bt4604_reuse).
 
 bt4576_deleted_private_table_is_stale_test() ->
     T = beamtalk_ets:'private:'(set),

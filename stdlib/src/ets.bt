@@ -409,9 +409,8 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// Destroy the table, freeing all memory. Returns `nil`.
   ///
   /// Only the process that created the table (the owner) may call `delete`.
-  /// Otherwise an unnamed (`private:`/`protected:`) table raises
-  /// `access_denied`, or `stale_table` once deleted; a named table raises
-  /// `permission_error` in both cases.
+  /// Any other process raises `access_denied`, and deleting a table that is
+  /// already gone raises `stale_table`, for named and unnamed tables alike.
   /// After calling `delete`, this `Ets` instance is no longer valid.
   /// Any further operations on the deleted table will raise an error.
   ///

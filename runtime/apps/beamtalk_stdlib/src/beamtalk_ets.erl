@@ -72,6 +72,11 @@ A use the table's protection forbids raises `access_denied`, never a raw
 %% e.g. `lookup: self key: key` → selector `lookup:key:` → function `lookup/2`
 -export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2, removeKey/3]).
 -export([keys/1, tableSize/1, deleteTable/1]).
+
+-ifdef(TEST).
+%% Expose the delete-failure classifier for EUnit (name-reuse cases).
+-export([delete_fault/1]).
+-endif.
 -export([
     removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
 ]).
@@ -408,24 +413,13 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         ets:delete(TableName),
         nil
     catch
-        error:badarg when not is_atom(TableName) ->
-            %% An unnamed table's id is never reused, so the failure is
-            %% unambiguous: gone, or the caller is not the owner (only the
-            %% owner may delete, whatever the protection).
-            case ets:info(TableName, owner) of
-                undefined -> stale_table_error('delete', TableName);
-                _Owner -> access_denied_error('delete', TableName)
-            end;
         error:badarg ->
-            %% Named tables keep their historical `permission_error`.
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    permission_error,
-                    'Ets',
-                    'delete',
-                    <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
-                )
-            )
+            %% Only the owner may delete, whatever the protection, so the
+            %% failure means the table is gone or the caller is not its owner.
+            case delete_fault(TableName) of
+                stale -> stale_table_error('delete', TableName);
+                access_denied -> access_denied_error('delete', TableName)
+            end
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
@@ -856,6 +850,29 @@ table_fault(TableName, Kind) ->
                 {undefined, _} -> stale;
                 _ -> access_denied
             end
+    end.
+
+-doc """
+Classify a failed `ets:delete/1`: `stale` (gone) or `access_denied` (the
+caller is not the owner). Only the owner may delete, whatever the protection.
+
+An unnamed table's id is never reused, so its probe is unambiguous. A named
+table's name can be reused between the failed delete and this probe:
+- No table under the name: `stale`.
+- The caller owns the table under the name: the table it tried to delete
+  cannot have been its own (that delete would have succeeded), so the
+  original is gone and the name was reused: `stale`.
+- Another process owns the table under the name: either the original or a
+  replacement. The two cannot be told apart, so the stated default is
+  `access_denied`, which is also what deleting the current table would raise.
+""".
+-spec delete_fault(table()) -> stale | access_denied.
+delete_fault(TableName) ->
+    Self = self(),
+    case ets:info(TableName, owner) of
+        undefined -> stale;
+        Self -> stale;
+        _Other -> access_denied
     end.
 
 -doc "A table's name for error messages; unnamed tables do not expose their tid.".
