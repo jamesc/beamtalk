@@ -36,3 +36,10 @@ TestCase subclass: DynamicSupervisorChildrenTest
     pool := Bt3966WorkerPool spawn
     pool stop
     self should: [pool children] raise: #stale_handle
+
+  // BT-4502: a pool child stays visible to Node introspection.
+  testPoolChildAppearsInNodeCurrentActors =>
+    pool := Bt3966WorkerPool spawn
+    a := pool startChild unwrap
+    self assert: (Node current actors unwrap includes: a) equals: true
+    pool stop

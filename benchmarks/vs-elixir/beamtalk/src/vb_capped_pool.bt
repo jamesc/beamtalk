@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// As VbPool, with a maxChildren cap (never reached: each start is followed by
+// a terminate), so the capped start path runs.
+DynamicSupervisor(VbCounter) subclass: VbCappedPool
+
+  childClass => VbCounter
+
+  maxChildren -> Integer => 8
