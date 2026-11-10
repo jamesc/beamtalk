@@ -589,6 +589,35 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
         {ok, ModuleName} ->
             invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State);
         continue ->
+            invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State)
+    end.
+
+-doc """
+A class with no dispatchable module that `has_method_local/2` accepted may
+hold the method as a runtime fun (module-less builder classes, ADR 0038 /
+0084). Resolve it with the same rule the direct send uses
+(`beamtalk_primitive:runtime_instance_method/2`) and invoke it with the
+value-type convention `fun(Self, Arg1..ArgN)`. Otherwise advance the walk.
+""".
+-spec invoke_runtime_fun(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    dispatch_result() | {continue, class_name() | none}.
+invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
+    case beamtalk_primitive:runtime_instance_method(MethodOwner, Selector) of
+        {ok, Fun} when is_function(Fun, length(Args) + 1) ->
+            try
+                {reply, erlang:apply(Fun, [Self | Args]), State}
+            catch
+                Type:Reason:Stack ->
+                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    ),
+                    #{error := BtError} = Wrapped,
+                    {error, BtError}
+            end;
+        _ ->
             {continue, beamtalk_object_class:superclass_safe(ClassPid)}
     end.
 

@@ -55,6 +55,8 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %% this map is the one source the routing conformance test enumerates.
 -define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
 
+-export([runtime_instance_method/2]).
+
 -include("beamtalk.hrl").
 
 %% Compiled stdlib modules are generated from Core Erlang, not .erl source.
