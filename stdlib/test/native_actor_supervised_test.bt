@@ -62,14 +62,16 @@ TestCase subclass: NativeActorSupervisedTest
   // Poll until `sup` runs a live Bt4577NativeCounter other than `before`.
   restartedChildOf: sup replacing: before =>
     found := nil
-    50 timesRepeat: [
-      found isNil ifTrue: [
-        c := (sup which: Bt4577NativeCounter) unwrap
-        (c notNil and: [c =/= before and: [c isAlive]])
-          ifTrue: [found := c]
-          ifFalse: [Timer sleep: 20]
+    50
+      timesRepeat: [
+        found isNil
+          ifTrue: [
+            c := (sup which: Bt4577NativeCounter) unwrap
+            (c notNil and: [
+              c =/= before and: [c isAlive]
+            ]) ifTrue: [found := c] ifFalse: [Timer sleep: 20]
+          ]
       ]
-    ]
     self deny: found isNil
     found
 
@@ -82,7 +84,9 @@ TestCase subclass: NativeActorSupervisedTest
     pool stop
 
   testNativeSpawnAsRegistersName =>
-    c := (Bt4577NativeCounter spawnWith: #{#initial => 3} as: #bt4577_spawn_as) unwrap
+    c := (Bt4577NativeCounter spawnWith: #{
+      #initial => 3
+    } as: #bt4577_spawn_as) unwrap
     self assert: c getValue equals: 3
     again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as
     self assert: again isError equals: true
