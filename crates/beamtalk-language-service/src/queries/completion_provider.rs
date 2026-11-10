@@ -2444,6 +2444,49 @@ mod tests {
         );
     }
 
+    /// Conformance: completing a pipeline stage, the LSP and the live
+    /// `complete` op (`parse_receiver_and_prefix/1` in
+    /// `beamtalk_repl_ops_dev.erl`, shared by the REPL, MCP and LiveView)
+    /// agree on the stage's receiver — the value before the last `|>`. Both
+    /// assert the cases in the shared corpus; the Erlang side in
+    /// `pipeline_receiver_matches_shared_corpus_test`.
+    #[test]
+    fn pipeline_receiver_matches_shared_corpus() {
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_workspace/test/fixtures/completion_pipeline_receiver_corpus.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let field = |key: &str| case[key].as_str().expect("string field");
+            let (line, receiver, prefix) = (field("line"), field("receiver"), field("prefix"));
+            let offset = u32::try_from(line.len()).unwrap();
+            let end = pipeline_receiver_end(line, offset)
+                .unwrap_or_else(|| panic!("{line:?}: not seen as a pipeline stage"));
+            assert_eq!(
+                line[..end as usize].trim_start(),
+                receiver,
+                "{line:?}: receiver"
+            );
+            assert!(line.ends_with(prefix), "{line:?}: prefix {prefix:?}");
+        }
+    }
+
+    #[test]
+    fn pipeline_receiver_end_ignores_lines_without_a_trailing_pipe() {
+        for line in [
+            r#""hello" size "#,
+            r#""hello" size ab"#,
+            r#""hello" |> size "#,
+        ] {
+            let offset = u32::try_from(line.len()).unwrap();
+            assert_eq!(pipeline_receiver_end(line, offset), None, "{line:?}");
+        }
+    }
+
     #[test]
     fn pipeline_completion_right_after_pipe() {
         assert_offers_integer_not_string(r#""hello" size |> "#);

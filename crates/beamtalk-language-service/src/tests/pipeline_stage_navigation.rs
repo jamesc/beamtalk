@@ -100,19 +100,19 @@ fn signature_help_on_keyword_stage() {
 #[test]
 fn senders_find_sends_written_in_pipeline_stages() {
     let (service, _, calls) = service();
-    let bar_sites: Vec<_> = service
+    let unary_sites: Vec<_> = service
         .find_selector_send_sites_across_files("bar")
         .into_iter()
         .filter(|l| l.file == calls)
         .collect();
     // `x bar`, the `|> bar` stage, and both sends of the multi-message stage.
-    assert_eq!(bar_sites.len(), 4, "{bar_sites:?}");
-    let baz_sites: Vec<_> = service
+    assert_eq!(unary_sites.len(), 4, "{unary_sites:?}");
+    let keyword_sites: Vec<_> = service
         .find_selector_send_sites_across_files("baz:")
         .into_iter()
         .filter(|l| l.file == calls)
         .collect();
-    assert_eq!(baz_sites.len(), 2, "{baz_sites:?}");
+    assert_eq!(keyword_sites.len(), 2, "{keyword_sites:?}");
 }
 
 #[test]
