@@ -454,8 +454,11 @@ lives in one function, `dependency_extensions_unknown`, used by every surface.
   dependency registers from its own Erlang (`native/`) code through the
   runtime registry is invisible to the checker; doing so is unsupported for
   static checking.
-- `beamtalk test` scans only each package's `src/` (plus `test/fixtures/`);
-  a package whose sources sit at its root keeps the guard on there.
+- `beamtalk test` registers each package's `src/` extensions, its fixtures'
+  (`test/fixtures/`) and those of every test file it compiles (one defining
+  a test class). A package whose sources sit at its root, and a test file
+  with deprecated `// @load` directives, keep the guard on there: the
+  extensions they would need are not scanned.
 
 ### 8. Package Reflection: The `Package` Class
 

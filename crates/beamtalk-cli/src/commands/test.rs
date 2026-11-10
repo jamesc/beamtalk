@@ -1470,20 +1470,6 @@ fn initialize_pipeline(
             super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
     }
 
-    // Every test file's own extension methods, so a test calling a helper
-    // extension declared in a sibling test file is not reported once the
-    // dependency guard lifts (ADR 0070 WS3, BT-4608). A file that cannot be
-    // read or parsed fails its own compilation later.
-    let mut extension_index = extension_index;
-    for test_file in &test_files {
-        if let Ok(source) = fs::read_to_string(test_file) {
-            let (module, _) = beamtalk_core::source_analysis::parse(
-                beamtalk_core::source_analysis::lex_with_eof(&source),
-            );
-            extension_index.add_module(&module, test_file.as_std_path());
-        }
-    }
-
     let native_type_registry = compute_native_type_registry(&discovered_packages, &test_files);
 
     // BT-4022: project-known Erlang modules for the `unresolved_ffi` check,
@@ -1631,6 +1617,57 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
 /// For each test file: resolves `@load` fixtures, compiles `TestCase` subclasses
 /// to Core Erlang, generates `EUnit` wrappers, and discovers doc tests. Core files
 /// are batch-compiled to BEAM at the end for efficiency.
+/// The extension methods of the test files `beamtalk test` will compile and
+/// load: those with at least one test class, found by the same discovery
+/// `compile_single_test_file` uses. A helper-only file is never compiled or
+/// loaded, so its extensions must not hide a does-not-understand that would
+/// fail at runtime. A file that cannot be read or parsed fails its own
+/// compilation later.
+fn collect_test_file_extensions(
+    test_files: &[Utf8PathBuf],
+    pkg_class_indexes: &PkgClassIndexes,
+    fixture_class_index: &HashMap<String, String>,
+    class_module_index: &HashMap<String, String>,
+    class_superclass_index: &HashMap<String, String>,
+) -> beamtalk_core::compilation::extension_index::ExtensionIndex {
+    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    for test_file in test_files {
+        let (_, file_super_index) = class_index_for_file(
+            test_file,
+            pkg_class_indexes,
+            fixture_class_index,
+            class_module_index,
+            class_superclass_index,
+        );
+        let Ok((test_classes, _)) =
+            discover_test_classes_in_hierarchy(test_file, &file_super_index)
+        else {
+            continue;
+        };
+        if test_classes.is_empty() {
+            continue;
+        }
+        if let Ok(source) = fs::read_to_string(test_file) {
+            let (module, _) = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(&source),
+            );
+            extensions.add_module(&module, test_file.as_std_path());
+        }
+    }
+    extensions
+}
+
+/// Whether a test file's analysis may lift the dependency guard (ADR 0070
+/// WS3, BT-4608): every dependency's extensions were loaded, and the file
+/// has no deprecated `// @load` directives — those pull in arbitrary files
+/// whose extensions are not in the index.
+fn test_file_dependency_extensions_complete(
+    pipeline_complete: bool,
+    load_files: &[String],
+) -> bool {
+    pipeline_complete && load_files.is_empty()
+}
+
 fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
     // Accumulate all test-file core paths; batch-compile after the loop to avoid
@@ -1649,6 +1686,20 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
 
     // Clone test_files to avoid borrow conflict with pipeline fields.
     let test_files = pipeline.test_files.clone();
+
+    // The extensions of every test file that will be compiled and loaded,
+    // so a test calling a helper extension declared in a sibling test file
+    // is not reported once the dependency guard lifts (ADR 0070 WS3,
+    // BT-4608). Collected after the fixtures are merged, so a test class
+    // inheriting from a fixture class is recognised.
+    let test_file_extensions = collect_test_file_extensions(
+        &test_files,
+        &pipeline.pkg_class_indexes,
+        &pipeline.fixture_class_index,
+        &pipeline.class_module_index,
+        &pipeline.class_superclass_index,
+    );
+    pipeline.extension_index.merge(&test_file_extensions);
 
     for test_file in &test_files {
         compile_single_test_file(
@@ -1761,11 +1812,10 @@ fn compile_single_test_file(
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         extension_index: pipeline.extension_index.clone(),
-        // A deprecated `// @load` pulls in an arbitrary file whose
-        // extensions are not in the index, so a file using one keeps the
-        // dependency guard on (ADR 0070 WS3, BT-4608).
-        dependency_extensions_complete: pipeline.dependency_extensions_complete
-            && load_files.is_empty(),
+        dependency_extensions_complete: test_file_dependency_extensions_complete(
+            pipeline.dependency_extensions_complete,
+            &load_files,
+        ),
     };
 
     // Handle deprecated @load directives as fallback.
@@ -2712,6 +2762,51 @@ mod tests {
 
     /// Pins the summary line's display format. See [`summary_line`] for the
     /// format's history and why it's still worth pinning.
+    /// Only test files that will be compiled and loaded (they define a test
+    /// class) contribute extensions; a helper-only file does not, so its
+    /// extension cannot hide a does-not-understand that fails at runtime.
+    #[test]
+    fn test_file_extensions_come_only_from_compiled_test_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let with_test = dir.join("shape_test.bt");
+        fs::write(
+            &with_test,
+            "TestCase subclass: ShapeTest\n  testShape => self assertShape: 1\n\n\
+             Object >> assertShape: x => x\n",
+        )
+        .unwrap();
+        let helper_only = dir.join("helpers.bt");
+        fs::write(&helper_only, "Object >> unloadedHelper => 1\n").unwrap();
+
+        let extensions = collect_test_file_extensions(
+            &[with_test, helper_only],
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let selectors: HashSet<String> = extensions
+            .entries()
+            .keys()
+            .map(|key| key.selector.to_string())
+            .collect();
+        assert!(selectors.contains("assertShape:"), "{selectors:?}");
+        assert!(!selectors.contains("unloadedHelper"), "{selectors:?}");
+    }
+
+    /// A test file with a deprecated `// @load` keeps the dependency guard
+    /// on: the loaded file's extensions are not in the index.
+    #[test]
+    fn load_directive_keeps_the_dependency_guard_on() {
+        assert!(test_file_dependency_extensions_complete(true, &[]));
+        assert!(!test_file_dependency_extensions_complete(
+            true,
+            &["examples/helper.bt".to_string()]
+        ));
+        assert!(!test_file_dependency_extensions_complete(false, &[]));
+    }
+
     /// Fixture extension methods reach test files' hierarchies too, so a
     /// test calling one is not reported once the dependency guard lifts.
     #[test]
