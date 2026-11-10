@@ -474,3 +474,19 @@ fn multi_line_cascade_reports_each_message_line() {
         );
     }
 }
+
+#[test]
+fn typed_cascade_receiver_reports_cascade() {
+    // A receiver a guarded direct call would cover still sends dynamically
+    // in a cascade; the reason says so rather than reading as a gap.
+    let hints = report("Object subclass: Caller\n  run: n :: Integer => n printString; abs\n");
+    for selector in ["printString", "abs"] {
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.starts_with(&format!("Send '{selector}'"))
+                    && h.contains("reason: cascade")),
+            "{selector}: {hints:?}"
+        );
+    }
+}

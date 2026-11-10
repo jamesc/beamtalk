@@ -21,7 +21,7 @@
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
-//! `supervisor`, `abstract`, `root`, `actor`, `exception`, …) for counting
+//! `supervisor`, `abstract`, `root`, `actor`, `exception`, `cascade`, …) for counting
 //! sites by reason.
 //!
 //! ## Coverage
@@ -107,6 +107,15 @@ fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
     }
 }
 
+/// Which kind of `send/3` site a report entry is for.
+#[derive(Clone, Copy)]
+enum SiteKind {
+    /// A send that could have taken the `typed_guarded` handler's path.
+    Send,
+    /// A cascade message, which always sends dynamically.
+    Cascade,
+}
+
 impl CoreErlangGenerator {
     /// Emits the dynamic-site report entry for `receiver selector` when
     /// diagnostics are on: the receiver's static type and the
@@ -117,17 +126,29 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
     ) {
-        self.report_dynamic_site_at(receiver, selector, receiver.span());
+        self.emit_dynamic_site(receiver, selector, receiver.span(), SiteKind::Send);
     }
 
-    /// [`Self::report_dynamic_site`], located at `span` rather than the
-    /// receiver: each message of a cascade reports its own line (BT-4392),
-    /// though the receiver's type is shared.
-    pub(in crate::core_erlang) fn report_dynamic_site_at(
+    /// BT-4596: the report entry for one cascade message, located at the
+    /// message (`span`) rather than the shared receiver, so each message
+    /// reports its own line (BT-4392). A cascade always sends dynamically, so
+    /// a receiver a guarded direct call would cover reads `cascade`, not as
+    /// a send that bypassed the `typed_guarded` handler.
+    pub(in crate::core_erlang) fn report_cascade_send(
         &mut self,
         receiver: &Expression,
         selector: &MessageSelector,
         span: Span,
+    ) {
+        self.emit_dynamic_site(receiver, selector, span, SiteKind::Cascade);
+    }
+
+    fn emit_dynamic_site(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        span: Span,
+        kind: SiteKind,
     ) {
         if !self.codegen_diagnostics_enabled {
             return;
@@ -135,7 +156,7 @@ impl CoreErlangGenerator {
         let line_info = self
             .span_to_line(span)
             .map_or(String::new(), |l| format!(" at line {l}"));
-        let description = self.dynamic_site_description(receiver, selector);
+        let description = self.dynamic_site_description(receiver, selector, kind);
         self.emit_codegen_diagnostic(
             format!(
                 "Send '{}'{line_info}: dynamic dispatch ({description})",
@@ -167,10 +188,11 @@ impl CoreErlangGenerator {
 
     /// The `(receiver: …; reason: …)` part of a dynamic-dispatch hint for
     /// `receiver selector`.
-    pub(in crate::core_erlang) fn dynamic_site_description(
+    fn dynamic_site_description(
         &self,
         receiver: &Expression,
         selector: &MessageSelector,
+        site: SiteKind,
     ) -> String {
         let ty = self.type_map.get(receiver.span());
         let class_name = match ty {
@@ -186,7 +208,10 @@ impl CoreErlangGenerator {
         let reason = match self.typed_send_target(receiver, selector) {
             // The `typed_guarded` handler would have claimed this send had it
             // reached `HANDLERS`; a dynamic send here came another way.
-            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
+            Ok(_) => match site {
+                SiteKind::Send => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
+                SiteKind::Cascade => "cascade — every cascade message dispatches dynamically".to_string(),
+            },
             Err(gate) => self.describe_gate(&gate, class_name),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))
