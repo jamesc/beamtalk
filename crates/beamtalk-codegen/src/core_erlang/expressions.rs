@@ -1298,7 +1298,9 @@ impl CoreErlangGenerator {
             || beamtalk_core::source_analysis::Span::new(0, 0),
             beamtalk_core::ast::Expression::span,
         );
-        Ok(self.hoist_cascade_splits(splits, docs, span))
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let racing = self.last_racing_operand(&exprs).is_some();
+        Ok(self.hoist_cascade_splits(splits, docs, span, racing))
     }
 
     /// Splits one cascade argument into its `(prelude, value)` pair through
@@ -1322,13 +1324,18 @@ impl CoreErlangGenerator {
     /// over already-split arguments: when any carries a prelude, every
     /// prelude is spliced into `docs` (plain values bound to fresh temps) so
     /// a `StateN` rebind stays in scope for later cascade messages.
+    ///
+    /// BT-4296: `racing` ([`Self::last_racing_operand`]) hoists them all too
+    /// when two or more operands may run code, since the list (or map) the
+    /// docs land in would otherwise evaluate them last-first.
     pub(super) fn hoist_cascade_splits(
         &mut self,
         splits: Vec<(Vec<ThreadedStmt>, Document<'static>)>,
         docs: &mut Vec<ThreadedStmt>,
         span: beamtalk_core::source_analysis::Span,
+        racing: bool,
     ) -> Vec<Document<'static>> {
-        let any_hoisted = splits.iter().any(|(prelude, _)| !prelude.is_empty());
+        let any_hoisted = racing || splits.iter().any(|(prelude, _)| !prelude.is_empty());
         if !any_hoisted {
             return splits.into_iter().map(|(_, doc)| doc).collect();
         }

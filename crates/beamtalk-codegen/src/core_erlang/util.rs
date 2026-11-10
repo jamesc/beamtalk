@@ -1429,7 +1429,7 @@ impl CoreErlangGenerator {
     /// literal, an identifier, a class reference, `super`, or a block —
     /// each compiles to a value that cannot raise or observe threaded
     /// state, so the parent may compile it in place after every prelude.
-    fn is_trivial_subexpr(expr: &Expression) -> bool {
+    pub(super) fn is_trivial_subexpr(expr: &Expression) -> bool {
         matches!(
             expr,
             Expression::Literal(..)

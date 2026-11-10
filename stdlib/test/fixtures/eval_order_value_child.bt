@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: a value-type `super` send whose arguments both send to the same
+// EvalOrderActor; stdlib/test/eval_order_test.bt checks they ran in order.
+
+EvalOrderValue subclass: EvalOrderValueChild
+
+  superArgsOf: a => super pair: a bump with: a n
