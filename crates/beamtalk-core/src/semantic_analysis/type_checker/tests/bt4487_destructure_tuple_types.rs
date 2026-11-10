@@ -47,6 +47,35 @@ fn object_position_stays_dynamic() {
 }
 
 #[test]
+fn object_member_of_union_column_binds_dynamic() {
+    // Column 1 is `Object | Integer`: Dynamic, so no mismatch (BT-4628).
+    assert_eq!(
+        probe(
+            "Tuple(Object, String) | Tuple(Integer, String)",
+            "{a, b}",
+            "a"
+        ),
+        0
+    );
+    assert_eq!(
+        probe(
+            "Tuple(Object, String) | Tuple(Integer, String)",
+            "{a, b}",
+            "b"
+        ),
+        0
+    );
+}
+
+#[test]
+fn type_var_member_of_union_column_binds_dynamic() {
+    let diags = analyse_diagnostics(
+        "typed Object subclass: Box(T)\n  run: p :: Tuple(T, String) | Tuple(Integer, String) -> String =>\n    {a, _} := p\n    a\n",
+    );
+    assert_eq!(mismatches(&diags), 0);
+}
+
+#[test]
 fn arity_mismatch_binds_dynamic() {
     assert_eq!(probe("Tuple(Integer, String)", "{a, b, c}", "a"), 0);
 }
