@@ -1337,7 +1337,8 @@ body.col-resizing .cockpit { transition: none; }
 .tok-match   { color: var(--t-binary); }
 .tok-send    { color: var(--t-send); font-weight: 700; }
 .tok-cascade { color: var(--t-cascade); }
-.tok-punct   { color: var(--t-punct); }
+.tok-pipe    { color: var(--t-cascade); font-weight: 600; }
+.tok-punct  { color: var(--t-punct); }
 
 /* ============================================================================
    CodeMirror 6 editor (BT-2538, BT-2539) — the CmEditor hook mounts CodeMirror

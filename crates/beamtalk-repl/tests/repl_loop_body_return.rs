@@ -636,6 +636,7 @@ fn verifier_report(src: &str) -> String {
     match catch_unwind(AssertUnwindSafe(|| {
         generate_repl_expressions_surfacing_verifier(
             &expressions,
+            &beamtalk_core::ast::PipelineSends::default(),
             "bt4288_off",
             HashMap::new(),
             None,

@@ -22,9 +22,13 @@
 //! a + (b * c)                 // right-hand binary operand needs parens
 //! ```
 
+use std::collections::HashSet;
+
 use crate::{LintContext, LintPass, LintTree};
-use beamtalk_core::ast::{BinarySegment, Block, Expression, MessageSelector, Module};
-use beamtalk_core::ast_walker::for_each_expr_seq;
+use beamtalk_core::ast::{
+    BinarySegment, Block, CommentAttachment, Expression, MessageSelector, Module, PipelineSends,
+};
+use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on `Expression::Parenthesized` wrapping expressions
@@ -38,12 +42,50 @@ impl LintPass for UnnecessaryParensPass {
     }
 
     fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+        let mut found = Vec::new();
         for_each_expr_seq(module, |seq| {
             for stmt in seq {
-                check_expr(&stmt.expression, diagnostics);
+                check_expr(&stmt.expression, &mut found);
             }
         });
+        let around_pipelines = parens_around_pipelines(module);
+        found.retain(|d| !around_pipelines.contains(&(d.span.start(), d.span.end())));
+        diagnostics.extend(found);
     }
+}
+
+/// The spans of the parentheses around a pipeline (ADR 0145), which are
+/// never reported.
+///
+/// `|>` binds looser than every message, so `x + (a foo |> bar)` without
+/// them pipes `x + a foo` into `bar`, and an argument or collection element
+/// needs them to hold a pipeline at all. The tree holds a pipeline as plain
+/// sends (`(a foo) bar` here, which on its own looks like a removable
+/// unary send), so the owning definitions' `|>` records say which sends
+/// were written with `|>`. Spans are offsets into the one file, so the
+/// module's and every method's records can be read together.
+fn parens_around_pipelines(module: &Module) -> HashSet<(u32, u32)> {
+    let piped: PipelineSends = std::iter::once(&module.pipeline_sends)
+        .chain(module.all_methods().map(|m| &m.pipeline_sends))
+        .flat_map(PipelineSends::spans)
+        .map(|span| (span, CommentAttachment::default()))
+        .collect();
+    let mut spans = HashSet::new();
+    if piped.is_empty() {
+        return spans;
+    }
+    for_each_expr_seq(module, |seq| {
+        for stmt in seq {
+            walk_expression(&stmt.expression, &mut |e| {
+                if let Expression::Parenthesized { expression, span } = e {
+                    if piped.on_receiver_spine(expression) {
+                        spans.insert((span.start(), span.end()));
+                    }
+                }
+            });
+        }
+    });
+    spans
 }
 
 /// Returns `true` when `expr` is an expression whose precedence is already
@@ -482,6 +524,32 @@ mod tests {
             1,
             "parens around literal in keyword arg should still be flagged, got: {diags:?}"
         );
+    }
+
+    /// ADR 0145 (BT-4517): parentheses around a pipeline change meaning in an
+    /// argument (`x + (a foo |> bar)` without them pipes `x + a foo` into
+    /// `bar`) and hold it in a collection element, so they are not reported,
+    /// though the tree holds the pipeline as a plain unary send. Parentheses
+    /// around a hand-written unary send in the same places still are.
+    #[test]
+    fn parens_around_a_pipeline_are_not_flagged() {
+        for body in [
+            "x at: (x foo |> bar)",
+            "x at: (x foo |> bar: 1)",
+            "x + (x foo |> bar)",
+            "#[(x |> foo), (x |> bar baz)]",
+            "x do: [:e | e + (e |> size)]",
+            "x |> at: (x foo |> bar)",
+        ] {
+            let module_body = format!("Object subclass: Foo\n  value: x => {body}\n");
+            let diags = lint(&module_body);
+            assert!(diags.is_empty(), "{body}: got {diags:?}");
+            let top_level = format!("{body}\n");
+            let diags = lint(&top_level);
+            assert!(diags.is_empty(), "top level {body}: got {diags:?}");
+        }
+        let diags = lint("Object subclass: Foo\n  value: x => x + (x foo bar)\n");
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
     }
 
     /// Parentheses around a message receiver (e.g. `(x builder) add: 1`)

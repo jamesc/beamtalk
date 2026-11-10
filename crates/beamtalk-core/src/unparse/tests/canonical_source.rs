@@ -21,7 +21,7 @@
 
 use proptest::prelude::*;
 
-use super::super::{format_source, unparse_method, unparse_module};
+use super::super::{format_source, reindent_method_source, unparse_method, unparse_module};
 use crate::ast::normalize::{
     PeeledParens, peel_operand_parens, peel_operand_parens_recording, restore_operand_parens,
 };
@@ -259,4 +259,167 @@ fn awkward_operands_round_trip() {
         let failure = round_trip_failure(parse_bt(&source));
         assert!(failure.is_none(), "{body}: {}", failure.unwrap_or_default());
     }
+}
+
+// --- `|>` pipelines as written (ADR 0145, BT-4517) ---
+//
+// The tree holds a pipeline as the nested sends it means and records which
+// sends were written with `|>`, so a re-sugaring path that misreads the
+// record prints an equivalent program rather than failing. Comparing trees
+// cannot catch that (`without_spans` erases the spans the record is keyed
+// by, so `a |> foo bar` and `a foo |> bar` compare equal); comparing the
+// text byte for byte can. Each fixture is canonical: fmt and every method's
+// reflected source must reproduce it exactly. Multi-message stages and heads
+// make sure a `|>` printed before the wrong send of a stage fails.
+//
+// Not yet covered: an unparenthesised pipeline as a string-interpolation
+// segment, a `match:` arm body or a collection element. Those sites do not
+// parse `|>` yet (BT-4516); the parenthesised forms are covered.
+
+/// Methods written with `|>`, in canonical layout.
+const PIPELINE_CLASS: &str = "\
+Object subclass: Piper
+
+  unary: x => x |> foo |> bar
+
+  keyword: p => p withX: 5 |> withY: 10 |> at: 1 put: 2
+
+  stageOfTwo: x => x |> foo bar
+
+  headOfTwo: x => x foo |> bar baz
+
+  headAndStageOfTwo: x => x foo bar |> baz qux |> quux
+
+  stageWithBinaryTail: xs => xs |> size + 1 |> max: 3
+
+  stageWithKeywordTail: x => x |> foo bar: 1 |> baz qux: 2 quux: 3
+
+  broken: orders =>
+    orders select: [:o | o isPaid]
+      |> collect: [:o | o amount]
+      |> inject: 0 into: [:sum :each | sum + each]
+
+  brokenKeywords: x =>
+    x
+      |> at: 1
+         put: 2
+         ifAbsent: [0]
+      |> size
+
+  commented: x =>
+    x foo  // after foo
+      // before bar
+      |> bar  // after bar
+      |> baz
+
+  commentAfterPipe: x =>
+    x foo
+      // why
+      |> bar
+
+  inBlock: xs => xs collect: [:e | e foo |> bar: 1]
+
+  inBlockBroken: xs =>
+    xs
+      do: [:e |
+        e foo  // why
+          |> bar
+        e baz
+      ]
+
+  blockStage: xs =>
+    xs
+      |> collect: [:e |
+        e foo
+        e bar
+      ]
+      |> size
+
+  inMatchArm: x =>
+    x match: [
+      1 -> (x |> foo);
+      _ -> (x |> bar baz)
+    ]
+
+  matchStage: x =>
+    x foo
+      |> match: [
+        1 -> 2;
+        _ -> 3
+      ]
+
+  interpolated: x => \"a {(x |> foo)} b\"
+
+  inCollections: x => #[(x |> foo), {(x foo |> bar), #{#a => (x |> baz)}}]
+
+  asArgument: x => x at: (x foo |> bar) put: (x |> baz: 1)
+
+  asBinaryArgument: x => 1 + (x |> size)
+
+  peeledHead: x => (x foo) |> bar
+
+  peeledOperand: x => (x |> size) + 1
+
+  peeledStageArgument: x => x |> at: (1) put: (x foo)
+
+  keywordReceiver: x => (x foo |> bar: 1) baz
+
+  cascadeTarget: x => (x |> foo) bar; baz
+
+  nested: x => x |> at: (x foo |> bar) |> size
+";
+
+/// Code outside methods records `|>` on the module, not on a method.
+const PIPELINE_MODULE: &str = "\
+x := p withX: 5 |> withY: 10
+x foo |> bar baz |> size + 1
+total := orders select: [:o | o isPaid]  // paid only
+  // sum the amounts
+  |> collect: [:o | o amount]
+  |> inject: 0 into: [:sum :each | sum + each]
+[:e | e |> foo bar] value: 1
+";
+
+/// State and class-state initialisers are outside any method, so they record
+/// `|>` on the module too.
+const PIPELINE_INITIALISERS: &str = "\
+Actor subclass: Holder
+  state: items = #(3, 1, 2) |> asSortedList |> first
+  classState: count = #(1, 2) |> size
+";
+
+#[test]
+fn fmt_reproduces_pipelines_byte_for_byte() {
+    for fixture in [PIPELINE_CLASS, PIPELINE_MODULE, PIPELINE_INITIALISERS] {
+        assert_eq!(
+            format_source(fixture).as_deref(),
+            Some(fixture),
+            "fmt changed a canonical pipeline fixture"
+        );
+    }
+}
+
+/// Each method's reflected source (`unparse_method` of codegen's peeled tree
+/// with the peeled parentheses restored, as `as_written_method_source`
+/// builds it) reproduces the method byte for byte: at column 0, and
+/// re-laid-out at the class body's indent as the file holds it.
+#[test]
+fn reflected_source_reproduces_pipelines_byte_for_byte() {
+    let raw = parse_bt(PIPELINE_CLASS);
+    let mut peeled = raw.clone();
+    let record = peel_operand_parens_recording(&mut peeled);
+    let written: Vec<&str> = PIPELINE_CLASS.trim_end().split("\n\n").skip(1).collect();
+    let methods = methods_of(&peeled);
+    assert_eq!(methods.len(), written.len());
+    for (method, on_disk) in methods.into_iter().zip(written) {
+        let at_column_0: String = on_disk
+            .lines()
+            .map(|line| line.strip_prefix("  ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let reflected = unparse_method(&restored(method, &record));
+        assert_eq!(reflected, at_column_0);
+        assert_eq!(reindent_method_source("  ", &reflected), on_disk);
+    }
+    assert!(restore_failures(&raw).is_empty());
 }
