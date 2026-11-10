@@ -1,0 +1,233 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the `|>` pipeline, `Object >> then:` and the
+// `cascade-drops-update` warning (ADR 0145, BT-4519).
+//
+// `recv m1 |> m2` is exactly `(recv m1) m2`: each stage is sent to the
+// previous stage's result. A `;` cascade still fans out to one receiver, so on
+// a value it drops every update but the last. These cases drive both through
+// the REPL protocol, including multi-line pipeline input and the reflected
+// source of a method written with `|>`.
+//
+// REPL-protocol cases share one workspace session, so every name here is
+// prefixed `Bt4519`.
+
+// ===========================================================================
+// A value with functional `with*:` setters
+// ===========================================================================
+
+Value subclass: Bt4519Point
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+// => "Bt4519Point"
+
+p := Bt4519Point x: 1 y: 2
+// => Bt4519Point(x: 1, y: 2)
+
+// ===========================================================================
+// A value pipeline: each stage is sent to the previous stage's copy
+// ===========================================================================
+
+p withX: 5 |> withY: 10
+// => Bt4519Point(x: 5, y: 10)
+
+(p withX: 5 |> withY: 10) =:= ((p withX: 5) withY: 10)
+// => true
+
+// The receiver is unchanged: a pipeline makes no mutation of its own.
+p
+// => Bt4519Point(x: 1, y: 2)
+
+// A head with no message of its own: `p |> withX: 7` is `p withX: 7`.
+p |> withX: 7
+// => Bt4519Point(x: 7, y: 2)
+
+// ===========================================================================
+// A value cascade fans out and drops the update (ADR 0145 § 1)
+// ===========================================================================
+//
+// `withY:` goes to `p`, not to the copy `withX:` answered, so `x` stays 1.
+// REPL bindings carry no static type, so this cascade does not warn here; the
+// same cascade in a method with a typed parameter does (below).
+
+p withX: 5; withY: 10
+// => Bt4519Point(x: 1, y: 10)
+
+// ===========================================================================
+// The buccaneer-style `with*:` chain (ADR 0145 § Motivating example)
+// ===========================================================================
+
+Value subclass: Bt4519Exchange
+  field: websock = nil
+  field: websockState = nil
+  field: websocketOptions = nil
+  field: respState = #idle
+// => "Bt4519Exchange"
+
+st := Bt4519Exchange new
+// => _
+
+// Multi-line input: in the REPL a line that ends in `|>` is incomplete, so
+// the next line continues the pipeline.
+upgraded := st withWebsock: #sock |>
+  withWebsockState: #open |>
+  withWebsocketOptions: #{#compress => true} |>
+  withRespState: #upgraded
+// => _
+
+upgraded websock
+// => sock
+
+upgraded websockState
+// => open
+
+upgraded websocketOptions
+// => #{#compress => true}
+
+upgraded respState
+// => upgraded
+
+// A leading-`|>` layout must be wrapped in parentheses at the REPL, so the
+// line above is not run on its own.
+(st withWebsock: #sock
+  |> withWebsockState: #open
+  |> withRespState: #upgraded) respState
+// => upgraded
+
+// The same chain written as a cascade keeps only the last update.
+(st withWebsock: #sock; withWebsockState: #open; withRespState: #upgraded) websock
+// => nil
+
+// ===========================================================================
+// Collection pipelines, with keyword and multi-message stages
+// ===========================================================================
+
+#(1, 2, 3, 4) select: [:x | x isEven] |> collect: [:x | x * 10] |> sum
+// => 60
+
+#(1, 2, 3, 4) select: [:x | x isEven] |> collect: [:x | x * 10] |> inject: 0 into: [:acc :x | acc + x]
+// => 60
+
+// A stage is a whole message chain: `|> keys sort` is `(… keys) sort`.
+#{#b => 2, #a => 1} |> keys sort
+// => ["a","b"]
+
+#{#b => 2, #a => 1} |> keys sort |> at: 1
+// => a
+
+#(3, 1, 2) |> size + 1
+// => 4
+
+// ===========================================================================
+// `then:` puts the value somewhere other than the receiver
+// ===========================================================================
+
+3 then: [:x | x * x]
+// => 9
+
+#(1, 2, 3) collect: [:x | x * 2] |> then: [:xs | xs size * 10]
+// => 30
+
+#(3, 1, 2) |> then: [:xs | xs sort] |> at: 1
+// => 1
+
+// ===========================================================================
+// A pipeline on an actor: each stage is a message to the actor
+// ===========================================================================
+
+Actor subclass: Bt4519Counter
+  state: total = 0
+  total => self.total
+// => "Bt4519Counter"
+
+// `add:` answers the actor itself, so the next stage is sent to it.
+Bt4519Counter >> add: n => self.total := self.total + n. self
+// => _
+
+c := Bt4519Counter spawn
+// => Actor(Bt4519Counter, _)
+
+c add: 1 |> add: 2 |> total
+// => 3
+
+c add: 4 |> total |> then: [:n | n * 10]
+// => 70
+
+c stop
+// => _
+
+// ===========================================================================
+// Reflected source keeps `|>` as written
+// ===========================================================================
+
+Value subclass: Bt4519Host
+  shifted: q => q withX: 5 |> withY: 10
+// => "Bt4519Host"
+
+Bt4519Host >> smallestKey: d => d keys |> sort at: 1
+// => _
+
+(Bt4519Host new shifted: p) y
+// => 10
+
+Bt4519Host new smallestKey: #{#b => 2, #a => 1}
+// => a
+
+(Bt4519Host >> #shifted:) source
+// => "shifted: q => q withX: 5 |> withY: 10"
+
+(Bt4519Host >> #smallestKey:) source
+// => "smallestKey: d => d keys |> sort at: 1"
+
+// ===========================================================================
+// The `cascade-drops-update` warning, and its `|>` help (ADR 0145 § 3)
+// ===========================================================================
+//
+// The warning needs the cascade receiver's static type. A literal and a typed
+// method parameter have one; a REPL binding does not (see `p withX: 5;
+// withY: 10` above, which answers without a warning). The hint suggests the
+// pipeline that keeps both updates.
+
+0 max: 1; max: 2
+// => WARNING: the result of `max:` is discarded HINT: use a pipeline: `0 max: … |> max: …`
+
+0 max: 1 |> max: 2
+// => NO-WARNING: is discarded
+
+0 max: 1 |> max: 2
+// => 2
+
+// A standalone method definition reports the class's recompile warnings, so
+// the pipeline method is added before the method that warns.
+Bt4519Host >> chained: q :: Bt4519Point -> Bt4519Point => q withX: 5 |> withY: 10
+// => NO-WARNING: is discarded
+
+Bt4519Host >> dropped: q :: Bt4519Point -> Bt4519Point => q withX: 5; withY: 10
+// => _
+
+Bt4519Host >> droppedMax: n :: Integer -> Integer => n max: 1; max: 2
+// => WARNING: the result of `max:` is discarded HINT: use a pipeline: `n max: … |> max: …`
+
+// The cascade drops `withX:`, so `x` is unchanged; the pipeline keeps it.
+(Bt4519Host new dropped: p) x
+// => 1
+
+(Bt4519Host new chained: p) x
+// => 5
+
+// ===========================================================================
+// Parse errors
+// ===========================================================================
+
+p withX: 5 |> withY: 10; withX: 3
+// => ERROR: cannot mix cascade `;` and pipeline `|>` in one expression
+
+p withX: 5 |> 10
+// => ERROR: expected a message after `|>`
+
+#(1, 2) |> + 1
+// => ERROR: a pipeline stage cannot start with a binary message
+
+|> withX: 1
+// => ERROR: a statement cannot start with `|>`
