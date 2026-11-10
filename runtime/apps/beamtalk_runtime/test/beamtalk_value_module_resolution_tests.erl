@@ -159,7 +159,9 @@ module_less_class_paths_make_no_code_server_call() ->
         {_, Calls} = code_server_calls_traced([Base, Sub], fun() ->
             _ = gen_server:call(Sub, {new, []}),
             _ = gen_server:call(Base, {new, []}),
-            _ = beamtalk_dispatch:lookup(foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, 'ZzMlSub', #{}),
+            _ = beamtalk_dispatch:lookup(
+                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, 'ZzMlSub', #{}
+            ),
             _ = beamtalk_object_class:has_method_local(Sub, foo)
         end),
         ?assertEqual([], Calls)
@@ -187,9 +189,16 @@ code_server_calls_traced(ExtraPids, Fun) ->
                 {result, Worker, R} -> R
             after 5000 -> error(worker_timeout)
             end,
-        lists:foreach(fun(P) -> Ref = erlang:trace_delivered(P),
-            receive {trace_delivered, P, Ref} -> ok after 5000 -> error(trace_delivery_timeout) end
-        end, Pids),
+        lists:foreach(
+            fun(P) ->
+                Ref = erlang:trace_delivered(P),
+                receive
+                    {trace_delivered, P, Ref} -> ok
+                after 5000 -> error(trace_delivery_timeout)
+                end
+            end,
+            Pids
+        ),
         {Result, collect_traced(Pids)}
     after
         erlang:trace_pattern(Pattern, false, [local]),

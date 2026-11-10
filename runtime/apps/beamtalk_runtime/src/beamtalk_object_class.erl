@@ -915,7 +915,7 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     case EnsureLoaded of
                         true ->
                             _ = beamtalk_primitive:ensure_class_module_loaded(
-                                class_name_safe(ClassPid), ModuleName
+                                fun() -> class_name_safe(ClassPid) end, ModuleName
                             );
                         false ->
                             ok

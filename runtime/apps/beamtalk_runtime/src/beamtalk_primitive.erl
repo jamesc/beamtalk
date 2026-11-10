@@ -1489,12 +1489,17 @@ A module-less (builder-built) class registers its own name as its "module",
 so there is no `.beam` to find and `code:ensure_loaded/1` would be a
 guaranteed `code_server` miss. Loaded modules never reach `code_server`
 either. Shared by dispatch, instantiation and method lookup (BT-4056).
+
+`Class` may be a thunk so hot-path callers that only hold a class pid pay for
+the class-name lookup (a gen_server call) only when the module is not loaded.
 """.
--spec ensure_class_module_loaded(atom(), atom()) -> boolean().
+-spec ensure_class_module_loaded(atom() | fun(() -> atom()), atom()) -> boolean().
 ensure_class_module_loaded(Class, Module) ->
     case erlang:module_loaded(Module) of
         true ->
             true;
+        false when is_function(Class, 0) ->
+            ensure_class_module_loaded(Class(), Module);
         false when Module =:= Class ->
             false;
         false ->
