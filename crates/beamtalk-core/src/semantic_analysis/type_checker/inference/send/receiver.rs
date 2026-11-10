@@ -84,27 +84,7 @@ impl TypeChecker {
             )
         );
         let narrowing = if is_branching {
-            Self::detect_narrowing(receiver)
-                .map(|info| self.refine_responds_to_narrowing(info))
-                .map(|info| {
-                    Self::refine_result_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| {
-                    Self::refine_singleton_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+            self.detect_refined_narrowing(receiver, env, hierarchy, span)
         } else {
             None
         };

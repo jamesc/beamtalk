@@ -39,25 +39,18 @@ impl TypeChecker {
         super::detect(receiver)
     }
 
-    /// BT-4635: narrowing for the lazy block of `<test> and: [...]` /
-    /// `<test> or: [...]`, where `<test>` is any single-variable type test
-    /// the [`super::rules::RULES`] table recognises (`isKindOf:`, `class =`,
-    /// `respondsTo:`, `isOk`, singleton equality, `isNil`, ...).
-    ///
-    /// The block runs only when the test answered true (`and:`) or false
-    /// (`or:`), so it gets the table's true-branch type for `and:` and the
-    /// complement for `or:` — exactly what the matching `ifTrue:` /
-    /// `ifFalse:` arm would get. Returns `None` when the test has no
-    /// usable narrowing for that direction.
-    pub(in crate::semantic_analysis::type_checker) fn boolean_connective_narrowing(
+    /// Detect a single-variable type test and run every refinement stage
+    /// over it — the one pipeline shared by the `ifTrue:` / `ifFalse:` path
+    /// and the `and:` / `or:` block path (BT-4635), so a stage added here
+    /// reaches both.
+    pub(in crate::semantic_analysis::type_checker) fn detect_refined_narrowing(
         &mut self,
-        selector_name: &str,
         receiver: &Expression,
-        hierarchy: &ClassHierarchy,
         env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
         span: Span,
-    ) -> Option<(EnvKey, InferredType)> {
-        let info = Self::detect_narrowing(receiver.unwrap_parens())
+    ) -> Option<NarrowingInfo> {
+        Self::detect_narrowing(receiver)
             .map(|info| self.refine_responds_to_narrowing(info))
             .map(|info| {
                 Self::refine_result_narrowing(
@@ -77,19 +70,36 @@ impl TypeChecker {
                     self.protocol_registry.as_deref(),
                 )
             })
-            .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))?;
+            .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+    }
+
+    /// BT-4635: narrowing for the lazy block of `<test> and: [...]` /
+    /// `<test> or: [...]`, where `<test>` is any single-variable test the
+    /// [`super::rules::RULES`] table recognises.
+    ///
+    /// The block runs only when the test answered true (`and:`) or false
+    /// (`or:`), so it gets the true-branch type for `and:` and the
+    /// complement (via `early_return_false_branch_type`, the same rule
+    /// `ifFalse:` uses) for `or:`.
+    pub(in crate::semantic_analysis::type_checker) fn boolean_connective_narrowing(
+        &mut self,
+        selector_name: &str,
+        receiver: &Expression,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+        span: Span,
+    ) -> Option<(EnvKey, InferredType)> {
+        let info = self.detect_refined_narrowing(receiver, env, hierarchy, span)?;
         match selector_name {
             "and:" => Some((info.variable, info.true_type)),
-            "or:" => {
-                if let Some(false_ty) = info.false_type {
-                    Some((info.variable, false_ty))
-                } else if info.is_nil_check {
-                    let current = self.narrowing_variable_type(&info.variable, env, hierarchy);
-                    Some((info.variable, Self::non_nil_type(&current)))
-                } else {
-                    None
-                }
-            }
+            "or:" => Self::early_return_false_branch_type(
+                &info,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+                self.protocol_registry.as_deref(),
+            )
+            .map(|ty| (info.variable, ty)),
             _ => None,
         }
     }
