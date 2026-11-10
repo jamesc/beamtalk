@@ -542,16 +542,37 @@ fn test_abstract_class_instantiation_error() {
     assert!(abstract_errors[0].message.contains("Shape"));
 }
 
-#[test]
-fn test_while_condition_arity_in_cascade_reported_once() {
-    // BT-4617: every cascade message shares the one receiver block, so its
-    // arity error is reported once, not once per message.
-    let src = "Object subclass: W\n  run =>\n    x := 0.\n    [:y | x < 3] whileTrue: [x := x + 1]; whileFalse: [x := x - 1].\n    x\n";
-    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
-    let receiver_errors: Vec<_> = result
+/// The receiver-arity errors in `src`, which defines one method.
+fn while_receiver_arity_errors(body: &str) -> usize {
+    let src = format!("Object subclass: W\n  run =>\n    x := 0.\n    {body}.\n    x\n");
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(&src));
+    result
         .diagnostics
         .iter()
         .filter(|d| d.message.contains("expects its receiver to be a block"))
-        .collect();
-    assert_eq!(receiver_errors.len(), 1, "{:?}", result.diagnostics);
+        .count()
+}
+
+#[test]
+fn test_while_condition_arity_in_cascade_reported_once() {
+    // BT-4617: the parser folds a cascade's first send into its receiver, so
+    // the block every message is sent to is that send's receiver. A bad
+    // condition is reported once, whichever message is the loop.
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
+    // The block reaches `whileTrue:` only through the cascade.
+    assert_eq!(
+        while_receiver_arity_errors("[:y | x < 3] value: 1; whileTrue: [x := x + 1]"),
+        1
+    );
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] value: 1; whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
 }

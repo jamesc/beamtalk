@@ -224,9 +224,25 @@ impl Analyser {
                 receiver, messages, ..
             } => {
                 self.analyse_expression(receiver, None);
-                // Every cascade message shares one receiver: report a bad
-                // receiver once, not once per message.
-                let mut receiver_reported = false;
+                // The parser folds the first send into `receiver`, so the
+                // object every cascade message is sent to is that send's own
+                // receiver. Report a bad target once: the first send's own
+                // check (in `analyse_expression` above) may already have.
+                let (cascade_target, mut receiver_reported) = match receiver.as_ref() {
+                    MessageSend {
+                        receiver: target,
+                        selector: first_selector,
+                        ..
+                    } => (
+                        target.as_ref(),
+                        self.method_validators
+                            .get(&first_selector.name())
+                            .is_some_and(|v| {
+                                !v.validate_receiver(first_selector, target).is_empty()
+                            }),
+                    ),
+                    other => (other, false),
+                };
                 for msg in messages {
                     // Apply selector-based context detection for cascade messages
                     let selector_str = msg.selector.name();
@@ -243,7 +259,7 @@ impl Analyser {
                         self.result.diagnostics.extend(diagnostics);
                         if !receiver_reported {
                             let receiver_diags =
-                                validator.validate_receiver(&msg.selector, receiver);
+                                validator.validate_receiver(&msg.selector, cascade_target);
                             receiver_reported = !receiver_diags.is_empty();
                             self.result.diagnostics.extend(receiver_diags);
                         }
