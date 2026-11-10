@@ -10,8 +10,9 @@
 // the REPL protocol, including multi-line pipeline input and the reflected
 // source of a method written with `|>`.
 //
-// REPL-protocol cases share one workspace session, so every name here is
-// prefixed `Bt4519`.
+// REPL-protocol cases share one workspace session, so every class name here
+// is prefixed `Bt4519`. Workspace bindings (`p`, `st`, `upgraded`, `c`) are
+// assigned here before use, as in other cases.
 
 // ===========================================================================
 // A value with functional `with*:` setters
