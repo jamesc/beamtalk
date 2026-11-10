@@ -4346,6 +4346,7 @@ fn test_class_method_super_uses_class_super_dispatch() {
             );
             assert!(
                 !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_reply'")
                     && !code.contains("'beamtalk_dispatch':'super_value'"),
                 "class-side `super` must not take the instance super path:\n{src}\n{code}"
             );
@@ -4417,7 +4418,8 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
             );
             assert!(
                 !code.contains("class_super_dispatch'('Host'")
-                    && !code.contains("'beamtalk_dispatch':'super'"),
+                    && !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_reply'"),
                 "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
             );
             assert_compiles_through_erlc("test", &code);

@@ -3723,9 +3723,9 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_dispatch':'super'('increment', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('getValue', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('at:put:', [1, Value], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('increment', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('getValue', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('at:put:', [1, Value], Self, State, 'Counter')
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
@@ -3838,9 +3838,12 @@ impl CoreErlangGenerator {
         // `super_send_producer` (`sequence_children`) and read back here.
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
+        // BT-4592: `super_reply/5`, not `super/5`, so an inherited method that
+        // raises re-raises its error here instead of answering an `{error, E}`
+        // 2-tuple that the `{reply, Result, NewState}` unpack fails on.
         let current_state = self.current_state_var();
         let doc = docvec![
-            "call 'beamtalk_dispatch':'super'(",
+            "call 'beamtalk_dispatch':'super_reply'(",
             leaf::atom(selector_atom),
             ", [",
             args_doc,

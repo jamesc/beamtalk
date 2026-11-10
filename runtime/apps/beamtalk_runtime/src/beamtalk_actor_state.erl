@@ -571,16 +571,12 @@ raises `actor_state_unreachable` (a block abroad cannot write the actor).
 super_send(Self, Capture, Class, Selector, Args) ->
     case at_home(Self) of
         {true, State} ->
-            case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
-                {reply, Result, NewState} ->
-                    store(NewState),
-                    Result;
-                {error, Error} ->
-                    %% BT-4208: an invoked value-class owner (e.g.
-                    %% `Object>>error:`) answers an already-wrapped map,
-                    %% which record-only `beamtalk_error:raise/1` rejects.
-                    beamtalk_exception_handler:reraise(Error)
-            end;
+            %% `super_reply/5` re-raises an `{error, E}` answer, in either shape
+            %% (BT-4208, BT-4592).
+            {reply, Result, NewState} =
+                beamtalk_dispatch:super_reply(Selector, Args, Self, State, Class),
+            store(NewState),
+            Result;
         false ->
             State = away_capture(Self, Selector, Capture),
             %% The superclass code stores to this process's cell (`call_foreign/3`,

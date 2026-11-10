@@ -62,6 +62,7 @@ super(Selector, Args, Self, State, CurrentClass)
 -export([
     lookup/5,
     super/5,
+    super_reply/5,
     super_value/4,
     inherited_target/2,
     invoke_resolved/6,
@@ -328,13 +329,25 @@ structured error.
 """.
 -spec super_value(selector(), args(), bt_self(), class_name()) -> term().
 super_value(Selector, Args, Self, CurrentClass) ->
-    case super(Selector, Args, Self, #{}, CurrentClass) of
-        {reply, Result, _State} -> Result;
-        %% BT-4173: a walk miss answers an unwrapped record, but an invoked
-        %% method that raised answers an already-wrapped exception map —
-        %% re-raise each through its own channel (raise/1 only takes records).
-        {error, #beamtalk_error{} = Error} -> beamtalk_error:raise(Error);
-        {error, Wrapped} -> error(Wrapped)
+    {reply, Result, _State} = super_reply(Selector, Args, Self, #{}, CurrentClass),
+    Result.
+
+-doc """
+`super/5` for a method-root actor `super` send (BT-4592): answers the
+`{reply, Result, NewState}` triple the generated code unpacks, and re-raises
+an `{error, E}` answer instead of handing the caller a 2-tuple.
+
+`E` is either a `#beamtalk_error{}` (a walk miss, or a raise the walk caught
+and unwrapped) or the already-wrapped exception map an invoked value-class
+owner answers (BT-4173, BT-4208); `beamtalk_exception_handler:reraise/1`
+raises both shapes.
+""".
+-spec super_reply(selector(), args(), bt_self(), state(), class_name()) ->
+    {reply, term(), state()}.
+super_reply(Selector, Args, Self, State, CurrentClass) ->
+    case super(Selector, Args, Self, State, CurrentClass) of
+        {reply, _Result, _NewState} = Reply -> Reply;
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
     end.
 
 -doc """
