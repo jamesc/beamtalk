@@ -735,9 +735,12 @@ impl ClassHierarchy {
     /// of `module`'s classes (`ClassInfo::in_caller_new1`), so the
     /// compile-time [`Self::runs_class_method_in_caller`] answers `new:` from
     /// the verdict codegen publishes. Run once the module's classes are
-    /// registered and indexed; a superclass not yet known (a sibling file not
-    /// yet injected) answers `false`, the conservative side.
-    pub(super) fn publish_explicit_new1_verdicts(&mut self, module: &Module) {
+    /// registered and indexed. A superclass not yet known (a sibling file not
+    /// yet injected) answers `false`, the conservative side, so callers
+    /// re-run this after cross-file injection (`add_from_beam_meta`,
+    /// `add_external_superclasses`) changed the hierarchy (BT-4625): the
+    /// verdict then equals the one codegen computes on the injected hierarchy.
+    pub fn publish_explicit_new1_verdicts(&mut self, module: &Module) {
         for class in &module.classes {
             let verdict = self.explicit_class_new1_runs_in_caller(class);
             if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
