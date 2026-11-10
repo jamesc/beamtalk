@@ -5030,6 +5030,45 @@ fn test_runs_class_method_in_caller_new1_agrees_with_published_list_over_stdlib(
     assert_eq!(in_caller, ["Array", "List", "Set", "Tuple"]);
 }
 
+/// BT-4644: a superclass-index stub ancestor (`add_external_superclasses`)
+/// has unknown class variables, so `chain_has_class_variables` answers `true`
+/// and neither codegen nor analysis treats the subclass's explicit `new:` as
+/// in-caller. Both must agree through the self-sufficient `generate_module`
+/// path with a sibling superclass known only from `class_superclass_index`.
+#[test]
+fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let src = "Sibling subclass: Kid\n  class new: xs => (Erlang lists) reverse: xs\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("Sibling".to_string(), "Object".to_string());
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("kid").with_class_superclass_index(index.clone()),
+    )
+    .expect("codegen");
+    let list = code
+        .lines()
+        .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+        .and_then(|rest| rest.split(']').next())
+        .expect("process_bound_class_selectors in meta");
+    let published_bound = list.split(", ").any(|s| s == "'new:'");
+    assert!(
+        published_bound,
+        "stub ancestor must keep `new:` bound: {list}"
+    );
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    let _ = hierarchy.add_external_superclasses(&index);
+    assert!(hierarchy.chain_has_class_variables("Sibling"));
+    assert!(!hierarchy.runs_class_method_in_caller("Sibling", "foo"));
+    assert_eq!(
+        hierarchy.runs_class_method_in_caller("Sibling", "new:"),
+        !published_bound
+    );
+}
+
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
     // actor classes have no constructor anchor, so no key is
