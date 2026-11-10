@@ -1698,46 +1698,41 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        // BT-4524 (ADR 0146 P0): a send no bracket covers (a conditional the
-        // compiler did not inline, say) that passes a block holding a `^`
-        // stores the state an inline `^` here would store, right before the
-        // call, so the closure's throw (which carries the cell) carries it.
-        let nlr_blocks: Vec<&beamtalk_core::ast::Block> = all_exprs
-            .iter()
-            .filter_map(|e| match e {
-                Expression::Block(block) => Some(block),
-                _ => None,
-            })
-            .collect();
-        // BT-4532: emitted as a store-only `SyncedCall` around the call, and
-        // covering only those block literals (`with_nlr_closure_cover`).
-        // Whether it stores is decided before the operands compile (the
-        // cover depends on it); what it stores is read after them, where the
-        // store is emitted, since an operand may step `State` (a
-        // field-writing self-send) and the store must carry that step.
-        let at = receiver.span();
-        let prestore = if self.synced.window_depth == 0 {
-            self.nlr_closure_prestore(&nlr_blocks, at)
-        } else {
-            None
-        };
-        let cover: Vec<_> = if prestore.is_some() {
-            nlr_blocks.iter().map(|block| block.span).collect()
-        } else {
-            Vec::new()
-        };
-        let mut seq =
-            self.with_nlr_closure_cover(&cover, |this| this.sequence_call(&all_exprs, "Disp"))?;
+        // BT-4612: no `^`-closure pre-store here. Outside every bracket
+        // window a send reaches this dispatch only when `classify_send`
+        // answered `UserCodeCall::No` (a `Yes` send there is a gap, and a
+        // self or `super` send dispatches elsewhere). Each way to `No`, with
+        // a block literal holding a `^` among the operands:
+        //
+        // - `SendUserCode::Never` (`p spawnWith: [^1]`): runs none of its
+        //   operands, so there is nothing to store for (BT-4606). The one
+        //   shape that reaches this dispatch (`never_spawn_with`).
+        // - `is_no_user_code_send`: a sealed primitive the stdlib marked
+        //   `no_user_code` promises to run no user code, so it never runs a
+        //   block either, and `build-stdlib` rejects a mark whose parameter
+        //   could be a block (`NO_USER_CODE_PARAMETER_TYPES`, which
+        //   `no_user_code_parameters_exclude_blocks` keeps free of `Block`).
+        // - `Inlined`, `LoopOrClosureCall`, `InlinedOrClosureCall` answered
+        //   `No`: the construct is lowered in place by its own lowering
+        //   (a conditional's fallback stores for itself,
+        //   `boolean_fallback_send`), never through this dispatch.
+        //
+        // Checked, not argued: in test builds every such send that reaches
+        // this dispatch is logged (`note_dispatch_nlr_literals`), and
+        // `only_never_sends_reach_the_dispatch_with_a_nlr_literal` compiles
+        // the whole `nlr_closure_call_corpus` (every in-place construct, and
+        // the fallback shapes with a non-literal operand) and fails on any
+        // logged send that is not `Never`. In any build, such a send would
+        // leave its `^` block an `UnbracketedNlrClosure` finding.
+        #[cfg(test)]
+        self.note_dispatch_nlr_literals(receiver, selector, arguments);
+        let mut seq = self.sequence_call(&all_exprs, "Disp")?;
         let actual_receiver = seq.next();
 
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
         let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
-        let call_doc = match prestore {
-            Some(prestore) => self.nlr_closure_prestored_call(prestore, call_doc),
-            None => call_doc,
-        };
 
         Ok(seq.close(self, call_doc, "DispRes"))
     }

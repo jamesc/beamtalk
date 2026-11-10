@@ -28,9 +28,23 @@
 //! off the send itself reports. A store vouches only for the block literals
 //! it stores for (`with_nlr_closure_cover`), so a `^`-closure of another send
 //! nested in a non-block operand is checked on its own.
+//!
+//! BT-4612: the one remaining pre-store (a conditional's non-Boolean
+//! fallback) records the `State` version it stores and is verified after the
+//! version its frame has bound (`VerifyError::StalePrestore`). With the store
+//! read before the conditional's receiver is sequenced
+//! (`FAULT_PRESTORE_READS_BEFORE_OPERANDS`), every row whose receiver steps
+//! `State` reports and no other does. A parenthesised block literal operand
+//! (`([^5]) value`) is the literal: `ast::normalize` peels send operands
+//! before codegen (BT-4059), so every place that matches an operand as a
+//! block literal sees it bare, and these rows report with the fix off like
+//! their unparenthesised twins.
 
 use super::assert_compiles_through_erlc;
-use crate::core_erlang::synced_call::{CLASSIFY_SEND_CALLS, FAULT_NLR_CLOSURES_UNSTORED};
+use crate::core_erlang::synced_call::{
+    CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, FAULT_NLR_CLOSURES_UNSTORED,
+    FAULT_PRESTORE_READS_BEFORE_OPERANDS, PRESTORE_EARLY_READ,
+};
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
@@ -142,6 +156,99 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("never_hash", "r := [^1] hash", false),
     ("never_field_at_put", "p fieldAt: #n put: [^1]", false),
     ("never_as_type", "r := [^1] asType: Block", false),
+    // BT-4612: the one shape found that reaches the runtime dispatch with a
+    // `^` block outside every window: a `Never` send, which runs nothing,
+    // so the dispatch stores nothing (it has no pre-store).
+    ("never_spawn_with", "p spawnWith: [^1]", false),
+    // BT-4612: in-place constructs given an operand they cannot inline
+    // (not a block literal, or a receiver of unknown class) next to a `^`
+    // literal: whatever they fall back to, it is not the runtime dispatch
+    // with a `^` literal outside every window
+    // (`only_never_sends_reach_the_dispatch_with_a_nlr_literal`).
+    (
+        "mixed_conditional",
+        "r := p ifTrue: [^8] ifFalse: blk",
+        true,
+    ),
+    ("to_do_unknown_bound", "1 to: p do: [:i | ^i]", true),
+    ("to_do_unknown_receiver", "p to: 3 do: [:i | ^i]", true),
+    (
+        "inject_unknown_receiver",
+        "p inject: 0 into: [:a :x | ^x]",
+        false,
+    ),
+    ("times_repeat_unknown_receiver", "p timesRepeat: [^7]", true),
+    ("while_true_param_receiver", "blk whileTrue: [^2]", true),
+    ("ensure_param_body", "blk ensure: [^2]", true),
+    ("on_do_param_body", "blk on: Error do: [:e | ^4]", true),
+    // BT-4612: a parenthesised block literal operand is the literal (the
+    // operand normalisation pass peels it), recorded, stored for and covered
+    // like the bare one (`note_nlr_operands`, `on:do:`'s cover).
+    ("paren_value", "r := ([^5]) value", true),
+    ("paren_times_repeat_arg", "3 timesRepeat: ([^7])", true),
+    ("paren_ensure_body", "([^2]) ensure: [nil]", true),
+    ("paren_conditional_arg", "r := p ifTrue: ([^8])", true),
+    ("paren_on_do_body", "([^3]) on: Error do: [:e | 0]", false),
+    (
+        "paren_on_do_handler",
+        "[p foo] on: Error do: ([:e | ^4])",
+        false,
+    ),
+];
+
+/// BT-4612: conditionals whose receiver steps `State` (a field-writing
+/// self-send) and whose non-Boolean fallback passes a `^` arm as a closure,
+/// so the fallback's pre-store must store the state after that step. Rows of
+/// the corpus like [`CALLS`]'s (`state_step_conditional` is the first).
+///
+/// The two whose conditional is an operand of a bracketed send
+/// (`state_step_operand`, `state_step_argument`) do not report with the
+/// pre-store off: the `UnbracketedNlrClosure` rule exempts every closure
+/// compiled inside a bracket window, though the operands run before the
+/// window's store (BT-4632). The pre-store is emitted there all the same.
+const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
+    (
+        "state_step_if_true",
+        "r := (self flip: p) ifTrue: [^8]",
+        true,
+    ),
+    (
+        "state_step_if_false",
+        "r := (self flip: p) ifFalse: [^8]",
+        true,
+    ),
+    ("state_step_and", "r := (self flip: p) and: [^8]", true),
+    ("state_step_or", "r := (self flip: p) or: [^8]", true),
+    (
+        "state_step_if_true_if_false",
+        "r := (self flip: p) ifTrue: [^8] ifFalse: [0]",
+        true,
+    ),
+    (
+        "state_step_threaded_arm",
+        "r := (self flip: p) ifTrue: [^8] ifFalse: [m := 1]",
+        true,
+    ),
+    (
+        "state_step_paren_arg",
+        "r := (self flip: p) ifTrue: ([^8])",
+        true,
+    ),
+    (
+        "state_step_two_steps",
+        "r := ((self flip: p) and: [self flip: q]) ifTrue: [^8]",
+        true,
+    ),
+    (
+        "state_step_operand",
+        "r := 1 + ((self flip: p) ifTrue: [^8])",
+        false,
+    ),
+    (
+        "state_step_argument",
+        "p foo: ((self flip: p) ifTrue: [^8])",
+        false,
+    ),
 ];
 
 /// Where the call sits.
@@ -156,7 +263,8 @@ const PREFIXES: &[(&str, &str)] = &[("field_write", "self.n := 6.\n    "), ("non
 
 fn corpus() -> Vec<(String, String, bool)> {
     let mut out = Vec::new();
-    for (call_name, call, needs_fix) in CALLS {
+    let state_steps = STATE_STEP_PRESTORES.iter().copied();
+    for (call_name, call, needs_fix) in CALLS.iter().copied().chain(state_steps) {
         for (pos_name, pos) in POSITIONS {
             for (prefix_name, prefix) in PREFIXES {
                 let body = pos.replace("CALL", call);
@@ -166,7 +274,7 @@ fn corpus() -> Vec<(String, String, bool)> {
                 out.push((
                     format!("{call_name} / {pos_name} / {prefix_name}"),
                     src,
-                    *needs_fix,
+                    needs_fix,
                 ));
             }
         }
@@ -260,6 +368,90 @@ fn unstored_nlr_closure_calls_report_with_the_fix_off() {
     );
     let needing = CALLS.iter().filter(|(_, _, needs)| *needs).count();
     assert!(reported >= needing * POSITIONS.len() * PREFIXES.len());
+}
+
+/// Runs `f` with the `^`-closure pre-store reading the state before the
+/// operand its call follows (`FAULT_PRESTORE_READS_BEFORE_OPERANDS`).
+fn with_prestore_read_early<T>(f: impl FnOnce() -> T) -> T {
+    let set = |on: bool| {
+        FAULT_PRESTORE_READS_BEFORE_OPERANDS.with(|flag| flag.set(on));
+        PRESTORE_EARLY_READ.with(|slot| slot.borrow_mut().clear());
+    };
+    set(true);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    set(false);
+    result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
+/// Whether corpus row `name` is a pre-store after a `State`-stepping
+/// receiver.
+fn is_state_step_prestore(name: &str) -> bool {
+    let call = name.split(" / ").next().unwrap_or_default();
+    call == "state_step_conditional" || STATE_STEP_PRESTORES.iter().any(|(n, _, _)| *n == call)
+}
+
+/// BT-4612: with the pre-store reading the state before its operands are
+/// threaded (BT-4532's first cut), every row whose conditional's receiver
+/// steps `State` ahead of the pre-store reports `StalePrestore`, in every
+/// position and with or without a field write, and no other row reports
+/// anything: a store read where its operands are not yet threaded is the
+/// verifier's finding, not a silently lost write.
+#[test]
+fn a_prestore_read_before_its_operands_reports_stale() {
+    let mut wrong = Vec::new();
+    let mut reported = 0;
+    for (name, src, _) in corpus() {
+        let finding = with_prestore_read_early(|| report(&src));
+        let ok = if is_state_step_prestore(&name) {
+            finding
+                .as_deref()
+                .is_some_and(|f| f.contains("StalePrestore"))
+        } else {
+            finding.is_none()
+        };
+        reported += usize::from(finding.is_some());
+        if !ok {
+            wrong.push(format!("{name}: got: {finding:?}\n{src}"));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} case(s) disagree:\n\n{}",
+        wrong.len(),
+        wrong.join("\n\n")
+    );
+    assert_eq!(
+        reported,
+        (STATE_STEP_PRESTORES.len() + 1) * POSITIONS.len() * PREFIXES.len()
+    );
+}
+
+/// BT-4612: the runtime dispatch has no `^`-closure pre-store, so a send
+/// that reaches it outside every bracket window with a `^`-holding block
+/// literal operand must run none of its operands: a `SendUserCode::Never`
+/// send. Over the whole corpus (every in-place construct, and their shapes
+/// with an operand they cannot inline) every such send is one, and the probe
+/// sees the one shape known to reach it (`p spawnWith: [^1]`).
+#[test]
+fn only_never_sends_reach_the_dispatch_with_a_nlr_literal() {
+    use beamtalk_core::state_threading_selectors::SendUserCode;
+    DISPATCH_NLR_LITERALS.with(|log| log.borrow_mut().clear());
+    for (_, src, _) in corpus() {
+        compile(&src);
+    }
+    let logged = DISPATCH_NLR_LITERALS.with(|log| std::mem::take(&mut *log.borrow_mut()));
+    let not_never: Vec<_> = logged
+        .iter()
+        .filter(|(_, class)| *class != SendUserCode::Never)
+        .collect();
+    assert!(
+        not_never.is_empty(),
+        "sends reaching the runtime dispatch with a `^` literal that may run it: {not_never:?}"
+    );
+    assert!(
+        logged.iter().any(|(selector, _)| selector == "spawnWith:"),
+        "the probe saw no send at all: {logged:?}"
+    );
 }
 
 /// BT-4532: a `^`-closure of one send nested in a non-block operand of

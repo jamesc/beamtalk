@@ -159,6 +159,23 @@ thread_local! {
     /// fire on it.
     pub(in crate::core_erlang) static FAULT_HYBRID_ADMITS_NLR: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Test-only fault (BT-4612): the `^`-closure pre-store of a
+    /// conditional's non-Boolean fallback stores the state read before the
+    /// conditional's receiver was sequenced (`(self flip: p) ifTrue: [^8]`),
+    /// as BT-4532's first cut did for the runtime dispatch's operands, so the
+    /// `StalePrestore` rule can be shown to fire.
+    pub(in crate::core_erlang) static FAULT_PRESTORE_READS_BEFORE_OPERANDS: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged.
+    pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
+        std::cell::RefCell<Vec<(String, SendUserCode)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The reads the fault stores instead, by the conditional's first block
+    /// argument (the pre-store's `at`)
+    /// ([`CoreErlangGenerator::publish_fault_prestore_read`]); cleared with
+    /// the fault.
+    pub(in crate::core_erlang) static PRESTORE_EARLY_READ: std::cell::RefCell<
+        std::collections::HashMap<Span, Option<PrestoreRead>>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 /// BT-4524 (ADR 0146 P0): whether a `^` in a block the call runs as a closure
@@ -381,6 +398,11 @@ pub(in crate::core_erlang) struct SyncedCallState {
 pub(in crate::core_erlang) struct NlrPrestore {
     at: Span,
 }
+
+/// BT-4612: what a `^`-closure pre-store stores: the variable read, and the
+/// frame's `State` version it holds when it is the frame's own threaded
+/// `State` ([`CoreErlangGenerator::nlr_prestore_read`]).
+pub(in crate::core_erlang) type PrestoreRead = (String, Option<VersionedVar>);
 
 /// BT-4279: a fast path offered by a guarded send's emitter
 /// ([`CoreErlangGenerator::offer_fast_path`]).
@@ -1066,9 +1088,9 @@ impl CoreErlangGenerator {
     /// BT-4524: runs `f` (which compiles the closures of a call that stores
     /// the threaded state before it runs them) with `blocks` covered: one of
     /// them holding a `^`, compiled as a closure inside, is not a finding.
-    /// The callers are the conditional fallback's pre-store or bracket, an
-    /// unbracketed runtime dispatch's pre-store, and `on:do:`'s closure path
-    /// (whose catch boundary stores the pre-region `State` on entry).
+    /// The callers are the conditional fallback's pre-store or bracket and
+    /// `on:do:`'s closure path (whose catch boundary stores the pre-region
+    /// `State` on entry).
     ///
     /// BT-4532: the cover names the block literals the store vouches for, by
     /// span, and nothing else `f` compiles. A `^`-holding closure of some
@@ -1118,17 +1140,25 @@ impl CoreErlangGenerator {
             && blocks.iter().any(|block| block_returns_from_scope(block))
     }
 
-    /// BT-4524: the store a call no bracket covers (a conditional's
-    /// non-Boolean fallback send, an unbracketed runtime dispatch) makes
-    /// before it runs `blocks` as closures, when one of them holds a `^`
-    /// (ADR 0146 P0): the state an inline `^` here would store
+    /// BT-4524: the store a conditional's non-Boolean fallback send (a call
+    /// no bracket covers, [`Self::boolean_fallback_send`]) makes before it
+    /// runs `blocks` as closures, when one of them holds a `^` (ADR 0146 P0):
+    /// the state an inline `^` here would store
     /// (`StateReadSite::NlrThrowState`), so the closure's throw, which
     /// carries the cell, carries it. Emitted around the call by
     /// [`Self::nlr_closure_prestored_call`], which reads the state to store
     /// there, after every operand of the call has been threaded: an operand
-    /// may step `State` (a field-writing self-send), and the store must
-    /// carry that step. `None` when no block holds a `^` or the cell protocol
-    /// does not apply.
+    /// may step `State` (a field-writing self-send receiver), and the store
+    /// must carry that step. `None` when no block holds a `^` or the cell
+    /// protocol does not apply.
+    ///
+    /// BT-4612: the one pre-store. A generic send reaches the runtime
+    /// dispatch outside every window only when it is classified
+    /// [`UserCodeCall::No`]; with a block literal among its operands that is
+    /// a [`SendUserCode::Never`] send (`p spawnWith: [^1]`), which runs none
+    /// of them ([`Self::note_nlr_operands`]), so the dispatch has nothing to
+    /// store for. Any other such send would be an
+    /// [`VerifyError::UnbracketedNlrClosure`], not a silent pre-store.
     pub(in crate::core_erlang) fn nlr_closure_prestore(
         &self,
         blocks: &[&beamtalk_core::ast::Block],
@@ -1136,6 +1166,29 @@ impl CoreErlangGenerator {
     ) -> Option<NlrPrestore> {
         self.nlr_closure_prestore_applies(blocks)
             .then_some(NlrPrestore { at })
+    }
+
+    /// BT-4612: what a `^`-closure pre-store stores, read now: the state an
+    /// inline `^` here would store, and the frame's `State` version it holds
+    /// when it is the frame's own threaded `State` (not a direct-params
+    /// loop's captured entry `State`, which no step of the frame renames).
+    /// `None` where the cell is already the source.
+    fn nlr_prestore_read(&self, at: Span) -> Option<PrestoreRead> {
+        let ActorStateSource::Var(var) = self.actor_state_source(StateReadSite::NlrThrowState, at)
+        else {
+            return None;
+        };
+        let reads = (self.loop_mode.direct_params_outer_state_var.is_none()
+            && var == self.current_state_var())
+        .then(|| self.frame_state_version());
+        Some((var, reads))
+    }
+
+    /// BT-4612: the frame's current `State`, as the version the pre-store's
+    /// verification counts from (`reads`, and the `State` the frame has
+    /// bound before the store).
+    fn frame_state_version(&self) -> VersionedVar {
+        VersionedVar::new(VersionPrefix::State, self.state_version(), FrameId::ROOT)
     }
 
     /// BT-4532: `call` preceded by `prestore`'s store, built as the
@@ -1146,6 +1199,11 @@ impl CoreErlangGenerator {
     /// renders verbatim from the root frame. Where the cell is already the
     /// source (a bracketed region) there is nothing to store and `call` is
     /// unchanged.
+    ///
+    /// BT-4612: the node records the `State` version it stores (`reads`) and
+    /// is verified after the version the frame has bound by now
+    /// ([`Self::verify_threaded_ir_after`]), so a store read before a step
+    /// that precedes it is a [`VerifyError::StalePrestore`].
     ///
     /// The store runs on every execution of the call, not only when a
     /// closure's `^` fires: whether the callee runs the closure, and whether
@@ -1161,9 +1219,12 @@ impl CoreErlangGenerator {
         call: Document<'static>,
     ) -> Document<'static> {
         // Read here, where the store is emitted (see `NlrPrestore`).
-        let ActorStateSource::Var(var) =
-            self.actor_state_source(StateReadSite::NlrThrowState, prestore.at)
-        else {
+        let read = self.nlr_prestore_read(prestore.at);
+        #[cfg(test)]
+        let read = PRESTORE_EARLY_READ
+            .with(|early| early.borrow().get(&prestore.at).cloned())
+            .unwrap_or(read);
+        let Some((var, reads)) = read else {
             return call;
         };
         let node = ThreadedStmt::SyncedCall {
@@ -1181,11 +1242,77 @@ impl CoreErlangGenerator {
             // that site's record (`StaleReadInBracketedLoop`).
             on_private_scratch: false,
             fast_path: None,
+            reads,
         };
-        let errors = self.verify_threaded_ir(std::slice::from_ref(&node));
+        let errors =
+            self.verify_threaded_ir_after(std::slice::from_ref(&node), self.frame_state_version());
         self.report_threaded_ir_verify_errors(&errors, "`^`-closure pre-store", prestore.at);
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
+    }
+
+    /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
+    /// outside every bracket window with a `^`-holding block literal among
+    /// its operands, where the cell protocol applies, with its
+    /// [`SendUserCode`] class ([`DISPATCH_NLR_LITERALS`]). The dispatch has
+    /// no pre-store, so every logged send must be [`SendUserCode::Never`].
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn note_dispatch_nlr_literals(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) {
+        let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
+            .chain(arguments)
+            .filter_map(|operand| match operand {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        if self.synced.window_depth > 0 || !self.nlr_closure_prestore_applies(&blocks) {
+            return;
+        }
+        let class = send_user_code(receiver, selector, arguments);
+        DISPATCH_NLR_LITERALS.with(|log| {
+            log.borrow_mut().push((selector.name().to_string(), class));
+        });
+    }
+
+    /// BT-4612 test-only fault hook, called where the conditional `send`
+    /// sequences its receiver ahead (the operand its non-Boolean fallback's
+    /// pre-store follows): the pre-store's `at` (the conditional's first
+    /// block argument) and the read a pre-store made here would take, for
+    /// [`Self::publish_fault_prestore_read`] once the receiver is sequenced.
+    /// `None` with the fault off.
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn fault_prestore_read_before_operands(
+        &self,
+        send: &Expression,
+    ) -> Option<(Span, Option<PrestoreRead>)> {
+        if !FAULT_PRESTORE_READS_BEFORE_OPERANDS.with(std::cell::Cell::get) {
+            return None;
+        }
+        let Expression::MessageSend { arguments, .. } = send else {
+            return None;
+        };
+        let at = arguments.iter().find_map(|arg| match arg {
+            Expression::Block(block) => Some(block.span),
+            _ => None,
+        })?;
+        Some((at, self.nlr_prestore_read(at)))
+    }
+
+    /// BT-4612 test-only fault hook: makes `early` (taken by
+    /// [`Self::fault_prestore_read_before_operands`]) the read the pre-store
+    /// at its span stores.
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn publish_fault_prestore_read(
+        early: Option<(Span, Option<PrestoreRead>)>,
+    ) {
+        if let Some((at, read)) = early {
+            PRESTORE_EARLY_READ.with(|slot| slot.borrow_mut().insert(at, read));
+        }
     }
 
     /// In count-only test mode, accepts a verifier finding instead of failing
@@ -1228,6 +1355,7 @@ impl CoreErlangGenerator {
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
             fast_path: None,
+            reads: None,
         }
     }
 
@@ -1287,6 +1415,7 @@ impl CoreErlangGenerator {
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
             fast_path: None,
+            reads: None,
         };
         let mut ctx = super::threaded_ir::RenderCtx::new(self);
         super::threaded_ir::render(&[node], &mut ctx)
@@ -1325,6 +1454,7 @@ impl CoreErlangGenerator {
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: self.in_private_scratch,
             fast_path: None,
+            reads: None,
         };
         // Today's only caller checks `conditional_fallback_brackets()` first,
         // which excludes a private scratch map. The verify guards a future
@@ -1850,6 +1980,7 @@ impl CoreErlangGenerator {
             tier2_local_rebinds,
             on_private_scratch: self.in_private_scratch,
             fast_path,
+            reads: None,
         });
         ThreadedValue {
             prelude,

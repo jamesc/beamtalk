@@ -1218,6 +1218,17 @@ pub(in crate::core_erlang) enum ThreadedStmt {
         /// exactly as above. `None` for every bracket whose call has no such
         /// guard.
         fast_path: Option<FastPath>,
+        /// BT-4612: the `State` version a store-only bracket whose `store` is
+        /// a rendered name (a [`VersionPrefix::Gensym`]) reads, the
+        /// `^`-closure pre-store's: `store` names the variable, `reads` the
+        /// version it holds, so the verifier can see a read made before an
+        /// earlier statement of the frame stepped `State`
+        /// ([`VerifyError::StalePrestore`](super::verify::VerifyError::StalePrestore)),
+        /// the same check as a construct's `scratch_base`. `None` for every
+        /// bracket whose `store` is itself a versioned `State`, and where the
+        /// name read is not the frame's own threaded `State` (a direct-params
+        /// loop's captured entry `State`).
+        reads: Option<VersionedVar>,
     },
 
     /// ADR 0131 §2: one conditional or handler arm, as a node. `threads` is
