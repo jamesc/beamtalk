@@ -1555,6 +1555,7 @@ impl TypeChecker {
             block_env.set_local(param.name.clone(), ty.clone());
         }
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+        Self::widen_outer_locals_written_by_block(block, &block_env, env);
         // A block whose body ends in a top-level non-local return
         // (`^expr`) never produces a *local* value — it diverges out of the
         // enclosing method entirely, and `^expr`'s type naturally matches
@@ -1594,6 +1595,44 @@ impl TypeChecker {
         };
         self.type_map.insert(block_span, ty.clone());
         ty
+    }
+
+    /// BT-4636: a block's writes to an outer local are threaded back to the
+    /// enclosing scope at runtime, but the block body is inferred in a child
+    /// environment that is then dropped, so `found := nil. xs do: [:e | found
+    /// := e]` left `found` typed `UndefinedObject` afterwards. Widen each outer
+    /// local the block writes to the join of its type before the block and the
+    /// type the block leaves it with (`String | Nil`), exactly as the
+    /// `ifTrue:`/`ifFalse:` arm join does (BT-4207). The block may run zero
+    /// times, so the prior type always stays a member. Nested blocks apply the
+    /// same rule to their own parent, so a write under `ifFalse: [...]` inside a
+    /// `do:` block reaches the method scope one level at a time.
+    fn widen_outer_locals_written_by_block(
+        block: &crate::ast::Block,
+        block_env: &TypeEnv,
+        env: &mut TypeEnv,
+    ) {
+        let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
+            env.get_local(name).is_some()
+        });
+        for write in writes {
+            if !matches!(
+                write.kind,
+                crate::semantic_analysis::block_facts::WriteKind::Local
+            ) {
+                continue;
+            }
+            let (Some(before), Some(after)) =
+                (env.get_local(&write.name), block_env.get_local(&write.name))
+            else {
+                continue;
+            };
+            if before == after {
+                continue;
+            }
+            let joined = Self::join_branch_arms(&[before, after]);
+            env.set_local(write.name.clone(), joined);
+        }
     }
 
     /// Resolve each parameter's type for a block literal (BT-4102 Decision A):
