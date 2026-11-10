@@ -881,6 +881,11 @@ struct ClassMeta {
     /// `Value subclass:`). Set by [`mark_value_subclasses`] once every file's
     /// metadata is collected; it gates the `auto_ctors` anchor.
     is_value_subclass: bool,
+    /// BT-4501: whether this class's explicit class-side `new:` runs in the
+    /// caller (`ClassHierarchy::explicit_class_new1_runs_in_caller`), the
+    /// verdict published as `ClassInfo::in_caller_new1` so a module that only
+    /// references the class reads the same answer codegen acted on.
+    in_caller_new1: bool,
 }
 
 /// Sort class metadata by class name — every generated-artifact writer
@@ -1607,6 +1612,20 @@ fn extract_class_metadata(
         .map(DeclaredType::from)
         .collect();
 
+    // BT-4501: the explicit-`new:` verdict needs the AST, so it is decided
+    // here and persisted (the same rule codegen publishes in
+    // `process_bound_class_selectors`).
+    let in_caller_new1 = {
+        let (hierarchy, _) =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build_with_options(
+                &module, true,
+            );
+        hierarchy
+            .ok()
+            .and_then(|h| h.get_class(&class_name).map(|c| c.in_caller_new1))
+            .unwrap_or(false)
+    };
+
     Ok(ClassMeta {
         module_name: module_name.to_string(),
         class_name,
@@ -1633,6 +1652,7 @@ fn extract_class_metadata(
         auto_kw,
         // Decided across files by `mark_value_subclasses`.
         is_value_subclass: false,
+        in_caller_new1,
     })
 }
 
@@ -2084,6 +2104,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_native: {is_native},\n\
          \x20           handle_scope: {handle_scope},\n\
          \x20           surface_incomplete: false,\n\
+         \x20           in_caller_new1: {in_caller_new1},\n\
          \x20           is_module_less: false,\n",
         func = class_info_fn_name(&meta.class_name),
         name = meta.class_name,
@@ -2092,6 +2113,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         typed = meta.modifiers.is_typed,
         is_value = meta.superclass_name == "Value",
         is_native = meta.modifiers.is_native,
+        in_caller_new1 = meta.in_caller_new1,
         // ADR 0103: emit the declared handle scope so it survives regeneration.
         handle_scope = meta
             .handle_scope
@@ -3405,6 +3427,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         }
     }
 
@@ -3616,6 +3639,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -3724,6 +3748,7 @@ mod tests {
                 handle_scope: None,
                 auto_kw: None,
                 is_value_subclass: false,
+                in_caller_new1: false,
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -3748,6 +3773,7 @@ mod tests {
                 handle_scope: None,
                 auto_kw: None,
                 is_value_subclass: false,
+                in_caller_new1: false,
             },
         ];
 
@@ -4921,6 +4947,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);

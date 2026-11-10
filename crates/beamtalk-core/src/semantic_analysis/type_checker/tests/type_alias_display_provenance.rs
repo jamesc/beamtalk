@@ -542,6 +542,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "TestCase".into(),
             superclass: Some("Value".into()),
@@ -569,6 +570,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
         },
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "ClassChecker".into(),
             superclass: Some("Object".into()),
@@ -673,6 +675,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "Widget".into(),
         superclass: Some("Object".into()),

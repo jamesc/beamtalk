@@ -17,6 +17,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
 
     let pre_class = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: ecow::EcoString::from("Helper"),
         superclass: Some(ecow::EcoString::from("Object")),

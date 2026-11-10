@@ -731,6 +731,21 @@ impl ClassHierarchy {
         self.explicit_class_constructor_builds_in_caller(class, "new:")
     }
 
+    /// BT-4501: record [`Self::explicit_class_new1_runs_in_caller`] on each
+    /// of `module`'s classes (`ClassInfo::in_caller_new1`), so the
+    /// compile-time [`Self::runs_class_method_in_caller`] answers `new:` from
+    /// the verdict codegen publishes. Run once the module's classes are
+    /// registered and indexed; a superclass not yet known (a sibling file not
+    /// yet injected) answers `false`, the conservative side.
+    pub(super) fn publish_explicit_new1_verdicts(&mut self, module: &Module) {
+        for class in &module.classes {
+            let verdict = self.explicit_class_new1_runs_in_caller(class);
+            if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
+                info.in_caller_new1 = verdict;
+            }
+        }
+    }
+
     /// The one rule behind [`Self::explicit_class_new_builds_in_caller`]
     /// (`new`, BT-4464) and [`Self::explicit_class_new1_runs_in_caller`]
     /// (`new:`, BT-4475): whether `class`'s own explicit class-side
