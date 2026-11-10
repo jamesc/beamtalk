@@ -42,7 +42,15 @@
 //!   it runs with write-through off, so its writes die with the re-raise.
 //!   Elsewhere (a class method running in its caller, ADR 0142, a value
 //!   type, the REPL) there is no actor `State` to store, and in a closure the
-//!   state already is the cell; there it takes the error path.
+//!   state already is the cell; there it takes the error path. Where the
+//!   scope's own throw also has a relay, that relay runs the same cleanup
+//!   from the same cell refresh, so the two share one compiled body (BT-4598,
+//!   [`ForeignCleanupBody::SharedWithRelay`]): one `$bt_nlr` clause runs the
+//!   cleanup, then the scope's own throw stores and resumes with the
+//!   cleanup's `StateAcc` and any other is stored with `store_unwound/2` and
+//!   re-raised. The own throw keeps its resumed state even though an actor
+//!   method's boundary commits the cell (ADR 0146, BT-4535): away from home
+//!   (an away `super_send/5`) that commit answers the carried state.
 //! - **`Block>>ensure:` reached dynamically** (`perform:`, BT-4429). Its
 //!   structural-fallback body runs in the Block method, where every `^` is of
 //!   another scope and its state kind is known only at run time
@@ -74,8 +82,8 @@
 
 use super::generator::CoreErlangGenerator;
 use super::threaded_ir::{
-    self, EnsureCatchVars, EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, NlrCarry, RenderCtx,
-    RethrowSlot, ThreadedStmt, TokenId,
+    self, EnsureCatchVars, EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, ForeignCleanupBody,
+    NlrCarry, RenderCtx, RethrowSlot, ThreadedStmt, TokenId,
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
@@ -115,6 +123,20 @@ impl CoreErlangGenerator {
             // The catch before ADR 0146 R1: a foreign `^` takes the error
             // path, whose cleanup's writes die with the re-raise.
             Some(fault::RelayFault::ForeignOnErrorPath) => None,
+            // With the relay off, a foreign clause that shared its cleanup
+            // (BT-4598) keeps it as its own, as it compiled before sharing.
+            Some(fault::RelayFault::NoRelay) => {
+                foreign.map(|foreign| match (&foreign.body, &relay) {
+                    (ForeignCleanupBody::SharedWithRelay, Some(relay)) => EnsureForeignNlr {
+                        body: ForeignCleanupBody::Own {
+                            seed: relay.seed.clone(),
+                            cleanup: relay.cleanup.clone(),
+                        },
+                        ..foreign
+                    },
+                    _ => foreign,
+                })
+            }
             _ => foreign,
         };
         let relay = match fault::active() {
