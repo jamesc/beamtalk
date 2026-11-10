@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4589: a `repeat` whose receiver block writes an outer local (or an
+// actor field) is canonicalised to `[true] whileTrue: <body>`
+// (`ast::normalize`), so the write is carried from one iteration to the next.
+// Exits by `^` and by a signalled error.
+// Fixture: fixtures/bt4589repeat_actor.bt.
+
+TestCase subclass: Bt4589RepeatWriteTest
+
+  testLocalWriteExitByReturn => self assert: self countToThree equals: 3
+
+  // The protected-region rule: a write inside an `on:do:` body that then
+  // raises is discarded, as for the `[true] whileTrue:` loop `repeat` is.
+  testLocalWriteExitByError =>
+    i := 0
+    [
+      [
+        i := i + 1
+        i >= 3 ifTrue: [Error signal: "done"]
+      ] repeat
+    ] on: Error do: [:e | nil]
+    self assert: i equals: 0
+
+  testActorFieldWriteExitByReturn =>
+    a := Bt4589RepeatActor spawn
+    self assert: (a countToField: 3) equals: 3
+    self assert: a count equals: 3
+    a stop
+
+  testActorLocalWriteExitByReturn =>
+    a := Bt4589RepeatActor spawn
+    self assert: (a countToLocal: 4) equals: 4
+    a stop
+
+  countToThree =>
+    i := 0
+    [
+      i := i + 1
+      i >= 3 ifTrue: [^i]
+    ] repeat
