@@ -120,8 +120,6 @@ pub(crate) fn discover_test_classes_in_hierarchy(
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&content);
     let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
-    let mut test_classes = Vec::new();
-
     // Extract @load directives from comments
     let load_files: Vec<String> = content
         .lines()
@@ -134,52 +132,74 @@ pub(crate) fn discover_test_classes_in_hierarchy(
         .filter(|p| !p.is_empty())
         .collect();
 
-    // Compiler only generates one module per .bt file (uses first class).
-    // Warn if multiple TestCase subclasses are found and take only the first.
-    let test_case_classes: Vec<_> = module
-        .classes
-        .iter()
-        .filter(|c| inherits_from_test_case(c.superclass_name(), superclass_index))
-        .collect();
-
-    if test_case_classes.len() > 1 {
+    // The compiler generates one module per .bt file, from its first
+    // TestCase subclass; warn when there are several.
+    let candidates = test_case_class_count(&module, superclass_index);
+    if candidates > 1 {
         warn!(
             "File '{}' contains {} TestCase subclasses; only the first will be compiled. \
              Split into separate files.",
-            source_path,
-            test_case_classes.len()
+            source_path, candidates
         );
     }
-
-    for class in test_case_classes.into_iter().take(1) {
-        let class_name = class.name.name.to_string();
-        let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
-        let module_name = format!("bt@{stem}");
-
-        let mut test_methods = Vec::new();
-
-        for method in &class.methods {
-            let selector_name = method.selector.name();
-            if selector_name.starts_with("test") {
-                test_methods.push(selector_name.to_string());
-            }
-        }
-
-        // No setUp/tearDown/serial detection here — the BUnit runner
-        // (beamtalk_test_runner) handles all lifecycle and serialization in Erlang.
-
-        // An indirect subclass inherits its test methods (see the doc comment).
-        if !test_methods.is_empty() || class.superclass_name() != "TestCase" {
-            test_classes.push(TestCaseClass {
-                class_name,
-                superclass_name: class.superclass_name().to_string(),
-                module_name,
-                test_methods,
-            });
-        }
-    }
+    let test_classes = test_classes_in_module(&module, superclass_index);
 
     Ok((test_classes, load_files))
+}
+
+/// How many classes in `module` inherit from `TestCase`.
+fn test_case_class_count(
+    module: &beamtalk_core::ast::Module,
+    superclass_index: &HashMap<String, String>,
+) -> usize {
+    module
+        .classes
+        .iter()
+        .filter(|c| inherits_from_test_case(c.superclass_name(), superclass_index))
+        .count()
+}
+
+/// The test class `module` compiles to, if any — the pure part of
+/// [`discover_test_classes_in_hierarchy`] (no I/O, no warnings), shared with
+/// `collect_test_file_extensions`. The compiler generates one module per
+/// `.bt` file from its first `TestCase` subclass, so at most one is returned.
+fn test_classes_in_module(
+    module: &beamtalk_core::ast::Module,
+    superclass_index: &HashMap<String, String>,
+) -> Vec<TestCaseClass> {
+    let Some(class) = module
+        .classes
+        .iter()
+        .find(|c| inherits_from_test_case(c.superclass_name(), superclass_index))
+    else {
+        return Vec::new();
+    };
+    let class_name = class.name.name.to_string();
+    let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
+    let module_name = format!("bt@{stem}");
+
+    let test_methods: Vec<String> = class
+        .methods
+        .iter()
+        .map(|method| method.selector.name())
+        .filter(|selector| selector.starts_with("test"))
+        .map(|selector| selector.to_string())
+        .collect();
+
+    // No setUp/tearDown/serial detection here — the BUnit runner
+    // (beamtalk_test_runner) handles all lifecycle and serialization in Erlang.
+
+    // An indirect subclass inherits its test methods (see
+    // `discover_test_classes_in_hierarchy`'s doc comment).
+    if test_methods.is_empty() && class.superclass_name() == "TestCase" {
+        return Vec::new();
+    }
+    vec![TestCaseClass {
+        class_name,
+        superclass_name: class.superclass_name().to_string(),
+        module_name,
+        test_methods,
+    }]
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1612,14 +1632,10 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     Ok(())
 }
 
-/// Phase 1: Discover test classes, compile test files and doc tests.
-///
-/// For each test file: resolves `@load` fixtures, compiles `TestCase` subclasses
-/// to Core Erlang, generates `EUnit` wrappers, and discovers doc tests. Core files
-/// are batch-compiled to BEAM at the end for efficiency.
 /// The extension methods of the test files `beamtalk test` will compile and
 /// load: those with at least one test class, found by the same discovery
-/// `compile_single_test_file` uses. A helper-only file is never compiled or
+/// `compile_single_test_file` uses (`test_classes_in_module`, minus its
+/// warnings, which the compile pass reports). A helper-only file is never compiled or
 /// loaded, so its extensions must not hide a does-not-understand that would
 /// fail at runtime. A file that cannot be read or parsed fails its own
 /// compilation later.
@@ -1639,18 +1655,13 @@ fn collect_test_file_extensions(
             class_module_index,
             class_superclass_index,
         );
-        let Ok((test_classes, _)) =
-            discover_test_classes_in_hierarchy(test_file, &file_super_index)
-        else {
+        let Ok(source) = fs::read_to_string(test_file) else {
             continue;
         };
-        if test_classes.is_empty() {
-            continue;
-        }
-        if let Ok(source) = fs::read_to_string(test_file) {
-            let (module, _) = beamtalk_core::source_analysis::parse(
-                beamtalk_core::source_analysis::lex_with_eof(&source),
-            );
+        let (module, _) = beamtalk_core::source_analysis::parse(
+            beamtalk_core::source_analysis::lex_with_eof(&source),
+        );
+        if !test_classes_in_module(&module, &file_super_index).is_empty() {
             extensions.add_module(&module, test_file.as_std_path());
         }
     }
@@ -1668,6 +1679,11 @@ fn test_file_dependency_extensions_complete(
     pipeline_complete && load_files.is_empty()
 }
 
+/// Phase 1: Discover test classes, compile test files and doc tests.
+///
+/// For each test file: resolves `@load` fixtures, compiles `TestCase` subclasses
+/// to Core Erlang, generates `EUnit` wrappers, and discovers doc tests. Core files
+/// are batch-compiled to BEAM at the end for efficiency.
 fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     let mut fixture_modules_by_name: HashMap<String, Utf8PathBuf> = HashMap::new();
     // Accumulate all test-file core paths; batch-compile after the loop to avoid
@@ -2760,8 +2776,6 @@ fn report_results(
 mod tests {
     use super::*;
 
-    /// Pins the summary line's display format. See [`summary_line`] for the
-    /// format's history and why it's still worth pinning.
     /// Only test files that will be compiled and loaded (they define a test
     /// class) contribute extensions; a helper-only file does not, so its
     /// extension cannot hide a does-not-understand that fails at runtime.
@@ -2877,6 +2891,8 @@ mod tests {
         assert!(complete);
     }
 
+    /// Pins the summary line's display format. See [`summary_line`] for the
+    /// format's history and why it's still worth pinning.
     #[test]
     fn summary_line_format() {
         let line = summary_line(8, 168, 167, 1, 39.84);
