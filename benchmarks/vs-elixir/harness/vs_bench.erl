@@ -596,7 +596,7 @@ compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatc
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
-compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:startChild (pool class + maxChildren read from the supervisor dictionary, supervisor:start_child, SupervisionChildAdded/ActorSpawned announcements skipped when the system bus has no subscriber) + terminateChild";
+compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:startChild (pool class + maxChildren read from the supervisor dictionary, supervisor:start_child, SupervisionChildAdded/ActorSpawned announcements skipped when no system-bus subscription can match (no matching subscriber)) + terminateChild";
 compiles_to("15b") -> "as 15a, with the atomic maxChildren cap: capacity token, monitor and slot release per child";
 compiles_to("13a") ->
     "direct erlang:phash2(A) in a try (BT-4485), behind an is_number/is_atom/is_pid argument guard: the spec proves the Integer result needs no coercion; errors go to ffi_call_raised/8";
