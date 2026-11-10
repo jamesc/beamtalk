@@ -1356,17 +1356,25 @@ impl TypeChecker {
             // The original `member_name` (`#foo`) is still used for the
             // user-facing missing-selector message and for `Self`-typed returns.
             //
-            // A protocol member's non-protocol selector that every object
-            // answers resolves through `Object` the same way (BT-4594), so
-            // the member responds with `Object`'s return type rather than
-            // counting as uncertain.
+            // A protocol member follows the same rule as a bare protocol
+            // receiver (BT-4594), rather than counting as an uncertain
+            // unknown class: one of its own selectors responds with
+            // `Dynamic` (as the bare `Known` path infers it), a method every
+            // object answers resolves through `Object`, and anything else is
+            // a missing member, exactly as DNU validation reports it.
             let resolve_name: &str =
-                if self.protocol_send_resolution(member_name, selector, hierarchy)
-                    == Some(ProtocolSendResolution::Object)
-                {
-                    WellKnownClass::Object.as_str()
-                } else {
-                    super::super::method_resolution_class(member_name)
+                match self.protocol_send_resolution(member_name, selector, hierarchy) {
+                    Some(ProtocolSendResolution::Protocol) => {
+                        responding_count += 1;
+                        return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                        continue;
+                    }
+                    Some(ProtocolSendResolution::Unknown) => {
+                        missing_names.push(member_name.clone());
+                        continue;
+                    }
+                    Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
+                    None => super::super::method_resolution_class(member_name),
                 };
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of

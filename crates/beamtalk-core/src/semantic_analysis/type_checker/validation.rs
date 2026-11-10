@@ -615,9 +615,11 @@ impl TypeChecker {
     /// own selectors (required ∪ provided, through `extending:`) win, then
     /// the methods every object answers (`Object`/`ProtoObject`). This is
     /// the one rule both DNU validation ([`Self::check_instance_selector`])
-    /// and return-type inference (the `Known` and union receiver paths)
-    /// read, so they cannot disagree about which selectors a protocol
-    /// receiver understands.
+    /// and inference (the `Known` and union receiver paths) read, so they
+    /// cannot disagree about which selectors a protocol receiver
+    /// understands. An `Object` method's return type comes from `Object`'s
+    /// method table; a send of the protocol's own selector still infers
+    /// `Dynamic` on both paths.
     pub(super) fn protocol_send_resolution(
         &self,
         name: &str,

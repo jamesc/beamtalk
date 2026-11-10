@@ -125,3 +125,49 @@ typed Object subclass: P
     );
     assert!(msgs.is_empty(), "{msgs:#?}");
 }
+
+#[test]
+fn union_member_protocol_object_method_return_type() {
+    // The receiver is still a union at the send, so this goes through the
+    // per-member union loop: the `Callable` member answers `printString`
+    // through `Object` (`String`), as does `Integer`.
+    let msgs = checker_messages(&source_with(
+        r"
+  class s: h :: Callable | Integer -> Integer => h printString
+",
+    ));
+    assert_eq!(msgs.len(), 1, "{msgs:#?}");
+    assert!(msgs[0].contains("String"), "{msgs:#?}");
+}
+
+#[test]
+fn union_member_protocol_selector_responds() {
+    // `call:` is `Callable`'s own selector: that member responds, so only
+    // `Integer` is reported missing.
+    let msgs = checker_messages(&source_with(
+        r"
+  class c: h :: Callable | Integer -> Object => h call: 1
+",
+    ));
+    assert_eq!(
+        msgs,
+        vec!["Integer does not understand 'call:' (in union Callable | Integer)".to_string()],
+        "{msgs:#?}"
+    );
+}
+
+#[test]
+fn union_member_protocol_unknown_selector_is_missing() {
+    // Neither member answers `frobnicate`: the protocol member is reported
+    // missing like any closed class, not skipped as uncertain.
+    let msgs = checker_messages(&source_with(
+        r"
+  class f: h :: Callable | Integer -> Object => h frobnicate
+",
+    ));
+    assert_eq!(msgs.len(), 1, "{msgs:#?}");
+    assert!(
+        msgs[0].contains("Callable") && msgs[0].contains("Integer"),
+        "{msgs:#?}"
+    );
+}
