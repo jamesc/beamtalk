@@ -213,12 +213,6 @@ const CALLS: &[(&str, &str, bool)] = &[
 /// self-send) and whose non-Boolean fallback passes a `^` arm as a closure,
 /// so the fallback's pre-store must store the state after that step. Rows of
 /// the corpus like [`CALLS`]'s (`state_step_conditional` is the first).
-///
-/// The two whose conditional is an operand of a bracketed send
-/// (`state_step_operand`, `state_step_argument`) do not report with the
-/// pre-store off: the `UnbracketedNlrClosure` rule exempts every closure
-/// compiled inside a bracket window, though the operands run before the
-/// window's store (BT-4632). The pre-store is emitted there all the same.
 const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
     (
         "state_step_if_true",
@@ -255,12 +249,12 @@ const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
     (
         "state_step_operand",
         "r := 1 + ((self flip: p) ifTrue: [^8])",
-        false,
+        true,
     ),
     (
         "state_step_argument",
         "p foo: ((self flip: p) ifTrue: [^8])",
-        false,
+        true,
     ),
 ];
 
