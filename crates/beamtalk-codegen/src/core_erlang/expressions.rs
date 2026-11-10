@@ -196,17 +196,17 @@ impl CoreErlangGenerator {
         let str_var = self.fresh_temp_var("interpStr");
 
         let display_string = MessageSelector::Unary("displayString".into());
-        let display_string_call = match self.typed_send_target(expr, &display_string) {
-            Ok(target) => self.guarded_send_on_vars(&target, "displayString", &interp_var, &[]),
-            Err(_) => {
-                // BT-4596: the segment's `displayString` is a dynamic site.
-                self.report_dynamic_site(expr, &display_string);
-                self.annotate_current_send_call(docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    leaf::var(interp_var.clone()),
-                    ", 'displayString', [])"
-                ])
-            }
+        let display_string_call = if let Ok(target) = self.typed_send_target(expr, &display_string)
+        {
+            self.guarded_send_on_vars(&target, "displayString", &interp_var, &[])
+        } else {
+            // BT-4596: the segment's `displayString` is a dynamic site.
+            self.report_dynamic_site(expr, &display_string);
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(interp_var.clone()),
+                ", 'displayString', [])"
+            ])
         };
         // Evaluate the expression
         let prefix = docvec![
