@@ -447,7 +447,15 @@ lives in one function, `dependency_extensions_unknown`, used by every surface.
 - The conflict reporting described in the 2026-06-27 amendment (two packages
   extending the same `{target, selector}`) is not yet wired: the extension
   conflict detector exists but no surface calls it, for project or dependency
-  extensions alike.
+  extensions alike. Until it is, the checker types such a selector by the
+  first definition it registers (the consumer's own, then dependencies in
+  resolution order), while the runtime is last-writer-wins (ADR 0066).
+- Only extensions declared in `.bt` source are seen. An extension a
+  dependency registers from its own Erlang (`native/`) code through the
+  runtime registry is invisible to the checker; doing so is unsupported for
+  static checking.
+- `beamtalk test` scans only each package's `src/` (plus `test/fixtures/`);
+  a package whose sources sit at its root keeps the guard on there.
 
 ### 8. Package Reflection: The `Package` Class
 

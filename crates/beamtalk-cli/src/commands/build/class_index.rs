@@ -316,19 +316,22 @@ pub(crate) fn build_class_index(
             &all_alias_infos,
             &extension_index,
         );
-        // Whether the dependency guard lifts changes every file's
+        // The dependency guard's final value changes every file's
         // diagnostics, and can flip without the extension index changing (a
         // dependency file gains a parse error; diagnostics cached before
         // dependency extensions were loaded at all), so for a package with
-        // dependencies it is part of the surface too.
-        if !dep_ctx.resolved_deps.is_empty() {
-            let state = if dependency_extensions_complete {
-                "loaded"
-            } else {
-                "unknown"
-            };
+        // dependencies it is part of the surface too. Folded as the value
+        // analysis will actually use (`beam_compiler` computes it the same
+        // way), so the two cannot drift apart.
+        if options.dependency_extensions_unknown {
+            let guard = beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+                options.dependency_extensions_unknown,
+                true,
+                dependency_extensions_complete,
+            );
             analysis_surface_hash = crate::commands::util::sha256_hex(
-                format!("{analysis_surface_hash}\ndependency-extensions:{state}").as_bytes(),
+                format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
+                    .as_bytes(),
             );
         }
     }

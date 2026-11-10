@@ -701,6 +701,11 @@ pub struct ClassHierarchyContext {
     /// (`CompilerOptions::dependency_extensions_unknown`, which callers set
     /// conservatively to "the package has dependencies") only when this
     /// holds; the default `false` keeps it on.
+    ///
+    /// **Precondition:** set it `true` only after dependency resolution
+    /// *succeeded* and every dependency's `DependencyExtensions` was complete
+    /// — `analyse_source_with_bindings` passes `resolved = true` to the
+    /// shared rule on the strength of this field alone.
     pub dependency_extensions_complete: bool,
 }
 

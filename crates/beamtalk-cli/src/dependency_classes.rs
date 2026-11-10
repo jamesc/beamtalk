@@ -555,6 +555,48 @@ mod tests {
         assert_eq!(scan.extensions.len(), 2, "{:?}", scan.extensions);
     }
 
+    /// A transitive dependency's extensions count too: `app` → `http` →
+    /// `json`, where only `json` extends `Object`.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn transitive_dependency_extensions_are_collected() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n\n\
+             [dependencies]\njson = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/server.bt").as_path(),
+            "Object subclass: Server\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/beamtalk.toml").as_path(),
+            "[package]\nname = \"json\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/src/ext.bt").as_path(),
+            "Object >> toJson -> String => \"json\"\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(scan.extensions_complete);
+        assert!(
+            scan.extensions
+                .entries()
+                .keys()
+                .any(|key| key.selector == "toJson"),
+            "{:?}",
+            scan.extensions
+        );
+    }
+
     /// A declared dependency that has not been fetched hides whatever it
     /// extends, so the extensions are incomplete.
     #[test]
