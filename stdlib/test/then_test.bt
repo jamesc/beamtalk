@@ -112,7 +112,7 @@ TestCase subclass: ThenTest
     target := ThenPromiseActor spawn
     target resolve: 41
     proxy := target withTimeout: 30000
-    [ self assert: (proxy then: [:v | v + 1]) equals: 42 ]
+    [self assert: (proxy then: [:v | v + 1]) equals: 42]
       ensure: [
         proxy stop
         target stop

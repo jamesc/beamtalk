@@ -77,7 +77,10 @@ typed Actor subclass: TimeoutProxy
   /// `then:` (a promise, say) runs it, and otherwise `Object >> then:` runs
   /// in the target's process with the target as the block's argument.
   then: aBlock :: Block -> Dynamic =>
-    self.target perform: #then: withArguments: #(aBlock) timeout: self.timeoutMs
+    self.target
+      perform: #then:
+      withArguments: #(aBlock)
+      timeout: self.timeoutMs
 
   // === Forwarding ===
 
