@@ -194,6 +194,19 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("while_true_param_receiver", "blk whileTrue: [^2]", true),
     ("ensure_param_body", "blk ensure: [^2]", true),
     ("on_do_param_body", "blk on: Error do: [:e | ^4]", true),
+    // BT-4632: a bracketed cascade's window covers the block literals its
+    // own sends run (`bracketed_call_blocks`): those of every message, and
+    // a block-literal shared receiver. A `^`-running send nested in its
+    // receiver or an argument runs before the window's store and is
+    // checked on its own (here a conditional's fallback, which pre-stores).
+    ("cascade_own_blocks", "p foo: [^1]; bar: [^2]", false),
+    ("cascade_block_receiver", "[^1] foo; bar", false),
+    ("cascade_nested_receiver", "(p ifTrue: [^8]) foo; bar", true),
+    (
+        "cascade_nested_argument",
+        "p foo: (q ifTrue: [^8]); bar",
+        true,
+    ),
     // BT-4612: a parenthesised block literal operand is the literal (the
     // operand normalisation pass peels it), recorded, stored for and covered
     // like the bare one (`note_nlr_operands`, `on:do:`'s cover).
