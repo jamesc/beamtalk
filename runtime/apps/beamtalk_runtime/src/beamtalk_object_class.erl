@@ -1975,7 +1975,7 @@ handle_cast(
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(Reason, #class_state{name = ClassName}) ->
+terminate(_Reason, #class_state{name = ClassName}) ->
     %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
@@ -1991,15 +1991,16 @@ terminate(Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% Clean up pid reverse index. Only cleaned on graceful shutdown —
-    %% on crash (including a callback exception, which also runs this
-    %% callback), the entry intentionally survives for auto-restart recovery,
-    %% including after the restart (BT-4552, `restart_class/1`). The class's
+    %% Clean up pid reverse index whenever this callback runs: the metadata
+    %% row above is gone, so this class cannot be restarted and its rows must
+    %% not keep naming it. An untrappable kill skips this callback, so its
+    %% entry survives for auto-restart recovery, including after the restart
+    %% (BT-4552, `restart_class/1`). The class's
     %% dead incarnations go with it, so a removed class answers `nil` from
     %% `beamtalk_interface:liveClassName/1` however many times it crashed.
     _ =
         (try
-            beamtalk_class_registry:forget_class_pids(self(), ClassName, Reason)
+            beamtalk_class_registry:forget_class_pids(self(), ClassName)
         catch
             _:_ -> ok
         end),

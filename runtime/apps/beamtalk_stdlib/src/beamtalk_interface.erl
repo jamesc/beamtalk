@@ -183,7 +183,7 @@ step, to tell "this class was removed mid-walk" apart from a genuine error.
 For a local class this is message-free: the pid's reverse-index row
 (`class_name_for_pid/1`), which `terminate/2` deletes when the class is
 removed, together with the rows of its earlier, crashed incarnations
-(`forget_class_pids/3`). A class killed untrappably skips `terminate/2`, so
+(`forget_class_pids/2`). A class killed untrappably skips `terminate/2`, so
 its row survives, including after a restart (BT-4552): it is crashed and
 awaiting or past auto-restart, not removed, and still answers its name. The walk then
 sends to it, `class_send_with_recovery` restarts it, and a genuine error from

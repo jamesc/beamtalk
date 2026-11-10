@@ -2086,33 +2086,29 @@ bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
         ets:match_delete(beamtalk_class_pids, {'_', Name})
     end.
 
-%% BT-4552: terminate/2 also runs on a callback exception (a crash the monitor
-%% restarts), so only a graceful stop reason reclaims the reverse-index rows.
-bt4552_forget_class_pids_only_on_graceful_stop_test() ->
+%% BT-4552: a callback exception runs terminate/2, which deletes the class's
+%% metadata, so the class cannot be restarted; its reverse-index row must go
+%% too, or the class would look live (`liveClassName/1`) while gone.
+bt4552_callback_crash_forgets_pid_row_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table(),
-    Name = 'BT4552ForgetGraceful',
-    DeadPid = spawn(fun() -> ok end),
-    MRef = monitor(process, DeadPid),
+    Name = 'BT4552CallbackCrash',
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        name => Name,
+        module => beamtalk_class_bt,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
+    MRef = monitor(process, Pid),
+    %% No handle_call clause matches: function_clause, then terminate/2.
+    ?assertExit(_, gen_server:call(Pid, bt4552_no_such_call)),
     receive
-        {'DOWN', MRef, process, DeadPid, _} -> ok
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 5000 -> ?assert(false)
     end,
-    Self = self(),
-    beamtalk_class_registry:record_class_pid(DeadPid, Name),
-    beamtalk_class_registry:record_class_pid(Self, Name),
-    try
-        ok = beamtalk_class_registry:forget_class_pids(Self, Name, {badarg, []}),
-        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(DeadPid)),
-        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Self)),
-        ok = beamtalk_class_registry:forget_class_pids(Self, Name, {shutdown, removed}),
-        ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(DeadPid)),
-        ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Self))
-    after
-        ets:match_delete(beamtalk_class_pids, {'_', Name})
-    end.
-
-bt4552_is_graceful_stop_test() ->
-    ?assert(beamtalk_class_registry:is_graceful_stop(normal)),
-    ?assert(beamtalk_class_registry:is_graceful_stop(shutdown)),
-    ?assert(beamtalk_class_registry:is_graceful_stop({shutdown, x})),
-    ?assertNot(beamtalk_class_registry:is_graceful_stop(killed)),
-    ?assertNot(beamtalk_class_registry:is_graceful_stop(noproc)).
+    ?assertMatch({error, _}, beamtalk_class_registry:restart_class(Name)),
+    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)).
