@@ -541,3 +541,81 @@ fn test_abstract_class_instantiation_error() {
     );
     assert!(abstract_errors[0].message.contains("Shape"));
 }
+
+/// The receiver-arity errors in `src`, which defines one method.
+fn while_receiver_arity_errors(body: &str) -> usize {
+    let src = format!("Object subclass: W\n  run =>\n    x := 0.\n    {body}.\n    x\n");
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(&src));
+    result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("expects its receiver to be a block"))
+        .count()
+}
+
+#[test]
+fn test_while_condition_arity_in_cascade_reported_once() {
+    // BT-4617: the parser folds a cascade's first send into its receiver, so
+    // the block every message is sent to is that send's receiver. A bad
+    // condition is reported once, whichever message is the loop.
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
+    // The block reaches `whileTrue:` only through the cascade.
+    assert_eq!(
+        while_receiver_arity_errors("[:y | x < 3] value: 1; whileTrue: [x := x + 1]"),
+        1
+    );
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] value: 1; whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
+}
+
+#[test]
+fn test_cascade_receiver_checks_see_the_cascade_target() {
+    // The parser folds a cascade's first send into its receiver; the
+    // receiver-based checks look at that send's receiver, the object each
+    // cascaded message is sent to.
+    let count = |body: &str, needle: &str| {
+        let src = format!("Object subclass: W\n  run =>\n    {body}\n");
+        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(
+        count(
+            "Integer printString; new",
+            "Cannot instantiate primitive class"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "42 printString; fieldAt: #x put: 1",
+            "Cannot mutate immutable value"
+        ),
+        1
+    );
+    // The type-aware argument checks use the cascade target's type, not the
+    // first send's result: `at:` on the String is checked, and `at:` on the
+    // Dictionary is not, even though its first `at:` answers a String.
+    assert_eq!(
+        count("\"abc\" size; at: #k", "expects an integer argument"),
+        1
+    );
+    assert_eq!(
+        count(
+            "#{#a => \"x\"} at: #a; at: #b",
+            "expects an integer argument"
+        ),
+        0
+    );
+}

@@ -54,6 +54,35 @@ type HybridFieldExtraction = (
     Vec<(String, String)>,
 );
 
+/// Validates that both blocks of a `whileTrue:`/`whileFalse:` loop take no
+/// arguments: the condition (receiver) and the body (argument). The loop
+/// evaluates each with no arguments, so a literal block with parameters is a
+/// compile-time [`CodeGenError::BlockArityError`] rather than a loop that
+/// silently drops them (BT-4617). A non-literal block's arity is unknown here.
+fn validate_while_block_arities(
+    condition: &Expression,
+    body: &Expression,
+    selector: &str,
+) -> Result<()> {
+    let example_condition = if selector == "whileFalse:" {
+        "x >= 10"
+    } else {
+        "x < 10"
+    };
+    for (block, role) in [(condition, "condition (receiver)"), (body, "body")] {
+        validate_block_arity_exact(
+            block,
+            0,
+            selector,
+            &format!(
+                "Fix: The {role} block must take no arguments:\n\
+                 \x20 [{example_condition}] {selector} [x := x + 1]"
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 impl CoreErlangGenerator {
     /// Whether a `whileTrue:`/`whileFalse:` with a literal `body` block is
     /// lowered by the stateful (`{Result, StateAcc}`) generator: the body
@@ -78,14 +107,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate body block arity (must be 0-arg)
-        validate_block_arity_exact(
-            body,
-            0,
-            "whileTrue:",
-            "Fix: The body block must take no arguments:\n\
-             \x20 [x < 10] whileTrue: [x := x + 1]",
-        )?;
+        validate_while_block_arities(condition, body, "whileTrue:")?;
 
         // BT-4002: a condition field write the loop cannot carry is rejected
         // as the same write in the body is.
@@ -135,14 +157,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate body block arity (must be 0-arg)
-        validate_block_arity_exact(
-            body,
-            0,
-            "whileFalse:",
-            "Fix: The body block must take no arguments:\n\
-             \x20 [x > 0] whileFalse: [x := x + 1]",
-        )?;
+        validate_while_block_arities(condition, body, "whileFalse:")?;
 
         // BT-4002: a condition field write the loop cannot carry is rejected
         // as the same write in the body is.
@@ -1699,6 +1714,54 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use crate::core_erlang::tests::codegen;
+
+    /// BT-4617: a literal condition block with parameters is rejected, in
+    /// every method kind, by the same check as a body block with parameters.
+    #[test]
+    fn test_while_condition_with_parameters_is_block_arity_error() {
+        let methods = [
+            ("Object subclass: W\n  class run =>\n", "class"),
+            ("Value subclass: W\n  run =>\n", "value-type"),
+            ("Actor subclass: W\n  run =>\n", "actor"),
+        ];
+        let loops = [
+            (
+                "[:y | x < 3] whileTrue: [x := x + 1]",
+                "whileTrue:",
+                "condition",
+            ),
+            (
+                "[:y | x > 3] whileFalse: [x := x + 1]",
+                "whileFalse:",
+                "condition",
+            ),
+            ("[x < 3] whileTrue: [:y | x := x + 1]", "whileTrue:", "body"),
+        ];
+        for (header, kind) in methods {
+            for (loop_src, expected_selector, role) in loops {
+                let src = format!("{header}    x := 0.\n    {loop_src}.\n    x\n");
+                let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+                let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+                let result = crate::core_erlang::generate_module(
+                    &module,
+                    crate::core_erlang::CodegenOptions::new("test"),
+                );
+                match result {
+                    Err(crate::core_erlang::CodeGenError::BlockArityError {
+                        selector,
+                        actual,
+                        hint,
+                        ..
+                    }) => {
+                        assert_eq!(selector, expected_selector, "{kind}: {loop_src}");
+                        assert_eq!(actual, 1, "{kind}: {loop_src}");
+                        assert!(hint.contains(role), "{kind}: {loop_src}: {hint}");
+                    }
+                    other => panic!("{kind}: {loop_src}: expected BlockArityError, got {other:?}"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_while_true_simple_generates_letrec() {

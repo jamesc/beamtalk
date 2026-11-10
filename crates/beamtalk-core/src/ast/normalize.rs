@@ -294,9 +294,9 @@ fn unary_loop_keyword(node: &Expression) -> Option<&'static str> {
     else {
         return None;
     };
-    // A receiver with parameters is no loop condition (the keyword loop never
-    // checks the condition's arity): it stays an ordinary send, which
-    // `Block>>whileTrue` rejects.
+    // A receiver with parameters is no loop condition: it stays an ordinary
+    // send, which `Block>>whileTrue` rejects at run time. (Rewriting it would
+    // turn that into the keyword loop's compile-time arity error, BT-4617.)
     if !arguments.is_empty()
         || !matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
     {
