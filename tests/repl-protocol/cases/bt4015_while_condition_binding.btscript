@@ -126,13 +126,17 @@ cw
 [cw < 3] whileTrue: b
 // => nil
 
-// The unary forms are not loops on Block: the send raises
-// `does_not_understand` and no write is silently dropped.
+// The unary forms are the keyword loop with an empty body (BT-4313): the
+// receiver's write is carried like a `whileTrue:` condition's.
 cw := 0
 // => 0
 [cw := cw + 1. cw < 3] whileTrue
-// => ERROR: does not understand
-[cw := cw + 1. cw >= 3] whileFalse
-// => ERROR: does not understand
+// => nil
 cw
+// => 3
+cw := 0
 // => 0
+[cw := cw + 1. cw >= 3] whileFalse
+// => nil
+cw
+// => 3

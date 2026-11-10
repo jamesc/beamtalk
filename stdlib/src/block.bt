@@ -69,6 +69,24 @@ sealed typed Object subclass: Block
   /// ```
   whileFalse: bodyBlock :: Block(R) -> Nil => @intrinsic whileFalse
 
+  /// Repeatedly evaluate the receiver while it evaluates to true. The
+  /// receiver is both the condition and the body, so it runs at least once.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// x := 0. [x := x + 1. x < 3] whileTrue
+  /// ```
+  whileTrue -> Nil => @intrinsic unaryWhileTrue
+
+  /// Repeatedly evaluate the receiver while it evaluates to false. The
+  /// receiver is both the condition and the body, so it runs at least once.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// x := 0. [x := x + 1. x >= 3] whileFalse
+  /// ```
+  whileFalse -> Nil => @intrinsic unaryWhileFalse
+
   /// Evaluate the block repeatedly forever (until an exception is raised).
   ///
   /// ## Examples

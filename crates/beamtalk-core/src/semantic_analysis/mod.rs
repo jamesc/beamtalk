@@ -805,7 +805,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
     // there is something to expand or peel.
     let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
-    let module: &Module = if has_uses || normalize::has_parenthesised_operand(module) {
+    let module: &Module = if has_uses || normalize::needs_normalising(module) {
         let mut owned = module.clone();
         if has_uses {
             let (expansion_diags, origins, resolved_uses) =

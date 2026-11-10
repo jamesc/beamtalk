@@ -1684,6 +1684,9 @@ impl Parser {
             .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
+        // A parsed block is never zero-width (its span covers at least `[`):
+        // `ast::normalize::written_unary_loop` reads a zero-width empty block as
+        // the body it added to a unary `whileTrue`/`whileFalse` (BT-4313).
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
     }
