@@ -2679,7 +2679,7 @@ impl CoreErlangGenerator {
         // BT-4116: a body that threads only outer locals folds a bare value (one
         // local) or an N-tuple (several) — no map, no per-element `maps:get`/`put`.
         if fold_plan.use_tuple_acc {
-            return self.generate_value_type_do_open_tuple(receiver, block_expr, body, &fold_plan);
+            return self.generate_value_type_do_open_tuple(receiver, body, &fold_plan);
         }
 
         // Phase 1: create a fresh map and pack each captured local into it.
@@ -2826,7 +2826,6 @@ impl CoreErlangGenerator {
     fn generate_value_type_do_open_tuple(
         &mut self,
         receiver: &Expression,
-        _block_expr: &Expression,
         body: &beamtalk_core::ast::Block,
         fold_plan: &ThreadingPlan,
     ) -> Result<Document<'static>> {

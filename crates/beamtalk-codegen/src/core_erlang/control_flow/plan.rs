@@ -572,17 +572,11 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // ADR 0111 Phase C, invariant class 2: no runtime
-        // check here anymore — `select_tuple_acc`'s own `matches!(context,
-        // CodeGenContext::ValueType)` early return (above) already makes
-        // `use_tuple_acc && context_is_value_type` unconditionally
-        // unreachable BY INSPECTION of that one function, the same
-        // already-structural shape found for
-        // `ThreadingModeUnpackMismatch`. `VerifyError::TupleAccInValueTypeContext`,
-        // `threaded_ir::verify_tuple_acc_value_type_exclusion`, and their
-        // hand-built-IR unit tests remain as regression pins (ADR 0111
-        // §Verifier honesty) — only this now-tautological production call
-        // site is gone.
+        // BT-4116: `select_tuple_acc` no longer excludes `ValueType` (a value
+        // type's fold bodies read fields from `Self`, not an actor `State`).
+        // What it still guarantees is checked by the verifier: a tuple-acc
+        // plan threads no family (`TupleAccWithFamily`) and its accumulator
+        // statement has its mode's shape (`FoldAccShapeMismatch`).
 
         // ADR 0111 Phase C, invariant class 3: likewise
         // no runtime check here — `select_direct_params`'s own
@@ -943,8 +937,8 @@ impl ThreadingPlan {
     /// only simple local var mutations — no field writes, self-sends, tier-2 assignments,
     /// complex control flow, conditional threaded writes, or destructure-as-last-expr.
     ///
-    /// `ValueType` methods have no `State` `gen_server` variable in scope; tuple-acc would
-    /// reference an unbound variable — always fall through to the map-acc path.
+    /// BT-4116: allowed in `ValueType` context too, except for a body that writes a
+    /// field (its `Self` rides the `{Acc, Self}` map path, BT-3827).
     fn select_tuple_acc(
         allow_tuple_acc: bool,
         threaded_locals: &[String],

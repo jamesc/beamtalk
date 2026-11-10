@@ -45,7 +45,7 @@ fn verify_tuple_acc_unpack_invariant(
 /// `!effects.has_non_tuple_safe_list_op` conjunct already makes
 /// `direct_params_selected && inner_needs_stateacc_fallback` unconditionally
 /// unreachable by inspection of that one function (`control_flow/mod.rs`) —
-/// see `verify_tuple_acc_value_type_exclusion`'s doc comment for the full
+/// see the module docs for the full
 /// rationale, shared verbatim. Kept as a regression pin.
 fn verify_nested_list_op_stateacc_compat(
     direct_params_selected: bool,
