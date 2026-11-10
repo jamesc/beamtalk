@@ -3381,6 +3381,8 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 
 The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)): at the REPL it threads the bindings it writes; in a value-type or actor method it threads a local it writes when it also writes a field or sends to `self`; otherwise a local written in it (and every local in a class method) is a compile error. Keep the counter in a field, or write the loop with a body: `[count := count + 1. count < 10] whileTrue` runs as `count := count + 1. [count < 10] whileTrue: [count := count + 1]`.
 
+A `repeat` sent to a block literal is the loop `[true] whileTrue: [...]` ([BT-4589](https://linear.app/beamtalk/issue/BT-4589)), so its receiver is a loop body: the locals and REPL bindings it writes are carried from one iteration to the next, and are visible after a `^` ends the loop. An error that ends it follows the protected-region rule like any other loop.
+
 ### Local Variable Mutations
 
 ```beamtalk
