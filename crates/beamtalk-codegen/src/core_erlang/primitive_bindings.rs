@@ -412,10 +412,11 @@ mod tests {
         )
     }
 
-    /// BT-4612: a `no_user_code` primitive never runs a block passed to it,
-    /// so the runtime dispatch, which has no `^`-closure pre-store, needs
-    /// none for one. That holds only while no parameter of a marked
-    /// primitive can be a block.
+    /// BT-4612: no parameter of a marked primitive is declared a block. The
+    /// `^`-closure rule does not rest on this (BT-4633): an annotation is not
+    /// checked at run time, so a caller may still pass a block literal, and a
+    /// `no_user_code` send records none of its block operands whatever they
+    /// are (`send_runs_no_operand`).
     #[test]
     fn no_user_code_parameters_exclude_blocks() {
         assert!(
