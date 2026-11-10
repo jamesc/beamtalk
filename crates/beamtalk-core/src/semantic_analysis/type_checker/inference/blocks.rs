@@ -934,6 +934,11 @@ impl TypeChecker {
             }
             let body_ty =
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            // BT-4636: a write inside a narrowing arm (`found isNil ifTrue:
+            // [found := e]`) is joined into the enclosing scope too, so it
+            // reaches the method scope through the `do:` block around it.
+            // `before` is read from the un-narrowed `env`.
+            Self::widen_outer_locals_written_by_block(block, &block_env, env);
             // Build `Block(P1, ..., Pn, R)` so downstream generic inference
             // (e.g. `infer_method_local_params` matching `Block(R) -> R`) can
             // recover the block's return type.
@@ -1631,6 +1636,10 @@ impl TypeChecker {
                 continue;
             }
             let joined = Self::join_branch_arms(&[before, after]);
+            // The old origin note and flow facts (known-remote, raw-Binary)
+            // described the earlier binding, not this union: drop them.
+            let key = EnvKey::local(write.name.clone());
+            env.remove(&key);
             env.set_local(write.name.clone(), joined);
         }
     }

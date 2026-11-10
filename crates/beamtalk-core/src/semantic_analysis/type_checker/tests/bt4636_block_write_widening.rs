@@ -72,11 +72,22 @@ fn non_nil_initial_type_is_widened_to_a_union() {
 }
 
 #[test]
-fn escaping_block_is_not_widened_at_the_definition() {
-    // The block is stored, not passed to a message, so there is no point at
-    // which its write is known to have happened: the local keeps its type.
+fn find_first_idiom_with_nil_guard_arm_is_widened() {
+    // The write sits in a narrowing arm (`found isNil ifTrue: [...]`), which
+    // is inferred on its own path from plain blocks.
     let diags = diagnostics_for(
-        "  class f: s :: String -> Integer =>\n    found := nil\n    setter := [found := s]\n    setter value\n    found isNil ifTrue: [^0]\n    0\n",
+        "  class f: items :: List(String) -> Integer =>\n    found := nil\n    items do: [:e | found isNil ifTrue: [found := e]]\n    found isNil ifTrue: [^0]\n    found size\n",
+    );
+    assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
+}
+
+#[test]
+fn block_stored_in_a_local_is_widened_where_it_is_defined() {
+    // A block literal on an assignment RHS goes through the same inference as
+    // a message argument, so its write is joined in at the definition: the
+    // block can run at any later point.
+    let diags = diagnostics_for(
+        "  class f: s :: String -> Integer =>\n    found := nil\n    setter := [found := s]\n    setter value\n    found isNil ifTrue: [^0]\n    found size\n",
     );
     assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
 }
