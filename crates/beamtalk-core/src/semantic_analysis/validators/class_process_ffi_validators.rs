@@ -254,7 +254,7 @@ fn row_for_send(
         name,
         package: None,
         ..
-    } = receiver.unwrap_parens()
+    } = receiver
     else {
         return None;
     };
