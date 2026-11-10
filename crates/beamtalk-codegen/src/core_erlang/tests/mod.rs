@@ -169,6 +169,27 @@ pub(crate) fn codegen_named(src: &str, module_name: &str) -> String {
     .expect("codegen should succeed")
 }
 
+/// Asserts that `src` parses with no diagnostics at all.
+///
+/// [`codegen_named`] discards parse diagnostics and emits whatever survived
+/// error recovery, so a source typo (`=` is not an operator; `=:=` is) silently
+/// drops statements and lets agreement/corpus tests pass vacuously. Corpus and
+/// agreement tests call this on every generated program first. The rule is
+/// "any diagnostic" (warnings included): generated rows are meant to be
+/// well-formed, so anything the parser flags is a generator slip.
+pub(crate) fn assert_parses(src: &str) {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (_, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "program has parse diagnostics {:?}:\n{src}",
+        diags
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
