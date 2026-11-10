@@ -59,7 +59,7 @@ live source sees the *new* signature for free; no explicit per-class
 override is constructed here. `class_hierarchy` is opt-in on `diagnostics/3`
 rather than the `diagnostics/2` default specifically so this module's new
 behaviour does not also change the keystroke-driven cockpit editor's
-diagnostics (`beamtalk_repl_ops_dev:diagnostics_for/2`), which
+diagnostics (`beamtalk_repl_ops_dev:diagnostics_for/3`), which
 stays on the unchanged class-context-free default.
 
 Returned diagnostics are filtered to the ones attributable to *this* reload,
