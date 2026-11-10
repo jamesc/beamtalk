@@ -133,7 +133,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
         case D4Type of
             <'error'> when 'true' ->
                 let <D4Built> = primop 'build_stacktrace'(D4Stack) in
-                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built), State}
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
             <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
         end
 

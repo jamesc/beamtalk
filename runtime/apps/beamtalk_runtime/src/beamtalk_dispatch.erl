@@ -722,7 +722,7 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
             %% always receive a canonical {reply,_,_} | {error,_} tuple.
             try beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
                 {reply, _, _} = Reply -> Reply;
-                {error, Error, _State} -> {error, Error}
+                {error, Error, _State} -> {error, beamtalk_exception_handler:ensure_wrapped(Error)}
             catch
                 Type:Reason:Stack ->
                     ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{

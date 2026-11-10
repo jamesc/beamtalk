@@ -5227,7 +5227,8 @@ impl CoreErlangGenerator {
     /// The `dispatch/4` → `dispatch/3` adapter: calls the state-less
     /// `dispatch/3` and answers `{'reply', Result, State}`, or, for an
     /// `error` the method raised, `{'error', Wrapped, State}` with the raised
-    /// term wrapped (with its stacktrace) as an exception map — so the walk
+    /// term wrapped (with its stacktrace, unless it already carries one) as an
+    /// exception map — so the walk
     /// reads it as "the invoked method raised", never as a lookup miss, even
     /// when it is a `does_not_understand` from inside the method body
     /// (BT-4593).
@@ -5256,7 +5257,10 @@ impl CoreErlangGenerator {
             indent,
             "            let <D4Built> = primop 'build_stacktrace'(D4Stack) in\n",
             indent,
-            "            {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built), State}\n",
+            // `ensure_wrapped/4` (empty context): an already-wrapped
+            // exception keeps its innermost `raw_stacktrace`, as in the
+            // walk's own `raised/4`.
+            "            {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}\n",
             indent,
             "        <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)\n",
             indent,

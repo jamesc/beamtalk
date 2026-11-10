@@ -124,7 +124,7 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
         case D4Type of
             <'error'> when 'true' ->
                 let <D4Built> = primop 'build_stacktrace'(D4Stack) in
-                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built), State}
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
             <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
         end
 

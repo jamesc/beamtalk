@@ -117,7 +117,7 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
         case D4Type of
             <'error'> when 'true' ->
                 let <D4Built> = primop 'build_stacktrace'(D4Stack) in
-                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built), State}
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
             <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
         end
 
