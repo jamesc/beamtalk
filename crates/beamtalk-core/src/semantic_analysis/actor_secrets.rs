@@ -202,7 +202,7 @@ pub(crate) fn check_actor_secret_declarations(
         }
         let slots = hierarchy.all_state(class_name);
         for secret in secrets.state.names() {
-            if !slots.iter().any(|s| *s == secret.name) {
+            if !slots.contains(&secret.name) {
                 diagnostics.push(
                     Diagnostic::warning(
                         format!(
