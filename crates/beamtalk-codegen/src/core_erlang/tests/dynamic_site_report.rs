@@ -14,7 +14,9 @@ fn report(src: &str) -> Vec<String> {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module_with_warnings(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_codegen_diagnostics(true),
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_source(src)
+            .with_codegen_diagnostics(true),
     )
     .expect("codegen should succeed");
     result
@@ -457,6 +459,18 @@ fn cascade_messages_are_reported() {
                 .any(|h| h.starts_with(&format!("Send '{selector}'"))
                     && h.contains("reason: untyped")),
             "{selector}: {hints:?}"
+        );
+    }
+}
+
+#[test]
+fn multi_line_cascade_reports_each_message_line() {
+    let hints = report("Object subclass: Caller\n  run: x =>\n    x foo;\n      bar;\n      baz\n");
+    for (selector, line) in [("foo", 3), ("bar", 4), ("baz", 5)] {
+        let needle = format!("Send '{selector}' at line {line}:");
+        assert!(
+            hints.iter().any(|h| h.starts_with(&needle)),
+            "{needle}: {hints:?}"
         );
     }
 }

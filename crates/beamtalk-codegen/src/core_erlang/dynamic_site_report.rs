@@ -52,6 +52,7 @@ use super::dispatch_codegen::{StaysDynamic, supervisor_family_root};
 use super::routing::{self, NoBuiltinRoute};
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
+use beamtalk_core::source_analysis::Span;
 
 /// How the receiver's static type reads in the report.
 fn describe_type(ty: Option<&InferredType>, kind: Option<ClassKind>) -> String {
@@ -116,10 +117,21 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         selector: &MessageSelector,
     ) {
+        self.report_dynamic_site_at(receiver, selector, receiver.span());
+    }
+
+    /// [`Self::report_dynamic_site`], located at `span` rather than the
+    /// receiver: each message of a cascade reports its own line (BT-4392),
+    /// though the receiver's type is shared.
+    pub(in crate::core_erlang) fn report_dynamic_site_at(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        span: Span,
+    ) {
         if !self.codegen_diagnostics_enabled {
             return;
         }
-        let span = receiver.span();
         let line_info = self
             .span_to_line(span)
             .map_or(String::new(), |l| format!(" at line {l}"));

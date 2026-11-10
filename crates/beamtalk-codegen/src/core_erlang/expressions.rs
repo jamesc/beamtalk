@@ -1236,8 +1236,9 @@ impl CoreErlangGenerator {
                     _ => self.generate_cascade_args(arguments, &mut docs)?,
                 };
 
-            // BT-4596: every cascade message is a dynamic send.
-            self.report_dynamic_site(underlying_receiver, selector);
+            // BT-4596: every cascade message is a dynamic send, reported at
+            // its own line.
+            self.report_dynamic_site_at(underlying_receiver, selector, msg_span);
             let mut send: Vec<Document<'static>> = vec![docvec![
                 "call 'beamtalk_message_dispatch':'send'(",
                 leaf::var(receiver_var.clone()),
