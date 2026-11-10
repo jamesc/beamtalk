@@ -1107,6 +1107,11 @@ conversions (~1 µs), so the answer for a class with a
 which is invalidated by every metadata write (class load, hot reload /
 redefinition, removal). After the first send a hit is one counter read and
 one ETS read, with no `string`, `beamtalk_module_name` or `code_server` call.
+BT-4623: the calling process additionally memoises the answer in its process
+dictionary, tagged with the cache generation read before deriving it (only
+answers the ETS layer would cache), so a warm send in a process skips the ETS
+read; any metadata write bumps the generation and turns the memo into a miss,
+and the loaded-module check below still runs on every hit.
 
 What is cached, and why that is safe:
 
