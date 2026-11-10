@@ -2057,3 +2057,31 @@ bt3832_hierarchy_docs_no_cross_class_deadlock_test_() ->
             Results
         )
     end}.
+
+%% BT-4552: restart keeps only the newest dead incarnations' reverse-index
+%% rows (8), and never touches a live pid's row.
+bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
+    beamtalk_class_registry:ensure_pid_table(),
+    Name = 'BT4552PruneCap',
+    Dead = [
+        begin
+            P = spawn(fun() -> ok end),
+            MRef = monitor(process, P),
+            receive
+                {'DOWN', MRef, process, P, _} -> ok
+            end,
+            beamtalk_class_registry:record_class_pid(P, Name),
+            P
+        end
+     || _ <- lists:seq(1, 11)
+    ],
+    Live = self(),
+    beamtalk_class_registry:record_class_pid(Live, Name),
+    try
+        ok = beamtalk_class_registry:prune_dead_class_pids(Name),
+        Kept = [P || P <- Dead, beamtalk_class_registry:class_name_for_pid(P) =:= {ok, Name}],
+        ?assertEqual(lists:nthtail(3, lists:sort(Dead)), lists:sort(Kept)),
+        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Live))
+    after
+        ets:match_delete(beamtalk_class_pids, {'_', Name})
+    end.

@@ -90,7 +90,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 ]).
 
 -ifdef(TEST).
--export([class_identity/1]).
+-export([class_identity/1, prune_dead_class_pids/1]).
 -endif.
 
 -export_type([
@@ -906,6 +906,32 @@ class_name_for_pid(Pid) ->
         error:badarg -> not_found
     end.
 
+%% How many dead incarnations of one class keep their reverse-index row for
+%% crash recovery (BT-4552). A class object held across more restarts than this
+%% gets `class_not_found` on its next send, as every stale holder did before.
+-define(MAX_DEAD_CLASS_PIDS, 8).
+
+%% Keep only the newest `?MAX_DEAD_CLASS_PIDS` dead local rows of `ClassName`,
+%% so a class that keeps crashing on a long-running node does not grow
+%% `beamtalk_class_pids` without bound. Local pids order by creation in Erlang
+%% term order, so the smallest are the oldest.
+-spec prune_dead_class_pids(class_name()) -> ok.
+prune_dead_class_pids(ClassName) ->
+    try
+        Dead = lists:sort([
+            P
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
+        ]),
+        Excess = length(Dead) - ?MAX_DEAD_CLASS_PIDS,
+        _ =
+            [ets:delete(beamtalk_class_pids, P) || Excess > 0, P <- lists:sublist(Dead, Excess)],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
 -doc """
 Drop the reverse-index rows of a class that is shutting down gracefully:
 `Pid`'s own row and every dead local incarnation of `ClassName` that
@@ -1380,9 +1406,11 @@ restart_class(ClassName) ->
             %% only name the class from this row. Deleting it on restart (the
             %% eager `beamtalk_class_monitor` restart runs immediately on the
             %% crash) turned every such send into
-            %% `Class 'unknown' not found`. The cost is one small row per crash
-            %% (eager or lazy restart) for the class's lifetime: a graceful stop
-            %% reclaims them all (`forget_class_pids/2`).
+            %% `Class 'unknown' not found`. Only the newest
+            %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
+            %% (`prune_dead_class_pids/1`), and a graceful stop reclaims the
+            %% rest (`forget_class_pids/2`).
+            prune_dead_class_pids(ClassName),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(
