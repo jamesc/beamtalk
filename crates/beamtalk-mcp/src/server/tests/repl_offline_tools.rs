@@ -105,8 +105,12 @@ async fn diagnostic_summary_tool_runs_offline() {
 
 // --- search_examples / search_classes (offline — no REPL touched) ---
 
+/// The bundled corpus is a build output read from the binary's sysroot
+/// (BT-4614). A test binary under `target/debug/deps/` has no corpus there, so
+/// the tool must say the corpus is missing rather than "no matches"; a binary
+/// that does find one must return results.
 #[tokio::test]
-async fn search_examples_finds_results_for_a_known_topic() {
+async fn search_examples_finds_results_or_reports_a_missing_corpus() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
     let result = mcp
         .search_examples(Parameters(SearchExamplesParams {
@@ -116,7 +120,15 @@ async fn search_examples_finds_results_for_a_known_topic() {
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
-    assert!(!call_text(&result).contains("No examples found"));
+    let text = call_text(&result);
+    match beamtalk_examples::bundled_corpus() {
+        beamtalk_examples::BundledCorpus::Loaded(_) => {
+            assert!(!text.contains("No examples found"), "{text}");
+        }
+        beamtalk_examples::BundledCorpus::Missing { .. } => {
+            assert!(text.contains("bundled example corpus is missing"), "{text}");
+        }
+    }
 }
 
 #[tokio::test]

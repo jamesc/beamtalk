@@ -15,6 +15,7 @@ keywords = ["beamtalk", "examples", "corpus", "mcp"]
 categories = ["development-tools"]
 
 [dependencies]
+beamtalk-sysroot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
