@@ -84,3 +84,44 @@ typed Object subclass: Repro
     let diags = type_diagnostics(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
+
+/// In-branch narrowing: `False` is removed from `x` in the `ifFalse:` arm.
+#[test]
+fn bt4638_if_true_if_false_narrows_each_branch() {
+    let source = r"
+typed Object subclass: Repro
+  class go: x :: Integer | False -> Integer =>
+    (x =:= false) ifTrue: [0] ifFalse: [x + 1]
+";
+    let diags = type_diagnostics(source);
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
+}
+
+/// Negated spellings are not narrowed (they would be unsound for non-Booleans).
+#[test]
+fn bt4638_negated_spelling_does_not_narrow() {
+    let diags = type_diagnostics(&guard_source("Integer | False", "(x /= false)"));
+    assert!(
+        !diags.is_empty(),
+        "`/=` is not recognised, so `False` is still possible; expected a diagnostic"
+    );
+}
+
+/// Testing an inferred `Integer` against `false` can never be true.
+#[test]
+fn bt4638_integer_eq_false_hints_never_true() {
+    let source = r"
+typed Object subclass: Repro
+  class go -> Integer =>
+    n := 3
+    (n =:= false) ifTrue: [^0]
+    n
+";
+    let hinted = run_with_expect(
+        &parse_source(source),
+        &ClassHierarchy::build(&parse_source(source)).0.unwrap(),
+    )
+    .iter()
+    .any(|d| d.message.contains("can never be true"));
+    assert!(hinted, "expected a `can never be true` hint");
+}
