@@ -746,9 +746,16 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
             %% by every in-tree caller (or replied by an actor)
             try
                 case ModuleName:dispatch(Selector, Args, Self, State) of
-                    {reply, _, _} = Reply -> Reply;
-                    {error, Error, _State} -> {error, Error};
-                    Other -> Other
+                    {reply, _, _} = Reply ->
+                        Reply;
+                    %% BT-4593: the walk already resolved Selector to this
+                    %% owner, so an error the owner answers is a raise, never
+                    %% a miss — wrap it so a `does_not_understand` record it
+                    %% returns cannot read as the walk's own miss.
+                    {error, Error, _State} ->
+                        {error, beamtalk_exception_handler:ensure_wrapped(Error)};
+                    Other ->
+                        Other
                 end
             catch
                 Type:Reason:Stack ->

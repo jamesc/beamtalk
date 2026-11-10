@@ -1354,8 +1354,11 @@ test_compiled_dispatch_returns_error_tuple() ->
         State = #{'$beamtalk_class' => 'DispatchErrTupleClass'},
         Self = make_ref(),
         Result = beamtalk_dispatch:lookup(errMethod, [], Self, State, 'DispatchErrTupleClass'),
-        %% Normalized to 2-tuple
-        ?assertMatch({error, #beamtalk_error{}}, Result),
+        %% Normalized to 2-tuple; the resolved owner's answered error is a
+        %% raise (a wrapped map), never the walk's own miss (BT-4593).
+        ?assertMatch(
+            {error, #{error := #beamtalk_error{kind = does_not_understand}}}, Result
+        ),
         ?assertEqual(2, tuple_size(Result))
     after
         gen_server:stop(Pid),
