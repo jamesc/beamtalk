@@ -1685,10 +1685,22 @@ impl TypeChecker {
                     // still names the alias, silently skipping the guard and
                     // letting `is_type_compatible`'s shortcut accept
                     // any known class instance against a `:: MyAlias` param.
+                    //
+                    // With the shortcut suppressed, a value whose own type is
+                    // `Class` or a subclass of it (e.g. a forwarded `:: Class`
+                    // parameter, BT-4599) is still compatible: check that by
+                    // the nominal chain directly, bypassing the shortcut.
                     let class_shortcut_applies =
                         expected_structural.as_str() == "Class" && !is_class_ref_arg;
-                    let instance_compat = !class_shortcut_applies
-                        && Self::is_type_compatible(actual_ty, &expected_structural, hierarchy);
+                    let instance_compat = if class_shortcut_applies {
+                        actual_ty.as_str() == "Class"
+                            || hierarchy
+                                .superclass_chain(actual_ty)
+                                .iter()
+                                .any(|ancestor| ancestor.as_str() == "Class")
+                    } else {
+                        Self::is_type_compatible(actual_ty, &expected_structural, hierarchy)
+                    };
                     let class_literal_compat = !instance_compat
                         && is_class_ref_arg
                         && hierarchy.has_class(actual_ty)
