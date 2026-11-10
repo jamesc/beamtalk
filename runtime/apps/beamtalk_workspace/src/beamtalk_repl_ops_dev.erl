@@ -1546,6 +1546,12 @@ Examples:
   <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
   <<"s">>               → {undefined, <<"s">>}
   <<>>                  → {undefined, <<>>}
+  <<"\"hi\" size |> ab">> → {expression, <<"\"hi\" size">>, <<"ab">>}
+
+After a pipeline `|>` (ADR 0145) the receiver is the value before the last
+`|>`, so `x m1 |> pre` completes `pre` against `x m1`, as the LSP does
+(`pipeline_receiver_end` in `completion_provider.rs`). Both are pinned to the
+shared corpus `test/fixtures/completion_pipeline_receiver_corpus.json`.
 """.
 -spec parse_receiver_and_prefix(binary()) ->
     {binary() | undefined, binary()} | {expression, binary(), binary()}.
@@ -1561,8 +1567,11 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
     {SpaceChars, ReceiverPartRev} = lists:splitwith(
         fun(C) -> C =:= $\s orelse C =:= $\t end, Rest
     ),
-    case SpaceChars of
-        [] ->
+    case {ReceiverPartRev, SpaceChars} of
+        {[$>, $| | BeforePipeRev], _} ->
+            %% `value |> prefix`: completing a pipeline stage (ADR 0145).
+            pipeline_stage_receiver(BeforePipeRev, Prefix);
+        {_, []} ->
             %% No space before prefix — single token, no receiver
             {undefined, Prefix};
         _ ->
@@ -1594,6 +1603,20 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             end
     end.
 
+-doc """
+The receiver and prefix when completing a pipeline stage: `Prefix` follows
+the last `|>`, and `BeforePipeRev` is the reversed text before that `|>`.
+The receiver is whatever `parse_receiver_and_prefix/1` finds at the end of
+that text, as if the cursor sat after it.
+""".
+-spec pipeline_stage_receiver(string(), binary()) ->
+    {binary() | undefined, binary()} | {expression, binary(), binary()}.
+pipeline_stage_receiver(BeforePipeRev, Prefix) ->
+    case parse_receiver_and_prefix(list_to_binary(lists:reverse(BeforePipeRev, " "))) of
+        {expression, ReceiverExpr, <<>>} -> {expression, ReceiverExpr, Prefix};
+        {Receiver, <<>>} -> {Receiver, Prefix}
+    end.
+
 -spec is_identifier_char(char()) -> boolean().
 is_identifier_char(C) ->
     (C >= $a andalso C =< $z) orelse
@@ -1621,6 +1644,7 @@ Examples:
   <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
   <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
   <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
+  <<"\"hello\" |> size abs">> → {ok, <<"\"hello\"">>, [size, abs]}
   <<"inject: 0 into:">>   → error  (keyword send)
   <<"(myList size)">>     → error  (paren)
 """.
@@ -1628,7 +1652,7 @@ Examples:
 tokenise_send_chain(<<>>) ->
     error;
 tokenise_send_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
@@ -1651,6 +1675,20 @@ tokenise_send_chain(Expr) when is_binary(Expr) ->
                     error
             end
     end.
+
+-doc """
+Split a receiver expression into whitespace-separated tokens for the chain
+tokenisers, dropping each pipeline `|>` token: in a chain of unary and binary
+sends walked left to right, `a m1 |> m2` is the same chain as `a m1 m2`
+(ADR 0145).
+""".
+-spec chain_tokens(binary()) -> [binary()].
+chain_tokens(Expr) ->
+    [
+        list_to_binary(T)
+     || T <- string:tokens(binary_to_list(Expr), " \t"),
+        T =/= "|>"
+    ].
 
 -spec validate_chain_tokens(binary(), [binary()]) -> ok | error.
 validate_chain_tokens(ReceiverToken, Selectors) ->
@@ -1733,7 +1771,7 @@ Examples:
 tokenise_binary_chain(<<>>) ->
     error;
 tokenise_binary_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
