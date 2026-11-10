@@ -65,12 +65,20 @@ fn nil_is_dropped_from_union() {
 fn union_of_same_arity_tuples_is_per_position() {
     // Position 1 is `Integer | Symbol`: not a String -> mismatch.
     assert_eq!(
-        probe("Tuple(Integer, String) | Tuple(Symbol, String)", "{a, b}", "a"),
+        probe(
+            "Tuple(Integer, String) | Tuple(Symbol, String)",
+            "{a, b}",
+            "a"
+        ),
         1
     );
     // Position 2 is String in both -> no mismatch.
     assert_eq!(
-        probe("Tuple(Integer, String) | Tuple(Symbol, String)", "{a, b}", "b"),
+        probe(
+            "Tuple(Integer, String) | Tuple(Symbol, String)",
+            "{a, b}",
+            "b"
+        ),
         0
     );
 }
