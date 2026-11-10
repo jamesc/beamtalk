@@ -771,6 +771,27 @@ class_self_spawn_with(ClassName, Module, IsAbstract0, InitArgs, Name) ->
 ) -> beamtalk_result:t().
 do_class_self_named_spawn(ClassName, Module, IsAbstract0, InitArgs, Name, Selector) ->
     IsAbstract = IsAbstract0 =:= true,
+    %% BT-4492: same spawnable-kind check as `do_handle_spawn/5` (BT-4443),
+    %% before the abstract flag; `unknown` decides nothing. Returned as a
+    %% `Result` error, like the abstract branch. The class-reference forms
+    %% `X spawnAs:` / `X spawnWith:as:` need no check here: they are Actor
+    %% class-side methods, so a Value or Object class gets the ordinary
+    %% `does_not_understand` from class-side dispatch.
+    case beamtalk_supervisor:spawn_kind(ClassName) of
+        none ->
+            beamtalk_result:from_tagged_tuple(
+                {error, not_spawnable_error(ClassName, Selector)}
+            );
+        _ ->
+            do_class_self_named_spawn_checked(
+                ClassName, Module, IsAbstract, InitArgs, Name, Selector
+            )
+    end.
+
+-spec do_class_self_named_spawn_checked(
+    class_name(), atom(), boolean(), term(), term(), atom()
+) -> beamtalk_result:t().
+do_class_self_named_spawn_checked(ClassName, Module, IsAbstract, InitArgs, Name, Selector) ->
     case IsAbstract of
         true ->
             beamtalk_result:from_tagged_tuple(
