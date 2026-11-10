@@ -39,6 +39,11 @@ type Timeout = Integer | #infinity
 /// All messages, including cast sends (`!`), are forwarded using the
 /// configured timeout via `perform:withArguments:timeout:`.
 ///
+/// Only messages the proxy does not understand are forwarded. Messages it
+/// inherits from `Object`, such as `class` and `then:` (ADR 0145), answer on
+/// the proxy itself: `slowDb then: [:p | ...]` runs the block in the proxy's
+/// process and passes it the proxy, not `db`.
+///
 /// @see Actor#withTimeout:
 typed Actor subclass: TimeoutProxy
   state: target :: Actor | Nil = nil

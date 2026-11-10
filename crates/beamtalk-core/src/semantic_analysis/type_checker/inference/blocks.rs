@@ -27,6 +27,14 @@ use crate::semantic_analysis::type_checker::{
 };
 use crate::source_analysis::Span;
 
+/// The `then:` selector (`Object >> then:`, ADR 0145 § 2, BT-4515).
+///
+/// A string, not a `WellKnownSelector` variant, for the reason `and:` is one
+/// in `send/receiver.rs`: `then:` is an ordinary self-hosted `Object` method
+/// that neither the type checker nor codegen intrinsifies; only its
+/// block-parameter typing is special.
+pub(in crate::semantic_analysis::type_checker) const THEN_SELECTOR: &str = "then:";
+
 impl TypeChecker {
     /// Infer argument types for `on:do:` with exception class propagation.
     ///
@@ -226,6 +234,121 @@ impl TypeChecker {
         )
     }
 
+    /// Whether a `then:` sent to a value of `receiver_ty` is answered by
+    /// `Object >> then:` (ADR 0145 § 2, BT-4515) for every class the type
+    /// admits.
+    ///
+    /// `then:` is not `sealed`, so a class may define its own (a promise
+    /// whose block takes the resolved value, not the receiver). The
+    /// [`Self::infer_args_for_then`] rule only describes `Object`'s method,
+    /// so it applies only when every member of the receiver's type resolves
+    /// `then:` to `Object`. A `Dynamic` receiver, a protocol type, or a
+    /// class that overrides `then:` keeps the generic send path.
+    pub(in crate::semantic_analysis::type_checker) fn then_resolves_to_object(
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        match receiver_ty {
+            InferredType::Known { class_name, .. } => hierarchy
+                .find_method(super::method_resolution_class(class_name), THEN_SELECTOR)
+                .is_some_and(|m| m.defined_in.as_str() == WellKnownClass::Object.as_str()),
+            InferredType::Union { members, .. } => {
+                !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|m| Self::then_resolves_to_object(m, hierarchy))
+            }
+            _ => false,
+        }
+    }
+
+    /// Infer the argument of `Object >> then:` (ADR 0145 § 2, BT-4515):
+    /// a literal block's first parameter is typed as the receiver's type,
+    /// so a `|>` pipeline that continues inside or after the block keeps
+    /// its types. Modelled on [`Self::infer_if_not_nil_block`], without the
+    /// nil narrowing: `then:` evaluates its block for every receiver, `nil`
+    /// included.
+    ///
+    /// Only called when [`Self::then_resolves_to_object`] holds. A non-block
+    /// argument takes the normal expression inference path; the send's
+    /// result type is then read from its `Block(..., R)` type by
+    /// [`Self::block_arg_result_ty`] if it has one.
+    pub(in crate::semantic_analysis::type_checker) fn infer_args_for_then(
+        &mut self,
+        arguments: &[Expression],
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        arguments
+            .iter()
+            .map(|arg| {
+                let Expression::Block(block) = arg else {
+                    return self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                };
+                // `Object >> then:` sends `value:`, so a well-formed block has
+                // one parameter; any beyond the first stay `Dynamic`, as in
+                // `infer_if_not_nil_block`. A zero-arity block still goes
+                // through the typed-param helper so its `Block(R)` type
+                // carries the body's result type.
+                let param_types: Vec<InferredType> = block
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        if i == 0 {
+                            receiver_ty.clone()
+                        } else {
+                            InferredType::Dynamic(DynamicReason::UnannotatedParam)
+                        }
+                    })
+                    .collect();
+                self.infer_block_with_typed_params(
+                    block,
+                    arg.span(),
+                    &param_types,
+                    hierarchy,
+                    env,
+                    in_abstract_method,
+                )
+            })
+            .collect()
+    }
+
+    /// The result type of evaluating a block argument: the last type-arg of
+    /// its `Block(..., R)` type, or `Never` when it is a block literal that
+    /// holds a non-local return (`^`) anywhere inside it (including nested
+    /// sub-expressions like `[[^1] value]` or `foo: (^bar)`), since that
+    /// exits the enclosing method before the value is observed.
+    ///
+    /// Returns `None` when `ty` is not a `Block(...)` type with type-args
+    /// (e.g. the caller passed a symbol or a bare `Block`), so the caller
+    /// falls back to the generic method-lookup path. Shared by the
+    /// `ifNil:`/`ifNotNil:` family and `then:`.
+    pub(in crate::semantic_analysis::type_checker) fn block_arg_result_ty(
+        arg: &Expression,
+        ty: &InferredType,
+    ) -> Option<InferredType> {
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            return None;
+        };
+        if class_name.as_str() != "Block" {
+            return None;
+        }
+        if let Expression::Block(block) = arg {
+            if block_has_any_return(block) {
+                return Some(InferredType::Never);
+            }
+        }
+        type_args.last().cloned()
+    }
+
     /// Compute the return type of `ifNil:ifNotNil:` /
     /// `ifNotNil:ifNil:` as the union of both branch bodies' return types.
     ///
@@ -246,31 +369,9 @@ impl TypeChecker {
         if arg_types.len() < 2 || arguments.len() < 2 {
             return None;
         }
-        let branch_ret = |arg: &Expression, ty: &InferredType| -> Option<InferredType> {
-            let InferredType::Known {
-                class_name,
-                type_args,
-                ..
-            } = ty
-            else {
-                return None;
-            };
-            if class_name.as_str() != "Block" {
-                return None;
-            }
-            // Non-local `^` anywhere inside the branch (including nested
-            // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
-            // the method before the expression value is observed — treat
-            // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = arg {
-                if block_has_any_return(block) {
-                    return Some(InferredType::Never);
-                }
-            }
-            type_args.last().cloned()
-        };
-        let a = branch_ret(&arguments[0], &arg_types[0])?;
-        let b = branch_ret(&arguments[1], &arg_types[1])?;
+        // A branch with a non-local `^` is `Never`, so `union_of` skips it.
+        let a = Self::block_arg_result_ty(&arguments[0], &arg_types[0])?;
+        let b = Self::block_arg_result_ty(&arguments[1], &arg_types[1])?;
         Some(InferredType::union_of(&[a, b]))
     }
 
@@ -326,28 +427,7 @@ impl TypeChecker {
             return None;
         }
 
-        let arg = arguments.first()?;
-        let ty = arg_types.first()?;
-        let InferredType::Known {
-            class_name,
-            type_args,
-            ..
-        } = ty
-        else {
-            return None;
-        };
-        if class_name.as_str() != "Block" {
-            return None;
-        }
-        let block_ret = if let Expression::Block(block) = arg {
-            if block_has_any_return(block) {
-                InferredType::Never
-            } else {
-                type_args.last().cloned()?
-            }
-        } else {
-            type_args.last().cloned()?
-        };
+        let block_ret = Self::block_arg_result_ty(arguments.first()?, arg_types.first()?)?;
 
         let self_branch = match WellKnownSelector::from_name(selector_name) {
             Some(WellKnownSelector::IfNil) => {

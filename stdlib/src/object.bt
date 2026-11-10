@@ -116,6 +116,40 @@ ProtoObject subclass: Object
   ifNotNil: notNilBlock :: Block ifNil: _nilBlock :: Block =>
     notNilBlock value: self
 
+  // === Pipelines ===
+
+  /// Answer the result of evaluating `aBlock` with the receiver
+  /// (ADR 0145 § 2, named after Elixir's `Kernel.then/2`).
+  ///
+  /// The escape hatch for putting a value somewhere other than the receiver
+  /// of the next message, typically after `|>`. It is an ordinary message,
+  /// so it also works without `|>`. Put `|>` in front of a `then:` that
+  /// follows a keyword message: without it, `xs inject: 0 into: [...]
+  /// then: [...]` is one `inject:into:then:` send.
+  ///
+  /// The `aBlock` param is a bare `Block` for the same reason as
+  /// `ifNotNil:` above (BT-2834). The type checker does not consult this
+  /// declared signature for a literal block: it types the block's parameter
+  /// as the receiver's type and answers the block's result type
+  /// (`infer_args_for_then` in `inference/blocks.rs`, BT-4515).
+  ///
+  /// `then:` is not inlined and not `sealed`. A class that defines its own
+  /// `then:` (a promise, say) keeps it. Because it is a message, on an actor
+  /// receiver the block runs in the actor's process, and on a class receiver
+  /// whose class declares class variables it runs in the class process
+  /// (ADR 0142). A block passed to it that assigns a captured local is an
+  /// escaping block (ADR 0133), a compile error: bind the value to a temp
+  /// local instead. A forwarding proxy (`TimeoutProxy`) answers `then:`
+  /// itself, with the proxy as the block's argument, rather than forwarding
+  /// it to its target.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3 then: [:x | x * x]                       // => 9
+  /// #(1, 2, 3) collect: [:x | x * 2] |> then: [:xs | xs size * 10]   // => 30
+  /// ```
+  then: aBlock :: Block => aBlock value: self
+
   // === Printing and inspecting ===
 
   /// Return the developer-readable (Debug) string representation.

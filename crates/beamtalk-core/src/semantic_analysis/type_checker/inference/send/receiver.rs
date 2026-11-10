@@ -131,6 +131,15 @@ impl TypeChecker {
             None
         };
 
+        // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
+        // parameter as the receiver and answers the block's result type. Only
+        // for an instance-side receiver whose every class answers `then:`
+        // with `Object`'s method — a class's own `then:` (a promise, say)
+        // and class-side receivers keep the generic path, as for `ifNil:`.
+        let is_object_then = selector_name == super::super::blocks::THEN_SELECTOR
+            && !Self::is_class_side_receiver(receiver, env)
+            && Self::then_resolves_to_object(&receiver_ty, hierarchy);
+
         // Infer argument types, applying narrowing to block arguments when detected.
         let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
             self.infer_args_with_narrowing(
@@ -181,6 +190,8 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
+        } else if is_object_then {
+            self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
         } else if let (true, Some(var_key), Some(arg)) = (
             // `and:` stays a string comparison rather than a
             // `WellKnownSelector` variant, matching `state_threading_selectors`'s
@@ -264,6 +275,13 @@ impl TypeChecker {
         // flow through `check_class_side_send` so an invalid metaclass send
         // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
         // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
+        if is_object_then {
+            if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
+                if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
+                    return ty;
+                }
+            }
+        }
         let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
         if !is_class_side_receiver {
             if matches!(

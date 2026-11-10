@@ -201,6 +201,30 @@ fn escaping_block_messages_name_the_shape() {
     }
 }
 
+/// BT-4515 (ADR 0145 § 2): `then:` is an ordinary `Object` message, not a
+/// construct the compiler threads a local through, so a literal block passed
+/// to it that assigns a captured local is an escaping block — with or without
+/// `|>` in front, and in every method context. The fix is a temp local.
+#[test]
+fn a_writing_block_passed_to_then_is_an_escaping_block() {
+    let message = "`t` is assigned in a block passed to `then:`, which is not a construct the \
+                   compiler threads it through";
+    for body in [
+        "3 then: [:v | t := t + v]\nt",
+        "#(1, 2) |> then: [:xs | t := xs size]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+            assert_eq!(s6[0].message.as_str(), message, "{src}");
+        }
+    }
+    // A block that only reads the captured local is fine.
+    let src = in_class("x := 3 then: [:v | t + v]\nx");
+    assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+}
+
 /// BT-4283: a block passed to a class reference whose name another package in
 /// scope also declares escapes to a class method: the name is one last-wins
 /// runtime class, so the stateless `CvA` this unit declares need not be the
