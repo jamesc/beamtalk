@@ -60,8 +60,8 @@ put on the wire:
   `{'$beamtalk_wire', V, async, Selector, WireArgs, FuturePid, PropCtx}`;
 - continuation: `{continue, {'$bt_continue', [{Selector, Args}]}}`.
 
-A `perform:`-family send whose first argument is a secret selector is
-treated as a send of that selector.
+A `perform:` send naming a secret selector, at any depth of nested
+`perform:` forms, is treated as a send of that selector.
 """.
 
 -include("beamtalk.hrl").
@@ -194,24 +194,13 @@ redact_args(Sel, Args, Selectors) ->
 
 -doc """
 Whether a send of `Sel` with `Args` is a send of a secret selector: `Sel`
-itself is secret, or `Sel` is a `perform:`-family selector whose first
-argument is a secret selector.
+itself is secret, or `Sel` is a `perform:` form that names a secret selector
+at any depth (`beamtalk_actor:performed_selector/2`).
 """.
 -spec is_secret_send(atom(), term(), [atom()]) -> boolean().
 is_secret_send(Sel, Args, Selectors) ->
     lists:member(Sel, Selectors) orelse
-        (is_perform(Sel) andalso
-            case Args of
-                [Target | _] when is_atom(Target) -> lists:member(Target, Selectors);
-                _ -> false
-            end).
-
--spec is_perform(atom()) -> boolean().
-is_perform(Sel) ->
-    case atom_to_binary(Sel) of
-        <<"perform:", _/binary>> -> true;
-        _ -> false
-    end.
+        lists:member(beamtalk_actor:performed_selector(Sel, Args), Selectors).
 
 %%% sys log
 

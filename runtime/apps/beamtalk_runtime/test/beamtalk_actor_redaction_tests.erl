@@ -98,6 +98,10 @@ message_shapes_test_() ->
             {continue, {?BT_CONTINUE_TAG, [{'login:', ?R}, {count, []}]}}
         },
         {{'perform:withArguments:', ['login:', [pw]], Ctx}, {'perform:withArguments:', ?R, Ctx}},
+        {
+            {'perform:withArguments:', ['perform:withArguments:', ['login:', [pw]]], Ctx},
+            {'perform:withArguments:', ?R, Ctx}
+        },
         %% non-secret sends and foreign messages pass through
         {{count, [], Ctx}, {count, [], Ctx}},
         {{'perform:', [count], Ctx}, {'perform:', [count], Ctx}},
