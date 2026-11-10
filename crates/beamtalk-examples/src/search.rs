@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::corpus::{CORPUS, Corpus, CorpusEntry};
+use crate::corpus::{Corpus, CorpusEntry, bundled_corpus};
 
 /// Maximum number of results that can be returned.
 const MAX_LIMIT: usize = 20;
@@ -13,11 +13,12 @@ pub struct SearchResult<'a> {
     pub score: u32,
 }
 
-/// Search the embedded corpus for entries matching the given query.
+/// Search the bundled corpus for entries matching the given query.
 ///
-/// Delegates to [`search_in`] using the global `CORPUS` singleton.
-pub fn search(query: &str, limit: Option<usize>) -> Vec<SearchResult<'_>> {
-    search_in(&CORPUS, query, limit)
+/// Delegates to [`search_in`] using the running binary's [`bundled_corpus`]
+/// (empty when the corpus file is missing).
+pub fn search(query: &str, limit: Option<usize>) -> Vec<SearchResult<'static>> {
+    search_in(bundled_corpus().corpus(), query, limit)
 }
 
 /// Search a given corpus for entries matching the given query.
