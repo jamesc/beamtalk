@@ -619,3 +619,39 @@ fn test_cascade_receiver_checks_see_the_cascade_target() {
         0
     );
 }
+
+#[test]
+fn test_method_validators_run_on_class_side_methods() {
+    // BT-4645: the analyser walks class-side methods too, so a class method
+    // gets the same method-validator diagnostics as an instance method.
+    let diags = |side: &str, body: &str, needle: &str| {
+        let src = format!("Object subclass: W\n  {side}run =>\n    {body}\n");
+        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .map(|d| d.span)
+            .collect::<Vec<_>>()
+    };
+    let cases = [
+        ("#(1, 2) collect: [:a :b | a]", "expects a block with 1"),
+        (
+            "[:y | true] whileTrue: [nil]",
+            "expects its receiver to be a block",
+        ),
+        ("\"abc\" at: #k", "expects an integer argument"),
+        ("Integer new", "Cannot instantiate primitive class"),
+    ];
+    for (body, needle) in cases {
+        let instance = diags("", body, needle);
+        assert_eq!(instance.len(), 1, "instance side: {body}");
+        // `class ` shifts every span by its own length.
+        let class_side = diags("class ", body, needle);
+        assert_eq!(class_side.len(), 1, "class side: {body}");
+        assert_eq!(
+            class_side[0].start(),
+            instance[0].start() + 6,
+            "class side span: {body}"
+        );
+    }
+}
