@@ -218,14 +218,17 @@ impl PackageSources {
 /// Outside one, only the targets are parsed and the scope is `ModuleOnly`.
 ///
 /// `on_unreadable(file, is_target, error)` is called for each file that
-/// cannot be read; the file is skipped.
+/// cannot be read; the file is skipped. A source directory that cannot be
+/// walked is logged. Either way Pass 1 has not seen the whole package, so
+/// the scope drops to `ModuleOnly`: claiming `ProjectComplete` would turn
+/// the missing classes into "genuinely unresolved" ones.
 pub fn parse_package_sources(
     lint_path: &Utf8Path,
     targets: &[Utf8PathBuf],
     mut on_unreadable: impl FnMut(&Utf8Path, bool, &std::io::Error),
 ) -> PackageSources {
     let package_root = find_package_root(lint_path);
-    let scope = package_checker_scope(package_root.as_deref());
+    let mut scope = package_checker_scope(package_root.as_deref());
     let current_package = scope.package_name.clone();
     let current_package = current_package.as_deref();
 
@@ -233,8 +236,15 @@ pub fn parse_package_sources(
         .iter()
         .map(|t| t.as_std_path().to_path_buf())
         .collect();
-    let (extraction_files, target_set) =
-        package::resolve_extraction_files(lint_path.as_std_path(), &target_paths);
+    let (extraction_files, target_set, walk_errors) =
+        package::resolve_extraction_files_with_errors(lint_path.as_std_path(), &target_paths);
+    for (dir, e) in &walk_errors {
+        warn!(
+            "failed to walk '{}' for cross-file class extraction: {e}",
+            dir.display()
+        );
+    }
+    let mut complete = walk_errors.is_empty();
 
     let mut class_infos = Vec::new();
     let mut extension_index = ExtensionIndex::new();
@@ -252,6 +262,7 @@ pub fn parse_package_sources(
             Ok(source) => source,
             Err(e) => {
                 on_unreadable(&file, is_target, &e);
+                complete = false;
                 continue;
             }
         };
@@ -306,6 +317,10 @@ pub fn parse_package_sources(
                 parse_diagnostics,
             });
         }
+    }
+
+    if !complete {
+        scope.knowledge_scope = KnowledgeScope::ModuleOnly;
     }
 
     PackageSources {
@@ -648,5 +663,60 @@ impl LintGate {
     #[must_use]
     pub fn fails(&self, warnings_as_errors: bool) -> bool {
         self.lint > 0 || (warnings_as_errors && self.live_recheck > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn package_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for (name, text) in files {
+            std::fs::write(root.join("src").join(name), text).unwrap();
+        }
+        (temp, root)
+    }
+
+    #[test]
+    fn complete_package_parse_is_project_complete() {
+        let (_temp, root) = package_with(&[("a.bt", "Object subclass: A\n")]);
+        let target = root.join("src").join("a.bt");
+        let sources = parse_package_sources(&root, &[target], |f, _, e| panic!("{f}: {e}"));
+        assert_eq!(
+            sources.scope.knowledge_scope,
+            KnowledgeScope::ProjectComplete
+        );
+        assert_eq!(sources.targets.len(), 1);
+    }
+
+    /// An unreadable package file leaves Pass 1 without some of the
+    /// package's classes, so the scope must not claim `ProjectComplete`
+    /// (MCP `lint` reports the file and carries on; BT-4585 review).
+    #[test]
+    fn unreadable_package_file_drops_scope_to_module_only() {
+        let (_temp, root) = package_with(&[("a.bt", "Object subclass: A\n")]);
+        // Not UTF-8, so `read_to_string` fails even for root (which
+        // bypasses permission bits).
+        std::fs::write(root.join("src").join("b.bt"), [0xff, 0xfe, 0xfd]).unwrap();
+        let target = root.join("src").join("a.bt");
+        let mut unreadable = Vec::new();
+        let sources = parse_package_sources(&root, &[target], |f, is_target, _| {
+            unreadable.push((f.to_path_buf(), is_target));
+        });
+        assert_eq!(
+            unreadable,
+            vec![(root.join("src").join("b.bt"), false)],
+            "the dangling file should be reported as an unreadable non-target"
+        );
+        assert_eq!(sources.scope.knowledge_scope, KnowledgeScope::ModuleOnly);
+        assert_eq!(sources.targets.len(), 1);
     }
 }

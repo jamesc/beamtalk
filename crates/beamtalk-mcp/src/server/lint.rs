@@ -53,8 +53,9 @@ impl LintResult {
     /// `warnings_as_errors` only `errors` fail it; with it, it applies CLI
     /// `beamtalk lint --warnings-as-errors`' gate ([`LintGate::fails`]) —
     /// Lint-severity diagnostics or the live-recheck set — plus file-level
-    /// errors (BT-4336). The diagnostics gated are the CLI's too: both
-    /// surfaces run [`lint_pipeline`] (BT-4585).
+    /// errors (BT-4336). Both surfaces run [`lint_pipeline`] (BT-4585), so
+    /// the diagnostics gated match the CLI's except where the FFI type
+    /// registry differs (BT-4643).
     pub(crate) fn fails(&self, warnings_as_errors: bool) -> bool {
         let gate = LintGate {
             lint: self.lint_failures,
@@ -67,8 +68,8 @@ impl LintResult {
 /// Build the Erlang FFI native-type registry for the package at
 /// `package_root` from its auto-extracted type specs
 /// (`beamtalk_cli::native_type_specs`), the extractor `beamtalk lint` uses.
-/// Unlike `beamtalk lint` it does not yet merge the ADR 0075 stub tiers
-/// (BT-4643). Returns `None` outside a package or when extraction finds no
+/// Unlike `beamtalk lint` it does not yet merge the ADR 0075 stub tiers or
+/// fall back to the stdlib's runtime specs for `stdlib/src` (BT-4643). Returns `None` outside a package or when extraction finds no
 /// `.beam` files (e.g. runtime not yet compiled).
 pub(crate) fn build_native_type_registry(
     package_root: Option<&Utf8Path>,

@@ -229,13 +229,34 @@ pub fn resolve_extraction_files(
     source_path: &Path,
     source_files: &[PathBuf],
 ) -> (Vec<PathBuf>, HashSet<PathBuf>) {
+    let (extraction_files, target_set, _) =
+        resolve_extraction_files_with_errors(source_path, source_files);
+    (extraction_files, target_set)
+}
+
+/// [`resolve_extraction_files`], also returning the package source
+/// directories that could not be walked (see
+/// [`collect_package_source_files_with_errors`]) — a non-empty list means
+/// the extraction set may be missing files.
+#[must_use]
+#[allow(clippy::type_complexity)] // the two-tuple above plus its walk errors
+pub fn resolve_extraction_files_with_errors(
+    source_path: &Path,
+    source_files: &[PathBuf],
+) -> (
+    Vec<PathBuf>,
+    HashSet<PathBuf>,
+    Vec<(PathBuf, miette::Report)>,
+) {
     let package_root = find_package_root(source_path);
 
     let target_set: HashSet<PathBuf> = source_files.iter().map(|f| try_canonicalize(f)).collect();
 
+    let mut walk_errors = Vec::new();
     let extraction_files = match &package_root {
         Some(root) => {
-            let mut pkg_files = collect_package_source_files(root);
+            let (mut pkg_files, errors) = collect_package_source_files_with_errors(root);
+            walk_errors = errors;
             // Build a canonical set of already-included package files so the
             // dedup lookup is O(1) per target rather than O(n) linear.
             let mut pkg_canonical: HashSet<PathBuf> =
@@ -253,7 +274,7 @@ pub fn resolve_extraction_files(
         None => source_files.to_vec(),
     };
 
-    (extraction_files, target_set)
+    (extraction_files, target_set, walk_errors)
 }
 
 #[cfg(test)]
