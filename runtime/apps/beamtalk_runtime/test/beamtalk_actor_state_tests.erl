@@ -454,7 +454,7 @@ commit_check_raises_on_a_stale_cell_test() ->
 commit_check_skips_a_cell_a_foreign_cleanup_put_ahead_test() ->
     with_commit_check(fun() ->
         with_cell(#{n => 0}, fun() ->
-            ok = beamtalk_actor_state:store_unwound(#{n => 40}),
+            ok = beamtalk_actor_state:store_unwound(nlr_throw(#{n => 0}), #{n => 40}),
             ?assertEqual(#{n => 40}, beamtalk_actor_state:commit(self_obj(), #{n => 0})),
             %% The marker is spent by the commit it was left for.
             ?assertEqual(
@@ -481,10 +481,58 @@ commit_check_off_never_raises_test() ->
         end)
     end).
 
+nlr_throw(Carried) -> {'$bt_nlr', make_ref(), 1, Carried}.
+
+%% The note is the throw's own: a nested commit of another `^` (a self-send's
+%% boundary reached while the throw is in flight) neither spends it nor is
+%% excused by it.
+commit_check_note_is_spent_only_by_its_own_throw_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ok = beamtalk_actor_state:store_unwound(nlr_throw(#{n => 0}), #{n => 40}),
+            %% Another throw, carrying the cell: passes, spends nothing.
+            ?assertEqual(#{n => 40}, beamtalk_actor_state:commit(self_obj(), #{n => 40})),
+            %% Another throw, stale: not excused by the first throw's note.
+            ?assertEqual(
+                actor_nlr_stale_cell,
+                kind_of(fun() -> beamtalk_actor_state:commit(self_obj(), #{n => 7}) end)
+            ),
+            %% The first throw's own commit is still excused.
+            ?assertEqual(#{n => 40}, beamtalk_actor_state:commit(self_obj(), #{n => 0}))
+        end)
+    end).
+
+%% A note left for a throw that never reached its boundary (it left the
+%% callback by another way) does not outlive the callback: a later callback's
+%% stale cell is still caught.
+commit_check_note_does_not_cross_callbacks_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ok = beamtalk_actor_state:store_unwound(nlr_throw(#{n => 0}), #{n => 40})
+        end),
+        with_cell(#{n => 40}, fun() ->
+            ?assertEqual(
+                actor_nlr_stale_cell,
+                kind_of(fun() -> beamtalk_actor_state:commit(self_obj(), #{n => 0}) end)
+            )
+        end)
+    end).
+
+%% A nested callback (an enclosing cell installed) keeps the outer one's note.
+commit_check_note_survives_a_nested_install_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ok = beamtalk_actor_state:store_unwound(nlr_throw(#{n => 0}), #{n => 40}),
+            Old = beamtalk_actor_state:install(#{n => 40}),
+            ok = beamtalk_actor_state:uninstall(Old),
+            ?assertEqual(#{n => 40}, beamtalk_actor_state:commit(self_obj(), #{n => 0}))
+        end)
+    end).
+
 store_unwound_stores_like_store_test() ->
     with_commit_check(false, fun() ->
         with_cell(#{n => 0}, fun() ->
-            ok = beamtalk_actor_state:store_unwound(#{n => 3}),
+            ok = beamtalk_actor_state:store_unwound(nlr_throw(#{n => 0}), #{n => 3}),
             ?assertEqual(#{n => 3}, beamtalk_actor_state:take()),
             ?assertEqual(undefined, erlang:get('$bt_nlr_cell_ahead'))
         end)

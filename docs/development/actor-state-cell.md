@@ -506,7 +506,7 @@ check asserts it directly at the commit: with `BEAMTALK_CHECK_NLR_COMMIT` set
 (the `Justfile` exports it, so BUnit, the stdlib corpus and the REPL and e2e
 suites run with it), a `^` thrown at home must reach its boundary carrying
 fields equal to the cell, unless an `ensure:` foreign clause put the cell
-ahead on the way (`store_unwound/1`) or the throw came from away (the BT-4448
+ahead on the way (`store_unwound/2`, noted for that throw only) or the throw came from away (the BT-4448
 stamp). Anything else raises `actor_nlr_stale_cell`: a lowering let a `^`
 start without storing the method's state.
 

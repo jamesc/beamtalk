@@ -377,6 +377,13 @@ impl CoreErlangGenerator {
     /// arm's threaded scope) to the method's boundary, storing it to the cell
     /// first where the cell is live ([`Self::nlr_throw_stores_cell`]).
     /// Answers the node and the variable its (never-produced) result binds.
+    ///
+    /// Only an arm of a threaded actor body reaches it: a merged Tier 2 fun's
+    /// body is cell-mode, so its arm `^`s take the generic `Return` lowering,
+    /// whose throw carries the merged map ([`NlrSlot::Tier2Merged`]); merged
+    /// funs are also reachable only in unvalidated compiles (ADR 0133).
+    /// Pinned by `tests/tier2_merge.rs`'s
+    /// `merged_fun_arm_returns_carry_the_merged_map`.
     pub(in crate::core_erlang) fn nlr_throw_stmt(
         &mut self,
         token: String,

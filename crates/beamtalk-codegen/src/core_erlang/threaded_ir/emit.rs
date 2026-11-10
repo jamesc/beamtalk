@@ -378,23 +378,27 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// is installed (a nested away `super_send/5`) does not claim that state for
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
-    cell_store_call(actor_state_helper::STORE, state)
+    cell_store_call(actor_state_helper::STORE, vec![state])
 }
 
-/// ADR 0146 R1 / BT-4535: `call 'beamtalk_actor_state':'store_unwound'(<state>)`,
-/// the store of an `ensure:` foreign clause ([`EnsureForeignNlr`]): the
-/// cleanup's writes, made while a `^` of another scope unwinds through it.
-/// That throw is re-raised as it came, so the cell is now ahead of the state
-/// it carries, which `store_unwound/1` tells the test-build check in
-/// `beamtalk_actor_state:commit/2`. Otherwise a [`cell_put_call`].
-pub(in crate::core_erlang) fn cell_put_unwound_call(state: Document<'static>) -> Document<'static> {
-    cell_store_call(actor_state_helper::STORE_UNWOUND, state)
+/// ADR 0146 R1 / BT-4535: `call 'beamtalk_actor_state':'store_unwound'(<throw>,
+/// <state>)`, the store of an `ensure:` foreign clause ([`EnsureForeignNlr`]):
+/// the cleanup's writes, made while `throw` (a `^` of another scope) unwinds
+/// through it. That throw is re-raised as it came, so the cell is now ahead
+/// of the state it carries, which `store_unwound/2` tells the test-build
+/// check in `beamtalk_actor_state:commit/2` for that throw only. Otherwise a
+/// [`cell_put_call`].
+pub(in crate::core_erlang) fn cell_put_unwound_call(
+    throw: Document<'static>,
+    state: Document<'static>,
+) -> Document<'static> {
+    cell_store_call(actor_state_helper::STORE_UNWOUND, vec![throw, state])
 }
 
 /// Every cell store, marking it for [`take_cell_store_emitted`].
-fn cell_store_call(helper: (&'static str, u32), state: Document<'static>) -> Document<'static> {
+fn cell_store_call(helper: (&'static str, u32), args: Vec<Document<'static>>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    actor_state_call(helper, vec![state])
+    actor_state_call(helper, args)
 }
 
 /// `call 'beamtalk_actor_state':'take'()`: the one emitter of every cell
@@ -807,9 +811,10 @@ fn render_ensure_foreign_clause(
     let store = match foreign.store {
         Some(version) => docvec![
             "let _ = ",
-            cell_put_unwound_call(leaf::var(super::super::util::versioned_var(
-                "StateAcc", version
-            ))),
+            cell_put_unwound_call(
+                leaf::var(vars.foreign_nlr_var.clone()),
+                leaf::var(super::super::util::versioned_var("StateAcc", version)),
+            ),
             " in ",
         ],
         None => Document::Nil,

@@ -1940,7 +1940,6 @@ impl VerifyWalk<'_> {
             // `condition_families` by `condition_families_not_carried`.
             // BT-4503: the boundary of a value-type or class-method function
             // answers the bare value its callers take as the send's result.
-            // ADR 0146: an actor method's boundary commits the cell.
             ThreadedStmt::NlrCatch { boundary, span, .. } => {
                 if matches!(self.scope, ScopeKind::ValueType | ScopeKind::ClassMethod)
                     && boundary.arm_shape() != NlrArmShape::Value
