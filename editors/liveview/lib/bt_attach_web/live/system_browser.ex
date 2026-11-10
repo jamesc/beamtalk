@@ -211,10 +211,22 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     # default script grammar would false-positive); the Workspace + REPL editors
     # send nothing. Forward the raw client value — the facade normalises it to a
     # known binary ("method" | "expression"), the single boundary for every caller.
+    #
+    # `tab_id` (BT-4583) names the method-editor tab the buffer belongs to. A
+    # file-backed `:def` tab resolves to its class's source file, which rides
+    # the request as `source_path` so the check uses that file's project scope
+    # (`beamtalk.toml` `[diagnostics]` table, cross-file type aliases) — the
+    # scope `load-project` compiles it with. The path is looked up here, never
+    # taken from the client, so a crafted event can't point the compiler at an
+    # arbitrary file. The Workspace + REPL editors send no tab id → no path.
     diagnostics =
       case Facade.dispatch(
              :diagnostics,
-             %{code: code, mode: Map.get(params, "mode")},
+             %{
+               code: code,
+               mode: Map.get(params, "mode"),
+               source_path: diagnostics_source_path(socket, Map.get(params, "tab_id"))
+             },
              RequestContext.build(socket)
            ) do
         {:ok, list} when is_list(list) -> list
@@ -648,6 +660,25 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       _ -> {:noreply, socket}
     end
   end
+
+  # BT-4583: the source file a `diagnostics` request's buffer edits, or `nil`.
+  # Only a class-definition (`:def`) tab is file-backed in expression mode: a
+  # method tab lints in "method" mode, which ignores the path, and the
+  # Workspace/REPL editors are scratch buffers. The class's file comes from the
+  # browser's class rows (`browse-classes` `source_file`); a class with no file
+  # (ClassBuilder, REPL-defined) has none, so it keeps today's scope.
+  defp diagnostics_source_path(socket, tab_id) when is_binary(tab_id) do
+    with %{kind: :def, class: class} <-
+           Enum.find(socket.assigns[:tabs] || [], &(&1.id == tab_id)),
+         %{"source_file" => path} when is_binary(path) and path != "" <-
+           Enum.find(socket.assigns[:browser_classes] || [], &(Map.get(&1, "name") == class)) do
+      path
+    else
+      _ -> nil
+    end
+  end
+
+  defp diagnostics_source_path(_socket, _tab_id), do: nil
 
   # ── System Browser data source (BT-2491, browse ops ADR 0096) ───────────────
   #

@@ -10,6 +10,9 @@
 //! - [`build_layout`] — centralised `_build/` path construction
 //! - [`dependency_classes`] — best-effort, offline dependency class
 //!   resolution shared with `beamtalk-mcp`
+//! - [`erlang_lint`] — text-based lint checks for native `.erl` files
+//! - [`lint_pipeline`] — the `beamtalk lint` analysis pipeline, shared with
+//!   the MCP `lint`/`diagnostic_summary` tools (BT-4585)
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction shared with
 //!   `beamtalk-mcp`
 //! - [`otp_support`] — OTP version support window (ADR 0125 §3.1), the
@@ -24,7 +27,9 @@ pub mod build_layout;
 pub mod dependency_classes;
 // Moved to `beamtalk-project` so the LSP applies the same rule (BT-4611).
 pub use beamtalk_project::dependency_extensions;
+pub mod erlang_lint;
 pub mod erlc;
+pub mod lint_pipeline;
 pub mod manifest;
 pub mod native_type_specs;
 pub mod otp_support;

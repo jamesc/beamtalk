@@ -27,7 +27,47 @@ fn run_lint_structured_non_bt_file() {
     let result = run_lint_structured(path.as_str());
     assert_eq!(result.total, 1);
     assert!(result.errors.len() == 1);
-    assert!(result.errors[0].message.contains(".bt file"));
+    // The CLI's message, from the shared `collect_lint_files` (BT-4585).
+    assert!(
+        result.errors[0]
+            .message
+            .contains("is not a .bt or .erl source file"),
+        "{result:?}"
+    );
+}
+
+/// MCP `lint` checks native `.erl` files the way `beamtalk lint` does
+/// (BT-4585): a directory target picks up the package's `native/` files,
+/// and each finding counts toward `lint_failures`.
+#[test]
+fn run_lint_structured_lints_native_erl_files() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src").join("ok.bt"), "Object subclass: Ok\n").unwrap();
+    std::fs::create_dir_all(dir.join("native")).unwrap();
+    // No `-moduledoc`: one Erlang lint finding.
+    std::fs::write(
+        dir.join("native").join("app_ffi.erl"),
+        "-module(app_ffi).\n-export([]).\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(dir.to_str().unwrap());
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|d| d.file.ends_with("app_ffi.erl") && d.message.contains("moduledoc")),
+        "the .erl file's missing -moduledoc should be reported: {result:?}"
+    );
+    assert!(result.lint_failures >= 1, "{result:?}");
+    assert!(result.fails(true), "{result:?}");
 }
 
 #[test]
@@ -92,14 +132,14 @@ fn run_lint_structured_expect_type_suppresses_dnu() {
 // ── near-miss `// === Name ===` divider ────────────────────────────────
 //
 // These exercise the real `lint`/`diagnostic_summary` entry points
-// (`run_lint_structured`, `run_module_analysis`), not
+// (`run_lint_structured`), not
 // `near_miss_divider::scan_source` directly — that's already covered by
 // that module's own `scan_source_locates_the_near_miss_comment_line_precisely`
 // test.
 
 #[test]
 fn run_lint_structured_near_miss_divider_span_points_at_comment_line() {
-    // `run_module_analysis` threads `source` through so the near-miss
+    // The shared `lint_pipeline::analyse_file` threads `source` through so the near-miss
     // check can scan the raw text directly. The AST-based
     // `NearMissDividerPass` alternative would report the wrong span here:
     // its `Comment::span` is actually `bar`'s token span (line 3), not the
@@ -156,122 +196,7 @@ fn run_lint_structured_multiple_near_miss_dividers_get_distinct_correctly_attrib
     );
 }
 
-/// `compute_diagnostic_summary`'s public JSON output only
-/// exposes aggregate severity/category counts, not individual
-/// diagnostic spans — so span accuracy can't be asserted through its
-/// return value directly. This instead calls `run_module_analysis`,
-/// the exact shared function `compute_diagnostic_summary`'s Pass 2 loop
-/// invokes per file (see the call site a few lines below in this
-/// module), and inspects the diagnostic it produces before that
-/// information is aggregated away — proving MCP `diagnostic_summary`'s
-/// code path carries the same accurate, comment-line span as MCP
-/// `lint` and the LSP, not just that it doesn't crash.
-#[test]
-fn run_module_analysis_near_miss_divider_span_points_at_comment_line() {
-    let source = "Object subclass: Foo\n  // === Section ====\n  bar => 1\n";
-    let tokens = lex_with_eof(source);
-    let (module, parse_diags) = parse(tokens);
-    let initial_diags: Vec<_> = parse_diags
-        .into_iter()
-        .filter(|d| d.severity == Severity::Lint)
-        .collect();
-    let (diags, _) = run_module_analysis(
-        &module,
-        source,
-        &[],
-        vec![],
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-        initial_diags,
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        None,
-        false,
-        None,
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-    );
-    let near_misses: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("section divider"))
-        .collect();
-    assert_eq!(
-        near_misses.len(),
-        1,
-        "expected exactly one near-miss-divider diagnostic: {diags:?}"
-    );
-    assert_eq!(
-        near_misses[0].span.line_number(source),
-        2,
-        "span should point at the comment's own line (2), not `bar`'s line (3): {diags:?}"
-    );
-}
-
-/// MCP `lint`/`diagnostic_summary` must report the same
-/// file-name/class-name mismatch `beamtalk build`/`beamtalk lint`/the
-/// LSP do: `run_module_analysis` must call
-/// `check_class_file_name_agreement`, or this surface silently
-/// reports clean regardless of `file_stem`.
-#[test]
-fn run_module_analysis_reports_mismatched_file_name() {
-    let source = "Value subclass: ExduraEvent";
-    let tokens = lex_with_eof(source);
-    let (module, parse_diags) = parse(tokens);
-    let (diags, _) = run_module_analysis(
-        &module,
-        source,
-        &[],
-        vec![],
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-        parse_diags,
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        None,
-        false,
-        Some("event"),
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-    );
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("does not match declared class")),
-        "mismatched file name should be reported: {diags:?}"
-    );
-}
-
-/// Negative control for the mismatched-file-name check above.
-#[test]
-fn run_module_analysis_does_not_report_matching_file_name() {
-    let source = "Value subclass: ExduraEvent";
-    let tokens = lex_with_eof(source);
-    let (module, parse_diags) = parse(tokens);
-    let (diags, _) = run_module_analysis(
-        &module,
-        source,
-        &[],
-        vec![],
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-        parse_diags,
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        None,
-        false,
-        Some("exdura_event"),
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-    );
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("does not match declared class")),
-        "matching file name should not be reported: {diags:?}"
-    );
-}
-
-/// ADR 0127 §10a / BT-3591: `run_module_analysis`'s `pre_loaded_protocol_defs`
+/// ADR 0127 §10a / BT-3591: `lint_pipeline::analyse_file`'s `pre_loaded_protocol_defs`
 /// argument must actually reach
 /// `AnalysisContext::with_pre_loaded_protocol_defs`, so a dependency-sourced
 /// trait (a provision-bearing protocol) can flatten into a `uses:` class
@@ -279,12 +204,12 @@ fn run_module_analysis_does_not_report_matching_file_name() {
 /// protocol". `trait_expansion`'s "unknown protocol"/"no source available"
 /// diagnostics carry no `DiagnosticCategory` (unlike
 /// `check_native_declaration_location`'s, see the test below), so — like
-/// `run_module_analysis_is_stub_file_suppresses_native_declaration_location_error`
+/// `analysis_is_stub_file_suppresses_native_declaration_location_error`
 /// above — this asserts on `analyse_full`'s pre-filter diagnostics directly
-/// rather than `run_module_analysis`'s own `category.is_some()`-filtered
+/// rather than `lint_pipeline::analyse_file`'s own `category.is_some()`-filtered
 /// return, which would otherwise silently drop them either way.
 #[test]
-fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
+fn analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
     let protocol_source = "Protocol define: Ranked\n  \
         < other :: Self -> Boolean\n\n  \
         max: other :: Self -> Self => (self < other) ifTrue: [other] ifFalse: [self]\n";
@@ -323,7 +248,7 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
 
 /// Analogous to
 /// `beamtalk_language_service::project_index::tests::is_stub_file_true_for_file_under_a_root_stubs_dir`:
-/// `run_module_analysis`'s `is_stub_file` argument must actually reach
+/// `lint_pipeline::analyse_file`'s `is_stub_file` argument must actually reach
 /// `AnalysisContext::is_stub_file` — verified here by calling it directly
 /// with `is_stub_file: false` on a module containing a `declare
 /// native:` block and confirming `check_native_declaration_location`
@@ -333,17 +258,17 @@ fn run_module_analysis_pre_loaded_protocol_defs_flattens_cross_package_uses() {
 ///
 /// This test asserts on `analyse_full`'s
 /// pre-filter diagnostics — built with the identical `AnalysisContext`
-/// construction `run_module_analysis` uses — rather than
-/// `run_module_analysis`'s own return value, because
+/// construction `lint_pipeline::analyse_file` uses — rather than
+/// `lint_pipeline::analyse_file`'s own return value, because
 /// `check_native_declaration_location`'s diagnostic also needs a
-/// `DiagnosticCategory` to survive `run_module_analysis`'s
+/// `DiagnosticCategory` to survive `lint_pipeline::analyse_file`'s
 /// `category.is_some()` filter; asserting on the pre-filter diagnostics
 /// isolates the `is_stub_file` wiring from that unrelated filter, so this
-/// test actually exercises it instead of vacuously passing either way. See
-/// `run_module_analysis_reports_native_declaration_location_error` below
-/// for the *returned*-diagnostics (post-filter, with category) case.
+/// test actually exercises it instead of vacuously passing either way. The
+/// CLI's `declare_native_outside_stubs_is_reported` covers the
+/// *returned*-diagnostics (post-filter, with category) case.
 #[test]
-fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error() {
+fn analysis_is_stub_file_suppresses_native_declaration_location_error() {
     let source = "declare native: lists\n";
     let tokens = lex_with_eof(source);
     let (module, _parse_diags) = parse(tokens);
@@ -368,49 +293,9 @@ fn run_module_analysis_is_stub_file_suppresses_native_declaration_location_error
     );
 }
 
-/// `check_native_declaration_location`'s diagnostic
-/// carries a `DiagnosticCategory`
-/// (`NativeDeclarationLocation`), so `run_module_analysis`'s
-/// `category.is_some()` filter does not silently drop it from the
-/// diagnostics MCP `lint`/`diagnostic_summary` actually return — unlike
-/// the previous test, which has to reach past
-/// `run_module_analysis` into `analyse_full`'s pre-filter diagnostics to
-/// observe the check running at all.
-#[test]
-fn run_module_analysis_reports_native_declaration_location_error() {
-    let source = "declare native: lists\n";
-    let tokens = lex_with_eof(source);
-    let (module, _parse_diags) = parse(tokens);
-
-    let (diags, _) = run_module_analysis(
-        &module,
-        source,
-        &[],
-        Vec::new(),
-        beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-        Vec::new(),
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        None,
-        false,
-        None,
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-    );
-
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("only valid in stubs/ directory")),
-        "declare native: outside stubs/ should be reported by run_module_analysis, \
-             not silently dropped: {diags:?}"
-    );
-}
-
 /// End-to-end (MCP-level): opening a legitimate `stubs/lists.bt` via the
 /// MCP `lint` tool must not report a false "only valid in stubs/
-/// directory" error. The earlier `run_module_analysis_is_stub_file_...`
+/// directory" error. The earlier `analysis_is_stub_file_...`
 /// test asserts the `is_stub_file` wiring actually
 /// discriminates stub vs. non-stub at the `AnalysisContext` level (the
 /// only level that can observe it, per that test's doc on the
@@ -462,7 +347,9 @@ fn build_native_type_registry_extracts_live_on_cold_cache() {
     // No `_build/` directory exists yet — the cold-cache case.
     assert!(!dir.join("_build").exists());
 
-    let Some(registry) = build_native_type_registry(dir.join("src").to_str().unwrap()) else {
+    let Some(registry) = build_native_type_registry(Some(
+        camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir"),
+    )) else {
         // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
         // with no OTP install on disk); skip rather than false-fail.
         eprintln!(
@@ -486,7 +373,7 @@ fn build_native_type_registry_extracts_live_on_cold_cache() {
 /// call does not fall back to `Dynamic(UntypedFfi)` and trip the
 /// "Dynamic in typed class" warning — mirrors
 /// `commands::lint`'s `ffi_call_with_registry_does_not_warn_dynamic_in_typed_class`.
-/// Without a live registry, `run_module_analysis` analyses with `None`,
+/// Without a live registry, `lint_pipeline::analyse_file` analyses with `None`,
 /// so this warning fires unconditionally regardless of whether the
 /// runtime's `.beam` files carry a real `-spec`.
 #[test]
@@ -506,7 +393,11 @@ fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
         )
         .unwrap();
 
-    if build_native_type_registry(file.to_str().unwrap()).is_none() {
+    if build_native_type_registry(Some(
+        camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir"),
+    ))
+    .is_none()
+    {
         eprintln!(
             "skipping run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class: \
                  no OTP .beam files discovered in this environment"
@@ -615,7 +506,7 @@ fn write_cross_file_visibility_leak_fixture() -> (tempfile::TempDir, std::path::
 }
 
 /// Regression: `current_package` must be threaded into
-/// `run_module_analysis`'s `CompilerOptions`, or `check_class_visibility`
+/// `lint_pipeline::analyse_file`'s `CompilerOptions`, or `check_class_visibility`
 /// (E0401/E0402) silently emits zero diagnostics for MCP `lint`, unlike
 /// `beamtalk build`/`beamtalk lint`.
 #[test]

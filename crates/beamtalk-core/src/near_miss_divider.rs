@@ -50,12 +50,12 @@
 //! whole into that method's plain-`String` `doc_comment` field (no
 //! `Comment`, no span, invisible to an AST walk). [`check_near_miss_dividers`]
 //! is the thin, `pub` wrapper every caller actually reaches:
-//! `queries::diagnostic_provider` (the LSP-facing pipeline), `beamtalk
-//! lint`'s `collect_diagnostics`, and MCP's `run_module_analysis` all
-//! thread `source: &str` through it and call it directly, rather than each
+//! `queries::diagnostic_provider`'s pipeline, which the LSP, `build` and
+//! the shared `beamtalk lint`/MCP `lint` pipeline (`lint_pipeline`) all
+//! reach, threads `source: &str` through it and calls it directly, rather than each
 //! reimplementing an AST-based pass that would share this file's
 //! accept/reject decision ([`check_comment_text`]) but inherit the AST's
-//! span imprecision. All three callers agree, by construction,
+//! span imprecision. All of them agree, by construction,
 //! on both *whether* something is a near-miss and *where* it is.
 //!
 //! # Why this lives at the crate root, not inside `lint/`

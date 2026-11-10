@@ -3096,3 +3096,26 @@ fn test_do_fold_and_pure_inject_do_not_use_receiver_guard() {
         "A pure inject:into: must not call the receiver guard. Got:\n{code}"
     );
 }
+
+// BT-4629: a closed tuple/bare `do:` whose locals nobody reads afterwards
+// (the method root's last expression) answers `{'nil'}` — no per-call
+// `{'nil', Map}` repack.
+#[test]
+fn test_closed_do_discarded_locals_skip_map_repack() {
+    let src = concat!(
+        "Value subclass: V\n",
+        "  state: dummy = 0\n\n",
+        "  run =>\n",
+        "    total := 0\n",
+        "    #(1, 2) do: [:v | total := total + v]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("{'nil'} in let _ThreadedValue"),
+        "discarded do: should answer a bare carrier. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'__local__total'"),
+        "discarded do: must not repack locals into a map. Got:\n{code}"
+    );
+}

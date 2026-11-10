@@ -1439,6 +1439,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # dispatch to without a real workspace node.
   def diagnostics(_code, _mode), do: {:ok, []}
 
+  # BT-4583: with a `source_path` the stub answers one info diagnostic naming
+  # the path, so a LiveView test can see which file the request was scoped to.
+  def diagnostics(_code, _mode, source_path),
+    do:
+      {:ok,
+       [%{"from" => 0, "to" => 0, "severity" => "info", "message" => "scope: " <> source_path}]}
+
   # ── Supervision tree ─────────────────────────────────────────────────────
 
   def supervision_tree(_pid, _scope), do: {:ok, []}

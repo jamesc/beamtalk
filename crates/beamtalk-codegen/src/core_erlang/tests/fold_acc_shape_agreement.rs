@@ -37,13 +37,17 @@ const FOLDS: [&str; 5] = [
 
 /// Body statements: one local, two locals, a field read, `on:do:` inside, an
 /// escaping block capturing the local.
-const BODIES: [&str; 6] = [
+const BODIES: [&str; 9] = [
     "s := s + e",
     "s := s + e. t := t + 1",
     "s := s + FIELD",
     "s := s + e. #(4) do: [:q | s := s + q]",
     "[s := s + e] on: Error do: [:x | s := 0]",
     "s := s + e. blk := [:z | z + s]",
+    // Non-local `^` (early return from the enclosing method) out of the fold.
+    "s := s + e. e = 2 ifTrue: [^s]",
+    "s := s + e. t := t + 1. e = 2 ifTrue: [^s + t]",
+    "e = 3 ifTrue: [^s]. s := s + e",
 ];
 
 /// Method contexts: (header, whether the program can be executed here).

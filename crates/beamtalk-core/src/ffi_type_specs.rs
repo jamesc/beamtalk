@@ -1234,6 +1234,13 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     })
 }
 
+/// The package's own compiled `native/` ebin, relative to the project root.
+///
+/// Single source of truth shared by [`collect_project_dependency_ebin_dirs`]
+/// (which builds the path) and [`is_own_native_ebin`] (which recognises it)
+/// so the two cannot drift apart (BT-4626).
+const NATIVE_EBIN_REL: &str = "_build/dev/native/ebin";
+
 /// Collect the ebin directories for a project's native and path dependencies.
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
@@ -1264,7 +1271,7 @@ pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8
     }
 
     // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
-    let native_ebin = build_root.join("dev").join("native").join("ebin");
+    let native_ebin = project_root.join(NATIVE_EBIN_REL);
     if native_ebin.is_dir() {
         dirs.push(native_ebin);
     }
@@ -1404,7 +1411,7 @@ pub fn collect_project_known_erlang_modules(
 /// result-coercion-free FFI calls (BT-4507).
 #[must_use]
 pub fn is_own_native_ebin(dir: &Utf8Path) -> bool {
-    dir.ends_with("_build/dev/native/ebin")
+    dir.ends_with(NATIVE_EBIN_REL)
 }
 
 /// ADR 0075 Phase 1: Extract type specs from OTP and
@@ -1744,6 +1751,30 @@ mod tests {
         assert!(!is_own_native_ebin(Utf8Path::new(
             "/p/_build/dev/native/default/lib/x/ebin"
         )));
+    }
+
+    #[test]
+    fn collected_dirs_have_exactly_the_native_ebin_as_own() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let build = root.join("_build");
+        let native = build.join("dev").join("native").join("ebin");
+        let path_dep = build.join("deps").join("x").join("ebin");
+        let hex_dep = build
+            .join("dev")
+            .join("native")
+            .join("default")
+            .join("lib")
+            .join("y")
+            .join("ebin");
+        for d in [&native, &path_dep, &hex_dep] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+
+        let dirs = collect_project_dependency_ebin_dirs(&root);
+        assert_eq!(dirs.len(), 3, "all three ebin dirs collected: {dirs:?}");
+        let own: Vec<_> = dirs.iter().filter(|d| is_own_native_ebin(d)).collect();
+        assert_eq!(own, vec![&native], "exactly the native ebin is own");
     }
 
     #[test]

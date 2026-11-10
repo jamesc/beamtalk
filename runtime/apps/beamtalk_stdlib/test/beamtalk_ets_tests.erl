@@ -723,10 +723,11 @@ stale_table_delete_test() ->
         _:_ -> ok
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_delete, set),
-    %% Delete the underlying table directly, then verify deleteTable raises permission_error
+    %% Delete the underlying table directly, then verify deleteTable raises stale_table
+    %% (the same kind as an unnamed table and every other operation; BT-4604).
     ets:delete(bt_ets_test_stale_delete),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = permission_error, class = 'Ets'}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
         beamtalk_ets:deleteTable(Table)
     ).
 
@@ -1072,6 +1073,67 @@ bt4576_delete_unnamed_table_errors_test() ->
     ?assertError(
         #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:deleteTable(T)
     ).
+
+-doc "Run Body, then delete the named table Name whether or not Body failed.".
+with_named_table_cleanup(Name, Body) ->
+    try
+        Body()
+    after
+        catch ets:delete(Name)
+    end.
+
+bt4604_delete_named_public_table_by_non_owner_succeeds_test() ->
+    %% Named tables are public, and ETS lets any process delete a public table.
+    with_named_table_cleanup(bt4604_named_public_delete, fun() ->
+        T = beamtalk_ets:'new:type:'(bt4604_named_public_delete, set),
+        ?assertEqual({ok, nil}, in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+            beamtalk_ets:deleteTable(T)
+        )
+    end).
+
+bt4604_delete_named_protected_table_by_non_owner_is_access_denied_test() ->
+    %% A name re-created by another process as a protected table: the caller
+    %% may not delete it, so the error is access_denied, not permission_error.
+    with_named_table_cleanup(bt4604_named_protected, fun() ->
+        ets:new(bt4604_named_protected, [named_table, protected]),
+        T = #{'$beamtalk_class' => 'Ets', table => bt4604_named_protected},
+        ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+        ?assertEqual(nil, beamtalk_ets:deleteTable(T))
+    end).
+
+-define(assertDeleteFault(Kind, Name),
+    ?assertError(
+        #{error := #beamtalk_error{kind = Kind, class = 'Ets'}},
+        beamtalk_ets:badarg_error('delete', Name)
+    )
+).
+
+bt4604_delete_badarg_name_reuse_test() ->
+    with_named_table_cleanup(bt4604_reuse, fun() ->
+        %% A failed delete is classified by probing the name, which may by
+        %% then hold a replacement table. No table under the name: stale.
+        ?assertDeleteFault(stale_table, bt4604_reuse),
+        %% The caller owns the table now under the name, so the one it failed
+        %% to delete was a predecessor that is gone: stale.
+        ets:new(bt4604_reuse, [named_table, protected]),
+        ?assertDeleteFault(stale_table, bt4604_reuse),
+        %% Another process owns a protected table under the name:
+        %% access_denied (the stated default; the original and a replacement
+        %% look the same).
+        ?assertAccessDenied(
+            in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
+        ),
+        ets:delete(bt4604_reuse),
+        %% A public replacement owned by another process: the caller could
+        %% have deleted it, so the failed delete hit a table that is gone.
+        ets:new(bt4604_reuse, [named_table, public]),
+        ?assertMatch(
+            {error, #{error := #beamtalk_error{kind = stale_table}}},
+            in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
+        )
+    end).
 
 bt4576_deleted_private_table_is_stale_test() ->
     T = beamtalk_ets:'private:'(set),

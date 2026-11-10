@@ -27,6 +27,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     class_responds_to/2,
     class_name_to_module/1,
     class_name_from_tag/1,
+    runtime_instance_method/2,
     print_string/1,
     display_string/1,
     process_label/1,
@@ -1491,7 +1492,8 @@ guaranteed `code_server` miss. Loaded modules never reach `code_server`
 either. Shared by dispatch, instantiation and method lookup (BT-4056).
 
 `Class` may be a thunk so hot-path callers that only hold a class pid pay for
-the class-name lookup (a gen_server call) only when the module is not loaded.
+the class-name lookup only when the module is not loaded (see
+`beamtalk_object_class:class_name_or_undefined/1`, a non-raising ETS read).
 """.
 -spec ensure_class_module_loaded(atom() | fun(() -> atom()), atom()) -> boolean().
 ensure_class_module_loaded(Class, Module) ->
