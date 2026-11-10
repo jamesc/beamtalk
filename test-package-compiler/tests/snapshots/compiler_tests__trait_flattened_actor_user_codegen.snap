@@ -492,7 +492,7 @@ module 'trait_flattened_actor_user' ['start_link'/1, 'start_link'/2, 'init'/1, '
                                     {'error', Error, State}
                             end
                         <'false'> when 'true' ->
-                            call 'beamtalk_error':'raise'(DispatchError)
+                            call 'beamtalk_exception_handler':'reraise'(DispatchError)
                     end
                 <{'error', ExtError, ExtErrorState}> when 'true' ->
                     {'error', ExtError, ExtErrorState}

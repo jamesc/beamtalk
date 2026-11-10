@@ -1139,7 +1139,7 @@ struct Pass1Snapshot {
     class_module_index: std::collections::BTreeMap<String, String>,
     class_superclass_index: std::collections::BTreeMap<String, String>,
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    trait_surface_hash: String,
+    analysis_surface_hash: String,
 }
 
 /// Pass 1 over `project_path` as it is on disk now: incrementally (`force`
@@ -1155,7 +1155,7 @@ fn pass1_snapshot(project_path: &Utf8Path, force: bool) -> Pass1Snapshot {
         class_module_index: index.class_module_index.into_iter().collect(),
         class_superclass_index: index.class_superclass_index.into_iter().collect(),
         all_class_infos: index.all_class_infos,
-        trait_surface_hash: index.trait_surface_hash,
+        analysis_surface_hash: index.analysis_surface_hash,
     }
 }
 

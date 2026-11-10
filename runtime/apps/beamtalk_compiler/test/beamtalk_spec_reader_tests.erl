@@ -198,6 +198,25 @@ map_type_tuple_positional_test() ->
         beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
     ).
 
+%% BT-4510: `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is a
+%% String's representation, so it maps to String, not Tuple — in a union
+%% too, so `{ok, beamtalk_string:t()}` reads as `Result(String, …)`.
+map_type_string_tag_tuple_is_string_test() ->
+    StringTag = {type, 0, tuple, [{atom, 0, beamtalk_string}, {type, 0, binary, []}]},
+    ?assertEqual(<<"String">>, beamtalk_spec_reader:map_type(StringTag)),
+    Ok = {type, 0, tuple, [{atom, 0, ok}, StringTag]},
+    ?assertEqual(
+        <<"Result(String, Exception) | Symbol">>,
+        beamtalk_spec_reader:map_type({type, 0, union, [Ok, {atom, 0, not_found}]})
+    ),
+    %% Any other 2-tuple headed by an atom stays a Tuple.
+    ?assertEqual(
+        <<"Tuple(Symbol, String | Binary)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, tuple, [{atom, 0, other_tag}, {type, 0, binary, []}]}
+        )
+    ).
+
 %% A tuple whose every element is uninformative collapses to bare Tuple.
 map_type_tuple_all_uninformative_collapses_test() ->
     Elements = [{type, 0, term, []}, {type, 0, any, []}],
@@ -1322,6 +1341,39 @@ read_specs_batch_module_names_test() ->
     Results = beamtalk_spec_reader:read_specs_batch([ListsBeam]),
     [{ModName, _}] = Results,
     ?assertEqual(<<"lists">>, ModName).
+
+%%% ---------------------------------------------------------------
+%%% add_export_only_entries/2 — exports without specs (BT-4574)
+%%% ---------------------------------------------------------------
+
+%% With no specs at all, every export becomes an export-only entry.
+add_export_only_entries_no_specs_test() ->
+    ListsBeam = code:which(lists),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, []),
+    ?assert(
+        lists:member(#{name => <<"reverse">>, arity => 1, export_only => true}, Entries)
+    ),
+    ?assert(lists:all(fun(#{export_only := true}) -> true end, Entries)),
+    ?assertEqual(length(lists:module_info(exports)), length(Entries)).
+
+%% A spec'd export keeps its spec entry and gets no export-only duplicate;
+%% an export without a spec (`module_info/0') is appended.
+add_export_only_entries_skips_specced_test() ->
+    ListsBeam = code:which(lists),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(ListsBeam),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, Specs),
+    ?assertEqual(Specs, lists:sublist(Entries, length(Specs))),
+    ExportOnly = [{N, A} || #{name := N, arity := A, export_only := true} <- Entries],
+    ?assertNot(lists:member({<<"reverse">>, 1}, ExportOnly)),
+    ?assert(lists:member({<<"module_info">>, 0}, ExportOnly)).
+
+%% An unreadable `.beam' leaves the specs unchanged.
+add_export_only_entries_missing_beam_test() ->
+    Specs = [#{name => <<"f">>, arity => 0, params => [], return_type => <<"Integer">>}],
+    ?assertEqual(
+        Specs,
+        beamtalk_spec_reader:add_export_only_entries("missing_bt4574.beam", Specs)
+    ).
 
 %% Parallel batch processing must produce exactly the same results,
 %% in the same order, as a sequential `read_specs/1' map — across a batch large

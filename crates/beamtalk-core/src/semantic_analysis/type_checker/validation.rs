@@ -193,65 +193,35 @@ impl TypeChecker {
                 .get_class(class_name)
                 .is_some_and(|info| info.is_sealed);
 
+        // Whether the selector is absent from everything the checker can see
+        // on this class object — no class method, no class-object-protocol
+        // method, no implicit constructor, and no DNU override that would
+        // answer it (BT-4526). Drives both the DNU below and the honest
+        // `Dynamic` reason of the terminal fallback.
+        let selector_absent = !has_class_method
+            && !is_sealed_with_instance_dnu
+            && !hierarchy.has_class_dnu_override(class_name)
+            && !Self::class_chain_resolves(class_name, selector, hierarchy);
+
         // ADR 0100 Rule 1: the completeness-ladder classifier folds
         // in the class-side DNU override and cross-file-parent
         // suppression — only a `ClosedComplete` receiver's absent class-side
         // method is diagnosable.
-        if !has_class_method
-            && !is_sealed_with_instance_dnu
+        let dnu_reported = selector_absent
             && receiver_knowledge::classify_receiver(class_name, hierarchy, true)
-                .is_closed_complete()
-        {
-            // Fall back to the Class→Behaviour→Object→ProtoObject instance-method chain.
-            // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
-            // fallthrough), so the type checker must model the same path.
-            //
-            // spawn/spawnWith: are still instance methods on Actor but routed
-            // class-side by beamtalk_class_dispatch.erl — they need the bypass.
-            // new/new: are proper class methods on Value and found
-            // via find_class_method through the hierarchy, so no bypass needed.
-            let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
-            // ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
-            // every *concrete* Object subclass via the runtime's class
-            // instantiation path, even when no explicit class-side `new` is
-            // declared (e.g. a `sealed typed Object subclass`). Suppress the DNU
-            // for these so the implicit-`new` override (previously documented
-            // with `@expect dnu`, e.g. a former singleton accessor) is no longer
-            // needed.
-            //
-            // Excluded:
-            //  * Abstract classes — instantiating them is a genuine error
-            //    (`infer_constructor_type` keeps the result Dynamic for them).
-            //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
-            //    not `new`'d. In the common case this exclusion is now moot for
-            //    `new`/`new:` specifically: actor.bt declares real `class sealed
-            //    new` / `new:`, so `has_class_method` above is already
-            //    `true` and this whole block is skipped before reaching here. It
-            //    stays as defense-in-depth for a partially-unresolved hierarchy
-            //    (e.g. a cross-package actor whose ancestor chain
-            //    `find_class_method` can't see) — see
-            //    `new_on_actor_subclass_no_longer_dnu` for the still-current
-            //    behavior and `test_actor_new_error_in_standalone_method` /
-            //    `check_actor_new_usage` for the actual "use spawn" diagnostic.
-            let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
-                && !hierarchy.is_abstract(class_name)
-                && !hierarchy.is_actor_subclass(class_name);
-            let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
-                || is_implicit_constructor
-                || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
-            if !has_class_chain_method {
-                self.emit_unknown_selector_warning(
-                    class_name,
-                    class_name,
-                    selector,
-                    span,
-                    hierarchy,
-                    true,
-                    Severity::Hint,
-                    None,
-                    None,
-                );
-            }
+                .is_closed_complete();
+        if dnu_reported {
+            self.emit_unknown_selector_warning(
+                class_name,
+                class_name,
+                selector,
+                span,
+                hierarchy,
+                true,
+                Severity::Hint,
+                None,
+                None,
+            );
         }
 
         // Infer return type for known factory methods
@@ -377,9 +347,64 @@ impl TypeChecker {
                         }
                     }
                 }
-                InferredType::Dynamic(DynamicReason::UnannotatedReturn)
+                // BT-4526: an absent selector is not an "unannotated return".
+                // Where the DNU was reported it is the root cause, so the
+                // result is a non-warning `DynamicReceiver` (as on the
+                // instance side); where the surface is open (an unseen
+                // extension might define it), say the selector is unresolved.
+                InferredType::Dynamic(if dnu_reported {
+                    DynamicReason::DynamicReceiver
+                } else if selector_absent {
+                    self.unresolved_selector_sends.insert(span);
+                    DynamicReason::UnresolvedSelector
+                } else {
+                    DynamicReason::UnannotatedReturn
+                })
             }
         }
+    }
+
+    /// Whether a class object answers `selector` without a class method of its
+    /// own: through the `Class → Behaviour → Object → ProtoObject`
+    /// instance-method chain, an implicit constructor, or an actor factory.
+    ///
+    /// At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
+    /// fallthrough), so the type checker must model the same path.
+    ///
+    /// spawn/spawnWith: are still instance methods on Actor but routed
+    /// class-side by `beamtalk_class_dispatch.erl` — they need the bypass.
+    /// new/new: are proper class methods on Value and found via
+    /// `find_class_method` through the hierarchy, so no bypass needed.
+    ///
+    /// ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
+    /// every *concrete* Object subclass via the runtime's class instantiation
+    /// path, even when no explicit class-side `new` is declared (e.g. a
+    /// `sealed typed Object subclass`), so they are not reported as DNU.
+    ///
+    /// Excluded:
+    ///  * Abstract classes — instantiating them is a genuine error
+    ///    (`infer_constructor_type` keeps the result Dynamic for them).
+    ///  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`), not
+    ///    `new`'d. In the common case this exclusion is moot for `new`/`new:`:
+    ///    actor.bt declares real `class sealed new` / `new:`, so the caller's
+    ///    `has_class_method` is already `true`. It stays as defense-in-depth
+    ///    for a partially-unresolved hierarchy (e.g. a cross-package actor
+    ///    whose ancestor chain `find_class_method` can't see) — see
+    ///    `new_on_actor_subclass_no_longer_dnu` for the still-current behavior
+    ///    and `test_actor_new_error_in_standalone_method` /
+    ///    `check_actor_new_usage` for the actual "use spawn" diagnostic.
+    fn class_chain_resolves(
+        class_name: &EcoString,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
+        let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
+            && !hierarchy.is_abstract(class_name)
+            && !hierarchy.is_actor_subclass(class_name);
+        hierarchy.resolves_selector("Class", selector)
+            || is_implicit_constructor
+            || (is_factory_selector && hierarchy.resolves_selector(class_name, selector))
     }
 
     /// Build the class-level substitution map for a class-method call.
@@ -1883,7 +1908,7 @@ impl TypeChecker {
             }
             other => list_element(other)?,
         };
-        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+        if Self::element_type_is_unjudged(&element, hierarchy) {
             return None;
         }
         Some(ListLiteralElements {
@@ -1895,12 +1920,10 @@ impl TypeChecker {
 
     /// Whether a declared list element type is left to the whole-argument
     /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
-    /// or mentions a type variable placeholder or a protocol anywhere in it.
-    fn element_type_is_unjudged(
-        ty: &InferredType,
-        hierarchy: &ClassHierarchy,
-        protocol_registry: Option<&ProtocolRegistry>,
-    ) -> bool {
+    /// or mentions a type variable placeholder anywhere in it. A protocol
+    /// element type is judged: the per-element rule checks structural
+    /// conformance (BT-4482).
+    fn element_type_is_unjudged(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
         match ty {
             InferredType::Dynamic(_) => true,
             InferredType::Known {
@@ -1909,15 +1932,13 @@ impl TypeChecker {
                 ..
             } => {
                 super::is_type_var_placeholder(class_name, hierarchy)
-                    || hierarchy.is_protocol_class(class_name)
-                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
-                    || type_args.iter().any(|arg| {
-                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
-                    })
+                    || type_args
+                        .iter()
+                        .any(|arg| Self::element_type_is_unjudged(arg, hierarchy))
             }
             InferredType::Union { members, .. } => members
                 .iter()
-                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy)),
             InferredType::Meta { .. }
             | InferredType::ProtocolMeta { .. }
             | InferredType::Never
@@ -4567,15 +4588,30 @@ impl TypeChecker {
     /// Render a [`DynamicInTypedClass`] fact detected by
     /// `inference::post_process_expr_type`.
     pub(super) fn emit_dynamic_in_typed_class(&mut self, fact: &DynamicInTypedClass, span: Span) {
+        // An unresolved selector is not fixed by a type annotation: name the
+        // selector so the diagnostic points at the real problem (BT-4526).
+        let (detail, hint): (EcoString, EcoString) = match &fact.unresolved_selector {
+            Some(selector) => (
+                format!("{} '{selector}'", fact.description).into(),
+                format!(
+                    "No method '{selector}' is visible on the receiver — check the selector, or use `@expect type` if a dependency's extension defines it"
+                )
+                .into(),
+            ),
+            None => (
+                fact.description.into(),
+                "Add a type annotation or use `@expect type` to suppress if intentional".into(),
+            ),
+        };
         self.diagnostics.push(
             Diagnostic::warning(
                 format!(
-                    "expression inferred as Dynamic in typed class `{}` ({})",
-                    fact.class_name, fact.description
+                    "expression inferred as Dynamic in typed class `{}` ({detail})",
+                    fact.class_name
                 ),
                 span,
             )
-            .with_hint("Add a type annotation or use `@expect type` to suppress if intentional")
+            .with_hint(hint)
             .with_category(DiagnosticCategory::Type),
         );
     }

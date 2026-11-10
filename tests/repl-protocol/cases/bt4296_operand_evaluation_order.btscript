@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: in REPL code the elements of a collection literal and the
+// arguments of a send evaluate left to right. `bump` sets the actor's `n` to
+// 1, so an `a n` after it in the same expression reads 1. The same shapes in
+// class, value-type and actor methods are stdlib/test/eval_order_test.bt.
+
+// @load stdlib/test/fixtures/eval_order_actor.bt
+
+a := EvalOrderActor spawn
+// => _
+
+#[a bump, a n]
+// => #[1, 1]
+
+#(a bump, a n)
+// => [2,2]
+
+{a bump, a n}
+// => {3, 3}
+
+#{#first => a bump, #second => a n}
+// => #{#first => 4, #second => 4}
+
+host := EvalOrderActor spawn
+// => _
+
+host pair: a bump with: a n
+// => #[5, 5]

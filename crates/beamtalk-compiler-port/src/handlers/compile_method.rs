@@ -15,7 +15,6 @@ use crate::decode::{
 use crate::diagnostics::{
     filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
 };
-use crate::registry::diagnostics_overrides;
 use crate::respond::{
     compile_method_diagnostic_response, compile_method_ok_response, diagnostic_error_response,
     error_response, format_codegen_error, method_signature_terms, with_verifier_warnings,
@@ -66,19 +65,15 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // aliases, FFI registry, and `[diagnostics]` table apply here too (same
     // session-wins merge and stdlib/manifest-less fallbacks).
     let source_path = map_get(request, "source_path").and_then(term_to_string);
-    let project = if stdlib_mode {
-        None
-    } else {
-        // A method patch is never part of a `load_project` batch: always
-        // verify the project scope afresh.
-        source_path
-            .as_deref()
-            .and_then(|path| crate::project_context::project_context_for_source(path, None))
-    };
-    let pre_loaded_aliases = match project.as_ref() {
-        Some(project) => crate::project_context::merge_aliases(session_aliases, &project.aliases),
-        None => session_aliases,
-    };
+    // A method patch is never part of a `load_project` batch: always verify
+    // the project scope afresh.
+    let scope = crate::project_context::RequestScope::for_source(
+        source_path.as_deref().filter(|_| !stdlib_mode),
+        None,
+    );
+    // A patch carries only its class, not the file's `type` declarations,
+    // so the file's own on-disk aliases stay in scope.
+    let pre_loaded_aliases = scope.aliases(session_aliases);
 
     // 1. Parse the bare method body directly — no `Class >>`, no normalize.
     let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);
@@ -208,11 +203,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // full `AnalysisResult` for the already-merged `merged_module` — no
     // further mutation happens before the codegen call below, so it's always
     // safe to thread through via `CodegenOptions::with_analysis`.
-    let default_project = beamtalk_core::semantic_analysis::ProjectAnalysisContext::default();
-    let (overrides, analysis_project) = match project.as_ref() {
-        Some(project) => (&project.diagnostics_table, &project.analysis_project),
-        None => (diagnostics_overrides(), &default_project),
-    };
     let (mut all_diagnostics, analysis) =
         beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &merged_module,
@@ -229,8 +219,8 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             // same as before this parameter existed.
             Vec::new(),
             pre_loaded_aliases.clone(),
-            overrides,
-            analysis_project,
+            scope.diagnostics_table(),
+            scope.analysis_project(),
         );
     let referenced_aliases = analysis.referenced_aliases.clone();
     let options = beamtalk_core::CompilerOptions {

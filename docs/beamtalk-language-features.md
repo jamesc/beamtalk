@@ -586,6 +586,11 @@ dict at: #name put: "hello"
 Transcript show: "Hello"; cr; show: "World"
 ```
 
+Each cascade part after a `;` is exactly one message. A further message on the
+same line, as in `x foo; size reversed`, is a parse error rather than a send to
+`size`'s result: write `(x size) reversed`, or put the next statement on a new
+line ([BT-4508](https://linear.app/beamtalk/issue/BT-4508)).
+
 ### Message Precedence (high to low)
 1. Unary messages: `3 factorial`
 2. Binary messages: `3 + 4` (with standard math precedence within binary)
@@ -1379,7 +1384,7 @@ A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. Th
 
 **Re-raising unchanged: `pass` vs `signal` (BT-4057).** `e signal` on a caught exception raises a fresh `error` with a new stacktrace, so a caught `ExitError` or `ThrowError` comes back out as an error. `e pass` re-raises with the original Erlang class (`error`, `exit` or `throw`), reason and call sites, so an outer handler (or the process) sees the original failure: `exit: #normal` still ends the process normally. It re-raises the stacktrace captured when the exception was caught, with each frame's argument values reduced to its arity, as `e stackTrace` shows them. On an exception that was never caught (`Exception new pass`), `pass` behaves like `signal`.
 
-**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. (A class-side extension on an *ancestor* of the receiving class is not seen, by this shortcut or by the ordinary class send: [BT-4307](https://linear.app/beamtalk/issue/BT-4307).) `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
+**Where a class-side signal raises (BT-4115, BT-4270).** `Error signal: m`, `MyError signal`, `Error signal: m reason: r` and `Exception signalKind:class:selector:hint:` sent to a class *literal* raise in the calling process: when the compiler sees that the class method resolves to one of `Exception`'s class-side signal primitives, which need nothing from the class but its name, the call site raises through the primitive directly instead of going through the class's process. The exception is the same as a dynamic send (`cls signal: m`) raises. The shortcut is checked at run time, with the same static call key as other static class sends ([ADR 0142](ADR/0142-class-process-owns-only-class-state.md) §2, BT-4316): it is taken only while the send still resolves to `Exception`'s compiled primitive. A `class signal:` override (in a subclass, or added later by hot reload), a class-side extension of `signal:` on the receiving class, or a runtime class-method fun that replaces it takes the ordinary class send instead, so the override runs, also from call sites compiled before it. A class-side extension of `signal:` on an *ancestor* of the receiving class counts as that ancestor's method, so it takes the ordinary class send too, and runs with the receiving class as `self` (BT-4307). `e stackTrace` builds its `StackFrame` objects each time it is read, not when the exception is caught, so class names are resolved at read time.
 
 ```beamtalk
 [(Erlang erlang) exit: #shutdown] on: Exception do: [:e | e pass]  // exits with #shutdown
@@ -2028,6 +2033,7 @@ Each `Dynamic` type carries a reason explaining why the type could not be determ
 | dynamic receiver | Receiver is Dynamic, so message send result is Dynamic | Fix the receiver's type first |
 | ambiguous control flow | Control flow produces incompatible types | Add type annotations to branches |
 | untyped FFI | Erlang FFI call with no spec or all-Dynamic spec | Add `-spec` to the Erlang module |
+| unresolved selector | The receiver's class is known but no visible method answers the selector, and an unseen dependency extension might still define it (when the checker can prove the method is absent it reports does-not-understand instead, and the result is not warned on again) | Check the selector spelling; use `@expect type` if a dependency's extension defines it |
 | *(none)* | Fallback — no specific reason available | Shown as plain `Dynamic` |
 
 #### LSP Hover
@@ -5871,6 +5877,17 @@ String >> shoutIt => super printString uppercase ++ "!"
 String class >> banner => "=== String ==="
 ```
 
+A class-side extension is inherited the way a class method is: at each class
+up the chain, its class-side extensions are checked before its own class
+methods, so `Sub banner` answers an extension registered on `Base class`, with
+`Sub` as `self`, and an extension on `Base class` shadows a compiled class
+method of `Base` for `Sub` too (unless `Sub` itself defines the method). An
+outside send, a dynamic send, a class-side `self` send, `super`,
+`respondsTo:` and protocol conformance all agree (BT-4307). Two exceptions
+remain: `performLocally:withArguments:` applies compiled class methods only, and
+the instance-creation sends `new` and `new:` do not yet see an ancestor's
+class-side extension of them ([BT-4588](https://linear.app/beamtalk/issue/BT-4588)).
+
 ---
 
 ## Workspace and Reflection API
@@ -7040,9 +7057,12 @@ Announcements (typed domain events you subscribe to in app logic):
 > dispatcher — subscriptions on announcer A are never matched by an `announce:`
 > on announcer B, even for the same event class. `SystemAnnouncer` is the
 > canonical multi-subscriber bus for system-wide events. Cross-node delivery to
-> a *connected* node works; partition tolerance, replay, and the
-> `RecordingAnnouncer`/telemetry-bridge extras live in the optional
-> `beamtalk-announcements` package (BT-2454).
+> a *connected* node works. The optional
+> [`beamtalk-announcements`](https://github.com/jamesc/beamtalk-announcements)
+> package adds `RecordingAnnouncer` (a test double that records instead of
+> dispatching) and `AnnouncementTelemetry` (re-emits announcements as
+> `telemetry` events). Partition tolerance and replay are planned for that
+> package (BT-4600).
 
 ---
 
@@ -7654,6 +7674,33 @@ is by construction: `Binary fromBytes:` answers a Binary even when the bytes
 happen to be valid UTF-8, and a String literal answers a String. The runtime
 never sniffs bytes to decide — `class` answers the construction type, and
 dispatch follows the class.
+
+**A String never equals a Binary, even with the same bytes.** `"abc" ==
+(Binary fromBytes: #(97, 98, 99))` is `false` (in either order, and for
+`=:=`), their hashes differ, a `Dictionary` keyed by `"abc"` does not find the
+Binary, and a `Set` holds both. Convert first: `aBinary asString` (validated,
+answers a Result) or `asStringUnchecked`. Because the mismatch fails quietly —
+bytes from Erlang looked up in a String-keyed Dictionary just come back
+absent — the compiler gives a `binary-string-compare` hint (BT-4257) when a
+value that is provably a raw Binary meets a `String`-typed value in `==`,
+`/=`, `=:=` or `=/=`, as the key of a `Dictionary(String, V)` `at:`,
+`at:ifAbsent:`, `at:put:`, `includesKey:` or `removeKey:`, or as the argument
+of a `Set(String)` `includes:` or `add:`:
+
+```
+hint[binary-string-compare]: a Binary never equals a String, even with the same bytes
+  = help: convert the Binary first with `asString` (validated, answers a Result) or `asStringUnchecked`
+```
+
+"Provably a raw Binary" means built by a Binary-only producer — `Binary
+fromBytes:`/`fromIolist:`/`withAll:`/`serialize:`/`empty`, a `Digest` hash,
+`<<...>>`, or `concat:`/`part:size:` of one of those — or a local last
+assigned from one. A value merely *typed* `Binary` (a parameter, a field, a
+method result) may be a String (String is a subclass of Binary), so it never
+triggers the hint, and neither does `Dynamic`. For the same reason a
+`Dictionary(Binary, V)` probed with a String is not reported. Suppress the
+hint with `@expect binary_string_compare`, or package-wide with
+`binary-string-compare = "off"` under `[diagnostics]` in `beamtalk.toml`.
 
 ```beamtalk
 // Construction
@@ -8420,7 +8467,14 @@ The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValu
 
 ### Ets — Shared In-Memory Tables
 
-`Ets` wraps OTP ets tables for sharing mutable state between actors without message-passing overhead. Tables are named and public by default, so any process can read and write them.
+`Ets` wraps OTP ets tables: either shared between actors without message-passing overhead, or private to one actor.
+
+| Constructor | Name | Who may read / write | Use for |
+|---|---|---|---|
+| `Ets new: #name type: t` | node-global | any process / any process | State shared between actors |
+| `Ets newOrExisting: #name type: t` | node-global | any process / any process | Shared state that may already exist |
+| `Ets private: t` | none | owner only / owner only | One actor's internal state, secrets |
+| `Ets protected: t` | none | any process / owner only | One writer, many concurrent readers |
 
 #### Creating a Table
 
@@ -8436,6 +8490,24 @@ Ets new: #t4 type: #duplicateBag // multiple identical entries per key
 
 // Look up an existing named table from another actor
 cache := Ets named: #myCache
+
+// Unnamed tables, owned by the caller
+secrets := Ets private: #set      // only this process may use it
+board := Ets protected: #set      // others may read, only this process writes
+```
+
+A named table's name is global to the node, so a second instance of the same actor cannot create the same name again (`already_exists`). Unnamed tables avoid that: create one per actor in `initialize` and keep it in a field typed `:: Ets`. They have no name, so `Ets named:` cannot find them. Using one from a process its protection forbids, or calling `delete` from any process but the owner, raises `access_denied`, not a raw `badarg`. Each REPL input runs in a short-lived process, so an unnamed table created at the REPL is deleted when that input finishes; create it in the actor that uses it. Printing or inspecting an `Ets` never shows its entries.
+
+```beamtalk
+Actor subclass: SessionStore
+  state: table :: Ets
+
+  initialize -> Nil =>
+    self.table := Ets private: #set
+    nil
+
+  remember: id state: s => self.table at: id put: s
+  claim: id => self.table removeKey: id ifAbsent: [nil]
 ```
 
 #### Reading and Writing
@@ -8489,13 +8561,14 @@ cache isEmpty                   // => true if no entries
 cache isNotEmpty                // => true if at least one entry
 cache keys                      // => List of all keys (order unspecified for #set)
 cache removeKey: "key"          // delete entry; no-op if key is absent
+cache removeKey: "key" ifAbsent: [nil]  // atomically remove and answer the value (ets:take)
 cache removeAll                 // remove all entries, keep the table
 cache delete                    // destroy the table; frees all memory
 ```
 
 #### Cross-Actor Sharing
 
-ETS tables are process-owned but publicly readable and writable. Create a named table in one actor, then retrieve it from another:
+Tables made with `new:type:` are process-owned but publicly readable and writable. Create a named table in one actor, then retrieve it from another:
 
 ```beamtalk
 // Actor A — create the table
@@ -8509,7 +8582,7 @@ cache at: "token"               // => "abc123"
 
 #### Table Lifecycle
 
-The owning process (the one that called `Ets new:type:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Only the owning actor may call `delete` on the table — other actors should request deletion by messaging the owner. Call `delete` explicitly in the owner to release memory before the process exits.
+The owning process (the one that called `Ets new:type:`, `private:` or `protected:`) holds the table. When that process terminates, the table is automatically deleted by the OTP runtime. Only the owning actor may call `delete` on the table — other actors should request deletion by messaging the owner. Call `delete` explicitly in the owner to release memory before the process exits.
 
 ---
 
@@ -8640,7 +8713,17 @@ setUp =>
   self   // <- carries both field mutations forward
 ```
 
-`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send, or a `with*:` cascade.
+`beamtalk build`/`beamtalk lint` warn when a `setUp` mutates a field — via `self.field := value` or a `with<Field>:` send — and its last statement isn't a bare `self`, another field assignment, a `with<Field>:` send (or a nested chain of them), or a cascade on `self` whose only `with<Field>:` message is its last.
+
+A cascade on `self` with more than one `with<Field>:` message does not return the updated self either ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). A cascade sends every message to the original receiver, so on a value each `with*:` returns its own copy and the cascade's value is the last message's result alone — every `with*:` before the last is silently dropped. The general `cascade-drops-update` warning reports this at each dropped message (here, `withCounter:`), so the `setUp` check adds no second warning of its own for this shape — also when `setUp` ends in a local bound to such a cascade (BT-4573). One `@expect cascade_drops_update` on the statement silences it. If `cascade-drops-update` cannot prove every dropped message (for example, one is a hand-written `with*:` method with no `-> Self` return annotation), the `setUp` warning above still fires. Turning `cascade-drops-update` off under `[diagnostics]` opts the project into fan-out cascades on values, so this shape then gets no warning at all. Nest the sends instead, so each one applies to the previous result:
+
+```beamtalk
+// Wrong — `self withCounter: 1; withDb: 2` keeps only `db`; `counter` stays at its default
+setUp => self withCounter: 1; withDb: 2
+
+// Right — each send receives the copy the previous one returned
+setUp => (self withCounter: 1) withDb: 2
+```
 
 Chained `with*:` setters (`self withCounter: (Counter spawn)`) remain a valid alternative to `self.field := value` — each `with*:` call itself returns the fully updated self, so the chain's own last call already carries every field set through. This only holds when the `with*:` chain is itself the trailing statement of `setUp`: like a bare `self.field := value`, its self-preserving return value only threads through when nothing follows it — the same trap applies, and `beamtalk lint` (BT-3391/BT-3395) warns for both forms.
 

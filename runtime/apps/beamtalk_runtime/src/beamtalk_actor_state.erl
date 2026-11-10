@@ -397,7 +397,10 @@ super_send(Self, Capture, Class, Selector, Args) ->
                     store(NewState),
                     Result;
                 {error, Error} ->
-                    beamtalk_error:raise(Error)
+                    %% BT-4208: an invoked value-class owner (e.g.
+                    %% `Object>>error:`) answers an already-wrapped map,
+                    %% which record-only `beamtalk_error:raise/1` rejects.
+                    beamtalk_exception_handler:reraise(Error)
             end;
         false ->
             State = away_capture(Self, Selector, Capture),
@@ -412,7 +415,7 @@ super_send(Self, Capture, Class, Selector, Args) ->
             try beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
                 {reply, Result, State} -> Result;
                 {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
-                {error, Error} -> beamtalk_error:raise(Error)
+                {error, Error} -> beamtalk_exception_handler:reraise(Error)
             after
                 uninstall(Saved)
             end

@@ -1388,10 +1388,20 @@ pub(crate) fn unparse_expression_statement(stmt: &ExpressionStatement) -> Docume
     concat(docs)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Counts [`unparse_expression`] calls on this thread, so tests can
+    /// assert that unparse does work linear in the tree size (BT-4531).
+    pub(crate) static UNPARSE_EXPRESSION_CALLS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 /// Builds a [`Document`] for an [`Expression`].
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
+    #[cfg(test)]
+    UNPARSE_EXPRESSION_CALLS.with(|n| n.set(n.get() + 1));
     match expr {
         Expression::Literal(lit, _) => unparse_literal(lit),
         Expression::Identifier(id) => unparse_identifier(id),
@@ -1569,43 +1579,6 @@ fn unparse_identifier(id: &Identifier) -> Document<'static> {
 
 // --- Message send unparsing ---
 
-/// Returns `true` if this expression is a block that will always render
-/// across multiple lines — because it contains multiple statements, has a
-/// trailing line comment, or its single expression renders to multiple lines
-/// (e.g. a keyword send with multiline block arguments).
-///
-/// Used by `unparse_message_send` to decide whether keyword messages should
-/// break each keyword to its own indented line.
-fn block_renders_multiline(expr: &Expression) -> bool {
-    let Expression::Block(block) = expr else {
-        return false;
-    };
-    match block.body.as_slice() {
-        // Multi-statement blocks always break.
-        [_, _, ..] => true,
-        // Single-statement block: forced-multiline when it has a trailing LINE
-        // comment (which would otherwise land inside the `// …` text), or when
-        // the formatted body itself spans multiple lines.
-        //
-        // Note: `unparse_expression` is called here purely for the multiline
-        // predicate; the caller will unparse the block again when building the
-        // actual output document.  This is a known O(n) duplication trade-off
-        // kept intentionally simple until profiling shows it matters.
-        [single] => {
-            let has_trailing_line_comment = matches!(
-                single.comments.trailing.as_ref().map(|c| c.kind),
-                Some(CommentKind::Line)
-            );
-            has_trailing_line_comment
-                || unparse_expression(&single.expression)
-                    .to_pretty_string()
-                    .contains('\n')
-        }
-        // Empty block `[]` stays inline.
-        [] => false,
-    }
-}
-
 /// The operand slot an expression is unparsed into (BT-4059).
 #[derive(Debug, Clone, Copy)]
 enum OperandSlot<'a> {
@@ -1761,25 +1734,30 @@ fn unparse_message_send(
         MessageSelector::Keyword(parts) => {
             // Break all keywords to their own indented lines when:
             // - 3+ keyword parts (elm-format style: always break multi-keyword messages), or
-            // - any argument renders multi-line (block or otherwise — e.g. a
-            //   parenthesized 3-keyword send that itself breaks).
+            // - any argument renders multi-line (a block with several statements,
+            //   a trailing line comment or a multi-line body — all of which
+            //   `unparse_block` emits with a hard `line()` — or any other
+            //   argument, e.g. a parenthesized 3-keyword send that itself breaks).
             // Otherwise use the compact inline form (1-2 keywords, width-aware).
             //
-            // For 3+ keywords, short-circuit to avoid re-unparsing every argument
-            // just for the `any_multiline` predicate (it doesn't matter since
-            // `parts.len() >= 3` guarantees a break regardless).
+            // Each argument is unparsed exactly once and its document reused for
+            // both the multi-line check and the output. Unparsing it again for
+            // the check would double the work at every level of nested block
+            // arguments, making unparse exponential in nesting depth (BT-4531).
+            let arg_docs: Vec<Document<'static>> = arguments.iter().map(arg_doc).collect();
             let always_break = parts.len() >= 3
-                || arguments.iter().any(|arg| {
-                    block_renders_multiline(arg) || arg_doc(arg).to_pretty_string().contains('\n')
-                });
+                || arg_docs
+                    .iter()
+                    .any(|doc| doc.to_pretty_string().contains('\n'));
+            let mut arg_docs = arg_docs.into_iter();
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for (i, part) in parts.iter().enumerate() {
+                for part in parts {
                     kw_docs.push(line());
                     let part_doc = unparse_keyword_part(part);
-                    if i < arguments.len() {
-                        kw_docs.push(docvec![part_doc, " ", arg_doc(&arguments[i])]);
+                    if let Some(arg) = arg_docs.next() {
+                        kw_docs.push(docvec![part_doc, " ", arg]);
                     } else {
                         kw_docs.push(part_doc);
                     }
@@ -1787,12 +1765,12 @@ fn unparse_message_send(
                 docvec![recv_doc, nest(2, concat(kw_docs))]
             } else {
                 let mut docs: Vec<Document<'static>> = vec![recv_doc];
-                for (i, part) in parts.iter().enumerate() {
+                for part in parts {
                     docs.push(Document::Str(" "));
                     docs.push(unparse_keyword_part(part));
-                    if i < arguments.len() {
+                    if let Some(arg) = arg_docs.next() {
                         docs.push(Document::Str(" "));
-                        docs.push(arg_doc(&arguments[i]));
+                        docs.push(arg);
                     }
                 }
                 concat(docs)

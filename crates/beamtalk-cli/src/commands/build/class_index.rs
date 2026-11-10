@@ -83,12 +83,13 @@ pub(crate) struct ClassIndexResult {
     /// `IncrementalPass1Result.file_protocol_uses`). Empty for
     /// manifest-less builds, same as `cached_asts`.
     pub(crate) file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
-    /// Hash of the flattened class surface of every class declared in a file
-    /// with `uses:` lines (BT-3674); empty when the package has none.
+    /// Hash of the cross-file analysis surface — every pre-loaded class
+    /// (trait provisions flattened in), protocol and alias, project and
+    /// dependency alike (`util::analysis_surface_hash`; BT-3674, BT-4336).
     /// `detect_changes` folds it into every file's cache key so an unchanged
-    /// caller of a trait-provided method is re-checked when a provision
+    /// file is re-checked when a signature it may type-check against
     /// changes. Empty for manifest-less builds.
-    pub(crate) trait_surface_hash: String,
+    pub(crate) analysis_surface_hash: String,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -278,9 +279,9 @@ pub(crate) fn build_class_index(
     // flattened in, as codegen flattens them (BT-3668). Only manifest builds
     // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
     // build — including `--stdlib-mode` — is a no-op here.
-    let mut trait_surface_hash = String::new();
+    let mut analysis_surface_hash = String::new();
     if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
-        let flattened = flatten_trait_user_class_infos(
+        flatten_trait_user_class_infos(
             &mut all_class_infos,
             &file_protocol_uses,
             &cached_asts,
@@ -289,8 +290,17 @@ pub(crate) fn build_class_index(
             env.source_root.as_deref(),
             pkg,
         );
-        trait_surface_hash =
-            crate::commands::util::class_surface_hash(&all_class_infos, &flattened, pkg);
+        // BT-4336: hashed after flattening, over the cross-file context Pass 2
+        // hands `analyse_full` (pre-loaded classes, protocols, aliases and
+        // standalone extensions; the project-known Erlang modules are folded
+        // in by `execute_build_passes`), so any cross-file signature change
+        // re-checks every file instead of replaying stale diagnostics.
+        analysis_surface_hash = crate::commands::util::analysis_surface_hash(
+            &all_class_infos,
+            &all_protocol_infos,
+            &all_alias_infos,
+            &extension_index,
+        );
     }
 
     // Taken after trait flattening, which rewrites only project classes'
@@ -312,7 +322,7 @@ pub(crate) fn build_class_index(
         force_pass2,
         source_hashes,
         file_protocol_uses,
-        trait_surface_hash,
+        analysis_surface_hash,
     })
 }
 
@@ -330,10 +340,6 @@ pub(crate) fn build_class_index(
 /// project's own classes: a class it maps to another file's module is
 /// `shadowed` there, so this file's provisions are not written into the slot
 /// of the class that wins (BT-3679).
-///
-/// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
-/// so the caller can hash exactly the cross-file surface that flattening
-/// contributes.
 pub(crate) fn flatten_trait_user_class_infos(
     all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
@@ -342,7 +348,7 @@ pub(crate) fn flatten_trait_user_class_infos(
     project_class_module_index: &HashMap<String, String>,
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
-) -> Vec<ecow::EcoString> {
+) {
     let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
         .iter()
         .filter(|(_, uses)| !uses.is_empty())
@@ -410,12 +416,15 @@ pub(crate) fn flatten_trait_user_class_infos(
     let modules = user_modules.iter().map(|(module, shadowed)| {
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserModule { module, shadowed }
     });
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
-        all_class_infos,
-        modules,
-        protocol_defs.iter().cloned(),
-        Some(pkg_name),
-    )
+    // The replaced classes' names are not needed here: the analysis
+    // surface hash covers every class (BT-4336).
+    let _replaced =
+        beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+            all_class_infos,
+            modules,
+            protocol_defs.iter().cloned(),
+            Some(pkg_name),
+        );
 }
 
 /// Collects `cached_asts`' trait users and carried protocols (in

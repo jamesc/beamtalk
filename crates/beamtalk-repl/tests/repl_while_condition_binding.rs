@@ -23,6 +23,11 @@
 //! (`tests/repl-protocol/cases/bt4015_while_condition_binding.btscript`); the
 //! verifier catching the pre-fix lowering is shown in `beamtalk-codegen`'s
 //! `while_condition_binding_corpus.rs`.
+//!
+//! BT-4062: the carried lowering exists only for a block-literal body; any
+//! other body (a variable, a computed block) is rejected at Phase 0 when the
+//! condition writes a binding, and the unary `whileTrue` / `whileFalse` forms
+//! are ordinary sends that raise `does_not_understand`.
 
 mod common;
 
@@ -189,4 +194,93 @@ fn bt4015_repros_compile() {
     .map(|lp| format!("cw := 0\nck := 0\n{lp}\n#[cw, ck]"))
     .collect();
     assert_inputs_compile(&repros, repros.len());
+}
+
+/// The Phase 0 errors `src` raises.
+fn errors(src: &str) -> Vec<String> {
+    let (parsed, _) = parse(lex_with_eof(src));
+    analyse_full(&parsed, AnalysisContext::default().with_known_vars(KNOWN))
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
+/// BT-4062: a binding-writing condition whose body is not a block literal (a
+/// variable, a computed block) is rejected at Phase 0
+/// in every position and for both loops: codegen's simple lowering runs the
+/// condition as a closure (the write was lost and the loop never ended, or
+/// the Tier 2 condition was applied with the wrong arity). A condition that
+/// writes nothing still compiles with any body.
+#[test]
+fn bt4062_non_literal_body_with_condition_write_is_rejected() {
+    let bodies = [
+        "b",
+        "(ck >= 0 ifTrue: [b] ifFalse: [b])",
+        "(Array with: b) first",
+    ];
+    let mut rejected = 0;
+    for position in POSITIONS {
+        for (selector, cmp) in LOOPS {
+            for cond in CONDITIONS {
+                for body in bodies {
+                    let lp = format!("[{}] {selector} {body}", cond.replace("CMP", cmp));
+                    let src = format!(
+                        "b := [nil]\ncw := 0\nck := 0\nw := 0\nx := 0\n{}\ncw",
+                        position.replace("{L}", &lp)
+                    );
+                    let errs = errors(&src);
+                    assert!(
+                        errs.iter()
+                            .any(|e| e.contains("whose body is not a block literal")),
+                        "{src}\nnot rejected: {errs:?}"
+                    );
+                    rejected += 1;
+                }
+            }
+        }
+    }
+    assert!(rejected >= 200, "only {rejected} row(s)");
+
+    // A parenthesized block literal is a block literal (the parser drops the
+    // parentheses), so it is carried like `[...]`.
+    assert_inputs_compile(
+        &["cw := 0\n[cw := cw + 1. cw < 3] whileTrue: ([nil])\ncw".to_string()],
+        1,
+    );
+
+    let pure: Vec<String> = ["[cw < 3] whileTrue: b", "[cw >= 3] whileFalse: b"]
+        .iter()
+        .map(|lp| format!("b := [nil]\ncw := 0\n{lp}\ncw"))
+        .collect();
+    for src in &pure {
+        assert!(errors(src).is_empty(), "{src}: {:?}", errors(src));
+    }
+    assert_inputs_compile(&pure, pure.len());
+}
+
+/// BT-4062: the unary `whileTrue` / `whileFalse` forms are not loops on
+/// `Block` (it has only the keyword forms), so a binding-writing receiver is
+/// accepted and compiles to an ordinary send that raises
+/// `does_not_understand` at run time (pinned in
+/// `bt4015_while_condition_binding.btscript`); no write is silently lost.
+#[test]
+fn bt4062_unary_while_with_condition_write_compiles() {
+    let unary: Vec<String> = POSITIONS
+        .iter()
+        .flat_map(|position| {
+            [
+                "[cw := cw + 1. cw < 3] whileTrue",
+                "[cw := cw + 1. cw >= 3] whileFalse",
+            ]
+            .map(|lp| {
+                format!(
+                    "cw := 0\nck := 0\nw := 0\nx := 0\n{}\ncw",
+                    position.replace("{L}", lp)
+                )
+            })
+        })
+        .collect();
+    assert_inputs_compile(&unary, unary.len());
 }

@@ -357,6 +357,18 @@ impl TypeChecker {
             }
         }
 
+        // BT-4257: a provably raw Binary compared with, or looked up
+        // against, a String never matches.
+        self.check_binary_string_compare(
+            receiver,
+            &receiver_ty,
+            selector,
+            arguments,
+            &arg_types,
+            span,
+            env,
+        );
+
         // If receiver is a class reference, check class-side methods.
         // Unwrap parens so `(HTTPRouter) foo:` dispatches class-side
         // — matches the block-param inference normalisation above.

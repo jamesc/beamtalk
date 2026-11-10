@@ -762,6 +762,91 @@ fn validate_hex_constraint(constraint: &str) -> Result<(), String> {
     validate_single_constraint(trimmed)
 }
 
+/// Whether a resolved hex `version` satisfies a `constraint` already
+/// accepted by [`validate_hex_constraint`] (hex.pm semantics: `~> 2.1` is
+/// `>= 2.1.0 and < 3.0.0`, `~> 2.1.0` is `>= 2.1.0 and < 2.2.0`).
+///
+/// A pre-release version (`2.1.0-rc.1`) sorts before its release and never
+/// matches a bare `~>` or exact constraint, so a lock holding one is simply
+/// re-resolved. Returns `false` for anything unparseable.
+pub fn hex_constraint_matches(constraint: &str, version: &str) -> bool {
+    let Some(version) = HexVersion::parse(version) else {
+        return false;
+    };
+    constraint
+        .trim()
+        .split(" and ")
+        .all(|part| single_constraint_matches(part.trim(), &version))
+}
+
+/// A hex version for comparison: numeric `major.minor.patch` (missing
+/// segments are 0) plus whether it is a release (pre-releases sort first).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct HexVersion {
+    numbers: [u64; 3],
+    is_release: bool,
+}
+
+impl HexVersion {
+    fn parse(version: &str) -> Option<Self> {
+        let version = version.trim();
+        // Build metadata never affects precedence.
+        let version = version.split('+').next()?;
+        let (core, pre) = match version.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (version, None),
+        };
+        let mut numbers = [0; 3];
+        let mut count = 0;
+        for (slot, segment) in numbers.iter_mut().zip(core.split('.')) {
+            *slot = segment.parse().ok()?;
+            count += 1;
+        }
+        if count == 0 || core.split('.').count() > 3 {
+            return None;
+        }
+        Some(Self {
+            numbers,
+            is_release: pre.is_none(),
+        })
+    }
+
+    fn release(numbers: [u64; 3]) -> Self {
+        Self {
+            numbers,
+            is_release: true,
+        }
+    }
+}
+
+fn single_constraint_matches(s: &str, version: &HexVersion) -> bool {
+    let bound = |rest: &str| HexVersion::parse(rest);
+    if let Some(rest) = s.strip_prefix("~>") {
+        let rest = rest.trim();
+        let Some(lower) = bound(rest) else {
+            return false;
+        };
+        let [major, minor, _] = lower.numbers;
+        // `~> X.Y` allows any X.*; `~> X.Y.Z` allows any X.Y.*.
+        let upper = if rest.split('.').count() >= 3 {
+            [major, minor + 1, 0]
+        } else {
+            [major + 1, 0, 0]
+        };
+        version.is_release && *version >= lower && *version < HexVersion::release(upper)
+    } else if let Some(rest) = s.strip_prefix(">=") {
+        bound(rest).is_some_and(|b| *version >= b)
+    } else if let Some(rest) = s.strip_prefix("<=") {
+        bound(rest).is_some_and(|b| *version <= b)
+    } else if let Some(rest) = s.strip_prefix('>') {
+        bound(rest).is_some_and(|b| *version > b)
+    } else if let Some(rest) = s.strip_prefix('<') {
+        bound(rest).is_some_and(|b| *version < b)
+    } else {
+        bound(s).is_some_and(|b| *version == b)
+    }
+}
+
 /// Validate a single (non-compound) version constraint.
 fn validate_single_constraint(s: &str) -> Result<(), String> {
     if let Some(rest) = s.strip_prefix("~>") {
@@ -3362,6 +3447,34 @@ utils = { path = "../utils" }
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(manifest.dependencies.len(), 2);
         assert!(manifest.native_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_hex_constraint_matches() {
+        let cases = [
+            ("~> 2.1", "2.1.0", true),
+            ("~> 2.1", "2.9.3", true),
+            ("~> 2.1", "3.0.0", false),
+            ("~> 2.1", "2.0.9", false),
+            ("~> 2.1.0", "2.1.7", true),
+            ("~> 2.1.0", "2.2.0", false),
+            ("~> 2.1", "2.2.0-rc.1", false),
+            ("2.12.0", "2.12.0", true),
+            ("2.12", "2.12.0", true),
+            ("2.12.0", "2.12.1", false),
+            (">= 1.0.0 and < 2.0.0", "1.5.0", true),
+            (">= 1.0.0 and < 2.0.0", "2.0.0", false),
+            ("> 1.0", "1.0.0", false),
+            ("<= 3.0", "3.0.0", true),
+            ("~> 2.1", "not-a-version", false),
+        ];
+        for (constraint, version, expected) in cases {
+            assert_eq!(
+                hex_constraint_matches(constraint, version),
+                expected,
+                "{constraint} vs {version}"
+            );
+        }
     }
 
     // --- Hex constraint validation unit tests ---

@@ -752,7 +752,7 @@ impl CoreErlangGenerator {
     /// only at the point a user-written annotation naming an alias is
     /// expanded (ADR 0108), so it is a declared type under another name.
     /// `Extracted` (`-spec`-derived) stays untrusted.
-    fn trusted_static_class(
+    pub(in crate::core_erlang) fn trusted_static_class(
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
@@ -973,11 +973,12 @@ impl CoreErlangGenerator {
     /// send. A selector the row's dynamic path answers elsewhere (`Pid`'s
     /// future protocol, `String`'s shared byte-level selectors — the
     /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
-    /// selector on those rows is routed. Rows whose test spans two routes
-    /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
-    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
-    /// stdlib built-in's module can be neither removed nor redefined into
-    /// another module, so the pinned target never goes stale.
+    /// selector on those rows is routed. A row whose test spans two routes
+    /// (`Binary`: a bare binary or the `String` tag) gets both, guarded one
+    /// after the other (BT-4510). Rows that carry a `dynamic_only` reason
+    /// (`Boolean`, `Bitstring`, `Character`, the records, the proxy) stay
+    /// dynamic. A stdlib built-in's module can be neither removed nor
+    /// redefined into another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
@@ -1086,62 +1087,7 @@ impl CoreErlangGenerator {
             .iter()
             .map(|_| self.fresh_temp_var("TTaggedArg"))
             .collect();
-        let args_list_doc = Self::join_docs_with_commas(
-            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
-        );
-
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-        };
-        // BT-4473: a send to an instance of this unit's own class whose
-        // selector one of its `dispatch/3` method arms answers calls that
-        // arm's function directly; every other tagged target, and every
-        // built-in route, calls `dispatch/3`.
-        let own_arm = match target {
-            TypedSendTarget::Tagged(tagged) => {
-                self.own_dispatch_arm(&tagged.class_name, &selector_atom, arguments.len())
-            }
-            TypedSendTarget::Builtin(_) => None,
-        };
-        let direct_call = match own_arm {
-            Some(arm) => Self::own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
-            None => docvec![
-                "call ",
-                leaf::atom(module_name),
-                ":'dispatch'(",
-                leaf::atom(selector_atom.clone()),
-                ", [",
-                args_list_doc.clone(),
-                "], ",
-                leaf::var(receiver_var.clone()),
-                ")",
-            ],
-        };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
-        let fallback_doc = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(receiver_var.clone()),
-            ", ",
-            leaf::atom(selector_atom.clone()),
-            ", [",
-            args_list_doc,
-            "])",
-        ]);
-
-        let case_doc = match target {
-            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
-                &receiver_var,
-                &tagged.class_name,
-                direct_doc,
-                fallback_doc,
-            ),
-            TypedSendTarget::Builtin(route) => {
-                self.render_send_guard(route.guard, &receiver_var, direct_doc, &fallback_doc)
-            }
-        };
+        let case_doc = self.guarded_send_on_vars(target, &selector_atom, &receiver_var, &arg_vars);
 
         // BT-4279: a unary send that may be an auto-generated slot getter of a
         // tagged Value class. Its fast path reads the slot with no bracket
@@ -1184,6 +1130,112 @@ impl CoreErlangGenerator {
             body
         ];
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
+    }
+
+    /// BT-4069, BT-4294, BT-4510: the guarded direct call of `selector_atom`
+    /// to the value bound to `receiver_var`, with `arg_vars` as arguments,
+    /// for a [`TypedSendTarget`]: the target's guard (a class tag, or a
+    /// built-in's representation test, then its `String`-tag half if any)
+    /// around the direct call, and the dynamic send in every miss arm. Shared
+    /// by [`Self::generate_typed_guarded_send`] and the sends the compiler
+    /// makes itself on an already-bound value (a string interpolation
+    /// segment's `displayString`).
+    pub(in crate::core_erlang) fn guarded_send_on_vars(
+        &mut self,
+        target: &TypedSendTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+    ) -> Document<'static> {
+        let args_list_doc = Self::join_docs_with_commas(
+            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
+        );
+        let module_name = match target {
+            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
+            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
+        };
+        // BT-4473: a send to an instance of this unit's own class whose
+        // selector one of its `dispatch/3` method arms answers calls that
+        // arm's function directly; every other tagged target, and every
+        // built-in route, calls `dispatch/3`.
+        let own_arm = match target {
+            TypedSendTarget::Tagged(tagged) => {
+                self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len())
+            }
+            TypedSendTarget::Builtin(_) => None,
+        };
+        let direct_call = match own_arm {
+            Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
+            None => {
+                Self::dispatch3_call_doc(module_name, selector_atom, &args_list_doc, receiver_var)
+            }
+        };
+        // BT-4366: both calls sit inside the type-test `case`, so each carries
+        // the send's line itself.
+        let direct_doc = self.annotate_current_send_call(direct_call);
+        let fallback_doc = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(receiver_var.to_string()),
+            ", ",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "])",
+        ]);
+
+        match target {
+            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
+                receiver_var,
+                &tagged.class_name,
+                direct_doc,
+                fallback_doc,
+            ),
+            TypedSendTarget::Builtin(route) => {
+                // BT-4510: a `Binary` receiver that is a `String` at run time
+                // misses the bare-binary guard and tries the `String` route
+                // before the dynamic send.
+                let miss_doc = match route.string_tag_route {
+                    Some(string_route) => {
+                        let string_call =
+                            self.annotate_current_send_call(Self::dispatch3_call_doc(
+                                string_route.target_module.to_string(),
+                                selector_atom,
+                                &args_list_doc,
+                                receiver_var,
+                            ));
+                        self.render_send_guard(
+                            string_route.guard,
+                            receiver_var,
+                            string_call,
+                            &fallback_doc,
+                        )
+                    }
+                    None => fallback_doc,
+                };
+                self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
+            }
+        }
+    }
+
+    /// `call 'Module':'dispatch'('sel', [Args], Recv)` — the remote
+    /// `dispatch/3` call every guarded direct send makes (BT-4510).
+    fn dispatch3_call_doc(
+        module_name: String,
+        selector_atom: &str,
+        args_list_doc: &Document<'static>,
+        receiver_var: &str,
+    ) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "], ",
+            leaf::var(receiver_var.to_string()),
+            ")",
+        ]
     }
 
     /// BT-4473: the own-class `dispatch/3` method arm that answers
@@ -1793,6 +1845,11 @@ impl CoreErlangGenerator {
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
                 let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+                // BT-4296: the arguments land in a list, which erlc evaluates
+                // last-first, so every argument before the last one that may
+                // run code is bound to a temp in source order.
+                let arg_exprs: Vec<&Expression> = arguments.iter().collect();
+                let racing_last = self.last_racing_operand(&arg_exprs);
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -1810,6 +1867,13 @@ impl CoreErlangGenerator {
                             " in "
                         ]);
                         arg_parts.push(leaf::var(wrapper_var));
+                    } else if racing_last.is_some_and(|last| i < last)
+                        && !Self::is_trivial_subexpr(arg)
+                    {
+                        let doc = self.expression_doc(arg)?;
+                        let (binding, var) = self.bind_subexpr_to_temp("ErlArg", doc);
+                        preamble_docs.push(binding);
+                        arg_parts.push(leaf::var(var));
                     } else {
                         arg_parts.push(self.expression_doc(arg)?);
                     }
@@ -3601,13 +3665,15 @@ impl CoreErlangGenerator {
         }
 
         let class_name = self.class_name();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         // value/primitive-context funs (`fun(Args, Self) -> Result`)
         // have no `State` binding, so `super` must not reference one. Route to
         // `super_value/4`, which walks the same chain and returns a plain value.
+        // BT-4296: its arguments are sequenced (`thread_args`) so the argument
+        // list evaluates them in source order.
         if self.context == CodeGenContext::ValueType {
-            return Ok(docvec![
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let call_doc = docvec![
                 "call 'beamtalk_dispatch':'super_value'(",
                 leaf::atom(selector_atom),
                 ", [",
@@ -3615,16 +3681,34 @@ impl CoreErlangGenerator {
                 "], Self, ",
                 leaf::atom(class_name),
                 ")",
-            ]);
+            ];
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at
-        // home), stores its answer back, and answers its value. So does one in
-        // a block or loop body, which threads no `State` for it (BT-3995): the
-        // enclosing call brackets the cell (`classify_super_send`).
+        // home), stores its answer back, and answers its value. A block or loop
+        // body threads no `State` for a `super` send either (BT-3995): it runs
+        // against the cell, which the enclosing call brackets
+        // (`classify_super_send`), and answers its value. Sends there are not
+        // sync-bracketed, so the arguments are sequenced (`thread_args`) to
+        // evaluate in source order (BT-4296).
         if !self.super_send_threads_state() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // The prelude closes around this call, so a threaded-state rebind in
+            // it would be scoped away from later statements (BT-3809): report
+            // it, as `capture_argument_list_doc` does for its arguments.
+            let escaped = super::threaded_ir::opaque_escapes(&args_preamble, false);
+            let at = arguments
+                .first()
+                .map_or_else(Span::default, Expression::span);
+            self.report_threaded_ir_verify_errors(
+                &escaped,
+                "super-send argument state rebind trapped in a closed argument list",
+                at,
+            );
+            let call_doc = self.cell_super_send_doc(&selector_atom, &class_name, args_doc);
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
         // BT-4318: this form answers `{reply, Result, NewState}`; only
@@ -3641,6 +3725,11 @@ impl CoreErlangGenerator {
                 at,
             );
         }
+
+        // A method-body `super` send's arguments are sequenced ahead by
+        // `super_send_producer` (`sequence_children`) and read back here.
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
         let current_state = self.current_state_var();
         let doc = docvec![
             "call 'beamtalk_dispatch':'super'(",

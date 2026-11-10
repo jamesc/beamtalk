@@ -76,7 +76,9 @@ try_dispatch(Selector, Args, Self) ->
         true ->
             case dispatch(Selector, Args, Self, Self) of
                 {reply, Result, _State} -> {ok, Result};
-                {error, Error, _State} -> beamtalk_error:raise(Error)
+                %% BT-4208: `perform:` reaching an invoked value-class method
+                %% that raised answers an already-wrapped map, not a record.
+                {error, Error, _State} -> beamtalk_exception_handler:reraise(Error)
             end;
         false ->
             false

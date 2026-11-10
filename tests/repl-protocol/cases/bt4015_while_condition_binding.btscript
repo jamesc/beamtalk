@@ -103,3 +103,36 @@ x := 0
 // => nil
 #[cw, w, x]
 // => #[3, 2, 3]
+
+// BT-4062: a body that is not a block literal takes the simple lowering,
+// which runs the condition as a plain closure, so a binding-writing condition
+// is rejected (was `arity_mismatch`, or a loop that never ended).
+b := [nil]
+// => _
+cw := 0
+// => 0
+[cw := cw + 1. cw < 3] whileTrue: b
+// => ERROR: `cw` is assigned in a block used as the condition of a `whileTrue:` whose body is not a block literal
+[cw := cw + 1. cw >= 3] whileFalse: b
+// => ERROR: `cw` is assigned in a block used as the condition of a `whileFalse:` whose body is not a block literal
+
+// Wrapping the block value in a literal carries the write.
+[cw := cw + 1. cw < 3] whileTrue: [b value]
+// => nil
+cw
+// => 3
+
+// A condition that writes nothing still takes any body.
+[cw < 3] whileTrue: b
+// => nil
+
+// The unary forms are not loops on Block: the send raises
+// `does_not_understand` and no write is silently dropped.
+cw := 0
+// => 0
+[cw := cw + 1. cw < 3] whileTrue
+// => ERROR: does not understand
+[cw := cw + 1. cw >= 3] whileFalse
+// => ERROR: does not understand
+cw
+// => 0

@@ -426,6 +426,17 @@ impl CoreErlangGenerator {
     /// order, into `prelude` (a plain one via a fresh `let <prefix>N = ...
     /// in`), preserving left-to-right evaluation order exactly as
     /// `hoist_subexpr_splits` did.
+    ///
+    /// BT-4296: the docs are operands of one Core Erlang construct (a list
+    /// cell, a tuple, a map, a call's arguments), whose operand evaluation
+    /// order Core Erlang leaves unspecified — erlc evaluates a list cell's
+    /// tail before its head, so `[E1, E2]` runs `E2` first. So when two or
+    /// more operands are non-trivial (any of them may send a message), the
+    /// hoisting point also extends to the last non-trivial operand: every
+    /// non-trivial operand before it is bound to a temp in source order, and
+    /// only that last one (followed by trivial operands alone) is left in
+    /// place. A single non-trivial operand has nothing to race with and
+    /// stays in place.
     pub(super) fn thread_subexprs(
         &mut self,
         exprs: &[&Expression],
@@ -433,7 +444,8 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, Vec<Document<'static>>)> {
         let frame = self.current_frame();
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
-        let Some(k) = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e)) else {
+        let needs_prelude = exprs.iter().rposition(|e| self.subexpr_needs_prelude(e));
+        let Some(k) = needs_prelude.max(self.last_racing_operand(exprs)) else {
             let mut docs = Vec::with_capacity(exprs.len());
             for e in exprs {
                 docs.push(self.expression_doc(e)?);
@@ -447,8 +459,28 @@ impl CoreErlangGenerator {
             // the ordinary `expression_doc` (`take_precompiled_subexpr`)
             // instead of re-threading it — see `subexpr_needs_prelude`'s
             // doc comment for the double-dispatch this avoids.
-            if i > k || self.precompiled_subexprs_contains(e) {
+            let inner = e.unwrap_parens();
+            // BT-4296: a literal is a constant, so it stays in place after every
+            // prelude (no temp for a map literal's `#key`). Not a variable: its
+            // read may compile to a state-map or cell lookup that a later
+            // operand's rebind would change, so it is threaded as before.
+            if i > k || matches!(inner, Expression::Literal(..)) {
                 docs.push(self.expression_doc(e)?);
+                continue;
+            }
+            let trivial = Self::is_trivial_subexpr(inner);
+            if self.precompiled_subexprs_contains(e) {
+                // Already evaluated by the enclosing prelude; an operand
+                // before `k` is still pinned to a temp so a later operand
+                // left in place cannot run ahead of reading it (BT-4296).
+                let doc = self.expression_doc(e)?;
+                if i < k && !trivial {
+                    let (binding, var) = self.bind_subexpr_to_temp(prefix, doc);
+                    prelude.push(ThreadedStmt::Statement(binding, inner.span()));
+                    docs.push(leaf::var(var));
+                } else {
+                    docs.push(doc);
+                }
                 continue;
             }
             let tv = self.threaded_expression(e, frame)?;
@@ -457,13 +489,44 @@ impl CoreErlangGenerator {
             let value_doc = self.threaded_value_doc(&tv.value);
             if must_bind {
                 let (binding, var) = self.bind_subexpr_to_temp(prefix, value_doc);
-                prelude.push(ThreadedStmt::Statement(binding, e.unwrap_parens().span()));
+                prelude.push(ThreadedStmt::Statement(binding, inner.span()));
                 docs.push(leaf::var(var));
             } else {
                 docs.push(value_doc);
             }
         }
         Ok((prelude, docs))
+    }
+
+    /// BT-4296: the index of the last operand of `exprs` that may run code
+    /// or observe code a sibling runs (anything but a trivial operand or a
+    /// stable field read) when two or more may — the operand a sequencer must
+    /// hoist up to so the operands evaluate in source order whatever order
+    /// the enclosing Core Erlang construct evaluates them in (a list cell or a
+    /// map literal evaluates its last operand first). `None` when at most one
+    /// operand may: it has nothing to race with.
+    ///
+    /// A field read is stable outside an actor closure: it reads a `State` or
+    /// `Self` version, and a sibling that writes the field is a prelude
+    /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
+    /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty
+    /// operand prelude). Inside an actor closure (ADR 0137 §3) a field read is
+    /// a live cell lookup that a sibling `blk value` writing the field through
+    /// the cell changes, so there it races like any send.
+    pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
+        let stable_field_reads = !self.in_cell_closure();
+        let mut racing = exprs
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                let inner = e.unwrap_parens();
+                let stable_field_read =
+                    stable_field_reads && matches!(inner, Expression::FieldAccess { .. });
+                !(Self::is_trivial_subexpr(inner) || stable_field_read)
+            })
+            .map(|(i, _)| i);
+        racing.next()?;
+        racing.next_back()
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns

@@ -18,6 +18,7 @@ fn vars() -> EnsureCatchVars {
         nlr_carried_var: v("Carried1"),
         other_pair_var: v("Other1"),
         cell_snapshot_var: v("Snap1"),
+        foreign_nlr_var: v("Foreign1"),
     }
 }
 
@@ -56,6 +57,8 @@ fn node(
         private_scratch: false,
         cleanup,
         relay,
+        cell_live: false,
+        foreign: None,
         other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
         span: span(),
     }
@@ -127,6 +130,8 @@ fn a_private_scratch_map_is_exempt_only_for_a_state_acc_carry() {
             private_scratch: true,
             cleanup,
             relay,
+            cell_live: false,
+            foreign: None,
             other,
             span,
         },
@@ -258,6 +263,8 @@ fn nothing_to_relay_verifies_clean() {
         private_scratch: false,
         cleanup: CLOSURE,
         relay: None,
+        cell_live: false,
+        foreign: None,
         other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
         span: span(),
     };
@@ -280,6 +287,8 @@ fn a_foreign_throw_needs_the_cell_over_the_carried_state_when_it_is_the_cells() 
             private_scratch: false,
             cleanup,
             relay,
+            cell_live: false,
+            foreign: None,
             other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
             span: span(),
         }
@@ -311,4 +320,114 @@ fn a_foreign_throw_needs_the_cell_over_the_carried_state_when_it_is_the_cells() 
     assert_eq!(defect(&[quiet]), None);
     // The scope's own carries still need their token.
     assert_eq!(defect(&[catch(NlrCarry::ActorState, CLOSURE, None)]), None);
+}
+
+/// ADR 0146 R1: an `ensure:` whose cleanup is `cleanup`, where the
+/// actor-state cell is `cell_live`, with `foreign` the clause a foreign
+/// `$bt_nlr` throw takes.
+fn foreign_node(
+    cell_live: bool,
+    cleanup: EnsureCleanup,
+    foreign: Option<EnsureForeignNlr>,
+) -> ThreadedStmt {
+    ThreadedStmt::EnsureCatch {
+        vars: Box::new(vars()),
+        token: None,
+        carry: Some(NlrCarry::ActorState),
+        private_scratch: false,
+        cleanup,
+        relay: None,
+        cell_live,
+        foreign,
+        other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
+        span: span(),
+    }
+}
+
+fn foreign_clause(store: Option<usize>) -> EnsureForeignNlr {
+    EnsureForeignNlr {
+        seed: Document::Str(
+            "let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in ",
+        ),
+        cleanup: Document::Str("let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in"),
+        store,
+    }
+}
+
+fn foreign_defect(ir: &[ThreadedStmt]) -> Option<ForeignStoreDefect> {
+    match verify(ir).as_slice() {
+        [] => None,
+        [VerifyError::EnsureForeignCleanupNotStored { defect, at }] => {
+            assert_eq!(*at, span());
+            Some(*defect)
+        }
+        other => panic!("expected one EnsureForeignCleanupNotStored, got {other:?}"),
+    }
+}
+
+/// ADR 0146 R1: a foreign `^` (one of another method of the same actor)
+/// unwinding through an inlined cleanup that advanced `StateAcc` must leave
+/// the cleanup's final version in the cell. The clause verifies and renders
+/// the cleanup, the store and the unchanged re-raise, before the error path.
+#[test]
+fn a_foreign_throw_stores_the_cleanups_final_state_acc_where_the_cell_is_live() {
+    let ir = [foreign_node(
+        true,
+        inlined(Some(1)),
+        Some(foreign_clause(Some(1))),
+    )];
+    assert_eq!(foreign_defect(&ir), None);
+    let text = lower_and_render(&ir).to_pretty_string();
+    assert!(
+        text.contains(
+            "case {Type1, Error1} of <{'throw', Foreign1}> when call 'erlang':'=:='(call 'erlang':'element'(1, Foreign1), '$bt_nlr') -> let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in let _ = call 'beamtalk_actor_state':'store'(StateAcc1) in primop 'raw_raise'(Type1, Error1, Stack1) <Other1> when 'true' -> primop 'raw_raise'(Type1, Error1, Stack1) end"
+        ),
+        "{text}"
+    );
+}
+
+/// The repro: no foreign clause, so the throw takes the error path, whose
+/// cleanup runs with write-through off; or a clause that stores nothing, or
+/// a stale version.
+#[test]
+fn a_foreign_throw_that_does_not_store_the_cleanups_final_state_acc_fails() {
+    assert_eq!(
+        foreign_defect(&[foreign_node(true, inlined(Some(1)), None)]),
+        Some(ForeignStoreDefect::NoClause)
+    );
+    assert_eq!(
+        foreign_defect(&[foreign_node(
+            true,
+            inlined(Some(1)),
+            Some(foreign_clause(None))
+        )]),
+        Some(ForeignStoreDefect::NoStore)
+    );
+    assert_eq!(
+        foreign_defect(&[foreign_node(
+            true,
+            inlined(Some(2)),
+            Some(foreign_clause(Some(1)))
+        )]),
+        Some(ForeignStoreDefect::StoresStaleVersion {
+            stored: 1,
+            expected: 2
+        })
+    );
+}
+
+/// Nothing to store: a cleanup that threads no write, a closure cleanup
+/// (it writes the cell in place), or a scope where the cell is not live (a
+/// class method running in its caller, a value type, the REPL, a closure).
+#[test]
+fn no_foreign_store_is_owed_where_there_is_nothing_to_store() {
+    assert_eq!(
+        foreign_defect(&[foreign_node(true, inlined(None), None)]),
+        None
+    );
+    assert_eq!(foreign_defect(&[foreign_node(true, CLOSURE, None)]), None);
+    assert_eq!(
+        foreign_defect(&[foreign_node(false, inlined(Some(1)), None)]),
+        None
+    );
 }

@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: the class-method column of stdlib/test/eval_order_test.bt. Each
+// method sends `bump` (a state write) and then `n` (a read) to the same
+// EvalOrderActor inside one literal, argument list or binary send.
+
+Object subclass: EvalOrderClass
+
+  class pair: x with: y => #[x, y]
+
+  class arrayOf: a => #[a bump, a n]
+
+  class listOf: a => #(a bump, a n)
+
+  class tupleOf: a => {a bump, a n}
+
+  class mapOf: a => #{#first => a bump, #second => a n}
+
+  class argsOf: a => self pair: a bump with: a n
+
+  class binaryOf: a => a bump - a n

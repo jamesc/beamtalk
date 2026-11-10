@@ -94,7 +94,14 @@ fn dictionary_at_put_warns() {
 #[test]
 fn integer_max_warns() {
     let diags = diagnostics_for("  run -> Integer =>\n    0 max: 1; max: 2\n");
-    assert_eq!(drops(&diags).len(), 1, "got: {diags:#?}");
+    let hits = drops(&diags);
+    assert_eq!(hits.len(), 1, "got: {diags:#?}");
+    // BT-4573: a literal receiver is rendered as written, not elided.
+    let hint = hits[0].hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("`(0 max: …) max: …`"),
+        "help should render the literal receiver, got: {hint}"
+    );
 }
 
 #[test]

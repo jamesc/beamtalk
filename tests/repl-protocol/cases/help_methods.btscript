@@ -23,6 +23,13 @@ helpResult isEmpty
 helpResult includesSubstring: "Instance methods:"
 // => true
 
+// BT-4166: class-side methods are listed with their signatures
+(Beamtalk help: Binary) includesSubstring: "Class methods:"
+// => true
+
+(Beamtalk help: Binary) includesSubstring: "fromBytes: bytes :: List(Integer) -> Binary"
+// => true
+
 // ===========================================================================
 // HELP:SELECTOR: — METHOD-LEVEL DOCUMENTATION
 // ===========================================================================
@@ -34,6 +41,10 @@ methodHelp := Beamtalk help: Integer selector: #asString
 // Method help result is non-empty
 methodHelp isEmpty
 // => false
+
+// BT-4166: help:selector: resolves a class-side method, doc comment included
+(Beamtalk help: Binary selector: #fromBytes:) includesSubstring: "Create a binary from a list"
+// => true
 
 // ===========================================================================
 // HELP: — ERROR: CLASS NOT FOUND
