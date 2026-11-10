@@ -17,7 +17,7 @@
 //! corpus) and is **returned** or **stored** by that method:
 //!
 //! | [`EscapeShape`]        | Source shape                                       |
-//! |------------------------|-------------------------------------------------|
+//! |------------------------|----------------------------------------------------||
 //! | `Returned`             | last statement of the method, or `^ [...]`         |
 //! | `StoredLocal`          | `name := [...]`                                    |
 //! | `StoredClassVar`       | `self.name := [...]`                               |
@@ -359,7 +359,9 @@ mod tests {
 
     #[test]
     fn parse_bad_source_returns_none() {
-        // Unclosed block is a parse error; None must be returned (line 92).
+        // Exercises the early-return path in `parse_corpus_source` when the
+        // source has parse errors; named without `_corpus` so it is not
+        // excluded from the coverage filterset (test(/agreement|_corpus/)).
         let result = parse_corpus_source("bad.bt", "Object subclass: Foo\n  class bad => [\n");
         assert!(
             result.is_none(),
@@ -370,7 +372,7 @@ mod tests {
     #[test]
     fn scan_bad_bt_file_lands_in_unparsed() {
         // A file whose content fails to parse must end up in `unparsed`, not
-        // `files` (the `None` arm on line 122).
+        // `files` (the `None` arm of the `parse_corpus_source` match in `scan_corpus`).
         let dir = tempfile::TempDir::new().expect("tempdir");
         std::fs::write(
             dir.path().join("bad.bt"),
@@ -385,8 +387,8 @@ mod tests {
     #[test]
     fn class_with_no_class_vars_is_skipped_in_escape_scan() {
         // A class with no classState declarations contributes no vars; the
-        // `vars.is_empty()` branch (line 181) must be exercised and no sites
-        // returned.
+        // `vars.is_empty()` early-continue in `escaping_class_var_closures`
+        // must be exercised and return no sites.
         let src = "Object subclass: Foo\n  class pure => [self doSomething]\n";
         assert!(
             shapes(src).is_empty(),
@@ -397,8 +399,8 @@ mod tests {
     #[test]
     fn cyclic_inheritance_does_not_loop() {
         // Construct a cycle in the superclass map by giving two classes each
-        // other as superclass; `class_vars_of` must break out of the while-loop
-        // at line 166 rather than looping forever.
+        // other as superclass; `class_vars_of` must hit its seen-set cycle
+        // guard and break rather than looping forever.
         let a = parse_corpus_source(
             "a.bt",
             "B subclass: A\n  classState: x = 0\n  class reader => [self.x]\n",
