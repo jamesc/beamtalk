@@ -1719,17 +1719,7 @@ impl CoreErlangGenerator {
 
         // Emit the dynamic-site report entry (BT-4292): the receiver's static
         // type and the gate that kept the send dynamic.
-        if self.codegen_diagnostics_enabled {
-            let span = receiver.span();
-            let line_info = self
-                .span_to_line(span)
-                .map_or(String::new(), |l| format!(" at line {l}"));
-            let description = self.dynamic_site_description(receiver, selector);
-            self.emit_codegen_diagnostic(
-                format!("Send '{selector_atom}'{line_info}: dynamic dispatch ({description})"),
-                span,
-            );
-        }
+        self.report_dynamic_site(receiver, selector);
 
         // Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved.

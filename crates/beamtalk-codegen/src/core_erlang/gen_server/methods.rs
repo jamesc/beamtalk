@@ -3102,6 +3102,8 @@ impl CoreErlangGenerator {
                         "valueWithArguments: with no argument expression".to_string(),
                     )
                 })?;
+                // The non-fun fallback is a dynamic site (BT-4596).
+                self.report_block_value_fallback(receiver, selector);
                 return self.generate_block_value_with_arguments_call_runtime_discriminated(
                     receiver, args_expr,
                 );
