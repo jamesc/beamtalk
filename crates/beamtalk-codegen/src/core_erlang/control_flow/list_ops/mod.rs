@@ -459,7 +459,7 @@ impl CoreErlangGenerator {
         // `-> Nil` (and the runtime primitive answers `nil`), so the inlined
         // `do:` sequences the call and answers `'nil'`.
         let list_call = if operation == "foreach" {
-            docvec!["do ", list_call, " 'nil'"]
+            docvec!["do ", list_call, " ", leaf::atom("nil")]
         } else {
             list_call
         };
