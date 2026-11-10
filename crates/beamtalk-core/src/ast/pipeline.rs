@@ -41,8 +41,11 @@
 //! ```
 //!
 //! both comments belong to the `collect:` send's entry: they sit between the
-//! `select:` stage and the `|>` that starts `collect:`. A comment after the
-//! last stage is the statement's own trailing comment, as before.
+//! `select:` stage and the `|>` that starts `collect:`. An end-of-line
+//! comment after a trailing `|>` (`x foo |>  // why`, then the stage on the
+//! next line) also belongs to that entry, as its last leading comment, so it
+//! is printed before the `|>` on its own line. A comment after the last stage
+//! is the statement's own trailing comment, as before.
 
 use std::collections::BTreeMap;
 

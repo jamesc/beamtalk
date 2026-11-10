@@ -2154,7 +2154,26 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
 }
 
 fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
-    let receiver_doc = unparse_expression(receiver);
+    // The cascade's target is the folded first send's receiver. A pipeline
+    // there must keep its parentheses: `(a |> foo) bar; baz` written without
+    // them is `a |> foo bar; baz`, which mixes `|>` and `;` and does not
+    // re-parse (ADR 0145). After the operand-paren peel nothing else puts
+    // them back, because as a plain unary receiver a pipeline needs none.
+    let receiver_doc = match receiver {
+        Expression::MessageSend {
+            receiver: target,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } if starts_with_pipeline(target) => unparse_message(
+            docvec!["(", unparse_expression(target), ")"],
+            selector,
+            arguments,
+            *is_cast,
+        ),
+        _ => unparse_expression(receiver),
+    };
     let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
 
     if messages.len() == 1 {

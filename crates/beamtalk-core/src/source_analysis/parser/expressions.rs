@@ -613,6 +613,12 @@ impl Parser {
             let mut comments = self.collect_comment_attachment();
             comments.trailing = self.collect_trailing_comment();
             self.advance(); // consume `|>`
+            // An end-of-line comment after a trailing `|>` belongs to the
+            // stage on the next line too. It joins the leading comments, so
+            // it is kept, and the unparser prints it before the `|>`.
+            if let Some(after_pipe) = self.collect_trailing_comment() {
+                comments.leading.push(after_pipe);
+            }
             value = self.parse_pipeline_stage(value, comments);
         }
         value

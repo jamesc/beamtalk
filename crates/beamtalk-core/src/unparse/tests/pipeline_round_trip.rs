@@ -106,7 +106,8 @@ fn comments_between_stages_round_trip() {
 fn a_peeled_pipeline_argument_gets_its_parentheses_back() {
     // The operand peel removes `( … )` around a send argument; unparse must
     // add them back around a pipeline, or `|>` would pipe the whole send.
-    let source = "x at: (a |> foo)\ny bar: (a foo: 1 |> baz) + (b |> c)\nz foo; at: (a |> d)\n";
+    let source = "x at: (a |> foo)\ny bar: (a foo: 1 |> baz) + (b |> c)\nz foo; at: (a |> d)\n\
+                  (a |> foo) bar; baz\n(a |> foo) at: 1; baz\n";
     let mut module = parse_bt(source);
     peel_operand_parens(&mut module);
     let text = unparse_module(&module);
@@ -117,4 +118,16 @@ fn a_peeled_pipeline_argument_gets_its_parentheses_back() {
         without_spans(&module),
         "re-parse of the peeled unparse differs:\n{text}"
     );
+}
+
+#[test]
+fn a_comment_after_a_trailing_pipe_is_kept() {
+    // `x foo |>  // why` with the stage on the next line: the comment belongs
+    // to that stage's entry, so fmt keeps it (before the `|>`) rather than
+    // dropping it.
+    let source = "x foo |>  // why\n  bar\n";
+    let text = unparse_module(&parse_bt(source));
+    assert!(text.contains("// why"), "comment dropped:\n{text}");
+    assert!(text.contains("|> bar"), "pipeline lost:\n{text}");
+    assert_idempotent(source);
 }

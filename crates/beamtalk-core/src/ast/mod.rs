@@ -64,6 +64,7 @@
 //!     span: Span::new(0, 10),
 //!     file_leading_comments: Vec::new(),
 //!     file_trailing_comments: Vec::new(),
+//!     pipeline_sends: PipelineSends::default(),
 //! };
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
