@@ -558,7 +558,7 @@ compiles_to("5a") -> "send(S, base, []): VbSub:dispatch/3 misses, extensions loo
 compiles_to("5b") -> "send(S, viaSelf, []), then `self base` is a second full send";
 compiles_to("5c") -> "send(S, 'hasField:', [v]) -> beamtalk_reflection:has_field/2";
 compiles_to("6a") -> "is_function(Blk, 1) guard, then apply Blk(41)";
-compiles_to("6b") -> "lists:foldl over a fun that maps:get/maps:put `sum` in a state map; + with coercion try";
+compiles_to("6b") -> "lists:foldl over a fun whose accumulator is the bare `sum` (BT-4116); + with coercion try";
 compiles_to("6c") -> "is_list guard, lists:foreach(fun)";
 compiles_to("6d") -> "is_list guard, lists:map(fun); * with is_number guard";
 compiles_to("6e") -> "is_list guard, lists:foldl(fun); + with coercion try";
