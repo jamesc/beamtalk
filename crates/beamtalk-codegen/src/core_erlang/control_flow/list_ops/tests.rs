@@ -3207,23 +3207,32 @@ fn test_closed_do_writing_self_field_keeps_carrier_slots() {
 }
 
 // BT-4651: which producers can arm `LoopMode::discarded_fold_block`: only a
-// `ProducerTail::Discard` construct tuple (`threaded_expr::discarded_fold_arm`).
-// A `Rebind` producer that still goes through `lower_construct_tuple` (here a
-// `do:` operand whose local is read afterwards inside a conditional) must keep
-// its carrier map, or the later read sees a stale/absent local.
+// `ProducerTail::Discard` construct tuple, in a non-actor frame, whose fold is
+// a plain `do:`/`doWithKey:` with a literal block and threads no self family
+// (`CoreErlangGenerator::discarded_fold_arm`, the one arming decision in
+// `lower_construct_tuple`). A `Rebind` producer is read afterwards, so arming
+// it would drop its locals. No source-level shape reaches the Rebind arm
+// through `lower_construct_tuple` with a closed-form `do:`, so the decision is
+// pinned directly.
 #[test]
-fn test_discarded_fold_flag_not_armed_for_rebind_tail_in_conditional() {
-    let src = concat!(
-        "Value subclass: V\n",
-        "  state: dummy = 0\n\n",
-        "  run: flag =>\n",
-        "    total := 0\n",
-        "    flag ifTrue: [#(1, 2) do: [:v | total := total + v]].\n",
-        "    flag ifTrue: [total] ifFalse: [0]\n",
-    );
-    let code = codegen(src);
+fn test_discarded_fold_arm_only_for_discard_tail() {
+    use crate::core_erlang::CoreErlangGenerator;
+    use crate::core_erlang::threaded_expr::ProducerTail;
+
+    let parse_first = |src: &str| {
+        let (module, _) = crate::core_erlang::tests::parse_normalised(src);
+        module.expressions[0].expression.clone()
+    };
+    let fold = parse_first("#(1, 2) do: [:v | total := total + v]");
+    let not_fold = parse_first("#(1, 2) collect: [:v | v]");
+
+    let arm = CoreErlangGenerator::discarded_fold_arm;
+    assert!(arm(ProducerTail::Discard, false, true, &fold).is_some());
     assert!(
-        !code.contains("{'nil'} in let _ThreadedValue"),
-        "a do: whose local is read afterwards must not answer a bare carrier. Got:\n{code}"
+        arm(ProducerTail::Rebind, false, true, &fold).is_none(),
+        "a Rebind producer is read afterwards and must never arm the flag"
     );
+    assert!(arm(ProducerTail::Discard, true, true, &fold).is_none());
+    assert!(arm(ProducerTail::Discard, false, false, &fold).is_none());
+    assert!(arm(ProducerTail::Discard, false, true, &not_fold).is_none());
 }

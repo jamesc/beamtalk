@@ -1884,7 +1884,7 @@ impl CoreErlangGenerator {
         no_self_families: bool,
         expr: &Expression,
     ) -> Option<Span> {
-        (true && !actor && no_self_families)
+        (tail == ProducerTail::Discard && !actor && no_self_families)
             .then(|| Self::discardable_fold_block(expr))
             .flatten()
     }
