@@ -428,7 +428,8 @@ compute_step(ClassName, Selector) ->
             case beamtalk_object_class:has_method_local(ClassPid, Selector) of
                 true ->
                     case dispatchable_module(ClassPid) of
-                        {ok, Module} -> {found, {owner, ClassName, Module}};
+                        {ok, Module} ->
+                            {found, {owner, ClassName, Module}};
                         continue ->
                             %% A module-less class holding the selector as a runtime
                             %% fun is the owner, but there is no module to cache: miss,
@@ -436,7 +437,9 @@ compute_step(ClassName, Selector) ->
                             %% rather than a compiled ancestor's method of the same name.
                             case
                                 runtime_value_fun(
-                                    ClassName, Selector, beamtalk_class_builder:selector_arity(Selector)
+                                    ClassName,
+                                    Selector,
+                                    beamtalk_class_builder:selector_arity(Selector)
                                 )
                             of
                                 {ok, _} -> {found, miss};
