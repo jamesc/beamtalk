@@ -62,6 +62,7 @@ mod bt4594_protocol_receiver_object_methods;
 mod bt4607_protocol_field_assignment;
 mod bt4635_and_or_type_test_narrowing;
 mod bt4636_block_write_widening;
+mod bt4648_generic_value_copy_return;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

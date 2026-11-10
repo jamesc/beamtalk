@@ -909,7 +909,7 @@ impl CoreErlangGenerator {
     /// converted like any declared return type.
     fn synthesized_copy_return_repr(class: &ClassDefinition) -> MetaTypeRepr {
         Self::declared_type_to_meta_repr(
-            &beamtalk_core::synthetic_selectors::synthesized_copy_return_type(&class.name.name),
+            &beamtalk_core::synthetic_selectors::synthesized_copy_return_type(),
             &class.type_params,
         )
     }

@@ -111,8 +111,14 @@ pub fn synthesized_keyword_constructor<'a>(
 }
 
 /// The declared return type of a synthesized `with<Field>:` copy-setter or
-/// keyword constructor on the value class `class_name`: the class itself,
-/// since both answer a new instance of it.
+/// keyword constructor on a value class: `Self`, since both answer a new
+/// instance of the receiver's class.
+///
+/// `Self` rather than the bare class name, so a generic value class keeps
+/// its type arguments through a copy: on `b :: Box(Integer)`,
+/// `b withItem: 3` is `Box(Integer)` and `(b withItem: 3) item` is
+/// `Integer`, where a bare `Box` would drop them (BT-4648). The flat `'Self'`
+/// rendering round-trips through `__beamtalk_meta` (`DeclaredType::parse`).
 ///
 /// Read by the hierarchy's synthesized `MethodInfo`s, the stdlib builtins
 /// generator (`build_stdlib`) and codegen's `__beamtalk_meta` `method_info`
@@ -121,8 +127,8 @@ pub fn synthesized_keyword_constructor<'a>(
 /// same return types as one built from its AST (BT-4621) — the
 /// `cascade-drops-update` warning, for one, reads them.
 #[must_use]
-pub fn synthesized_copy_return_type(class_name: &str) -> DeclaredType {
-    DeclaredType::simple(class_name)
+pub fn synthesized_copy_return_type() -> DeclaredType {
+    DeclaredType::SelfType
 }
 
 /// The declared return type of the synthesized getter for `slot`: the
