@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::drivers::SurfaceOutput;
+use crate::normalize;
 use crate::pool::beamtalk_binary;
 
 /// Run `beamtalk build <path>` and report the diagnostic count.
@@ -42,7 +43,7 @@ pub fn build_project(path: &Path) -> Result<SurfaceOutput, String> {
     let diagnostic_count = if output.status.success() {
         0
     } else {
-        count_diagnostic_lines(&combined).max(1)
+        normalize::count_diagnostic_lines(&combined, false).max(1)
     };
     Ok(SurfaceOutput {
         classes: Some(classes),
@@ -138,7 +139,7 @@ pub fn lint(path: &Path) -> Result<SurfaceOutput, String> {
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let combined = format!("{stdout}\n{stderr}");
-    let count = count_diagnostic_lines(&combined);
+    let count = normalize::count_diagnostic_lines(&combined, false);
     Ok(SurfaceOutput {
         diagnostic_count: Some(count),
         raw: combined,
@@ -207,18 +208,6 @@ pub fn test_project(path: &Path) -> Result<SurfaceOutput, String> {
     })
 }
 
-fn count_diagnostic_lines(text: &str) -> usize {
-    text.lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            t.starts_with("warning")
-                || t.starts_with("error")
-                || t.contains(": warning:")
-                || t.contains(": error:")
-        })
-        .count()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,7 +215,7 @@ mod tests {
     #[test]
     fn diagnostic_lines_counts_classic_formats() {
         let text = "warning: redundant\nerror: bad\nfoo.bt:1:1: warning: x\nok\n";
-        assert_eq!(count_diagnostic_lines(text), 3);
+        assert_eq!(normalize::count_diagnostic_lines(text, false), 3);
     }
 
     #[test]
