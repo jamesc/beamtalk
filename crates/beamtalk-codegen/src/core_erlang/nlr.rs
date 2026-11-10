@@ -482,15 +482,14 @@ impl CoreErlangGenerator {
 /// was before ADR 0146, so [`VerifyError::ActorNlrCommitBypassesCell`](super::threaded_ir::VerifyError::ActorNlrCommitBypassesCell)
 /// and [`VerifyError::NlrThrowWithoutCellStore`](super::threaded_ir::VerifyError::NlrThrowWithoutCellStore)
 /// can be shown to fire on a real compile (`tests/nlr.rs`). Compiled for this
-/// crate's tests and for dependents that enable the `test` feature; otherwise
-/// [`active`](fault::active) is always `None`.
+/// crate's tests only; otherwise [`active`](fault::active) is always `None`.
 pub mod fault {
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     use std::cell::Cell;
 
     /// An actor `^` as it was before a fix.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[cfg_attr(not(any(test, feature = "test")), allow(dead_code))]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub enum NlrFault {
         /// The catch arm commits the state the throw carries,
         /// `{'reply', Value, State}`, instead of the actor's cell.
@@ -503,26 +502,26 @@ pub mod fault {
         ThrowWithoutCellStore,
     }
 
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     thread_local! {
         static FAULT: Cell<Option<NlrFault>> = const { Cell::new(None) };
     }
 
     /// The commit fault switched on on this thread, if any.
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     pub(crate) fn active() -> Option<NlrFault> {
         FAULT.with(Cell::get)
     }
 
     /// The commit fault switched on on this thread, if any.
-    #[cfg(not(any(test, feature = "test")))]
+    #[cfg(not(test))]
     pub(crate) fn active() -> Option<NlrFault> {
         None
     }
 
     /// Runs `body` with `fault` switched on, restoring the boundary
     /// afterwards even if `body` panics.
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(test)]
     pub fn with_fault<T>(fault: NlrFault, body: impl FnOnce() -> T) -> T {
         struct Reset;
         impl Drop for Reset {

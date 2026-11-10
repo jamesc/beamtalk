@@ -515,7 +515,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// [^(self.count := self.count + 10)]` (BT-3495's arm lowering) threw
     /// the written `State` without storing it, so the boundary committed
     /// the cell from before the write; found by the test-build check in
-    /// `beamtalk_actor_state:commit/2` over BUnit.
+    /// `beamtalk_actor_state:commit/2` over `BUnit`.
     NlrThrowWithoutCellStore { at: Span },
 
     /// BT-4288 / BT-4312: a REPL `^` run in place (`beamtalk-core`'s
