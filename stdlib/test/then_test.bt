@@ -33,9 +33,8 @@ TestCase subclass: ThenTest
 
   testAfterPipeline =>
     // `/` answers a Float, the mean of 20, 40 and 60.
-    average := #(2, 4, 6) collect: [:x |
-      x * 10
-    ] |> then: [:xs | (xs inject: 0 into: [:a :b | a + b]) / xs size]
+    average := #(2, 4, 6) collect: [:x | x * 10]
+      |> then: [:xs | (xs inject: 0 into: [:a :b | a + b]) / xs size]
     self assert: average equals: 40.0
 
   testPipelineContinuesAfterThen =>
@@ -74,9 +73,10 @@ TestCase subclass: ThenTest
   testActorAfterPipeline =>
     a := ThenProbeActor spawn
     [
-      self assert: (a add: 1 |> add: 2 |> total |> then: [:n |
-        n * 10
-      ]) equals: 30
+      self assert: (a add: 1
+        |> add: 2
+        |> total
+        |> then: [:n | n * 10]) equals: 30
     ] ensure: [a stop]
 
   // --- Class receivers ---
