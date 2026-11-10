@@ -96,19 +96,35 @@ impl TypeChecker {
     where
         F: Fn(&EcoString) -> bool,
     {
+        Self::classify_union_members_with(members, |_, name| pred(name))
+    }
+
+    /// [`Self::classify_union_members`] with a predicate that also receives
+    /// each member's own type (BT-4607: a protocol-typed state slot judges a
+    /// member by structural conformance, which needs the type, not its name).
+    pub(super) fn classify_union_members_with<F>(
+        members: &[InferredType],
+        pred: F,
+    ) -> Option<(usize, usize, Vec<EcoString>)>
+    where
+        F: Fn(&InferredType, &EcoString) -> bool,
+    {
         // Skip the whole union if any member is non-`Known` (Dynamic/Union/Meta/
         // Never) — we can't reason about those conservatively.
         if members.iter().any(|m| m.as_known().is_none()) {
             return None;
         }
-        let member_names: Vec<EcoString> = members
-            .iter()
-            .map(InferredType::display_annotation)
-            .collect();
-        let compatible = member_names.iter().filter(|m| pred(m)).count();
-        let incompatible: Vec<EcoString> =
-            member_names.iter().filter(|m| !pred(m)).cloned().collect();
-        Some((compatible, member_names.len(), incompatible))
+        let mut compatible = 0;
+        let mut incompatible = Vec::new();
+        for member in members {
+            let name = member.display_annotation();
+            if pred(member, &name) {
+                compatible += 1;
+            } else {
+                incompatible.push(name);
+            }
+        }
+        Some((compatible, members.len(), incompatible))
     }
 
     /// Classifies a `Union` argument's members against `expected`, per
@@ -3043,6 +3059,16 @@ impl TypeChecker {
         // Simple` could ever be a registered alias reference to begin with,
         // matching `state_field_type`'s bare-`EcoString` return —
         // so render the structured type once at this boundary.
+        // BT-4607: the structured slot type, so a protocol-typed slot
+        // (`P`, `P | Nil`, `P1 & P2`) is judged by structural conformance
+        // (`protocol_slot_accepts`) rather than by name.
+        let (declared_resolved, _) = type_resolver::resolve_declared_type_with_alias_deps(
+            &declared_type,
+            &type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_ref(),
+            super::TypeStringContext::Declared,
+        );
         let declared_type: EcoString = declared_type.to_string().into();
         // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
@@ -3079,7 +3105,14 @@ impl TypeChecker {
                 class_name: value_type,
                 ..
             } => {
-                if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                let accepted = Self::protocol_slot_accepts(
+                    value_ty,
+                    &declared_resolved,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                )
+                .unwrap_or_else(|| Self::is_assignable_to(value_type, &declared_type, hierarchy));
+                if !accepted {
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let declared_display = declared_display.clone();
                     let value_display =
@@ -3119,8 +3152,14 @@ impl TypeChecker {
             InferredType::Union { members, .. } => {
                 // Check all union members against the declared field type.
                 let Some((compat, total, incompatible)) =
-                    Self::classify_union_members(members, |m| {
-                        Self::is_assignable_to(m, &declared_type, hierarchy)
+                    Self::classify_union_members_with(members, |member, name| {
+                        Self::protocol_slot_accepts(
+                            member,
+                            &declared_resolved,
+                            hierarchy,
+                            self.protocol_registry.as_deref(),
+                        )
+                        .unwrap_or_else(|| Self::is_assignable_to(name, &declared_type, hierarchy))
                     })
                 else {
                     return; // Contains Dynamic — skip
@@ -3787,7 +3826,7 @@ impl TypeChecker {
                 type_resolver::resolve_type_annotation_with_alias_deps(
                     type_annotation,
                     &type_resolver::SubstitutionMap::new(),
-                    None,
+                    self.protocol_registry.as_deref(),
                     self.alias_registry.as_ref(),
                 );
             self.referenced_aliases.extend(alias_deps);
@@ -3835,7 +3874,16 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: value_type,
                     ..
-                } if !Self::is_assignable_to(value_type, &declared_type, hierarchy) => {
+                } if !Self::protocol_slot_accepts(
+                    &inferred,
+                    &resolved_declared,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                )
+                .unwrap_or_else(|| {
+                    Self::is_assignable_to(value_type, &declared_type, hierarchy)
+                }) =>
+                {
                     let declared_display = declared_display.clone();
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let value_display =
@@ -3858,8 +3906,16 @@ impl TypeChecker {
                     // Check all union members against the declared field
                     // type, mirroring `check_field_assignment`'s handling.
                     let Some((compat, total, incompatible)) =
-                        Self::classify_union_members(members, |m| {
-                            Self::is_assignable_to(m, &declared_type, hierarchy)
+                        Self::classify_union_members_with(members, |member, name| {
+                            Self::protocol_slot_accepts(
+                                member,
+                                &resolved_declared,
+                                hierarchy,
+                                self.protocol_registry.as_deref(),
+                            )
+                            .unwrap_or_else(|| {
+                                Self::is_assignable_to(name, &declared_type, hierarchy)
+                            })
                         })
                     else {
                         continue; // Contains Dynamic — skip
