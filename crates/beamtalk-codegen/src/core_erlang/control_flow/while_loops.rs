@@ -655,7 +655,7 @@ impl CoreErlangGenerator {
                     // advances).
                     let _ = this.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
                 } else if let Expression::DestructureAssignment { pattern, value, .. } = expr
-                    && !this.condition_destructure_plain_fault()
+                    && !Self::condition_destructure_plain_fault()
                 {
                     // BT-4584: each name is written as the branch above writes
                     // `name := ...` here, a `Put` into the condition's
@@ -800,7 +800,7 @@ impl CoreErlangGenerator {
     /// carried while condition takes the generic statement lowering, as
     /// before BT-4584, so `ConditionWriteNotInMap` is shown to fire on a real
     /// compile (`tests/while_condition_binding_corpus.rs`).
-    fn condition_destructure_plain_fault(&self) -> bool {
+    fn condition_destructure_plain_fault() -> bool {
         #[cfg(test)]
         if super::super::threaded_expr::fault::active()
             == Some(super::super::threaded_expr::fault::LocalRebindFault::ConditionDestructurePlain)
