@@ -224,6 +224,9 @@ impl Analyser {
                 receiver, messages, ..
             } => {
                 self.analyse_expression(receiver, None);
+                // Every cascade message shares one receiver: report a bad
+                // receiver once, not once per message.
+                let mut receiver_reported = false;
                 for msg in messages {
                     // Apply selector-based context detection for cascade messages
                     let selector_str = msg.selector.name();
@@ -238,9 +241,12 @@ impl Analyser {
                             msg.span,
                         );
                         self.result.diagnostics.extend(diagnostics);
-                        self.result
-                            .diagnostics
-                            .extend(validator.validate_receiver(&msg.selector, receiver));
+                        if !receiver_reported {
+                            let receiver_diags =
+                                validator.validate_receiver(&msg.selector, receiver);
+                            receiver_reported = !receiver_diags.is_empty();
+                            self.result.diagnostics.extend(receiver_diags);
+                        }
                     }
 
                     // Run receiver-based validators for cascade messages

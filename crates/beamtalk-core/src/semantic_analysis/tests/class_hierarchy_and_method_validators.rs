@@ -541,3 +541,17 @@ fn test_abstract_class_instantiation_error() {
     );
     assert!(abstract_errors[0].message.contains("Shape"));
 }
+
+#[test]
+fn test_while_condition_arity_in_cascade_reported_once() {
+    // BT-4617: every cascade message shares the one receiver block, so its
+    // arity error is reported once, not once per message.
+    let src = "Object subclass: W\n  run =>\n    x := 0.\n    [:y | x < 3] whileTrue: [x := x + 1]; whileFalse: [x := x - 1].\n    x\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let receiver_errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("expects its receiver to be a block"))
+        .collect();
+    assert_eq!(receiver_errors.len(), 1, "{:?}", result.diagnostics);
+}
