@@ -317,7 +317,8 @@ store_unwound(Throw, State) when is_map(State) ->
     store(State).
 
 -spec note_cell_ahead(term()) -> ok.
-note_cell_ahead({'$bt_nlr', _Token, _Value, Carried}) ->
+note_cell_ahead(Throw) when ?IS_NLR(Throw), tuple_size(Throw) =:= 4 ->
+    Carried = element(4, Throw),
     Ahead =
         case erlang:get(?CELL_AHEAD) of
             List when is_list(List) -> List;
