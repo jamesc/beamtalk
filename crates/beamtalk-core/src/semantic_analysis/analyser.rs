@@ -250,7 +250,7 @@ impl Analyser {
 
                     // Run method-specific validators for cascade messages
                     if let Some(validator) = self.method_validators.get(&selector_str) {
-                        let receiver_type = self.type_map.get(receiver.span());
+                        let receiver_type = self.type_map.get(cascade_target.span());
                         let diagnostics = validator.validate(
                             &msg.selector,
                             &msg.arguments,

@@ -604,4 +604,18 @@ fn test_cascade_receiver_checks_see_the_cascade_target() {
         ),
         1
     );
+    // The type-aware argument checks use the cascade target's type, not the
+    // first send's result: `at:` on the String is checked, and `at:` on the
+    // Dictionary is not, even though its first `at:` answers a String.
+    assert_eq!(
+        count("\"abc\" size; at: #k", "expects an integer argument"),
+        1
+    );
+    assert_eq!(
+        count(
+            "#{#a => \"x\"} at: #a; at: #b",
+            "expects an integer argument"
+        ),
+        0
+    );
 }
