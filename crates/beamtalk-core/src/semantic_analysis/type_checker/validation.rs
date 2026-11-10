@@ -3061,7 +3061,7 @@ impl TypeChecker {
         // so render the structured type once at this boundary.
         // BT-4607: the structured slot type, so a protocol-typed slot
         // (`P`, `P | Nil`, `P1 & P2`) is judged by structural conformance
-        // (`protocol_slot_accepts`) rather than by name.
+        // (`slot_accepts`) rather than by name.
         let (declared_resolved, _) = type_resolver::resolve_declared_type_with_alias_deps(
             &declared_type,
             &type_resolver::SubstitutionMap::new(),
@@ -3105,14 +3105,14 @@ impl TypeChecker {
                 class_name: value_type,
                 ..
             } => {
-                let accepted = Self::protocol_slot_accepts(
+                if !Self::slot_accepts(
                     value_ty,
+                    value_type,
                     &declared_resolved,
+                    &declared_type,
                     hierarchy,
                     self.protocol_registry.as_deref(),
-                )
-                .unwrap_or_else(|| Self::is_assignable_to(value_type, &declared_type, hierarchy));
-                if !accepted {
+                ) {
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let declared_display = declared_display.clone();
                     let value_display =
@@ -3153,13 +3153,14 @@ impl TypeChecker {
                 // Check all union members against the declared field type.
                 let Some((compat, total, incompatible)) =
                     Self::classify_union_members_with(members, |member, name| {
-                        Self::protocol_slot_accepts(
+                        Self::slot_accepts(
                             member,
+                            name,
                             &declared_resolved,
+                            &declared_type,
                             hierarchy,
                             self.protocol_registry.as_deref(),
                         )
-                        .unwrap_or_else(|| Self::is_assignable_to(name, &declared_type, hierarchy))
                     })
                 else {
                     return; // Contains Dynamic — skip
@@ -3874,15 +3875,14 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: value_type,
                     ..
-                } if !Self::protocol_slot_accepts(
+                } if !Self::slot_accepts(
                     &inferred,
+                    value_type,
                     &resolved_declared,
+                    &declared_type,
                     hierarchy,
                     self.protocol_registry.as_deref(),
-                )
-                .unwrap_or_else(|| {
-                    Self::is_assignable_to(value_type, &declared_type, hierarchy)
-                }) =>
+                ) =>
                 {
                     let declared_display = declared_display.clone();
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
@@ -3907,15 +3907,14 @@ impl TypeChecker {
                     // type, mirroring `check_field_assignment`'s handling.
                     let Some((compat, total, incompatible)) =
                         Self::classify_union_members_with(members, |member, name| {
-                            Self::protocol_slot_accepts(
+                            Self::slot_accepts(
                                 member,
+                                name,
                                 &resolved_declared,
+                                &declared_type,
                                 hierarchy,
                                 self.protocol_registry.as_deref(),
                             )
-                            .unwrap_or_else(|| {
-                                Self::is_assignable_to(name, &declared_type, hierarchy)
-                            })
                         })
                     else {
                         continue; // Contains Dynamic — skip

@@ -306,26 +306,32 @@ impl TypeChecker {
     }
 
     /// BT-4607: whether a state slot of type `declared` accepts the value
-    /// member `value`, when a protocol is involved on either side — the
-    /// annotated-local rule ([`Self::instances_widen`], BT-4482) applied to
-    /// `self.f := v` and `state: f :: T = v`, so a structural conformer of a
-    /// protocol-typed slot is accepted and a non-conformer is not. `None`
-    /// when no protocol is involved: the caller's nominal superclass walk
-    /// ([`Self::is_assignable_to`]) decides.
-    pub(in crate::semantic_analysis::type_checker) fn protocol_slot_accepts(
+    /// member `value` — the rule `self.f := v` and `state: f :: T = v`
+    /// share. Where a protocol is involved on either side, the
+    /// annotated-local rule ([`Self::instances_widen`], BT-4482) decides by
+    /// structural conformance, so a conformer of a protocol-typed slot (`P`,
+    /// `P | Nil`, `P1 & P2`) is accepted and a non-conformer is not.
+    /// Otherwise the nominal superclass walk ([`Self::is_assignable_to`])
+    /// compares `value_name` against `declared_name`, the slot's flattened,
+    /// alias-expanded spelling.
+    pub(in crate::semantic_analysis::type_checker) fn slot_accepts(
         value: &InferredType,
+        value_name: &EcoString,
         declared: &InferredType,
+        declared_name: &EcoString,
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
-    ) -> Option<bool> {
-        Self::protocol_involved(value, declared, hierarchy, protocol_registry).then(|| {
+    ) -> bool {
+        if Self::protocol_involved(value, declared, hierarchy, protocol_registry) {
             Self::instances_widen(
                 std::slice::from_ref(value),
                 declared,
                 hierarchy,
                 protocol_registry,
             )
-        })
+        } else {
+            Self::is_assignable_to(value_name, declared_name, hierarchy)
+        }
     }
 
     /// BT-4482: whether every one of the `values` (union members of a value
