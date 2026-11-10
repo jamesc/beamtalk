@@ -884,10 +884,11 @@ struct ClassMeta {
     /// `Value subclass:`). Set by [`mark_value_subclasses`] once every file's
     /// metadata is collected; it gates the `auto_ctors` anchor.
     is_value_subclass: bool,
-    /// BT-4501: whether this class's explicit class-side `new:` runs in the
-    /// caller (`ClassHierarchy::explicit_class_new1_runs_in_caller`), the
-    /// verdict published as `ClassInfo::in_caller_new1` so a module that only
-    /// references the class reads the same answer codegen acted on.
+    /// BT-4501: the body shape of this class's explicit class-side `new:`
+    /// (`ClassHierarchy::explicit_class_constructor_shape`), published as
+    /// `ClassInfo::in_caller_new1`. `runs_class_method_in_caller` adds the
+    /// chain half, so a module that only references the class reads the same
+    /// answer codegen acted on.
     in_caller_new1: bool,
 }
 

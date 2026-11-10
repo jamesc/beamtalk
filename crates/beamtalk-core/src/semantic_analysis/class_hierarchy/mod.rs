@@ -463,7 +463,7 @@ impl ClassHierarchy {
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
         if selector == "new:"
             && self.get_class(class_name).is_some_and(|c| c.in_caller_new1)
-            && self.info_constructor_chain_allows_in_caller(class_name)
+            && self.constructor_chain_allows_in_caller(class_name)
         {
             // BT-4501: the class's own explicit `new:` is published out of
             // `process_bound_class_selectors` (codegen), so it runs in the

@@ -4636,6 +4636,8 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
     for (base_src, expected) in [
         ("Object subclass: Base\n", true),
         ("Object subclass: Base\n  classState: n = 0\n", false),
+        ("Actor subclass: Base\n", false),
+        ("Value subclass: Base\n", true),
     ] {
         let base = parse(base_src);
         // Caller's view: only Pass 1 infos of both sibling files.

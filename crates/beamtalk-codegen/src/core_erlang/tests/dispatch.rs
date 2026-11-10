@@ -5060,6 +5060,8 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
     let cases = [
         ("Object subclass: Base\n", true),
         ("Object subclass: Base\n  classState: n = 0\n", false),
+        ("Actor subclass: Base\n", false),
+        ("Value subclass: Base\n", true),
     ];
     for (base_src, with_infos_expected) in cases {
         let base = parse(base_src);
