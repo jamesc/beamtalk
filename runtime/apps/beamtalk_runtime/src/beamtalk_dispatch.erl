@@ -604,6 +604,9 @@ value-type convention `fun(Self, Arg1..ArgN)`. Otherwise advance the walk.
 invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     case beamtalk_primitive:runtime_instance_method(MethodOwner, Selector) of
         {ok, Fun} when is_function(Fun, length(Args) + 1) ->
+            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
+            %% by every in-tree caller (or replied by an actor), as in
+            %% invoke_resolved/6.
             try
                 {reply, erlang:apply(Fun, [Self | Args]), State}
             catch
