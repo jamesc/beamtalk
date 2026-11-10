@@ -94,7 +94,10 @@ format_status(Module, Status) ->
         {[], []} ->
             Status;
         {Slots, Selectors} when is_list(Slots), is_list(Selectors) ->
-            redact_status(Status, Slots, Selectors)
+            redact_status(Status, Slots, Selectors);
+        _Malformed ->
+            %% An exception in an `of` clause is not caught below.
+            fail_closed(Status)
     catch
         _:_ -> fail_closed(Status)
     end.
