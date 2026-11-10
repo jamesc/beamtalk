@@ -101,7 +101,7 @@ top-level `test_coverage` options. The `liveview` CI job runs `mix test
 --cover` directly, so PRs get the threshold enforced as a real gate; a
 separate `coverage` job in `liveview.yml` (push-to-`main` only) publishes
 the `elixir-coverage.json` badge, through the same
-`scripts/ci/publish-coverage-badge.sh` that `ci.yml`'s `publish-coverage`
+`scripts/ci/publish-coverage-badge.sh` that `coverage.yml`'s `publish-coverage`
 job uses for the Rust and Erlang badges (measured by its `coverage-rust`
 and `coverage-erlang` legs).
 
@@ -168,14 +168,17 @@ Coverage reports are saved to:
 
 **CI Integration:**
 
-`ci.yml` measures coverage in two parallel legs, `coverage-rust` and
-`coverage-erlang`. They run on every push to `main`, on a manual
-`workflow_dispatch` of the CI workflow, and on any PR touching the `Justfile`
-(home of the `coverage-*` recipes) or `ci.yml` itself, so a coverage-recipe
-change is exercised before it merges. Each leg writes its report to the
-GitHub Actions job summary and uploads it as an artifact.
+The Nightly Coverage workflow (`coverage.yml`) measures coverage in two
+parallel legs, `coverage-rust` and `coverage-erlang`. It runs once a day on
+`main` (05:00 UTC), not on every PR or merge: re-running both suites
+instrumented costs about 43 runner-minutes, which competed with PR jobs for
+runners (BT-4609). A failed leg is triaged like a red `main` by
+`ci-triage.yml`. To exercise a coverage-recipe change before it merges,
+dispatch the workflow on the branch: `gh workflow run coverage.yml --ref
+<branch>`. Each leg writes its report to the GitHub Actions job summary and
+uploads it as an artifact.
 
-On a push to `main`, `publish-coverage` then updates the Rust and Erlang
+On a run of `main`, `publish-coverage` then updates the Rust and Erlang
 badges on the `badges` branch from whatever report each leg produced — even
 when a leg failed its threshold, in which case its badge goes red. A leg
 that produced no report at all leaves its badge unchanged. The failed leg
@@ -184,7 +187,7 @@ job, not the badge, is what fails the run.
 **Coverage Thresholds:**
 
 The line-coverage floors are defined once, as `RUST_LINE_COVERAGE_MIN` and
-`ERLANG_LINE_COVERAGE_MIN` in `ci.yml`'s workflow `env`.
+`ERLANG_LINE_COVERAGE_MIN` in `coverage.yml`'s workflow `env`.
 
 | Metric | Minimum | Target | Action if Below Minimum |
 |--------|---------|--------|------------------------|
@@ -692,10 +695,13 @@ carry this harness. True for any commit once BT-3509 has landed on `main` —
 which is why it's Phase 0 of its epic and blocks every other issue in it —
 but not for a branch diffed against a pre-BT-3509 `main`.
 
-**CI:** runs as an informational job (`.github/workflows/ci.yml`'s
-`core-diff` job) on PRs touching `crates/beamtalk-codegen/`, reporting any
-diff to the job summary without failing the build. Add the
-`core-diff:enforce` label to a PR to make a real diff fail that job instead.
+**CI:** opt-in. The Core Diff workflow (`.github/workflows/core-diff.yml`)
+runs only on a PR that touches `crates/beamtalk-codegen/` and carries the
+`ci:core-diff` label, reporting any diff to the job summary without failing
+the build. The `core-diff:enforce` label also runs it, and makes a real diff
+fail the job. Adding either label starts a run. It used to run on every
+codegen PR, but nothing read the report and it cost about 19 runner-minutes
+per run (BT-4609); run `just core-diff` locally for the same report.
 
 The job diffs against the PR's base SHA (`github.event.pull_request.base.sha`)
 rather than a freshly fetched `origin/main`, because the base side is
@@ -882,6 +888,29 @@ just ci
 #   just test-bunit      # BUnit TestCase tests (grows continuously — see "BUnit Tests" above for a count command)
 #   just test-repl-protocol  # REPL TCP-protocol tests (~50s)
 ```
+
+### Opt-in CI checks
+
+PR wall-clock is dominated by waiting for a free runner, not by job length, so
+the most expensive informational or specialised checks run on a PR only when
+it carries their label (BT-4609). Adding the label starts a run, and later
+pushes to a labelled PR re-run it. AGENTS.md (Opt-in CI labels) says when an
+agent must add each one.
+
+| Label | Workflow | Runs on `main` | Add it when |
+|-------|----------|----------------|-------------|
+| `ci:corpus` | `corpus.yml` (Rust corpus tier, `just test-corpus`, two shards, about 33 runner-min) | Every merge | The PR changes state-threading lowering or its analysis, fixes a state-threading or `PIN-BUG` issue, or adds or changes a `*_corpus` / `*agreement*` test |
+| `ci:core-diff` | `core-diff.yml` (corpus `.core` diff vs the PR base) | Never | A codegen refactor should leave generated Core Erlang unchanged |
+| `core-diff:enforce` | `core-diff.yml`, failing on any diff | Never | As above, and any difference must fail the PR |
+| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule | The PR is platform-sensitive (paths, processes, file system) |
+
+Because `main` runs the corpus tier on every merge, and `ci-triage.yml` files
+an issue for a red `main` run, a PR that should have carried `ci:corpus` but
+didn't is caught one merge later. Locally, `just ci-changed` still runs the
+tier whenever `scripts/ci/corpus-gate.sh` matches the changed paths.
+
+Coverage is not on the PR path at all: see § Code Coverage (`coverage.yml`,
+nightly).
 
 ### Testing Pyramid
 
