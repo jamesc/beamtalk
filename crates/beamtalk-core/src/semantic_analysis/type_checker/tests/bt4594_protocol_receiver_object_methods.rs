@@ -230,3 +230,20 @@ fn class_of_a_protocol_receiver_is_the_protocol_metatype() {
     assert_eq!(msgs.len(), 1, "{msgs:#?}");
     assert!(msgs[0].contains("String"), "{msgs:#?}");
 }
+
+#[test]
+fn union_member_protocol_unknown_selector_widens_to_dynamic() {
+    // The protocol member is uncertain (a conformer may override
+    // `doesNotUnderstand:`), so — like every other uncertain union member —
+    // it widens the send's type with `Dynamic` rather than letting
+    // `Integer`'s `abs` alone decide it.
+    let msgs = checker_messages(&source_with(
+        r"
+  class a: h :: Callable | Integer -> String => h abs
+",
+    ));
+    assert!(
+        !msgs.iter().any(|m| m.contains("returns Integer")),
+        "{msgs:#?}"
+    );
+}

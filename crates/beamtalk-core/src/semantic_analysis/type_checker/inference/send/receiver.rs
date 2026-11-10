@@ -1376,9 +1376,12 @@ impl TypeChecker {
                 Some(ProtocolSendResolution::Unknown) => {
                     // Reported missing, but a conformer may override
                     // `doesNotUnderstand:`, so — like a bare protocol
-                    // receiver — this member caps the union DNU at `Hint`.
+                    // receiver — this member caps the union DNU at `Hint`
+                    // and, like every other uncertain member, widens the
+                    // send's type with `Dynamic`.
                     uncertain_member_count += 1;
                     missing_names.push(member_name.clone());
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                     continue;
                 }
                 Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
