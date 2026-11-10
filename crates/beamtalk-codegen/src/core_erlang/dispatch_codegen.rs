@@ -1116,6 +1116,12 @@ impl CoreErlangGenerator {
         let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
         all_exprs.push(receiver);
         all_exprs.extend(arguments.iter());
+        // BT-4633: no `^`-closure pre-store here either; the runtime
+        // dispatch's argument holds (`generate_runtime_dispatch`), and the
+        // same test-build log checks it. A `no_user_code` send to a receiver
+        // of statically known class reaches this guarded send, not that one.
+        #[cfg(test)]
+        self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "TTagged")?;
         let mut docs_iter = docs.drain(..);
         let receiver_doc = docs_iter.next().ok_or_else(|| {
@@ -1698,32 +1704,41 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        // BT-4612: no `^`-closure pre-store here. Outside every bracket
-        // window a send reaches this dispatch only when `classify_send`
+        // BT-4612: no `^`-closure pre-store here, nor in the typed guarded
+        // send (`generate_typed_guarded_send`), which takes a send to a
+        // receiver of statically known class instead and falls back to this
+        // same call. Outside every bracket window a send reaches either
+        // dispatch only when `classify_send`
         // answered `UserCodeCall::No` (a `Yes` send there is a gap, and a
         // self or `super` send dispatches elsewhere). Each way to `No`, with
         // a block literal holding a `^` among the operands:
         //
         // - `SendUserCode::Never` (`p spawnWith: [^1]`): runs none of its
-        //   operands, so there is nothing to store for (BT-4606). The one
-        //   shape that reaches this dispatch (`never_spawn_with`).
+        //   operands, so there is nothing to store for (BT-4606). Reaches
+        //   this dispatch (`never_spawn_with`).
         // - `is_no_user_code_send`: a sealed primitive the stdlib marked
-        //   `no_user_code` promises to run no user code, so it never runs a
-        //   block either, and `build-stdlib` rejects a mark whose parameter
-        //   could be a block (`NO_USER_CODE_PARAMETER_TYPES`, which
-        //   `no_user_code_parameters_exclude_blocks` keeps free of `Block`).
+        //   `no_user_code` runs no user code for any argument, so it runs
+        //   none of its operands either: a block passed to it (even to a
+        //   parameter annotated `Integer`, since annotations are not checked
+        //   at run time) is never run, and `note_nlr_operands` records
+        //   nothing for it, like a `Never` send (BT-4633). Its receiver's
+        //   class is known, so it reaches the typed guarded send
+        //   (`no_user_code_block_argument`). Both are
+        //   `send_runs_no_operand`.
         // - `Inlined`, `LoopOrClosureCall`, `InlinedOrClosureCall` answered
         //   `No`: the construct is lowered in place by its own lowering
         //   (a conditional's fallback stores for itself,
         //   `boolean_fallback_send`), never through this dispatch.
         //
         // Checked, not argued: in test builds every such send that reaches
-        // this dispatch is logged (`note_dispatch_nlr_literals`), and
-        // `only_never_sends_reach_the_dispatch_with_a_nlr_literal` compiles
-        // the whole `nlr_closure_call_corpus` (every in-place construct, and
-        // the fallback shapes with a non-literal operand) and fails on any
-        // logged send that is not `Never`. In any build, such a send would
-        // leave its `^` block an `UnbracketedNlrClosure` finding.
+        // either dispatch is logged (`note_dispatch_nlr_literals`), and
+        // `only_sends_that_run_no_operand_reach_the_dispatch_with_a_nlr_literal`
+        // compiles the whole `nlr_closure_call_corpus` (every in-place
+        // construct, the fallback shapes with a non-literal operand, and a
+        // test-only parameterised `no_user_code` mark given a `^` block) and
+        // fails on any logged send that may run an operand. In any build,
+        // such a send would leave its `^` block an `UnbracketedNlrClosure`
+        // finding.
         #[cfg(test)]
         self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let mut seq = self.sequence_call(&all_exprs, "Disp")?;
