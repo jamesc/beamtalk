@@ -1873,6 +1873,22 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4651: the one place that decides whether `LoopMode::discarded_fold_block`
+    /// is armed for a construct tuple. Only a `ProducerTail::Discard` producer
+    /// can arm it (nothing reads its locals afterwards); a `Rebind` producer
+    /// never does, since later code reads the repacked locals. Actor frames and
+    /// self-family folds (`no_self_families` false) never arm it either.
+    pub(super) fn discarded_fold_arm(
+        tail: ProducerTail,
+        actor: bool,
+        no_self_families: bool,
+        expr: &Expression,
+    ) -> Option<Span> {
+        (true && !actor && no_self_families)
+            .then(|| Self::discardable_fold_block(expr))
+            .flatten()
+    }
+
     /// BT-4629: consumes [`LoopMode::discarded_fold_block`]: whether the fold
     /// whose body block is at `body_span` is the discarded construct.
     pub(super) fn take_discarded_fold(&mut self, body_span: Span) -> bool {
@@ -2583,11 +2599,12 @@ impl CoreErlangGenerator {
         // BT-4629: a `Discard` tail reads no local back, so a `do:` fold that
         // is this construct need not repack them into its carrier's map.
         // Self-family folds also read the carrier's other slots: they keep it.
-        let discard_block = (tail == ProducerTail::Discard
-            && !actor
-            && self_families == super::control_flow::analysis::ThreadedFamilies::default())
-        .then(|| Self::discardable_fold_block(expr))
-        .flatten();
+        let discard_block = Self::discarded_fold_arm(
+            tail,
+            actor,
+            self_families == super::control_flow::analysis::ThreadedFamilies::default(),
+            expr,
+        );
         self.loop_mode.discarded_fold_block = discard_block;
         let doc = self.with_fold_self_slot_consumer(expr, |this| {
             this.with_cleared_direct_params_loop(|this| this.expression_doc(expr))

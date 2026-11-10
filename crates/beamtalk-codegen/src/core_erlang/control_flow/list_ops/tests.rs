@@ -3205,3 +3205,25 @@ fn test_closed_do_writing_self_field_keeps_carrier_slots() {
         "the carrier must still hold the fold's slots. Got:\n{code}"
     );
 }
+
+// BT-4651: which producers can arm `LoopMode::discarded_fold_block`: only a
+// `ProducerTail::Discard` construct tuple (`threaded_expr::discarded_fold_arm`).
+// A `Rebind` producer that still goes through `lower_construct_tuple` (here a
+// `do:` operand whose local is read afterwards inside a conditional) must keep
+// its carrier map, or the later read sees a stale/absent local.
+#[test]
+fn test_discarded_fold_flag_not_armed_for_rebind_tail_in_conditional() {
+    let src = concat!(
+        "Value subclass: V\n",
+        "  state: dummy = 0\n\n",
+        "  run: flag =>\n",
+        "    total := 0\n",
+        "    flag ifTrue: [#(1, 2) do: [:v | total := total + v]].\n",
+        "    flag ifTrue: [total] ifFalse: [0]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        !code.contains("{'nil'} in let _ThreadedValue"),
+        "a do: whose local is read afterwards must not answer a bare carrier. Got:\n{code}"
+    );
+}
