@@ -2862,6 +2862,13 @@ Both are the same linked, trap-exit, init-ack-awaited start
 supervisor see the child's exit. The answer is `{ok, Pid}` or `{error,
 Reason}` — never `ignore`, which the actor start converts to `{error,
 ignore}`.
+
+A `native:` actor child (ADR 0056, BT-4577) goes through the same calls:
+`ChildModule` is then its facade, which has no `init/1`, and those
+`beamtalk_actor` starts resolve the facade's backing module and start it
+with `BackingModule:start_link(Args)` instead, as the facade's own `spawn/1`
+does (`beamtalk_actor:safe_start_native/4`). A named native child is
+registered just after it started.
 """.
 -spec start_actor_child(module(), term()) -> {ok, pid()} | {error, term()}.
 start_actor_child(ChildModule, Args) ->

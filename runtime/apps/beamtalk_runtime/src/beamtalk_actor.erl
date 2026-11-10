@@ -107,6 +107,13 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/5, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 
+A `native:` actor's facade module (ADR 0056) has no `init/1`. Its own
+`spawn/0,1` calls `BackingModule:start_link/1`. When one of the paths above
+is handed the facade instead (a supervised child, `spawnAs:`),
+`safe_spawn_linked/2` and `safe_spawn_named/5` start the backing module the
+same way (`safe_start_native/4`, BT-4577). There is no Beamtalk
+`initialize` to await.
+
 unnamed `Module:spawn/0,1` (via `beamtalk_actor:safe_spawn/2`)
 spawns unlinked in the common case — the caller (which can be a class
 gen_server for dynamic dispatch, or a class method body for `self spawn`)
@@ -970,9 +977,14 @@ sys-based wait (`await_initialize/3`).
 """.
 -spec safe_spawn_linked(module(), term()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
-    start_link_and_await(
-        fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
-    ).
+    case native_backing_module(Module) of
+        none ->
+            start_link_and_await(
+                fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
+            );
+        Backing ->
+            safe_start_native(Backing, InitArgs, none, linked)
+    end.
 
 -doc """
 Spawn a named actor with trap_exit + initialize synchronization, per
@@ -1031,11 +1043,20 @@ function's doc for why the caller cannot do it after.
 """.
 -spec safe_spawn_named(local | global, link_mode(), atom(), module(), map()) ->
     {ok, pid()} | {error, term()}.
-safe_spawn_named(local, Link, Name, Module, InitArgs) ->
+safe_spawn_named(Scope, Link, Name, Module, InitArgs) ->
+    case native_backing_module(Module) of
+        none -> safe_spawn_gen_named(Scope, Link, Name, Module, InitArgs);
+        Backing -> safe_start_native(Backing, InitArgs, {Scope, Name}, Link)
+    end.
+
+%% `safe_spawn_named/5` for a compiled (non-`native:`) actor module.
+-spec safe_spawn_gen_named(local | global, link_mode(), atom(), module(), map()) ->
+    {ok, pid()} | {error, term()}.
+safe_spawn_gen_named(local, Link, Name, Module, InitArgs) ->
     start_link_and_await(
         fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs, Link
     );
-safe_spawn_named(global, Link, Name, Module, InitArgs) ->
+safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
     case
         start_link_and_await(
             fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, Link
@@ -1051,6 +1072,106 @@ safe_spawn_named(global, Link, Name, Module, InitArgs) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+-doc """
+BT-4577: the backing module of a `native:` actor class's facade module
+(ADR 0056), or `none` for any other module (a compiled actor, a hand-written
+gen_server).
+
+A `native:` actor compiles to a facade with no `init/1`; its process is the
+backing module's, started by `BackingModule:start_link(Config)` — what the
+facade's own generated `spawn/1` calls. The facade publishes that module as
+`backing_module` in `__beamtalk_meta/0`, read here through
+`beamtalk_class_registry:meta_backing_module/1`, so every start path that
+is handed the class's module (`safe_spawn_linked/2`, `safe_spawn_named/5`,
+and through them a supervisor's actor child, `beamtalk_supervisor:
+start_actor_child/2,3`) starts the backing module instead of calling
+`gen_server:start_link` on the facade (`undef` `init/1`).
+""".
+-spec native_backing_module(module()) -> module() | none.
+native_backing_module(Module) ->
+    _ = code:ensure_loaded(Module),
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true -> beamtalk_class_registry:meta_backing_module(Module:'__beamtalk_meta'());
+        false -> none
+    end.
+
+-doc """
+BT-4577: start a `native:` actor's backing module, linked, as
+`safe_spawn_linked/2` (`Registration = none`) and `safe_spawn_named/5`
+(`{local | global, Name}`) do for a compiled actor.
+
+The start is `BackingModule:start_link(Config)`, the same call the facade's
+`spawn/1` makes. There is no Beamtalk `initialize` to await and no init-ack
+target to add: the backing module's own `init/1` has run when `start_link`
+returns. Exits are trapped around the start so a backing `init/1` that fails
+is answered as `{error, Reason}` instead of killing the caller.
+
+The backing `start_link/1` takes no name, so a named start registers the
+pid after it started — `register/2` for `local`, `global:register_name/3`
+with `resolve_global_conflict/3` for `global` (as the compiled-actor `global`
+path already does). A name that is taken stops the new process and answers
+`{error, {already_started, Holder}}`, which `spawn_named_scoped/5` turns into
+`#name_registered`. `Link = unlinked` drops the start link before exits stop
+being trapped (`maybe_unlink_started/2`).
+""".
+-spec safe_start_native(module(), term(), none | {local | global, atom()}, link_mode()) ->
+    {ok, pid()} | {error, term()}.
+safe_start_native(Backing, Config, Registration, Link) ->
+    OldTrap = erlang:process_flag(trap_exit, true),
+    Result =
+        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
+        %% is a hand-written Erlang start function, never a Beamtalk block
+        try Backing:start_link(Config) of
+            {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
+            {error, Reason} -> {error, Reason};
+            ignore -> {error, ignore};
+            Other -> {error, {bad_start_link_return, Other}}
+        catch
+            _:CrashReason -> {error, CrashReason}
+        end,
+    case Result of
+        {ok, Started} -> ok = maybe_unlink_started(Link, Started);
+        {error, _} -> ok
+    end,
+    erlang:process_flag(trap_exit, OldTrap),
+    Result.
+
+%% BT-4577: register a just-started native actor under its name, or stop it
+%% when the name is taken.
+-spec register_native_started(none | {local | global, atom()}, pid()) ->
+    {ok, pid()} | {error, {already_started, pid() | undefined}}.
+register_native_started(none, Pid) ->
+    {ok, Pid};
+register_native_started({local, Name}, Pid) ->
+    try register(Name, Pid) of
+        true -> {ok, Pid}
+    catch
+        error:badarg ->
+            ok = stop_unregistered_native(Pid),
+            {error, {already_started, whereis(Name)}}
+    end;
+register_native_started({global, Name}, Pid) ->
+    case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
+        yes ->
+            {ok, Pid};
+        no ->
+            ok = stop_unregistered_native(Pid),
+            {error, {already_started, global:whereis_name(Name)}}
+    end.
+
+%% Stop a native actor whose name could not be registered. Called with exits
+%% trapped: the start link is removed and any `'EXIT'` it already delivered is
+%% dropped, then the process is killed and awaited through a monitor (the
+%% backing module's `start_link` is not guaranteed to link).
+-spec stop_unregistered_native(pid()) -> ok.
+stop_unregistered_native(Pid) ->
+    ok = maybe_unlink_started(unlinked, Pid),
+    MonRef = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', MonRef, process, Pid, _} -> ok
     end.
 
 -doc """

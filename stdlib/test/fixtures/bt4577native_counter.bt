@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4577: a `native:` actor started as a supervisor child. Backed by the
+// runtime's beamtalk_test_native_counter gen_server (`initial` start arg).
+
+Actor subclass: Bt4577NativeCounter native: beamtalk_test_native_counter
+
+  increment -> Integer => self delegate
+
+  getValue -> Integer => self delegate
+
+  /// Restarted after a crash, so the restart path is exercised. A class
+  /// method with a Beamtalk body is allowed on a native actor.
+  class supervisionPolicy -> RestartStrategy => #permanent
