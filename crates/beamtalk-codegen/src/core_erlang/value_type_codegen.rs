@@ -2626,7 +2626,8 @@ impl CoreErlangGenerator {
     /// captured local threading) as an **open let chain**.
     ///
     /// Unlike the closed form (which buries the extracted locals inside `_seqN = (... 'nil')`)
-    /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
+    /// this form emits the foldl and the extractions (plain lets / `element/2` for the
+    /// tuple/bare accumulator, `maps:get` for the map accumulator) directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
     #[allow(clippy::too_many_lines)] // Document-based foldl scaffolding spans many lines
@@ -2658,18 +2659,10 @@ impl CoreErlangGenerator {
             "The do: block must take exactly one argument: [:each | ...]",
         )?;
 
-        // a second, throwaway `ThreadingPlan` — constructed purely to read the
-        // threaded locals and to build the fold call via `foldl_call_doc`
-        // (computed identically to the one
-        // `generate_list_do_body_with_threading` builds internally below via
-        // `ThreadingPlan::new`) — NOT passed to
-        // `emit_loop_convention_diagnostic` (that would double-emit the
-        // diagnostic `generate_list_do_body_with_threading` already emits
-        // for its own, real plan). This "open" `do:` codegen is a genuinely
-        // separate reimplementation from `list_ops/basic_ops.rs`'s closed
-        // form (it needs an open let-chain, not a closed `{Value, StateAcc}`
-        // return) — see this function's own doc comment — so it uses the same
-        // `foldl_call_doc` every other `Foldl*` call site does.
+        // The fold's real plan (BT-4116: `new_for_foldl_list_op`, so it can pick
+        // the tuple/bare accumulator). It drives either the tuple/bare open
+        // form (`generate_value_type_do_open_tuple`) or the map open form
+        // below; both emit the loop-convention diagnostic from it.
         let fold_plan = self.with_fold_self_slot_consumer(expr, |this| {
             ThreadingPlan::new_for_foldl_list_op(this, body, ListOpKind::Do)
                 .with_value_self_slot(this, body)

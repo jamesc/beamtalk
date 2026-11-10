@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn test_dict_do_value_type_with_local_mutation_emits_nil_result() {
-        // ValueType context + dict do: + local mutation uses the map-acc path in
+        // ValueType context + dict do: + local mutation folds a bare accumulator (BT-4116; the closed form still repacks a map, see BT-4629) in
         // generate_dict_do_with_mutations. When threaded_locals is non-empty and
         // context is ValueType, the result suffix is the atom 'nil' rather than
         // {'nil', FoldResult} (covers lines 204-205 of dict_ops.rs).
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_dict_do_with_key_value_type_with_local_mutation_answers_the_carrier() {
-        // ValueType context + doWithKey: + local mutation uses the map-acc path in
+        // ValueType context + doWithKey: + local mutation folds a bare accumulator (BT-4116; the closed form still repacks a map, see BT-4629) in
         // generate_dict_do_with_key_mutations. Like `do:` (BT-3796) the closed form
         // answers the `{nil, FoldResult}` carrier that the producer site unpacks
         // (BT-3841), not a bare `nil`.

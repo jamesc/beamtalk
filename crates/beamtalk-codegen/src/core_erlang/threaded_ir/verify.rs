@@ -86,6 +86,15 @@ pub(in crate::core_erlang) enum VerifyError {
     /// rides the map path (`select_tuple_acc`'s `field_writes` guard).
     TupleAccWithFamily { at: Span },
 
+    /// BT-4116: a `TupleAccUnpack` node's `shape` disagrees with its
+    /// enclosing `TupleAcc` mode's (`element` on a bare value, or the whole
+    /// tuple bound to one local).
+    UnpackShapeMismatch {
+        mode: FoldAccShape,
+        node: FoldAccShape,
+        at: Span,
+    },
+
     /// BT-4116: a [`FoldAccShape::Bare`] unpack with other than exactly one
     /// target (`render_tuple_acc_unpack` would bind each to the whole value).
     BareAccTargets { targets: usize, at: Span },
@@ -2177,7 +2186,14 @@ impl VerifyWalk<'_> {
                 // the node's own `gate_slots` must match the enclosing mode's.
                 if let Some(mode) = self.mode_stack.last() {
                     match mode {
-                        ThreadingMode::TupleAcc(mode_gate_slots, _) => {
+                        ThreadingMode::TupleAcc(mode_gate_slots, mode_shape) => {
+                            if *mode_shape != *shape {
+                                self.errors.push(VerifyError::UnpackShapeMismatch {
+                                    mode: *mode_shape,
+                                    node: *shape,
+                                    at: *span,
+                                });
+                            }
                             if *mode_gate_slots != *gate_slots {
                                 self.errors.push(VerifyError::EarlyExitGateSlotMismatch {
                                     mode_gate_slots: *mode_gate_slots,

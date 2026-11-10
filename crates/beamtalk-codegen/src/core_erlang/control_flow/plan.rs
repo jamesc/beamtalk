@@ -107,7 +107,8 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// no complex control flow that generates `StateAcc`-dependent code).
     ///
     /// Eliminates per-iteration `maps:get` / `maps:put` for locally-threaded vars.
-    /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
+    /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`; the bare
+    /// local itself when exactly one is threaded, see `fold_acc_shape`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
     /// the `TupleAcc` mode's canonical leading gate-slot count,

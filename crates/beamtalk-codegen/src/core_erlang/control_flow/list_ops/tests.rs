@@ -1550,8 +1550,8 @@ fn test_value_type_do_with_local_mutation_open_chain() {
 #[test]
 fn test_value_type_collect_with_local_mutation_threaded_result_wrapper() {
     // ValueType + collect: + local mutation → generate_list_collect_with_mutations
-    // (basic_ops.rs) in map-acc mode (ValueType forces map-acc; tuple-acc is disabled).
-    // The result is wrapped in a {List, StateAcc} pair; the outer method body unpacks
+    // (basic_ops.rs) in tuple-acc mode (BT-4116: ValueType may use it too).
+    // The result is wrapped in a ThreadedResult; the outer method body unpacks
     // it via element(1, ThreadedResult).
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, 2, 3) collect: [:item | count := count + 1. item * 2]\n";
     let code = codegen(src);
@@ -1574,8 +1574,8 @@ fn test_value_type_collect_with_local_mutation_threaded_result_wrapper() {
 #[test]
 fn test_value_type_select_with_local_mutation_threaded_result_wrapper() {
     // ValueType + select: + local mutation → generate_list_filter_with_mutations
-    // (filter_ops.rs) in map-acc mode (ValueType forces map-acc).
-    // Like collect:, the result is wrapped in a {List, StateAcc} pair that the outer
+    // (filter_ops.rs) in tuple-acc mode (BT-4116: ValueType may use it too).
+    // Like collect:, the result is wrapped in a ThreadedResult that the outer
     // method body unpacks via element(1, ThreadedResult).
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, -2, 3) select: [:item | count := count + 1. item > 0]\n";
     let code = codegen(src);

@@ -361,3 +361,31 @@ fn bare_unpack_of_several_targets_is_reported() {
         })
     );
 }
+
+#[test]
+fn unpack_shape_disagreeing_with_the_mode_is_reported() {
+    let frame = FrameId::new(1);
+    let target = VersionedVar::new(VersionPrefix::Gensym("a".into()), 1, frame);
+    let stmt = ThreadedStmt::Threaded {
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Bare),
+        frame,
+        threads: vec!["a".into()],
+        body: vec![ThreadedStmt::TupleAccUnpack {
+            param: AccParam::new("AccSt"),
+            gate_slots: 0,
+            shape: FoldAccShape::Tuple,
+            targets: vec![target.clone()],
+            frame,
+            span: span(),
+        }],
+        produces: vec![target],
+        span: span(),
+    };
+    assert!(
+        verify(std::slice::from_ref(&stmt)).contains(&VerifyError::UnpackShapeMismatch {
+            mode: FoldAccShape::Bare,
+            node: FoldAccShape::Tuple,
+            at: span()
+        })
+    );
+}

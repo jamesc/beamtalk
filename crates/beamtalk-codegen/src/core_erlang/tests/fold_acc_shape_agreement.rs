@@ -197,7 +197,7 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
     script.push_str(
         &"Ok = length([M || M <- [LIST], element(1, Run(M)) =/= caught]),\n\
           io:format(\"RAN ~p~n\", [Ok]),\n\
-          [case Run(M) of {caught, _, E} when E =:= undef; E =:= class_not_found -> io:format(\"BROKEN ~p ~p~n\", [M, E]); _ -> ok end || M <- [LIST]],\n"
+          [case Run(M) of {caught, _, undef} -> io:format(\"BROKEN ~p undef~n\", [M]); {caught, _, #{error := Err}} when is_tuple(Err), element(2, Err) =:= class_not_found -> io:format(\"BROKEN ~p class_not_found~n\", [M]); _ -> ok end || M <- [LIST]],\n"
             .replace("LIST", &list),
     );
     script.push_str("io:format(\"DONE~n\"), halt().");
