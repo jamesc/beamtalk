@@ -1144,7 +1144,11 @@ mark_seen(_, Seen) ->
 %% heuristic for any value summarised inline.
 -spec render_field(map(), integer(), non_neg_integer(), map(), provenance()) -> iolist().
 render_field(
-    #{label := {beamtalk_string, Label}, value := Value, drillable := true}, Depth, Indent, Seen, Prov
+    #{label := {beamtalk_string, Label}, value := Value, drillable := true},
+    Depth,
+    Indent,
+    Seen,
+    Prov
 ) when
     Depth > 1
 ->
