@@ -41,6 +41,7 @@
 //! their unparenthesised twins.
 
 use super::assert_compiles_through_erlc;
+use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
 use crate::core_erlang::synced_call::{
     CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, FAULT_NLR_CLOSURES_UNSTORED,
     FAULT_PRESTORE_READS_BEFORE_OPERANDS, PRESTORE_EARLY_READ,
@@ -160,11 +161,23 @@ const CALLS: &[(&str, &str, bool)] = &[
     // `^` block outside every window: a `Never` send, which runs nothing,
     // so the dispatch stores nothing (it has no pre-store).
     ("never_spawn_with", "p spawnWith: [^1]", false),
+    // BT-4633: a send to a `no_user_code` primitive (`is_no_user_code_send`)
+    // runs no user code, so it runs none of its operands either, whatever
+    // its declared parameter types (they are not checked at run time). A
+    // parameterised mark given a `^` block reaches a dispatch with no
+    // pre-store (the typed guarded send, its receiver's class being known)
+    // like `never_spawn_with` and records nothing. The mark is test-only
+    // ([`NO_USER_CODE_PROBE`]): every stdlib mark today is unary.
+    (
+        "no_user_code_block_argument",
+        "r := 3 noUserCodeProbe: [^1]",
+        false,
+    ),
     // BT-4612: in-place constructs given an operand they cannot inline
     // (not a block literal, or a receiver of unknown class) next to a `^`
     // literal: whatever they fall back to, it is not the runtime dispatch
     // with a `^` literal outside every window
-    // (`only_never_sends_reach_the_dispatch_with_a_nlr_literal`).
+    // (`only_sends_that_run_no_operand_reach_the_dispatch_with_a_nlr_literal`).
     (
         "mixed_conditional",
         "r := p ifTrue: [^8] ifFalse: blk",
@@ -282,9 +295,31 @@ fn corpus() -> Vec<(String, String, bool)> {
     out
 }
 
+/// BT-4633: a test-only parameterised `no_user_code` mark, `Integer >>
+/// noUserCodeProbe:`, that `build-stdlib`'s rule accepts (a sealed class, an
+/// `Integer` parameter), so a corpus row can send it a `^` block.
+const NO_USER_CODE_PROBE: &str = "sealed Object subclass: Integer
+  noUserCodeProbe: x :: Integer -> Integer => @primitive \"noUserCodeProbe:\" no_user_code
+";
+
+/// The binding table the corpus compiles against: [`NO_USER_CODE_PROBE`]'s
+/// mark, checked against the `build-stdlib` rule.
+fn probe_bindings() -> PrimitiveBindingTable {
+    let (module, _) = parse(lex_with_eof(NO_USER_CODE_PROBE));
+    let mut table = PrimitiveBindingTable::new();
+    table.add_from_module(&module);
+    assert!(table.is_no_user_code("Integer", "noUserCodeProbe:"));
+    assert_eq!(table.check_no_user_code_marks(), Vec::<String>::new());
+    table
+}
+
 fn compile(src: &str) -> String {
     let (module, _) = parse(lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
+    generate_module(
+        &module,
+        CodegenOptions::new("test").with_bindings(probe_bindings()),
+    )
+    .expect("codegen should succeed")
 }
 
 /// The panic message of compiling `src` (a verifier finding is a debug-build
@@ -426,32 +461,35 @@ fn a_prestore_read_before_its_operands_reports_stale() {
     );
 }
 
-/// BT-4612: the runtime dispatch has no `^`-closure pre-store, so a send
-/// that reaches it outside every bracket window with a `^`-holding block
-/// literal operand must run none of its operands: a `SendUserCode::Never`
-/// send. Over the whole corpus (every in-place construct, and their shapes
-/// with an operand they cannot inline) every such send is one, and the probe
-/// sees the one shape known to reach it (`p spawnWith: [^1]`).
+/// BT-4612: the runtime dispatch (and, BT-4633, the typed guarded send) has
+/// no `^`-closure pre-store, so a send that reaches either outside every
+/// bracket window with a `^`-holding block literal operand must run none of
+/// its operands: a `SendUserCode::Never` send or (BT-4633) a `no_user_code`
+/// primitive (`send_runs_no_operand`). Over the whole corpus (every in-place
+/// construct, and their shapes with an operand they cannot inline) every
+/// such send is one, and the probe sees both kinds reach a dispatch
+/// (`p spawnWith: [^1]`, `3 noUserCodeProbe: [^1]`).
 #[test]
-fn only_never_sends_reach_the_dispatch_with_a_nlr_literal() {
-    use beamtalk_core::state_threading_selectors::SendUserCode;
+fn only_sends_that_run_no_operand_reach_the_dispatch_with_a_nlr_literal() {
     DISPATCH_NLR_LITERALS.with(|log| log.borrow_mut().clear());
     for (_, src, _) in corpus() {
         compile(&src);
     }
     let logged = DISPATCH_NLR_LITERALS.with(|log| std::mem::take(&mut *log.borrow_mut()));
-    let not_never: Vec<_> = logged
+    let may_run: Vec<_> = logged
         .iter()
-        .filter(|(_, class)| *class != SendUserCode::Never)
+        .filter(|(_, runs_no_operand)| !runs_no_operand)
         .collect();
     assert!(
-        not_never.is_empty(),
-        "sends reaching the runtime dispatch with a `^` literal that may run it: {not_never:?}"
+        may_run.is_empty(),
+        "sends reaching the runtime dispatch with a `^` literal that may run it: {may_run:?}"
     );
-    assert!(
-        logged.iter().any(|(selector, _)| selector == "spawnWith:"),
-        "the probe saw no send at all: {logged:?}"
-    );
+    for selector in ["spawnWith:", "noUserCodeProbe:"] {
+        assert!(
+            logged.iter().any(|(logged, _)| logged == selector),
+            "the probe saw no `{selector}` send: {logged:?}"
+        );
+    }
 }
 
 /// BT-4532: a `^`-closure of one send nested in a non-block operand of
