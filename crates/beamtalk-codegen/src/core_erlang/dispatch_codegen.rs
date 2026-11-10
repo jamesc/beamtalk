@@ -1708,10 +1708,10 @@ impl CoreErlangGenerator {
         // send (`generate_typed_guarded_send`), which takes a send to a
         // receiver of statically known class instead and falls back to this
         // same call. Outside every bracket window a send reaches either
-        // dispatch only when `classify_send`
-        // answered `UserCodeCall::No` (a `Yes` send there is a gap, and a
-        // self or `super` send dispatches elsewhere). Each way to `No`, with
-        // a block literal holding a `^` among the operands:
+        // dispatch only when `classify_send` answered `UserCodeCall::No` (a
+        // `Yes` send there is a gap, and a self or `super` send dispatches
+        // elsewhere). Each way to `No`, with a block literal holding a `^`
+        // among the operands:
         //
         // - `SendUserCode::Never` (`p spawnWith: [^1]`): runs none of its
         //   operands, so there is nothing to store for (BT-4606). Reaches

@@ -1277,10 +1277,11 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
-    /// outside every bracket window with a `^`-holding block literal among
-    /// its operands, where the cell protocol applies, with whether it runs
-    /// none of its operands ([`DISPATCH_NLR_LITERALS`]). The dispatch has no
-    /// pre-store, so every logged send must be one that runs none
+    /// (or, BT-4633, the typed guarded send) outside every bracket window
+    /// with a `^`-holding block literal among its operands, where the cell
+    /// protocol applies, with whether it runs none of its operands
+    /// ([`DISPATCH_NLR_LITERALS`]). Neither dispatch has a pre-store, so
+    /// every logged send must be one that runs none
     /// ([`Self::send_runs_no_operand`]: a [`SendUserCode::Never`] send, or a
     /// `no_user_code` primitive, BT-4633).
     #[cfg(test)]
