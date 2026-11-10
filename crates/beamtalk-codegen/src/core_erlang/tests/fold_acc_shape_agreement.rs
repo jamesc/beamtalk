@@ -16,7 +16,7 @@
 //!    running class/actor process);
 //!
 //! and the new shape's fault ([`LocalRebindFault::BareFoldTupleRepack`]) is
-//! reported as `FoldAccShapeMismatch`. The execution half is skipped when the
+//! reported as `FoldAccShapeMismatch`. The execution half is skipped (unless `BEAMTALK_REQUIRE_RUNTIME` is set, as in CI) when the
 //! Erlang runtime has not been built (`runtime/_build`).
 
 use super::{codegen_named, verifier_report};
@@ -45,9 +45,9 @@ const BODIES: [&str; 9] = [
     "[s := s + e] on: Error do: [:x | s := 0]",
     "s := s + e. blk := [:z | z + s]",
     // Non-local `^` (early return from the enclosing method) out of the fold.
-    "s := s + e. e = 2 ifTrue: [^s]",
-    "s := s + e. t := t + 1. e = 2 ifTrue: [^s + t]",
-    "e = 3 ifTrue: [^s]. s := s + e",
+    "s := s + e. e =:= 2 ifTrue: [^s]",
+    "s := s + e. t := t + 1. e =:= 2 ifTrue: [^s + t]",
+    "e =:= 3 ifTrue: [^s]. s := s + e",
 ];
 
 /// Method contexts: (header, whether the program can be executed here).
@@ -62,6 +62,23 @@ const CONTEXTS: [(&str, &str, bool); 5] = [
     ),
     ("Value subclass: Probe\n  state: n = 7\n\n", "run =>", true),
 ];
+
+/// `codegen_named` discards parse diagnostics and emits whatever survived
+/// error recovery, so a typo in a program (`=` is not an operator; `=:=` is)
+/// would silently drop statements from both builds and still "agree".
+fn assert_parses(src: &str) {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (_, diags) = beamtalk_core::source_analysis::parse(tokens);
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .map(|d| d.message.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "program has parse errors {errors:?}:\n{src}"
+    );
+}
 
 fn programs() -> Vec<(usize, String)> {
     let mut out = Vec::new();
@@ -88,6 +105,9 @@ fn programs() -> Vec<(usize, String)> {
                 ));
             }
         }
+    }
+    for (_, src) in &out {
+        assert_parses(src);
     }
     out
 }
@@ -144,9 +164,33 @@ fn bare_and_tuple_folds_compile_clean_in_every_context() {
     assert!(failures.is_empty(), "{}", failures.join("\n---\n"));
 }
 
+/// BT-4641: a `^` out of a fold must answer its value directly, not just
+/// agree with the oracle (a failure shared by both builds would agree).
+/// Writes `bt4116_pin` (production codegen) and `bt4116_pino` (oracle).
+fn write_pinned_modules(dir: &Path) {
+    let pinned = "Object subclass: Probe\n  state: n = 7\n\n  run =>\n    s := 0.\n    t := 0.\n    blk := nil.\n    #(1, 2, 3) do: [:e | s := s + e. e =:= 2 ifTrue: [^s]].\n    s + t\n";
+    assert_parses(pinned);
+    std::fs::write(
+        dir.join("bt4116_pin.core"),
+        codegen_named(pinned, "bt4116_pin"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("bt4116_pino.core"),
+        fault::with(LocalRebindFault::ForceStateAccFold, || {
+            codegen_named(pinned, "bt4116_pino")
+        }),
+    )
+    .unwrap();
+}
+
 #[test]
 fn bare_and_tuple_folds_agree_with_the_map_oracle() {
+    // BT-4641: CI sets BEAMTALK_REQUIRE_RUNTIME so a missing toolchain or
+    // runtime turns this test red instead of silently degrading it.
+    let require = std::env::var_os("BEAMTALK_REQUIRE_RUNTIME").is_some();
     if Command::new("erlc").arg("-v").output().is_err() {
+        assert!(!require, "BEAMTALK_REQUIRE_RUNTIME set but erlc is missing");
         eprintln!("erlc not available; skipping");
         return;
     }
@@ -175,10 +219,15 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n---\n"));
+    write_pinned_modules(&dir);
     if let Err(e) = erlc_all(&dir) {
         panic!("erlc rejected a generated module:\n{e}");
     }
     if ebins.is_empty() {
+        assert!(
+            !require,
+            "BEAMTALK_REQUIRE_RUNTIME set but the runtime ebins are missing"
+        );
         eprintln!("runtime not built; compile-only");
         return;
     }
@@ -204,6 +253,9 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
           [case Run(M) of {caught, _, undef} -> io:format(\"BROKEN ~p undef~n\", [M]); {caught, _, #{error := Err}} when is_tuple(Err), element(2, Err) =:= class_not_found -> io:format(\"BROKEN ~p class_not_found~n\", [M]); _ -> ok end || M <- [LIST]],\n"
             .replace("LIST", &list),
     );
+    script.push_str(
+        "case Run(bt4116_pin) of {ok, 3} -> ok; Other -> io:format(\"PINFAIL ~p old=~p~n\", [Other, Run(bt4116_pino)]) end,\n",
+    );
     script.push_str("io:format(\"DONE~n\"), halt().");
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell").arg("-pa").arg(&dir);
@@ -219,6 +271,7 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!text.contains("DISAGREE"), "{text}");
+    assert!(!text.contains("PINFAIL"), "{text}");
     // Both builds failing alike (a missing module or class) would agree
     // vacuously; the runtime must be complete enough to run every program.
     assert!(!text.contains("BROKEN"), "{text}");
