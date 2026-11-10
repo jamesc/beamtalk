@@ -504,7 +504,7 @@ pub(crate) fn compile_fixture(
         warnings_as_errors,
         current_package: None,
         knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-        has_package_dependencies: false,
+        dependency_extensions_unknown: false,
         // Bootstrap-test fixtures have no project on disk whose
         // dependency/native modules could be collected (BT-4022).
         known_erlang_modules: std::collections::HashSet::new(),

@@ -241,6 +241,7 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: Some(dep_stubs_dir),
+        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
     }];
 
     // Layer 1 (highest precedence): project-local stubs.
@@ -341,6 +342,7 @@ fn load_dependency_stub_registries_flags_collision_between_sibling_package_stubs
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: Some(alpha_dep_stubs),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
         crate::commands::deps::path::ResolvedDependency {
             name: "dep_b".to_string(),
@@ -355,6 +357,7 @@ fn load_dependency_stub_registries_flags_collision_between_sibling_package_stubs
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: Some(beta_dep_stubs),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
     ];
 
@@ -413,6 +416,7 @@ fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: Some(alpha_dep_stubs),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
         crate::commands::deps::path::ResolvedDependency {
             name: "dep_b".to_string(),
@@ -427,6 +431,7 @@ fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: Some(beta_dep_stubs),
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         },
     ];
 

@@ -316,9 +316,9 @@ impl SimpleLanguageService {
 
     /// Declare whether the workspace has package dependencies.
     ///
-    /// Pre-WS3, dependency extension contributions are invisible, so when
-    /// true (and the project is complete) the receiver-knowledge classifier
-    /// keeps every receiver `Open`.
+    /// The LSP does not yet decide whether every dependency's extensions
+    /// were loaded (BT-4611), so when true (and the project is complete) the
+    /// receiver-knowledge classifier keeps every receiver `Open`.
     pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
         self.has_package_dependencies = has_deps;
     }
@@ -1867,7 +1867,10 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
-                options.has_package_dependencies = self.has_package_dependencies;
+                // The LSP does not yet load dependency extensions with the
+                // CLI's completeness rule (BT-4611), so any dependency keeps
+                // the pre-WS3 guard on here.
+                options.dependency_extensions_unknown = self.has_package_dependencies;
                 // BT-4022: project-known Erlang modules (hex-dep/native
                 // ebins + own `native/*.erl`, set by the LSP server at
                 // startup) so the `unresolved_ffi` check agrees with

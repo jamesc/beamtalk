@@ -1382,14 +1382,14 @@ fn test_split_intersection_type_string() {
     );
 }
 
-/// Pre-WS3 dependency guard: with dependencies declared and
-/// project-complete knowledge, the receiver-knowledge classifier keeps every
-/// receiver `Open`, which also suppresses protocol-conformance warnings —
-/// a dependency could extend the class with the missing required method, so
-/// non-conformance is no longer provable. This is the deliberate,
+/// Pre-WS3 dependency guard: with dependencies whose extensions were not all
+/// loaded and project-complete knowledge, the receiver-knowledge classifier
+/// keeps every receiver `Open`, which also suppresses protocol-conformance
+/// warnings — a dependency could extend the class with the missing required
+/// method, so non-conformance is no longer provable. This is the deliberate,
 /// open-world-conservative blast radius of the guard (ADR 0100 Rule 1,
-/// third downgrade); it reverts to full checking once WS3 loads
-/// cross-package extension metadata.
+/// third downgrade); once every dependency's extensions are loaded (ADR 0070
+/// WS3, BT-4608) the flag is clear and full checking returns.
 #[test]
 fn test_dependency_guard_suppresses_conformance_warning() {
     use crate::semantic_analysis::KnowledgeScope;
@@ -1411,7 +1411,7 @@ fn test_dependency_guard_suppresses_conformance_warning() {
         .collect();
     assert!(
         conformance_warnings.is_empty(),
-        "with dependencies declared (pre-WS3), conformance warnings are withheld, got: {:?}",
+        "with dependency extensions unknown, conformance warnings are withheld, got: {:?}",
         conformance_warnings
             .iter()
             .map(|d| &d.message)

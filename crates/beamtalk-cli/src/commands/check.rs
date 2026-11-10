@@ -58,7 +58,7 @@ pub fn run_check(path: &str) -> Result<()> {
     let mut options = beamtalk_core::CompilerOptions::default();
     let scope =
         crate::commands::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.has_package_dependencies = scope.has_package_dependencies;
+    options.dependency_extensions_unknown = scope.has_package_dependencies;
     if Utf8Path::new(path).is_dir() {
         options.knowledge_scope = scope.knowledge_scope;
     }
@@ -128,6 +128,7 @@ pub fn run_check(path: &str) -> Result<()> {
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
+            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         dep_registry: registry_ref,
         strict_deps,
@@ -414,5 +415,134 @@ mod tests {
             format!("{err:?}").contains("stub declarations contain errors"),
             "unexpected error: {err:?}"
         );
+    }
+
+    // ── ADR 0070 WS3 (BT-4608): dependency extensions ─────────────────────
+    //
+    // A consumer package with a path dependency. `[diagnostics]` escalates
+    // `dnu` and `type` to errors so whether `check` passes shows whether the
+    // pre-WS3 dependency guard lifted: before WS3 every receiver in a package
+    // with dependencies was `Open`, so no DNU or conformance diagnostic could
+    // fire at all.
+
+    /// The producer's extensions: on `Object`, on a stdlib class instance-
+    /// and class-side, and class-side on its own sealed class.
+    const PRODUCER_EXTENSIONS: &str = "Object >> shout -> Integer => 1\n\
+         Integer >> doubled -> Integer => self * 2\n\
+         Integer class >> fromShout -> Integer => 2\n\
+         Codec class >> make -> Integer => 3\n";
+
+    /// A sealed producer class with a class method, and no
+    /// `validateHeader:value:` (the BT-4526 repro shape).
+    const PRODUCER_CODEC: &str =
+        "sealed Object subclass: Codec\n  class encode: x :: Integer -> Integer => x\n";
+
+    /// `deps::test_support::consumer_with_fresh_path_dependency` with `dnu` and `type`
+    /// escalated to errors, so `check` fails exactly when one is reported.
+    fn consumer_with_dependency(
+        temp: &TempDir,
+        producer_files: &[(&str, &str)],
+        consumer_files: &[(&str, &str)],
+    ) -> Utf8PathBuf {
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        crate::commands::deps::test_support::consumer_with_fresh_path_dependency(
+            &root,
+            producer_files,
+            "[diagnostics]\ndnu = \"error\"\ntype = \"error\"\n",
+            consumer_files,
+        )
+    }
+
+    fn producer_with_extensions() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("codec.bt", PRODUCER_CODEC),
+            ("ext.bt", PRODUCER_EXTENSIONS),
+        ]
+    }
+
+    #[test]
+    fn dependency_extensions_resolve_with_no_false_dnu() {
+        let temp = TempDir::new().unwrap();
+        let consumer = consumer_with_dependency(
+            &temp,
+            &producer_with_extensions(),
+            &[(
+                "main.bt",
+                "Object subclass: Main\n  run => 42 shout + 42 doubled + Integer fromShout + Codec make\n",
+            )],
+        );
+        run_check(consumer.as_str())
+            .expect("selectors the dependency's extensions define must not be reported");
+    }
+
+    #[test]
+    fn missing_selector_is_reported_once_dependency_extensions_are_loaded() {
+        // Before WS3 the guard kept every receiver `Open` in a package with
+        // dependencies, so this passed.
+        let temp = TempDir::new().unwrap();
+        let consumer = consumer_with_dependency(
+            &temp,
+            &producer_with_extensions(),
+            &[("main.bt", "Object subclass: Main\n  run => 42 whisper\n")],
+        );
+        let err = run_check(consumer.as_str())
+            .expect_err("an undefined selector must be reported as does-not-understand");
+        assert!(format!("{err:?}").contains("check failed"), "{err:?}");
+    }
+
+    #[test]
+    fn removed_class_side_selector_on_dependency_class_is_reported() {
+        // The BT-4526 repro: `HPACK validateHeader:value:` after the
+        // dependency removed it.
+        let temp = TempDir::new().unwrap();
+        let consumer = consumer_with_dependency(
+            &temp,
+            &producer_with_extensions(),
+            &[(
+                "main.bt",
+                "Object subclass: Main\n  run => Codec validateHeader: 1 value: 2\n",
+            )],
+        );
+        run_check(consumer.as_str()).expect_err("the removed class method must be reported");
+    }
+
+    #[test]
+    fn removing_the_dependency_extension_brings_the_dnu_back() {
+        let temp = TempDir::new().unwrap();
+        let consumer = consumer_with_dependency(
+            &temp,
+            &[("codec.bt", PRODUCER_CODEC)],
+            &[("main.bt", "Object subclass: Main\n  run => 42 shout\n")],
+        );
+        run_check(consumer.as_str())
+            .expect_err("without the producer's extension, `shout` is not understood");
+    }
+
+    #[test]
+    fn dependency_extension_satisfies_protocol_conformance() {
+        let consumer_files = [
+            (
+                "shouter.bt",
+                "Protocol define: Shouter\n  shout -> Integer\n",
+            ),
+            (
+                "main.bt",
+                "Object subclass: Main\n  \
+                 use: s :: Shouter -> Integer => s shout\n  \
+                 run => self use: 42\n",
+            ),
+        ];
+
+        let temp = TempDir::new().unwrap();
+        let consumer =
+            consumer_with_dependency(&temp, &producer_with_extensions(), &consumer_files);
+        run_check(consumer.as_str())
+            .expect("Integer conforms to Shouter through the dependency's `Object >> shout`");
+
+        let temp = TempDir::new().unwrap();
+        let consumer =
+            consumer_with_dependency(&temp, &[("codec.bt", PRODUCER_CODEC)], &consumer_files);
+        run_check(consumer.as_str())
+            .expect_err("without the extension, Integer does not conform to Shouter");
     }
 }
