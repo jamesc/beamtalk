@@ -90,6 +90,7 @@ message and log are all replaced.
 """.
 -spec format_status(module(), map()) -> map().
 format_status(Module, Status) ->
+    %% bt-catcher-audit: not-applicable-no-block - '__beamtalk_secrets'/0 is a generated constant getter
     try Module:'__beamtalk_secrets'() of
         {[], []} ->
             Status;
