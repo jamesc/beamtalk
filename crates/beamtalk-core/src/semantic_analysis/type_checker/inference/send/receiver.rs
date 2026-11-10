@@ -84,27 +84,7 @@ impl TypeChecker {
             )
         );
         let narrowing = if is_branching {
-            Self::detect_narrowing(receiver)
-                .map(|info| self.refine_responds_to_narrowing(info))
-                .map(|info| {
-                    Self::refine_result_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| {
-                    Self::refine_singleton_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+            self.detect_refined_narrowing(receiver, env, hierarchy, span)
         } else {
             None
         };
@@ -220,6 +200,25 @@ impl TypeChecker {
                 arg,
                 &var_key,
                 &non_nil_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
+        } else if let (true, Some((var_key, narrowed_ty)), Some(arg)) = (
+            // BT-4635: any other single-variable type test (`isKindOf:`,
+            // `class =`, `respondsTo:`, `isOk`, singleton equality, ...) on
+            // the receiver of `and:` / `or:`. The lazy block runs only when
+            // the test answered true (`and:`) or false (`or:`), so it gets
+            // the same narrowing the matching `ifTrue:` / `ifFalse:` arm
+            // would. `notNil` is handled by the branch above.
+            matches!(selector_name.as_str(), "and:" | "or:"),
+            self.boolean_connective_narrowing(&selector_name, receiver, hierarchy, env, span),
+            arguments.first(),
+        ) {
+            vec![self.infer_block_with_narrowing(
+                arg,
+                &var_key,
+                &narrowed_ty,
                 hierarchy,
                 env,
                 in_abstract_method,
