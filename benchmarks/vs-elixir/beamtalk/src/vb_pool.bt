@@ -6,11 +6,3 @@
 DynamicSupervisor(VbCounter) subclass: VbPool
 
   childClass => VbCounter
-
-// As VbPool, with a maxChildren cap (never reached: each start is followed by
-// a terminate), so the capped start path runs.
-DynamicSupervisor(VbCounter) subclass: VbCappedPool
-
-  childClass => VbCounter
-
-  maxChildren -> Integer => 8
