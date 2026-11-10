@@ -49,7 +49,16 @@ lookup(Selector, Args, Self, State, CurrentClass)
 Super send dispatch. Starts at immediate superclass (no double-walk).
 ```erlang
 super(Selector, Args, Self, State, CurrentClass)
-    -> {reply, Result, NewState} | {error, #beamtalk_error{}}
+    -> {reply, Result, NewState} | {error, #beamtalk_error{} | map()}
+```
+
+### super_reply/5
+`super/5` that re-raises an `{error, E}` answer instead of returning it.
+Called by a method-root actor `super` send and by a block's `super` send
+(`beamtalk_actor_state:super_send/5`).
+```erlang
+super_reply(Selector, Args, Self, State, CurrentClass)
+    -> {reply, Result, NewState}
 ```
 
 ## References

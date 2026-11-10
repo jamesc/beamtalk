@@ -3709,8 +3709,9 @@ impl CoreErlangGenerator {
 
     /// Generates code for a super message send.
     ///
-    /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass
-    /// implementation via hierarchy walking (ADR 0006).
+    /// A method-root actor super call uses `beamtalk_dispatch:super_reply/5`
+    /// (`super/5`, re-raising an error answer, BT-4592) to invoke the
+    /// superclass implementation via hierarchy walking (ADR 0006).
     ///
     /// # Example
     ///
@@ -3749,7 +3750,7 @@ impl CoreErlangGenerator {
         // The live receiver (`ClassSelf`) is passed as is (BT-4301), so a
         // subclass receiver runs the superclass method under its own
         // class-variable key with its real reference. A class method binds no instance `Self`/`State`,
-        // so it must never reach the `beamtalk_dispatch:super/5` instance path
+        // so it must never reach the `beamtalk_dispatch:super_reply/5` instance path
         // below.
         let class_side_super_class = (self.builder_class_method_class().is_some()
             || self.in_class_method())
@@ -3861,7 +3862,7 @@ impl CoreErlangGenerator {
 
     /// Whether a `super` send compiled now threads the method's own `State`:
     /// `generate_super_send` answers the raw `{reply, Result, NewState}`
-    /// tuple of `beamtalk_dispatch:super/5`, which the caller must unpack
+    /// tuple of `beamtalk_dispatch:super_reply/5`, which the caller must unpack
     /// (BT-4318) — through [`Self::threaded_expression`]'s `super` producer
     /// in any value position. False on the class side, in a value type, and
     /// wherever the send runs against the actor-state cell (a closure, a

@@ -587,10 +587,9 @@ super_send(Self, Capture, Class, Selector, Args) ->
             %% host's own cell is restored afterwards.
             Saved = snapshot(),
             erlang:put(?CELL, {owner_of(Self), State}),
-            try beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
+            try beamtalk_dispatch:super_reply(Selector, Args, Self, State, Class) of
                 {reply, Result, State} -> Result;
-                {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
-                {error, Error} -> beamtalk_exception_handler:reraise(Error)
+                {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write)
             after
                 uninstall(Saved)
             end
