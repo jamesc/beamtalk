@@ -75,8 +75,8 @@ A use the table's protection forbids raises `access_denied`, never a raw
 -export([keys/1, tableSize/1, deleteTable/1]).
 
 -ifdef(TEST).
-%% Expose the delete-failure classifier for EUnit (name-reuse cases).
--export([delete_fault/1]).
+%% Expose the badarg classifier for EUnit (named-table reuse cases).
+-export([badarg_error/2]).
 -endif.
 -export([
     removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
@@ -415,12 +415,14 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         nil
     catch
         error:badarg ->
-            %% The table is gone, or it is protected/private and the caller
-            %% is not its owner.
-            case delete_fault(TableName) of
-                stale -> stale_table_error('delete', TableName);
-                access_denied -> access_denied_error('delete', TableName)
-            end
+            %% ETS lets any process delete a public table and only the owner
+            %% a protected/private one: the same rule as a write, so the
+            %% `write` classification applies. A named table's name can be
+            %% reused before the probe; a replacement the caller could delete
+            %% (its own, or public) means the original is gone (`stale_table`),
+            %% and one it cannot delete gives `access_denied`, the stated
+            %% default since it cannot be told apart from the original.
+            badarg_error('delete', TableName)
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
@@ -850,38 +852,6 @@ table_fault(TableName, Kind) ->
                 {protected, read} -> ok;
                 {undefined, _} -> stale;
                 _ -> access_denied
-            end
-    end.
-
--doc """
-Classify a failed `ets:delete/1`: `stale` (gone) or `access_denied` (the
-caller may not delete it). ETS lets any process delete a `public` table; a
-`protected` or `private` one only its owner.
-
-An unnamed table's id is never reused, so its probe is unambiguous. A named
-table's name can be reused between the failed delete and this probe, so the
-probe may see a replacement. Each outcome is classified as follows:
-- No table under the name: `stale`.
-- The caller owns it, or it is `public`: the caller could have deleted it,
-  so the table whose delete failed is gone and the name was reused: `stale`.
-- Another process owns a `protected`/`private` table under the name: either
-  the original or a replacement. They cannot be told apart, so the stated
-  default is `access_denied`, which is what deleting the current table raises.
-""".
--spec delete_fault(table()) -> stale | access_denied.
-delete_fault(TableName) ->
-    Self = self(),
-    case ets:info(TableName, owner) of
-        undefined ->
-            stale;
-        Self ->
-            stale;
-        _Other ->
-            case ets:info(TableName, protection) of
-                Protection when Protection =:= protected; Protection =:= private ->
-                    access_denied;
-                _PublicOrGone ->
-                    stale
             end
     end.
 

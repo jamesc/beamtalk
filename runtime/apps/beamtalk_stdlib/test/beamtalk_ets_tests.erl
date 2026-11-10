@@ -1091,25 +1091,33 @@ bt4604_delete_named_protected_table_by_non_owner_is_access_denied_test() ->
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
     ?assertEqual(nil, beamtalk_ets:deleteTable(T)).
 
-bt4604_delete_fault_name_reuse_test() ->
-    %% No table under the name: stale.
-    ?assertEqual(stale, beamtalk_ets:delete_fault(bt4604_reuse)),
+-define(assertDeleteFault(Kind, Name),
+    ?assertError(
+        #{error := #beamtalk_error{kind = Kind, class = 'Ets'}},
+        beamtalk_ets:badarg_error('delete', Name)
+    )
+).
+
+bt4604_delete_badarg_name_reuse_test() ->
+    %% A failed delete is classified by probing the name, which may by then
+    %% hold a replacement table. No table under the name: stale.
+    ?assertDeleteFault(stale_table, bt4604_reuse),
     %% The caller owns the table now under the name, so the one it failed to
     %% delete was a predecessor that is gone: stale.
     ets:new(bt4604_reuse, [named_table, protected]),
-    ?assertEqual(stale, beamtalk_ets:delete_fault(bt4604_reuse)),
+    ?assertDeleteFault(stale_table, bt4604_reuse),
     %% Another process owns a protected table under the name: access_denied
     %% (the stated default; the original and a replacement look the same).
-    ?assertEqual(
-        {ok, access_denied},
-        in_other_process(fun() -> beamtalk_ets:delete_fault(bt4604_reuse) end)
+    ?assertAccessDenied(
+        in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
     ),
     ets:delete(bt4604_reuse),
     %% A public replacement owned by another process: the caller could have
     %% deleted it, so the failed delete hit a table that is gone: stale.
     ets:new(bt4604_reuse, [named_table, public]),
-    ?assertEqual(
-        {ok, stale}, in_other_process(fun() -> beamtalk_ets:delete_fault(bt4604_reuse) end)
+    ?assertMatch(
+        {error, #{error := #beamtalk_error{kind = stale_table}}},
+        in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
     ),
     ets:delete(bt4604_reuse).
 
