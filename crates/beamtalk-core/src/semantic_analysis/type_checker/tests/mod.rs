@@ -60,6 +60,7 @@ mod bt4515_object_then;
 mod bt4526_static_dnu_known_receiver;
 mod bt4607_protocol_field_assignment;
 mod bt4635_and_or_type_test_narrowing;
+mod bt4638_boolean_literal_early_return;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

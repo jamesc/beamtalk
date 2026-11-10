@@ -16,6 +16,7 @@ use crate::ast::Expression;
 
 use super::info::NarrowingInfo;
 
+mod boolean_eq;
 mod class_eq;
 mod is_kind_of;
 mod is_nil;
@@ -53,5 +54,6 @@ pub(crate) static RULES: &[NarrowingRule] = &[
     responds_to::RULE,
     is_kind_of::RULE,
     class_eq::RULE,
+    boolean_eq::RULE,
     singleton_eq::RULE,
 ];
