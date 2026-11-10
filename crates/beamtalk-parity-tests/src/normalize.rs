@@ -108,6 +108,26 @@ fn collapse_whitespace(s: &str) -> String {
     out.trim().to_string()
 }
 
+/// Count lines in `text` that look like compiler diagnostics.
+///
+/// A line counts when it starts with `warning`, `error`, or contains
+/// `": warning:"` / `": error:"` (the `path:line:col: level:` prefix
+/// produced by `beamtalk lint`). Pass `include_notes: true` to also count
+/// lines that start with `note` (used by the MCP surface, which surfaces
+/// note-level diagnostics separately).
+pub(crate) fn count_diagnostic_lines(text: &str, include_notes: bool) -> usize {
+    text.lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            t.starts_with("warning")
+                || t.starts_with("error")
+                || (include_notes && t.starts_with("note"))
+                || t.contains(": warning:")
+                || t.contains(": error:")
+        })
+        .count()
+}
+
 /// Cached workspace root (the directory containing the top-level `Cargo.toml`).
 pub fn project_root() -> &'static std::path::Path {
     static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
