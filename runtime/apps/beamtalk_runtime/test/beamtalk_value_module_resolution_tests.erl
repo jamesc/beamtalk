@@ -414,11 +414,15 @@ perform_relays_nlr_and_script_exit_from_runtime_fun() ->
         ok = beamtalk_object_class:put_method(Pid, 'do:', fun(_S, Blk) -> Blk(1) end),
         Throwing = fun(_) -> erlang:throw(Nlr) end,
         ?assertThrow(Nlr, beamtalk_primitive:send(Self, 'do:', [Throwing])),
-        ?assertThrow(Nlr, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [Throwing]])),
+        ?assertThrow(
+            Nlr, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [Throwing]])
+        ),
         Exit = {beamtalk_script_exit, 3},
         ExitBlk = fun(_) -> erlang:throw(Exit) end,
         ?assertThrow(Exit, beamtalk_primitive:send(Self, 'do:', [ExitBlk])),
-        ?assertThrow(Exit, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [ExitBlk]]))
+        ?assertThrow(
+            Exit, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [ExitBlk]])
+        )
     after
         stop_class(Pid)
     end.
